@@ -1361,6 +1361,234 @@
         "title": "api.diagnoseRequest",
         "type": "object"
       },
+      "api.dnsRecordChange": {
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update",
+              "keep",
+              "conflict",
+              "stale"
+            ],
+            "type": "string"
+          },
+          "current": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "currentTtl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ours": {
+            "type": "boolean"
+          },
+          "proxied": {
+            "type": "boolean"
+          },
+          "ttl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME"
+            ],
+            "type": "string"
+          },
+          "want": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "api.dnsRecordChange",
+        "type": "object"
+      },
+      "api.dnsRecordManaged": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "ttl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME"
+            ],
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "title": "api.dnsRecordManaged",
+        "type": "object"
+      },
+      "api.dnsRecordPlan": {
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/dnsrecords.Candidate"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/api.dnsRecordChange"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "environment": {
+            "type": "string"
+          },
+          "environmentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "foreign": {
+            "type": "boolean"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "managed": {
+            "items": {
+              "$ref": "#/components/schemas/api.dnsRecordManaged"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "providerKey": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "refusal": {
+            "type": "string"
+          },
+          "refusalCode": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "tunnel": {
+            "type": "boolean"
+          },
+          "want": {
+            "items": {
+              "$ref": "#/components/schemas/dnsrecords.Set"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "writable": {
+            "type": "boolean"
+          },
+          "written": {
+            "items": {
+              "$ref": "#/components/schemas/dnsrecords.Change"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "title": "api.dnsRecordPlan",
+        "type": "object"
+      },
+      "api.dnsRecordWriteRequest": {
+        "properties": {
+          "replace": {
+            "type": "boolean"
+          },
+          "ttl": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "api.dnsRecordWriteRequest",
+        "type": "object"
+      },
       "api.draftRevisionRequest": {
         "properties": {
           "revision": {
@@ -14103,6 +14331,122 @@
         "title": "deploy.WakeOutcome",
         "type": "object"
       },
+      "dnsrecords.Candidate": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "title": "dnsrecords.Candidate",
+        "type": "object"
+      },
+      "dnsrecords.Change": {
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update",
+              "keep",
+              "conflict",
+              "stale"
+            ],
+            "type": "string"
+          },
+          "current": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "currentTtl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "proxied": {
+            "type": "boolean"
+          },
+          "ttl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME"
+            ],
+            "type": "string"
+          },
+          "want": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "dnsrecords.Change",
+        "type": "object"
+      },
+      "dnsrecords.Set": {
+        "properties": {
+          "comment": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "proxied": {
+            "type": "boolean"
+          },
+          "ttl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME"
+            ],
+            "type": "string"
+          },
+          "unwritable": {
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "dnsrecords.Set",
+        "type": "object"
+      },
       "dockerx.Event": {
         "properties": {
           "action": {
@@ -18906,6 +19250,108 @@
           }
         }
       ]
+    },
+    "/deploy/{id}/domains/{domain}/dns-record": {
+      "get": {
+        "description": "Nothing is written. A plan that cannot be written says why in refusal and refusalCode rather than failing.",
+        "operationId": "deploymentDNSRecord",
+        "parameters": [
+          {
+            "description": "The TTL to plan with, in seconds; the provider's floor and a day's cap apply, and 300 when absent.",
+            "in": "query",
+            "name": "ttl",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.dnsRecordPlan"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Dry-run a domain's DNS record: what its zone holds, what would be written (A and AAAA to this server, or a proxied CNAME to the tunnel for a name served through Cloudflare Tunnel), and through which saved DNS credential and zone.",
+        "tags": [
+          "domains"
+        ],
+        "x-deploy-key": "refused (session_required): a domain's DNS record is read and written in a zone outside this server, with the DNS credentials saved under Certificates, in the dashboard"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The domain, as the environment's saved configuration lists it.",
+          "in": "path",
+          "name": "domain",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Answers 409 dns_record_unwritable (no saved credential reaches the zone), dns_record_tunnel_zone, dns_record_conflict (a record stands in the way and would have to be deleted), dns_record_foreign (a record this dashboard did not write, changed only with replace), no_public_address or tunnel_not_connected, and 502 dns_provider_error in the provider's words. Audited as deploy.domain.record.",
+        "operationId": "deploymentDNSRecordWrite",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.dnsRecordWriteRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.dnsRecordPlan"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Write a domain's DNS record into its zone with the DNS credentials saved under Certificates: create or change A and AAAA, or the tunnel's CNAME; a record is never deleted.",
+        "tags": [
+          "domains"
+        ],
+        "x-deploy-key": "refused (session_required): a domain's DNS record is read and written in a zone outside this server, with the DNS credentials saved under Certificates, in the dashboard"
+      }
     },
     "/deploy/{id}/duplicate": {
       "parameters": [
@@ -26680,7 +27126,7 @@
       "name": "previews"
     },
     {
-      "description": "What a deployment's public route serves: the maintenance switch and pages, hostname suggestions, the requests and traffic it saw.",
+      "description": "What a deployment's public route serves: the maintenance switch and pages, hostname suggestions, a domain's DNS record, the requests and traffic it saw.",
       "name": "domains"
     },
     {

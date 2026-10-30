@@ -148,6 +148,17 @@ describe("fixTarget", () => {
       label: "Review the storage",
     })
     expect(fixTarget(5, { kind: "review", field: "somewhere.else" })).toBe(undefined)
+    // A domain's record that saved DNS credentials can write opens its sheet.
+    expect(
+      fixTarget(5, {
+        kind: "dns_record",
+        field: "domains.*.preview.example.com",
+        value: "*.preview.example.com",
+      }),
+    ).toEqual({
+      href: "/deploy/5/settings/domains?record=*.preview.example.com",
+      label: "Create the record",
+    })
   })
 })
 

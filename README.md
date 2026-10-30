@@ -116,6 +116,9 @@ free.
 - The container flags `docker run` has, per deployment: the user it runs as, a read-only root with
   writable paths in memory, ulimits, the container's own sysctls and NVIDIA GPUs
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
+- A domain's DNS record created from its settings with those same credentials: the A and AAAA to this
+  server, or a tunnel's CNAME, written into its zone at Cloudflare, Route 53, DigitalOcean, Google Cloud
+  DNS, Linode, OVH, Gandi or your own RFC 2136 server, shown as a dry run first and never deleting a record
 - Domains served through Cloudflare Tunnel from a server with no public address or open port: the
   connector runs as a container, and its routes and DNS records are set as each release goes live
 - Edge rules per deployment: block, answer or redirect by path, method, user agent or address, a

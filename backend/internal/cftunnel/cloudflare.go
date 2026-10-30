@@ -250,9 +250,11 @@ const (
 	DNSUpdated DNSOutcome = "updated"
 )
 
-// recordComment marks a record this dashboard created, so it is the one it
-// may move to another tunnel later and never an operator's own.
-const recordComment = "Just Dashboard: routed through Cloudflare Tunnel"
+// RecordComment marks a record this dashboard created, so it is the one it
+// may move to another tunnel later and never an operator's own. The
+// Domains settings' Create the record leaves the same mark on a tunnel's
+// CNAME it writes (api/handlers_deploy_dns_record.go).
+const RecordComment = "Just Dashboard: routed through Cloudflare Tunnel"
 
 // EnsureCNAME makes hostname a proxied CNAME to the tunnel. A record of the
 // name that already points there is left as it is; one this dashboard made
@@ -278,7 +280,7 @@ func (a API) EnsureCNAME(ctx context.Context, zoneID, hostname, tunnelID string)
 				map[string]any{"proxied": true}, nil)
 			return DNSUpdated, err
 		}
-		if record.Type == "CNAME" && record.Comment == recordComment {
+		if record.Type == "CNAME" && record.Comment == RecordComment {
 			err := a.call(ctx, "point "+hostname+" at the tunnel", http.MethodPatch, "/zones/"+url.PathEscape(zoneID)+"/dns_records/"+url.PathEscape(record.ID), nil,
 				map[string]any{"content": target, "proxied": true}, nil)
 			return DNSUpdated, err
@@ -286,7 +288,7 @@ func (a API) EnsureCNAME(ctx context.Context, zoneID, hostname, tunnelID string)
 		return "", fmt.Errorf("%s already has a %s record to %s in Cloudflare, which is not this dashboard's; remove it, and the next pass points the name at the tunnel", hostname, record.Type, record.Content)
 	}
 	err := a.call(ctx, "create the record of "+hostname, http.MethodPost, "/zones/"+url.PathEscape(zoneID)+"/dns_records", nil,
-		DNSRecord{Type: "CNAME", Name: hostname, Content: target, Proxied: true, Comment: recordComment}, nil)
+		DNSRecord{Type: "CNAME", Name: hostname, Content: target, Proxied: true, Comment: RecordComment}, nil)
 	if err != nil {
 		return "", err
 	}
