@@ -15,7 +15,7 @@ import type {
   ReleaseListChange,
 } from "@/lib/types"
 import { Modal } from "@/components/modal"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChoiceCard } from "@/components/choice-card"
 import { GroupRule } from "@/components/flow"
@@ -205,9 +205,11 @@ export function PromoteDialog({
     >
       {step === "choose" ? (
         <div className="space-y-4">
-          <GroupRule label="Staging releases" count={eligible.length} />
+          <GroupRule label="Staging releases" count={releases.data ? eligible.length : undefined} />
           {releases.loading && !releases.data ? (
             <Skeleton className="h-16 w-full" />
+          ) : releases.error && !releases.data ? (
+            <ErrorState error={releases.error} onRetry={releases.refresh} retryable />
           ) : eligible.length === 0 ? (
             <p className="py-6 text-center text-body text-muted-foreground">
               Staging has no release to promote yet. Deploy staging first.

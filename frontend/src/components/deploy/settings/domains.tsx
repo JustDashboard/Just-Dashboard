@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { useSessionState } from "@/lib/view-state"
+import { useMemoryState, useSessionState } from "@/lib/view-state"
 import {
   ArrowUpRight,
   Copy,
@@ -74,9 +74,18 @@ import {
   SettingsPage,
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
-import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
+import {
+  draftChanges,
+  useConfiguration,
+  useSettingDraft,
+} from "@/components/deploy/settings/use-configuration"
+import {
+  withPasswords,
+  withTypedPassword,
+  withoutPassword,
+} from "@/components/deploy/settings/domain-passwords"
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
-import { useProject } from "@/components/deploy/project-context"
+import { useDraftScope, useProject } from "@/components/deploy/project-context"
 import { EdgeRulesForm } from "@/components/deploy/settings/edge-rules"
 import { DNSRecordPanel } from "@/components/deploy/settings/dns-record-panel"
 import {
@@ -511,6 +520,21 @@ function DomainsForm({
   )
   const domains = draft.value
   const setDomains = draft.set
+  // A password typed on a saved name is a secret before it is saved, and the
+  // draft above is written to sessionStorage: it stays in memory, beside the
+  // draft, and joins it only on the way to the server.
+  const scope = useDraftScope()
+  const [passwords, setPasswords] = useMemoryState<Record<string, string>>(
+    `deploy.${project.projectId}.settings.domains.passwords${scope}`,
+    {},
+  )
+  const toSave = withPasswords(domains, passwords)
+  const changes = draftChanges(toSave, configuration.domains)
+  // A tab open across the upgrade can still hold a draft written before this.
+  const written = draft.value.some((domain) => domain.protection?.password)
+  useEffect(() => {
+    if (written) setDomains((current) => current.map(withoutPassword))
+  }, [written, setDomains])
   const [saving, setSaving] = useState(false)
   const [adding, setAdding] = useSessionState(
     `deploy.${project.projectId}.settings.domains.adding`,
@@ -552,8 +576,12 @@ function DomainsForm({
   const update = (index: number, next: Partial<DomainValue>) =>
     setDomains(domains.map((item, i) => (i === index ? { ...item, ...next } : item)))
 
+  const typePassword = (hostname: string, password: string) =>
+    setPasswords((typed) => withTypedPassword(typed, hostname, password))
+
   const persist = async (next: DomainValue[]) => {
     await save({ domains: next })
+    setPasswords({})
     notify.success("Domains saved")
   }
 
@@ -561,7 +589,8 @@ function DomainsForm({
     setSaving(true)
     setRowError(undefined)
     try {
-      await save({ domains })
+      await save({ domains: toSave })
+      setPasswords({})
       return true
     } catch (error) {
       const index = error instanceof ApiError ? refusedIndex(error.field, "domains") : undefined
@@ -634,7 +663,8 @@ function DomainsForm({
         danger: true,
         // A name redirecting to the one removed would point nowhere, so it
         // goes back to serving the application rather than failing the save.
-        run: () =>
+        run: () => {
+          typePassword(domain.hostname, "")
           setDomains(
             domains
               .filter((_, i) => i !== index)
@@ -643,7 +673,8 @@ function DomainsForm({
                   ? { ...item, redirectTo: undefined, redirectCode: undefined }
                   : item,
               ),
-          ),
+          )
+        },
       })
     return verbs
   }
@@ -653,12 +684,13 @@ function DomainsForm({
       <SettingForm
         name="Domains"
         onSave={onSave}
-        dirty={draft.dirty}
-        changes={draft.changes}
+        dirty={changes > 0}
+        changes={changes}
         saving={saving}
         canEdit={canAdmin}
         onDiscard={() => {
           setRowError(undefined)
+          setPasswords({})
           draft.discard()
         }}
       >
@@ -677,7 +709,7 @@ function DomainsForm({
               </Link>
             )
           }
-          status={settingStatus({ dirty: draft.dirty, refused: Boolean(rowError) })}
+          status={settingStatus({ dirty: changes > 0, refused: Boolean(rowError) })}
           actions={
             canAdmin && (
               <Button type="button" size="sm" variant="outline" onClick={() => setAdding(true)}>
@@ -723,6 +755,8 @@ function DomainsForm({
                   targets={servedNames(domains).filter((name) => name !== domain.hostname)}
                   verbs={verbsFor(domain, index)}
                   onChange={(next) => update(index, next)}
+                  password={passwords[domain.hostname] ?? ""}
+                  onPassword={(password) => typePassword(domain.hostname, password)}
                 />
               ))}
               {leaving.map((route) => {
@@ -758,9 +792,9 @@ function DomainsForm({
       <AddDomainPanel
         open={adding}
         onOpenChange={setAdding}
-        unsaved={draft.changes}
+        unsaved={changes}
         onAdd={async (domain) => {
-          await persist([...domains, domain])
+          await persist([...toSave, domain])
           setAdding(false)
         }}
       />
@@ -786,6 +820,8 @@ function DomainRow({
   targets,
   verbs,
   onChange,
+  password,
+  onPassword,
 }: {
   domain: DomainValue
   route?: DeploymentDomainRoute
@@ -798,6 +834,9 @@ function DomainRow({
   targets: string[]
   verbs: Verb[]
   onChange: (next: Partial<DomainValue>) => void
+  /** Typed and not saved. It stays out of `domain`, whose draft is written to the tab's storage. */
+  password: string
+  onPassword: (password: string) => void
 }) {
   const host = domain.hostname
   const protection = domain.protection
@@ -920,10 +959,11 @@ function DomainRow({
             onChange({
               https: through || values.includes("https"),
               protection: values.includes("password")
-                ? (protection ?? { username: "", password: "" })
+                ? (protection ?? { username: "" })
                 : undefined,
               tunnel: through || undefined,
             })
+            if (!values.includes("password")) onPassword("")
           }}
           disabled={!canAdmin}
           className="shrink-0"
@@ -1009,9 +1049,7 @@ function DomainRow({
                 info="Visitors are asked for this user name and password before the site. Left empty, a saved password stays as it is."
                 hint={
                   <span aria-live="polite">
-                    <FieldCheck met={(protection.password ?? "").length >= 8}>
-                      At least 8 characters
-                    </FieldCheck>
+                    <FieldCheck met={password.length >= 8}>At least 8 characters</FieldCheck>
                   </span>
                 }
               >
@@ -1019,11 +1057,11 @@ function DomainRow({
                   id={`domain-password-${index}`}
                   type="password"
                   autoComplete="new-password"
-                  value={protection.password ?? ""}
+                  value={password}
                   readOnly={!canAdmin}
                   className="font-mono"
                   placeholder={protection.hash ? "Unchanged" : ""}
-                  onChange={(event) => setProtection({ password: event.target.value })}
+                  onChange={(event) => onPassword(event.target.value)}
                 />
               </Field>
             </FieldRow>

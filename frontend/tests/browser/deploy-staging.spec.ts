@@ -347,6 +347,30 @@ test("a release production took from staging is marked as promoted", async ({ pa
   await expect(page.getByText("From staging #2").first()).toBeVisible()
 })
 
+test("a failed read of staging's releases does not say it has none", async ({ page }) => {
+  await mockProject(page)
+  await mockStaging(page, { promotionOnly: true, idle: true })
+  let failing = true
+  await page.route("**/api/v1/deploy/7/environments/13/releases*", async (route) => {
+    if (!failing) return route.fallback()
+    return json(route, { error: { code: "internal", message: "The read was refused" } }, 500)
+  })
+  await page.goto("/deploy/7")
+  await page
+    .locator('[data-slot="project-header"]')
+    .getByRole("button", { name: "Promote from staging…" })
+    .click()
+  const dialog = page.getByRole("dialog", { name: "Promote to production" })
+  await expect(dialog.getByRole("alert")).toContainText("The read was refused")
+  await expect(dialog.getByText(/no release to promote/)).toHaveCount(0)
+  await expect(dialog.getByRole("button", { name: "Continue" })).toBeDisabled()
+
+  failing = false
+  await dialog.getByRole("button", { name: "Try again" }).click()
+  await expect(dialog.getByRole("alert")).toHaveCount(0)
+  await expect(dialog.getByRole("group", { name: "Staging releases" })).toContainText("Release #2")
+})
+
 test("a staging release production cannot take says why instead of waiting", async ({ page }) => {
   await mockProject(page)
   await mockStaging(page, { refused: true })
