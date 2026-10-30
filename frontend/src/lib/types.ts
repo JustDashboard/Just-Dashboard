@@ -3114,6 +3114,7 @@ export type DeploymentBuildEvidence = {
       dockerfileDigest?: string
       targetPlatform?: string
       cachePolicy?: string
+      railpack?: RailpackEvidence
     }
   }
 }
@@ -3127,7 +3128,8 @@ export type DeploymentBuildEvidence = {
  */
 export type DeploymentFailureCause = {
   code: string
-  phase?: "install" | "build" | "output_check" | "setup" | "dockerfile" | "base_image" | "pull"
+  phase?:
+    "install" | "build" | "output_check" | "setup" | "dockerfile" | "base_image" | "pull" | "plan"
   command?: string
   exitCode?: number
   subjects?: string[]
@@ -4976,6 +4978,11 @@ export type DeploymentStaticSite = {
 
 export type DeploymentDetectionCandidate = {
   dockerfile?: string
+  /**
+   * The Railpack provider that would build this directory: beside a recipe, the choice
+   * offered next to it; on a Railpack candidate, the one it builds with.
+   */
+  railpackProvider?: RailpackProvider
   goVersion?: string
   packageManager?: NodePackageManager
   packageManagers?: NodePackageManager[]
@@ -5357,7 +5364,46 @@ export type DeploymentDetection = {
 }
 
 export type DeploymentBuildMethod =
-  "recipe" | "dockerfile" | "static" | "image" | "compose" | "none" | "legacy_compose"
+  "recipe" | "dockerfile" | "static" | "image" | "compose" | "none" | "legacy_compose" | "railpack"
+
+/** The providers Railpack has: the values its provider setting, like railpack.json's, takes. */
+export type RailpackProvider =
+  | "cpp"
+  | "deno"
+  | "dotnet"
+  | "elixir"
+  | "gleam"
+  | "golang"
+  | "java"
+  | "node"
+  | "php"
+  | "python"
+  | "ruby"
+  | "rust"
+  | "shell"
+  | "staticfile"
+  | "zig"
+
+/**
+ * What Railpack decided for a run, from its info and its plan: the release (pinned by
+ * digest), the providers it detected, the packages it resolved, the steps of its plan
+ * and the images that plan builds from, as Railpack names them.
+ */
+export type RailpackEvidence = {
+  version: string
+  image: string
+  provider?: RailpackProvider
+  providers: string[]
+  configFile?: string
+  packages: { name: string; requested?: string; resolved?: string; source?: string }[]
+  steps: { name: string; commands: string[] }[]
+  startCommand?: string
+  images: string[]
+  secrets?: string[]
+  facts?: Record<string, string>
+  logs?: { level: "error" | "warn" | "info" | "suggestion"; message: string }[]
+  success: boolean
+}
 
 export type DeploymentOwnership = "managed" | "linked" | "observed"
 
@@ -5576,6 +5622,12 @@ export type DeploymentConfiguration = {
     target?: string
     /** The Compose service readiness and the release's container follow; empty keeps detection's. */
     primaryService?: string
+    /** A Railpack build's release from the reviewed catalogue; empty is the dashboard's current one. */
+    railpackVersion?: string
+    /** The provider Railpack is told to use instead of detecting one. */
+    railpackProvider?: RailpackProvider
+    /** The configuration file Railpack reads, relative to the root; empty is railpack.json. */
+    railpackConfig?: string
     noCache?: boolean
     secrets?: { variable: string; step: BuildSecretStep }[]
     releaseTasks?: {

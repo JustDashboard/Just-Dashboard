@@ -515,3 +515,31 @@ func TestRailpackPreflightSaysWhatItDoesNotPin(t *testing.T) {
 		t.Fatal("a Railpack build does not ask for Buildx")
 	}
 }
+
+// The build forms offer Railpack's providers and name its release from the
+// frontend's own list, which must be the one validation accepts.
+func TestRailpackVocabularyMatchesTheForms(t *testing.T) {
+	t.Parallel()
+	content, err := os.ReadFile("../../../frontend/src/components/deploy/vocabulary.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(content)
+	if !strings.Contains(page, `RAILPACK_DEFAULT_VERSION = "`+RailpackDefaultVersion+`"`) {
+		t.Errorf("the forms name another Railpack release than %s", RailpackDefaultVersion)
+	}
+	start := strings.Index(page, "export const RAILPACK_PROVIDERS")
+	end := strings.Index(page[start:], "\n]\n")
+	if start < 0 || end < 0 {
+		t.Fatal("RAILPACK_PROVIDERS not found")
+	}
+	listed := page[start : start+end]
+	for _, provider := range railpackProviders {
+		if !strings.Contains(listed, `["`+provider+`", `) {
+			t.Errorf("the forms do not offer the %s provider", provider)
+		}
+	}
+	if count := strings.Count(listed, `["`); count != len(railpackProviders) {
+		t.Errorf("the forms offer %d providers; Railpack has %d", count, len(railpackProviders))
+	}
+}

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Copy, LockClosed } from "@/components/icons"
+import { Copy, Layers, LockClosed } from "@/components/icons"
 import { ApiError, get, post, refusedIndex } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
@@ -17,6 +17,7 @@ import type {
   DeploymentRecipe,
   DeploymentRunSnapshot,
   NodePackageManager,
+  RailpackProvider,
 } from "@/lib/types"
 import { ChoiceGrid, ProductCard } from "@/components/choice-card"
 import { Disclosure, Field, FieldRow, FormNote, OptionRow } from "@/components/form"
@@ -31,6 +32,13 @@ import {
 } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   InputGroup,
   InputGroupAddon,
@@ -59,7 +67,13 @@ import {
   publicBuildVariable,
   validateConfiguration,
 } from "@/components/deploy/deployment-defaults"
-import { RECIPE_SHORT } from "@/components/deploy/vocabulary"
+import {
+  RAILPACK_DEFAULT_VERSION,
+  RAILPACK_DESCRIPTION,
+  RAILPACK_PROVIDERS,
+  RECIPE_SHORT,
+  railpackProviderLabel,
+} from "@/components/deploy/vocabulary"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import {
   SettingForm,
@@ -149,6 +163,9 @@ const BUILD_FIELD_IDS: Record<string, string> = {
   "build.spaFallback": "build-spa",
   "build.dockerfile": "build-dockerfile",
   "build.target": "build-target",
+  "build.railpackVersion": "build-method",
+  "build.railpackProvider": "build-railpack-provider",
+  "build.railpackConfig": "build-railpack-config",
   "build.primaryService": "build-primary-service",
   "build.buildCommand": "build-command",
   "build.startCommand": "build-start",
@@ -169,6 +186,8 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-dotnet-version": "build",
   "build-dockerfile": "build",
   "build-target": "build",
+  "build-railpack-provider": "build",
+  "build-railpack-config": "build",
   "build-primary-service": "build",
   "build-root": "commands",
   "build-command": "commands",
@@ -212,18 +231,20 @@ function answer(text: string | undefined) {
 type Builder = {
   key: string
   label: string
-  product: string
+  /** The product the card is drawn as; a builder with no logo of its own has `fallback`. */
+  product?: string
+  fallback?: typeof Layers
   detail: string
-  method: "recipe" | "dockerfile" | "static"
+  method: "recipe" | "dockerfile" | "static" | "railpack"
   recipe?: DeploymentRecipe
 }
 
 /**
  * Every way a Git or local source can be built: the fifteen recipes the
- * backend's `validRecipe` accepts, then a Dockerfile of the project's own and
- * a static site. The detail is a word about the toolchain or what decides it,
- * short enough for the five-across grid at 1280, where a card has about 60px
- * for it.
+ * backend's `validRecipe` accepts, then a Dockerfile of the project's own, a
+ * static site and Railpack. The detail is a word about the toolchain or what
+ * decides it, short enough for the five-across grid at 1280, where a card has
+ * about 60px for it.
  */
 const BUILDERS: Builder[] = [
   {
@@ -359,6 +380,14 @@ const BUILDERS: Builder[] = [
     product: "nginx-static",
     detail: "nginx",
     method: "static",
+  },
+  {
+    key: "railpack",
+    label: "Railpack",
+    // Railpack ships no mark this dashboard carries; the glyph says layers.
+    fallback: Layers,
+    detail: "its detection",
+    method: "railpack",
   },
 ]
 
@@ -561,6 +590,10 @@ function BuildForm({
       setFieldError({ id: "build-system-packages", message: errors.systemPackages })
       return false
     }
+    if (errors.railpackConfig) {
+      setFieldError({ id: "build-railpack-config", message: errors.railpackConfig })
+      return false
+    }
     const refusal =
       errors.buildMethod ||
       errors.buildSecrets ||
@@ -604,7 +637,10 @@ function BuildForm({
   }
 
   const buildable =
-    build.method === "recipe" || build.method === "dockerfile" || build.method === "static"
+    build.method === "recipe" ||
+    build.method === "dockerfile" ||
+    build.method === "static" ||
+    build.method === "railpack"
   // A Compose stack from a repository is built here too — every service's
   // image, from the root directory, for the target platform, with or without
   // the cache (build_artifacts.go) — so it keeps those fields. What it has no
@@ -656,6 +692,8 @@ function BuildForm({
           .join(" · ")
       : undefined
   const baseImages = evidence?.prepared?.baseImages?.map((base) => base.reference) ?? []
+  // What Railpack decided for the last build, while the draft still builds with it.
+  const lastRailpack = asLastBuilt ? evidence?.prepared?.railpack : undefined
   const reaching = buildVariables.length - installOnly.length
 
   const choose = (choice: Builder) => {
@@ -712,6 +750,12 @@ function BuildForm({
       packageManager: undefined,
       spaFallback: choice.method === "static" ? build.spaFallback : undefined,
       target: choice.method === "dockerfile" ? build.target : undefined,
+      // Railpack decides a static site's output itself, and its own
+      // settings mean nothing to the other builders.
+      outputDirectory: choice.method === "railpack" ? undefined : build.outputDirectory,
+      railpackVersion: choice.method === "railpack" ? build.railpackVersion : undefined,
+      railpackProvider: choice.method === "railpack" ? build.railpackProvider : undefined,
+      railpackConfig: choice.method === "railpack" ? build.railpackConfig : undefined,
     })
   }
 
@@ -765,6 +809,9 @@ function BuildForm({
             "dockerfile",
             "target",
             "primaryService",
+            "railpackVersion",
+            "railpackProvider",
+            "railpackConfig",
           ]),
           refused: refusedIn("build") || Boolean(error),
         })}
@@ -803,6 +850,7 @@ function BuildForm({
                 <ProductCard
                   key={choice.key}
                   product={choice.product}
+                  fallback={choice.fallback}
                   label={choice.label}
                   detail={choice.detail}
                   selected={
@@ -1180,6 +1228,78 @@ function BuildForm({
             </Field>
           </FieldRow>
         )}
+        {build.method === "railpack" && (
+          <div className="animate-rise space-y-5">
+            <FormNote>
+              {RAILPACK_DESCRIPTION} Railpack{" "}
+              {lastRailpack?.version ?? build.railpackVersion ?? RAILPACK_DEFAULT_VERSION} is pinned
+              by digest; the builder and runtime images its plan names are Railpack&apos;s own.
+            </FormNote>
+            <FieldRow>
+              <Field
+                label="Provider"
+                htmlFor="build-railpack-provider"
+                hint={
+                  detected?.railpackProvider
+                    ? `Detection reads this directory as ${railpackProviderLabel(detected.railpackProvider)}.`
+                    : lastRailpack?.providers?.[0]
+                      ? `The last build was planned as ${railpackProviderLabel(lastRailpack.providers[0])}.`
+                      : undefined
+                }
+                error={errorFor("build-railpack-provider")}
+              >
+                <Select
+                  value={build.railpackProvider ?? "detect"}
+                  disabled={!canEdit}
+                  onValueChange={(value) =>
+                    setBuild({
+                      ...build,
+                      railpackProvider:
+                        value === "detect" ? undefined : (value as RailpackProvider),
+                    })
+                  }
+                >
+                  <SelectTrigger id="build-railpack-provider" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="detect">Railpack&apos;s detection</SelectItem>
+                    {RAILPACK_PROVIDERS.map(([provider, label]) => (
+                      <SelectItem key={provider} value={provider}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field
+                label="Configuration file"
+                htmlFor="build-railpack-config"
+                info="Railpack reads railpack.json in the root directory when the repository has one; name another file here."
+                error={errorFor("build-railpack-config")}
+              >
+                <InputGroup>
+                  <InputGroupAddon align="inline-start">
+                    <InputGroupText className="max-w-32 font-mono">
+                      <span className="truncate">{root ? `${root}/` : "./"}</span>
+                    </InputGroupText>
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    id="build-railpack-config"
+                    value={build.railpackConfig ?? ""}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("build-railpack-config"))}
+                    className="font-mono"
+                    placeholder="railpack.json"
+                    onChange={(event) =>
+                      setBuild({ ...build, railpackConfig: event.target.value.trim() || undefined })
+                    }
+                  />
+                </InputGroup>
+              </Field>
+            </FieldRow>
+          </div>
+        )}
         {build.method === "compose" && (
           <Field
             label="Primary service"
@@ -1243,6 +1363,33 @@ function BuildForm({
             </InputGroup>
           </Field>
 
+          {build.method === "railpack" && (
+            // Railpack's plan has its own commands; these replace them.
+            <FieldRow key={build.method} className="animate-rise">
+              <CommandField
+                id="build-command"
+                label="Build command"
+                value={build.buildCommand ?? ""}
+                hint="Empty runs the one Railpack's plan has."
+                error={errorFor("build-command")}
+                readOnly={!canEdit}
+                onChange={(buildCommand) => setBuild({ ...build, buildCommand })}
+              />
+              <CommandField
+                id="build-start"
+                label="Start command"
+                value={build.startCommand ?? ""}
+                hint={
+                  lastRailpack?.startCommand
+                    ? `Empty starts with \`${lastRailpack.startCommand}\`, as Railpack planned it last.`
+                    : "Empty starts the way Railpack's plan does."
+                }
+                error={errorFor("build-start")}
+                readOnly={!canEdit}
+                onChange={(startCommand) => setBuild({ ...build, startCommand })}
+              />
+            </FieldRow>
+          )}
           {(build.method === "recipe" || build.method === "static") && (
             // Keyed on the builder, so moving between a recipe and a static
             // site, which swaps the commands, rises like any other reveal.
@@ -1384,9 +1531,13 @@ function BuildForm({
               summary={
                 evidence?.prepared?.method === "dockerfile"
                   ? "Dockerfile the last build used"
-                  : "Dockerfile the recipe wrote"
+                  : evidence?.prepared?.method === "railpack"
+                    ? "Plan Railpack wrote"
+                    : "Dockerfile the recipe wrote"
               }
-              facts={dockerfileFacts(preview)}
+              facts={
+                evidence?.prepared?.method === "railpack" ? undefined : dockerfileFacts(preview)
+              }
             >
               <div className="space-y-1.5">
                 <div className="flex justify-end">
