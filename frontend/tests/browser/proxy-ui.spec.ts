@@ -10,6 +10,7 @@ import {
   snippet,
   user,
 } from "./proxy-fixtures"
+import { risen } from "./risen"
 
 /**
  * The proxy pages, checked for the things a screenshot cannot.
@@ -171,21 +172,18 @@ test("/proxy/sites keeps the band's blocks and height while the traffic summary 
   await expect(blocks).toHaveCount(3)
   const traffic = band.getByRole("region", { name: "Traffic", exact: true })
   await expect(traffic).toContainText("Reading the sites' access logs")
+  await risen(page)
   const heights = await blocks.evaluateAll((all) =>
     all.map((block) => block.getBoundingClientRect().height),
   )
   expect(new Set(heights).size).toBe(1)
-  // Whole pixels: the page is still easing up from its entrance here.
-  const place = async () => {
-    const box = await band.boundingBox()
-    return [Math.round(box?.y ?? 0), Math.round(box?.height ?? 0)]
-  }
-  const before = await place()
+  const before = await band.boundingBox()
 
   land()
   await expect(traffic).toContainText("requests in the hour")
   await expect(blocks).toHaveCount(3)
-  expect(await place()).toEqual(before)
+  await risen(page)
+  expect(await band.boundingBox()).toEqual(before)
 })
 
 test("/proxy/sites reads each standing and application on the band's line", async ({ page }) => {

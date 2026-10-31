@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { NETS, mockNetworks } from "./docker-networks-fixture"
+import { risen } from "./risen"
 
 /**
  * The Networks page against a host with eleven networks: Docker's own three,
@@ -8,17 +9,6 @@ import { NETS, mockNetworks } from "./docker-networks-fixture"
  */
 
 const id = (name: string) => NETS.find((n) => n.name === name)!.id
-
-/** Where the page rests: `boundingBox` during its four-pixel rise reads a place it is leaving. */
-const risen = (page: Page) =>
-  page.evaluate(() =>
-    Promise.allSettled(
-      document
-        .getAnimations()
-        .filter((a) => (a as CSSAnimation).animationName === "jd-rise")
-        .map((a) => a.finished),
-    ),
-  )
 
 test("opens on the engine, with the unused networks as its verdict", async ({ page }) => {
   await mockNetworks(page)

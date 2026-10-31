@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { CONTAINERS, VOLUMES, mockVolumes } from "./docker-volumes-fixture"
+import { risen } from "./risen"
 
 /**
  * /docker/volumes after its overhaul: Docker's identity line with what a prune
@@ -11,17 +12,6 @@ import { CONTAINERS, VOLUMES, mockVolumes } from "./docker-volumes-fixture"
 
 const body = (page: Page) => page.locator("[data-slot=table-body] tr")
 const row = (page: Page, name: string) => page.getByRole("row", { name: new RegExp(name) })
-
-/** Where the page rests: `boundingBox` during its four-pixel rise reads a place it is leaving. */
-const risen = (page: Page) =>
-  page.evaluate(() =>
-    Promise.allSettled(
-      document
-        .getAnimations()
-        .filter((a) => (a as CSSAnimation).animationName === "jd-rise")
-        .map((a) => a.finished),
-    ),
-  )
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })

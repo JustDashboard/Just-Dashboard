@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { PG_LINES } from "./logs-lens-fixture"
+import { risen } from "./risen"
 
 /**
  * The three claims the Docker overhaul rests on, checked in a browser.
@@ -1442,12 +1443,14 @@ test("the band does not move when the first frame lands", async ({ page }) => {
   await expect(blocks).toHaveCount(3)
   const measure = () =>
     blocks.evaluateAll((all) => all.map((block) => block.getBoundingClientRect().height))
+  await risen(page)
   const before = await measure()
   expect(new Set(before).size).toBe(1)
 
   land()
   const processor = page.getByLabel("Processor by container")
   await expect(processor.getByRole("button", { name: `Open ${containers[0].name}` })).toBeVisible()
+  await risen(page)
   expect(await measure()).toEqual(before)
 })
 

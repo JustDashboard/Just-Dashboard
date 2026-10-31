@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { recordProgress } from "./progress-recording"
+import { risen } from "./risen"
 import { CONTAINERS, DETAIL, mockStackDetail, statsFrame } from "./stack-detail-fixture"
 
 /**
@@ -115,11 +116,13 @@ test("every block of the band is one height before its readings land and after",
   await expect(page.getByLabel("Memory by service")).toContainText("Waiting for the first reading…")
   const measure = () =>
     blocks.evaluateAll((all) => all.map((block) => block.getBoundingClientRect().height))
+  await risen(page)
   const before = await measure()
   expect(new Set(before).size).toBe(1)
 
   land()
   await expect(page.getByLabel("Memory by service").getByRole("button").first()).toBeVisible()
+  await risen(page)
   expect(await measure()).toEqual(before)
 })
 

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { hold } from "./database-fixture"
 import { dockerInventory, dockerlessInventory, mockFleet, refusal } from "./database-fleet-fixture"
+import { risen } from "./risen"
 
 /**
  * The section-wide pages of Databases: the control center, the map and Add a
@@ -340,6 +341,7 @@ test.describe("the control center", () => {
     await expect(page.getByRole("region", { name: "Sessions" })).toContainText(
       "Nothing is connected to any database right now.",
     )
+    await risen(page)
     const heights = await blocks.evaluateAll((all) =>
       all.map((block) => block.getBoundingClientRect().height),
     )

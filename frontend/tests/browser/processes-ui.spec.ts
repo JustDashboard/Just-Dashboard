@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { expect, test, type Page, type Route, type WebSocketRoute } from "@playwright/test"
 import { answerLogs, mockLogSockets, type LogMocks } from "./processes-logs-fixture"
+import { risen } from "./risen"
 
 /**
  * The Processes section, checked in a browser against a mocked host.
@@ -666,13 +667,12 @@ test("the workloads hold their place while the first read is out", async ({ page
   await page.goto("/processes")
   const band = page.locator("[data-slot='workloads']")
   await expect(band.getByText("Reading the workloads…").first()).toBeVisible()
+  await risen(page)
   const before = await band.boundingBox()
   release()
   await expect(band.getByRole("button", { name: "Only api's processes" }).first()).toBeVisible()
-  const after = await band.boundingBox()
-  // Layout reports fractions of a pixel: anything under one is not a shift.
-  expect(after?.height).toBeCloseTo(before?.height ?? 0, 1)
-  expect(after?.y).toBeCloseTo(before?.y ?? 0, 1)
+  await risen(page)
+  expect(await band.boundingBox()).toEqual(before)
 })
 
 // The band answers who; a press narrows the table to that workload, and the

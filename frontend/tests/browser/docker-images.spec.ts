@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { IMAGES, UPDATES, mockImages } from "./docker-images-fixture"
+import { risen } from "./risen"
 
 /**
  * /docker/images after its overhaul: the engine's identity line, a band of
@@ -10,17 +11,6 @@ import { IMAGES, UPDATES, mockImages } from "./docker-images-fixture"
 
 const body = (page: Page) => page.locator("[data-slot=table-body] tr")
 const row = (page: Page, name: RegExp) => page.getByRole("row", { name })
-
-/** Where the page rests: `boundingBox` during its four-pixel rise reads a place it is leaving. */
-const risen = (page: Page) =>
-  page.evaluate(() =>
-    Promise.allSettled(
-      document
-        .getAnimations()
-        .filter((a) => (a as CSSAnimation).animationName === "jd-rise")
-        .map((a) => a.finished),
-    ),
-  )
 
 test("the page opens on the engine, what it holds and what the registries say", async ({
   page,

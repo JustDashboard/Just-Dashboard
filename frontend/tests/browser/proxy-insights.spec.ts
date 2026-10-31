@@ -7,6 +7,7 @@ import {
   STATUS_FILE,
   type MetricsSample,
 } from "./fixtures/proxy/insights"
+import { risen } from "./risen"
 
 /**
  * The overview's Live traffic panel: the edge's hour added up from every
@@ -210,6 +211,7 @@ test("the band keeps its blocks and its height while the hour's reading lands", 
   await expect(page.getByRole("region", { name: "Traffic", exact: true })).toContainText(
     "Reading the sites' access logs",
   )
+  await risen(page)
   const heights = await blocks.evaluateAll((all) =>
     all.map((block) => block.getBoundingClientRect().height),
   )
@@ -221,6 +223,7 @@ test("the band keeps its blocks and its height while the hour's reading lands", 
     "requests this hour",
   )
   await expect(blocks).toHaveCount(3)
+  await risen(page)
   const after = await band.boundingBox()
   // Live traffic above draws the same tiles and chart before the read as after,
   // and anything under a pixel is not a shift.

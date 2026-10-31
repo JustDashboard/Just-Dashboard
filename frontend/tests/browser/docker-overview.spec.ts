@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { DOCKER_CONTAINERS, mockDockerHost } from "./docker-fixture"
+import { risen } from "./risen"
 
 /**
  * The Docker overview after it took §15's exit: no tiles, the daemon's
@@ -123,6 +124,7 @@ test("every block of the band is one height, whatever it has to say", async ({ p
   const band = page.locator("[data-slot=container-band]")
   const blocks = band.locator("[data-slot=bar-reading]")
   await expect(blocks).toHaveCount(3)
+  await risen(page)
   const heights = await blocks.evaluateAll((all) =>
     all.map((block) => block.getBoundingClientRect().height),
   )
@@ -138,6 +140,7 @@ test("reading another part changes the line and nothing else on the page", async
   const processor = page.getByLabel("Processor by container")
   const line = processor.locator("[data-slot=reading-line]")
   await expect(line).toContainText("shop-api")
+  await risen(page)
   const before = await band.boundingBox()
   const table = page.getByRole("table")
   const tableBefore = await table.boundingBox()

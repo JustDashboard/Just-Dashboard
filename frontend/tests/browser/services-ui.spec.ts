@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { mockServices, SYSTEMD_LIST, UNITS } from "./services-fixture"
+import { risen } from "./risen"
 
 /**
  * The Services page against a host whose services carry their live readings:
@@ -57,6 +58,7 @@ test("the page opens on the host, who is busy and what changed, with no tiles", 
   await expect(recent).toContainText("9 changes in the last day")
 
   // Every block one height, what it has to say aside.
+  await risen(page)
   const heights = await band
     .locator("[data-slot=bar-reading]")
     .evaluateAll((all) => all.map((block) => block.getBoundingClientRect().height))

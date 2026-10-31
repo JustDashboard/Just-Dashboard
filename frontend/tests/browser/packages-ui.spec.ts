@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { mockHostLogs } from "./host-logs-fixture"
 import { mockHost, installed, inventory, report, user } from "./packages-fixture"
+import { risen } from "./risen"
 
 test("software filters include dependencies and Escape clears the selection", async ({ page }) => {
   await mockHost(page)
@@ -283,9 +284,11 @@ test("the band is there before the inventory, and keeps its height when it lands
   await page.goto("/packages")
   const band = page.locator("[data-slot='software-band']")
   await expect(band.getByText("Reading the installed packages…")).toBeVisible()
+  await risen(page)
   const before = await band.boundingBox()
   release()
   await expect(band.getByRole("button", { name: "Only Linux packages" })).toBeVisible()
+  await risen(page)
   const after = await band.boundingBox()
   expect(after?.height).toBe(before?.height)
   expect(after?.y).toBe(before?.y)

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { mockStacks } from "./stacks-fixture"
+import { risen } from "./risen"
 
 /**
  * The Stacks page after its overhaul: the server's identity line with the
@@ -140,6 +141,7 @@ test("the band holds its place while the stacks are read, and nothing moves when
   await expect(blocks).toHaveCount(3)
   await expect(page.getByLabel("Processor by stack")).toContainText("Reading the stacks…")
   await expect(page.getByRole("button", { name: "Showing analytics" })).toHaveCount(0)
+  await risen(page)
   const heights = await blocks.evaluateAll((all) =>
     all.map((block) => block.getBoundingClientRect().height),
   )
@@ -149,6 +151,7 @@ test("the band holds its place while the stacks are read, and nothing moves when
   land()
   await expect(stackRow(page, "analytics")).toBeVisible()
   await expect(page.getByLabel("Processor by stack").getByRole("button").first()).toBeVisible()
+  await risen(page)
   expect(await band.boundingBox()).toEqual(before)
 })
 
