@@ -152,6 +152,25 @@ test("reading another part changes the line and nothing else on the page", async
   await expect(line).toContainText("shop-api")
 })
 
+test("a reading that moves draws its trail on the line, and the order holds", async ({ page }) => {
+  await mockDockerHost(page, { tick: 200 })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker")
+
+  const processor = page.getByLabel("Processor by container")
+  const marks = () =>
+    processor
+      .locator("[data-slot=reading-strip] button")
+      .evaluateAll((all) => all.map((mark) => mark.getAttribute("aria-label")))
+  const line = processor.locator("[data-slot=reading-line]")
+  await expect(line.locator("svg[viewBox='0 0 56 16']")).toBeVisible()
+
+  // A dozen frames that each wobble a figure: nobody swaps places over a wobble.
+  const first = await marks()
+  await page.waitForTimeout(2400)
+  expect(await marks()).toEqual(first)
+})
+
 test("an event that lands while the page is open joins Recent", async ({ page }) => {
   const mocks = await mockDockerHost(page)
   await page.setViewportSize({ width: 1440, height: 900 })
