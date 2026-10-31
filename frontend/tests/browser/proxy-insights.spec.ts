@@ -214,14 +214,18 @@ test("the band keeps its blocks and its height while the hour's reading lands", 
     all.map((block) => block.getBoundingClientRect().height),
   )
   expect(new Set(heights).size).toBe(1)
-  const before = (await band.boundingBox())?.height
+  const before = await band.boundingBox()
 
   land()
   await expect(page.getByRole("region", { name: "Traffic", exact: true })).toContainText(
     "requests this hour",
   )
   await expect(blocks).toHaveCount(3)
-  expect((await band.boundingBox())?.height).toBe(before)
+  const after = await band.boundingBox()
+  // Live traffic above draws the same tiles and chart before the read as after,
+  // and anything under a pixel is not a shift.
+  expect(after?.height).toBeCloseTo(before?.height ?? 0, 0)
+  expect(after?.y).toBeCloseTo(before?.y ?? 0, 0)
 })
 
 test("the nginx counters read requests and connections", async ({ page }) => {
