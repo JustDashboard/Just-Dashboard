@@ -10,8 +10,7 @@ import {
   trailSignature,
 } from "./bar-reading-model"
 
-const parts = (values: Record<string, number>) =>
-  Object.entries(values).map(([key, value]) => ({ key, value }))
+const parts = (values) => Object.entries(values).map(([key, value]) => ({ key, value }))
 
 describe("settleOrder", () => {
   test("the first reading is heaviest first", () => {
