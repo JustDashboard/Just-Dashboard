@@ -38,13 +38,16 @@ export function RefTags({
   refs,
   className,
   max,
+  landmarks,
 }: {
   refs?: string
   className?: string
   /** Names past this many are counted rather than drawn, so a row keeps room for its subject. */
   max?: number
+  /** Only what a list is scanned for, the checked-out branch and the tags; the commit lists the rest. */
+  landmarks?: boolean
 }) {
-  const parsed = parseRefs(refs)
+  const parsed = parseRefs(refs).filter((r) => !landmarks || r.kind !== "branch")
   if (parsed.length === 0) return null
   const shown = max === undefined ? parsed : parsed.slice(0, max)
   const rest = parsed.slice(shown.length)

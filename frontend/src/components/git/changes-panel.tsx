@@ -506,7 +506,7 @@ function FileRow({
   return (
     <div
       className={cn(
-        "group flex min-w-0 items-center gap-2 py-1 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
+        "group flex min-w-0 items-center gap-2 py-1 pr-1.5 pl-3 transition-colors hover:bg-row-hover max-lg:py-2",
         active && "bg-accent",
       )}
       style={gitStyle(tone)}
@@ -527,13 +527,23 @@ function FileRow({
         type="button"
         onClick={onClick}
         aria-pressed={active}
-        className={cn(
-          "min-w-0 flex-1 truncate text-left font-mono text-xs focus-ring-inset hover:underline",
-          file.label === "deleted" && "text-muted-foreground line-through",
-          file.label === "conflicted" && "text-(--git-colour)",
-        )}
+        title={file.path}
+        className="flex min-w-0 flex-1 items-baseline gap-2 py-0.5 text-left focus-ring-inset"
       >
-        {file.path}
+        {/* The name, then where it lives: cut from the end, a whole path keeps
+            the part every file has in common and loses the part that differs. */}
+        <span
+          className={cn(
+            "max-w-full shrink-0 truncate text-body group-hover:underline",
+            file.label === "deleted" && "text-muted-foreground line-through",
+            file.label === "conflicted" && "text-(--git-colour)",
+          )}
+        >
+          {file.path.split("/").pop()}
+        </span>
+        <span className="min-w-0 truncate text-hint text-muted-foreground">
+          {file.path.split("/").slice(0, -1).join("/")}
+        </span>
       </button>
       <RowActions className="gap-0">{actions}</RowActions>
     </div>

@@ -62,6 +62,11 @@ export function githubAppStage(status: GitHubAppStatus | undefined): GitHubAppSt
  * its initials. The server reads it once an hour per account instead, which is
  * also the reason the operator's browser never announces a visit to GitHub.
  */
+/** A picture or video a pull request embeds, through this server for the same reason. */
+export function forgeMediaUrl(url: string) {
+  return downloadUrl("/git/github/media", { url })
+}
+
 export function githubAvatarUrl(account: string) {
   return downloadUrl("/git/github/avatar", { account })
 }

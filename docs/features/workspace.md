@@ -15,7 +15,8 @@ A real terminal, files, Git, drawings and your own computers, all in the same br
 
 - A file manager with search, previews, Monaco and image editors
 - A full Git workspace: staging by line, history, branches, conflicts, PR reviews
-- GitHub, GitLab and Gitea pull requests and Actions logs
+- GitHub, GitLab and Gitea pull requests and Actions logs, with the screenshots and videos a pull request embeds drawn in place
+- One pane at a time on a phone, with a bottom bar for changes, history, branches, GitHub and files
 
 <table>
 <tr>

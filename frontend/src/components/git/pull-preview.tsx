@@ -1,15 +1,16 @@
 "use client"
 
 import { useState } from "react"
-import { CheckCircle, Clock, CrossCircle, External, Slash } from "@/components/icons"
+import { CheckCircle, ChevronRight, Clock, CrossCircle, External, Slash } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import type { GitHubCheckRun, GitPullRequest, GitResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
-import { CommentCard, PullReview } from "@/components/git/github-review"
+import { PullReview } from "@/components/git/github-review"
 import { SourceBranch, SourceMerge } from "@/components/git/glyphs"
 import { BranchChip, ForgeFace } from "@/components/git/marks"
+import { Markdown } from "@/components/git/markdown"
 import { MergePullDialog } from "@/components/git/merge-pull-dialog"
 import { PreviewHeader } from "@/components/git/preview-header"
 import type { PreviewContext } from "@/components/git/preview-panel"
@@ -41,15 +42,16 @@ export function repoUrlOf(pullUrl: string | undefined): string | undefined {
  * conversation behind a chip under the checks, with commenting a button that
  * opened a dialog over the very text being answered. Now, top to bottom:
  *
- * - **who wants what**: the state in its forge colour, the author's face, and
- *   the sentence GitHub writes — wants to merge `head` into `base` — with
- *   how the checks and the reviews stand and the size of the change;
+ * - **who wants what**: the state in its forge colour, the author's face and
+ *   the two branches, with how the checks and reviews stand and the size of
+ *   the change;
  * - **the verbs**: Merge is the one command face, pinned to the head commit
  *   so what was reviewed is what lands; checking the branch out and opening
  *   it on GitHub beside it;
- * - **the description**, drawn as the first comment of the conversation,
- *   rendered from its Markdown (`markdown.tsx`);
- * - **the checks** on the head commit, each with its mark;
+ * - **the description**, rendered from its Markdown with the pictures and
+ *   videos it embeds (`markdown.tsx`), as the page rather than as a card;
+ * - **the checks** on the head commit, one line while they all passed and open
+ *   when one did not, because that is when the list is read;
  * - **the conversation and the changed files**, and under them the comment
  *   box as a section of the page (`github-review.tsx`) — answering is
  *   something done *on* the request, below what is being answered.
@@ -96,12 +98,13 @@ export function PullPreview({
     <div className="flex min-h-0 flex-1 flex-col">
       <PreviewHeader
         mono={false}
-        leading={p ? <PullStateMark pull={p} /> : undefined}
+        wrap
+        leading={p ? <PullStateMark pull={p} className="mt-0.5" /> : undefined}
         title={p?.title ?? title ?? `#${number}`}
         subtitle={
           p ? (
             <>
-              <span className="numeric">#{p.number}</span> · {p.author ?? "unknown"}
+              <span className="numeric">#{p.number}</span>
               {p.createdAt ? ` · opened ${relativeTime(p.createdAt)}` : ""}
             </>
           ) : (
@@ -114,18 +117,19 @@ export function PullPreview({
         {pull.error && <ErrorState error={pull.error} className="m-3" />}
         {pull.loading && !p && <LoadingRows className="p-3" rows={5} />}
         {p && (
-          <div className="animate-rise space-y-3 px-3 py-3">
-            {/* Who wants what, in GitHub's own sentence. */}
+          <div className="animate-rise space-y-3 px-4 py-3">
+            {/* Who wants what. */}
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 text-hint text-muted-foreground">
               <PullStateWord pull={p} />
               <span className="inline-flex min-w-0 items-center gap-1">
                 <ForgeFace login={p.author} provider="github" size="xs" />
                 <span className="font-medium text-foreground">{p.author}</span>
               </span>
-              <span>{state === "merged" ? "merged" : "wants to merge"}</span>
-              <BranchChip branch={p.head} className="max-w-[14rem]" />
-              <span>into</span>
-              <BranchChip branch={p.base} className="max-w-[10rem]" />
+              <span className="inline-flex max-w-full min-w-0 items-center gap-1">
+                <BranchChip branch={p.head} className="max-w-[14rem]" />
+                <span aria-label={state === "merged" ? "merged into" : "into"}>→</span>
+                <BranchChip branch={p.base} className="max-w-[10rem]" />
+              </span>
               {p.fork && <Tag tone="warning">fork</Tag>}
             </div>
 
@@ -193,14 +197,13 @@ export function PullPreview({
               </Button>
             </div>
 
-            <CommentCard
-              author={p.author}
-              action="opened this pull request"
-              at={p.createdAt}
-              body={p.body}
-              empty="No description provided."
-              repoUrl={repoUrl}
-            />
+            <div className="border-t border-hairline pt-3">
+              {p.body?.trim() ? (
+                <Markdown source={p.body} repoUrl={repoUrl} />
+              ) : (
+                <p className="text-hint text-muted-foreground italic">No description provided.</p>
+              )}
+            </div>
           </div>
         )}
 
@@ -320,9 +323,28 @@ function ChecksSection({
   )
   const failed = rows.filter((c) => checkMark(c).tone === "text-destructive").length
   const passed = rows.filter((c) => checkMark(c).tone === "text-success").length
+  // Open for the reason it would be read; the reader's press outranks it.
+  const needsReading = failed > 0 || rows.some((c) => c.status !== "completed")
+  const [pressed, setPressed] = useState<boolean>()
+  const open = pressed ?? needsReading
   return (
     <section className="border-t border-hairline">
-      <div className="flex h-8 items-center gap-2 px-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        disabled={rows.length === 0}
+        onClick={() => setPressed(!open)}
+        className="flex h-9 w-full items-center gap-2 px-4 text-left focus-ring-inset enabled:hover:bg-row-hover"
+      >
+        {rows.length > 0 && (
+          <ChevronRight
+            aria-hidden
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-90",
+            )}
+          />
+        )}
         <span className="eyebrow">Checks</span>
         {checks.data && (
           <span className="numeric flex items-center gap-2 text-hint text-muted-foreground">
@@ -333,7 +355,7 @@ function ChecksSection({
             )}
           </span>
         )}
-      </div>
+      </button>
       {checks.error != null && (
         <p className="px-3 pb-2 text-hint text-muted-foreground">
           Could not list checks: {errorMessage(checks.error)}
@@ -343,14 +365,14 @@ function ChecksSection({
       {checks.data && rows.length === 0 && (
         <p className="px-3 pb-3 text-hint text-muted-foreground">No checks on this commit.</p>
       )}
-      {rows.length > 0 && (
+      {open && rows.length > 0 && (
         <ul className="divide-y divide-hairline border-t border-hairline">
           {rows.map((check, i) => {
             const mark = checkMark(check)
             return (
               <li
                 key={`${check.app ?? ""}:${check.name}:${i}`}
-                className="group flex min-w-0 items-center gap-2 px-3 py-1.5"
+                className="group flex min-w-0 items-center gap-2 px-4 py-1.5"
               >
                 <mark.Glyph
                   aria-hidden

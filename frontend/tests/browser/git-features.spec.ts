@@ -669,6 +669,7 @@ test("Actions jobs expose step logs and failure filtering", async ({ page }) => 
   const seen = await fixture(page, false, "github")
   await page.goto("/git?repo=%2Fsrv%2Fapp")
   await page.getByRole("tab", { name: "GitHub" }).click()
+  await page.getByRole("tab", { name: "Actions" }).click()
   await page.getByRole("button", { name: /Build workflow/ }).click()
   await page.getByRole("button", { name: /Unit tests/ }).click()
   await expect(page.getByText("Test failed: expected 42, received 1")).toBeVisible()
@@ -840,6 +841,7 @@ test("author filter reaches the history API and signatures appear on commits", a
   const seen = await fixture(page)
   await page.goto("/git?repo=%2Fsrv%2Fapp")
   await page.getByRole("tab", { name: "History", exact: true }).click()
+  await page.getByRole("button", { name: "Filter by author" }).click()
   await page.getByRole("textbox", { name: "Filter commits by author" }).fill("ada@example.com")
   await expect
     .poll(() =>
@@ -1214,10 +1216,11 @@ test("a comment on a pull request goes to its conversation as the checkout's own
   )
 })
 
-test("open issues are listed under the pull requests and can be answered", async ({ page }) => {
+test("open issues are listed beside the pull requests and can be answered", async ({ page }) => {
   const seen = await fixture(page, false, "github")
   await page.goto("/git?repo=%2Fsrv%2Fapp")
   await page.getByRole("tab", { name: "GitHub" }).click()
+  await page.getByRole("tab", { name: /Issues/ }).click()
   const row = page.locator("li").filter({ hasText: "Crash on start" })
   await expect(row.getByLabel("2 comments")).toBeVisible()
   await row.getByRole("button", { name: "Comment", exact: true }).click()
