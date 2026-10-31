@@ -138,6 +138,109 @@ test("the overview draws each domain wired through nginx to what answers it", as
   await expect(page).toHaveURL(/\/proxy\/traffic\?site=app\.example\.com$/)
 })
 
+test("/proxy/sites keeps the band's blocks and height while the traffic summary lands", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let land: () => void = () => {}
+  const held = new Promise<void>((resolve) => (land = resolve))
+  await page.route("**/api/v1/proxy/traffic", async (route) => {
+    await held
+    await json(route, {
+      observedAt: now,
+      sites: [
+        {
+          site: "app.example.com",
+          file: "/etc/nginx/sites-available/app.example.com",
+          engine: "nginx",
+          status: "available",
+          requests: 1_200,
+          errorRate: 0.002,
+          bytes: 1_000,
+          complete: true,
+          points: [],
+        },
+      ],
+    })
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/proxy/sites")
+
+  const band = page.locator("[data-slot=site-band]")
+  const blocks = band.locator("[data-slot=bar-reading]")
+  await expect(blocks).toHaveCount(3)
+  const traffic = band.getByRole("region", { name: "Traffic", exact: true })
+  await expect(traffic).toContainText("Reading the sites' access logs")
+  const heights = await blocks.evaluateAll((all) =>
+    all.map((block) => block.getBoundingClientRect().height),
+  )
+  expect(new Set(heights).size).toBe(1)
+  // Whole pixels: the page is still easing up from its entrance here.
+  const place = async () => {
+    const box = await band.boundingBox()
+    return [Math.round(box?.y ?? 0), Math.round(box?.height ?? 0)]
+  }
+  const before = await place()
+
+  land()
+  await expect(traffic).toContainText("requests in the hour")
+  await expect(blocks).toHaveCount(3)
+  expect(await place()).toEqual(before)
+})
+
+test("/proxy/sites reads each standing and application on the band's line", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/upstreams", (route) =>
+    json(route, {
+      checkedAt: now,
+      targets: [
+        {
+          site: "app.example.com",
+          kind: "http",
+          directive: "proxy_pass",
+          address: "127.0.0.1:3000",
+          file: "/etc/nginx/sites-available/app.example.com",
+          line: 12,
+          state: "up",
+          ms: 2,
+        },
+        {
+          site: "legacy.example.com",
+          kind: "http",
+          directive: "proxy_pass",
+          address: "127.0.0.1:8080",
+          file: "/etc/nginx/sites-available/legacy.example.com",
+          line: 12,
+          state: "refused",
+        },
+      ],
+    }),
+  )
+  await page.goto("/proxy/sites")
+
+  const band = page.locator("[data-slot=site-band]")
+  const certificates = band.getByRole("region", { name: "Certificates" })
+  await expect(certificates.getByRole("listitem").first()).toBeVisible()
+  await expect(certificates.locator("[data-slot=reading-line]")).toContainText(
+    /\d+ (valid|renewal due|expired)/,
+  )
+
+  const applications = band.getByRole("region", { name: "Applications" })
+  const line = applications.locator("[data-slot=reading-line]")
+  // The one that does not answer leads.
+  await expect(line).toContainText("refused")
+  await applications.getByRole("link", { name: "Open app.example.com" }).hover()
+  await expect(line).toContainText("up 2 ms")
+  // The count at the strip's end narrows the list to them.
+  await applications.getByRole("button", { name: "1 refuses connections" }).click()
+  await expect(page.getByRole("button", { name: /Upstream down/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await applications.getByRole("link", { name: "Open app.example.com" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com$/)
+})
+
 test("the raw editor reads its file afresh on every opening", async ({ page }) => {
   await mockProxy(page, { included: true })
   // A new revision on every read, so a reopened editor showing the first one

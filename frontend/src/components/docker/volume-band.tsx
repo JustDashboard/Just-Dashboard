@@ -1,11 +1,9 @@
 "use client"
 
-import { Database, Filter, Trash } from "@/components/icons"
-import { rowReveal } from "@/components/icon-action"
+import { Database, Trash } from "@/components/icons"
+import { BarReading } from "@/components/bar-reading"
 import { LiveBytes } from "@/components/overview/readings"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ShareBar } from "@/components/procs/workloads"
-import { ProductGlyph, ProductGlyphs } from "@/components/product-logo"
+import { ProductGlyph } from "@/components/product-logo"
 import {
   STANDING_COLOR,
   STANDING_LABEL,
@@ -29,18 +27,21 @@ import { cn } from "@/lib/utils"
 const SHOWN = 5
 
 /**
- * Who keeps their data on this disk, beside whether anything still mounts it
- * — the two questions the old page left to be added up a card at a time.
+ * Who keeps their data on this disk, beside whether anything still mounts it,
+ * each a bar with one line under it. Both are here before the list answers,
+ * and when there are no volumes at all, so the table does not move when it does.
  *
- * The left half is the Processes band asked of storage: the stacks and lone
+ * The left is the Processes band asked of storage: the stacks and lone
  * containers holding the most, as spans of one bar the size of every volume,
  * each in the lane hue the Stacks and Containers pages give that name. The
- * right half is every volume by where it stands, the part a prune would take
- * hatched inside its span, as the Images band hatches what a prune gives
- * back. A line in either narrows the table to what it counts.
+ * right is every volume by where it stands, the part a prune would take hatched
+ * inside its span, as the Images band hatches what a prune gives back. A press
+ * in either narrows the table to what it counts.
  */
 export function VolumeBand({
   volumes,
+  loading,
+  failed,
   productOf,
   holder,
   onHolder,
@@ -50,6 +51,9 @@ export function VolumeBand({
   onPrune,
 }: {
   volumes: VolumeDetail[]
+  /** The list has not answered yet, so an empty one means nothing. */
+  loading: boolean
+  failed: boolean
   productOf: Map<string, string>
   holder: string
   onHolder: (key: string) => void
@@ -59,15 +63,26 @@ export function VolumeBand({
   /** Undefined when the reader may not prune. */
   onPrune?: () => void
 }) {
+  const unknown = failed ? (
+    "Docker's volumes could not be read."
+  ) : loading ? (
+    <TextShimmer>Reading the volumes…</TextShimmer>
+  ) : undefined
   return (
     <div
       data-slot="volume-band"
       className="grid min-w-0 animate-rise gap-x-10 gap-y-6 lg:grid-cols-2"
     >
-      <HolderShare volumes={volumes} productOf={productOf} selected={holder} onSelect={onHolder} />
+      <HolderShare
+        volumes={volumes}
+        unknown={unknown}
+        productOf={productOf}
+        selected={holder}
+        onSelect={onHolder}
+      />
       <MountShare
         volumes={volumes}
-        productOf={productOf}
+        unknown={unknown}
         selected={selected}
         onSelect={onSelect}
         pruning={pruning}
@@ -88,11 +103,13 @@ function holderProducts(holder: Holder, productOf: Map<string, string>) {
 
 function HolderShare({
   volumes,
+  unknown,
   productOf,
   selected,
   onSelect,
 }: {
   volumes: VolumeDetail[]
+  unknown: React.ReactNode
   productOf: Map<string, string>
   selected: string
   onSelect: (key: string) => void
@@ -104,128 +121,81 @@ function HolderShare({
   const restSize = rest.reduce((sum, h) => sum + h.size, 0)
 
   return (
-    <Panel plain aria-label="Who holds the data">
-      <PanelHeader
-        title="Held by"
-        className="min-h-10"
-        actions={
-          // As tall as the Mounts head's button, so the two hairlines meet.
-          <span className="numeric flex h-6 items-center text-body font-medium">
+    <BarReading
+      title="Held by"
+      label="Who holds the data"
+      list="Who holds the most"
+      capacity={total}
+      rest={restSize}
+      restLabel="Other holders"
+      format={(v) => bytes(v)}
+      figure={
+        total > 0 && (
+          <span className="numeric flex h-7 items-center text-body font-medium">
             <LiveBytes value={total} />
           </span>
+        )
+      }
+      message={
+        unknown ??
+        (volumes.length === 0
+          ? "No volumes on this server."
+          : total === 0
+            ? "Docker has measured nothing in these volumes yet."
+            : undefined)
+      }
+      note={rest.length > 0 && `and ${plural(rest.length, "more holder")}`}
+      parts={shown.map((h) => {
+        const pressed = selected === h.key
+        const product = holderProducts(h, productOf)[0]
+        return {
+          key: h.key,
+          value: h.size,
+          color: holderHue(h),
+          mark: product ? (
+            <ProductGlyph id={product} className="size-3.5" />
+          ) : (
+            <Database aria-hidden className="size-3.5 text-muted-foreground" />
+          ),
+          name:
+            h.kind === "none" ? (
+              <span className="text-muted-foreground">Nothing mounts them</span>
+            ) : (
+              h.name
+            ),
+          detail: (
+            <>
+              {plural(h.volumes.length, "volume")}
+              {h.kind === "stack" && h.down && (
+                <span className="text-warning"> · stack is down</span>
+              )}
+            </>
+          ),
+          figure: <LiveBytes value={h.size} />,
+          label: `${h.name} ${bytes(h.size)}`,
+          press: {
+            label: `Only the volumes ${h.kind === "none" ? "nothing mounts" : `${h.name} holds`}`,
+            pressed,
+            onPress: () => onSelect(pressed ? "" : h.key),
+          },
         }
-      />
-      <PanelBody className="space-y-3 pt-4">
-        {total === 0 ? (
-          <p className="py-2 text-body text-muted-foreground">
-            Docker has measured nothing in these volumes yet.
-          </p>
-        ) : (
-          <>
-            <ShareBar
-              label="Held by"
-              capacity={total}
-              rest={restSize}
-              parts={shown.map((h) => ({
-                key: h.key,
-                value: h.size,
-                color: holderHue(h),
-                label: `${h.name} ${bytes(h.size)}`,
-              }))}
-              format={(v) => bytes(v)}
-            />
-            <ul className="-mx-2">
-              {shown.map((h) => {
-                const pressed = selected === h.key
-                const products = holderProducts(h, productOf)
-                return (
-                  <li key={h.key}>
-                    <button
-                      type="button"
-                      aria-pressed={pressed}
-                      aria-label={`Only the volumes ${h.kind === "none" ? "nothing mounts" : `${h.name} holds`}`}
-                      onClick={() => onSelect(pressed ? "" : h.key)}
-                      className={cn(
-                        "group flex h-9 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body focus-ring-inset transition-colors",
-                        pressed ? "bg-accent" : "hover:bg-row-hover",
-                      )}
-                    >
-                      <span
-                        aria-hidden
-                        className="h-3 w-0.5 shrink-0 rounded-full"
-                        style={{ background: holderHue(h) }}
-                      />
-                      <span className="flex size-4 shrink-0 items-center justify-center">
-                        {products[0] ? (
-                          <ProductGlyph id={products[0]} className="size-3.5" />
-                        ) : (
-                          <Database aria-hidden className="size-3.5 text-muted-foreground" />
-                        )}
-                      </span>
-                      <span
-                        className={cn(
-                          "min-w-0 truncate font-medium",
-                          h.kind === "none" && "text-muted-foreground",
-                        )}
-                        style={h.kind === "none" ? undefined : { color: holderHue(h) }}
-                      >
-                        {h.kind === "none" ? "Nothing mounts them" : h.name}
-                      </span>
-                      <span className="numeric shrink-0 truncate text-hint text-muted-foreground">
-                        {plural(h.volumes.length, "volume")}
-                        {h.kind === "stack" && h.down && (
-                          <span className="text-warning"> · stack is down</span>
-                        )}
-                      </span>
-                      {products.length > 1 && (
-                        <span className="hidden min-w-0 truncate sm:inline">
-                          <ProductGlyphs ids={products.slice(1)} max={3} />
-                        </span>
-                      )}
-                      <span className="numeric ml-auto shrink-0 font-medium">
-                        <LiveBytes value={h.size} />
-                      </span>
-                      <Filter
-                        aria-hidden
-                        className={cn(
-                          "size-3.5 shrink-0 text-muted-foreground",
-                          pressed ? "text-foreground" : rowReveal(),
-                        )}
-                      />
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-            {rest.length > 0 && (
-              <p className="numeric text-hint text-muted-foreground">
-                and {plural(rest.length, "more holder")}
-                {restSize > 0 && `, ${bytes(restSize)} between them`}
-              </p>
-            )}
-          </>
-        )}
-      </PanelBody>
-    </Panel>
+      })}
+    />
   )
 }
 
 /* ---------------------------------------------------------------- mounts -- */
 
-/** The part of a span a prune would take: the kind's own colour, hatched, as the Images band draws it. */
-const hatched = (color: string) =>
-  `repeating-linear-gradient(-45deg, ${color} 0 2px, color-mix(in oklab, ${color} 22%, transparent) 2px 5px)`
-
 function MountShare({
   volumes,
-  productOf,
+  unknown,
   selected,
   onSelect,
   pruning,
   onPrune,
 }: {
   volumes: VolumeDetail[]
-  productOf: Map<string, string>
+  unknown: React.ReactNode
   selected: Standing | ""
   onSelect: (standing: Standing | "") => void
   pruning: boolean
@@ -241,138 +211,56 @@ function MountShare({
     }
   }).filter((g) => g.volumes.length > 0)
   const share = pruneShare(volumes)
-  const total = volumes.length
 
   return (
-    <Panel plain aria-label="Where each volume stands">
-      <PanelHeader
-        title="Mounts"
-        className="min-h-10"
-        actions={
-          pruning ? (
-            <span className="flex h-6 items-center text-hint">
-              <TextShimmer>Pruning…</TextShimmer>
-            </span>
-          ) : (
-            onPrune &&
-            share.volumes.length > 0 && (
-              <Button size="xs" variant="outline" onClick={onPrune}>
-                <Trash />
-                Prune {share.size > 0 ? bytes(share.size) : plural(share.volumes.length, "volume")}
-              </Button>
-            )
-          )
-        }
-      />
-      <PanelBody className="space-y-3 pt-4">
-        {total === 0 ? (
-          <p className="py-2 text-body text-muted-foreground">No volumes to stand anywhere.</p>
+    <BarReading
+      title="Mounts"
+      label="Where each volume stands"
+      list="Where the volumes stand"
+      fixed
+      working={pruning}
+      figure={
+        pruning ? (
+          <span className="flex h-7 items-center text-hint">
+            <TextShimmer>Pruning…</TextShimmer>
+          </span>
         ) : (
-          <>
-            <div
-              role="img"
-              aria-label={`Mounts: ${groups
-                .map((g) => `${STANDING_LABEL[g.standing]} ${g.volumes.length}`)
-                .join(", ")}`}
-              className="relative flex h-2.5 w-full overflow-hidden rounded-sm bg-meter-track"
-            >
-              {groups.map((g) => (
-                <span
-                  key={g.standing}
-                  title={`${STANDING_LABEL[g.standing]}: ${g.volumes.length}`}
-                  className="flex h-full shrink-0 border-r border-background transition-[width] duration-700 ease-out last:border-r-0 motion-reduce:transition-none"
-                  style={{ width: `${(g.volumes.length / total) * 100}%` }}
-                >
-                  {g.taken < g.volumes.length && (
-                    <span
-                      className="h-full flex-1"
-                      style={{ background: STANDING_COLOR[g.standing] }}
-                    />
-                  )}
-                  {g.taken > 0 && (
-                    <span
-                      className="h-full"
-                      style={{
-                        width: `${(g.taken / g.volumes.length) * 100}%`,
-                        background: hatched(STANDING_COLOR[g.standing]),
-                      }}
-                    />
-                  )}
-                </span>
-              ))}
-              {/* A prune in flight sweeps the bar, as a registry check sweeps
-                  the Images band and Health's segment its check. */}
-              {pruning && (
-                <span
-                  aria-hidden
-                  className="absolute inset-y-0 left-0 w-1/3 animate-sweep bg-foreground/20"
-                />
-              )}
-            </div>
-            <ul className="-mx-2">
-              {groups.map((g) => {
-                const pressed = selected === g.standing
-                const products = [
-                  ...new Set(
-                    g.volumes
-                      .map((v) => volumeProduct(v, productOf))
-                      .filter((id): id is string => id !== undefined),
-                  ),
-                ]
-                return (
-                  <li key={g.standing}>
-                    <button
-                      type="button"
-                      aria-pressed={pressed}
-                      aria-label={`Only volumes: ${STANDING_LABEL[g.standing].toLowerCase()}`}
-                      onClick={() => onSelect(pressed ? "" : g.standing)}
-                      className={cn(
-                        "group flex h-9 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body focus-ring-inset transition-colors",
-                        pressed ? "bg-accent" : "hover:bg-row-hover",
-                      )}
-                    >
-                      <span
-                        aria-hidden
-                        className="h-3 w-0.5 shrink-0 rounded-full"
-                        style={{ background: STANDING_COLOR[g.standing] }}
-                      />
-                      <span
-                        className={cn(
-                          "shrink-0 font-medium",
-                          g.standing === "down" && "text-warning",
-                        )}
-                      >
-                        {STANDING_LABEL[g.standing]}
-                      </span>
-                      <span className="min-w-0 truncate">
-                        <ProductGlyphs ids={products} max={4} />
-                      </span>
-                      <span className="numeric ml-auto shrink-0 text-hint text-muted-foreground">
-                        {g.size > 0 && bytes(g.size)}
-                      </span>
-                      <span className="numeric w-5 shrink-0 text-right font-medium">
-                        {g.volumes.length}
-                      </span>
-                      <Filter
-                        aria-hidden
-                        className={cn(
-                          "size-3.5 shrink-0 text-muted-foreground",
-                          pressed ? "text-foreground" : rowReveal(),
-                        )}
-                      />
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-            <p className="text-hint text-muted-foreground">
-              {share.volumes.length > 0
-                ? `Hatched is what a prune deletes: ${plural(share.volumes.length, "volume")} no container mounts, running or stopped.`
-                : "A prune would delete nothing: a stopped container still holds what it mounts."}
-            </p>
-          </>
-        )}
-      </PanelBody>
-    </Panel>
+          onPrune &&
+          share.volumes.length > 0 && (
+            <Button size="xs" variant="outline" onClick={onPrune}>
+              <Trash />
+              Prune {share.size > 0 ? bytes(share.size) : plural(share.volumes.length, "volume")}
+            </Button>
+          )
+        )
+      }
+      message={unknown ?? (volumes.length === 0 ? "No volumes to stand anywhere." : undefined)}
+      parts={groups.map((g) => {
+        const label = STANDING_LABEL[g.standing]
+        const pressed = selected === g.standing
+        return {
+          key: g.standing,
+          value: g.volumes.length,
+          color: STANDING_COLOR[g.standing],
+          hatch: g.taken / g.volumes.length,
+          mark: <span className="numeric text-hint font-medium">{g.volumes.length}</span>,
+          name: <span className={cn(g.standing === "down" && "text-warning")}>{label}</span>,
+          detail: g.size > 0 ? bytes(g.size) : undefined,
+          figure: g.volumes.length,
+          label: `${label} ${g.volumes.length}`,
+          title:
+            g.taken > 0
+              ? `Hatched is what a prune deletes: ${plural(g.taken, "volume")} no container mounts, running or stopped.`
+              : g.standing === "stopped"
+                ? "A prune would not delete these: a stopped container still holds what it mounts."
+                : undefined,
+          press: {
+            label: `Only volumes: ${label.toLowerCase()}`,
+            pressed,
+            onPress: () => onSelect(pressed ? "" : g.standing),
+          },
+        }
+      })}
+    />
   )
 }

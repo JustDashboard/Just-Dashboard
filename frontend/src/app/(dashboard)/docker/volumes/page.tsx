@@ -395,7 +395,7 @@ export default function DockerVolumesPage() {
             </>
           }
           facts={
-            list.data && (
+            list.data ? (
               <>
                 <span className="numeric font-medium text-foreground">
                   {plural(volumes.length, "volume")}
@@ -413,6 +413,9 @@ export default function DockerVolumesPage() {
                   </>
                 )}
               </>
+            ) : (
+              // Holds the line open, so the band under it does not move when the list lands.
+              <span aria-hidden>&nbsp;</span>
             )
           }
           aside={
@@ -445,158 +448,150 @@ export default function DockerVolumesPage() {
           }
         />
 
+        {/* Here before the list is and with no volumes at all, saying so, so the
+            page does not move when the list lands. */}
+        <VolumeBand
+          volumes={volumes}
+          loading={list.loading && !list.data}
+          failed={list.error !== undefined && !list.data}
+          productOf={productOf}
+          holder={holder}
+          onHolder={(key) => narrow({ holder: key })}
+          selected={only}
+          onSelect={(next) => narrow({ only: next })}
+          pruning={pruning}
+          onPrune={can("destructive") ? prune : undefined}
+        />
+
+        {/* Framed, as every table is (§2): its container scrolls, and an
+            edge says where the columns that did not fit went. */}
         {list.loading && !list.data ? (
           <LoadingPanel />
         ) : list.error && !list.data ? (
           <ErrorState error={list.error} onRetry={list.refresh} />
         ) : (
-          <>
+          <Panel className="animate-rise">
+            <PanelHeader
+              title="Volumes"
+              actions={
+                filtered &&
+                volumes.length > 0 && (
+                  <span className="numeric text-hint text-muted-foreground">
+                    {visible.length} of {volumes.length}
+                  </span>
+                )
+              }
+            />
             {volumes.length > 0 && (
-              <VolumeBand
-                volumes={volumes}
-                productOf={productOf}
-                holder={holder}
-                onHolder={(key) => narrow({ holder: key })}
-                selected={only}
-                onSelect={(next) => narrow({ only: next })}
-                pruning={pruning}
-                onPrune={can("destructive") ? prune : undefined}
-              />
-            )}
-
-            {/* Framed, as every table is (§2): its container scrolls, and an
-                edge says where the columns that did not fit went. */}
-            <Panel className="animate-rise">
-              <PanelHeader
-                title="Volumes"
-                actions={
-                  filtered &&
-                  volumes.length > 0 && (
-                    <span className="numeric text-hint text-muted-foreground">
-                      {visible.length} of {volumes.length}
-                    </span>
-                  )
-                }
-              />
-              {volumes.length > 0 && (
-                <PanelToolbar>
-                  <SearchInput
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Volume, container or path"
-                    aria-label="Find volumes"
-                  />
-                  <div className="flex min-w-0 flex-wrap items-center gap-1">
-                    <FilterChip selected={showing === "all"} onClick={() => setShow("all")}>
-                      All <ChipCount>{volumes.length}</ChipCount>
-                    </FilterChip>
-                    {(
-                      [
-                        ["running", "In use"],
-                        ["stopped", "Stopped"],
-                        ["unmounted", "Not mounted"],
-                        ...(coverage.data ? [["unprotected", "Not backed up"]] : []),
-                      ] as [Show, string][]
-                    ).map(([key, label]) =>
-                      count(key) > 0 ? (
-                        <FilterChip
-                          key={key}
-                          selected={showing === key}
-                          onClick={() => setShow(key)}
-                        >
-                          {label} <ChipCount>{count(key)}</ChipCount>
-                        </FilterChip>
-                      ) : null,
-                    )}
-                  </div>
-                  {showing === "prunable" && (
-                    <FilterChip
-                      selected
-                      onClick={() => setShow("all")}
-                      aria-label="Clear prune filter"
-                    >
-                      A prune would delete ×
-                    </FilterChip>
+              <PanelToolbar>
+                <SearchInput
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Volume, container or path"
+                  aria-label="Find volumes"
+                />
+                <div className="flex min-w-0 flex-wrap items-center gap-1">
+                  <FilterChip selected={showing === "all"} onClick={() => setShow("all")}>
+                    All <ChipCount>{volumes.length}</ChipCount>
+                  </FilterChip>
+                  {(
+                    [
+                      ["running", "In use"],
+                      ["stopped", "Stopped"],
+                      ["unmounted", "Not mounted"],
+                      ...(coverage.data ? [["unprotected", "Not backed up"]] : []),
+                    ] as [Show, string][]
+                  ).map(([key, label]) =>
+                    count(key) > 0 ? (
+                      <FilterChip key={key} selected={showing === key} onClick={() => setShow(key)}>
+                        {label} <ChipCount>{count(key)}</ChipCount>
+                      </FilterChip>
+                    ) : null,
                   )}
-                  {holder && (
-                    <FilterChip
-                      selected
-                      onClick={() => setHolder("")}
-                      aria-label="Clear holder filter"
-                    >
-                      {holderName} ×
-                    </FilterChip>
-                  )}
-                  {only && (
-                    <FilterChip
-                      selected
-                      onClick={() => setOnly("")}
-                      aria-label="Clear mount filter"
-                    >
-                      {STANDING_LABEL[only]} ×
-                    </FilterChip>
-                  )}
-                </PanelToolbar>
-              )}
-              <PanelBody flush>
-                {volumes.length === 0 ? (
-                  <EmptyState
-                    icon={Database}
-                    className="m-4"
-                    title="No volumes on this server"
-                    description={
-                      <>
-                        A <Term name="volume">volume</Term> is storage Docker manages, kept outside
-                        a container so it survives being recreated.
-                      </>
-                    }
-                    action={
-                      can("service.control") && (
-                        <Button size="sm" onClick={() => setCreating(true)}>
-                          <Plus className="size-4" />
-                          Create volume
-                        </Button>
-                      )
-                    }
-                  />
-                ) : visible.length === 0 ? (
-                  <EmptyState
-                    icon={Database}
-                    className="m-4"
-                    title="Nothing matches"
-                    description="Clear the search or the filters to see every volume."
-                    action={
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setQuery("")
-                          narrow({})
-                        }}
-                      >
-                        Clear filters
-                      </Button>
-                    }
-                  />
-                ) : (
-                  <VolumeTable
-                    volumes={visible}
-                    productOf={productOf}
-                    backups={backups}
-                    wide={wide}
-                    widest={widest}
-                    arrived={arrived}
-                    removing={removing}
-                    sort={sort}
-                    onSort={onSort}
-                    verbs={verbsFor}
-                    onOpen={setSelected}
-                    onHolder={(key) => narrow({ holder: key })}
-                  />
+                </div>
+                {showing === "prunable" && (
+                  <FilterChip
+                    selected
+                    onClick={() => setShow("all")}
+                    aria-label="Clear prune filter"
+                  >
+                    A prune would delete ×
+                  </FilterChip>
                 )}
-              </PanelBody>
-            </Panel>
-          </>
+                {holder && (
+                  <FilterChip
+                    selected
+                    onClick={() => setHolder("")}
+                    aria-label="Clear holder filter"
+                  >
+                    {holderName} ×
+                  </FilterChip>
+                )}
+                {only && (
+                  <FilterChip selected onClick={() => setOnly("")} aria-label="Clear mount filter">
+                    {STANDING_LABEL[only]} ×
+                  </FilterChip>
+                )}
+              </PanelToolbar>
+            )}
+            <PanelBody flush>
+              {volumes.length === 0 ? (
+                <EmptyState
+                  icon={Database}
+                  className="m-4"
+                  title="No volumes on this server"
+                  description={
+                    <>
+                      A <Term name="volume">volume</Term> is storage Docker manages, kept outside a
+                      container so it survives being recreated.
+                    </>
+                  }
+                  action={
+                    can("service.control") && (
+                      <Button size="sm" onClick={() => setCreating(true)}>
+                        <Plus className="size-4" />
+                        Create volume
+                      </Button>
+                    )
+                  }
+                />
+              ) : visible.length === 0 ? (
+                <EmptyState
+                  icon={Database}
+                  className="m-4"
+                  title="Nothing matches"
+                  description="Clear the search or the filters to see every volume."
+                  action={
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setQuery("")
+                        narrow({})
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  }
+                />
+              ) : (
+                <VolumeTable
+                  volumes={visible}
+                  productOf={productOf}
+                  backups={backups}
+                  wide={wide}
+                  widest={widest}
+                  arrived={arrived}
+                  removing={removing}
+                  sort={sort}
+                  onSort={onSort}
+                  verbs={verbsFor}
+                  onOpen={setSelected}
+                  onHolder={(key) => narrow({ holder: key })}
+                />
+              )}
+            </PanelBody>
+          </Panel>
         )}
 
         <VolumeSheet

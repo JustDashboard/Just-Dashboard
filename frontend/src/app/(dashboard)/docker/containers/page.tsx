@@ -429,6 +429,7 @@ export default function ContainersPage() {
           snapshot={snapshot}
           entries={entries}
           listening={eventStream.state === "open"}
+          loaded={loaded}
           now={now}
           onOpen={open}
         />

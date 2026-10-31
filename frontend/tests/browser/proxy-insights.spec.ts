@@ -125,9 +125,103 @@ test("recent errors are the hour's 5xx by site", async ({ page }) => {
   await page.goto("/proxy")
   const errors = page.getByRole("region", { name: "Recent errors" })
   await expect(errors).toContainText("server errors this hour")
-  await expect(errors.getByRole("list", { name: "Sites answering 5xx" })).toContainText(
-    "app.example.com",
+  await expect(
+    errors
+      .getByRole("list", { name: "Sites answering 5xx" })
+      .getByRole("button", { name: "Open app.example.com's requests" }),
+  ).toBeVisible()
+  await expect(errors.locator("[data-slot=reading-line]")).toContainText("app.example.com")
+})
+
+test("what nginx logged sits beside the sites and opens the error log", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, {
+      observedAt: new Date().toISOString(),
+      sites: [hour("app.example.com", "nginx", [minute(1, 50, 5)])],
+    }),
   )
+  await page.route("**/api/v1/proxy/errors?**", (route) =>
+    json(route, {
+      scope: "main",
+      path: "/var/log/nginx/error.log",
+      exists: true,
+      since: new Date().toISOString(),
+      complete: true,
+      lines: 3,
+      groups: [
+        {
+          pattern: "upstream timed out",
+          level: "error",
+          count: 3,
+          first: new Date().toISOString(),
+          last: new Date().toISOString(),
+          sample: "upstream timed out (110: Connection timed out)",
+          title: "The application took too long to answer",
+          advice: "Look at what the application was doing.",
+        },
+        {
+          pattern: "signal process started",
+          level: "notice",
+          count: 9,
+          first: new Date().toISOString(),
+          last: new Date().toISOString(),
+          sample: "signal process started",
+        },
+      ],
+    }),
+  )
+  await page.goto("/proxy")
+
+  const errors = page.getByRole("region", { name: "Recent errors" })
+  const logged = errors.getByRole("button", {
+    name: "Open The application took too long to answer in the error log",
+  })
+  // A notice has nothing to act on, and is not drawn.
+  await expect(errors.getByRole("listitem")).toHaveCount(2)
+  await logged.hover()
+  await expect(errors.locator("[data-slot=reading-line]")).toContainText(
+    "The application took too long to answer",
+  )
+  await expect(logged).toHaveAttribute("title", "Look at what the application was doing.")
+  await logged.click()
+  await expect(page).toHaveURL(/\/proxy\/traffic\?view=errors$/)
+})
+
+test("the band keeps its blocks and its height while the hour's reading lands", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let land: () => void = () => {}
+  const held = new Promise<void>((resolve) => (land = resolve))
+  await page.route("**/api/v1/proxy/traffic", async (route) => {
+    await held
+    await json(route, {
+      observedAt: new Date().toISOString(),
+      sites: [hour("app.example.com", "nginx", [minute(1, 50, 5)])],
+    })
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/proxy")
+
+  const band = page.locator("[data-slot=overview-band]")
+  const blocks = band.locator("[data-slot=bar-reading]")
+  await expect(blocks).toHaveCount(3)
+  await expect(page.getByRole("region", { name: "Traffic", exact: true })).toContainText(
+    "Reading the sites' access logs",
+  )
+  const heights = await blocks.evaluateAll((all) =>
+    all.map((block) => block.getBoundingClientRect().height),
+  )
+  expect(new Set(heights).size).toBe(1)
+  const before = (await band.boundingBox())?.height
+
+  land()
+  await expect(page.getByRole("region", { name: "Traffic", exact: true })).toContainText(
+    "requests this hour",
+  )
+  await expect(blocks).toHaveCount(3)
+  expect((await band.boundingBox())?.height).toBe(before)
 })
 
 test("the nginx counters read requests and connections", async ({ page }) => {

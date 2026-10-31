@@ -1420,6 +1420,37 @@ test("a stack narrows the table from its chip or its row", async ({ page }) => {
   await expect(page.locator("tbody tr")).toHaveCount(2)
 })
 
+test("the band does not move when the first frame lands", async ({ page }) => {
+  await mockDocker(page)
+  let land!: () => void
+  const held = new Promise<void>((resolve) => (land = resolve))
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/stream/, async (socket) => {
+    await held
+    socket.send(JSON.stringify({ type: "containers", data: containers }))
+    socket.send(
+      JSON.stringify({
+        type: "stats",
+        data: [{ id: containers[0].id, cpuPercent: 12, memUsage: 1e8, memLimit: 5e8, hostCpus: 8 }],
+      }),
+    )
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker/containers")
+
+  const band = page.locator("[data-slot=container-band]")
+  const blocks = band.locator("[data-slot=bar-reading]")
+  await expect(blocks).toHaveCount(3)
+  const measure = () =>
+    blocks.evaluateAll((all) => all.map((block) => block.getBoundingClientRect().height))
+  const before = await measure()
+  expect(new Set(before).size).toBe(1)
+
+  land()
+  const processor = page.getByLabel("Processor by container")
+  await expect(processor.getByRole("button", { name: `Open ${containers[0].name}` })).toBeVisible()
+  expect(await measure()).toEqual(before)
+})
+
 /**
  * What happened lately is Docker's own event log, with a restart loop as one
  * line and a kill for memory said on the exit it caused — which also turns
@@ -1466,8 +1497,10 @@ test("recent events fold a restart loop and name a kill for memory", async ({ pa
   await page.goto("/docker/containers")
 
   const recent = page.getByRole("region", { name: "Recent container events" })
-  await expect(recent.getByText(/restarted ×4 in \d+ min · exit 1/)).toBeVisible()
-  await expect(recent.getByText("killed for memory")).toBeVisible()
+  const line = recent.locator("[data-slot=reading-line]")
+  await expect(line).toContainText("killed for memory")
+  await recent.getByRole("button", { name: "Open web" }).hover()
+  await expect(line.getByText(/restarted ×4 in \d+ min · exit 1/)).toBeVisible()
   const db = page.getByRole("row").filter({ hasText: "postgres:16" })
   await expect(db.getByText("Out of memory")).toBeVisible()
   await expect(page.getByRole("button", { name: /^Failing/ })).toContainText("1")

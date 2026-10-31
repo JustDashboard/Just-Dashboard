@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { recordProgress } from "./progress-recording"
-import { DETAIL, mockStackDetail } from "./stack-detail-fixture"
+import { CONTAINERS, DETAIL, mockStackDetail, statsFrame } from "./stack-detail-fixture"
 
 /**
  * A stack's own page (`/docker/stacks/<name>`), over `shop`: six services,
@@ -81,13 +81,46 @@ test("draws how the stack is reached and what happened to it", async ({ page }) 
   await expect(networks.getByText("backend", { exact: true })).toBeVisible()
   await expect(networks.getByText("frontend", { exact: true })).toBeVisible()
 
+  // A service's changes are a mark each, newest first.
   const recent = page.getByRole("region", { name: "Recent changes" })
-  await expect(recent.getByText("exited 1")).toBeVisible()
-  await expect(recent.getByText(/^restarted ×5 in \d+ min · exit 1$/)).toBeVisible()
-  await expect(recent.getByText("passing its check again")).toBeVisible()
+  const line = recent.locator("[data-slot=reading-line]")
+  await expect(line).toContainText("exited 1")
+  await recent.getByRole("button", { name: "Open worker" }).nth(1).hover()
+  await expect(line.getByText(/^restarted ×5 in \d+ min · exit 1$/)).toBeVisible()
+  await recent.getByRole("button", { name: "Open db" }).first().hover()
+  await expect(line).toContainText("passing its check again")
 
   const memory = page.getByRole("region", { name: "Memory by service" })
-  await expect(memory.getByRole("button", { name: "Open db" })).toContainText(/9\d% of its limit/)
+  await memory.getByRole("button", { name: "Open db" }).hover()
+  await expect(memory.locator("[data-slot=reading-line]")).toContainText(/9\d% of its limit/)
+})
+
+test("every block of the band is one height before its readings land and after", async ({
+  page,
+}) => {
+  await mockStackDetail(page)
+  let land!: () => void
+  const held = new Promise<void>((resolve) => (land = resolve))
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/stream/, async (socket) => {
+    await held
+    socket.send(JSON.stringify({ type: "containers", data: CONTAINERS }))
+    socket.send(JSON.stringify({ type: "stats", data: statsFrame(0) }))
+  })
+  await page.setViewportSize({ width: 1440, height: 1600 })
+  await page.goto("/docker/stacks/shop")
+
+  const band = page.locator("[data-slot=stack-usage]")
+  const blocks = band.locator("[data-slot=bar-reading]")
+  await expect(blocks).toHaveCount(3)
+  await expect(page.getByLabel("Memory by service")).toContainText("Waiting for the first reading…")
+  const measure = () =>
+    blocks.evaluateAll((all) => all.map((block) => block.getBoundingClientRect().height))
+  const before = await measure()
+  expect(new Set(before).size).toBe(1)
+
+  land()
+  await expect(page.getByLabel("Memory by service").getByRole("button").first()).toBeVisible()
+  expect(await measure()).toEqual(before)
 })
 
 test("a service's compose verbs run for that service", async ({ page }) => {

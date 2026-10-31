@@ -12,6 +12,17 @@ import { CONTAINERS, VOLUMES, mockVolumes } from "./docker-volumes-fixture"
 const body = (page: Page) => page.locator("[data-slot=table-body] tr")
 const row = (page: Page, name: string) => page.getByRole("row", { name: new RegExp(name) })
 
+/** Where the page rests: `boundingBox` during its four-pixel rise reads a place it is leaving. */
+const risen = (page: Page) =>
+  page.evaluate(() =>
+    Promise.allSettled(
+      document
+        .getAnimations()
+        .filter((a) => (a as CSSAnimation).animationName === "jd-rise")
+        .map((a) => a.finished),
+    ),
+  )
+
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
 })
@@ -32,14 +43,20 @@ test("the page opens on the engine, who holds the data and where each volume sta
 
   const held = page.getByRole("region", { name: "Who holds the data" })
   await expect(held.getByRole("img", { name: /^Held by: minio 14\.2 GB, shop/ })).toBeVisible()
-  await expect(
-    held.getByRole("button", { name: "Only the volumes nextcloud holds" }),
-  ).toContainText("stack is down")
+  await held.getByRole("button", { name: "Only the volumes nextcloud holds" }).hover()
+  await expect(held.locator("[data-slot=reading-line]")).toContainText("stack is down")
   const mounts = page.getByRole("region", { name: "Where each volume stands" })
+  const stands = mounts.locator("[data-slot=reading-line]")
   await expect(mounts.getByRole("button", { name: /in use$/ })).toContainText("10")
+  await mounts.getByRole("button", { name: /in use$/ }).hover()
+  await expect(stands).toContainText("In use")
+  await mounts.getByRole("button", { name: /held by stopped containers$/ }).hover()
+  await expect(stands).toContainText("Held by stopped containers")
   await expect(mounts.getByRole("button", { name: /held by stopped containers$/ })).toContainText(
     "1",
   )
+  await mounts.getByRole("button", { name: /left by a stack$/ }).hover()
+  await expect(stands).toContainText("Left by a stack")
   await expect(mounts.getByRole("button", { name: /left by a stack$/ })).toContainText("2")
   await expect(mounts.getByRole("button", { name: "Prune 2.9 GB" })).toBeVisible()
 
@@ -129,6 +146,57 @@ test("the band, the verdict and the chips narrow the table, and Escape lets go",
     .getByRole("button", { name: "Only the volumes monitoring holds" })
     .click()
   await expect(body(page)).toHaveCount(2)
+})
+
+test("the band is there before the list lands, and does not move when it does", async ({
+  page,
+}) => {
+  await mockVolumes(page)
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/docker/volumes/", async (route) => {
+    await held
+    return route.fallback()
+  })
+  await page.goto("/docker/volumes")
+
+  const band = page.locator("[data-slot=volume-band]")
+  const blocks = band.locator("[data-slot=bar-reading]")
+  await expect(blocks).toHaveCount(2)
+  await expect(band.getByRole("region", { name: "Who holds the data" })).toContainText(
+    "Reading the volumes…",
+  )
+  const heights = await blocks.evaluateAll((all) =>
+    all.map((block) => block.getBoundingClientRect().height),
+  )
+  expect(new Set(heights).size).toBe(1)
+  await risen(page)
+  const before = await band.boundingBox()
+
+  release()
+  await expect(body(page)).toHaveCount(VOLUMES.length)
+  await expect(band.getByRole("img", { name: /^Held by: minio/ })).toBeVisible()
+  await risen(page)
+  expect(await band.boundingBox()).toEqual(before)
+})
+
+test("with no volumes the band stays, saying so", async ({ page }) => {
+  await mockVolumes(page)
+  await page.route("**/api/v1/docker/volumes/", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ status: 200, contentType: "application/json", body: "[]" })
+      : route.fallback(),
+  )
+  await page.goto("/docker/volumes")
+
+  const band = page.locator("[data-slot=volume-band]")
+  await expect(band.getByRole("region", { name: "Who holds the data" })).toContainText(
+    "No volumes on this server.",
+  )
+  await expect(band.getByRole("region", { name: "Where each volume stands" })).toContainText(
+    "No volumes to stand anywhere.",
+  )
+  await expect(page.getByText("No volumes on this server", { exact: true })).toBeVisible()
 })
 
 test("every column heading orders the table", async ({ page }) => {

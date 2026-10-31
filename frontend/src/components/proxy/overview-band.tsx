@@ -2,44 +2,44 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Box, CheckCircle, FileText, LockOpen } from "@/components/icons"
+import { ArrowRight, Box, LockClosed } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { LANES } from "@/lib/hue"
-import { plural } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { Certificate, ErrorReport, SiteTrafficReading } from "@/lib/types"
-import { BarList, type BarListItem } from "@/components/bar-list"
-import { FindingList } from "@/components/finding-list"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { BarReading, type ReadingPart } from "@/components/bar-reading"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
-import { Sparkline } from "@/components/metrics/sparkline"
-import { ShareBar } from "@/components/procs/workloads"
-import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
-import { Skeleton } from "@/components/ui/skeleton"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { certificateProduct } from "@/components/proxy/marks"
 import { ProjectFavicon } from "@/components/deploy/project-mark"
-import { errorFinding, isActionableProxyError } from "@/components/proxy/site-errors"
+import { isActionableProxyError } from "@/components/proxy/site-errors"
 import { useAuth } from "@/hooks/use-auth"
 import { compactCount, errorRateTone, readingHref, share } from "@/components/proxy/site-traffic"
 
 /** How many sites and certificates a block names; the rest are one link away. */
 const SHOWN = 5
 
+/** How many of nginx's error groups Recent errors names after the sites. */
+const SHOWN_GROUPS = 4
+
 /** The runway's far end: certbot issues for ninety days. */
 const RUNWAY_DAYS = 90
 
 /**
- * The readings the four tiles never gave, as three blocks under the route
- * map: which sites the hour's requests went to, how long every certificate
- * has left on one runway, and what failed. Each opens on its one figure at
- * the page's reading size, then the rows that make it up — a press opens the
- * site's requests, the certificate, the error log.
+ * The readings the four tiles never gave, as three bars under the route map:
+ * which sites the hour's requests went to, where each certificate stands on a
+ * ninety-day runway, and what failed. Each block is a bar and one line, so it
+ * is one height with a reading or without: the blocks drawn depend only on
+ * whether an engine here keeps access records, not on what those records have
+ * said so far, and the routes under the band stay where they are as readings
+ * land. A press opens the site's requests, the certificate, the error log.
  *
  * Traffic and errors are read from every site's access record, nginx's and
  * the Docker Caddy ingress's alike, so a host where the ingress holds ports
- * 80 and 443 is read as busy as it is.
+ * 80 and 443 is read as busy as it is. They are polled, so nothing here is
+ * marked live.
  */
 export function OverviewBand({
   traffics,
@@ -69,22 +69,15 @@ export function OverviewBand({
   /** The name a site's visitors type, which says more than its file's. */
   labelOf: (site: string) => string
 }) {
-  // With no access log read anywhere, Live traffic above already says why
-  // there is nothing to count; a second block saying it again was the
-  // emptiest third of the band.
-  const logged = (traffic.sites ?? []).some((s) => s.status === "available")
-  const showTraffic = traffics && (logged || !traffic.sites || Boolean(traffic.error))
-  const blocks = 1 + (showTraffic ? 1 : 0) + (traffics ? 1 : 0)
   return (
     <div
       data-slot="overview-band"
       className={cn(
         "grid min-w-0 gap-x-12 gap-y-10 [&>*]:min-w-0",
-        blocks === 2 && "lg:grid-cols-2",
-        blocks === 3 && "lg:grid-cols-2 xl:grid-cols-3",
+        traffics && "lg:grid-cols-2 xl:grid-cols-3",
       )}
     >
-      {showTraffic && <TrafficBlock {...traffic} appOf={appOf} labelOf={labelOf} />}
+      {traffics && <TrafficBlock {...traffic} appOf={appOf} labelOf={labelOf} />}
       <CertificatesBlock {...certificates} />
       {traffics && (
         <ErrorsBlock
@@ -92,6 +85,7 @@ export function OverviewBand({
           nginx={nginx}
           sites={traffic.sites}
           trafficError={traffic.error}
+          appOf={appOf}
           labelOf={labelOf}
         />
       )}
@@ -99,72 +93,73 @@ export function OverviewBand({
   )
 }
 
-/** The engine whose access records a block reads, for its empty tile. */
-function nginxOrCaddy(sites: SiteTrafficReading[] | undefined) {
-  return (sites ?? []).some((s) => s.engine === "caddy-ingress") ? "caddy" : "nginx"
-}
-
 function HeadLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Link
       href={href}
-      className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
+      className="flex h-7 shrink-0 items-center gap-1 rounded-md text-hint font-medium whitespace-nowrap text-muted-foreground focus-ring hover:text-foreground"
     >
       {children} <ArrowRight className="size-3" />
     </Link>
   )
 }
 
-function Bones() {
-  return (
-    <div className="space-y-3 py-1">
-      <Skeleton className="h-2.5 w-full" />
-      <Skeleton className="h-4 w-48" />
-      <Skeleton className="h-4 w-40" />
-    </div>
-  )
+const TONE_TEXT = {
+  danger: "text-destructive",
+  warning: "text-warning",
+  success: "text-success",
 }
 
-/**
- * A block's one figure, at the size a reading takes on this page, with what
- * it counts beside it and the line that qualifies it under.
- */
-function Headline({
+/** A block's figure in its head: the number, in its standing's tone, and what it counts. */
+function HeadFigure({
   value,
-  unit,
-  caption,
+  word,
   tone,
 }: {
   value: React.ReactNode
-  unit: React.ReactNode
-  caption?: React.ReactNode
-  tone?: "warning" | "danger" | "success"
+  word: string
+  tone?: keyof typeof TONE_TEXT
 }) {
   return (
-    <div className="min-w-0 space-y-0.5">
-      <p className="flex min-w-0 items-baseline gap-2">
-        <span
-          className={cn(
-            "numeric text-2xl leading-tight font-semibold tracking-tight",
-            tone === "warning" && "text-warning",
-            tone === "danger" && "text-destructive",
-            tone === "success" && "text-success",
-          )}
-        >
-          {value}
-        </span>
-        <span className="truncate text-hint text-muted-foreground">{unit}</span>
-      </p>
-      {caption && <p className="truncate text-hint text-muted-foreground">{caption}</p>}
-    </div>
+    <span className="numeric flex h-7 items-center gap-1 text-hint whitespace-nowrap text-muted-foreground">
+      <span className={cn("font-medium", tone ? TONE_TEXT[tone] : "text-foreground")}>{value}</span>
+      {word}
+    </span>
+  )
+}
+
+/** A site's mark: the project it is, else the product it reaches, else a plain box. */
+function SiteGlyph({ app }: { app?: { product?: string; projectId?: number } }) {
+  return (
+    <ProjectFavicon
+      projectId={app?.projectId}
+      className="size-3.5"
+      fallback={
+        hasProductLogo(app?.product) ? (
+          <ProductGlyph id={app.product} />
+        ) : (
+          <Box aria-hidden className="size-3.5 text-muted-foreground" />
+        )
+      }
+    />
+  )
+}
+
+/** Words for the end of a block's strip, cut to what fits with the whole of them on a pointer. */
+function Note({ parts }: { parts: (string | false)[] }) {
+  const words = parts.filter(Boolean).join(" · ")
+  return (
+    <span className="truncate" title={words}>
+      {words}
+    </span>
   )
 }
 
 /**
  * The hour's requests as one bar shared out by site, each rank a hue of its
  * own from `LANES` (none of them a state's, and no two neighbours alike, which
- * a hash of five names did not promise), then the five busiest as rows: what
- * they reach, the hour's shape, their 5xx share and their count.
+ * a hash of five names did not promise). The line reads a site's count and its
+ * 5xx share, and its trail what the count has done since the page opened.
  */
 function TrafficBlock({
   sites,
@@ -184,134 +179,79 @@ function TrafficBlock({
   const total = read.reduce((sum, s) => sum + s.requests, 0)
   const rest = total - top.reduce((sum, s) => sum + s.requests, 0)
   const silent = (sites ?? []).length - read.length
-  const busy = ranked.filter((s) => s.requests > 0).length
+  const quieter = ranked.length - top.length
 
   return (
-    <Panel plain aria-label="Traffic">
-      <PanelHeader
-        title="Traffic"
-        actions={<HeadLink href="/proxy/traffic">All traffic</HeadLink>}
-      />
-      <PanelBody className="space-y-4 pt-4">
-        {error ? (
-          <p className="text-hint text-muted-foreground" title={errorMessage(error)}>
-            {"Couldn't read the sites' access logs."}
-          </p>
+    <BarReading
+      title="Traffic"
+      label="Traffic"
+      list="Busiest sites"
+      palette={LANES}
+      trail
+      rest={rest}
+      restLabel="Quieter sites"
+      format={compactCount}
+      figure={
+        <span className="flex h-7 items-center gap-3">
+          {read.length > 0 && <HeadFigure value={compactCount(total)} word="requests this hour" />}
+          <HeadLink href="/proxy/traffic">All traffic</HeadLink>
+        </span>
+      }
+      message={
+        error ? (
+          <span title={errorMessage(error)}>{"Couldn't read the sites' access logs."}</span>
         ) : !sites ? (
-          <Bones />
+          <TextShimmer>{"Reading the sites' access logs…"}</TextShimmer>
         ) : read.length === 0 ? (
-          <OverviewEmpty
-            mark={<EmptyMark product={nginxOrCaddy(sites)} corner={FileText} />}
-            title="No access log to read"
-          >
-            No site writes an access log the dashboard can read.
-          </OverviewEmpty>
-        ) : (
-          <div className="animate-rise space-y-4">
-            <Headline
-              value={compactCount(total)}
-              unit="requests this hour"
-              caption={
-                total === 0
-                  ? `None of ${plural(read.length, "site")} answered a request`
-                  : `${busy} of ${plural(read.length, "site")} answered`
-              }
-            />
-            {total > 0 && (
-              <>
-                <ShareBar
-                  label="Requests in the last hour"
-                  capacity={total}
-                  rest={rest}
-                  parts={top.map((s, rank) => ({
-                    key: s.site,
-                    value: s.requests,
-                    color: LANES[rank % LANES.length],
-                    label: `${labelOf(s.site)} ${compactCount(s.requests)}`,
-                  }))}
-                  format={compactCount}
-                />
-                <ul aria-label="Busiest sites" className="-mx-2">
-                  {top.map((s, rank) => {
-                    const app = appOf(s.site)
-                    const product = app?.product
-                    const tone = errorRateTone(s.errorRate)
-                    const label = labelOf(s.site)
-                    return (
-                      <li key={s.site}>
-                        <button
-                          type="button"
-                          title={`Open ${label}'s requests`}
-                          aria-label={`Open ${label}'s requests`}
-                          onClick={() => router.push(readingHref(s))}
-                          className="flex h-9 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body focus-ring-inset transition-colors hover:bg-row-hover"
-                        >
-                          <span
-                            aria-hidden
-                            className="h-3 w-0.5 shrink-0 rounded-full"
-                            style={{ background: LANES[rank % LANES.length] }}
-                          />
-                          <span className="flex size-4 shrink-0 items-center justify-center">
-                            <ProjectFavicon
-                              projectId={app?.projectId}
-                              className="size-3.5"
-                              fallback={
-                                hasProductLogo(product) ? (
-                                  <ProductGlyph id={product} />
-                                ) : (
-                                  <Box aria-hidden className="size-3.5 text-muted-foreground" />
-                                )
-                              }
-                            />
-                          </span>
-                          <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
-                          {s.errorRate > 0 && (
-                            <span
-                              className={cn(
-                                "numeric shrink-0 text-hint",
-                                tone === "danger"
-                                  ? "font-medium text-destructive"
-                                  : tone === "warning"
-                                    ? "text-warning"
-                                    : "text-muted-foreground",
-                              )}
-                            >
-                              {share(s.errorRate)} 5xx
-                            </span>
-                          )}
-                          <Sparkline
-                            values={s.points.map((p) => p.total)}
-                            color={LANES[rank % LANES.length]}
-                            width={56}
-                            height={16}
-                            className="shrink-0 max-sm:hidden"
-                            label={`${label}'s requests a minute over the last hour`}
-                          />
-                          <span className="numeric w-12 shrink-0 text-right font-medium">
-                            {compactCount(s.requests)}
-                            <span className="font-normal text-muted-foreground">/h</span>
-                          </span>
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </>
-            )}
-            {(ranked.length > top.length || silent > 0) && (
-              <p className="border-t border-hairline pt-3 text-hint text-muted-foreground">
-                {[
-                  ranked.length > top.length && plural(ranked.length - top.length, "quieter site"),
-                  silent > 0 && `${plural(silent, "site")} with no log the dashboard reads`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-            )}
-          </div>
-        )}
-      </PanelBody>
-    </Panel>
+          "No site writes an access log the dashboard can read."
+        ) : total === 0 ? (
+          `None of ${plural(read.length, "site")} answered a request this hour.`
+        ) : undefined
+      }
+      note={
+        (quieter > 0 || silent > 0) && (
+          <Note
+            parts={[
+              quieter > 0 && plural(quieter, "quieter site"),
+              silent > 0 && `${plural(silent, "site")} with no log the dashboard reads`,
+            ]}
+          />
+        )
+      }
+      parts={top.map((s) => {
+        const label = labelOf(s.site)
+        const tone = errorRateTone(s.errorRate)
+        return {
+          key: s.site,
+          value: s.requests,
+          mark: <SiteGlyph app={appOf(s.site)} />,
+          name: label,
+          detail: s.errorRate > 0 && (
+            <span
+              className={cn(
+                tone === "danger" && "text-destructive",
+                tone === "warning" && "text-warning",
+              )}
+            >
+              {share(s.errorRate)} 5xx
+            </span>
+          ),
+          figure: (
+            <>
+              {compactCount(s.requests)}
+              <span className="font-normal text-muted-foreground">/h</span>
+            </>
+          ),
+          label: `${label} ${compactCount(s.requests)}`,
+          title: `${s.requests.toLocaleString()} requests in the last hour`,
+          press: {
+            label: `Open ${label}'s requests`,
+            opens: true,
+            onPress: () => router.push(readingHref(s)),
+          },
+        }
+      })}
+    />
   )
 }
 
@@ -322,17 +262,26 @@ function standing(cert: Certificate): Standing {
   return cert.expiring ? "due" : "fine"
 }
 
-const DOT: Record<Standing, string> = {
-  wrong: "bg-destructive",
-  due: "bg-warning",
-  fine: "bg-success",
+const STANDING_COLOR: Record<Standing, string> = {
+  wrong: "var(--destructive)",
+  due: "var(--warning)",
+  fine: "var(--success)",
 }
 
 /**
- * Every certificate on one runway that ends ninety days out — certbot's term
- * — each a dot in its state's colour where its days left put it, so a host
- * whose certificates bunch up at the near end is seen before one is read.
- * Under it the five that run out first, each its issuer's mark and its days.
+ * Where a certificate sits on the runway. One that browsers would refuse has
+ * no days worth counting however far off its date is, so it sits at the near
+ * end and is among the first named.
+ */
+function runwayDays(cert: Certificate) {
+  return standing(cert) === "wrong" ? 0 : cert.daysLeft
+}
+
+/**
+ * The certificates on one runway that ends ninety days out — certbot's term —
+ * each a tick in its standing's colour where its days left put it, so a host
+ * whose certificates bunch up at the near end is seen before one is read. The
+ * five that run out first are on it, each its issuer's mark and its days.
  */
 function CertificatesBlock({
   list,
@@ -350,167 +299,115 @@ function CertificatesBlock({
   const router = useRouter()
   const { can } = useAuth()
   const all = list ?? []
-  const wrong = all.filter((c) => standing(c) !== "fine").length
-  const severe = all.some((c) => standing(c) === "wrong")
-  const next = [...all].sort((a, b) => a.daysLeft - b.daysLeft)[0]
-  // Life left against the longest term on this host, floored at the ninety
-  // days certbot issues for, so a host whose certificates are all nearly due
-  // reads as a run of short bars rather than one full bar the rest are
-  // measured against.
-  const horizon = Math.max(...all.map((c) => c.daysLeft), RUNWAY_DAYS)
-  const soonest: BarListItem[] = [...all]
-    .sort((a, b) => a.daysLeft - b.daysLeft)
-    .slice(0, SHOWN)
-    .map((cert) => {
-      const state = standing(cert)
-      const product = certificateProduct(cert)
-      return {
-        key: cert.path,
-        label: cert.name,
-        mark: product ? <ProductGlyph id={product} /> : undefined,
-        mono: false,
-        // The figure column is a fixed width and does not truncate, so the
-        // reading is a word rather than the sentence the finding carries.
-        value: cert.error
+  const soonest = [...all].sort((a, b) => runwayDays(a) - runwayDays(b) || a.daysLeft - b.daysLeft)
+  const named = soonest.slice(0, SHOWN)
+  const wrong = all.filter((c) => standing(c) === "wrong").length
+  const due = all.filter((c) => standing(c) === "due").length
+  const next = soonest[0]
+
+  return (
+    <BarReading
+      title="Certificates"
+      label="Certificates"
+      ticks
+      figure={
+        loading || error ? undefined : all.length === 0 ? (
+          <span className="flex h-7 items-center">
+            <Button asChild size="xs" variant="outline">
+              <Link href="/proxy/certificates">
+                {certbot && can("system.admin") ? "Issue a certificate" : "Open Certificates"}
+                <ArrowRight />
+              </Link>
+            </Button>
+          </span>
+        ) : (
+          <span className="flex h-7 items-center gap-3">
+            {wrong > 0 ? (
+              <HeadFigure value={wrong} word="not valid" tone="danger" />
+            ) : due > 0 ? (
+              <HeadFigure value={due} word="due for renewal" tone="warning" />
+            ) : (
+              <HeadFigure
+                value={next.daysLeft}
+                word={next.daysLeft === 1 ? "day to next expiry" : "days to next expiry"}
+                tone="success"
+              />
+            )}
+            <HeadLink href="/proxy/certificates">All certificates</HeadLink>
+          </span>
+        )
+      }
+      message={
+        loading ? (
+          <TextShimmer>Reading the certificates…</TextShimmer>
+        ) : error ? (
+          <span className="inline-flex items-center gap-2">
+            <span title={errorMessage(error)}>{"Couldn't read the certificates."}</span>
+            <Button size="xs" variant="outline" onClick={onRetry}>
+              Try again
+            </Button>
+          </span>
+        ) : all.length === 0 ? (
+          certbot ? (
+            "Every site is on plain HTTP. Issue one from Let's Encrypt and certbot renews it before it runs out."
+          ) : (
+            "No certificates were found on this host. Install certbot to issue free ones, or bring your own."
+          )
+        ) : undefined
+      }
+      note={all.length > named.length && `${all.length - named.length} more`}
+      parts={named.map((cert) => {
+        const product = certificateProduct(cert)
+        const state = standing(cert)
+        // A word rather than the sentence a finding carries: the line's figure
+        // keeps to its one row.
+        const reading = cert.error
           ? "error"
           : cert.expired
             ? "expired"
             : cert.staging
               ? "test"
-              : `${cert.daysLeft}d`,
-        share: cert.daysLeft / horizon,
-        signal: state === "fine" ? 0 : 1,
-        tone: state === "wrong" ? "danger" : "warning",
-        // Contract with the Certificates page, which opens the certificate
-        // a ?cert= link names; the page itself is the destination either way.
-        title: `Show ${cert.name} in Certificates`,
-        onClick: () => router.push(`/proxy/certificates?cert=${encodeURIComponent(cert.path)}`),
-        // Where it came from, because certbot renews itself and an imported
-        // file does not — which is what the days left mean differently.
-        hint: cert.selfSigned
-          ? "self-signed"
-          : cert.source.startsWith("nginx:")
-            ? "site"
-            : cert.source,
-      }
-    })
-
-  return (
-    <Panel plain aria-label="Certificates">
-      <PanelHeader
-        title="Certificates"
-        actions={all.length > 0 && <HeadLink href="/proxy/certificates">All certificates</HeadLink>}
-      />
-      <PanelBody className="space-y-4 pt-4">
-        {loading ? (
-          <Bones />
-        ) : error ? (
-          <ErrorState error={error} onRetry={onRetry} className="mt-2" />
-        ) : all.length === 0 ? (
-          // Let's Encrypt as the issuer certbot asks, with the open lock the
-          // picture draws a plain-HTTP domain with in its corner: a shield with
-          // a tick in it said "all well" about having none.
-          <OverviewEmpty
-            mark={
-              <EmptyMark
-                product={certbot ? "lets-encrypt" : undefined}
-                fallback={LockOpen}
-                corner={certbot ? LockOpen : undefined}
-                tone="warning"
-              />
-            }
-            tone="warning"
-            title={certbot ? "No certificates yet" : "No certificates on this host"}
-            action={
-              <Button asChild size="sm" variant="outline">
-                <Link href="/proxy/certificates">
-                  {certbot && can("system.admin") ? "Issue a certificate" : "Open Certificates"}
-                  <ArrowRight />
-                </Link>
-              </Button>
-            }
-          >
-            {certbot
-              ? "Every site is on plain HTTP. Issue one from Let's Encrypt and certbot renews it before it runs out."
-              : "No certificates were found on this host. Install certbot to issue free ones, or bring your own on the Certificates page."}
-          </OverviewEmpty>
-        ) : (
-          <div className="animate-rise space-y-4">
-            {wrong > 0 ? (
-              <Headline
-                value={wrong}
-                unit={wrong === 1 ? "not valid" : "not valid"}
-                caption={`of ${plural(all.length, "certificate")}`}
-                tone={severe ? "danger" : "warning"}
-              />
-            ) : (
-              next && (
-                <Headline
-                  value={next.daysLeft}
-                  unit={next.daysLeft === 1 ? "day to the next expiry" : "days to the next expiry"}
-                  caption={`${next.name} · all ${plural(all.length, "certificate")} valid`}
-                  tone="success"
-                />
-              )
-            )}
-            <Runway certificates={all} />
-            <BarList items={soonest} />
-          </div>
-        )}
-      </PanelBody>
-    </Panel>
-  )
-}
-
-/**
- * The days left as positions on a line from now to ninety days out. Dots
- * that would sit on one another step down a row, so a cluster reads as a
- * cluster rather than as one dot.
- */
-function Runway({ certificates }: { certificates: Certificate[] }) {
-  const placed: { cert: Certificate; at: number; row: number }[] = []
-  for (const cert of [...certificates].sort((a, b) => a.daysLeft - b.daysLeft)) {
-    const days = cert.error || cert.expired || cert.staging ? 0 : cert.daysLeft
-    const at = Math.min(Math.max(days, 0), RUNWAY_DAYS) / RUNWAY_DAYS
-    let row = 0
-    while (placed.some((p) => p.row === row && Math.abs(p.at - at) < 0.035)) row += 1
-    placed.push({ cert, at, row: Math.min(row, 2) })
-  }
-  const rows = Math.max(...placed.map((p) => p.row), 0) + 1
-  return (
-    <div
-      role="img"
-      aria-label={`Days left on each certificate: ${certificates.map((c) => `${c.name} ${c.expired ? "expired" : `${c.daysLeft} days`}`).join(", ")}`}
-      className="pt-1"
-    >
-      <div className="relative" style={{ height: `${rows * 10 + 8}px` }}>
-        <span aria-hidden className="absolute inset-x-0 bottom-0 h-1 rounded-full bg-meter-track">
-          {/* The stretch certbot renews inside, in the colour a certificate
-              there is drawn in. */}
-          <span
-            className="absolute inset-y-0 left-0 rounded-l-full bg-plot-warning"
-            style={{ width: `${(30 / RUNWAY_DAYS) * 100}%` }}
-          />
-        </span>
-        {placed.map(({ cert, at, row }) => (
-          <span
-            key={cert.path}
-            title={`${cert.name} · ${cert.expired ? "expired" : `${cert.daysLeft} days left`}`}
-            className={cn(
-              "absolute size-2 -translate-x-1/2 rounded-full ring-2 ring-background",
-              DOT[standing(cert)],
-            )}
-            style={{ left: `${Math.min(Math.max(at * 100, 1), 99)}%`, bottom: `${8 + row * 10}px` }}
-          />
-        ))}
-      </div>
-      <div className="numeric mt-1 flex justify-between text-micro text-muted-foreground">
-        <span>now</span>
-        <span>30d</span>
-        <span>60d</span>
-        <span>90d</span>
-      </div>
-    </div>
+              : `${cert.daysLeft}d`
+        return {
+          key: cert.path,
+          value: 1,
+          at: runwayDays(cert) / RUNWAY_DAYS,
+          color: STANDING_COLOR[state],
+          mark: product ? (
+            <ProductGlyph id={product} />
+          ) : (
+            <LockClosed aria-hidden className="size-3.5 text-muted-foreground" />
+          ),
+          name: cert.name,
+          // Where it came from, because certbot renews itself and an imported
+          // file does not — which is what the days left mean differently.
+          detail: cert.selfSigned
+            ? "self-signed"
+            : cert.source.startsWith("nginx:")
+              ? "site"
+              : cert.source,
+          figure: (
+            <span
+              className={cn(
+                state === "wrong" && "text-destructive",
+                state === "due" && "text-warning",
+              )}
+            >
+              {reading}
+            </span>
+          ),
+          label: `${cert.name} ${reading}`,
+          title: `${cert.name} · ${cert.error ?? (cert.expired ? "expired" : `${cert.daysLeft} days left`)}`,
+          // Contract with the Certificates page, which opens the certificate
+          // a ?cert= link names; the page itself is the destination either way.
+          press: {
+            label: `Show ${cert.name} in Certificates`,
+            opens: true,
+            onPress: () => router.push(`/proxy/certificates?cert=${encodeURIComponent(cert.path)}`),
+          },
+        }
+      })}
+    />
   )
 }
 
@@ -519,7 +416,8 @@ function Runway({ certificates }: { certificates: Certificate[] }) {
  * answers in every site's access record, by site, and — where nginx is on
  * the host — its error log, grouped by what went wrong. It read nginx's
  * error log alone, which on a host where the Docker Caddy ingress answers
- * said "no errors" about requests nginx never saw.
+ * said "no errors" about requests nginx never saw. A group's advice is on the
+ * error log's page, which each of its parts opens.
  */
 function ErrorsBlock({
   report,
@@ -527,6 +425,7 @@ function ErrorsBlock({
   nginx,
   sites,
   trafficError,
+  appOf,
   labelOf,
 }: {
   report?: ErrorReport
@@ -534,161 +433,150 @@ function ErrorsBlock({
   nginx: boolean
   sites?: SiteTrafficReading[]
   trafficError?: Error
+  appOf: (site: string) => { product?: string; projectId?: number } | undefined
   labelOf: (site: string) => string
 }) {
   const router = useRouter()
-  const { can } = useAuth()
   const read = (sites ?? []).filter((s) => s.status === "available")
   const failing = read
     .map((s) => ({ reading: s, failed: Math.round(s.errorRate * s.requests) }))
     .filter((s) => s.failed > 0)
     .sort((a, b) => b.failed - a.failed)
   const failed = failing.reduce((sum, s) => sum + s.failed, 0)
-  const errorGroups = report?.groups.filter(isActionableProxyError) ?? []
-  const logged = errorGroups.reduce((sum, g) => sum + g.count, 0)
   const waiting = (!sites && !trafficError) || (nginx && !report && !error)
   // A 5xx is counted from an access log. With none read anywhere the count
   // is unknown, not zero: the block said "0 server errors this hour" and
   // "Nothing failed" about a host whose requests it could not see.
   const counted = !trafficError && read.length > 0
   const errorLog = nginx && !error && report && !report.note
+  // Only groups worth acting on are drawn: a log whose every line was a notice
+  // has nothing to say beyond the block's all-clear.
+  const groups = errorLog ? report.groups.filter(isActionableProxyError) : []
+  const logged = groups.reduce((sum, g) => sum + g.count, 0)
   const quiet = failed === 0 && logged === 0
-  const mayConfigure = can("system.admin")
 
-  const errorLogLine =
+  // What stopped the error log being read, said after whatever else is said.
+  const logTrouble =
     nginx &&
     (error ? (
-      <p className="text-hint text-muted-foreground" title={errorMessage(error)}>
-        {"Couldn't read nginx's error log."}
-      </p>
-    ) : report?.note ? (
-      <p className="text-hint text-muted-foreground">{report.note}</p>
+      <span title={errorMessage(error)}>{"Couldn't read nginx's error log."}</span>
     ) : (
-      // Only groups worth acting on are drawn: a log whose every line was
-      // a notice drew an empty finding list, whose own "No problems found"
-      // stood under the block's all-clear and said it a second time.
-      errorGroups.length > 0 && (
-        <FindingList
-          findings={errorGroups.slice(0, 4).map((group) => errorFinding(group, { mayConfigure }))}
-        />
-      )
+      report?.note
     ))
+  const unread = trafficError
+    ? "Couldn't read the sites' access logs, so their server errors (5xx) are unknown."
+    : "Server errors (5xx) are not counted: no site writes an access log."
+
+  const message = waiting ? (
+    <TextShimmer>{"Reading this hour's errors…"}</TextShimmer>
+  ) : !counted && !errorLog ? (
+    <>
+      {trafficError
+        ? "Couldn't read the sites' access logs, so this hour's server errors are unknown."
+        : "Server errors are counted from access logs, and no site here writes one the dashboard reads."}
+      {logTrouble && <> {logTrouble}</>}
+    </>
+  ) : quiet ? (
+    counted ? (
+      <>
+        Nothing failed in the last hour: no 5xx answers from {plural(read.length, "site")}
+        {errorLog ? ", and nginx's error log is quiet." : "."}
+        {logTrouble && <> {logTrouble}</>}
+      </>
+    ) : (
+      // Without an access log the 5xx count is unknown, so this vouches only
+      // for what it read: the error log.
+      <>nginx logged no errors this hour. {unread}</>
+    )
+  ) : undefined
+
+  const figure =
+    message !== undefined ? undefined : counted ? (
+      <HeadFigure
+        value={failed.toLocaleString()}
+        word={failed === 1 ? "server error this hour" : "server errors this hour"}
+        tone={failed > 0 ? "danger" : undefined}
+      />
+    ) : (
+      <HeadFigure
+        value={logged.toLocaleString()}
+        word={logged === 1 ? "nginx error-log line this hour" : "nginx error-log lines this hour"}
+        tone="danger"
+      />
+    )
+
+  const siteParts: ReadingPart[] = failing.slice(0, SHOWN).map(({ reading, failed }) => {
+    const label = labelOf(reading.site)
+    return {
+      key: `site:${reading.site}`,
+      value: failed,
+      color: "var(--destructive)",
+      mark: <SiteGlyph app={appOf(reading.site)} />,
+      name: label,
+      detail: share(reading.errorRate),
+      figure: <span className="text-destructive">{failed.toLocaleString()}</span>,
+      label: `${label} ${failed.toLocaleString()} server errors`,
+      title: `${failed.toLocaleString()} of ${reading.requests.toLocaleString()} requests answered with a 5xx`,
+      press: {
+        label: `Open ${label}'s requests`,
+        opens: true,
+        onPress: () => router.push(readingHref(reading)),
+      },
+    }
+  })
+  const groupParts: ReadingPart[] = groups.slice(0, SHOWN_GROUPS).map((group) => {
+    const name = group.title || group.pattern
+    return {
+      key: `log:${group.level}:${group.pattern}:${group.upstream ?? ""}`,
+      value: group.count,
+      color: group.level === "warn" ? "var(--warning)" : "var(--destructive)",
+      mark: <ProductGlyph id="nginx" />,
+      name,
+      detail: `last ${relativeTime(group.last)}${group.upstream ? ` · ${group.upstream}` : ""}`,
+      figure: group.count.toLocaleString(),
+      label: `${name} ${group.count.toLocaleString()} in nginx's error log`,
+      title: group.advice,
+      press: {
+        label: `Open ${name} in the error log`,
+        opens: true,
+        onPress: () => router.push("/proxy/traffic?view=errors"),
+      },
+    }
+  })
 
   return (
-    <Panel plain aria-label="Recent errors">
-      <PanelHeader
-        title="Recent errors"
-        actions={nginx && <HeadLink href="/proxy/traffic?view=errors">Error log</HeadLink>}
-      />
-      <PanelBody className="space-y-4 pt-4">
-        {waiting ? (
-          <Bones />
-        ) : !counted && !errorLog ? (
-          <>
-            <OverviewEmpty
-              mark={<EmptyMark product={nginx ? "nginx" : "caddy"} corner={FileText} />}
-              title="Nothing to read errors from"
-            >
-              {trafficError
-                ? "Couldn't read the sites' access logs, so this hour's server errors are unknown."
-                : "Server errors are counted from access logs, and no site here writes one the dashboard reads."}
-            </OverviewEmpty>
-            {errorLogLine}
-          </>
-        ) : quiet ? (
-          // An hour with nothing failed is good news, said as a card of the
-          // empties' own shape beside them, rather than a grey 0 over a line
-          // saying the same thing.
-          <>
-            <OverviewEmpty
-              mark={
-                <EmptyMark
-                  product={nginx ? "nginx" : "caddy"}
-                  corner={CheckCircle}
-                  tone="success"
-                />
-              }
-              tone="success"
-              // Without an access log the 5xx count is unknown, so the card
-              // vouches only for what it read: the error log.
-              title={
-                counted ? "Nothing failed in the last hour" : "nginx logged no errors this hour"
-              }
-            >
-              {counted
-                ? `No 5xx answers from ${plural(read.length, "site")}${errorLog ? ", and nginx's error log is quiet" : ""}.`
-                : trafficError
-                  ? "Couldn't read the sites' access logs, so their server errors (5xx) are unknown."
-                  : "Server errors (5xx) are not counted: no site writes an access log."}
-            </OverviewEmpty>
-            {errorLogLine}
-          </>
+    <BarReading
+      title="Recent errors"
+      label="Recent errors"
+      list={failing.length > 0 ? "Sites answering 5xx" : "What nginx logged"}
+      className="lg:col-span-2 xl:col-span-1"
+      fixed
+      figure={
+        nginx ? (
+          <HeadLink href="/proxy/traffic?view=errors">{figure ?? "Error log"}</HeadLink>
         ) : (
-          <div className="animate-rise space-y-4">
-            {counted ? (
-              <Headline
-                value={failed.toLocaleString()}
-                unit={failed === 1 ? "server error this hour" : "server errors this hour"}
-                tone={failed > 0 ? "danger" : undefined}
-                caption={
-                  errorLog
-                    ? `${logged.toLocaleString()} nginx error-log ${logged === 1 ? "line" : "lines"}`
-                    : failed > 0
-                      ? `across ${plural(failing.length, "site")}`
-                      : undefined
-                }
-              />
-            ) : (
-              <Headline
-                value={logged.toLocaleString()}
-                unit={
-                  logged === 1
-                    ? "nginx error-log line this hour"
-                    : "nginx error-log lines this hour"
-                }
-                tone={logged > 0 ? "danger" : undefined}
-                caption={
-                  trafficError
-                    ? "Couldn't read the sites' access logs"
-                    : "Server errors (5xx) are not counted: no site writes an access log"
-                }
-              />
-            )}
-            {/* Without a 5xx count the headline is the error log's own zero,
-                and "nginx logged nothing this hour" under it said it twice. */}
-            {failing.length > 0 && (
-              <ul aria-label="Sites answering 5xx" className="-mx-2">
-                {failing.slice(0, SHOWN).map(({ reading, failed }) => {
-                  const label = labelOf(reading.site)
-                  return (
-                    <li key={reading.site}>
-                      <button
-                        type="button"
-                        title={`Open ${label}'s requests`}
-                        onClick={() => router.push(readingHref(reading))}
-                        className="flex h-9 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body focus-ring-inset transition-colors hover:bg-row-hover"
-                      >
-                        <span
-                          aria-hidden
-                          className="size-1.5 shrink-0 rounded-full bg-destructive"
-                        />
-                        <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
-                        <span className="numeric shrink-0 text-hint text-muted-foreground">
-                          {share(reading.errorRate)}
-                        </span>
-                        <span className="numeric w-12 shrink-0 text-right font-medium text-destructive">
-                          {failed.toLocaleString()}
-                        </span>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-            {errorLogLine}
-          </div>
-        )}
-      </PanelBody>
-    </Panel>
+          figure
+        )
+      }
+      message={message}
+      note={
+        message === undefined &&
+        (failing.length > SHOWN || logTrouble || !counted) && (
+          <span
+            className="truncate"
+            title={!counted ? unread : error ? errorMessage(error) : report?.note}
+          >
+            {[
+              failing.length > SHOWN && plural(failing.length - SHOWN, "more site"),
+              !counted && (trafficError ? "5xx unknown" : "5xx not counted"),
+              logTrouble && "error log not read",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        )
+      }
+      parts={message === undefined ? [...siteParts, ...groupParts] : []}
+    />
   )
 }

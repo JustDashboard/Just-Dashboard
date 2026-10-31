@@ -652,6 +652,27 @@ test("a kernel thread and a zombie are not offered signals they cannot take", as
   await expect(page).toHaveURL(/pid=1\b/)
 })
 
+// The first read lands after the band is drawn: its blocks keep their height
+// and the table under them stays where it was.
+test("the workloads hold their place while the first read is out", async ({ page }) => {
+  await mockHost(page)
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/processes/inventory*", async (route) => {
+    await held
+    await route.fallback()
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/processes")
+  const band = page.locator("[data-slot='workloads']")
+  await expect(band.getByText("Reading the workloads…").first()).toBeVisible()
+  const before = await band.boundingBox()
+  release()
+  await expect(band.getByRole("button", { name: "Only api's processes" }).first()).toBeVisible()
+  const after = await band.boundingBox()
+  expect(after?.height).toBe(before?.height)
+})
+
 // The band answers who; a press narrows the table to that workload, and the
 // chip it leaves in the toolbar is how it is let go.
 test("a workload narrows the table to its processes", async ({ page }) => {
@@ -822,7 +843,8 @@ test("PM2 says whether it survives a reboot and offers the housekeeping verbs", 
   await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
   const band = page.locator("[data-slot='pm2-band']")
   await expect(band.getByRole("button", { name: "Only api" })).toHaveCount(2)
-  await expect(band.getByRole("button", { name: "Only api" }).first()).toContainText("×2")
+  await band.getByRole("button", { name: "Only api" }).first().hover()
+  await expect(band.locator("[data-slot=reading-line]").first()).toContainText("×2")
   const states = page.locator("[aria-label='State']")
   await expect(states.getByRole("button", { name: /Online/ })).toContainText("2")
   await expect(states.getByRole("button", { name: /Errored/ })).toContainText("1")

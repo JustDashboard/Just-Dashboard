@@ -53,6 +53,8 @@ export type ReadingPart = {
   /** Its name and figure as plain words, for the bar's accessible name. */
   label: string
   title?: string
+  /** Its mark is itself a control, so the cell around it takes no focus of its own. */
+  markIsControl?: boolean
   /** A control of its own, drawn on the line while it is the part on it. */
   control?: React.ReactNode
   /** What a press does, as a filter: `pressed` stays on the line and lit. */
@@ -94,6 +96,7 @@ export function BarReading({
   free,
   format,
   hue,
+  palette,
   fixed,
   ticks,
   trail,
@@ -122,6 +125,8 @@ export function BarReading({
   format?: (value: number) => string
   /** The hue a part without its own is shaded from, by its place. */
   hue?: string
+  /** Hues a part without its own takes by its place, for parts that are not one measurement. */
+  palette?: readonly string[]
   /** The parts come in an order of their own, kept: standings, kinds, newest first. */
   fixed?: boolean
   /** The bar is an axis, each part a tick at its `at`. */
@@ -146,7 +151,9 @@ export function BarReading({
   const given = new Map(parts.map((part) => [part.key, part]))
   const drawn = settled.map((key, place) => {
     const part = given.get(key)!
-    return { ...part, color: part.color ?? shade(hue ?? "var(--muted-foreground)", place) }
+    const color =
+      palette?.[place % palette.length] ?? shade(hue ?? "var(--muted-foreground)", place)
+    return { ...part, color: part.color ?? color }
   })
 
   const [trails, setTrails] = useState<{ signature: string; values: Map<string, number[]> }>(
@@ -365,7 +372,7 @@ export function BarReading({
                 data-slot="reading-strip"
                 className="-mx-1 flex min-w-0 shrink-0 items-center gap-0.5"
               >
-                {drawn.map((part) => {
+                {drawn.slice(0, MARKS).map((part) => {
                   const isActive = active?.key === part.key && hovered !== REST && hovered !== FREE
                   const face = (
                     <>
@@ -398,7 +405,11 @@ export function BarReading({
                       {part.press ? (
                         <button
                           type="button"
-                          aria-pressed={part.press.opens ? undefined : Boolean(part.press.pressed)}
+                          aria-pressed={
+                            part.press.opens && part.press.pressed === undefined
+                              ? undefined
+                              : Boolean(part.press.pressed)
+                          }
                           aria-label={part.press.label}
                           title={part.title}
                           onClick={() => {
@@ -423,7 +434,17 @@ export function BarReading({
                           {face}
                         </Link>
                       ) : (
-                        <span title={part.title} className={cell} {...reach}>
+                        // Nothing to press, but a keyboard and a thumb can still
+                        // bring it onto the line.
+                        <span
+                          title={part.title}
+                          tabIndex={part.markIsControl ? undefined : 0}
+                          aria-label={part.markIsControl ? undefined : part.label}
+                          role={part.markIsControl ? undefined : "note"}
+                          onClick={() => previewed(part.key)}
+                          className={cell}
+                          {...reach}
+                        >
                           {face}
                         </span>
                       )}
@@ -443,6 +464,9 @@ export function BarReading({
     </Panel>
   )
 }
+
+/** Past these a part keeps its span, read under the pointer, but draws no mark. */
+const MARKS = 6
 
 /** The bar's muted span and its empty track, which have no part of their own to carry a key. */
 const REST = "\0rest"
@@ -513,10 +537,7 @@ function Line({
               )}
             />
           ) : (
-            <ArrowRight
-              aria-hidden
-              className={cn("size-3.5 text-muted-foreground", rowReveal())}
-            />
+            <ArrowRight aria-hidden className={cn("size-3.5 text-muted-foreground", rowReveal())} />
           ))}
         {figure !== undefined && (
           <span className="numeric font-medium">

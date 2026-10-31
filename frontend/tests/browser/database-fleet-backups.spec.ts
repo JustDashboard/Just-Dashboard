@@ -68,22 +68,16 @@ test.describe("the last backup the control center reads", () => {
     await expect(backups(page)).toContainText(/4\s*of 5 in the last day/)
     await expect(
       backups(page).getByRole("img", {
-        name: /^Databases by their newest backup: 4 today, 1 never$/,
+        name: /^Backups: 1 never, 4 today$/,
       }),
     ).toBeVisible()
-    // Never backed up first, then the oldest.
+    // Never backed up first; each standing opens the oldest in it.
     expect(
       await backups(page)
         .getByRole("list", { name: "Databases by last backup" })
         .getByRole("link")
         .evaluateAll((links) => links.map((link) => link.getAttribute("aria-label"))),
-    ).toEqual([
-      "Backups of app",
-      "Backups of shop",
-      "Backups of notes",
-      "Backups of cache",
-      "Backups of blog",
-    ])
+    ).toEqual(["Backups of app", "Backups of shop"])
 
     await page.getByRole("radio", { name: "Table" }).click()
     await expect(tableRow(page, "shop")).toContainText(/5h(?: \d+[ms])? ago/)
@@ -100,9 +94,7 @@ test.describe("the last backup the control center reads", () => {
     for (const name of ["shop", "blog", "cache", "app", "notes"]) {
       await expect(card(page, name).getByText("never backed up")).toBeVisible()
     }
-    await expect(
-      backups(page).getByRole("img", { name: /^Databases by their newest backup: 5 never$/ }),
-    ).toBeVisible()
+    await expect(backups(page).getByRole("img", { name: /^Backups: 5 never$/ })).toBeVisible()
   })
 
   test("when the dump directories cannot be read, the fleet still says when each was backed up", async ({

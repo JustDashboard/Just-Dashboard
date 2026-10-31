@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page, type Route } from "@playwright/test"
 import { IMAGES, UPDATES, mockImages } from "./docker-images-fixture"
 
 /**
@@ -10,6 +10,17 @@ import { IMAGES, UPDATES, mockImages } from "./docker-images-fixture"
 
 const body = (page: Page) => page.locator("[data-slot=table-body] tr")
 const row = (page: Page, name: RegExp) => page.getByRole("row", { name })
+
+/** Where the page rests: `boundingBox` during its four-pixel rise reads a place it is leaving. */
+const risen = (page: Page) =>
+  page.evaluate(() =>
+    Promise.allSettled(
+      document
+        .getAnimations()
+        .filter((a) => (a as CSSAnimation).animationName === "jd-rise")
+        .map((a) => a.finished),
+    ),
+  )
 
 test("the page opens on the engine, what it holds and what the registries say", async ({
   page,
@@ -25,10 +36,16 @@ test("the page opens on the engine, what it holds and what the registries say", 
 
   const disk = page.getByRole("region", { name: "Docker on disk" })
   await expect(disk.getByRole("img", { name: /^On disk: Images/ })).toBeVisible()
-  await expect(disk.getByText("48 entries · 0 in use")).toBeVisible()
+  await disk.getByRole("button", { name: "Empty the build cache" }).hover()
+  await expect(disk.locator("[data-slot=reading-line]")).toContainText("48 entries · 0 in use")
   const registry = page.getByRole("region", { name: "What the registries say" })
-  await expect(registry.getByRole("button", { name: /update available/ })).toContainText("2")
-  await expect(registry.getByRole("button", { name: /pinned by digest/ })).toContainText("1")
+  const answer = registry.locator("[data-slot=reading-line]")
+  await registry.getByRole("button", { name: /update available/ }).hover()
+  await expect(answer).toContainText("Update available")
+  await expect(answer).toContainText("2")
+  await registry.getByRole("button", { name: /pinned by digest/ }).hover()
+  await expect(answer).toContainText("Pinned by digest")
+  await expect(answer).toContainText("1")
 
   for (const name of ["Image", "Containers", "Registry", "Created", "Size"]) {
     await expect(page.getByRole("columnheader", { name, exact: true })).toBeVisible()
@@ -131,14 +148,16 @@ test("each disk line reclaims only its own kind", async ({ page }) => {
   await page.goto("/docker/images")
   const disk = page.getByRole("region", { name: "Docker on disk" })
 
-  await disk.getByRole("button", { name: "Reclaim", exact: true }).first().click()
+  // Images lead the line at rest, and its Reclaim is the only one drawn.
+  await disk.getByRole("button", { name: "Reclaim", exact: true }).click()
   await page
     .getByRole("dialog", { name: "Remove unused images" })
     .getByRole("button", { name: "Remove" })
     .click()
   await expect.poll(() => mocks.calls).toContain("POST /docker/images/prune?all=true")
 
-  await disk.getByRole("button", { name: "Reclaim", exact: true }).nth(1).click()
+  await disk.getByRole("button", { name: "Empty the build cache" }).hover()
+  await disk.getByRole("button", { name: "Reclaim", exact: true }).click()
   await page
     .getByRole("dialog", { name: "Empty the build cache" })
     .getByRole("button", { name: "Empty it" })
@@ -147,6 +166,57 @@ test("each disk line reclaims only its own kind", async ({ page }) => {
 
   // Neither line ran the sweep, which also removes stopped containers.
   expect(mocks.calls.some((c) => c.startsWith("POST /docker/prune"))).toBe(false)
+})
+
+test("a kind's mark reaches its reclaim from the keyboard", async ({ page }) => {
+  await mockImages(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/docker/images")
+  const disk = page.getByRole("region", { name: "Docker on disk" })
+
+  const mark = disk.getByRole("button", { name: "Empty the build cache" })
+  await mark.focus()
+  await expect(disk.locator("[data-slot=reading-line]")).toContainText("Build cache")
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("dialog", { name: "Empty the build cache" })).toBeVisible()
+})
+
+test("the band is there before the images land, and does not move when they do", async ({
+  page,
+}) => {
+  await mockImages(page)
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  const hold = async (route: Route) => {
+    await held
+    return route.fallback()
+  }
+  await page.route("**/api/v1/docker/images/", hold)
+  await page.route("**/api/v1/docker/disk-usage", hold)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/docker/images")
+
+  const band = page.locator("[data-slot=image-band]")
+  const blocks = band.locator("[data-slot=bar-reading]")
+  await expect(blocks).toHaveCount(2)
+  await expect(band.getByRole("region", { name: "Docker on disk" })).toContainText(
+    "Reading what Docker holds…",
+  )
+  await expect(band.getByRole("region", { name: "What the registries say" })).toContainText(
+    "Reading the images…",
+  )
+  const heights = await blocks.evaluateAll((all) =>
+    all.map((block) => block.getBoundingClientRect().height),
+  )
+  expect(new Set(heights).size).toBe(1)
+  await risen(page)
+  const before = await band.boundingBox()
+
+  release()
+  await expect(body(page)).toHaveCount(IMAGES.length)
+  await expect(band.getByRole("img", { name: /^On disk: Images/ })).toBeVisible()
+  await risen(page)
+  expect(await band.boundingBox()).toEqual(before)
 })
 
 test("an image nobody runs can be removed, and any image can be tagged", async ({ page }) => {
