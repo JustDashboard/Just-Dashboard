@@ -1,5 +1,7 @@
 "use client"
 
+import { createContext, useContext } from "react"
+import { commitLogin } from "@/lib/commit-faces"
 import { plural, relativeTime } from "@/lib/format"
 import { workingTreeCounts, workingTreeSquares, type WorkingTreePart } from "@/lib/git-status"
 import type { GitRepo } from "@/lib/types"
@@ -153,23 +155,38 @@ export function ShortSha({ sha, className }: { sha?: string; className?: string 
   )
 }
 
+/** Which GitHub account each commit email in this checkout belongs to, as GitHub reads them. */
+export const CommitAuthors = createContext<Record<string, string> | undefined>(undefined)
+
 /**
  * Who made a commit, as the person they are everywhere else in the product.
  *
- * There is no avatar to fetch — these are checkouts on a host, not rows from
- * an API — so it is the account face without a picture (`InitialsMark`): the
- * initial on the tinted wash of the hue the name is given in the rail, a run's
- * actor and a variable's author. It was a solid square on a palette of its
- * own, which drew "mira" in one colour as the author of a commit and another
- * as the person who deployed it, in the same row (§14). It still earns its
- * pixels the way the language mark does in the deploy chooser: a column of
- * commits where mine and the bot's are two colours is scanned, and one where
- * they are the same grey is read.
+ * Their GitHub face when the email says who they are: GitHub's own matching
+ * where the workspace has asked for it (`CommitAuthors`), or a private address
+ * that carries the login. Otherwise the account face without a picture
+ * (`InitialsMark`): the initial on the tinted wash of the hue the name is given
+ * in the rail, a run's actor and a variable's author. It still earns its pixels
+ * the way the language mark does in the deploy chooser: a column of commits
+ * where mine and the bot's are two colours is scanned, and one where they are
+ * the same grey is read.
  */
-export function AuthorMark({ name, className }: { name?: string; className?: string }) {
+export function AuthorMark({
+  name,
+  email,
+  size = "xs",
+  className,
+}: {
+  name?: string
+  email?: string
+  size?: "xs" | "md"
+  className?: string
+}) {
+  const authors = useContext(CommitAuthors)
+  const login = commitLogin(authors, email)
+  if (login) return <ForgeFace login={login} provider="github" size={size} className={className} />
   const who = (name ?? "").trim()
   if (!who) return null
-  return <InitialsMark name={who} size="xs" className={className} />
+  return <InitialsMark name={who} size="xs" className={cn(FACE_BOX[size], className)} />
 }
 
 /**

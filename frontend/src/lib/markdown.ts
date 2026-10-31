@@ -6,16 +6,18 @@
  * paragraph: the reader parsed the syntax by eye before reading the words.
  * This reads the subset people actually write in a review — headings, lists
  * and task lists, fenced code, quotes, tables, rules, emphasis, inline code,
- * links, `#123` references and `@mentions` — into plain data, and
+ * links, images, `#123` references and `@mentions` — into plain data, and
  * `components/git/markdown.tsx` draws it as React elements.
  *
  * **Nothing here is HTML.** The tree is drawn with elements and text nodes,
  * never `innerHTML`, so a comment cannot carry markup or script into the
- * page. Raw HTML in the source is dropped where it is layout (`<br>`,
- * `<details>`, an HTML comment a template left behind) and shown as the text
- * it is otherwise. Images become links to themselves: the page's `img-src`
- * is its own origin, and a comment should not be able to make the browser
- * fetch from anywhere it likes.
+ * page. The HTML people really write in a description is read into what it
+ * means (`<details>`, `<img>`, `<video>`, `<code>`, `<b>`, `<a>`), layout is
+ * dropped (`<br>` aside, an HTML comment a template left behind), and the rest
+ * is shown as the text it is. An image is data too: the page's `img-src` is its
+ * own origin, so GitHub's media is drawn through this server (`forgeMediaUrl`)
+ * and anything else stays a link, because a comment should not be able to make
+ * the browser fetch from anywhere it likes.
  */
 
 export type Inline =
@@ -27,6 +29,7 @@ export type Inline =
   | { t: "link"; href: string; c: Inline[] }
   | { t: "ref"; n: number }
   | { t: "mention"; v: string }
+  | { t: "image"; src: string; alt: string }
   | { t: "br" }
 
 export type Block =
@@ -42,6 +45,7 @@ export type Block =
       rows: Inline[][][]
     }
   | { t: "rule" }
+  | { t: "details"; open: boolean; summary: Inline[]; c: Block[] }
 
 export type ListItem = { task?: boolean; done?: boolean; c: Block[] }
 
@@ -52,14 +56,69 @@ const QUOTE = /^ {0,3}> ?/
 const BULLET = /^( {0,3})([-*+])\s+(.*)$/
 const ORDERED = /^( {0,3})(\d{1,9})[.)]\s+(.*)$/
 const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
+const DETAILS = /^\s*<\/?details(?: open)?>\s*$/
+const SUMMARY = /^\s*<summary>(.*?)(?:<\/summary>)?\s*$/
 
-/** HTML a template leaves behind, dropped before anything is read. */
-function stripHtml(source: string): string {
-  return source
-    .replace(/<!--[\s\S]*?-->/g, "")
+const attribute = (tag: string, name: string) =>
+  new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i").exec(tag)?.slice(1).find(Boolean)
+
+/** The HTML people write in a description, as the Markdown it means, or gone if it is layout. */
+function readHtml(text: string): string {
+  return text
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/?(details|summary|p|div|sub|sup|kbd|picture|source|center)\b[^>]*>/gi, "")
-    .replace(/<img\b[^>]*>/gi, "")
+    .replace(/<(img|video)\b[^>]*>(?:\s*<\/video>)?/gi, (tag) => {
+      const src = attribute(tag, "src")
+      return src ? `![${(attribute(tag, "alt") ?? "").replace(/[[\]]/g, "")}](${src})` : ""
+    })
+    .replace(/<code>([^<\n]*)<\/code>/gi, "`$1`")
+    .replace(/<(b|strong)>([^<\n]*)<\/\1>/gi, "**$2**")
+    .replace(/<(i|em)>([^<\n]*)<\/\1>/gi, "*$2*")
+    .replace(/<a\b[^>]*>([^<\n]*)<\/a>/gi, (tag, label: string) => {
+      const href = attribute(tag, "href")
+      return href ? `[${label}](${href})` : label
+    })
+    .replace(/<\/?(p|div|sub|sup|kbd|picture|source|center)\b[^>]*>/gi, "")
+    .replace(/<details\b([^>]*)>/gi, (_, attrs: string) =>
+      /\bopen\b/i.test(attrs) ? "\n<details open>\n" : "\n<details>\n",
+    )
+    .replace(/<\/details\s*>/gi, "\n</details>\n")
+    .replace(/<summary\b[^>]*>\s*/gi, "\n<summary>")
+    .replace(/\s*<\/summary\s*>/gi, "</summary>\n")
+}
+
+/**
+ * Everything but code: a fence or a backticked span is what the author typed,
+ * and `<img>` inside one is the words, not a picture.
+ */
+function stripHtml(source: string): string {
+  const out: string[] = []
+  let prose: string[] = []
+  let fence = ""
+  const flush = () => {
+    const text = prose.join("\n").replace(/<!--[\s\S]*?-->/g, "")
+    out.push(
+      text
+        .split(/(`[^`\n]*`)/)
+        .map((part, index) => (index % 2 ? part : readHtml(part)))
+        .join(""),
+    )
+    prose = []
+  }
+  for (const line of source.split("\n")) {
+    const marker = FENCE.exec(line)?.[1]
+    if (fence) {
+      out.push(line)
+      if (line.trimStart().startsWith(fence)) fence = ""
+    } else if (marker) {
+      flush()
+      out.push(line)
+      fence = marker
+    } else {
+      prose.push(line)
+    }
+  }
+  flush()
+  return out.join("\n")
 }
 
 export function parseMarkdown(source: string): Block[] {
@@ -73,6 +132,18 @@ function parseBlocks(lines: string[]): Block[] {
   while (i < lines.length) {
     const line = lines[i]
     if (!line.trim()) {
+      i++
+      continue
+    }
+
+    if (/^<details(?: open)?>$/.test(line.trim())) {
+      const [details, next] = parseDetails(lines, i)
+      blocks.push(details)
+      i = next
+      continue
+    }
+    // A closing tag with no opening one, which a truncated description leaves.
+    if (DETAILS.test(line) || SUMMARY.test(line)) {
       i++
       continue
     }
@@ -139,8 +210,35 @@ function startsBlock(line: string): boolean {
     RULE.test(line) ||
     QUOTE.test(line) ||
     BULLET.test(line) ||
-    ORDERED.test(line)
+    ORDERED.test(line) ||
+    DETAILS.test(line) ||
+    SUMMARY.test(line)
   )
+}
+
+/** A fold: its summary, then every line down to the tag that closes it, read again as blocks. */
+function parseDetails(lines: string[], start: number): [Block, number] {
+  const body: string[] = []
+  let summary = ""
+  let depth = 1
+  let i = start + 1
+  for (; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (line === "<details>" || line === "<details open>") depth++
+    if (line === "</details>" && --depth === 0) break
+    const heading = depth === 1 && !summary ? SUMMARY.exec(lines[i]) : null
+    if (heading) summary = heading[1]
+    else body.push(lines[i])
+  }
+  return [
+    {
+      t: "details",
+      open: lines[start].includes("open"),
+      summary: parseInline(summary || "Details"),
+      c: parseBlocks(body),
+    },
+    i + 1,
+  ]
 }
 
 const indentOf = (line: string) => line.length - line.trimStart().length
@@ -238,6 +336,27 @@ export function safeHref(href: string): string | undefined {
   return /^(https?:\/\/|mailto:)/i.test(value) ? value : undefined
 }
 
+/**
+ * Whether the server will read this address for the page. The same rule as
+ * `isForgeMedia` on the server, which is the one that decides: this only keeps
+ * a request from being made to be refused.
+ */
+export function isForgeMedia(src: string): boolean {
+  try {
+    const url = new URL(src)
+    if (url.protocol !== "https:" || url.username || url.password || url.port) return false
+    if (url.hostname === "github.com") {
+      return /^\/(user-attachments\/assets\/|[^/]+\/[^/]+\/(assets|raw|blob)\/)/.test(url.pathname)
+    }
+    return url.hostname.endsWith(".githubusercontent.com")
+  } catch {
+    return false
+  }
+}
+
+/** An upload pasted on a line of its own, which GitHub draws as the file rather than a link. */
+const ATTACHMENT = /^https:\/\/github\.com\/user-attachments\/assets\/[\w-]+$/
+
 const DELIMITED: { open: string; t: "strong" | "em" | "del" }[] = [
   { open: "**", t: "strong" },
   { open: "__", t: "strong" },
@@ -284,7 +403,16 @@ export function parseInline(text: string): Inline[] {
         continue
       }
     }
-    // An image is a link to itself, labelled by its alt text.
+    // A picture that is also a link, which is how a badge is written. The
+    // picture is what the reader came for, and the lightbox links onwards.
+    const linked = /^\[!\[([^\]]*)\]\(\s*<?([^()\s>]+)>?(?:\s+"[^"]*")?\s*\)\]\([^)]*\)/.exec(rest)
+    const linkedSrc = linked && safeHref(linked[2])
+    if (linked && linkedSrc) {
+      flush()
+      out.push({ t: "image", src: linkedSrc, alt: linked[1] })
+      i += linked[0].length
+      continue
+    }
     // One level of parentheses inside the address, as GitHub allows: a
     // Wikipedia link ends in one.
     const link =
@@ -295,8 +423,8 @@ export function parseInline(text: string): Inline[] {
       const href = safeHref(link[3])
       flush()
       const label = link[2] || (link[1] ? "image" : link[3])
-      if (href)
-        out.push({ t: "link", href, c: link[1] ? [{ t: "text", v: label }] : parseInline(label) })
+      if (href && link[1]) out.push({ t: "image", src: href, alt: link[2] })
+      else if (href) out.push({ t: "link", href, c: parseInline(label) })
       else out.push(...parseInline(label))
       i += link[0].length
       continue
@@ -305,7 +433,11 @@ export function parseInline(text: string): Inline[] {
       /^<(https?:\/\/[^>\s]+)>/.exec(rest) ?? /^(https?:\/\/[^\s<)]+[^\s<).,;:!?'"])/.exec(rest)
     if (auto && (i === 0 || /[\s(]/.test(text[i - 1]) || rest.startsWith("<"))) {
       flush()
-      out.push({ t: "link", href: auto[1], c: [{ t: "text", v: auto[1] }] })
+      const alone =
+        (i === 0 || text[i - 1] === "\n") &&
+        /^\s*$/.test(text.slice(i + auto[0].length).split("\n")[0])
+      if (alone && ATTACHMENT.test(auto[1])) out.push({ t: "image", src: auto[1], alt: "" })
+      else out.push({ t: "link", href: auto[1], c: [{ t: "text", v: auto[1] }] })
       i += auto[0].length
       continue
     }
@@ -383,6 +515,7 @@ export function markdownText(source: string): string {
       if (run.t === "text" || run.t === "code") words.push(run.v)
       else if (run.t === "ref") words.push(`#${run.n}`)
       else if (run.t === "mention") words.push(`@${run.v}`)
+      else if (run.t === "image") words.push(run.alt)
       else if (run.t === "br") words.push(" ")
       else if ("c" in run) walkInline(run.c)
     }
@@ -392,9 +525,46 @@ export function markdownText(source: string): string {
       if (block.t === "heading" || block.t === "paragraph") walkInline(block.c)
       else if (block.t === "quote") walk(block.c)
       else if (block.t === "list") block.items.forEach((item) => walk(item.c))
+      else if (block.t === "details") {
+        walkInline(block.summary)
+        words.push(" ")
+        walk(block.c)
+      }
       words.push(" ")
     }
   }
   walk(parseMarkdown(source))
   return words.join("").replace(/\s+/g, " ").trim()
+}
+
+/** Every picture and video in a body, in reading order: what a lightbox steps through. */
+export function markdownMedia(blocks: Block[]): { src: string; alt: string }[] {
+  const out: { src: string; alt: string }[] = []
+  const walkInline = (runs: Inline[]) => {
+    for (const run of runs) {
+      if (run.t === "image") {
+        if (isForgeMedia(run.src) && !out.some((seen) => seen.src === run.src)) out.push(run)
+      } else if ("c" in run) walkInline(run.c)
+    }
+  }
+  const walk = (list: Block[]) => {
+    for (const block of list) {
+      if (block.t === "heading" || block.t === "paragraph") walkInline(block.c)
+      else if (block.t === "quote") walk(block.c)
+      else if (block.t === "list") block.items.forEach((item) => walk(item.c))
+      else if (block.t === "details") walk(block.c)
+      else if (block.t === "table") {
+        block.head.forEach(walkInline)
+        block.rows.forEach((row) => row.forEach(walkInline))
+      }
+    }
+  }
+  walk(blocks)
+  return out
+}
+
+/** The paragraph is pictures and nothing else, so it is laid out as pictures. */
+export function onlyMedia(runs: Inline[]): boolean {
+  const body = runs.filter((run) => run.t !== "br" && !(run.t === "text" && !run.v.trim()))
+  return body.length > 0 && body.every((run) => run.t === "image")
 }

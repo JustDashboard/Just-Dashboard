@@ -43,6 +43,7 @@ import { ForgePreview } from "@/components/git/forge-preview"
 import { BlamePreview, RecoveryPreview, CommitSignature } from "@/components/git/inspect-panels"
 import { NameDialog } from "@/components/git/name-dialog"
 import { SourceBranch, SourceMerge } from "@/components/git/glyphs"
+import { AuthorMark } from "@/components/git/marks"
 import { RefTags } from "@/components/git/ref-tags"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -546,6 +547,11 @@ function CommitPreview({
         subtitle={
           c ? (
             <>
+              <AuthorMark
+                name={c.author}
+                email={c.email}
+                className="mr-1 inline-flex align-text-bottom"
+              />
               <span className="font-mono">{c.short}</span> · {c.author} · {timestamp(c.at)}
               {c.isMerge ? " · merge" : ""}
             </>

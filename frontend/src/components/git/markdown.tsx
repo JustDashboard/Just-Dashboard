@@ -1,9 +1,10 @@
 "use client"
 
 import { Fragment, useMemo } from "react"
-import { Check } from "@/components/icons"
-import { parseMarkdown, type Block, type Inline } from "@/lib/markdown"
+import { Check, ChevronRight } from "@/components/icons"
+import { markdownMedia, onlyMedia, parseMarkdown, type Block, type Inline } from "@/lib/markdown"
 import { cn } from "@/lib/utils"
+import { MediaGrid, MediaImage, MediaLightbox } from "@/components/git/media"
 import { Well } from "@/components/panel"
 
 /**
@@ -35,11 +36,14 @@ export function Markdown({
   className?: string
 }) {
   const blocks = useMemo(() => parseMarkdown(source), [source])
+  const media = useMemo(() => markdownMedia(blocks), [blocks])
   const forge = repoUrl ? new URL(repoUrl).origin : undefined
   return (
-    <div className={cn("min-w-0 space-y-2.5 text-body leading-relaxed break-words", className)}>
-      <Blocks blocks={blocks} repoUrl={repoUrl} forge={forge} code={code} />
-    </div>
+    <MediaLightbox media={media}>
+      <div className={cn("min-w-0 space-y-3 text-body leading-relaxed break-words", className)}>
+        <Blocks blocks={blocks} repoUrl={repoUrl} forge={forge} code={code} />
+      </div>
+    </MediaLightbox>
   )
 }
 
@@ -49,10 +53,12 @@ type Links = {
   code?: (block: { lang: string; v: string }) => React.ReactNode
 }
 
+// Each rung opens more room above it than it leaves below, so a heading reads
+// as the start of what follows rather than the end of what came before.
 const HEADING = [
-  "text-title font-semibold",
-  "text-title font-semibold",
-  "text-sm font-semibold",
+  "pt-4 text-base font-semibold",
+  "pt-4 text-title font-semibold",
+  "pt-2 text-sm font-semibold",
   "text-body font-semibold",
   "text-body font-semibold",
   "text-body font-semibold text-muted-foreground",
@@ -67,18 +73,22 @@ function BlockView({ block, ...links }: { block: Block } & Links) {
     case "heading": {
       const Tag = `h${Math.min(block.level + 2, 6)}` as "h3"
       return (
-        <Tag
-          className={cn(
-            HEADING[block.level - 1],
-            "pt-1 first:pt-0",
-            block.level <= 2 && "border-b border-hairline pb-1",
-          )}
-        >
+        <Tag className={cn(HEADING[block.level - 1], "leading-snug first:pt-0")}>
           <Runs runs={block.c} {...links} />
         </Tag>
       )
     }
     case "paragraph":
+      if (onlyMedia(block.c)) {
+        const pictures = block.c.filter((run) => run.t === "image")
+        return (
+          <MediaGrid count={pictures.length}>
+            {pictures.map((run, index) => (
+              <MediaImage key={index} src={run.src} alt={run.alt} fill={pictures.length > 1} />
+            ))}
+          </MediaGrid>
+        )
+      }
       return (
         <p className="text-foreground/90">
           <Runs runs={block.c} {...links} />
@@ -99,6 +109,25 @@ function BlockView({ block, ...links }: { block: Block } & Links) {
       )
     case "rule":
       return <hr className="border-hairline" />
+    case "details":
+      // The native element, so a closed fold's pictures are not fetched and
+      // find-in-page still opens it.
+      return (
+        <details open={block.open} className="group/fold rounded-lg border border-hairline">
+          <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2.5 py-1.5 font-medium focus-ring-inset select-none hover:bg-row-hover [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              aria-hidden
+              className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open/fold:rotate-90"
+            />
+            <span className="min-w-0">
+              <Runs runs={block.summary} {...links} />
+            </span>
+          </summary>
+          <div className="space-y-3 border-t border-hairline px-3 py-3">
+            <Blocks blocks={block.c} {...links} />
+          </div>
+        </details>
+      )
     case "list": {
       const List = block.ordered ? "ol" : "ul"
       const tasks = block.items.some((item) => item.task)
@@ -186,6 +215,8 @@ function Runs({ runs, repoUrl, forge }: { runs: Inline[] } & Links) {
     switch (run.t) {
       case "text":
         return <Fragment key={index}>{run.v}</Fragment>
+      case "image":
+        return <MediaImage key={index} src={run.src} alt={run.alt} />
       case "br":
         return <br key={index} />
       case "code":

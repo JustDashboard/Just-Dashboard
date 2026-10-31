@@ -1,6 +1,6 @@
 "use client"
 
-import { Cross } from "@/components/icons"
+import { ArrowLeft, Cross } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { PaneHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ export function PreviewHeader({
   leading,
   trailing,
   mono = true,
+  wrap,
   onClose,
 }: {
   title: string
@@ -20,13 +21,33 @@ export function PreviewHeader({
   leading?: React.ReactNode
   trailing?: React.ReactNode
   mono?: boolean
+  /** A sentence rather than a name: two lines before it is cut. */
+  wrap?: boolean
   onClose: () => void
 }) {
   return (
-    <PaneHeader className="gap-2 px-3">
+    <PaneHeader className={cn("gap-2 px-3", wrap && "items-start")}>
+      {/* On a phone the preview is a page of its own, and leaving it is going
+          back to the list rather than closing a column. */}
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground lg:hidden"
+        aria-label="Back to the list"
+        onClick={onClose}
+      >
+        <ArrowLeft className="size-4" />
+      </Button>
       {leading}
       <div className="min-w-0 flex-1">
-        <p className={cn("truncate text-body font-medium", mono && "font-mono")} title={title}>
+        <p
+          className={cn(
+            "text-body font-medium",
+            wrap ? "line-clamp-2 leading-snug" : "truncate",
+            mono && "font-mono",
+          )}
+          title={title}
+        >
           {title}
         </p>
         {subtitle && <p className="truncate text-hint text-muted-foreground">{subtitle}</p>}
@@ -37,7 +58,7 @@ export function PreviewHeader({
           <Button
             size="sm"
             variant="ghost"
-            className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+            className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground max-lg:hidden"
             aria-label="Close"
             onClick={onClose}
           >
