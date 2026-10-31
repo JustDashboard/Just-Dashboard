@@ -511,9 +511,10 @@ function Line({
       )}
     >
       <span aria-hidden className="h-3 w-0.5 shrink-0 rounded-full" style={{ background: color }} />
-      <span className="min-w-0 truncate font-medium">{name}</span>
+      {/* The name gives way last: the detail truncates long before it does. */}
+      <span className="min-w-0 shrink-[0.25] truncate font-medium">{name}</span>
       {detail && (
-        <span className="numeric min-w-0 shrink-[2] truncate text-hint text-muted-foreground">
+        <span className="numeric min-w-0 shrink-[4] truncate text-hint text-muted-foreground">
           {detail}
         </span>
       )}
