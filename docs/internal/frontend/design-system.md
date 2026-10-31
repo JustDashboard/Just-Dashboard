@@ -185,9 +185,10 @@ taking a frame:
   sidebar's ground with a switch on each row it may hide; and the four views on
   Packages — the installed and updates tables, the software search and the package Log (its `Pane`
   on the page's ground, no panel around it), under one underlined strip
-  (`tabClasses`) rather than a filled tab list, beneath the host's identity and the software-size
-  band beside its update queue — each a toolbar and a hairline over a framed table or, for the
-  catalogue, lit choices on the page's own edge. Security updates carry their command in the queue;
+  (`tabClasses`) rather than a filled tab list, beneath the host's identity and the band of software
+  size and updates waiting — each a toolbar and a hairline over a framed table or, for the
+  catalogue, lit choices on the page's own edge. Security updates carry their command at the end of
+  the Updates waiting block's strip;
   a reboot owed and a stale index remain notices, and the Git page's repository list under its four readings (its workspace is one framed
   workbench of three `Pane flush` columns with a strip across the top, the way the terminal page is
   drawn);
@@ -426,6 +427,7 @@ rail's headings end on.
 | `ChoiceCard` | One thing you pick out of several, in a `ChoiceGrid` — a source, a template, a database engine | Not a `Panel`: a panel is content that happens to be framed, this is a button that happens to be large |
 | `ChoiceRow` | One instance among many of one kind, in a `ChoiceList` — a repository, an image tag, an unfinished setup | Not a `Row`: a `Row` is read, a `ChoiceRow` is taken |
 | `BarList` | A ranked list with the meter's track behind each name and the figure at the right — the top ten of something, with a signal segment for the share that is wrong | Not a chart, and not a `RowList`: nothing here has a second line worth a row |
+| `BarReading` | One block of a band: a head, a bar, one line and one strip of marks, the same height in every state (§10) | Not a `BarList`: nothing is listed under the bar, and it is the only thing a band's bar is drawn with |
 
 **Reach for `Panel`/`Pane`/`Page`, and add a variant there rather than a one-off in a feature page.**
 Before these existed, fourteen pages read as fourteen products.
@@ -944,6 +946,51 @@ rather than assembling its own recharts tree — adding a measurement should mea
   plan add up to the whole. The figure beside it is the step's own, which is what "slowest first"
   orders by.
 
+### The bar reading
+
+A band, the blocks between a page's identity line and its table, draws each block as one `BarReading`
+(`components/bar-reading.tsx`; its logic and tests are `bar-reading-model.ts` and
+`bar-reading-model.test.js`): a head, a bar, one fixed-height readout line and one strip of marks,
+the same height in every state. **No rows under a bar in a band.** The bands over the Docker,
+Processes, Packages, Proxy and Database pages were a bar with a list under it, the five heaviest
+things as rows and a sentence where there were none yet. Each poll reordered the rows; a block grew
+from a sentence to five lines when its first reading landed, which pushed the table under it down the
+page; and the rows repeated that table's columns. Any new band takes this component, and what it
+would have listed is the table's. Scheduled's lanes and the Overview's Storage are not shares of one
+bar and keep their own shapes.
+
+- **The line holds one part.** At rest that is the heaviest, or the part the table is narrowed to, or
+  the first given on a `ticks` or `fixed` reading, so those lead with the one worth reading: Recent's
+  newest, Certificates' soonest to end, the worst standing. Hovering a span or a mark, or focusing a
+  mark, puts that part on the line and fades the other spans; off the block it returns. A sliver too
+  narrow to point at is still reached by its mark, which is also how a keyboard reaches any part. A
+  touch press previews first and acts on the second, because a tap has no hover. The line rises when
+  its part changes (§11), and its figures have landed already, so reading another part shows its
+  value rather than counting up to it (`LandedFigures`).
+- **A press is the part's.** `press` narrows the table, and `pressed` keeps that part on the line and
+  lit; `press.opens` or `href` opens its page, from the span, the mark or the line alike. `control` is
+  a part's own verb, drawn on the line while it is the part there, as a kind's Reclaim is on Images.
+- **Order holds between polls** (`settleOrder`): a part must pass the one above it by 25% before they
+  change places, so neighbours within a rounding of each other stop swapping and a mark stays where
+  it was pointed at. `fixed` keeps the order given: standings, kinds, newest first.
+- **`trail`** draws the part's readings since the page opened as a sparkline on the line, only for
+  readings that move. A flat trail or one under three readings draws nothing, for the reason
+  `TileTrend` does not.
+- **`live` is reserved for socket-fed figures** (§11's rule) and draws a breathing cap at the end of
+  the filled bar. The container socket's bands carry it; a polled reading has a trail and no cap, even
+  beside a head figure that is live.
+- **`ticks`** makes the bar an axis, each part a tick at its `at`: Recent is a day (`timeAt`, anything
+  older on the far end where it can still be reached), the proxy overview's Certificates ninety days.
+- **`hatch`** draws the share of a span a prune would take, hatched inside it. **`working`** sweeps the
+  bar while work on what it draws runs, a registry check or a prune.
+- **`message`** fills the line and the strip, two lines at most: no reading yet, nothing to say, a
+  failed read. What needs more goes under the block. **`note`**, at the strip's end, holds what the
+  strip leaves out or a control for the whole block. **At most six marks**; a part past them keeps its
+  span and is read under the pointer.
+- **A band must not mount, unmount or change columns as data lands, and its page renders it during
+  load.** Whether a block is drawn is decided by what the host is, never by what a read has said so
+  far, so a page whose readings land does not move.
+
 ## 11. Motion says one of four things
 
 Before 0.6.7 the only shared motion in the product was whatever Radix and `tw-animate-css` happened
@@ -954,7 +1001,7 @@ levels rather than between pages:
 
 | Token | Says | Spent on |
 | --- | --- | --- |
-| `animate-breathe` | this reading is live | A halo breathing out of a `StatusDot`, at an amplitude low enough to read as "still arriving" and never as an alarm. |
+| `animate-breathe` | this reading is live | A halo breathing out of a `StatusDot`, at an amplitude low enough to read as "still arriving" and never as an alarm, and the cap on a live bar reading (§10). |
 | `animate-rise` | this was not here a moment ago | Opacity and four pixels, once, on arrival: a panel that appears, a disclosure that opens, a sparkline whose data landed. |
 | `animate-sweep` | this is working, and cannot say how far along | An indeterminate bar for a pull or a prune, where a spinner in the corner of a wide panel is too small to be the answer. |
 | `animate-drill` | you crossed a level | `rise` turned sideways, for the one place where a list is replaced by a list: the sidebar going into a section and back out. The direction *is* the message — in arrives from the right, out from the left — so the distance is `--drill-from` at the call site, not in the keyframe, and a panel that merely re-rendered does not move at all. |
@@ -969,7 +1016,8 @@ take the footer's first line. With no measured total the track spends `animate-s
 item or byte count fills it instead. An upload reaching its total switches to an indeterminate
 processing reading until the server answers. Elapsed time is not a completion estimate or a server
 heartbeat. The timer is excluded from the live region, the track has a named `progressbar` role, and
-reduced motion leaves a static full track. Pages, workbenches and job consoles draw no working bar.
+reduced motion leaves a static full track. Pages, workbenches and job consoles draw no working bar of
+their own; a bar reading already on the page sweeps its own bar while work on what it draws runs (§10).
 
 **`rise` is expected wherever a fetch settles**, not reserved for special occasions. The Overview is
 the reference: the page rises once when its first snapshot lands; each sparkline when its hour of
@@ -977,15 +1025,17 @@ history arrives; the activity list when its events arrive; each service figure w
 settles (swap the figure's `key` between skeleton and value so it remounts). Hover is colour only —
 `transition-colors` on a wash or a border — and a meter eases its width. Nothing translates, scales,
 glows or casts a shadow to say it was hovered or pressed; the one `group-hover:translate` the product
-had was removed from the Overview's service arrow in 0.6.7.
+had was removed from the Overview's service arrow in 0.6.7. A bar reading's line (§10) rises when
+pointing changes its part, because that part was not on the line a moment ago, and the spans it fades
+are the reading answering, not a hover's wash.
 
 `animate-pulse` is not one of them. It dims the element itself, which on a table of twenty running
 containers reads as twenty things blinking for attention — `breathe` leaves the dot constant and
 moves only the air around it, so the column still scans as "all green" at a glance.
 
 **Live is a claim about the data, not a decoration.** `StatusDot`'s `live` prop belongs to a row fed
-by an open socket. A polled figure is not live, and marking it so is the interface lying about how
-fresh its numbers are.
+by an open socket, and `BarReading`'s to a bar fed by one. A polled figure is not live, and marking it
+so is the interface lying about how fresh its numbers are.
 
 Nothing here needs a `motion-reduce:` guard. The rule lives once at the root of `globals.css` and
 collapses every animation's *duration* rather than cancelling it, so a keyframe that would otherwise
@@ -2071,7 +2121,9 @@ The passes, in order. Each one is a diff you can review on its own.
    rest of what the host reports in use one muted span, every span easing to the next poll and
    every figure gliding to it. A workload is a supervisor's processes or the copies of one program
    started by hand, summed by the backend over the whole snapshot with shared pages counted once,
-   so forty Chrome renderers are one row rather than forty; a press narrows the table to it. The
+   so forty Chrome renderers are one span rather than forty rows; a press narrows the table to it.
+   The five were rows under the bar (`ShareBar`) until 0.8.5, and are a bar reading now (§10): one on
+   the line, the marks of all five under it. The
    line of two buttons that stood above the identity line went into it, as Metrics' shortcuts did.
    The table took fixed columns — sized to their content, a long command line had pushed Memory
    and every row's menu past the panel's edge at 1280 — and draws CPU and memory as a figure beside
@@ -2110,10 +2162,11 @@ The passes, in order. Each one is a diff you can review on its own.
    failed count, a press of which narrows the table to them — beside Reload unit files and the
    shortcuts, where a button stood alone over the table. Under it `components/procs/
    service-band.tsx` answers what the tiles never did: the five services using the most processor
-   and the most memory on Live's bar the size of the machine (`ShareBar`), and a third block of
-   what happened — the last units to start, stop, finish or fail since the boot settled, each with
-   its time, a failure saying why in the same line and a restart in progress shimmering. A row
-   there opens the unit. The figures are systemd's own, read from each unit's cgroup by the list
+   and the most memory on Live's bar the size of the machine, and a third block of what happened —
+   the last units to start, stop, finish or fail since the boot settled, each a tick on the last day,
+   with its time, a failure saying why on the line and a restart in progress shimmering. Each is a
+   bar reading (§10), where they were rows under a `ShareBar` until 0.8.5. A press opens the unit.
+   The figures are systemd's own, read from each unit's cgroup by the list
    route, so a service's share is every process it started. The table took Live's fixed columns
    and its figure-beside-a-bar readings, and its state column says how long a unit has been in its
    state — up for, failed since and why, the restarts it has taken. Only a newly listed unit rises
@@ -2136,11 +2189,13 @@ The passes, in order. Each one is a diff you can review on its own.
    second line, where "no health check" is still said out loud. The line opens on the engine as
    Services' opens on the host: Docker as its mark and version, the host with its distribution, the
    storage driver, the running count, the stacks and images, and at its right end the verdict — the
-   failing count, a press of which narrows the table. Under it `components/docker/container-band.tsx`
-   answers what the bar never did: the five containers using the most processor and memory on Live's
-   bar the size of the machine (`ShareBar`), figures gliding to each two-second frame of the
-   container socket, and **Recent**, Docker's event log followed live — a restart loop one line ("×14
-   in 9 min · exit 1"), an OOM kill said on the exit it caused, a failing health check in red. Failing
+   failing count, a press of which narrows the table. Under it `components/docker/containers-band.tsx`
+   answers what the bar never did, in bar readings (§10) that were rows under a `ShareBar` until 0.8.5:
+   the five containers using the most processor and memory on Live's bar the size of the machine,
+   its cap breathing and its figures gliding to each two-second frame of the container socket, and
+   **Recent**, Docker's event log followed live as ticks on the last day — a restart loop one tick
+   ("×14 in 9 min · exit 1" on the line), an OOM kill said on the exit it caused, a failing health
+   check in red. Failing
    is read from the state, the health check, the exit status and that log together
    (`components/docker/containers.ts`): a 137 is `docker stop`'s as often as the OOM killer's, so only
    the event log turns it red. The table took Live's fixed columns and figure-beside-a-bar readings —
@@ -2153,14 +2208,15 @@ The passes, in order. Each one is a diff you can review on its own.
 
    Packages took the same exit in 0.7.1 at the operator's request. Installed is a fact in the
    identity and a count on its view; by-hand and dependencies are scope chips; Updates is its view's
-   count, the security chip and a security-first queue; On disk heads the software band. The band
-   (`components/packages/software-band.tsx`) is Processes' question applied to installed software:
-   the five largest products, or archive sections for packages no product names, as spans of one
-   bar of the installed size in the disk measurement's hue, with every other package in one muted
-   span. Its figures glide on arrival and to a new inventory; a press narrows Installed to that
-   group, including its dependencies. The queue beside it opens a package's readout and carries
-   the security/all-upgrade decisions; no advisory data is said rather than counted as no security
-   updates. The sheet is one scroll, with version changes and size over commands, registered services,
+   count, the security chip and the band's Updates waiting; On disk heads the software band. The band
+   (`components/packages/software-band.tsx`) is two bar readings (§10). On disk is Processes' question
+   applied to installed software: the five largest products, or archive sections for packages no
+   product names, as spans of one bar of the installed size in the disk measurement's hue, with every
+   other package in one muted span. Its figures glide on arrival and to a new inventory; a press
+   narrows Installed to that group, including its dependencies. Updates waiting, a queue of rows until
+   0.8.5, is one bar with a span per pending package, security first in amber, the first five named
+   and each opening its package's readout; the strip's end carries the security/all-upgrade decisions.
+   No advisory data is said rather than counted as no security updates. The sheet is one scroll, with version changes and size over commands, registered services,
    file links, the manual, inspectable dependencies and metadata. Catalogue suggestions and results,
    and the sheet's service/file destinations, take the lit choice edge (pass 3). Tables retain
    their frame and gain fixed responsive columns and a measured size bar per installed row.
@@ -2181,10 +2237,10 @@ The passes, in order. Each one is a diff you can review on its own.
    services as one strip of their states. The line opens on Docker drawn as itself, its version,
    the host, the storage driver and cgroup version, and the images with what their layers hold
    (`GET /docker/info` and the disk read). Under it `components/docker/container-band.tsx` answers
-   what the tiles never did, in Services' shape: the five containers using the most processor and
-   memory on Live's bar the size of the machine (`ShareBar`), fed by the containers socket so every
-   span eases and every figure glides with each frame, and a Recent block of the last thing that
-   happened to each container, live off the daemon's events (`components/docker/overview.ts`: an
+   what the tiles never did, in Services' shape, as bar readings (§10): the five containers using the
+   most processor and memory on Live's bar the size of the machine, fed by the containers socket so
+   every span eases and every figure glides with each frame, and a Recent block of the last thing that
+   happened to each container, a tick on the last day, live off the daemon's events (`components/docker/overview.ts`: an
    OOM kill and its exit read as one line, a stop's kill, die and stop as one, and a container that
    came back after crashing says how many times it did in the hour). Then every container as a
    framed table rather than `/docker/containers`' cards (§16 says why): fixed columns from `xl`, each
@@ -2246,15 +2302,18 @@ The passes, in order. Each one is a diff you can review on its own.
    more than a request a minute, quicker the busier (`requestPulse`, the Network section's curve
    over requests), red where it fails or the upstream refuses (dashed then), amber in plain HTTP
    or where the upstream times out; pointing at a domain lights the application it reaches and the
-   other way round. The band under it (`overview-band.tsx`) is three blocks: Traffic, the hour's
-   requests as one `ShareBar` of the busiest five, each rank a `LANES` hue, over rows with what
-   each reaches and its 5xx share, each opening the site's traffic; Certificates, every
-   certificate as a dot on one ninety-day runway in the colour of its state with certbot's renewal
-   stretch marked, over the five soonest as the expiry `BarList`; and Recent errors, the hour's 5xx by site from the
-   same access records over nginx's error-log groups where nginx is on the host. Each block opens on
-   its one figure at the 24px reading size (requests this hour, days to the next expiry or how many
-   need attention, server errors this hour), and a site's row opens its traffic, or for an ingress
-   route, its site page, which reads the deployment's record. The
+   other way round. The band under it (`overview-band.tsx`) is three bar readings (§10): Traffic, the
+   hour's requests shared out over the busiest five, each rank a `LANES` hue, its 5xx share and its
+   trail on the line; Certificates, the five that run out first as ticks in the colour of their state
+   on one ninety-day axis, the rest counted at the strip's end, each opening its certificate; and Recent
+   errors, the hour's 5xx by site from the same access records over nginx's error-log groups where
+   nginx is on the host, each opening the site's requests or the error log. Until 0.8.5 these were
+   rows under each bar: Traffic's a `ShareBar` over what each site reaches, Certificates every
+   certificate as a dot on a runway with certbot's renewal stretch marked over the five soonest as the
+   expiry `BarList`, each block opening on its figure at the 24px reading size. Each head holds its
+   one figure now (requests this hour, days to the next expiry or how many need attention, server
+   errors this hour), and a site opens its traffic, or for an ingress route, its site page, which reads
+   the deployment's record. The
    route cards lead with the application's own mark and the engine in the tile's corner
    (`RouteMark`), and are one line: what serves the route and the way a request goes (its names,
    only where they differ from the route's own, then the upstream or folder) under the name, and
@@ -2271,11 +2330,13 @@ The passes, in order. Each one is a diff you can review on its own.
    a rail of what the page draws once nginx runs. It was two `xs` outline buttons over an empty
    Certificates block, an empty Routes list and a Recent changes rail; none of those are drawn
    without an engine, and the identity line drops its zero counts (the open ports stay). Where a
-   block has nothing to read it says so in one shape, `OverviewEmpty` (an icon, what is missing,
+   block had nothing to read it said so in one shape, `OverviewEmpty` (an icon, what is missing,
    why, and the one way forward as an outline button where there is one), rather than a grey
-   sentence at whichever size each block had chosen. With no access log read anywhere, Live
-   traffic says why and opens the site (or Sites), the band drops its Traffic block rather than
-   saying it a second time, and Recent errors leads on nginx's error-log lines, since a 5xx count
+   sentence at whichever size each block had chosen; the band's blocks say it in their own `message`
+   since 0.8.5 (§10), and the card is Live traffic's. With no access log read anywhere, Live
+   traffic says why and opens the site (or Sites), the band's Traffic block says so on its one line,
+   where it used to drop out and move the routes under it (only a host whose engines keep no access
+   records draws neither it nor Recent errors), and Recent errors leads on nginx's error-log lines, since a 5xx count
    with no log to count from is unknown, not zero; an error log whose every group is a notice no
    longer draws an empty finding list's "No problems found" under the block's own all-clear.
 
@@ -2299,8 +2360,9 @@ The passes, in order. Each one is a diff you can review on its own.
    *open* (`frontDoorLine(doors, self)`) rather than "nginx" a third time. Live traffic leads on
    the server's reason where it gives one instead of a sentence of ours it contradicted, and its
    button says it opens a site; the stub_status strip is *nginx counters* and drops the "On"/"Off"
-   word where the switch beside it already says it; the empty Certificates block draws the open
-   lock the picture uses for plain HTTP rather than a shield with a tick; and Recent errors,
+   word where the switch beside it already says it; the empty Certificates block drew the open
+   lock the picture uses for plain HTTP rather than a shield with a tick, until its card became the
+   block's `message` in 0.8.5; and Recent errors,
    without an access log, gives the error log's zero for the hour once rather than again under it.
 
    A fourth pass on 2026-10-24, at the operator's request, made the page read as one product with
@@ -2308,16 +2370,18 @@ The passes, in order. Each one is a diff you can review on its own.
    40px tile on a framed `bg-card` bar rather than a 48px tile over a hairline) now carries the
    page's own controls — how old the page is, Refresh as an icon button, and **Alerts** as a link
    whose firing count stands beside it in red (holding in amber) — before the engine's commands,
-   where they had been a row of their own over a band of empty ground. Every quiet block is
-   `OverviewEmpty`'s card now, the Routes row's shape: a tile drawn as the product the block is
+   where they had been a row of their own over a band of empty ground. Every quiet block became
+   `OverviewEmpty`'s card, the Routes row's shape: a tile drawn as the product the block is
    about with what is missing in its corner (`EmptyMark` — nginx with a log for no access log,
    Let's Encrypt with an open lock for no certificates), the title and its reason beside it
    on one line, and the way forward at the card's far end where the card is wide enough
-   (a container query, since it stands full-width under Live traffic and in half the band). The
+   (a container query, since it stood full-width under Live traffic and in half the band). The
    16px glyph in a column of its own over 12px grey text left a gutter down each block. No
-   certificates is amber-edged, with **Issue a certificate** at its end for an administrator; an hour in which nothing failed is a green-edged card with a tick on nginx —
-   *Nothing failed in the last hour* where an access log counts 5xx, *nginx logged no errors this
-   hour* where none does, since a 5xx count with no log is still unknown, not zero. The nginx
+   certificates was amber-edged, with **Issue a certificate** at its end for an administrator; an hour in which nothing failed a green-edged card with a tick on nginx. The band's blocks gave those
+   cards up in 0.8.5, because a block keeps one height (§10): they are its `message` now, *Nothing
+   failed in the last hour* where an access log counts 5xx, *nginx logged no errors this hour* where
+   none does, since a 5xx count with no log is still unknown, not zero, and Issue a certificate
+   stands in the block's head. Live traffic's empty is still the card. The nginx
    counters are a card the same shape whose whole surface is the switch's `<label>`, so a press
    anywhere flips it, with the readings at the body size; Live traffic's requests draw in
    `--chart-2` rather than the near-white brand. Alerts left the sheet for a page of its own,
@@ -2332,7 +2396,7 @@ The passes, in order. Each one is a diff you can review on its own.
    notification channel's card, because the operator found them too big with their verb not part
    of them: a 12px inset and a 56px floor, the title over a hint-sized reason, and the verb a small
    outline button at the far end (under the words, never the tile, where the card is narrow), the
-   amber edge rather than a filled button carrying that no certificate is a problem. The alerts
+   amber edge rather than a filled button carrying that no certificate was a problem. The alerts
    page's all-clear and firing cards take the same size. The host's Alerts page under Metrics
    (`/metrics/alerts`, 2026-10-25) is the same page over the machine's own readings — CPU, memory
    and filesystems as their glyphs, containers as Docker, backups as an archive — and draws its
@@ -2346,13 +2410,14 @@ The passes, in order. Each one is a diff you can review on its own.
    network — a compose project, this dashboard, standalone or Docker — with Unused in amber beside
    them. It opens on Docker's identity line, the overview's, whose verdict is the address pool nearly
    or wholly spent, else the unused networks (a press narrows the table to them), else every network
-   in use. Under it `components/docker/network-band.tsx` answers what the cards never did: which
-   networks carry the traffic, read off their bridges every two seconds and drawn as spans of one bar
-   in each network's colour; how much of the address pool Docker carves networks from is taken, as
-   blocks in the colour of the network holding each — the pool every `compose up` takes a subnet from
-   runs out at thirty-one with the built-in pools; and who joined or left which network, from
-   Docker's events. A network's colour is a lane hue (`networkHue`, slate for Docker's own) and is the
-   same on its row's edge, its span, its blocks and its chips in the containers table, which lists
+   in use. Under it `components/docker/network-band.tsx` answers what the cards never did, in three bar
+   readings (§10): which networks carry the traffic, read off their bridges every two seconds and
+   drawn as spans of one bar in each network's colour; how much of the address pool Docker carves
+   networks from is taken, one span per network sized by the blocks it holds and the first free block
+   at the strip's end — the pool every `compose up` takes a subnet from runs out at thirty-one with
+   the built-in pools; and who joined or left which network, from Docker's events, as ticks on the
+   last day. A network's colour is a lane hue (`networkHue`, slate for Docker's own) and is the
+   same on its row's edge, its spans, its ticks and its chips in the containers table, which lists
    every container with each network it is on, its address there and the names it answers to, so
    "can the API reach the database" is whether two rows share a colour. The sheet became a live
    readout: four readings over the bridge's two minutes, the bridge wired to each member in the
@@ -2365,12 +2430,13 @@ The passes, in order. Each one is a diff you can review on its own.
    the server's identity line — the Compose mark, Docker's version, stacks deployed, services running,
    ports published — with the attention verdict at its right end, red where a service fails its check
    or exited on an error and amber for the rest, a press of which narrows the table as the chip does.
-   Under it `components/docker/stack-band.tsx` is Services' band for applications: the five stacks
-   using the most processor and memory on Live's bar the size of the machine (`ShareBar`), each a sum
-   over the stack's containers from the containers socket, a press narrowing the table to that stack;
-   and Recent, the daemon's last starts, exits with their codes, out-of-memory kills folded into the
-   exit they caused and failed checks, each with its time and its stack's name in that stack's lane
-   hue, opening the stack. The stacks themselves are one framed table of their containers
+   Under it `components/docker/stack-band.tsx` is Services' band for applications, in bar readings (§10)
+   that were rows under a `ShareBar` until 0.8.5: the five stacks using the most processor and memory
+   on Live's bar the size of the machine, each a sum over the stack's containers from the containers
+   socket, a press narrowing the table to that stack; and Recent, the daemon's last starts, exits with
+   their codes, out-of-memory kills folded into the exit they caused and failed checks, each a tick on
+   the last day with its time and its stack's name in that stack's lane hue on the line, opening the
+   stack. The stacks themselves are one framed table of their containers
    (`stack-table.tsx`) — a stack is still a destination, but its containers are rows of readings, and
    a stack's row is where they add up. A stack's row carries its products, state, how many declared
    services are up (a service its file dropped is counted as an orphan, not as a fourth of three), the
@@ -2390,17 +2456,18 @@ The passes, in order. Each one is a diff you can review on its own.
    told apart by anything but its words. It opens on Docker's identity line (the engine's version,
    how many images, the layers' size, how many are in use and untagged as facts; the registry's
    verdict at its right end, a press of which narrows the table to what is behind, beside Pull and
-   Build). Under it `components/docker/image-band.tsx` asks Packages' two questions of Docker. On
-   disk is one bar of what Docker holds — images, build cache, containers, volumes, each in the
-   colour the Docker overview's `DiskSummary` gives that kind — with the part a prune would give
-   back hatched inside each span, so the reclaimable share is seen before a figure is read; each
-   line keeps its own Reclaim, which now calls that kind's own route rather than the sweep (the
-   sweep also removes stopped containers and networks, which the Images and Build cache lines'
+   Build). Under it `components/docker/image-band.tsx` asks Packages' two questions of Docker, as two
+   bar readings (§10). On disk is one bar of what Docker holds — images, build cache, containers,
+   volumes, each in the colour the Docker overview's `DiskSummary` gives that kind — with the part a
+   prune would give back hatched inside each span, so the reclaimable share is seen before a figure is
+   read; each kind keeps its own Reclaim, on the line while that kind is there and on its mark in the
+   strip, which now calls that kind's own route rather than the sweep (the sweep, Reclaim in the
+   block's head, also removes stopped containers and networks, which the Images and Build cache lines'
    confirmations never said). Registry is one bar of every image by what its registry says —
    update available in amber, current in green, pinned and built here in `--tag-cyan` and
    `--tag-violet` because they are choices rather than states, unanswered and unused muted — with a
-   line per answer drawn as the products in it, each narrowing the table; a check the reader asked
-   for sweeps the bar. The images are a framed table again (§12): the image as its product, its
+   part per answer whose line draws the products in it, each narrowing the table; a check the reader
+   asked for sweeps the bar. The images are a framed table again (§12): the image as its product, its
    registry and tag a step back from the repository; the containers running it by name with their
    state's dot, each a link to its page; the registry's answer in the band's colours; its age; and
    its size over a bar against the largest, in the Images span's colour. Below `xl` the containers
@@ -2430,14 +2497,14 @@ The passes, in order. Each one is a diff you can review on its own.
    how many are mounted and how many a backup job covers as facts), with the verdict at its right
    end — how many volumes a prune would delete, a press of which narrows the table to them — beside
    Create volume. Under it `components/docker/volume-band.tsx` asks two questions the cards left to be
-   added up. Held by is the Processes band asked of storage: the stacks and lone containers holding
+   added up, as two bar readings (§10). Held by is the Processes band asked of storage: the stacks and lone containers holding
    the most, as spans of one bar the size of every volume, each in the lane hue (`hueFor(name,
    LANES)`) the Stacks and Containers pages give that name, a stack taken down saying so in amber.
    Mounts is every volume by where it stands — in use in green, held by stopped containers in
    `--tag-cyan`, left by a stack in amber, not mounted in `--tag-violet`, anonymous muted — with the
    part a prune would take hatched inside each span, as the Images band hatches what a prune gives
-   back, and the Prune command beside it naming the bytes; a prune in flight sweeps the bar. A line in
-   either narrows the table. The table's widest column is the containers that mount each volume, by
+   back, and the Prune command in the block's head naming the bytes; a prune in flight sweeps the bar.
+   A press in either narrows the table. The table's widest column is the containers that mount each volume, by
    name with their state's dot and the path they see it at, `ro` where they cannot write, each a
    link to its page; then the volume's state in the band's colour over whether a backup covers it,
    and its size over a bar against the largest in the Volumes span's colour (`--chart-5`, the Docker
@@ -2598,12 +2665,14 @@ The passes, in order. Each one is a diff you can review on its own.
    application refusing connections red, plain HTTP, a parked site or a change not live amber), a
    press of which narrows the cards to exactly them through a *Needs attention* chip — beside
    Export all, Import and New site. Under it `components/proxy/site-band.tsx` answers what the
-   tiles never did: **Traffic**, the hour's requests as spans of one bar in each site's hue with the
-   busiest five as rows and a 5xx share in amber from 1% and red from 5%; **Certificates**, the
-   enabled TLS sites' certificates counted valid, due for renewal and expired on one `StandingBar`
-   (`components/standing-bar.tsx`), over the five soonest to end with their days left, amber in
-   the last fortnight; and **Applications**, what the sites stand in front of drawn as itself, each with
-   the health check's answer. A row opens its site. What a site fronts is read off the Ports page's
+   tiles never did, in three bar readings (§10): **Traffic**, the hour's requests as spans of one bar
+   in each site's hue with the busiest five named, a 5xx share on the line in amber from 1% and red
+   from 5%; **Certificates**, the enabled TLS sites' certificates counted expired, due for renewal and
+   valid on one bar, worst first, the line naming the soonest to end in that standing with its days
+   left; and **Applications**, what the sites stand in front of drawn as itself, those refusing
+   connections first, the line carrying the health check's answer. A press opens its site. Until
+   0.8.5 Traffic's five and Certificates' five soonest were rows under their bars, the second on a
+   `StandingBar`. What a site fronts is read off the Ports page's
    sockets (`components/proxy/site-apps.ts`, unit-tested): the container's image, else the program,
    else its unit — never the port alone, so an upstream nothing on the list names keeps the
    engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else"; the
@@ -2640,19 +2709,20 @@ The passes, in order. Each one is a diff you can review on its own.
    verdict — how many do not answer, else how many are stopped, else *All N answering* — beside
    Scan and Add a database, which left the page's own row. Under it
    `components/database/fleet/fleet-band.tsx`, over the unit-tested `fleet/band.ts`, reads the fleet
-   three ways the cards cannot: **Storage**, what each database holds as spans of one bar with the
-   five largest as rows; **Sessions**, the open sessions — a key–value store's clients — as one
-   bar, a server that did not answer counted apart rather than drawn as zero, the busiest beside
-   the products that read them; and **Backups**, every database the dashboard can dump counted
-   backed up today, this week, over a week ago — the age every other reading of the section calls
-   stale — and never, on one `StandingBar`, over the worst five, never-dumped first, each with its
-   newest dump's age. A row opens the database, or under Backups its Backups page. This block and
-   the Sites page's Certificates drew a track under every row with a dot on it until 0.7.5, which
+   three ways the cards cannot, in three bar readings (§10): **Storage**, what each database holds as
+   spans of one bar with the five largest named; **Sessions**, the open sessions — a key–value store's
+   clients — as one bar, a server that did not answer counted at the strip's end rather than drawn
+   as zero, the line giving the products that read each; and **Backups**, every database the dashboard
+   can dump counted never, over a week ago — the age every other reading of the section calls stale —
+   this week and today on one bar, worst first, the line naming the worst database in that standing
+   with its newest dump's age. A press opens the database, or under Backups its Backups page. Until
+   0.8.5 each block's five were rows under its bar, Backups' on a `StandingBar`. Backups and
+   the Sites page's Certificates had also drawn a track under every row with a dot on it until 0.7.5, which
    went at the operator's request: the track had no scale, so the dot said less than the age beside
    it, a database never backed up was drawn at a place it did not have, and the track's hairline
    under each row's own rule read as a double line. Each database keeps one hue (`fleetHues`, a
    lane hue without slate dealt in the order the connections were saved, so five databases are
-   five hues and a new one moves nobody's) on its span, its key in a row and its table row; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
+   five hues and a new one moves nobody's) on its span, its mark's rule in the strip and its table row; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
    the operator's request), and its Stored figure carries a short bar in that hue
    against the largest database, as the table's Size cell does. The picture of what the databases
    feed moved above *Found on this server*, so the page's moving thing is not under a list of rows.
@@ -3257,11 +3327,12 @@ strip's figures went, and what took their place (`docker/stack-detail.tsx`):
   stack's log) as a stripe down its row, and its compose verbs are declared once per service —
   Restart and Stop inline, Recreate service and Pull & redeploy in its menu with Logs and Open a
   shell, each confirmation carrying the command as compose runs it.
-- **The band** (`docker/stack-usage-band.tsx`): Processor and Memory as the Services page's
-  `ShareBar`, the stack's services as spans of one bar the size of the server beside everything
-  else in use, figures gliding to each frame; and Recent, the stack's events with a restart loop on
-  one line, an OOM kill on the exit it caused and a passing health check only after a failing one,
-  each service named in its lane.
+- **The band** (`docker/stack-usage-band.tsx`), bar readings (§10) like the Services page's:
+  Processor and Memory, the stack's five heaviest services as spans of one bar the size of the
+  server beside everything else in use, figures gliding to each frame and the rest counted at the
+  strip's end; and Recent, the stack's events as ticks on the last day, a restart loop one tick, an
+  OOM kill on the exit it caused and a passing health check only after a failing one, each service
+  named in its lane.
 - **A picture of how it is reached** (`docker/stack-map.tsx`), the deployment Runtime map's shape
   under a plain head: the ports it publishes on this server, its services as their products with
   their state in the tile's corner, and the Docker networks they are on. A wire pulses while its

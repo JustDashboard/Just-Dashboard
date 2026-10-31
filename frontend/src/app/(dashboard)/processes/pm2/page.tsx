@@ -292,9 +292,7 @@ function PM2Applications() {
           </Panel>
         )}
 
-        {apps.length > 0 && (
-          <PM2Band apps={apps} snapshot={snapshot} selected={appFilter} onSelect={setAppFilter} />
-        )}
+        <PM2Band apps={apps} snapshot={snapshot} selected={appFilter} onSelect={setAppFilter} />
 
         {/* Framed, because it is a table: the grid owns a scroll region and the
           edge is what says so (§2). Everything above it stays plain. */}

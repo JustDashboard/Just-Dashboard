@@ -30,10 +30,11 @@ tester run on the page and draw no working bar.
   were removed in 0.7.5. `container-configuration.tsx` retains reviewed manual replacement; Compose
   configuration remains owned by its stack. No page polls the deleted advisory endpoints.
 - The containers page (`app/(dashboard)/docker/containers/page.tsx`) is three parts under the engine's
-  identity line. `container-band.tsx` draws the five containers using the most processor and memory
-  as spans of one bar the size of the host (the Processes band's `ShareBar`), figures gliding to each
-  two-second frame, and **Recent**: Docker's event log over `/docker/events/stream?kinds=container`,
-  a restart loop folded to one line and an OOM kill said on the exit it caused (`foldRestarts`).
+  identity line. `containers-band.tsx` draws the five containers using the most processor and memory
+  as spans of one bar the size of the host (a bar reading, `design-system.md` §10), figures gliding to
+  each two-second frame, and **Recent**: Docker's event log over `/docker/events/stream?kinds=container`
+  as ticks on the last day, a restart loop folded to one tick and an OOM kill said on the exit it
+  caused (`foldRestarts`).
   `container-table.tsx` is the table — sortable headings, a ticking uptime under each state, CPU and
   memory as figures beside short bars (memory against its limit, amber past 85%), the processor's
   hour and the network rate from `2xl`, the compose project in its `hueFor(…, LANES)` hue as a filter
@@ -87,21 +88,22 @@ that does something.
 - The Images page is `app/(dashboard)/docker/images/page.tsx` over `image-band.tsx`, `image-table.tsx`,
   `image-sheet.tsx` and `image-pull.tsx`, with the pure parts — a reference split as a registry reads
   it, one registry answer per image, the table's filters and order, a pull's stream folded by layer
-  and a history line read as its instruction — in `images.ts` (unit-tested). Its disk lines reclaim
-  their own kind: unused images through `POST /docker/images/prune?all=true`, the build cache through
+  and a history line read as its instruction — in `images.ts` (unit-tested). Each kind on its disk
+  reading reclaims itself, from its line or its mark: unused images through `POST /docker/images/prune?all=true`, the build cache through
   `POST /docker/build-cache/prune` and stopped containers through `POST /docker/containers/prune`;
-  only Reclaim beside the total runs the sweep, and says it reaches stopped containers and networks.
+  only Reclaim in the block's head runs the sweep, and says it reaches stopped containers and networks.
   The pull socket is enabled only while a pull is in flight: the server closes it when the pull
   ends, and `useSocket` reconnects whatever is still enabled, so a finished pull used to open a new
   one about once a second until the page was left. Tag names the same image again, so the copy a
   container runs can keep a name across the next pull of its tag.
 - `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2): the
   server's identity line (the Compose mark, Docker's version, stacks deployed, services running, ports
-  published), then `stack-band.tsx`
+  published), then `stack-band.tsx`, bar readings
   (the five stacks using the most processor and memory as spans of one bar the size of the machine,
   summed over each stack's containers from the containers socket, a press narrowing the table to that
   stack; and Recent, the daemon's last starts, exits with their codes, out-of-memory kills folded into
-  the exit they caused and failed checks, each opening its stack), then `stack-table.tsx`: the stacks as
+  the exit they caused and failed checks, each a tick on the last day opening its stack), then
+  `stack-table.tsx`: the stacks as
   one framed table of their containers. A stack is a row with its state, how many declared services are
   up, its summed CPU and memory and the one action that belongs there — deploy when the application is
   down — and a lane in its name's hue down its containers; each container is a row of the containers
@@ -384,8 +386,10 @@ five largest software groups as shares of the installed size, in the disk measur
 other packages as one muted span. Products are grouped by `packageProduct`; unnamed packages use the
 archive's section. These sums cover the whole inventory, not the 400-row rendered table. Pressing a
 group opens Installed, clears its search and selects Everything so dependencies appear too; Escape or
-the selected chip clears the group. Beside it is a security-first update queue, version changes,
-advisory coverage and confirmed security/all-upgrade actions. Missing sizes and advisory data are stated;
+the selected chip clears the group. Beside it **Updates waiting** is one bar with a span per pending
+package, security first, the first five named with their version changes and each opening its package,
+advisory coverage in its head and confirmed security/all-upgrade actions at the strip's end. Both are
+bar readings (design-system §10), drawn before the inventory lands. Missing sizes and advisory data are stated;
 a failed update read is an error, never an empty all-clear.
 `package-sheet.tsx` is one scroll: version changes and size, copyable commands coloured as shell words,
 registered services with links to their systemd inspector, configuration and documentation links into

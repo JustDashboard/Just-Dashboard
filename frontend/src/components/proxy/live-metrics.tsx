@@ -107,77 +107,98 @@ export function LiveTraffic({
           <p className="text-hint text-muted-foreground" title={errorMessage(error)}>
             {"Couldn't read the sites' access logs."}
           </p>
-        ) : !sites ? (
-          <div className="space-y-3">
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-40 w-full" />
-          </div>
-        ) : read.length === 0 ? (
+        ) : sites && read.length === 0 ? (
           <QuietEdge sites={sites} />
         ) : (
+          // The same tiles and chart before the first read as after it, so the
+          // band under them is not pushed down when the readings land.
           <div className="animate-rise space-y-4">
             <StatGrid columns={4} framed>
               <StatTile
                 label="Requests"
-                value={lastWhole ? compactCount(lastWhole.total) : "—"}
+                value={sites && lastWhole ? compactCount(lastWhole.total) : "—"}
                 trailing="last minute"
                 trend={
-                  <TileTrend
-                    values={points.map((p) => p.total)}
-                    color="var(--chart-2)"
-                    label="Requests a minute over the last hour"
-                  />
+                  <Trend>
+                    <TileTrend
+                      values={points.map((p) => p.total)}
+                      color="var(--chart-2)"
+                      label="Requests a minute over the last hour"
+                    />
+                  </Trend>
                 }
               />
               <StatTile
                 label="This hour"
-                value={compactCount(total)}
+                value={sites ? compactCount(total) : "—"}
                 trailing="requests"
-                hint={`${(total / 60).toFixed(total >= 600 ? 0 : 1)} a minute on average`}
+                hint={
+                  sites
+                    ? `${(total / 60).toFixed(total >= 600 ? 0 : 1)} a minute on average`
+                    : "\u00a0"
+                }
               />
               <StatTile
                 label="Server errors"
-                value={share(failRate)}
+                value={sites ? share(failRate) : "—"}
                 trailing="5xx"
                 tone={failed > 0 ? errorRateTone(failRate) : "default"}
                 trend={
-                  <TileTrend
-                    values={points.map((p) => p.failed)}
-                    color="var(--chart-3)"
-                    label="5xx responses a minute over the last hour"
-                  />
+                  <Trend>
+                    <TileTrend
+                      values={points.map((p) => p.failed)}
+                      color="var(--chart-3)"
+                      label="5xx responses a minute over the last hour"
+                    />
+                  </Trend>
                 }
-                hint={failed > 0 ? `${failed.toLocaleString()} this hour` : "None this hour"}
+                hint={
+                  !sites
+                    ? "\u00a0"
+                    : failed > 0
+                      ? `${failed.toLocaleString()} this hour`
+                      : "None this hour"
+                }
               />
               <StatTile
                 label="Served"
-                value={bytes(served)}
+                value={sites ? bytes(served) : "—"}
                 trailing="this hour"
                 trend={
-                  <TileTrend
-                    values={points.map((p) => p.bytes)}
-                    color="var(--chart-5)"
-                    label="Bytes served a minute over the last hour"
-                  />
+                  <Trend>
+                    <TileTrend
+                      values={points.map((p) => p.bytes)}
+                      color="var(--chart-5)"
+                      label="Bytes served a minute over the last hour"
+                    />
+                  </Trend>
                 }
               />
             </StatGrid>
-            <ChartPanel
-              plain
-              title="Requests a minute"
-              rows={rows}
-              series={EDGE_SERIES}
-              height={180}
-              format={count}
-              showPeaks={false}
-              note="No requests in the last hour."
-            />
+            {/* As tall as the chart and its legend, which an empty chart does not draw. */}
+            <div className="min-h-[329px]">
+              <ChartPanel
+                plain
+                title="Requests a minute"
+                rows={rows}
+                series={EDGE_SERIES}
+                height={180}
+                format={count}
+                showPeaks={false}
+                note={sites ? "No requests in the last hour." : "Reading the access logs…"}
+              />
+            </div>
           </div>
         )}
         {nginx && <NginxCounters admin={admin} />}
       </PanelBody>
     </Panel>
   )
+}
+
+/** A tile's trend, its band held when there is no line to draw so the tiles keep their height. */
+function Trend({ children }: { children: React.ReactNode }) {
+  return <div className="min-h-9">{children}</div>
 }
 
 /**

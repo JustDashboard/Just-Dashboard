@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { mockServices, SYSTEMD_LIST, UNITS } from "./services-fixture"
+import { risen } from "./risen"
 
 /**
  * The Services page against a host whose services carry their live readings:
@@ -37,22 +38,33 @@ test("the page opens on the host, who is busy and what changed, with no tiles", 
   await expect(cpu.getByRole("button").first()).toHaveAccessibleName("Open mongod.service")
   await expect(cpu.getByRole("button")).toHaveCount(5)
   const memory = band.getByLabel("Memory by service")
-  await expect(memory.getByRole("button").first()).toContainText("1.2 GB")
+  await expect(memory.locator("[data-slot=reading-line]")).toContainText("1.2 GB")
 
   // What happened, newest first: the restart in progress, the failure and
   // why, the restart a reader made — and not the boot's own starts.
   const recent = band.getByLabel("Recent changes")
   const changes = recent.getByRole("button")
-  await expect(changes.nth(0)).toContainText("redis-server")
-  await expect(changes.nth(0)).toContainText("restarting")
-  await expect(changes.nth(1)).toContainText("failed · start limit hit")
-  await expect(changes.nth(1)).toContainText("12m ago")
-  await expect(changes.nth(2)).toContainText("nginx")
-  await expect(changes.nth(2)).toContainText("started")
-  await expect(recent).not.toContainText("docker")
+  const line = recent.locator("[data-slot=reading-line]")
+  await expect(changes.nth(0)).toHaveAccessibleName(/redis-server/)
+  await expect(line).toContainText("redis-server")
+  await expect(line).toContainText("restarting")
+  await changes.nth(1).hover()
+  await expect(line).toContainText("failed · start limit hit")
+  await expect(line).toContainText("12m ago")
+  await changes.nth(2).hover()
+  await expect(line).toContainText("nginx")
+  await expect(line).toContainText("started")
+  await expect(recent.getByRole("button", { name: /docker/ })).toHaveCount(0)
   await expect(recent).toContainText("9 changes in the last day")
 
-  // A row there opens the unit.
+  // Every block one height, what it has to say aside.
+  await risen(page)
+  const heights = await band
+    .locator("[data-slot=bar-reading]")
+    .evaluateAll((all) => all.map((block) => block.getBoundingClientRect().height))
+  expect(new Set(heights).size).toBe(1)
+
+  // A mark there opens the unit.
   await recent.getByRole("button", { name: "Open nginx.service" }).click()
   await expect(page.getByRole("dialog")).toContainText("nginx.service")
   await expect(page).toHaveURL(/unit=nginx\.service/)

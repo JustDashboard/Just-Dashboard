@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { createContext, useContext, useState } from "react"
 import { cn } from "@/lib/utils"
 import { byteParts } from "@/lib/format"
 import type { ConnectionState } from "@/lib/metrics-store"
@@ -20,6 +20,17 @@ export const HUE = {
   net: "var(--chart-5)",
   disk: "var(--chart-4)",
 } as const
+
+const Landed = createContext(false)
+
+/**
+ * The figures inside have landed already: they start at their value and glide
+ * from there. For a place that swaps which reading it shows, where a count up
+ * from zero on every swap would say the reading had just arrived.
+ */
+export function LandedFigures({ children }: { children: React.ReactNode }) {
+  return <Landed.Provider value>{children}</Landed.Provider>
+}
 
 /**
  * A figure fed by the metrics socket, gliding to each frame's value rather
@@ -42,7 +53,8 @@ export function LiveFigure({
 }) {
   // The count from zero belongs to the first unit only; a later one starts
   // where the figure already is.
-  const [scale, setScale] = useState({ unit, from: 0 })
+  const landed = useContext(Landed)
+  const [scale, setScale] = useState({ unit, from: landed ? value : 0 })
   if (scale.unit !== unit) setScale({ unit, from: value })
   return (
     <>

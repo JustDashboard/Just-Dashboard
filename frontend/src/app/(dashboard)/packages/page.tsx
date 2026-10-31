@@ -38,6 +38,7 @@ import { Status } from "@/components/status-dot"
 import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
   stickyTableHeader,
   Table,
@@ -309,7 +310,19 @@ export default function PackagesPage() {
           />
         )}
 
-        {data?.available && !data.error && (
+        {/* Held open while the inventory is out, the identity line above it too,
+          so neither block moves when it lands. A host with no package manager
+          is the one answer that has nothing to draw in them. */}
+        {inventory.loading && !data && (
+          <HostIdentity
+            mark={platformProduct(host?.platform)}
+            fallback={Puzzle}
+            title={<TextShimmer>Reading the package database…</TextShimmer>}
+            facts={<span>&nbsp;</span>}
+          />
+        )}
+
+        {(!data || data.available) && (
           <SoftwareBand
             inventory={data}
             report={report}

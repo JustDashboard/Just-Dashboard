@@ -304,7 +304,7 @@ export default function DockerImagesPage() {
             </>
           }
           facts={
-            images.data && (
+            images.data ? (
               <>
                 <span className="numeric font-medium text-foreground">
                   {plural(list.length, "image")}
@@ -324,6 +324,9 @@ export default function DockerImagesPage() {
                   </>
                 )}
               </>
+            ) : (
+              // Holds the line open, so the band under it does not move when the list lands.
+              <span aria-hidden>&nbsp;</span>
             )
           }
           aside={
@@ -366,127 +369,130 @@ export default function DockerImagesPage() {
           }
         />
 
+        {/* Here before anything else is, saying so, so the page does not move
+            when the list lands. */}
+        <ImageBand
+          usage={usage.data}
+          usageLoading={usage.loading}
+          usageError={usage.error}
+          images={list}
+          imagesLoading={images.loading && !images.data}
+          imagesFailed={images.error !== undefined && !images.data}
+          states={states}
+          checkedAt={checkedAt}
+          checking={checking}
+          updatesError={updates.error}
+          onCheck={recheck}
+          state={state}
+          onState={(next) => {
+            setState(next)
+            setUse("all")
+          }}
+          confirm={confirm}
+          onPruned={refresh}
+        />
+
+        {/* Framed, as every table is (§2): its container scrolls, and an
+            edge says where the columns that did not fit went. */}
         {images.loading && !images.data ? (
           <LoadingPanel />
         ) : images.error && !images.data ? (
           <ErrorState error={images.error} onRetry={images.refresh} />
         ) : (
-          <>
-            <ImageBand
-              usage={usage.data}
-              usageLoading={usage.loading}
-              images={list}
-              states={states}
-              checkedAt={checkedAt}
-              checking={checking}
-              updatesError={updates.error}
-              onCheck={recheck}
-              state={state}
-              onState={(next) => {
-                setState(next)
-                setUse("all")
-              }}
-              confirm={confirm}
-              onPruned={refresh}
-            />
-
-            {/* Framed, as every table is (§2): its container scrolls, and an
-                edge says where the columns that did not fit went. */}
-            <Panel className="animate-rise">
-              <PanelHeader
-                title="Images"
-                actions={
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-muted-foreground"
-                      aria-label={`Order: ${SORT_LABEL[sort]}`}
-                      onClick={() => setSort(NEXT_SORT[sort])}
-                    >
-                      {SORT_LABEL[sort]}
-                    </Button>
-                    {can("destructive") && untagged > 0 && (
-                      <Button size="sm" variant="outline" onClick={pruneUntagged}>
-                        <Trash className="size-4" />
-                        Prune untagged
-                      </Button>
-                    )}
-                  </>
-                }
-              />
-              <PanelToolbar>
-                <SearchInput
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Name, version or id"
-                  aria-label="Find images"
-                />
-                <div className="flex min-w-0 flex-wrap items-center gap-1">
-                  <FilterChip selected={use === "all"} onClick={() => setUse("all")}>
-                    All <ChipCount>{list.length}</ChipCount>
-                  </FilterChip>
-                  <FilterChip selected={use === "running"} onClick={() => setUse("running")}>
-                    In use <ChipCount>{inUse}</ChipCount>
-                  </FilterChip>
-                  <FilterChip selected={use === "unused"} onClick={() => setUse("unused")}>
-                    Not in use <ChipCount>{unused}</ChipCount>
-                  </FilterChip>
-                  {untagged > 0 && (
-                    <FilterChip selected={use === "untagged"} onClick={() => setUse("untagged")}>
-                      Untagged <ChipCount>{untagged}</ChipCount>
-                    </FilterChip>
-                  )}
-                </div>
-                {state && (
-                  <FilterChip
-                    selected
-                    onClick={() => setState("")}
-                    aria-label="Clear registry filter"
+          <Panel className="animate-rise">
+            <PanelHeader
+              title="Images"
+              actions={
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground"
+                    aria-label={`Order: ${SORT_LABEL[sort]}`}
+                    onClick={() => setSort(NEXT_SORT[sort])}
                   >
-                    {FRESHNESS_LABEL[state]} ×
+                    {SORT_LABEL[sort]}
+                  </Button>
+                  {can("destructive") && untagged > 0 && (
+                    <Button size="sm" variant="outline" onClick={pruneUntagged}>
+                      <Trash className="size-4" />
+                      Prune untagged
+                    </Button>
+                  )}
+                </>
+              }
+            />
+            <PanelToolbar>
+              <SearchInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Name, version or id"
+                aria-label="Find images"
+              />
+              <div className="flex min-w-0 flex-wrap items-center gap-1">
+                <FilterChip selected={use === "all"} onClick={() => setUse("all")}>
+                  All <ChipCount>{list.length}</ChipCount>
+                </FilterChip>
+                <FilterChip selected={use === "running"} onClick={() => setUse("running")}>
+                  In use <ChipCount>{inUse}</ChipCount>
+                </FilterChip>
+                <FilterChip selected={use === "unused"} onClick={() => setUse("unused")}>
+                  Not in use <ChipCount>{unused}</ChipCount>
+                </FilterChip>
+                {untagged > 0 && (
+                  <FilterChip selected={use === "untagged"} onClick={() => setUse("untagged")}>
+                    Untagged <ChipCount>{untagged}</ChipCount>
                   </FilterChip>
                 )}
-              </PanelToolbar>
-              <PanelBody flush>
-                {list.length === 0 ? (
-                  <EmptyState
-                    icon={Layers}
-                    className="m-4"
-                    title="No images on this server"
-                    description="Pull one from a registry, or build one from a directory on this server."
-                    action={
-                      can("service.control") && (
-                        <Button size="sm" onClick={() => setPullSeed("")}>
-                          <Download className="size-4" />
-                          Pull image
-                        </Button>
-                      )
-                    }
-                  />
-                ) : visible.length === 0 ? (
-                  <EmptyState
-                    icon={Layers}
-                    className="m-4"
-                    title="Nothing matches"
-                    description="Clear the search or pick All to see every image."
-                  />
-                ) : (
-                  <ImageTable
-                    images={visible}
-                    users={users}
-                    updates={updates.data}
-                    states={states}
-                    wide={wide}
-                    arrived={arrived}
-                    pulling={pull.ref}
-                    verbs={rowVerbs}
-                    onOpen={setSelected}
-                  />
-                )}
-              </PanelBody>
-            </Panel>
-          </>
+              </div>
+              {state && (
+                <FilterChip
+                  selected
+                  onClick={() => setState("")}
+                  aria-label="Clear registry filter"
+                >
+                  {FRESHNESS_LABEL[state]} ×
+                </FilterChip>
+              )}
+            </PanelToolbar>
+            <PanelBody flush>
+              {list.length === 0 ? (
+                <EmptyState
+                  icon={Layers}
+                  className="m-4"
+                  title="No images on this server"
+                  description="Pull one from a registry, or build one from a directory on this server."
+                  action={
+                    can("service.control") && (
+                      <Button size="sm" onClick={() => setPullSeed("")}>
+                        <Download className="size-4" />
+                        Pull image
+                      </Button>
+                    )
+                  }
+                />
+              ) : visible.length === 0 ? (
+                <EmptyState
+                  icon={Layers}
+                  className="m-4"
+                  title="Nothing matches"
+                  description="Clear the search or pick All to see every image."
+                />
+              ) : (
+                <ImageTable
+                  images={visible}
+                  users={users}
+                  updates={updates.data}
+                  states={states}
+                  wide={wide}
+                  arrived={arrived}
+                  pulling={pull.ref}
+                  verbs={rowVerbs}
+                  onOpen={setSelected}
+                />
+              )}
+            </PanelBody>
+          </Panel>
         )}
 
         <ImageSheet

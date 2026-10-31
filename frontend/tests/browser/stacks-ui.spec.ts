@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { mockStacks } from "./stacks-fixture"
+import { risen } from "./risen"
 
 /**
  * The Stacks page after its overhaul: the server's identity line with the
@@ -111,11 +112,47 @@ test("recent says what Docker did to the stacks, and a line opens its stack", as
   await open(page)
 
   const recent = page.getByRole("region", { name: "Recent changes" })
-  await expect(recent.getByText("unhealthy")).toBeVisible()
-  // The oom and the exit it caused are one line.
-  await expect(recent.getByText("killed for memory")).toHaveCount(1)
-  await recent.getByRole("button", { name: /^Open monitoring: alertmanager/ }).click()
+  const line = recent.locator("[data-slot=reading-line]")
+  await expect(line).toContainText("unhealthy")
+  // The oom and the exit it caused are one mark.
+  const alertmanager = recent.getByRole("button", { name: /^Open monitoring: alertmanager/ })
+  await expect(alertmanager).toHaveCount(1)
+  await alertmanager.hover()
+  await expect(line).toContainText("killed for memory")
+  await alertmanager.click()
   await expect(page).toHaveURL(/\/docker\/stacks\/monitoring$/, NAVIGATION)
+})
+
+test("the band holds its place while the stacks are read, and nothing moves when they land", async ({
+  page,
+}) => {
+  await mockStacks(page)
+  let land!: () => void
+  const held = new Promise<void>((resolve) => (land = resolve))
+  await page.route("**/api/v1/docker/stacks/", async (route) => {
+    await held
+    await route.fallback()
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker/stacks")
+
+  const band = page.locator("[data-slot=stack-band]")
+  const blocks = band.locator("[data-slot=bar-reading]")
+  await expect(blocks).toHaveCount(3)
+  await expect(page.getByLabel("Processor by stack")).toContainText("Reading the stacks…")
+  await expect(page.getByRole("button", { name: "Showing analytics" })).toHaveCount(0)
+  await risen(page)
+  const heights = await blocks.evaluateAll((all) =>
+    all.map((block) => block.getBoundingClientRect().height),
+  )
+  expect(new Set(heights).size).toBe(1)
+  const before = await band.boundingBox()
+
+  land()
+  await expect(stackRow(page, "analytics")).toBeVisible()
+  await expect(page.getByLabel("Processor by stack").getByRole("button").first()).toBeVisible()
+  await risen(page)
+  expect(await band.boundingBox()).toEqual(before)
 })
 
 test("the native state chips count and narrow without an attention filter", async ({ page }) => {
@@ -182,4 +219,5 @@ test("a server with no stacks offers to create one", async ({ page }) => {
   await page.goto("/docker/stacks")
   await expect(page.getByText("No compose stacks found")).toBeVisible({ timeout: 20_000 })
   await expect(page.getByRole("button", { name: "Create stack" })).toBeVisible()
+  await expect(page.getByLabel("Memory by stack")).toContainText("No stack is running.")
 })
