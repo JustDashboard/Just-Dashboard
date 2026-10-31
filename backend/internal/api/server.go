@@ -82,7 +82,8 @@ type Server struct {
 	mapSources mapSources
 
 	// The GitHub accounts' own pictures, read once an hour per account.
-	avatars avatarCache
+	avatars    avatarCache
+	forgeMedia forgeMediaCache
 
 	// What the DNS record routes reach, which a test replaces
 	// (handlers_deploy_dns_record.go).

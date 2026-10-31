@@ -57,6 +57,10 @@ func (s *Server) mountGitHubRoutes(r chi.Router) {
 		// rather than through gh: every surface that names an identity draws
 		// it, including the ones that have no checkout and no sign-in.
 		r.Method(http.MethodGet, "/avatar", s.handle(s.handleGitHubAvatar))
+		// The same answer for what a pull request embeds: the page may only
+		// draw from its own origin.
+		r.Method(http.MethodGet, "/media", s.handle(s.handleGitHubMedia))
+		r.Method(http.MethodGet, "/authors", s.handle(s.handleGitHubAuthors))
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
