@@ -1,18 +1,15 @@
 "use client"
 
-import { BookOpen, Question } from "@/components/icons"
+import { Question } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 /**
  * The teaching layer for git, in the shape docker/explain.tsx established: the
  * vocabulary is the actual barrier, not the buttons, so the explanation lives
- * where the choice is made. Two forms — a term with its meaning one hover away,
- * and a "how it works" card that lays out the four-step flow — because the
- * person this is for has heard "commit" and "push" and does not know which
- * order they go in or what each one actually does to their files.
+ * where the choice is made: a term with its meaning one hover away, because the
+ * person this is for has heard "commit" and "push" and does not know what each
+ * one actually does to their files.
  *
  * The rule is the same one that keeps the docker forms usable: the explanation
  * is quiet. An expert skims past it; a newcomer stops to read it.
@@ -137,68 +134,5 @@ export function GitExplain({ name, className }: { name: string; className?: stri
         <p className="text-muted-foreground">{entry?.body ?? "No description available."}</p>
       </HoverCardContent>
     </HoverCard>
-  )
-}
-
-const STEPS = [
-  { title: "Stage", body: "Tick the changed files you want to save together." },
-  { title: "Describe", body: "Write a short message saying what you changed." },
-  { title: "Commit", body: "Save them as one point in this repository's history." },
-  { title: "Push", body: "Send your commits to the shared copy so they are safe and shared." },
-]
-
-/** The "new to git?" button: the four-step flow plus the words behind it. */
-export function GitHelp({ compact }: { compact?: boolean }) {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        {/* In the workspace strip the words give way to the book alone: the
-            strip is the repository's verbs, and a primer is not one of them. */}
-        <Button
-          variant="outline"
-          size={compact ? "icon-sm" : "sm"}
-          aria-label={compact ? "New to git?" : undefined}
-          title={compact ? "New to git?" : undefined}
-        >
-          <BookOpen className="size-4" />
-          {!compact && "New to git?"}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-96 space-y-3">
-        <div>
-          <p className="text-body font-medium">Saving your work, step by step</p>
-          <p className="text-xs text-muted-foreground">
-            The same four moves every time. You never have to touch the command line.
-          </p>
-        </div>
-        {/* A numbered list, numbered by its numerals: the filled circle each
-            step used to sit in was a pill with a digit in it, which is the
-            shape this product draws nothing in. */}
-        <ol className="space-y-2">
-          {STEPS.map((s, i) => (
-            <li key={s.title} className="flex gap-2.5">
-              <span className="numeric w-4 shrink-0 text-right text-hint font-semibold text-brand">
-                {i + 1}
-              </span>
-              <div className="min-w-0">
-                <p className="text-body leading-tight font-medium">{s.title}</p>
-                <p className="text-hint leading-snug text-muted-foreground">{s.body}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-        <div className="space-y-1.5 border-t border-hairline pt-2.5 text-xs">
-          <p className="eyebrow">Words you will see</p>
-          {(["branch", "stash", "fetch", "pull", "aheadBehind", "tag", "merge"] as const).map(
-            (k) => (
-              <p key={k} className="leading-snug">
-                <span className="font-medium">{GIT_GLOSSARY[k].title}</span>{" "}
-                <span className="text-muted-foreground">— {GIT_GLOSSARY[k].body}</span>
-              </p>
-            ),
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
   )
 }
