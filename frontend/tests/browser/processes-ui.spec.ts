@@ -670,7 +670,9 @@ test("the workloads hold their place while the first read is out", async ({ page
   release()
   await expect(band.getByRole("button", { name: "Only api's processes" }).first()).toBeVisible()
   const after = await band.boundingBox()
-  expect(after?.height).toBe(before?.height)
+  // Layout reports fractions of a pixel: anything under one is not a shift.
+  expect(after?.height).toBeCloseTo(before?.height ?? 0, 1)
+  expect(after?.y).toBeCloseTo(before?.y ?? 0, 1)
 })
 
 // The band answers who; a press narrows the table to that workload, and the

@@ -525,11 +525,8 @@ function RegistryShare({
           key: g.state,
           value: g.images.length,
           color: FRESHNESS_COLOR[g.state],
-          mark: products[0] ? (
-            <ProductGlyph id={products[0]} className="size-3.5" />
-          ) : (
-            <Layers aria-hidden className="size-3.5 text-muted-foreground" />
-          ),
+          // Its count: one product's logo cannot stand for a whole answer.
+          mark: <span className="numeric text-hint font-medium">{g.images.length}</span>,
           name: <span className={cn(g.state === "outdated" && "text-warning")}>{label}</span>,
           detail: <ProductGlyphs ids={products} />,
           figure: g.images.length,

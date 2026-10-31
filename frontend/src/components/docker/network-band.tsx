@@ -5,7 +5,7 @@ import { timeAt } from "@/components/bar-reading-model"
 import { LiveBytes } from "@/components/overview/readings"
 import { ProductGlyph, containerProduct } from "@/components/product-logo"
 import { Cidr } from "@/components/network/address"
-import { RX, RatePair, TX } from "@/components/network/rate-pair"
+import { RX, TX } from "@/components/network/rate-pair"
 import { ago } from "@/components/procs/units"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { plural, rate } from "@/lib/format"
@@ -129,7 +129,17 @@ export function NetworkBand({
             />
           ),
           name: r.network.name,
-          figure: <RatePair rx={r.rx} tx={r.tx} />,
+          // On one line: the line is a fixed height, and a stacked pair fills it.
+          figure: (
+            <span className="flex items-center gap-2 font-mono text-hint font-normal">
+              <span style={{ color: RX }}>
+                ↓ <LiveBytes value={r.rx} suffix="/s" />
+              </span>
+              <span style={{ color: TX }}>
+                ↑ <LiveBytes value={r.tx} suffix="/s" />
+              </span>
+            </span>
+          ),
           label: `${r.network.name} ${rate(r.rx + r.tx)}`,
           press: { label: `Open ${r.network.name}`, opens: true, onPress: () => onOpen(r.network) },
         }))}
