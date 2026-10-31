@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { ArrowRight, Filter } from "@/components/icons"
+import { rowReveal } from "@/components/icon-action"
 import { LandedFigures } from "@/components/overview/readings"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -507,14 +508,14 @@ function Line({
             <Filter
               aria-hidden
               className={cn(
-                "size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100",
-                part?.press?.pressed && "text-foreground opacity-100",
+                "size-3.5 text-muted-foreground",
+                part?.press?.pressed ? "text-foreground" : rowReveal(),
               )}
             />
           ) : (
             <ArrowRight
               aria-hidden
-              className="size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+              className={cn("size-3.5 text-muted-foreground", rowReveal())}
             />
           ))}
         {figure !== undefined && (

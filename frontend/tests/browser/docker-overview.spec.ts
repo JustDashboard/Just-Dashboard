@@ -102,12 +102,54 @@ test("the band names the busiest containers and the last thing each did", async 
   )
 
   const recent = page.getByLabel("Recent changes")
+  const line = recent.locator("[data-slot=reading-line]")
   // An OOM kill and its exit are one line, and the crash before it is counted.
-  await expect(recent.getByText("ran out of memory")).toBeVisible()
-  await expect(recent.getByText("· 2 crashes")).toBeVisible()
-  await expect(recent.getByText("failing its health check")).toBeVisible()
+  await expect(line).toContainText("ran out of memory")
+  await expect(line).toContainText("· 2 crashes")
+  await recent.getByRole("button", { name: "Open monitoring-uptime-kuma" }).hover()
+  await expect(line).toContainText("failing its health check")
   // Two days ago is not recent.
-  await expect(recent.getByText("mailhog")).toHaveCount(0)
+  await expect(recent.getByRole("button", { name: "Open mailhog" })).toHaveCount(0)
+})
+
+test("every block of the band is one height, whatever it has to say", async ({ page }) => {
+  await mockDockerHost(page)
+  // Nothing has been measured yet: the blocks say so, and the page must not
+  // move when the readings land.
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/stream/, () => {})
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker")
+
+  const band = page.locator("[data-slot=container-band]")
+  const blocks = band.locator("[data-slot=bar-reading]")
+  await expect(blocks).toHaveCount(3)
+  const heights = await blocks.evaluateAll((all) =>
+    all.map((block) => block.getBoundingClientRect().height),
+  )
+  expect(new Set(heights).size).toBe(1)
+})
+
+test("reading another part changes the line and nothing else on the page", async ({ page }) => {
+  await mockDockerHost(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker")
+
+  const band = page.locator("[data-slot=container-band]")
+  const processor = page.getByLabel("Processor by container")
+  const line = processor.locator("[data-slot=reading-line]")
+  await expect(line).toContainText("shop-api")
+  const before = await band.boundingBox()
+  const table = page.getByRole("table")
+  const tableBefore = await table.boundingBox()
+
+  await processor.getByRole("button", { name: "Open automation-n8n" }).hover()
+  await expect(line).toContainText("automation-n8n")
+  expect(await band.boundingBox()).toEqual(before)
+  expect(await table.boundingBox()).toEqual(tableBefore)
+
+  // Off the block, the line goes back to the heaviest.
+  await page.mouse.move(0, 0)
+  await expect(line).toContainText("shop-api")
 })
 
 test("an event that lands while the page is open joins Recent", async ({ page }) => {
@@ -116,7 +158,7 @@ test("an event that lands while the page is open joins Recent", async ({ page })
   await page.goto("/docker")
 
   const recent = page.getByLabel("Recent changes")
-  await expect(recent.getByText("failing its health check")).toBeVisible()
+  await expect(recent.getByRole("button", { name: "Open monitoring-uptime-kuma" })).toBeVisible()
   mocks.emit({
     time: new Date().toISOString(),
     type: "container",
@@ -129,7 +171,9 @@ test("an event that lands while the page is open joins Recent", async ({ page })
     level: "notice",
     source: "compose",
   })
-  const line = recent.getByRole("button", { name: "Open monitoring-grafana" })
+  const mark = recent.getByRole("button", { name: "Open monitoring-grafana" })
+  await mark.hover()
+  const line = recent.locator("[data-slot=reading-line]")
   await expect(line).toContainText("restarted")
   await expect(line).toContainText("just now")
 })
