@@ -47,7 +47,6 @@ import { FileTree, type ConfirmRequest as TreeConfirmRequest } from "@/component
 import { SourceBranch, SourceCommit, SourceFork, SourcePull } from "@/components/git/glyphs"
 import { branchLabel, CommitAuthors } from "@/components/git/marks"
 import { AheadBehind } from "@/components/git/ahead-behind"
-import { GitHelp } from "@/components/git/help"
 import { ChangesPanel } from "@/components/git/changes-panel"
 import { HistoryPanel } from "@/components/git/history-panel"
 import { BranchesPanel } from "@/components/git/branches-panel"
@@ -853,7 +852,6 @@ export function RepoWorkspace({
                   <span aria-hidden className="mx-0.5 hidden h-5 w-px bg-hairline @4xl:block" />
 
                   <GitHubAccountControl repoPath={repo.path} status={github} compact="fit" />
-                  <GitHelp compact />
                 </div>
               </div>
             </PaneHeader>
