@@ -6,10 +6,11 @@ import { plural, relativeTime, timestamp } from "@/lib/format"
 import type { RequestAudience, RequestFacet, RequestSummary, RequestVisitor } from "@/lib/types"
 import { agentProduct, networkOf, parseAgent, refererProduct, systemProduct } from "@/lib/clients"
 import { hueFor, LANES } from "@/lib/hue"
-import { BarList } from "@/components/bar-list"
 import { BadgedLogo, NETWORK_GLYPH } from "@/components/client-mark"
+import { Meter } from "@/components/meter"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { ProductGlyph } from "@/components/product-logo"
+import { RankList, SplitBar, percent } from "@/components/rank-list"
 import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { Address, RequestPath } from "@/components/deploy/request-marks"
@@ -58,6 +59,7 @@ export function AudienceReadings({
   const devices = audience.devices ?? []
   const people = devices.reduce((n, d) => n + d.count, 0)
   const lead = devices[0]
+  const direct = Math.max(summary.total - summary.referers.reduce((n, r) => n + r.count, 0), 0)
   return (
     <StatGrid columns={5} dense className="shrink-0 border-b border-hairline">
       <StatTile
@@ -65,11 +67,13 @@ export function AudienceReadings({
         value={<NumberTicker value={audience.visitors} />}
         trailing={audience.visitors === 1 ? "person" : "people"}
         trend={
-          <TileTrend
-            values={buckets.map((b) => b.visitors ?? 0)}
-            label="People across the window"
-            color="var(--tag-green)"
-          />
+          <Band>
+            <Trend
+              values={buckets.map((b) => b.visitors ?? 0)}
+              label="People across the window"
+              color="var(--tag-green)"
+            />
+          </Band>
         }
         hint={audience.visitors === 0 ? "nobody opened a page" : "browsers that opened a page"}
       />
@@ -78,26 +82,31 @@ export function AudienceReadings({
           label="Page views"
           value={<NumberTicker value={summary.pages} />}
           trend={
-            <TileTrend
-              values={buckets.map((b) => b.total)}
-              label="Requests across the window"
-              color="var(--chart-1)"
-            />
+            <Band>
+              <Trend
+                values={buckets.map((b) => b.total)}
+                label="Requests across the window"
+                color="var(--chart-1)"
+              />
+            </Band>
           }
           hint={
             perVisitor > 0
               ? `${perVisitor.toFixed(1)} per visitor · of ${plural(summary.total, "request")}`
               : `of ${plural(summary.total, "request")}`
           }
-          className="group-hover:bg-row-hover"
+          className="h-full group-hover:bg-row-hover"
         />
       </StatButton>
       <StatTile
         label="Bots and scripts"
         value={<NumberTicker value={audience.bots} />}
         trailing={audience.bots === 1 ? "address" : "addresses"}
-        meter={botShare > 0 ? botShare * 100 : undefined}
-        meterLabel="Share of requests from bots"
+        trend={
+          <Band center>
+            <Meter value={botShare * 100} size="thin" label="Share of requests from bots" />
+          </Band>
+        }
         hint={
           audience.botRequests > 0
             ? `${Math.round(botShare * 100)}% of the requests`
@@ -108,7 +117,7 @@ export function AudienceReadings({
         label="Came from"
         value={
           source ? (
-            <span className="flex min-w-0 items-center gap-2">
+            <span className="flex h-7.5 min-w-0 items-center gap-2">
               {site ? (
                 <ProductGlyph id={site} className="size-5" />
               ) : (
@@ -119,6 +128,25 @@ export function AudienceReadings({
           ) : (
             "Direct"
           )
+        }
+        trend={
+          <Band center>
+            <SplitBar
+              parts={[
+                ...summary.referers.map((r) => ({
+                  key: r.value,
+                  count: r.count,
+                  color: hueFor(r.value, LANES),
+                })),
+                { key: "direct", count: direct, color: "var(--tag-slate)" },
+              ]}
+              label={
+                source
+                  ? `${source.value} and ${summary.referers.length - 1} more, against direct visits`
+                  : "Every request came direct"
+              }
+            />
+          </Band>
         }
         hint={
           source
@@ -140,7 +168,20 @@ export function AudienceReadings({
         trailing={
           lead ? (DEVICE[lead.value as DeviceKind]?.label ?? lead.value).toLowerCase() : undefined
         }
-        trend={people > 0 ? <DeviceSplit devices={devices} people={people} /> : undefined}
+        trend={
+          <Band center>
+            <SplitBar
+              parts={devices.map((d) => ({
+                key: d.value,
+                count: d.count,
+                color: DEVICE[d.value as DeviceKind]?.color ?? "var(--tag-slate)",
+              }))}
+              label={devices
+                .map((d) => `${Math.round((d.count / Math.max(people, 1)) * 100)}% ${d.value}`)
+                .join(", ")}
+            />
+          </Band>
+        }
         hint={
           devices.length > 1
             ? devices
@@ -159,30 +200,23 @@ export function AudienceReadings({
   )
 }
 
-/** The devices as one bar in their colours, desktop, phone and tablet side by side. */
-function DeviceSplit({ devices, people }: { devices: RequestFacet[]; people: number }) {
+/**
+ * Each tile's picture, on the one line all five keep for it. Two tiles had
+ * none and a third a thin meter tight under its figure, so their lines stopped
+ * being a row and they ended on a band of nothing. The line stays when a
+ * trend has nothing to draw, for the same reason.
+ */
+function Band({ center, children }: { center?: boolean; children: React.ReactNode }) {
   return (
-    <span
-      role="img"
-      aria-label={devices
-        .map((d) => `${Math.round((d.count / people) * 100)}% ${d.value}`)
-        .join(", ")}
-      className="flex h-full items-center"
-    >
-      <span className="flex h-2 w-full gap-0.5 overflow-hidden rounded-full">
-        {devices.map((d) => (
-          <span
-            key={d.value}
-            className="h-full transition-[width] duration-500 ease-out first:rounded-l-full last:rounded-r-full"
-            style={{
-              width: `${(d.count / people) * 100}%`,
-              backgroundColor: DEVICE[d.value as DeviceKind]?.color ?? "var(--tag-slate)",
-            }}
-          />
-        ))}
-      </span>
-    </span>
+    <div className={cn("h-full min-w-0", center && "flex items-center [&>*]:w-full")}>
+      {children}
+    </div>
   )
+}
+
+/** A trend on its own peak, so a flat window still draws its line rather than a hole. */
+function Trend({ values, label, color }: { values: number[]; label: string; color: string }) {
+  return <TileTrend values={values} label={label} color={color} max={Math.max(...values, 1)} />
 }
 
 /**
@@ -309,23 +343,33 @@ function Breakdown({
   item: (facet: RequestFacet) => { mark: React.ReactNode; label: string; color?: string }
 }) {
   const total = facets.reduce((n, f) => n + f.count, 0)
+  const rows = facets.slice(0, 5).map((f) => ({ facet: f, drawn: item(f) }))
   return (
     <div className="min-w-0">
-      <p className="mb-1 text-hint text-muted-foreground">{title}</p>
-      <BarList
-        items={facets.slice(0, 5).map((f) => {
-          const drawn = item(f)
-          return {
-            key: f.value,
-            mark: drawn.mark,
-            mono: false,
-            label: drawn.label,
-            color: drawn.color,
-            value: total ? `${Math.round((f.count / total) * 100)}%` : f.count.toLocaleString(),
-            share: total ? f.count / Math.max(...facets.map((x) => x.count), 1) : 0,
-            hint: plural(f.count, "person", "people"),
-          }
-        })}
+      <p className="mb-2 text-hint text-muted-foreground">{title}</p>
+      {rows.length > 0 && (
+        <SplitBar
+          className="mb-1.5"
+          parts={rows.map(({ facet, drawn }) => ({
+            key: facet.value,
+            count: facet.count,
+            color: drawn.color ?? "var(--tag-slate)",
+          }))}
+          label={rows
+            .map(({ facet, drawn }) => `${percent(facet.count / total)} ${drawn.label}`)
+            .join(", ")}
+        />
+      )}
+      <RankList
+        items={rows.map(({ facet, drawn }) => ({
+          key: facet.value,
+          swatch: drawn.color ?? "var(--tag-slate)",
+          mark: drawn.mark,
+          mono: false,
+          label: drawn.label,
+          value: total ? percent(facet.count / total) : facet.count.toLocaleString(),
+          hint: plural(facet.count, "person", "people"),
+        }))}
         emptyLabel="Not recorded."
       />
     </div>

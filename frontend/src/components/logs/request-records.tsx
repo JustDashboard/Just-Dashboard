@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { cn } from "@/lib/utils"
 import { get } from "@/lib/api"
-import { dockerSource, stackSource } from "@/lib/log-sources"
+import { dockerSource } from "@/lib/log-sources"
 import type {
   DeploymentFleet,
   DeploymentRelease,
@@ -22,13 +22,12 @@ import { tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import type { ChartMarker } from "@/components/deploy/request-chart"
 import { RequestLines } from "@/components/deploy/request-lines"
-import { OutputInsights } from "@/components/deploy/output-insights"
 import {
   RequestsWorkspace,
   type RequestQuery,
   type RequestsView,
 } from "@/components/deploy/requests-workspace"
-import { containerAt, liveStack, orderedServices, type Lead } from "@/components/deploy/logs-model"
+import { containerAt, type Lead } from "@/components/deploy/logs-model"
 import type { ProjectDetail } from "@/components/deploy/project-context"
 import { serviceProduct } from "@/components/deploy/service-product"
 import { ProjectMark } from "@/components/deploy/project-mark"
@@ -306,15 +305,6 @@ function DeploymentRecord({ record, view, query, onQueryChange, openLog }: Recor
     runtime?.status === "available" && Array.isArray(releases.data)
       ? containerAt(services, releases.data, Date.parse(entry.time), lead)
       : undefined
-  const stack = liveStack(services)
-  const live = orderedServices(
-    services.filter((s) => s.liveRelease),
-    lead,
-  )[0]
-  const containerOf = (short: string | undefined) =>
-    short
-      ? services.find((s) => s.containerId.startsWith(short) || short.startsWith(s.containerId))
-      : undefined
   const openOutput = (container: DeploymentRuntimeService, at: string) =>
     openLog(dockerSource(container.containerId), around(at))
 
@@ -336,18 +326,6 @@ function DeploymentRecord({ record, view, query, onQueryChange, openLog }: Recor
       renderInline={(entry, window) => (
         <RequestLines entry={entry} window={window} answering={answering(entry)} />
       )}
-      afterInsights={
-        live
-          ? (window) => (
-              <OutputInsights
-                sourceId={stack ? stackSource(stack) : dockerSource(live.containerId)}
-                label={stack ? "the live release's services" : live.name}
-                window={window}
-                onOpen={(at, container) => openOutput(containerOf(container) ?? live, at)}
-              />
-            )
-          : undefined
-      }
     />
   )
 }

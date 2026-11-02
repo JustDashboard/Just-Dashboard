@@ -968,7 +968,7 @@ question's fields and levels; pressing it again lets them go. A lens whose defau
 moves to a source in another lens, unless the reader changed them. `insights.tsx` is **Insights**, any lens's version of the request log's: one overview search
 (`facets`, the measure, `histogramBy=event`) and one per group, in parallel, over the window and the
 filter on screen, drawn as the events over time, a `BarList` per key (a press narrows and stays),
-the measure's ladder where it is milliseconds, each group as a ranked table and the log's patterns last.
+the measure's figures where it is milliseconds, each group as a ranked table and the log's patterns last.
 `lens-readings.tsx` is the readings: those on one key share a search, those on levels another, and a
 distinct count asks on its own (`lib/log-insights.ts`), read again each minute over the lens's window
 and independent of the filter on screen and of the view, so they hold still while the reader moves
@@ -980,7 +980,7 @@ the window — counted by level, or by the events the lens marks in that tone wh
 event), the busiest minute, and the measure's p95 where the lens has one, or else how many distinct
 addresses the lens's first address key saw. A section that draws no metric cards — a database's Logs —
 passes `insightTiles={false}` through `ServiceLogs`, and its Insights opens on the chart: the level chips,
-the chart's busiest column and the measure's ladder already say what those tiles said. A
+the chart's busiest column and the measure's figures already say what those tiles said. A
 page with a `StatGrid` of its own takes the tiles from `useLensReadings` (`only` names the ones it
 draws, and the rest are not searched for) and hands them to the pane (`answeredBy`).
 
