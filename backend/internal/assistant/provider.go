@@ -102,9 +102,12 @@ type Client interface {
 	// answer, without asking the model anything.
 	Probe(ctx context.Context) error
 	// Tools says whether the conversation may offer tools. An
-	// OpenAI-compatible server is asked none: plenty of local models refuse
-	// a request that carries them.
+	// OpenAI-compatible server is offered them only when its setup says it
+	// takes them: plenty of local models refuse a request that carries them.
 	Tools() bool
+	// Models lists what this provider can answer with, for a person to choose
+	// from. It asks no model anything.
+	Models(ctx context.Context) ([]Model, error)
 }
 
 // Options are what a client is built with besides the settings.
@@ -130,7 +133,7 @@ func New(s Settings, opts Options) (Client, error) {
 		}
 		return &anthropicClient{http: opts.HTTP, base: strings.TrimRight(base, "/"), key: s.Key, model: s.Model}, nil
 	case ProviderOpenAI:
-		return &openAIClient{http: opts.HTTP, base: strings.TrimRight(s.BaseURL, "/"), key: s.Key, model: s.Model}, nil
+		return &openAIClient{http: opts.HTTP, base: strings.TrimRight(s.BaseURL, "/"), key: s.Key, model: s.Model, tools: s.ToolCalls}, nil
 	}
 	return nil, fmt.Errorf("unknown provider %q", s.Provider)
 }

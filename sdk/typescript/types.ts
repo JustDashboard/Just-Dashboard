@@ -3176,6 +3176,7 @@ export interface OperationsSummary {
 export interface OperatorRequest {
   conversation?: string
   decisions?: Record<string, boolean> | null
+  mode?: string
   question?: string
 }
 

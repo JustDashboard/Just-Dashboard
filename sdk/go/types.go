@@ -3146,6 +3146,7 @@ type OperationsSummary struct {
 type OperatorRequest struct {
 	Conversation string          `json:"conversation,omitempty"`
 	Decisions    map[string]bool `json:"decisions"`
+	Mode         string          `json:"mode,omitempty"`
 	Question     string          `json:"question,omitempty"`
 }
 

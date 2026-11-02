@@ -395,7 +395,9 @@ func (s *Server) deploymentDraftForPrincipal(r *http.Request) (*deploy.Draft, er
 		return nil, mapDeploymentPlanningError(err)
 	}
 	principal := httpx.MustPrincipal(r)
-	if principal.DeployKey() {
+	// The assistant works on the draft of the person it acts for, which the
+	// page they are on made: their drafts are its, not a key's own.
+	if principal.DeployKey() && !principal.Assistant {
 		if err := deploy.AuthorizeDraftForKey(draft, principal.KeyID()); err != nil {
 			return nil, httpx.Err(http.StatusForbidden, "draft_forbidden",
 				"this deployment draft is not this deploy key's: a key reaches the drafts it made and no other")

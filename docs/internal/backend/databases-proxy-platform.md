@@ -1103,20 +1103,18 @@ and what a plan does, and on PostgreSQL drafts row-level security policies. It i
 administrator chooses who answers it, and what it is sent and what it may do are decided here, not by
 the page.
 
-- **The provider is the operator's own.** `PUT /databases/assistant` (`system.admin`) takes
-  Anthropic — a Claude model from a closed list (`assistant.AnthropicModels`, Claude Opus 5.5 by
-  default) and an API key — or any server that speaks OpenAI's chat completions: OpenAI, a gateway,
-  or a model on this machine (Ollama, LM Studio, vLLM, llama.cpp), by its address, a model name and a
-  key if it asks for one. The address is HTTPS unless it is loopback, a private range or the
-  tailnet's `100.64.0.0/10`, and one with no path is given `/v1`. Nothing is saved until the
-  provider has said that the key, the address and the model answer, asked without asking the model
-  anything — Anthropic's `GET /v1/models/{model}`, the server's own `GET /models` with the model
-  looked for on it (a server that answers that path 404 or 405 lists nothing, and its first question
-  says whether the model is there) — so a mistyped key is refused under its field. The settings are one row of
-  `settings` (`databases.assistant`), sealed whole with `JD_MASTER_KEY`; the key is never read back,
-  and a blank key keeps the stored one only for the same provider at the same address, so a key is
-  never sent to a server typed in after it. `GET /databases/assistant` (any role) answers the
-  provider, the model, the address, whether a key is set and the model list; `DELETE` forgets it all.
+- **The provider is the operator's own, set up once for every page.** It is chosen on `/assistant`, among
+  Anthropic — a Claude model from a closed list (`assistant.AnthropicModels`) and an API key — hosted providers
+  that speak OpenAI's chat completions, or a model on this machine (Ollama, LM Studio, vLLM, llama.cpp), by its
+  address, a model name and a key if it asks for one. Several may be saved, one active; see
+  [the assistant's providers](../deployments/operator.md#providers), which also covers its routes and the keyring.
+  `GET`, `PUT` and `DELETE /databases/assistant` still answer on the same keyring. The address is HTTPS unless it
+  is loopback, a private range or the tailnet's `100.64.0.0/10`, and one with no path is given `/v1`. Nothing is
+  saved until the provider has said that the key, the address and the model answer, asked without asking the model
+  anything — Anthropic's `GET /v1/models/{model}`, the server's own `GET /models` with the model looked for on it
+  (a server that answers that path 404 or 405 lists nothing, and its first question says whether the model is
+  there) — so a mistyped key is refused under its field. The key is never read back, and a blank key keeps the
+  stored one only for the same provider at the same address, so a key is never sent to a server typed in after it.
   No provider request follows a redirect, because the key travels in a header.
 - **What is sent is the structure.** A conversation begins by reading the schema in focus through the
   catalogue the schema pages use (`assistant.ReadSchema`: `ListTables`, `BuildSchemaGraphWithLimit`

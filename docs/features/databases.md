@@ -17,7 +17,7 @@ A control center for every database on the server, even the ones nothing has con
 ## Working in the data
 
 - Table editor with staged, reviewed edits and a SQL editor with plans and stored programs (DELIMITER, GO and PL/SQL scripts)
-- An optional SQL assistant on your own Anthropic key or local model, told the schema and never the rows
+- An optional SQL assistant on your own key (Anthropic, OpenAI, Gemini, OpenRouter and others) or local model, set up once for the whole dashboard, told the schema and never the rows
 - Schema browser, diagram, code generation, mock seed data written parents first, performance
 
 <table>

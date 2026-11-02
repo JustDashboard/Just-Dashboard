@@ -43,6 +43,7 @@ import {
   ShieldCheck,
   ShieldOff,
   SignIn,
+  Sparkles,
   Terminal,
   TerminalWindow,
   ServerMap,
@@ -229,6 +230,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
   {
     label: "Workspace",
     items: [
+      { title: "Assistant", href: "/assistant", icon: Sparkles },
       { title: "Excalidraw", href: "/excalidraw", icon: ExcalidrawGlyph },
       { title: "Terminal", href: "/terminal", icon: Terminal, capability: "terminal" },
       { title: "Files", href: "/files", icon: FolderOpen },
@@ -443,6 +445,7 @@ export type ProjectNavEntry = {
 
 export const PROJECT_NAV: ProjectNavEntry[] = [
   { title: "Overview", path: "", icon: GridSquare },
+  { title: "Assistant", path: "/assistant", icon: Sparkles },
   { title: "Deployments", path: "/deployments", icon: Layers },
   { title: "Logs", path: "/logs", icon: Logs },
   { title: "Runtime", path: "/runtime", icon: Servers },

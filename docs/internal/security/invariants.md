@@ -322,14 +322,20 @@ A change that weakens any of these has to say so explicitly.
     changing the scope and unlinking are session-only in the browser (an API key is refused) and root-only at
     the terminal, the heartbeat is a fixed field set that names nothing on the machine below `operate`, and
     the installer never handles a link credential. See [account link](../backend/account-link.md).
-13. The deployment operator reads only with the person's leave and runs nothing itself. Its reads are a
-    closed set of tools held to their own fields and bounds (`assistant.OperatorCalls`; a call to
-    anything else refuses the whole answer), each run only after the person allows that call, with the
-    person's own role and masked by the run diagnosis's masker. Its actions are proposals: the server
-    checks one and the page draws a card, and only the person's press runs it — as the request the
-    project's own button makes to that action's existing route, under that route's capability,
-    confirmation and audit. There is no shell, no command the model writes and no other path from an
-    answer to the host, and the route is a session's. See [the deployment operator](../deployments/operator.md).
+13. The dashboard's assistant is a person's, at the dashboard, and acts as them and no further. Its route is
+    a session's. What it does is a closed set of tools (`assistant.AgentCalls`; a call to anything else refuses
+    the whole answer) over a closed list of the dashboard's own routes, read off the router
+    (`api/handlers_assistant_catalogue.go`), each made through the router under the person's user and role, so
+    that route's capability check, audit entry and rate limit apply. It is held to every rule a deploy key is
+    (`agentDelegate`, `Principal.Assistant`): variables write-only, no reach past a deployment's own container to
+    the host, no saved credential sent somewhere new, narrowed to the deployment the conversation is about. A
+    secret's value, saved credentials, secret stores, the routes that take a typed confirmation, what speaks as
+    the dashboard on GitHub and a new deployment's commit are not reachable in any mode. Every string it reads is
+    masked before it is sent. How much runs without asking is the mode, which the server holds on every press and
+    which defaults to asking before any change; **Full access is a person choosing to let a change run unseen**,
+    and text the model reads can try to talk it into one, so that default must not move. There is no shell, no
+    command the model writes and no other path from an answer to the host. See
+    [the deployment assistant](../deployments/operator.md).
 
 14. A vulnerability scanner reads an image; it never reaches the host. `imagescan.ScanSpec` runs Trivy
     with **no network** (`NetworkMode: none`), no capabilities, a read-only root, no new privileges and

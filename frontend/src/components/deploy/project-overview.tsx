@@ -53,7 +53,6 @@ import { RightSizeCard } from "@/components/deploy/right-size"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch"
 import { SleepPanel, useSleep } from "@/components/deploy/sleep-panel"
-import { OperatorSheet } from "@/components/deploy/operator/operator-sheet"
 import { Vulnerabilities } from "@/components/deploy/vulnerabilities"
 
 /**
@@ -92,7 +91,6 @@ export function ProjectOverview() {
   const { can } = useAuth()
   const { deployment, project: record, runtime } = project.detail
   const [rollbackOpen, setRollbackOpen] = useState(false)
-  const [diagnosing, setDiagnosing] = useState(false)
   // The operator asks the install's model and proposes actions a person
   // presses, so it is offered to whoever may control the deployment.
   const canDiagnose = project.normalized && !project.archived && can("service.control")
@@ -220,9 +218,11 @@ export function ProjectOverview() {
               </Button>
             )}
             {canDiagnose && (
-              <Button variant="outline" size="sm" onClick={() => setDiagnosing(true)}>
-                <Sparkles />
-                Diagnose
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/deploy/${project.projectId}/assistant?ask=diagnose`}>
+                  <Sparkles />
+                  Diagnose
+                </Link>
               </Button>
             )}
           </>
@@ -464,18 +464,6 @@ export function ProjectOverview() {
         runs={project.runs}
         domains={domainHostnames}
       />
-      {canDiagnose && (
-        <OperatorSheet
-          open={diagnosing}
-          onOpenChange={setDiagnosing}
-          projectId={project.projectId}
-          environmentId={project.environmentId}
-          environment={project.environmentQuery?.environment}
-          environmentName={deployment.environmentName}
-          deploymentName={record.name}
-          onChanged={project.refresh}
-        />
-      )}
       <Confetti ref={celebrate} className="pointer-events-none fixed inset-0 z-50 size-full" />
       {pulls.dialogs}
     </div>

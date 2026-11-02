@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Check } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
+import { cn } from "@/lib/utils"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type {
   DeploymentDraft,
@@ -33,6 +34,12 @@ import {
   variablesWithoutScope,
 } from "@/components/deploy/deployment-defaults"
 import { PlanRail } from "@/components/deploy/new-project/plan-rail"
+import {
+  SetupAssistant,
+  SetupAssistantOffer,
+  draftScope,
+} from "@/components/deploy/new-project/setup-assistant"
+import { agentBusy, useAgentSession } from "@/components/assistant/agent/sessions"
 import { planGroups, type PlanRow } from "@/components/deploy/new-project/plan-reading"
 import { StepProject } from "@/components/deploy/new-project/step-project"
 import { StepRuntime } from "@/components/deploy/new-project/step-runtime"
@@ -114,6 +121,8 @@ export function Configure({
   initialAdvanced,
   step,
   onStepChange,
+  assist,
+  onAssistChange,
 }: {
   flow: ConfigureFlow
   // Accepts the functional updater form too: the two calls in `submit` below
@@ -128,6 +137,9 @@ export function Configure({
   initialAdvanced: boolean
   step: ConfigureStepKey
   onStepChange: (step: ConfigureStepKey) => void
+  /** The assistant is setting this up, beside the form. */
+  assist: boolean
+  onAssistChange: (assist: boolean) => void
 }) {
   const router = useRouter()
   const [nameTouched, setNameTouched] = useState(false)
@@ -883,6 +895,33 @@ export function Configure({
     automatic: isGitSource ? gitPolicy.automatic : undefined,
   })
   const openRow = (row: PlanRow) => (row.section ? openSection(row.section) : goto(row.step))
+  // While it works the page's revision is behind the server's, so what commits the
+  // plan waits for it to finish.
+  const assistantSession = useAgentSession(draftScope(flow))
+  const assistantWorking = agentBusy(assistantSession)
+  // It starts from what the person sees, so what the page holds is saved first. A
+  // plan that does not save yet is no reason to refuse: it reads the detection.
+  const prepareAssistant = useCallback(async () => {
+    try {
+      let working = flow.draft
+      if (
+        working.data.intent?.name !== flow.name ||
+        working.data.intent?.profile !== flow.profile
+      ) {
+        working = await saveIntent(working, { name: flow.name, profile: flow.profile })
+      }
+      const saved = await saveConfiguration(
+        working,
+        configurationForSave(flow.configuration, flow.source),
+        text,
+        retainedKeys,
+      )
+      onFlowChange((current) => (current ? { ...current, draft: saved } : current))
+    } catch {
+      // Told to the assistant by what it reads; the form keeps what was typed.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flow.draft.id])
   /* The plan read down, beside the fields from `xl` and after them below it:
      stacked on a phone, the drawing came first and the question's first field
      started two-thirds of the way down every step — the same summary scrolled
@@ -894,6 +933,7 @@ export function Configure({
       data-slot="plan-rail-column"
       className="min-w-0 xl:col-start-1 xl:row-start-1 xl:min-h-0 xl:overflow-y-auto"
     >
+      {!created && <SetupAssistantOffer onClick={() => onAssistChange(true)} />}
       <PlanRail flow={flow} groups={groups} current={current} onOpen={openRow} />
     </aside>
   )
@@ -947,7 +987,7 @@ export function Configure({
        overview. It is also how a four-step sequence stays one thing: the rail
        does not change when the step does, and each of its rows goes to the
        step that decides it. */
-    <div className={LAYOUT}>
+    <div className={cn(LAYOUT, assist && "xl:grid-cols-[28rem_minmax(0,1fr)]")}>
       {/* Disabled while a submit is in flight: inputs left editable during the
           async save/preflight round trip could be typed into and then
           silently reverted once the response handler lands (§14). */}
@@ -1075,7 +1115,7 @@ export function Configure({
                 className="h-11 sm:h-9"
                 onClick={() => void submit("deploy")}
                 pending={busy === "deploy"}
-                disabled={Boolean(busy)}
+                disabled={Boolean(busy) || assistantWorking}
               >
                 <ArrowRight className="size-4" />
                 {blockers.length
@@ -1093,8 +1133,17 @@ export function Configure({
           </FlowActions>
         </FlowPanel>
 
-        {rail}
+        {!assist && rail}
       </fieldset>
+      {assist && (
+        <SetupAssistant
+          flow={flow}
+          onFlowChange={onFlowChange}
+          onClose={() => onAssistChange(false)}
+          onPrepare={prepareAssistant}
+          onReview={() => goto("review")}
+        />
+      )}
     </div>
   )
 }

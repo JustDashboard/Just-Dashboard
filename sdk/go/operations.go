@@ -1238,12 +1238,12 @@ type DeploymentOperatorParams struct {
 	Environment int64
 }
 
-// DeploymentOperator is POST /deploy/{id}/assistant: ask the deployment operator about an
-// environment, or answer the reads it asked for.
+// DeploymentOperator is POST /deploy/{id}/assistant: ask the deployment's assistant anything about
+// an environment, or answer the calls it is waiting on.
 //
-// A session's route. The answer streams one JSON object a line: start, thinking, text, ran (what
-// each allowed read read), proposal (an action whose card the person may press; nothing has run),
-// done (with the reads waiting for a decision) or error.
+// A session's route. The answer streams one JSON object a line: start, thinking, text, call (a
+// tool call as it starts), called (what became of it, and the shortcut to what it changed), link
+// (a shortcut the assistant offers), done (with the calls waiting for a decision) or error.
 //
 // Only an interactive session may call it; no key reaches it. The answer is application/x-ndjson,
 // returned as it came.
@@ -2360,6 +2360,17 @@ func (c *Client) DeploymentWatchPathSimulate(ctx context.Context, id int64, env 
 		return nil, err
 	}
 	return &out, nil
+}
+
+// DraftOperator is POST /deploy/drafts/{draft}/assistant: ask the assistant to configure a draft:
+// what it saves runs nothing until a person commits it.
+//
+// A session's route. It streams the lines POST /deploy/{id}/assistant does.
+//
+// Only an interactive session may call it; no key reaches it. The answer is application/x-ndjson,
+// returned as it came.
+func (c *Client) DraftOperator(ctx context.Context, draft string, body OperatorRequest, opts ...RequestOption) ([]byte, error) {
+	return c.raw(ctx, "POST", "/deploy/drafts/"+url.PathEscape(draft)+"/assistant", nil, body, "application/x-ndjson", opts)
 }
 
 // GameConsole is POST /deploy/{id}/game/console: send a console command to a game server.

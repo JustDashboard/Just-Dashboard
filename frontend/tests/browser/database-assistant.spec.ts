@@ -45,6 +45,27 @@ const LOCAL = {
   models: MODELS,
 }
 
+const PRESETS = [
+  {
+    id: "anthropic",
+    label: "Anthropic",
+    detail: "Claude, with your API key",
+    product: "claude",
+    provider: "anthropic",
+    keyRequired: true,
+  },
+  {
+    id: "ollama",
+    label: "Ollama",
+    detail: "A model running on this machine",
+    product: "ollama",
+    provider: "openai",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    local: true,
+    keyRequired: false,
+  },
+]
+
 const TABLES: Record<string, string[]> = {
   customers: ["id", "email", "tier", "created_at"],
   orders: ["id", "customer_id", "status", "total_cents", "created_at"],
@@ -89,7 +110,7 @@ type Answer =
 type AssistantMock = DatabaseMock & {
   settings?: object
   answers?: Answer[]
-  /** What `PUT /databases/assistant` answers, in order; then success. */
+  /** What `PUT /assistant/providers/{preset}` answers, in order; then success. */
   refusals?: { field: string; message: string }[]
 }
 
@@ -109,10 +130,37 @@ async function mockAssistant(page: Page, options: AssistantMock = {}) {
   const answers = [...(options.answers ?? [])]
   const refusals = [...(options.refusals ?? [])]
 
-  await page.route("**/api/v1/databases/assistant", async (route) => {
+  const view = () => {
+    const current = settings as { preset?: string; configured?: boolean } & Record<string, unknown>
+    const preset = current.configured ? (current.baseUrl ? "ollama" : "anthropic") : undefined
+    return {
+      ...current,
+      preset,
+      tools: current.configured === true,
+      presets: PRESETS,
+      profiles: preset
+        ? [
+            {
+              preset,
+              provider: current.provider,
+              model: current.model,
+              modelLabel: current.modelLabel,
+              baseUrl: current.baseUrl,
+              keySet: current.keySet,
+              toolCalls: true,
+              active: true,
+            },
+          ]
+        : [],
+    }
+  }
+  await page.route("**/api/v1/assistant", (route) => json(route, view()))
+  await page.route("**/api/v1/assistant/models", (route) => json(route, { models: [] }))
+  await page.route("**/api/v1/assistant/providers/*", async (route) => {
     const request = route.request()
+    const preset = new URL(request.url()).pathname.split("/").at(-1)
     if (request.method() === "PUT") {
-      const body = request.postDataJSON() as Record<string, unknown>
+      const body: Record<string, unknown> = { preset, ...request.postDataJSON() }
       sent.setups.push(body)
       const refusal = refusals.shift()
       if (refusal) {
@@ -129,17 +177,17 @@ async function mockAssistant(page: Page, options: AssistantMock = {}) {
         )
       }
       settings =
-        body.provider === "openai"
+        preset !== "anthropic"
           ? { ...LOCAL, model: body.model, modelLabel: body.model, baseUrl: body.baseUrl }
           : { ...ON, model: body.model, modelLabel: MODELS.find((m) => m.id === body.model)?.label }
-      return json(route, settings)
+      return json(route, view())
     }
     if (request.method() === "DELETE") {
       sent.removed++
       settings = OFF
-      return json(route, settings)
+      return json(route, view())
     }
-    return json(route, settings)
+    return json(route, view())
   })
 
   await page.route(/\/api\/v1\/databases\/1\/.+/, async (route) => {
@@ -350,10 +398,11 @@ test("the assistant is off until an administrator sets a provider up", async ({ 
   await sheet.getByRole("button", { name: "Save" }).click()
   await expect(sheet).toBeHidden()
   expect(sent.setups.at(-1)).toEqual({
-    provider: "anthropic",
+    preset: "anthropic",
     model: "claude-sonnet-5-5",
     baseUrl: "",
     key: "sk-ant-api03-right",
+    activate: true,
   })
   await expect(pane(page)).toContainText("Claude Sonnet 5.5")
   await expect(question(page)).toBeVisible()
@@ -367,30 +416,32 @@ test("a server on this machine is set up by its address and model", async ({ pag
   await openAssistant(page)
   await pane(page).getByRole("button", { name: "Set up the assistant" }).click()
   const sheet = page.getByRole("dialog", { name: "Set up the assistant" })
-  await sheet.getByRole("button", { name: /^OpenAI-compatible/ }).click()
+  await sheet.getByRole("button", { name: /^Ollama/ }).click()
   await sheet.getByLabel("Address", { exact: true }).fill("http://127.0.0.1:11434/v1")
   await sheet.getByLabel("Model", { exact: true }).fill("qwen2.5-coder:14b")
   await sheet.getByRole("button", { name: "Save" }).click()
   await expect(sheet).toBeHidden()
   expect(sent.setups.at(-1)).toEqual({
-    provider: "openai",
+    preset: "ollama",
     model: "qwen2.5-coder:14b",
     baseUrl: "http://127.0.0.1:11434/v1",
     key: "",
+    toolCalls: true,
+    activate: true,
   })
   await expect(pane(page)).not.toContainText("Sends 127.0.0.1:11434")
 })
 
-test("turning the assistant off asks first and forgets the provider", async ({ page }) => {
+test("removing the last provider asks first and turns the assistant off", async ({ page }) => {
   const sent = await mockAssistant(page, { settings: ON })
   await openEditor(page)
   await openAssistant(page)
   await pane(page).getByRole("button", { name: "Assistant settings" }).click()
   const sheet = page.getByRole("dialog", { name: "Assistant settings" })
-  await sheet.getByRole("button", { name: "Turn off the assistant" }).click()
-  const confirm = page.getByRole("dialog", { name: "Turn off the assistant" })
+  await sheet.getByRole("button", { name: "Remove Anthropic" }).click()
+  const confirm = page.getByRole("dialog", { name: "Remove Anthropic" })
   await expect(confirm).toContainText("Claude Opus 5.5")
-  await confirm.getByRole("button", { name: "Turn off" }).click()
+  await confirm.getByRole("button", { name: "Remove" }).click()
   await expect(pane(page)).toContainText("The assistant is off")
   expect(sent.removed).toBe(1)
 })

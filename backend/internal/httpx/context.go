@@ -37,7 +37,12 @@ type Principal struct {
 	// (WithMCPDelegate). AuthenticateFeatures sets it alone, after the deploy
 	// key table admitted the route, and from there the key is held to every
 	// rule a deploy key is (DeployKey).
-	ViaMCP    bool
+	ViaMCP bool
+	// Assistant is the dashboard's assistant acting for the person whose user and
+	// role these are, which handlers_assistant_turn.go dispatches through the router as an
+	// MCP key of no ID (WithMCPDelegate). It is held to every rule a deploy key is,
+	// and may reach the few further routes assistantRoutes opens to it.
+	Assistant bool
 	IP        string
 	UserAgent string
 	// Elevated is whether this credential has passed its second factor. It is

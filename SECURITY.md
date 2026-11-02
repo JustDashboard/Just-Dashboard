@@ -22,6 +22,11 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Destructive actions are confirmed and audited; deleting a project, database, stack, Git checkout or a
   host account's home, and uninstalling with a wipe, asks for a typed phrase checked on the server.
 - Every state-changing request lands in the audit log.
+- The assistant, when you set one up, sends your question and what it reads to the model you chose, with
+  secret values masked; it never reads a secret's value. It acts through the dashboard's own routes as
+  you, under your role, narrowed to one deployment and barred from what reaches the host. It asks before
+  any change unless you give it full access. Text it reads, such as a log line, can try to talk a model
+  into something, so leave that on for deployments where someone else's text can reach it.
 - The session cookie stays the dashboard's. It is `__Host-jd_session` — HttpOnly, SameSite=Strict,
   Secure and sent to no other name — and the previews and tailnet-only apps the dashboard publishes on
   its own tailnet name, or a deployment on the dashboard's own domain, are never sent it: browsers send

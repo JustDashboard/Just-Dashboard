@@ -17,6 +17,7 @@ import { SavedFolderColours } from "@/components/files/folder-colour"
 import { WorkspaceCommandsProvider } from "@/components/workspace/commands"
 import { NetworkChangeConfirmation } from "@/components/network/change-confirmation"
 import { HeldSessionsHost, HeldSessionsProvider } from "@/components/remote-desktop/held-sessions"
+import { AgentDock } from "@/components/assistant/agent/dock"
 
 /**
  * The page's name in the tab is what tells a row of dashboard tabs apart. This
@@ -104,6 +105,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                     <NetworkChangeConfirmation />
                     <SavedFolderColours>{children}</SavedFolderColours>
                     <HeldSessionsHost />
+                    {/* The way back to a conversation with the assistant, from
+                      whatever page a shortcut of its led to. */}
+                    <AgentDock />
                   </div>
                 </SidebarInset>
               </SidebarProvider>

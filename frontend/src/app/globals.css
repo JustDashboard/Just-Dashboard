@@ -1158,3 +1158,15 @@
 [data-slot="server-map"] .map-name {
   line-height: 1.3;
 }
+
+/*
+ * Where a shortcut from the assistant sent the reader: the section it named, lit for
+ * a moment by the same colour as the focus ring (the lit step is attention, §3). A
+ * transition on the outline, not a fifth animation (§11).
+ */
+[data-arrived="true"] {
+  outline: 2px solid var(--signal);
+  outline-offset: 8px;
+  border-radius: 0.5rem;
+  transition: outline-color 400ms ease;
+}
