@@ -161,11 +161,15 @@ API's description, `docs/api/deploy-openapi.json`.
 ## The pages
 
 - The project overview's **Vulnerabilities** panel (`deploy/vulnerabilities.tsx`, its words in
-  `vulnerabilities-model.ts`): the verdict in the header, one figure per severity with how many have a
-  fix, the rebuild's reason when the alert's condition holds (each moved base, pinned and current
-  digest), an end-of-life distribution called out, the fixable findings at the floor with their advisory
-  link and `installed → fixed`, what could not be read, and when the scan ran against how old a
-  database. **Rebuild** and **Scan now** are its verbs; the terms are a link away.
+  `vulnerabilities-model.ts`): the verdict in the header; a sentence on Trivy's mark with how many were
+  found, how many have a fix, and when the scan ran against how old a database; one bar of the
+  severities with its key; the bases on their own marks; the rebuild's reason when the alert's condition
+  holds (each moved base, pinned and current digest); an end-of-life distribution called out; the fixable
+  findings at the floor as one upgrade per package (`groupFindings`), on the mark of its distribution or
+  ecosystem, with the one version that fixes all of them and each advisory under it; and what could not be
+  read. Trivy lists every release line with a fix ("6.29.1, 7.30.1, 8.12.2"), so `nearestFix` takes the one
+  on the line installed, and `cleanTitle` drops the package it repeats in front of its titles.
+  **Rebuild** and **Scan now** are its verbs; the terms are a link away.
 - The deployments list marks a release whose scan found something at the floor — a shield and
   "2 fixable" or "3 unfixed", a `Status`, since it changes with the next scan — with the counts in its
   title.

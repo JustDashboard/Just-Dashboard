@@ -283,3 +283,49 @@ func seedAvailabilityEnvironment(t *testing.T, s *OrchestrationStore) (projectID
 	environmentID, _ = result.LastInsertId()
 	return projectID, environmentID
 }
+
+// The stretches are what the page draws its ribbon from: they have to add up to
+// the windows they sit beside, and time nobody was listening must not read as up.
+func TestAvailabilityDaysPlaceDowntimeAndLeaveTheUnrecordedEmpty(t *testing.T) {
+	spans := []LiveSpan{{ReleaseID: 1, ReleaseNumber: 1, From: availabilityNow.Add(-5 * 24 * time.Hour)}}
+	down := availabilityNow.Add(-36 * time.Hour)
+	events := []dockerx.Event{
+		lifecycle(down, "die", "a", "1"),
+		lifecycle(down.Add(10*time.Minute), "start", "a", "1"),
+	}
+	got := ComputeAvailability(availabilityNow, availabilityNow.Add(-3*24*time.Hour), spans, events)
+	if len(got.Days) != availabilityDayCount {
+		t.Fatalf("days = %d", len(got.Days))
+	}
+	last := got.Days[len(got.Days)-1]
+	if !last.From.Equal(availabilityNow.Add(-24*time.Hour)) || last.DownSeconds != 0 || last.ObservedSeconds != 86400 {
+		t.Fatalf("the last stretch is the 24h window, steady: %+v", last)
+	}
+	yesterday := got.Days[len(got.Days)-2]
+	if yesterday.DownSeconds != 600 || yesterday.Incidents != 1 {
+		t.Fatalf("the downtime lands on the stretch it happened in: %+v", yesterday)
+	}
+	// Live for five days, but the record only reaches three.
+	if before := got.Days[len(got.Days)-4]; before.ObservedSeconds != 0 {
+		t.Fatalf("a stretch before the record is unknown: %+v", before)
+	}
+	var total int64
+	for _, day := range got.Days {
+		total += day.DownSeconds
+	}
+	if _, week := ratioOf(t, got, "7d"); week.DownSeconds != total {
+		t.Fatalf("the stretches add up to the window: %d against %d", total, week.DownSeconds)
+	}
+}
+
+func TestAvailabilityDaysAreEmptyWithoutARecord(t *testing.T) {
+	got := ComputeAvailability(availabilityNow, time.Time{}, nil, nil)
+	if len(got.Days) != availabilityDayCount {
+		t.Fatalf("days = %d", len(got.Days))
+	}
+	for _, day := range got.Days {
+		if day.ObservedSeconds != 0 {
+			t.Fatalf("no record, nothing observed: %+v", day)
+		}
+	}
+}

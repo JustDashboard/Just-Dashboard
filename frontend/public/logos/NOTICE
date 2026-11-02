@@ -24,6 +24,9 @@ centos.svg had their darkest colour lifted to the same hue at the L 0.72 rung
 (#a80030 to #ff6a79, #294172 to #87a5dd, #0d597f to #6aadd7, #262577 to
 #8e9cf9) so they read on a dark ground.
 
+trivy.svg is Simple Icons' path (CC0) filled with Trivy's navy lifted to
+#7d8cff, the L 0.72 rung, as the dark marks above are.
+
 The marks for what a backup covers and where it goes, and for the programs a
 terminal runs, come from the same collection: git.svg, backblaze.svg,
 nodejs.svg, python.svg, vim.svg, neovim.svg, npm.svg, kubernetes.svg and

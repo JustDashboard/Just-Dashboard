@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
+  cleanTitle,
+  findingProduct,
+  groupFindings,
+  nearestFix,
+  scanLead,
   ageWords,
   atLeast,
   badgeOf,
@@ -174,5 +179,95 @@ describe("vulnerabilities", () => {
     expect(ageWords(undefined)).toBe("")
     expect(shortDigest("sha256:0123456789abcdef0123")).toBe("0123456789ab")
     expect(shortDigest(undefined)).toBe("")
+  })
+})
+
+describe("the findings as upgrades", () => {
+  const finding = (overrides) => ({
+    id: "CVE-1",
+    package: "undici",
+    installed: "6.28.0",
+    fixed: "6.29.1, 7.30.1, 8.12.2",
+    severity: "HIGH",
+    target: "Node.js",
+    class: "lang-pkgs",
+    ...overrides,
+  })
+
+  test("a title loses the package Trivy repeats in front of it", () => {
+    expect(cleanTitle("undici: undici: Denial of Service", "undici")).toBe("Denial of Service")
+    expect(cleanTitle("a flaw in zlib", "zlib")).toBe("A flaw in zlib")
+    expect(cleanTitle(undefined, "zlib")).toBeUndefined()
+    expect(cleanTitle("undici:", "undici")).toBeUndefined()
+  })
+
+  test("the fix is the one on the line already installed", () => {
+    expect(nearestFix("6.28.0", "6.29.1, 7.30.1, 8.12.2")).toBe("6.29.1")
+    expect(nearestFix("5.0.9", "5.0.10, 3.0.7, 2.1.5, 1.1.19")).toBe("5.0.10")
+    expect(nearestFix("2.0.0", "3.1.0, 4.0.1")).toBe("3.1.0")
+    expect(nearestFix("1.2.13-r0", "1.2.13-r1")).toBe("1.2.13-r1")
+    expect(nearestFix("1.0.0", undefined)).toBeUndefined()
+  })
+
+  test("one package is one upgrade, to the version that fixes all of it, worst first", () => {
+    const groups = groupFindings([
+      finding({
+        id: "CVE-MED",
+        package: "tar",
+        installed: "6.0.0",
+        fixed: "6.2.1",
+        severity: "MEDIUM",
+      }),
+      finding({ id: "CVE-A", fixed: "6.28.1, 7.29.1" }),
+      finding({ id: "CVE-B" }),
+      finding({ id: "CVE-C", severity: "CRITICAL", fromBase: true }),
+    ])
+    expect(groups.map((group) => group.package)).toEqual(["undici", "tar"])
+    const [undici] = groups
+    expect(undici.fix).toBe("6.29.1")
+    expect(undici.worst).toBe("CRITICAL")
+    expect(undici.fromBase).toBe(true)
+    expect(undici.counts).toMatchObject({ critical: 1, high: 2 })
+    expect(undici.findings.map((item) => item.id)).toEqual(["CVE-A", "CVE-B", "CVE-C"])
+  })
+
+  test("a version-major compare is numeric, not alphabetical", () => {
+    const [group] = groupFindings([
+      finding({ installed: "5.0.9", fixed: "5.0.9" }),
+      finding({ id: "CVE-2", installed: "5.0.9", fixed: "5.0.10" }),
+    ])
+    expect(group.fix).toBe("5.0.10")
+  })
+
+  test("the mark is the distribution or the ecosystem", () => {
+    expect(findingProduct({ class: "os-pkgs", target: "alpine 3.19.1" })).toBe("alpine")
+    expect(findingProduct({ class: "os-pkgs", target: "something 1" })).toBe("linux")
+    expect(findingProduct({ class: "lang-pkgs", target: "web · Node.js" })).toBe("npm")
+    expect(findingProduct({ class: "lang-pkgs", target: "app/go.mod" })).toBe("go")
+    expect(findingProduct({ class: "lang-pkgs", target: "app/requirements.txt" })).toBe("python")
+    expect(findingProduct({ class: "lang-pkgs", target: "app/unknown" })).toBeUndefined()
+  })
+
+  test("the sentence says how many and how many can be fixed", () => {
+    const scan = (counts, fixableCounts) => ({
+      releaseNumber: 19,
+      summary: { counts, fixableCounts, fixable: [], unfixed: [] },
+    })
+    const zero = { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 }
+    const some = { ...zero, high: 6, medium: 14, low: 1 }
+    expect(scanLead(scan(some, some))).toEqual({
+      title: "21 known vulnerabilities in release 19",
+      fix: "All 21 have a fix",
+    })
+    expect(scanLead(scan(some, { ...zero, high: 6 })).fix).toBe("6 of 21 have a fix")
+    expect(scanLead(scan(some, { ...zero, high: 1 })).fix).toBe("1 of 21 has a fix")
+    expect(scanLead(scan({ ...zero, low: 1 }, zero))).toEqual({
+      title: "1 known vulnerability in release 19",
+      fix: "None has a fix yet",
+    })
+    expect(scanLead(scan(zero, zero))).toEqual({
+      title: "No known vulnerabilities in release 19",
+      fix: undefined,
+    })
   })
 })

@@ -33,10 +33,13 @@ test("the overview says what the scan found and rebuilds the live commit on a ne
   await expect(panel.getByRole("heading", { name: "Vulnerabilities" })).toBeVisible()
   await expect(panel.getByText("2 fixable by a newer base")).toBeVisible()
   // One figure per severity, each with how many have a fix.
-  await expect(panel.getByText("Critical", { exact: true })).toBeVisible()
-  await expect(panel.getByText("1 with a fix").first()).toBeVisible()
+  // One sentence, one bar of the severities, and an upgrade per package.
+  await expect(panel.getByText("16 known vulnerabilities in release 2")).toBeVisible()
+  await expect(panel.getByRole("img", { name: /^By severity: 1 critical, 2 high/ })).toBeVisible()
+  await expect(panel.locator('[data-slot="stat-tile"]')).toHaveCount(0)
+  await expect(panel.locator('[data-slot="vulnerable-package"]')).toHaveCount(2)
   await expect(panel.getByText("A rebuild is likely to fix some of these")).toBeVisible()
-  await expect(panel.getByText("node:22-alpine", { exact: true })).toBeVisible()
+  await expect(panel.getByText("node:22-alpine", { exact: true }).first()).toBeVisible()
   await expect(panel.getByRole("link", { name: "CVE-2022-37434" })).toHaveAttribute(
     "href",
     "https://avd.aquasec.com/nvd/cve-2022-37434",

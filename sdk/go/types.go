@@ -167,6 +167,7 @@ type Automation struct {
 
 // Availability is deploy.Availability in the dashboard's source.
 type Availability struct {
+	Days        []AvailabilityDay    `json:"days"`
 	Down        bool                 `json:"down,omitempty"`
 	LiveRelease *int64               `json:"liveRelease,omitempty"`
 	ObservedAt  time.Time            `json:"observedAt,omitzero"`
@@ -174,6 +175,14 @@ type Availability struct {
 	RecordSince *time.Time           `json:"recordSince,omitempty"`
 	Status      string               `json:"status,omitempty"`
 	Windows     []AvailabilityWindow `json:"windows"`
+}
+
+// AvailabilityDay is deploy.AvailabilityDay in the dashboard's source.
+type AvailabilityDay struct {
+	DownSeconds     int64     `json:"downSeconds,omitempty"`
+	From            time.Time `json:"from,omitzero"`
+	Incidents       int64     `json:"incidents,omitempty"`
+	ObservedSeconds int64     `json:"observedSeconds,omitempty"`
 }
 
 // AvailabilityWindow is deploy.AvailabilityWindow in the dashboard's source.

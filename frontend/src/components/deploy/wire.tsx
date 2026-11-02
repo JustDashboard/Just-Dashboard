@@ -104,9 +104,12 @@ export function WireMark({
   tone = "neutral",
   size = "lg",
   shape = "square",
+  hue,
   className,
   children,
 }: {
+  /** A measurement's own colour (§10), in place of a tone: its glyph on its tint. */
+  hue?: string
   /**
    * neutral is a step of ground, for a thing that is off; brand is this
    * product; logo is a thing's own mark or glyph.
@@ -133,13 +136,18 @@ export function WireMark({
           size === "lg" && "size-14 [&>img]:size-6 [&>svg]:size-6",
           size === "md" && "size-11 [&>img]:size-5 [&>svg]:size-5",
           size === "sm" && "size-9 [&>img]:size-4 [&>svg]:size-4",
-          tone === "neutral" && "border border-hairline bg-control text-foreground",
+          !hue && tone === "neutral" && "border border-hairline bg-control text-foreground",
           tone === "brand" && "bg-brand text-brand-foreground",
           tone === "logo" && "border border-hairline bg-background text-muted-foreground",
           tone === "success" && "bg-plot-success text-success",
           tone === "danger" && "bg-plot-danger text-destructive",
           tone === "warning" && "bg-plot-warning text-warning",
         )}
+        style={
+          hue
+            ? { color: hue, background: `color-mix(in oklab, ${hue} 14%, transparent)` }
+            : undefined
+        }
       >
         {children}
       </span>

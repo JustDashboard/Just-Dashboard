@@ -68,9 +68,11 @@ plan validation and deploy-key host-authority guard, the same revision conflict,
 with the next release" (the sizing then answers `pending: true`).
 
 **UI.** The project overview's **Right-size** card (`components/deploy/right-size.tsx`, words in
-`sizing-model.ts`) sits under Production: the verdict and *Apply suggested limits* in its head, the two
-suggestions as figures with p95, peak and limit under each, the first reason of each limit that is off,
-and the window it rests on; each figure's ⓘ states its rule. It draws nothing for a Compose stack or a
+`sizing-model.ts`) sits under Production: the verdict and *Apply suggested limits* in its head; a sentence
+on the mark of what the project runs, with the first reason of each limit that is off and the window it
+rests on; and each limit as what to do with it ("Raise to 640 MiB") over a gauge: what it used most of the
+time, its peak paler, the limit in the foreground and the suggestion's tick in the brand, the same readings
+in words under it. Each limit's ⓘ states its rule. It draws nothing for a Compose stack or a
 failed read. The fleet's **Right-size** panel under the projects lists only the environments that are
 off, furthest first, with what an apply would change and an *Apply* per row; what is right or still
 gathering history is a count in its head, and a fleet with nothing off draws nothing.

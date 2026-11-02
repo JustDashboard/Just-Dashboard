@@ -110,8 +110,12 @@ test.describe("right-sizing", () => {
     await expect(card.getByText("Too tight", { exact: true })).toBeVisible()
     await expect(card.getByText("640 MiB", { exact: true })).toBeVisible()
     await expect(card.getByText("0.35 cores", { exact: true })).toBeVisible()
-    await expect(card.getByText("limit 512 MiB · p95 491 MiB · peak 500 MiB")).toBeVisible()
-    await expect(card.getByText("limit 4 cores · p95 0.21 cores · peak 0.6 cores")).toBeVisible()
+    await expect(
+      card.getByText("491 MiB most of the time · 500 MiB at its peak · limit 512 MiB"),
+    ).toBeVisible()
+    await expect(
+      card.getByText("0.21 cores most of the time · 0.6 cores at its peak · limit 4 cores"),
+    ).toBeVisible()
     await expect(card.getByText(/96% of the limit/)).toBeVisible()
     await expect(card.getByText(/From 11,520 samples over 2 days/)).toBeVisible()
     await expect(

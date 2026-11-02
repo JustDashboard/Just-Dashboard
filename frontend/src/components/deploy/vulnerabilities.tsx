@@ -3,38 +3,53 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, ShieldOff } from "@/components/icons"
+import { ArrowRight, Box, ShieldOff } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { plural, relativeTime, timestamp } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import type {
   DeploymentEngineRun,
   ImageScan,
   ImageScanReading,
+  VulnerabilityCounts,
   VulnerabilityFinding,
 } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Status } from "@/components/status-dot"
+import { ProductGlyph, hasProductLogo, imageProduct } from "@/components/product-logo"
+import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { WireMark, WireNode } from "@/components/deploy/wire"
 import {
   SEVERITIES,
+  SEVERITY_COLOR,
   ageWords,
+  cleanTitle,
   countAtLeast,
+  countsLine,
+  findingProduct,
   floorWords,
+  groupFindings,
   inFlight,
+  scanLead,
   scanVerdict,
   severityTone,
   shortDigest,
   vulnerable,
+  type FindingGroup,
 } from "@/components/deploy/vulnerabilities-model"
 
-/** How many fixable findings the panel lists before "Show all". */
-const LISTED = 6
+/** How many packages the panel lists before "Show all". */
+const LISTED = 5
+
+const WORST_TEXT = {
+  danger: "text-destructive",
+  warning: "text-warning",
+} as const
 
 /**
  * The live release's image, read for known vulnerabilities (`deploy/
@@ -220,38 +235,55 @@ function VulnerabilityBody({
 
   const { summary } = scan
   const fixable = summary.fixable
-  const listed = all ? fixable : fixable.slice(0, LISTED)
+  const groups = groupFindings(fixable)
+  const listed = all ? groups : groups.slice(0, LISTED)
   const outdated = scan.baseUpdates.filter((update) => update.state === "outdated")
   const endOfLife = scan.targets.find((target) => target.kind === "release" && target.endOfLife)
   const failedTargets = scan.targets.filter((target) => target.state === "failed")
   const fixableAtFloor = countAtLeast(summary.fixableCounts, scan.floor)
+  const bases = scan.targets.filter((target) => target.kind === "base")
+  const lead = scanLead(scan)
+  const verdict = scanVerdict(reading)
 
   return (
-    <div className="space-y-4">
-      <StatGrid columns={4} dense className="[&_[data-slot=stat-tile]]:py-3">
-        {SEVERITIES.map((severity) => {
-          const key = severity.toLowerCase() as "critical" | "high" | "medium" | "low"
-          const count = summary.counts[key]
-          const withFix = summary.fixableCounts[key]
-          return (
-            <StatTile
-              key={severity}
-              label={severity.charAt(0) + severity.slice(1).toLowerCase()}
-              value={<span className="numeric">{count}</span>}
-              tone={
-                count === 0
-                  ? undefined
-                  : severityTone(severity) === "danger"
-                    ? "danger"
-                    : severityTone(severity) === "warning"
-                      ? "warning"
-                      : undefined
-              }
-              hint={count === 0 ? "none found" : `${withFix} with a fix`}
-            />
-          )
-        })}
-      </StatGrid>
+    <div className="space-y-4 pt-1">
+      <WireNode
+        mark={
+          <span className="relative flex">
+            <WireMark tone="logo" size="md">
+              <ProductGlyph id="trivy" />
+            </WireMark>
+            <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
+              <StatusDot tone={verdict.tone} />
+            </span>
+          </span>
+        }
+        title={lead.title}
+        hint={
+          <>
+            {lead.fix && `${lead.fix}. `}
+            Read by {scan.scanner ? `Trivy ${scan.scanner}` : reading.scanner}{" "}
+            <span title={timestamp(scan.finishedAt)}>{relativeTime(scan.finishedAt)}</span>
+            {scan.databaseAgeHours !== undefined &&
+              `, against a vulnerability database ${ageWords(scan.databaseAgeHours)}`}
+            . <SettingsLink href={settingsHref}>Scanning terms</SettingsLink>
+          </>
+        }
+      />
+
+      <SeverityBar counts={summary.counts} />
+
+      {bases.length > 0 && (
+        <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
+          <span>Built on</span>
+          {bases.map((base) => (
+            <span key={base.reference} className="inline-flex min-w-0 items-center gap-1.5">
+              <BaseGlyph reference={base.reference} />
+              <span className="truncate font-mono">{base.reference}</span>
+            </span>
+          ))}
+        </p>
+      )}
 
       {scan.state === "failed" && (
         <Notice tone="warning" title="The latest scan did not finish">
@@ -288,20 +320,21 @@ function VulnerabilityBody({
               With a fix, {floorWords(scan.floor)}
             </h3>
             <span className="numeric shrink-0 text-hint text-muted-foreground">
-              {fixableAtFloor}
+              {plural(fixableAtFloor, "finding")} · {groups.length}{" "}
+              {groups.length === 1 ? "upgrade" : "upgrades"}
             </span>
           </div>
           <ul className="divide-y divide-hairline">
-            {listed.map((finding) => (
-              <FindingLine
-                key={`${finding.id}:${finding.package}:${finding.target}`}
-                finding={finding}
+            {listed.map((group) => (
+              <PackageRow
+                key={`${group.package}:${group.installed}:${group.target}`}
+                group={group}
               />
             ))}
           </ul>
-          {!all && fixable.length > LISTED && (
+          {!all && groups.length > LISTED && (
             <Button size="sm" variant="ghost" className="-ml-2" onClick={onShowAll}>
-              Show all {fixable.length}
+              Show all {groups.length}
             </Button>
           )}
         </section>
@@ -324,58 +357,138 @@ function VulnerabilityBody({
           ))}
         </p>
       )}
-      <p className="text-hint text-muted-foreground">
-        Release {scan.releaseNumber} read{" "}
-        <span title={timestamp(scan.finishedAt)}>{relativeTime(scan.finishedAt)}</span> with{" "}
-        {scan.scanner ? `Trivy ${scan.scanner}` : reading.scanner}
-        {scan.databaseAgeHours !== undefined &&
-          `, against a vulnerability database ${ageWords(scan.databaseAgeHours)}`}
-        {scan.targets.some((target) => target.kind === "base") &&
-          ` · ${plural(
-            scan.targets.filter((target) => target.kind === "base").length,
-            "base image",
-          )} read beside it`}
-        . <SettingsLink href={settingsHref}>Scanning terms</SettingsLink>
-      </p>
     </div>
   )
 }
 
-function FindingLine({ finding }: { finding: VulnerabilityFinding }) {
+/**
+ * How the scan's findings split, as one bar and its key in the words. Four
+ * figures in a row said the same thing and gave a zero the room of a six; here
+ * the proportions are the reading, and a severity with nothing in it is absent.
+ */
+function SeverityBar({ counts }: { counts: VulnerabilityCounts }) {
+  const parts = SEVERITIES.map((severity) => ({
+    severity,
+    count: counts[severity.toLowerCase() as "critical" | "high" | "medium" | "low"],
+  })).filter((part) => part.count > 0)
+  const total = parts.reduce((sum, part) => sum + part.count, 0)
   return (
-    <li className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 py-2">
-      <span className="flex min-w-0 items-baseline gap-2">
-        <Status
-          tone={severityTone(finding.severity)}
-          label={finding.severity.toLowerCase()}
-          className="w-16 shrink-0"
-        />
-        {finding.url ? (
-          <a
-            href={finding.url}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="shrink-0 rounded-sm font-mono text-xs focus-ring hover:underline"
-          >
-            {finding.id}
-          </a>
-        ) : (
-          <span className="shrink-0 font-mono text-xs">{finding.id}</span>
+    <div className="min-w-0 space-y-2">
+      <div
+        role="img"
+        aria-label={total > 0 ? `By severity: ${countsLine(counts)}` : "Nothing found"}
+        data-testid="severity-bar"
+        className={cn(
+          "flex h-2.5 animate-rise gap-0.5 overflow-hidden rounded-sm",
+          total === 0 ? "bg-success/70" : "bg-meter-track",
         )}
-        <span className="min-w-0 truncate text-body" title={finding.title}>
-          {finding.package}
+      >
+        {parts.map((part) => (
+          <span
+            key={part.severity}
+            className="block h-full [transition:width_700ms_ease-out]"
+            style={{
+              width: `${(part.count / total) * 100}%`,
+              minWidth: 4,
+              background: SEVERITY_COLOR[part.severity],
+            }}
+          />
+        ))}
+      </div>
+      {parts.length > 0 && (
+        <p className="numeric flex flex-wrap gap-x-4 gap-y-1 text-hint text-muted-foreground">
+          {parts.map((part) => (
+            <span key={part.severity} className="inline-flex items-center gap-1.5">
+              <span
+                aria-hidden
+                className="size-2 rounded-[2px]"
+                style={{ background: SEVERITY_COLOR[part.severity] }}
+              />
+              <span className="font-medium text-foreground">{part.count}</span>
+              {part.severity.toLowerCase()}
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function BaseGlyph({ reference }: { reference: string }) {
+  const product = imageProduct(reference)
+  return hasProductLogo(product) ? (
+    <ProductGlyph id={product} />
+  ) : (
+    <Box aria-hidden className="size-3.5 shrink-0" />
+  )
+}
+
+/** One upgrade: the package on its ecosystem's mark, and the advisories it answers. */
+function PackageRow({ group }: { group: FindingGroup }) {
+  const product = findingProduct(group)
+  const tone = severityTone(group.worst)
+  return (
+    <li className="min-w-0 py-3" data-slot="vulnerable-package">
+      <div className="flex min-w-0 items-center gap-3">
+        <WireMark tone="logo" size="sm">
+          {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Box aria-hidden />}
+        </WireMark>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+            <span className="truncate text-body font-medium">{group.package}</span>
+            <span
+              className={cn(
+                "numeric text-hint font-medium",
+                tone === "danger" || tone === "warning"
+                  ? WORST_TEXT[tone]
+                  : "text-muted-foreground",
+              )}
+            >
+              {countsLine(group.counts)}
+            </span>
+            {group.fromBase && <Tag title="The base image carries it too">base image</Tag>}
+          </div>
+          <p className="truncate text-hint text-muted-foreground" title={group.target}>
+            <span className="font-mono">
+              {group.installed} → {group.fix}
+            </span>{" "}
+            · {group.target}
+          </p>
+        </div>
+      </div>
+      <ul className="mt-2 space-y-1 pl-12">
+        {group.findings.map((finding) => (
+          <FindingLine key={finding.id} finding={finding} />
+        ))}
+      </ul>
+    </li>
+  )
+}
+
+function FindingLine({ finding }: { finding: VulnerabilityFinding }) {
+  const title = cleanTitle(finding.title, finding.package)
+  return (
+    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-hint sm:flex-nowrap">
+      <span title={finding.severity.toLowerCase()} className="inline-flex translate-y-[-1px]">
+        <StatusDot tone={severityTone(finding.severity)} />
+      </span>
+      {finding.url ? (
+        <a
+          href={finding.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="shrink-0 rounded-sm font-mono focus-ring hover:underline"
+        >
+          {finding.id}
+        </a>
+      ) : (
+        <span className="shrink-0 font-mono">{finding.id}</span>
+      )}
+      {title && (
+        <span className="min-w-0 text-muted-foreground sm:truncate" title={title}>
+          {title}
         </span>
-      </span>
-      <span className="flex shrink-0 items-baseline gap-2 text-hint text-muted-foreground">
-        {finding.fromBase && <Tag title="The base image carries it too">base</Tag>}
-        <span className="font-mono">
-          {finding.installed} → {finding.fixed}
-        </span>
-      </span>
-      <span className="col-span-2 min-w-0 truncate pl-[4.5rem] text-hint text-muted-foreground">
-        {finding.title ? `${finding.title} · ` : ""}
-        {finding.target}
-      </span>
+      )}
     </li>
   )
 }

@@ -155,6 +155,7 @@ export interface Automation {
 
 /** deploy.Availability in the dashboard's source. */
 export interface Availability {
+  days?: AvailabilityDay[] | null
   down?: boolean
   liveRelease?: number | null
   observedAt?: string
@@ -162,6 +163,14 @@ export interface Availability {
   recordSince?: string | null
   status?: string
   windows?: AvailabilityWindow[] | null
+}
+
+/** deploy.AvailabilityDay in the dashboard's source. */
+export interface AvailabilityDay {
+  downSeconds?: number
+  from?: string
+  incidents?: number
+  observedSeconds?: number
 }
 
 /** deploy.AvailabilityWindow in the dashboard's source. */
