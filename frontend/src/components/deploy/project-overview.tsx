@@ -4,15 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowRight, Sparkles } from "@/components/icons"
 import { get } from "@/lib/api"
-import { percent } from "@/lib/format"
 import {
   previewServices,
   pullOfPreview,
   shownBranches,
   unavailableReason,
 } from "@/lib/pull-requests"
-import { perMinute } from "@/lib/requests"
-import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
@@ -21,21 +18,17 @@ import type {
   DeploymentSummary,
   GitPullRequest,
   ProjectPullRequests,
-  TrafficPulse,
 } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { ChoiceList } from "@/components/flow"
-import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { buildMethodProduct, imageProduct } from "@/components/product-logo"
-import { TileTrend } from "@/components/metrics/sparkline"
 import { PullRequestRow } from "@/components/git/pull-request-row"
 import { Button } from "@/components/ui/button"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
-import { NumberTicker } from "@/components/ui/number-ticker"
 import { useProject } from "@/components/deploy/project-context"
 import {
   WORKLOAD_LABELS,
@@ -47,7 +40,6 @@ import {
   sourceLine,
   sourceProduct,
 } from "@/components/deploy/vocabulary"
-import { failingTone } from "@/components/deploy/fleet"
 import { FirstSignIn } from "@/components/deploy/first-sign-in"
 import { SitePreview } from "@/components/deploy/site-preview"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
@@ -55,7 +47,7 @@ import { ProjectWiring } from "@/components/deploy/project-wiring"
 import { Insights } from "@/components/deploy/insights"
 import { Availability } from "@/components/deploy/availability"
 import { RunRow } from "@/components/deploy/run-row"
-import { UsageTiles } from "@/components/deploy/usage-tiles"
+import { TrafficReadings, UsageReadings } from "@/components/deploy/live-readings"
 import { PreviewBranchLines } from "@/components/deploy/preview-branches"
 import { RightSizeCard } from "@/components/deploy/right-size"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
@@ -76,9 +68,14 @@ import { Vulnerabilities } from "@/components/deploy/vulnerabilities"
  * banner), and it is not listed again under recent deployments. Under it,
  * Production: a window onto the live site beside the way a request reaches
  * it, and under both the four live readings — requests, the share failing,
- * processor and memory — each carrying its last hour and each a way to the
- * page that has the rest. They were two panels of two tiles, the second of
- * which sat alone on its own row at every desktop width.
+ * processor and memory — each a line in words with its last hour at the end,
+ * and each a way to the page that has the rest.
+ *
+ * Every block under them opens the way the wiring's nodes do: a real mark, one
+ * sentence and its detail, then the one coloured picture that block has — the
+ * limits' gauges, the severities' bar, the ribbon of days, the releases per
+ * day — so the page reads down as one thing rather than as figures under a
+ * picture.
  *
  * Findings live here rather than on Runtime — Runtime is evidence, this is
  * the verdict — and the identity line's "needs attention" links to them. How
@@ -274,15 +271,16 @@ export function ProjectOverview() {
           />
         </div>
         {/* The four readings a visitor asks after "is it up": two from the
-            request record and two from the live container, one row of
-            figures under the picture they describe. */}
-        <div className="mt-6 grid min-w-0 border-t border-hairline xl:grid-cols-2">
-          <TrafficTiles projectId={project.projectId} />
-          <div className="min-w-0 border-t border-hairline xl:border-t-0 xl:border-l xl:pl-5">
-            {/* A container that has exited has no usage to read live: its
-                last socket frame would claim a reading of something that is
-                not running (§11). */}
-            <UsageTiles
+            request record and two from the live container, under the picture
+            they describe. A container that has exited has no usage to read
+            live: its last socket frame would claim a reading of something that
+            is not running (§11). */}
+        <div className="mt-5 border-t border-hairline pt-3">
+          {/* Out by the lines' own inset, so their marks stand on the page's
+              edge under the wiring's and only the hover wash passes it. */}
+          <div className="-mx-2 grid min-w-0 gap-x-6 xl:grid-cols-2">
+            <TrafficReadings projectId={project.projectId} />
+            <UsageReadings
               containerId={liveService?.state === "running" ? liveService.containerId : undefined}
               name={liveService?.name}
               reason={
@@ -309,6 +307,7 @@ export function ProjectOverview() {
         projectId={project.projectId}
         environmentId={project.environmentId}
         onApplied={project.refresh}
+        product={runtimeProduct(deployment, product, project.configuration)}
       />,
     ])
 
@@ -439,6 +438,7 @@ export function ProjectOverview() {
         <Insights
           projectId={project.projectId}
           environmentId={project.environmentQuery?.environment}
+          mark={sourceProduct(deployment, project.configuration?.source)}
         >
           {history}
         </Insights>
@@ -694,64 +694,4 @@ function useCelebration(deployment: DeploymentSummary) {
     watched.current = undefined
   }, [active, last?.id, last?.state, last?.operation, last?.trigger])
   return confetti
-}
-
-const TILE_HOVER = "h-full transition-colors group-hover:bg-row-hover"
-
-/**
- * The last hour at the ingress: how much, with its shape, and how much of it
- * failed — read from the record the server holds, content with a reading a
- * minute old. Each is a way to the Logs page, where the rows are. With no
- * record yet the tiles stay, with a dash and the reason, so the row of four
- * does not reflow when the first request lands. The failing share takes the
- * fleet's colour for it, so one share is one colour on every deploy page.
- */
-function TrafficTiles({ projectId }: { projectId: number }) {
-  const pulse = usePoll<Record<string, TrafficPulse>>(
-    (signal) => get<Record<string, TrafficPulse>>("/deploy/traffic", undefined, signal),
-    30000,
-    [],
-  )
-  const mine = pulse.data?.[String(projectId)]
-  const ready = mine?.status === "available" ? mine : undefined
-  const waiting = pulse.data ? "No requests recorded yet" : "Reading the request record…"
-  const base = `/deploy/${projectId}/logs`
-  return (
-    <StatGrid columns={2} dense>
-      <StatLink href={base} label="Requests on Logs">
-        <StatTile
-          // Keyed by whether there is a figure, so it rises when the record
-          // lands rather than on every poll.
-          key={ready ? "requests" : "requests-waiting"}
-          label="Requests"
-          value={
-            ready ? (
-              <NumberTicker
-                value={Number(perMinute(ready.perMinute))}
-                decimalPlaces={ready.perMinute < 10 ? 2 : ready.perMinute < 100 ? 1 : 0}
-              />
-            ) : (
-              "—"
-            )
-          }
-          trailing={ready && "/min"}
-          trend={
-            ready && <TileTrend values={ready.points} label="Requests per minute, last hour" />
-          }
-          hint={ready ? `${ready.pages.toLocaleString()} page views · last hour` : waiting}
-          className={cn(TILE_HOVER, ready && "animate-rise")}
-        />
-      </StatLink>
-      <StatLink href={`${base}?view=insights`} label="Failing requests on Logs">
-        <StatTile
-          key={ready ? "failing" : "failing-waiting"}
-          label="Failing"
-          value={ready ? percent(ready.errorRate * 100, 1) : "—"}
-          tone={ready ? failingTone(ready.errorRate) : "default"}
-          hint="answered 5xx · last hour"
-          className={cn(TILE_HOVER, ready && "animate-rise")}
-        />
-      </StatLink>
-    </StatGrid>
-  )
 }

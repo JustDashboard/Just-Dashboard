@@ -318,21 +318,17 @@ test("the shortcuts start something, each counting what it adds to", async ({ pa
   const shortcuts = page.locator("section", {
     has: page.getByRole("heading", { name: "Shortcuts" }),
   })
-  const cards = shortcuts.locator("[data-slot=choice-card]")
+  const cards = shortcuts.locator("[data-slot=shortcut]")
   await expect(cards).toHaveText([
     /New project.*6 projects/,
-    /Add a site.*2 sites/,
-    /Add a database.*4 databases/,
-    /New shell.*3 open · operator/,
+    /New terminal.*3 open · operator/,
     /New drawing.*1 drawing/,
     /Browse files.*atlas/,
-    /Add a computer.*2 computers/,
-    /Back up.*3 jobs/,
   ])
-  // Four across at this width.
-  const [first, fifth] = await Promise.all([cards.nth(0).boundingBox(), cards.nth(4).boundingBox()])
-  expect(fifth?.x).toBe(first?.x)
-  expect(fifth!.y).toBeGreaterThan(first!.y)
+  // One line of four at this width, and no taller than the label and its count need.
+  const boxes = await Promise.all([0, 1, 2, 3].map((n) => cards.nth(n).boundingBox()))
+  expect(new Set(boxes.map((box) => box!.y)).size).toBe(1)
+  expect(boxes[0]!.height).toBeLessThanOrEqual(64)
 
   // A drawing is made where the shortcut is pressed, and opened.
   await cards.filter({ hasText: "New drawing" }).click()
@@ -340,16 +336,25 @@ test("the shortcuts start something, each counting what it adds to", async ({ pa
   expect(created).toEqual({ name: "Untitled drawing" })
 })
 
-test("a new site opens on the Sites page's form", async ({ page }) => {
+test("a new terminal opens in the account's home, and is a link the whole way across", async ({
+  page,
+}) => {
   await page.goto("/")
-  await page.locator("[data-slot=choice-card]", { hasText: "Add a site" }).click()
-  await expect(page).toHaveURL(/\/proxy\/sites/)
+  const card = page.getByRole("link", { name: /New terminal/ })
+  await expect(card).toHaveAttribute("href", "/terminal?cwd=%2Fhome%2Foperator")
+  const box = (await card.boundingBox())!
+  await page.mouse.click(box.x + box.width - 4, box.y + box.height - 4)
+  // Only the path: the terminal takes the directory off the address once it has used it.
+  await expect(page).toHaveURL(/\/terminal(\?|$)/)
 })
 
-test("a new shell opens in the account's home", async ({ page }) => {
+test("nothing but the four shortcuts is offered", async ({ page }) => {
+  const requested: string[] = []
+  page.on("request", (request) => requested.push(new URL(request.url()).pathname))
   await page.goto("/")
-  await page.locator("[data-slot=choice-card]", { hasText: "New shell" }).click()
-  await expect(page).toHaveURL(/\/terminal\?cwd=%2Fhome%2Foperator$/)
+  await expect(page.locator("[data-slot=shortcut]")).toHaveCount(4)
+  // The list of sites was only ever read to count them on a card that has gone.
+  expect(requested).not.toContain("/api/v1/proxy/vhosts")
 })
 
 test("the shells left open lead with the one working, and open on themselves", async ({ page }) => {
@@ -433,7 +438,7 @@ test("a reader without write access sees no shortcut that would refuse them", as
     json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
   )
   await page.goto("/")
-  await expect(page.locator("[data-slot=choice-card]")).toHaveText([/Browse files/])
+  await expect(page.locator("[data-slot=shortcut]")).toHaveText([/Browse files/])
   // No terminal: its listing needs the terminal, and is never asked for.
   await expect(page.getByRole("heading", { name: "Terminal", exact: true })).toHaveCount(0)
   await expect(page.getByRole("list", { name: "Recent drawings" })).toBeVisible()
@@ -468,7 +473,7 @@ test("a section kept out of the sidebar is kept off the Overview, read and all",
   for (const path of ["/api/v1/terminal/", "/api/v1/boards/", "/api/v1/backups/"]) {
     expect(requested).not.toContain(path)
   }
-  await expect(page.locator("[data-slot=choice-card]", { hasText: "New shell" })).toHaveCount(0)
+  await expect(page.locator("[data-slot=shortcut]", { hasText: "New terminal" })).toHaveCount(0)
 })
 
 test("on a phone the tiles are two to a row and the fleet keeps its worst three", async ({
@@ -480,9 +485,20 @@ test("on a phone the tiles are two to a row and the fleet keeps its worst three"
   await expect(cards).toHaveCount(3)
   await expect(cards.first()).toContainText("docs-site")
   await expect(page.getByText("Showing 3 of 6")).toBeVisible()
-  const shortcuts = page.locator("[data-slot=choice-card]")
-  const [a, b] = await Promise.all([shortcuts.nth(0).boundingBox(), shortcuts.nth(1).boundingBox()])
-  expect(a?.y).toBe(b?.y)
+  // The shortcuts stand two by two, and every label is whole.
+  const shortcuts = page.locator("[data-slot=shortcut]")
+  const boxes = await Promise.all([0, 1, 2, 3].map((n) => shortcuts.nth(n).boundingBox()))
+  expect(boxes[0]?.y).toBe(boxes[1]?.y)
+  expect(boxes[2]?.y).toBe(boxes[3]?.y)
+  expect(boxes[2]!.y).toBeGreaterThan(boxes[0]!.y)
+  expect(
+    await shortcuts.evaluateAll((cards) =>
+      cards.every((card) => {
+        const label = card.querySelector<HTMLElement>("span.font-medium")!
+        return label.scrollWidth <= label.clientWidth
+      }),
+    ),
+  ).toBe(true)
   const resources = page.locator("section", {
     has: page.getByRole("heading", { name: "Resources" }),
   })

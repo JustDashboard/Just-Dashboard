@@ -1,4 +1,5 @@
-import type { AvailabilityWindow } from "@/lib/types"
+import type { AvailabilityDay, AvailabilityWindow } from "@/lib/types"
+import type { DotTone } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
 
 /**
@@ -76,7 +77,7 @@ export type AvailabilityReading = {
   tone: Tone
 }
 
-/** One window as a tile reads it: the figure, the line under it, its tone. */
+/** One window as the readout says it: the figure, what is behind it, its tone. */
 export function availabilityReading(
   window: AvailabilityWindow,
   downNow: boolean,
@@ -101,4 +102,71 @@ export function availabilityReading(
     hint: parts.join(" · "),
     tone: availabilityTone(window.ratio, downNow),
   }
+}
+
+/** A window's name in the readout under the ribbon. */
+export const WINDOW_SHORT: Record<string, string> = {
+  "24h": "24 hours",
+  "7d": "7 days",
+  "30d": "30 days",
+}
+
+/** "the last 2 days": the window, or as much of it as the record reaches. */
+function reachWords(window: AvailabilityWindow) {
+  const seconds =
+    window.coverageSeconds > 0 && window.coverageSeconds < window.seconds
+      ? window.coverageSeconds
+      : window.seconds
+  if (seconds >= 2 * 86400) return `the last ${Math.round(seconds / 86400)} days`
+  if (seconds >= 2 * 3600) return `the last ${Math.round(seconds / 3600)} hours`
+  return "the last hour"
+}
+
+/**
+ * The section's sentence, over the longest window with a figure. It names how
+ * far back the record really reaches, so a steady two days never reads as a
+ * steady month, and says whether the downtime is recent.
+ */
+export function availabilityLead(data: { down: boolean; windows: AvailabilityWindow[] }): {
+  title: string
+  hint?: string
+  tone: DotTone
+} {
+  const figures = data.windows.filter((w) => w.ratio !== undefined && w.observedSeconds > 0)
+  const widest = figures.at(-1)
+  if (!widest && !data.down)
+    return {
+      title: "Nothing recorded yet",
+      hint: "The record fills in while a release is live.",
+      tone: "unknown",
+    }
+  const lost =
+    widest && widest.downSeconds > 0
+      ? `${downtimeLabel(widest.downSeconds)} down across ${widest.incidents} ${widest.incidents === 1 ? "incident" : "incidents"}`
+      : undefined
+  if (data.down) return { title: "The live release is down right now", hint: lost, tone: "danger" }
+  const reach = reachWords(widest!)
+  if (!lost) return { title: `No downtime in ${reach}`, tone: "running" }
+  const day = data.windows.find((w) => w.window === "24h")
+  const quiet = day && day.observedSeconds > 0 && day.downSeconds === 0
+  const tone = availabilityTone(widest!.ratio, false)
+  return {
+    title: `Up ${availabilityPercent(widest!.ratio!)} of ${reach}`,
+    hint: quiet ? `${lost}, none in the last 24 hours` : lost,
+    tone: tone === "danger" ? "danger" : tone === "warning" ? "warning" : "running",
+  }
+}
+
+/** A stretch's colour on the ribbon: any downtime shows, however little. */
+export function dayTone(day: AvailabilityDay): "unknown" | "up" | "dented" | "down" {
+  if (day.observedSeconds <= 0) return "unknown"
+  if (day.downSeconds <= 0) return "up"
+  return 1 - day.downSeconds / day.observedSeconds < DANGER_BELOW ? "down" : "dented"
+}
+
+/** What a stretch says on the readout while it is pointed at. */
+export function dayWords(day: AvailabilityDay) {
+  if (day.observedSeconds <= 0) return "nothing recorded"
+  if (day.downSeconds <= 0) return "no downtime"
+  return `${downtimeLabel(day.downSeconds)} down · ${day.incidents} ${day.incidents === 1 ? "incident" : "incidents"}`
 }

@@ -18,7 +18,7 @@ backed up, behind one login that lives on your private network.
 
 </div>
 
-<a href="FEATURES.md"><img src="docs/readme/overview.png" alt="The server overview: the machine, shortcuts to every section, live resources, storage and the deployed projects"></a>
+<a href="FEATURES.md"><img src="docs/readme/overview.png" alt="The server overview: the machine, shortcuts to what a visit starts, live resources, storage and the deployed projects"></a>
 
 ## What it does
 

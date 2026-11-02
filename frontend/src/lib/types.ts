@@ -9149,6 +9149,16 @@ export type DeploymentAvailability = {
   /** Whether the record says the live release is down at this moment. */
   down: boolean
   windows: AvailabilityWindow[]
+  /** The last thirty stretches of 24 hours ending now, oldest first. */
+  days: AvailabilityDay[]
+}
+
+/** One 24-hour stretch of the record. 0 observed is unknown, not up. */
+export type AvailabilityDay = {
+  from: string
+  observedSeconds: number
+  downSeconds: number
+  incidents: number
 }
 
 /*

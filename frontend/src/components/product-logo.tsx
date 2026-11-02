@@ -353,6 +353,7 @@ const LOGOS: Record<string, string> = {
   symfony: "symfony.svg",
   syncthing: "syncthing.svg",
   systemd: "systemd.svg",
+  trivy: "trivy.svg",
   tailscale: "tailscale.svg",
   tanstack: "tanstack.svg",
   telegram: "telegram.svg",

@@ -683,12 +683,17 @@ the run that put it there and a correlated trigger links to `/audit?action=…`,
 host feed makes.
 
 The Overview gained **Availability** (`components/deploy/availability.tsx`) over the Delivery figures:
-three `StatTile`s, one per window, with the downtime and its incidents under each figure
-("6 min down · 2 incidents"), "down now" on the day's tile while the record says so, and "record
-covers 9 of 30 days" where the record is younger than the window, over one sentence saying what the
-figure is read from. The wording is `availability-model.ts` — two decimals, and "100%" only for no
-downtime at all, since 99.996% must never round up to a claim the record does not make; quiet under
-three nines, warning below, danger below two or while down now — so `bun test` holds it.
+a sentence on Docker's mark naming how far the record really reaches ("Up 99.41% of the last 2 days",
+"The live release is down right now"), the downtime and whether it was recent under it, and the
+status page's ribbon of the last thirty days. The server cuts the record into thirty stretches of 24
+hours ending now (`Availability.days`, `availabilityDays`), so the last is the same span as the `24h`
+window and no timezone has to be agreed on; a stretch the record does not reach, or with no release
+live, is drawn as the bare track rather than as up. One line under the ribbon holds the three
+windows' figures, each titled with its downtime, and takes the day under the pointer in their place,
+so the block is one height either way. What the figure is read from moved behind the head's ⓘ. The
+wording is `availability-model.ts` — two decimals, and "100%" only for no downtime at all, since
+99.996% must never round up to a claim the record does not make; steady in the success hue, warning
+under three nines, danger below two or while down now — so `bun test` holds it.
 Its rows are grouped under hour rules, each event drawn on its project's or image's tile with what
 happened as a toned glyph in the corner (`EventMark`, shared with the Docker page's Events through
 `components/docker/event-marks.tsx`), and the rows a poll or the socket brings rise as they

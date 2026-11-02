@@ -932,8 +932,8 @@ rather than assembling its own recharts tree — adding a measurement should mea
   measurement in it, so Pressure's CPU, memory and I/O lines are the three tiles' colours; a
   chart's second line takes the hue furthest from its first (out `--chart-2` against in, write
   `--chart-3` against read).
-- **A reading's last hour in a deployment page's `StatTile` is `TileTrend`** (`sparkline.tsx`), the
-  one shape for it: the tile's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
+- **A reading's last hour in a deployment page's `StatTile` or an Overview reading line is `TileTrend`**
+  (`sparkline.tsx`), the one shape for it: its slot's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
   below two points, which is not yet a shape, nor for a series that never moves on a scale of its
   own — scaled to its own maximum a flat line fills the band and reads as a full meter — and the
   tile's trend band then collapses rather than leave a gap. With a fixed `max` a flat line sits at
@@ -2870,7 +2870,7 @@ The passes, in order. Each one is a diff you can review on its own.
 
 **What the Overview looks like after these passes**, as a checklist for the page you are on: the
 machine's identity line first (`HostIdentity` — its distribution drawn as itself, the processor and
-hypervisor as bare marks among its facts); Shortcuts, a run of `ProductCard`s; a Resources `Section`
+hypervisor as bare marks among its facts); Shortcuts, a run of four `ShortcutCard`s; a Resources `Section`
 whose head carries the socket's `Status live` and the way on to Metrics, holding a four-tile
 `StatGrid` of the readings that move — each carrying its last hour in the tile's `trend` slot where a
 meter would be, keyed before its name by its line's colour, its figure gliding to every frame — over
@@ -2885,14 +2885,25 @@ which is not one. Everything that arrived, rose.
 product does: Terminal, Excalidraw, Files and Remote Desktop were nowhere on it, Databases
 and Backups were one figure each, and the only thing it offered to *start* was a project. Nothing
 above was taken back; what the page gained is the answer to "what was I doing, and how do I start the
-next thing". **Shortcuts** opens the page under the identity line: a `ProductCard` per thing a visit
+next thing". **Shortcuts** opens the page under the identity line: a card per thing a visit
 starts, each counting what it adds to (*6 projects*, *3 open · operator*) so it is data rather than a
-caption (pass 8), two to a row on a phone and four across from `xl`, and gated
+caption (pass 8), and gated
 on the section and on the capability its destination checks — a shortcut that opens a refusal is a
 dead button. New drawing makes the drawing where it is pressed, as the list's own New does, and
-opens it. When Stickyboard left in 0.8 its card went with it, and Add a site took the place,
-after New project as the Proxy section follows Deploy in the sidebar: the next thing an app needs
-is a name in front of it, and it opens the Sites form from `?new=1`. Under Deployments, three
+opens it.
+
+The run grew to eight and in 0.8.5 was cut, at the operator's request, to the four that are started
+from here rather than from their own pages: New project, New terminal, New drawing and Browse files.
+Add a site, Add a database, Add a computer and Back up each have a section one press away that opens
+on the same verb; the list of sites, read only to count on its card, went with it. Four took a card
+of their own, `ShortcutCard` in `overview/shortcuts.tsx`, rather than `ProductCard`: that is a button
+you pick one of in a form, and these go somewhere, so each is a link across its whole face that opens
+in a new tab like any other. The run is laid out against the content's width by a container query, two
+by two until 42rem and four across after it, because the sidebar makes the window's width no guide to
+what a card has. A card stays about 56px tall on a phone and 60px beside a wide run, and its end glyph
+— `Plus` to make, `ArrowRight` to go — gives way wherever the label needs the room.
+
+Under Deployments, three
 **pairs**: the shells open on the server (`workspace.tsx`
 — working first, each drawn as the program in it, a row opening `/terminal?session=` on that session)
 beside the drawings edited last, each its own preview; the databases (the
@@ -3528,7 +3539,8 @@ reading page is revamped:
   the operator's request, and that is the other side of the same line: there the containers are read
   down their columns before any one is taken, so the overview's table keeps hairlines and a wash and
   its rows open by a press anywhere on them;
-- a **figure** is still a `StatTile` (§15 pass 2) in either register.
+- a **figure** is still a `StatTile` (§15 pass 2) in either register, with one page excepted: a
+  project's Overview, below.
 
 A page that is mostly readings with one run of choices in it takes the edge on that one run. That is
 the honest answer to "use it everywhere": everywhere something is picked.
@@ -3543,6 +3555,28 @@ from, whether a database is created or an existing one used, the saved connectio
 traffic-alert rules on Automation are the counter-example on the same page: a rule is read against
 its threshold, with a `Meter` carrying a tick where the line is, and opens nothing, so its rows stay
 rows you read.
+
+### A project's Overview reads in sentences
+
+At the operator's request in 0.8.5 the Overview carries no `StatTile`: "I don't like them", "clean text
+and easy to understand", and sections added later that "feel like they don't belong". The top of that
+page already says everything in the wiring's words, so what follows it now takes the wiring's shape, and
+a new block on this page takes it too:
+
+- **A block opens on a `WireNode`:** a real mark (`WireMark tone="logo"` and a `ProductGlyph`, with the
+  block's state as the `StatusDot` in its corner, as Runtime's node has it), then the reading as a sentence
+  and its detail. What the runtime is on Right-size, Trivy on Vulnerabilities, Docker on Availability and
+  the source's forge on Delivery: each mark is where the block's evidence comes from.
+- **Then its one coloured picture:** each limit's gauge, the severities' bar, the ribbon of days, the
+  releases per day. The hues are the existing ones (§3, §10), and the reading it replaces is said in the
+  words beside it, so nothing is colour alone.
+- **The live readings are lines,** `ReadingLine` in `deploy/live-readings.tsx`: a measurement's glyph on
+  its own tint (`WireMark hue`, the `HUE` map's colours), a name, the reading as words ("0.1% of one core"),
+  a detail and its last hour at the line's end. Each is one height in every state and opens the page that
+  has the rest.
+
+The Deployments tab's history and every other page keep `StatTile`: this is the Overview's register of
+speech, not a retirement of the figure.
 
 ### What register B does not get
 
