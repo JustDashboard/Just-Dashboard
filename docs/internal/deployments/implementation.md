@@ -2139,7 +2139,11 @@ only renderer/executor/validation authority for their feature.
   Domains settings and the public-address step offer **Ask visitors for a password**; the overview tags a
   protected domain. Previews inherit the plan's protection. A password typed in Domains settings stays
   in memory beside the form's draft and joins the list only in the save, so a reload loses it and keeps
-  the rest of the draft.
+  the rest of the draft. The credentials are the route's, so a password set on one name is asked on every
+  name the route serves, and the row's tooltip and field say so; the route keeps one password per user
+  name, the first name's in list order, so two names with one user name and different passwords get a
+  warning. An empty protection is read as none by `canonicalDomainProtection`, so the form holds its Save
+  until the user name and password are there rather than saying Saved over an open site.
 - Domain redirects and route rules. `domains[].redirectTo` names another of the plan's hostnames
   (`redirectCode` 301, 302, 307 or 308; empty is 308) that this one sends visitors to, with the path and
   query kept, instead of serving the application: the www. a bare domain keeps for old links, or the
@@ -2188,8 +2192,8 @@ only renderer/executor/validation authority for their feature.
   ones do not, and warns when no served domain is HTTPS, since then nobody does. The release comparison
   lists `hsts` as the header's value or `off`. The Domains settings offer **HSTS** under Access and headers
   while a served domain is HTTPS, or while a policy is saved so it stays removable, with the lifetimes,
-  subdomains and preload confirmation the Proxy site form has, and each served domain's row says whether
-  plain HTTP is redirected to HTTPS or served as asked. Previews copy the policy with the other rules.
+  subdomains and preload confirmation the Proxy site form has, and a plain name's row says it is served
+  plain, while the HTTPS switch's tooltip says what an HTTPS name does with plain visitors. Previews copy the policy with the other rules.
 - Route sign-in. `runtime.forwardAuth` (`provider` authelia, authentik, oauth2-proxy or custom;
   `verify`, the auth server's check address; `signIn`, the page a visitor without a session is sent to;
   `previewsOnly`) has the public route ask an auth server about every request before the application

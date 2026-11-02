@@ -1366,11 +1366,22 @@ export const CERTIFICATE_LABEL: Record<DeploymentDomainRoute["certificate"], str
 }
 
 /** A domain's certificate as one status word. */
-export function CertificateStatus({ domain }: { domain: DeploymentDomainRoute }) {
+export function CertificateStatus({
+  domain,
+  named,
+}: {
+  domain: DeploymentDomainRoute
+  /** Beside another status the bare "Not observed" does not say what was not. */
+  named?: boolean
+}) {
   return (
     <Status
       tone={CERTIFICATE_TONE[domain.certificate]}
-      label={CERTIFICATE_LABEL[domain.certificate]}
+      label={
+        named && domain.certificate === "unavailable"
+          ? "Certificate not observed"
+          : CERTIFICATE_LABEL[domain.certificate]
+      }
     />
   )
 }

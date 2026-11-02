@@ -48,6 +48,7 @@ import {
   hitsOf,
   ingressLimitRequests,
   moveRule,
+  rateLimitProblem,
   newEdgeRule,
   refusedRuleIndex,
   savedEdgeRule,
@@ -113,12 +114,13 @@ export function EdgeRulesForm({
       value.edgeRules.filter((_, other) => other !== index).map((other) => other.name),
     ),
   )
+  const limitProblem = rateLimitProblem(value.rateLimit)
   const setRules = (edgeRules: DeploymentEdgeRule[]) => draft.set({ ...value, edgeRules })
   const setRule = (index: number, rule: DeploymentEdgeRule) =>
     setRules(value.edgeRules.map((current, at) => (at === index ? rule : current)))
 
   const onSave = async () => {
-    if (problems.some(Boolean)) return false
+    if (problems.some(Boolean) || limitProblem) return false
     setSaving(true)
     setRefusal(undefined)
     setLimitRefusal(undefined)
@@ -168,6 +170,7 @@ export function EdgeRulesForm({
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
+      invalid={problems.some(Boolean) || Boolean(limitProblem)}
       canEdit={canAdmin}
       onDiscard={() => {
         setRefusal(undefined)
@@ -180,7 +183,8 @@ export function EdgeRulesForm({
         state={edgeRulesState(value.edgeRules, value.rateLimit, value.crowdSec)}
         status={settingStatus({
           dirty: draft.dirty,
-          refused: Boolean(refusal || limitRefusal) || problems.some(Boolean),
+          refused:
+            Boolean(refusal || limitRefusal) || problems.some(Boolean) || Boolean(limitProblem),
         })}
         actions={
           canAdmin && (
@@ -214,7 +218,7 @@ export function EdgeRulesForm({
               <RateLimitFields
                 limit={value.rateLimit}
                 onChange={(rateLimit) => draft.set({ ...value, rateLimit })}
-                error={limitRefusal}
+                error={limitProblem ?? limitRefusal}
                 disabled={!canAdmin}
               />
             )}
@@ -410,7 +414,7 @@ function EdgeRuleRow({
           </span>
         </div>
         <FieldRow columns={2}>
-          <Field label="Name" htmlFor={`${id}-name`} error={problem}>
+          <Field label="Name" htmlFor={`${id}-name`}>
             <Input
               id={`${id}-name`}
               value={rule.name}
@@ -419,7 +423,7 @@ function EdgeRuleRow({
               onChange={(event) => onChange({ ...rule, name: edgeRuleName(event.target.value) })}
             />
           </Field>
-          <Field label="Path" htmlFor={`${id}-path`}>
+          <Field label="Path" htmlFor={pathKind !== "none" ? `${id}-path` : undefined}>
             <div className="flex min-w-0 gap-2">
               <Select
                 value={pathKind}
@@ -510,6 +514,13 @@ function EdgeRuleRow({
           />
         </FieldRow>
         <ActionFields id={id} action={rule.action} onChange={setAction} disabled={disabled} />
+        {/* At the rule's foot: it can be about any field here, and under Name
+            it read as the name being wrong. */}
+        {problem && (
+          <FormNote role="alert" tone="danger" className="animate-rise">
+            {problem}
+          </FormNote>
+        )}
       </Well>
     </li>
   )
