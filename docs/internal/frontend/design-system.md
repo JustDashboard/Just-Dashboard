@@ -1255,11 +1255,23 @@ measures its own width because it is drawn on /backups as well); a runtime servi
 both lines spent, traffic joining at `xl`), the runs in flight (from `sm`) and the archive (from `sm`).
 Narrow, each keeps one short second line, as the channel card does on a phone; a fact that fitted
 neither line and is not needed to recognise or judge the card went to the page or sheet it opens.
-A revealed variable value and an isolation note on a preview keep their line, because one is a
-control and the other is the thing to do. A row that
+An isolation note on a preview keeps its line, because it is the thing to do. A row that
 only reflows rather than rearranging, a domain or a mount editor, uses a container query
 (`@container`, `@min-[40rem]` for a domain and `@min-[36rem]` for a mount) and draws nothing twice
 by construction.
+
+**A variable is read down its columns, and a value is revealed in place.** At the operator's request
+in 0.8.5 an environment's and a shared variable's card is `ChoiceRow columns`, one 44px line from
+600px: the name, the value, then an edge of one width on every row, with a state in the value's
+column so it cannot move the columns. Reveal swaps the mask for `RevealedValue` in the same cell, one
+line that scrolls sideways however long the value is. It was a framed band under the row, which
+pushed the rest of the list down for the length of a look. Nothing hangs under the row at any width:
+a shared variable's readers open from its *Read by N*, and on a phone the row is its name over its
+value, where a variable reaches being on the filter chips and in its editor. A band left empty room
+under the mark. Reveal and copy are inline in both states,
+when a variable was set is on the face and in its editor, and no strip of the variables' products
+stands under the section's title: each row wears its own mark, and one logo there read as a stray
+icon.
 
 A row drawn this way is a **click target, not a control**. `role="button"` on the wrapper is the
 obvious way to make a whole card pressable and is wrong: an ARIA button takes its accessible name
@@ -2760,7 +2772,7 @@ The passes, in order. Each one is a diff you can review on its own.
    card went beside the control that sets it, and the page's doc comment names where. Variables took the
    `/git` exit exactly — every count (all, pending, secret, config, reaching the build, the runtime
    or a release task, holding a reference) is a filter chip over the list, where it also narrows
-   to what it counts, and the products the environment talks to sit under the section's head. And a
+   to what it counts. And a
    project's Runtime page carries each count in the header of the block it counts. Its five moving
    readings stood as tiles over the charts they move on until the operator asked for the tiles to
    go; each now heads its own chart as the chart's reading now — the processor's share of a core

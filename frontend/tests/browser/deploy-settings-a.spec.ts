@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { expectSaved, json, mockProject, saveBar, saveSettings } from "./deploy-fixture"
+import { risen } from "./risen"
 
 /**
  * Project settings, part A: General, Build, Runtime, Environment variables,
@@ -774,6 +775,68 @@ test.describe("Environment variables", () => {
     await expect(row.getByText("revealed-browser-secret")).toBeVisible()
     await row.getByRole("button", { name: "Hide" }).click()
     await expect(row.getByText("revealed-browser-secret")).toHaveCount(0)
+  })
+
+  for (const { width, height } of [
+    { width: 1280, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    test(`revealing a long value moves nothing at ${width}px`, async ({ page, context }) => {
+      await context.grantPermissions(["clipboard-read", "clipboard-write"])
+      // The list lands in a stagger; the measure is of the settled page.
+      await page.emulateMedia({ reducedMotion: "reduce" })
+      await page.setViewportSize({ width, height })
+      const long = `-----BEGIN KEY-----\n${"a1b2c3d4".repeat(40)}\n-----END KEY-----`
+      await mockProject(page, { showcase: true })
+      await page.route("**/variables/*/reveal", (route) =>
+        json(route, { name: "API_TOKEN", value: long }),
+      )
+      await page.goto("/deploy/7/settings/variables")
+
+      const row = variableRow(page, "API_TOKEN")
+      const next = page.getByRole("list", { name: "Environment variables" }).locator("li").last()
+      await expect(row).toBeVisible()
+      await risen(page)
+      const box = await row.boundingBox()
+      const nextBox = await next.boundingBox()
+      // One line wide and two on a phone, with nothing hanging under the mark.
+      expect(box?.height).toBeLessThanOrEqual(width === 390 ? 60 : 48)
+
+      await row.getByRole("button", { name: "Reveal" }).click()
+      const value = row.getByLabel("Value of API_TOKEN")
+      await expect(value).toBeVisible()
+      // A row's height alone would pass with the value clipped out of sight, so
+      // the value's own line and the row after it are measured as well.
+      await risen(page)
+      expect((await value.boundingBox())?.height).toBeLessThanOrEqual(20)
+      expect(await row.boundingBox()).toEqual(box)
+      expect(await next.boundingBox()).toEqual(nextBox)
+      expect(await overflow(page)).toBeLessThanOrEqual(1)
+
+      await row.getByRole("button", { name: "Copy API_TOKEN" }).click()
+      // One line on screen, and every line of it on the clipboard.
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(long)
+    })
+  }
+
+  test("nothing stands under the section's title but the list", async ({ page }) => {
+    await mockProject(page, { showcase: true })
+    await page.goto("/deploy/7/settings/variables")
+    const section = page.locator("section", {
+      has: page.getByRole("heading", { name: "Environment variables" }),
+    })
+    const title = await section
+      .getByRole("heading", { name: "Environment variables" })
+      .boundingBox()
+    const add = await section.getByRole("button", { name: "Add variable" }).boundingBox()
+    const search = await section.getByLabel("Search variables").boundingBox()
+    // The head is one line, and the search begins right under it.
+    expect(
+      Math.abs(
+        (title?.y ?? 0) + (title?.height ?? 0) / 2 - ((add?.y ?? 0) + (add?.height ?? 0) / 2),
+      ),
+    ).toBeLessThanOrEqual(6)
+    expect((search?.y ?? 0) - ((add?.y ?? 0) + (add?.height ?? 0))).toBeLessThanOrEqual(24)
   })
 
   test("rotating or generating a secret shows the value once", async ({ page }) => {
