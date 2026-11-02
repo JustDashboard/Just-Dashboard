@@ -2615,7 +2615,9 @@ product names keeps its workload glyph.
 Deployments carries delivery insights as two charts over the same days: success rate and weekly
 frequency over releases per day, and median release time and recovery time over release time per
 day — a bar for each day a release succeeded, the window's median as a dashed rule and the slowest
-day naming the scale's top. It is not drawn for a window in which nothing succeeded. These replace
+day naming the scale's top. It is not drawn for a window in which nothing succeeded. Every day of
+both charts, empty ones included, answers with a tooltip naming the date and what it holds: under the
+pointer, on a tap, and with the arrow keys from the chart's one tab stop. These replace
 the history page's four tiles; the Overview keeps its delivery tiles. Why releases failed runs under
 both charts, counting the failed releases and when the last one was; each cause's bar is its share
 of every failed release, and a single cause is a line with its count and no bar. A failure reason
