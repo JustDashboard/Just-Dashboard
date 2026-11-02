@@ -135,3 +135,23 @@ export function windowSpanNote(win: MetricsWindow): string | null {
   if (win.from === undefined || win.to === undefined) return null
   return `${timestamp(new Date(win.from).toISOString())} → ${timestamp(new Date(win.to).toISOString())}`
 }
+
+/**
+ * The window on screen as a reading's trend covers it: "Last hour" in a head,
+ * "the last hour" in each trend's name. A dragged span is its two ends, since
+ * the range picker beside it already says how wide it is.
+ */
+export function windowPhrase(win: MetricsWindow, live: boolean): { head: string; over: string } {
+  const zoomed = windowSpanNote(win)
+  if (!live && zoomed) return { head: zoomed, over: "the window on screen" }
+  const head = live
+    ? "Last 5 minutes"
+    : {
+        live: "Last 5 minutes",
+        "1h": "Last hour",
+        "6h": "Last 6 hours",
+        "24h": "Last 24 hours",
+        "7d": "Last 7 days",
+      }[win.key]
+  return { head, over: `the ${head.toLowerCase()}` }
+}

@@ -593,22 +593,41 @@ export function TrafficBar({
   busiest: number
   colors: { in: string; out: string }
 }) {
-  const inbound = (iface.recvRate / busiest) * 100
-  const outbound = (iface.sendRate / busiest) * 100
+  return (
+    <SplitBar
+      label={`${rate(iface.recvRate)} in, ${rate(iface.sendRate)} out`}
+      busiest={busiest}
+      parts={[
+        { value: iface.recvRate, color: colors.in },
+        { value: iface.sendRate, color: colors.out },
+      ]}
+    />
+  )
+}
+
+/** Two sides of one quantity as one bar, against the largest of the bars beside it. */
+export function SplitBar({
+  label,
+  busiest,
+  parts,
+}: {
+  label: string
+  busiest: number
+  parts: { value: number; color: string }[]
+}) {
   return (
     <div
       role="img"
-      aria-label={`${rate(iface.recvRate)} in, ${rate(iface.sendRate)} out`}
+      aria-label={label}
       className="flex h-1.5 w-full min-w-16 overflow-hidden rounded-full bg-meter-track"
     >
-      <span
-        className="h-full transition-[width] duration-700 ease-out"
-        style={{ width: `${inbound}%`, background: colors.in }}
-      />
-      <span
-        className="h-full transition-[width] duration-700 ease-out"
-        style={{ width: `${outbound}%`, background: colors.out }}
-      />
+      {parts.map((part, index) => (
+        <span
+          key={index}
+          className="h-full transition-[width] duration-700 ease-out"
+          style={{ width: `${(part.value / busiest) * 100}%`, background: part.color }}
+        />
+      ))}
     </div>
   )
 }

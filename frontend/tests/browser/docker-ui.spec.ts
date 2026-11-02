@@ -1819,21 +1819,40 @@ async function mockUsage(
 
 /**
  * The Usage tab reads a container the way a project's Runtime reads a
- * release — each chart headed by its reading now — and breaks those
- * readings down under the charts the way the Metrics page breaks the host
- * down.
+ * release — the Metrics page's row of readings over its charts — and breaks
+ * those readings down under the charts the way the Metrics page breaks the
+ * host down.
  */
-test("usage heads each chart with its reading now and breaks the readings down", async ({
-  page,
-}) => {
+test("usage reads as the Metrics page does and breaks the readings down", async ({ page }) => {
   const feed = await mockUsage(page)
   const usage = page.getByTestId("container-usage")
   await feed.send(0, 1024 * 1024)
   await feed.send(2, 1024 * 1024 + 4096)
   await expect(usage.getByText("Live", { exact: true }).first()).toBeVisible()
-  // The processor's share of a core heads its chart, and a rate needs two frames.
-  await expect(usage.getByText("150.0%", { exact: true })).toBeVisible()
+  // The five readings, as on Metrics: a share of a core against its quota, and
+  // a rate, which needs two frames.
+  const readings = usage.locator("[data-slot=stat-grid]").first()
+  await expect(readings.locator("[data-slot=stat-tile]")).toHaveCount(5)
+  await expect(readings.locator("[data-slot=stat-tile]", { hasText: "CPU" })).toContainText(
+    "150.0%",
+  )
+  await expect(readings.getByText("of a 2-core quota")).toBeVisible()
+  await expect(readings.getByText("of 512.0 MB")).toBeVisible()
   await expect(usage.getByText("2.0 KB/s").first()).toBeVisible()
+
+  // The counters since it started are what moved, not a table of limits: one
+  // bar each for the network and the disk, on one scale.
+  const moved = usage.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Data moved", exact: true }),
+  })
+  await expect(moved.getByText("since it started")).toBeVisible()
+  await expect(moved.getByRole("img")).toHaveCount(2)
+  await expect(moved.getByRole("img", { name: /in, .* out/ })).toBeVisible()
+  await expect(moved.getByRole("img", { name: /read, .* written/ })).toBeVisible()
+  await expect(moved.getByText(/quota|limit/)).toHaveCount(0)
+
+  // The line that used to end the block, said nowhere now.
+  await expect(usage.getByText(/Live from Docker's stats stream|Recorded every/)).toHaveCount(0)
 
   // Where the memory is: the inactive cache apart from the working set.
   await expect(usage.getByRole("heading", { name: "Allocation", exact: true })).toBeVisible()
@@ -1870,7 +1889,7 @@ test("a stopped container keeps its history and opens no socket", async ({ page 
   const stopped = await mockUsage(page, { stopped: true })
   const usage = page.getByTestId("container-usage")
   await expect(usage.getByText("Not running", { exact: true })).toBeVisible()
-  await expect(usage.getByRole("heading", { name: "Processor", exact: true })).toBeVisible()
+  await expect(usage.getByRole("heading", { name: "Utilisation", exact: true })).toBeVisible()
   await expect(usage.getByText("Not running. These are read while it runs.").first()).toBeVisible()
   expect(stopped.connections()).toBe(0)
 })
@@ -1894,7 +1913,7 @@ for (const width of [1280, 1720, 390]) {
     await feed.send(0, 1024 * 1024)
     await feed.send(2, 1024 * 1024 + 4096)
     await expect(page.getByRole("heading", { name: "Interfaces", exact: true })).toBeVisible()
-    await expect(page.getByRole("heading", { name: "Since it started", exact: true })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Data moved", exact: true })).toBeVisible()
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)
