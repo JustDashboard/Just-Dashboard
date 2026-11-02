@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { useViewState } from "@/lib/view-state"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
@@ -16,6 +17,7 @@ import { formatDuration } from "@/components/deploy/vocabulary"
 import { causeTitle } from "@/components/deploy/failure-cause"
 import { deliveryLead } from "@/components/deploy/delivery-model"
 import { WireMark, WireNode } from "@/components/deploy/wire"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
   SelectContent,
@@ -62,6 +64,138 @@ function dayLabel(date: string) {
     month: "short",
     day: "numeric",
   })
+}
+
+/** "Wed, Oct 28": the weekday is what a day's releases are usually remembered by. */
+function dayHeading(date: string) {
+  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  })
+}
+
+type Day = DeploymentInsights["daily"][number]
+type DayLine = { text: string; fill?: string }
+
+function releaseLines(day: Day): DayLine[] {
+  const lines = (Object.keys(FILL) as Outcome[])
+    .filter((outcome) => day[outcome] > 0)
+    .map((outcome) => ({ text: `${day[outcome]} ${outcome}`, fill: FILL[outcome] }))
+  return lines.length > 0 ? lines : [{ text: "No releases" }]
+}
+
+function durationLines(day: Day): DayLine[] {
+  if (!day.medianDurationSeconds) return [{ text: "No successful release" }]
+  return [
+    {
+      text: `${seconds(day.medianDurationSeconds)}, median of ${day.succeeded} successful release${day.succeeded === 1 ? "" : "s"}`,
+      fill: "bg-chart-2",
+    },
+  ]
+}
+
+/**
+ * A chart's days, each column its own hover target and reading. The native
+ * `title` these used to carry took a second of holding still to appear and
+ * never appeared at all for a finger or a keyboard, so the chart read as
+ * having no detail behind it.
+ *
+ * The whole column answers rather than only its bar: most days have nothing
+ * but a tick on the baseline, and they are readings too. One tab stop per
+ * chart, with the arrow keys walking the days, because 90 stops would put the
+ * records below out of reach.
+ */
+function DayBars({
+  days,
+  label,
+  testId,
+  className,
+  lines,
+  children,
+}: {
+  days: Day[]
+  label: string
+  testId: string
+  className?: string
+  lines: (day: Day) => DayLine[]
+  children: (day: Day) => React.ReactNode
+}) {
+  const [active, setActive] = useState<number | null>(null)
+  return (
+    <ol
+      className={cn("flex items-end gap-px border-b border-hairline", className)}
+      aria-label={label}
+      data-testid={testId}
+      onKeyDown={(event) => {
+        const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0
+        if (!step) return
+        const columns = Array.from(event.currentTarget.children) as HTMLElement[]
+        const at = columns.indexOf(event.target as HTMLElement)
+        if (at < 0) return
+        event.preventDefault()
+        columns[at + step]?.focus()
+      }}
+    >
+      {days.map((day, index) => {
+        const reading = lines(day)
+        return (
+          <Tooltip
+            // Dates repeat when a window is longer than the recorded history;
+            // the position is what makes a bar unique.
+            key={`${day.date}-${index}`}
+            open={active === index}
+            onOpenChange={(open) =>
+              setActive((current) => (open ? index : current === index ? null : current))
+            }
+          >
+            {/* Radix closes on a press and on the pointer leaving, and a tap is
+                both, so a finger would never see the reading. Preventing the
+                default skips only Radix's own handler. */}
+            <TooltipTrigger
+              asChild
+              onPointerDown={(event) => {
+                event.preventDefault()
+                setActive(index)
+              }}
+              onClick={(event) => event.preventDefault()}
+              onPointerLeave={(event) => {
+                if (event.pointerType === "touch") event.preventDefault()
+              }}
+            >
+              <li
+                // Full height, or the bar's percentage has nothing to resolve
+                // against and every day draws at zero.
+                className={cn(
+                  "flex h-full min-w-0 flex-1 flex-col items-center justify-end rounded-t-sm focus-ring-inset",
+                  active === index && "bg-row-hover",
+                )}
+                tabIndex={index === (active ?? days.length - 1) ? 0 : -1}
+              >
+                {children(day)}
+                <span className="sr-only">
+                  {`${dayHeading(day.date)}: ${reading.map((line) => line.text).join(", ")}`}
+                </span>
+              </li>
+            </TooltipTrigger>
+            {/* No entrance: moving along the days swaps the reading many times
+                a second, and each one sliding in reads as flicker. */}
+            <TooltipContent side="top" sideOffset={6} className="animate-none!">
+              <p className="font-medium">{dayHeading(day.date)}</p>
+              {reading.map((line) => (
+                <p key={line.text} className="numeric flex items-center gap-1.5">
+                  {line.fill && (
+                    <span aria-hidden className={cn("size-2 shrink-0 rounded-[2px]", line.fill)} />
+                  )}
+                  {line.text}
+                </p>
+              ))}
+            </TooltipContent>
+          </Tooltip>
+        )
+      })}
+    </ol>
+  )
 }
 
 /**
@@ -124,8 +258,7 @@ export function Insights({
   const durationValues = daily.map((day) => day.medianDurationSeconds).filter((value) => value > 0)
   // The window's median is drawn across the days, so it has to be on their scale.
   const slowest = Math.max(data?.medianDurationSeconds ?? 0, ...durationValues)
-  const total = (day: DeploymentInsights["daily"][number]) =>
-    day.succeeded + day.failed + day.cancelled
+  const total = (day: Day) => day.succeeded + day.failed + day.cancelled
   const peak = Math.max(1, ...daily.map(total))
   const reading = "space-y-1"
   const figure = "numeric text-2xl font-semibold tracking-tight"
@@ -234,58 +367,45 @@ export function Insights({
             ))}
           </p>
         </div>
-        <ol
+        <DayBars
           // Keyed by the window so a new range arrives rather than
           // the old bars stretching into it.
           key={range}
-          className={cn(
-            "flex animate-rise items-end gap-px border-b border-hairline",
-            history ? "h-28" : "h-20",
-          )}
-          aria-label="Releases per day"
-          data-testid="insights-daily"
+          days={daily}
+          label="Releases per day"
+          testId="insights-daily"
+          className={cn("animate-rise", history ? "h-28" : "h-20")}
+          lines={releaseLines}
         >
-          {daily.map((day, index) => {
+          {(day) => {
             const count = total(day)
-            return (
-              <li
-                // Dates repeat when a window is longer than the recorded
-                // history; the position is what makes a bar unique.
-                key={`${day.date}-${index}`}
-                // Full height, or the bar's percentage has nothing to
-                // resolve against and every day draws at zero.
-                className="flex h-full min-w-0 flex-1 flex-col items-center justify-end"
-                title={`${day.date}: ${day.succeeded} succeeded, ${day.failed} failed${day.cancelled ? `, ${day.cancelled} cancelled` : ""}`}
+            return count ? (
+              <span
+                // A thin bar centred in its day, so a week is
+                // eight marks rather than eight slabs.
+                className="flex w-full max-w-3 flex-col overflow-hidden rounded-t-sm transition-[height] duration-500 ease-out"
+                style={{ height: `${Math.max(8, Math.round((count / peak) * 100))}%` }}
               >
-                {count ? (
-                  <span
-                    // A thin bar centred in its day, so a week is
-                    // eight marks rather than eight slabs.
-                    className="flex w-full max-w-3 flex-col overflow-hidden rounded-t-sm transition-[height] duration-500 ease-out"
-                    style={{ height: `${Math.max(8, Math.round((count / peak) * 100))}%` }}
-                  >
-                    {STACK.map((outcome) =>
-                      day[outcome] ? (
-                        <span
-                          key={outcome}
-                          className={cn(
-                            "block w-full shrink-0 transition-[height] duration-500 ease-out",
-                            FILL[outcome],
-                          )}
-                          style={{ height: `${(day[outcome] / count) * 100}%` }}
-                        />
-                      ) : null,
-                    )}
-                  </span>
-                ) : (
-                  // Nothing ran: a tick on the baseline, never a
-                  // faint success.
-                  <span className="block h-0.5 w-full max-w-3 bg-meter-track" />
+                {STACK.map((outcome) =>
+                  day[outcome] ? (
+                    <span
+                      key={outcome}
+                      className={cn(
+                        "block w-full shrink-0 transition-[height] duration-500 ease-out",
+                        FILL[outcome],
+                      )}
+                      style={{ height: `${(day[outcome] / count) * 100}%` }}
+                    />
+                  ) : null,
                 )}
-              </li>
+              </span>
+            ) : (
+              // Nothing ran: a tick on the baseline, never a
+              // faint success.
+              <span className="block h-0.5 w-full max-w-3 bg-meter-track" />
             )
-          })}
-        </ol>
+          }}
+        </DayBars>
         {axis}
       </div>
 
@@ -335,34 +455,26 @@ export function Insights({
                   scale. The first line of the plot is kept for the scale's
                   top, so the slowest day never runs under its own label. */}
               <div key={range} className="relative animate-rise">
-                <ol
-                  className="flex h-28 items-end gap-px border-b border-hairline pt-4"
-                  aria-label="Median release time per day"
-                  data-testid="insights-durations"
+                <DayBars
+                  days={daily}
+                  label="Median release time per day"
+                  testId="insights-durations"
+                  className="h-28 pt-4"
+                  lines={durationLines}
                 >
-                  {daily.map((day, index) => (
-                    <li
-                      key={`${day.date}-${index}`}
-                      className="flex h-full min-w-0 flex-1 flex-col items-center justify-end"
-                      title={
-                        day.medianDurationSeconds
-                          ? `${day.date}: ${seconds(day.medianDurationSeconds)}, median of ${day.succeeded} successful release${day.succeeded === 1 ? "" : "s"}`
-                          : `${day.date}: no successful release`
-                      }
-                    >
-                      {day.medianDurationSeconds ? (
-                        <span
-                          className="block w-full max-w-3 rounded-t-sm bg-chart-2"
-                          style={{
-                            height: `${Math.max(4, (day.medianDurationSeconds / slowest) * 100)}%`,
-                          }}
-                        />
-                      ) : (
-                        <span className="block h-0.5 w-full max-w-3 bg-meter-track" />
-                      )}
-                    </li>
-                  ))}
-                </ol>
+                  {(day) =>
+                    day.medianDurationSeconds ? (
+                      <span
+                        className="block w-full max-w-3 rounded-t-sm bg-chart-2"
+                        style={{
+                          height: `${Math.max(4, (day.medianDurationSeconds / slowest) * 100)}%`,
+                        }}
+                      />
+                    ) : (
+                      <span className="block h-0.5 w-full max-w-3 bg-meter-track" />
+                    )
+                  }
+                </DayBars>
                 <span className="numeric absolute top-0 left-0 text-micro leading-4 text-muted-foreground">
                   {seconds(slowest)}
                 </span>

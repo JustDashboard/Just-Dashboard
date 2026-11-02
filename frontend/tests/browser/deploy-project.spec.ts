@@ -334,14 +334,25 @@ test("the deployments tab reports delivery figures with their basis and window",
   const durations = page.getByTestId("insights-durations")
   await expect(durations.locator("li")).toHaveCount(31)
   await expect(page.getByText("median 1m 35s", { exact: true })).toBeVisible()
-  await expect(durations.locator("li").first()).toHaveAttribute(
-    "title",
-    "2026-08-04: 1m 35s, median of 1 successful release",
-  )
-  await expect(durations.locator("li").nth(1)).toHaveAttribute(
-    "title",
-    "2026-08-05: no successful release",
-  )
+  // Each day answers under the pointer, the empty ones too, in both charts.
+  const tooltip = page.getByRole("tooltip")
+  await durations.locator("li").first().hover()
+  await expect(tooltip).toHaveText(/Aug 4.*1m 35s, median of 1 successful release/)
+  await durations.locator("li").nth(1).hover()
+  await expect(tooltip).toHaveText(/Aug 5.*No successful release/)
+  const releases = page.getByTestId("insights-daily")
+  await releases.locator("li").first().hover()
+  await expect(tooltip).toHaveText(/Aug 4.*1 succeeded.*1 failed/)
+  await releases.locator("li").nth(1).hover()
+  await expect(tooltip).toHaveText(/Aug 5.*No releases/)
+  // One tab stop for a chart of 31 days, and the arrows walk them.
+  await expect(releases.locator('li[tabindex="0"]')).toHaveCount(1)
+  await releases.locator("li").nth(1).focus()
+  await page.keyboard.press("ArrowLeft")
+  await expect(tooltip).toHaveText(/Aug 4.*1 succeeded/)
+  await page.mouse.move(0, 0)
+  await page.keyboard.press("Escape")
+  await expect(tooltip).toHaveCount(0)
   await expect(page.getByText(/^3 failed releases · last /)).toBeVisible()
 
   // A reason for failing narrows the list below to the failed runs, and each
@@ -1971,4 +1982,21 @@ test("a pull-request listing the server cannot answer hides the panel, and an un
   await answered
   await expect(page.getByRole("heading", { name: "Recent deployments" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Pull requests", exact: true })).toHaveCount(0)
+})
+
+test.describe("delivery charts on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+
+  test("a tap on a day holds its reading until the next tap", async ({ page }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/deployments")
+    const days = page.getByTestId("insights-daily").locator("li")
+    const tooltip = page.getByRole("tooltip")
+    await days.first().tap()
+    await expect(tooltip).toHaveText(/Aug 4.*1 succeeded.*1 failed/)
+    await days.nth(1).tap()
+    await expect(tooltip).toHaveText(/Aug 5.*No releases/)
+    await page.getByRole("heading", { name: "Delivery", exact: true }).tap()
+    await expect(tooltip).toHaveCount(0)
+  })
 })
