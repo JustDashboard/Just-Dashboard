@@ -130,15 +130,26 @@ up on the press, moves it once the pointer has gone a few pixels — less is a c
 it the system being read, without moving the camera — and saves the frame's corner by system id when
 it is put down. A system nobody carried keeps the place the atlas gives it.
 
-**Tidy up** forgets every box's position and every system's place (with *Undo* in its toast);
-**Forget this layout** in Options throws away the whole arrangement, the system last read included,
-behind a confirmation.
+**Tidy up** forgets every box's position and every system's place (with *Undo* in its toast). It
+sits in the zoom controls and appears only once something has been moved.
+
+## What is on the canvas
+
+Nothing runs over the canvas: no toolbar, no search, no minimap. On a desk the rail starts at the top
+of the frame, the zoom controls float at the bottom left (with *Fit*, *All* and *Tidy up*), and the
+inspector's toggle and full screen float at the top right. A failed save still says so in a toast.
+
+Below `lg` (1024 px) the map is the canvas alone, edge to edge, with no rail, inspector, zoom controls
+or full screen. It opens on the address's or last-read system, else the first one, since every system
+at once is too small to read or tap. A finger pans and pinches, and nothing can be dragged. A tap on
+a box or a system's head floats one button, *Open …*, to its page; a tap on open ground takes it away.
+A phone writes nothing to the account's arrangement.
 
 ## Reading it
 
 - **The rail** lists every system, grouped by what anchors it, with what it holds in a few words and
-  its anchor's dot; a row flies the canvas to its system, which the next visit opens on. *Show all*
-  and the canvas's *All* fit every frame. `/map?system=<id>` opens on one system.
+  its anchor's dot; a row flies the canvas to its system, which the next visit opens on. The
+  canvas's *All* fits every frame. `/map?system=<id>` opens on one system.
 - **Choosing a box** lights what it is wired to in its system, draws those lines in the brand's blue
   with how each is known written on them — a pulse travelling the line where both ends are up — and
   steps the rest of the system back. Double-clicking a box, or Enter, opens its page; double-clicking
@@ -149,14 +160,11 @@ behind a confirmation.
   named by the surest, `mapViaOrder`, the others in its title) and *Also drawn in*. With a system and
   no box chosen it is the system's account, box by box; with neither, the list of systems. Pointing
   at a row rings its box on the canvas.
-- **Search** (`/`) keeps the systems in the rail and the frames on the canvas that hold a match — by
-  name, state, detail, product or role — rings each matching box, and Enter chooses the first and
-  frames it with its neighbours.
 - **No box spills.** A box's name and state are cut short with an ellipsis rather than wrapping or
   running past its outline, so the sizes `server-systems.ts` lays out are the sizes drawn.
 - **A source that could not be read says so** over the canvas, with its reason, and is never drawn as
   an empty system (security invariants: an unavailable reading is neither healthy nor a problem).
-- **Keys**: `/` search, `f` fit the system being read (or every system), `i` the inspector, Enter
+- **Keys**: `f` fit the system being read (or every system), `i` the inspector, Enter
   opens the chosen box's page, Escape lets it go; the zoom keys are under *Moving it*.
 
 ## What keeps it light
@@ -243,13 +251,14 @@ route); what it answers is what that account's own pages would show it (`filterS
 `GET`/`PUT`/`DELETE /map/layout` keep one JSON document per account in `map_layouts` (goes with the
 account). They need a browser session (`RequireSession`): arranging your view of the server is open to
 every role and is no business of an API key. The server checks only that the body is a JSON object under
-512 KiB; `decodeDocument` reads it back defensively. A save is debounced (900 ms), reported in the
-toolbar (*Saving…*, *Saved*, *Not saved*), sent on the way out of the page on a request the browser
+512 KiB; `decodeDocument` reads it back defensively. A save is debounced (900 ms), reported only when
+it fails (a toast), sent on the way out of the page on a request the browser
 keeps alive, and audited as `map.layout.save` / `map.layout.reset`. The document (`version: 2`) holds
 the positions of the boxes dragged, by node id inside their system; the corners of the systems
 carried, by system id (`frames`, absent from a document saved before systems could be carried); the
-system last read; the view; and the minimap switch. A version-1 document — the mind map this replaced, whose positions placed
-shelves round the server — is read as a fresh arrangement, keeping only its minimap switch.
+system last read; and the view. A version-1 document — the mind map this replaced, whose positions
+placed shelves round the server — is read as a fresh arrangement. Nothing in the page calls `DELETE`
+any more; the route stays for the API it has always been.
 
 ## Tests
 
@@ -260,7 +269,7 @@ shelves round the server — is read as a fresh arrangement, keeping only its mi
   and marked shared; a stack of its own as a card wired to its members; this dashboard as a system
   (its tailnet, address, stack and store); services drawn only when wired, a native database named by
   itself; what nothing claims as one system last; absent and unread kinds drawing nothing; the atlas's
-  rows; dragging (a box, its satellites following, a stack's frame redrawn); search; neighbours; and
+  rows; dragging (a box, its satellites following, a stack's frame redrawn); neighbours; and
   the document decoder reading a version-1 document as fresh.
 - `api/map_build_test.go`: the joins, the measured states (exit codes, project states), unread and
   absent sources, worst-first capping, a box's facts and the per-role filter; `map_links_test.go`: every
@@ -282,7 +291,8 @@ shelves round the server — is read as a fresh arrangement, keeping only its mi
   its satellites and its shapes, with images and keys left off; this dashboard's tailnet, address,
   stack, roles and store; choosing a box (its lines named in the inspector, the rest stepped back,
   Escape); a shared database's *Also drawn in* flying to the stack that runs it; the rail flying the
-  canvas and a search keeping what holds a match; a drag saved by node id, kept across a reload and
+  canvas; no bar or minimap over the desk's canvas, and its two floating buttons; a phone's bare map,
+  its one *Open* button and a finger sliding the canvas across a box; a drag saved by node id, kept across a reload and
   tidied away; a version-1 arrangement read as fresh; every word the same size far out; a trackpad's
   slide, its pinch and the zoom keys; a mouse sliding the canvas from inside a frame; a system carried
   by its head with everything in it, not taken for a click, kept across a reload and tidied away; no

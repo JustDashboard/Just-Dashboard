@@ -68,7 +68,8 @@ export type FrameData = {
   anchorKind: string
   census: string
   chosen: boolean
-  dimmed: boolean
+  /** On a phone, where nothing is carried: its head slides the canvas like any other ground. */
+  fixed: boolean
 }
 
 export type StackData = { frame: StackFrame; dimmed: boolean }
@@ -712,12 +713,14 @@ export const SystemFrameNode = memo(function SystemFrameNode({ data }: NodeProps
         "map-frame relative h-full w-full rounded-[28px] border transition-[border-color,opacity]",
         data.chosen ? "border-rule-brand" : "border-hairline",
         loose && "border-dashed",
-        data.dimmed && "opacity-40",
       )}
     >
       <div
-        title="Drag to move this system"
-        className="map-frame-grip nopan nodrag flex h-16 items-center gap-3 rounded-t-[28px] border-b border-hairline px-6"
+        title={data.fixed ? undefined : "Drag to move this system"}
+        className={cn(
+          "nodrag flex h-16 items-center gap-3 rounded-t-[28px] border-b border-hairline px-6",
+          !data.fixed && "map-frame-grip nopan",
+        )}
       >
         {loose ? (
           <span className="flex size-10 items-center justify-center rounded-lg border border-hairline bg-background">
