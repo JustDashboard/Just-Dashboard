@@ -1265,7 +1265,10 @@ in 0.8.5 an environment's and a shared variable's card is `ChoiceRow columns`, o
 600px: the name, the value, then an edge of one width on every row, with a state in the value's
 column so it cannot move the columns. Reveal swaps the mask for `RevealedValue` in the same cell, one
 line that scrolls sideways however long the value is. It was a framed band under the row, which
-pushed the rest of the list down for the length of a look. Reveal and copy are inline in both states,
+pushed the rest of the list down for the length of a look. Nothing hangs under the row at any width:
+a shared variable's readers open from its *Read by N*, and on a phone the row is its name over its
+value, where a variable reaches being on the filter chips and in its editor. A band left empty room
+under the mark. Reveal and copy are inline in both states,
 when a variable was set is on the face and in its editor, and no strip of the variables' products
 stands under the section's title: each row wears its own mark, and one logo there read as a stray
 icon.

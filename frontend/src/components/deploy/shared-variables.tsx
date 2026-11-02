@@ -20,6 +20,7 @@ import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, variableProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
@@ -431,10 +432,9 @@ export function SharedVariables({
 /**
  * One shared variable, drawn as an environment's variable is: its name and the
  * reference that reads it on one line, and at its edge whether a reader still
- * runs an earlier value, how many read it and who changed it. Under it the
- * readers themselves, each a link to the variables page it is read from. Its
- * value, revealed, takes the reference's place. Narrow, the reference goes
- * under the name and the edge under that.
+ * runs an earlier value, how many read it and who changed it. Its value,
+ * revealed, takes the reference's place. Narrow, the reference goes under the
+ * name with the count beside it. Nothing ever hangs under the row.
  */
 function SharedRow({
   variable,
@@ -453,22 +453,7 @@ function SharedRow({
   onEdit: () => void
   verbs: Verb[]
 }) {
-  const waiting = waitingReaders(variable)
-  const state = waiting > 0 && (
-    <Status key="waiting" tone="notice" label="Saved · not live yet" className="animate-rise" />
-  )
-  const count = (
-    <span
-      // One width, so the edge is the same on every row and the values line up.
-      className={cn(
-        "numeric text-hint whitespace-nowrap text-muted-foreground",
-        wide && "w-14 text-right",
-      )}
-    >
-      {variable.usedBy.length === 0 ? "Not read" : `Read by ${variable.usedBy.length}`}
-    </span>
-  )
-  const readers = readersByProject(variable.usedBy)
+  const waiting = waitingReaders(variable) > 0
   const value =
     revealed !== undefined ? (
       <RevealedValue name={variable.name} value={revealed} />
@@ -495,63 +480,94 @@ function SharedRow({
       columns={wide}
       className={wide ? "min-h-11 py-1.5" : "py-2"}
       description={
-        wide ? (
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1">{value}</span>
-            {state}
-          </span>
-        ) : (
-          value
-        )
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 flex-1">{value}</span>
+          {wide ? (
+            waiting && (
+              <Status
+                key="waiting"
+                tone="notice"
+                label="Saved · not live yet"
+                className="animate-rise"
+              />
+            )
+          ) : (
+            <SharedReaders variable={variable} waiting={waiting} />
+          )}
+        </span>
       }
       trailing={
         wide ? (
           <>
-            {count}
+            <SharedReaders variable={variable} wide />
             {changedBy}
           </>
         ) : undefined
       }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${variable.name}`} />}
-    >
-      {(!wide || readers.length > 0) && (
-        <div className="min-w-0 space-y-2 sm:pl-11">
-          {!wide && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              {count}
-              {state}
-              {changedBy && <span className="ml-auto flex">{changedBy}</span>}
-            </div>
-          )}
-          {readers.length > 0 && (
-            // A press on a reader follows its link and opens nothing else.
-            <ul
-              aria-label={`Variables reading ${variable.name}`}
-              onClick={(event) => event.stopPropagation()}
-              className="flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-hint text-muted-foreground"
-            >
-              {readers.map((project) => (
-                <li key={project.projectId} className="min-w-0">
-                  <Link
-                    href={`/deploy/${project.projectId}/settings/variables`}
-                    className="rounded-sm text-foreground/90 focus-ring hover:underline"
-                  >
-                    {project.projectName}
-                  </Link>
-                  {project.uses.map((use) => (
-                    <span key={`${use.environmentId}-${use.variable}`}>
-                      {" · "}
-                      {use.environmentName} as <span className="font-mono">{use.variable}</span>
-                      {use.waiting && <span className="text-warning"> (not live yet)</span>}
-                    </span>
-                  ))}
-                </li>
+    />
+  )
+}
+
+/**
+ * How many variables read this one, opening on who they are. The readers were
+ * a band under the row, which made a read variable a taller card than an unread
+ * one, with empty room under its mark. Each is a link to the page it is read
+ * from, and says if it still runs an earlier value. On a phone the row has room
+ * for one word here, so a value not live yet says that instead of the count.
+ */
+function SharedReaders({
+  variable,
+  wide = false,
+  waiting = false,
+}: {
+  variable: DeploymentSharedVariable
+  wide?: boolean
+  waiting?: boolean
+}) {
+  // One width, so the edge is the same on every row and the values line up.
+  const width = wide && "w-14 text-right"
+  if (variable.usedBy.length === 0)
+    return (
+      <span className={cn("shrink-0 text-hint whitespace-nowrap text-muted-foreground", width)}>
+        Not read
+      </span>
+    )
+  const count = `Read by ${variable.usedBy.length}`
+  return (
+    <Popover>
+      <PopoverTrigger
+        aria-label={count}
+        className={cn(
+          "numeric shrink-0 rounded-sm text-hint whitespace-nowrap text-muted-foreground focus-ring hover:text-foreground",
+          width,
+        )}
+      >
+        {waiting ? <Status tone="notice" label="Not live yet" /> : count}
+      </PopoverTrigger>
+      {/* A press in here reaches the row through React even from a portal, and
+          the row would open its editor. */}
+      <PopoverContent align="end" onClick={(event) => event.stopPropagation()}>
+        <ul aria-label={`Variables reading ${variable.name}`} className="space-y-2 text-hint">
+          {readersByProject(variable.usedBy).map((project) => (
+            <li key={project.projectId} className="min-w-0 text-muted-foreground">
+              <Link
+                href={`/deploy/${project.projectId}/settings/variables`}
+                className="rounded-sm font-medium text-foreground focus-ring hover:underline"
+              >
+                {project.projectName}
+              </Link>
+              {project.uses.map((use) => (
+                <span key={`${use.environmentId}-${use.variable}`} className="block break-words">
+                  {use.environmentName} as <span className="font-mono">{use.variable}</span>
+                  {use.waiting && <span className="text-warning"> (not live yet)</span>}
+                </span>
               ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </ChoiceRow>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
   )
 }
 

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { expectSaved, json, mockProject, saveBar, saveSettings } from "./deploy-fixture"
+import { risen } from "./risen"
 
 /**
  * Project settings, part A: General, Build, Runtime, Environment variables,
@@ -795,14 +796,18 @@ test.describe("Environment variables", () => {
       const row = variableRow(page, "API_TOKEN")
       const next = page.getByRole("list", { name: "Environment variables" }).locator("li").last()
       await expect(row).toBeVisible()
+      await risen(page)
       const box = await row.boundingBox()
       const nextBox = await next.boundingBox()
+      // One line wide and two on a phone, with nothing hanging under the mark.
+      expect(box?.height).toBeLessThanOrEqual(width === 390 ? 60 : 48)
 
       await row.getByRole("button", { name: "Reveal" }).click()
       const value = row.getByLabel("Value of API_TOKEN")
       await expect(value).toBeVisible()
       // A row's height alone would pass with the value clipped out of sight, so
       // the value's own line and the row after it are measured as well.
+      await risen(page)
       expect((await value.boundingBox())?.height).toBeLessThanOrEqual(20)
       expect(await row.boundingBox()).toEqual(box)
       expect(await next.boundingBox()).toEqual(nextBox)

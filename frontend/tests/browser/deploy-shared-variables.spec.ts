@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { json, mockProject, now } from "./deploy-fixture"
+import { risen } from "./risen"
 
 /**
  * Shared variables: the server's on `/deploy/variables`, a project's under
@@ -131,6 +132,43 @@ function overflow(page: Page) {
   return page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
 }
 
+for (const { width, height } of [
+  { width: 1280, height: 900 },
+  { width: 390, height: 844 },
+]) {
+  test(`a read, a revealed and an unread variable are one height at ${width}px`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await page.setViewportSize({ width, height })
+    await mockProject(page, { showcase: true })
+    await mockShared(page)
+    await page.goto("/deploy/variables")
+
+    const read = sharedRow(page, "Server variables", "SENTRY_DSN")
+    const unread = sharedRow(page, "Server variables", "PUBLIC_API_URL")
+    await expect(unread).toBeVisible()
+    await risen(page)
+    const box = await read.boundingBox()
+    const after = await unread.boundingBox()
+    expect(box?.height).toBe(after?.height)
+
+    await read.getByRole("button", { name: "Reveal value" }).click()
+    await expect(read.getByText("revealed-sentry_dsn")).toBeVisible()
+    await risen(page)
+    expect(await read.boundingBox()).toEqual(box)
+    expect(await unread.boundingBox()).toEqual(after)
+
+    // Opening who reads it is a layer over the list, and a press in it stays there.
+    await read.getByRole("button", { name: /Read by 2|Not live yet/ }).click()
+    const readers = page.getByRole("list", { name: "Variables reading SENTRY_DSN" })
+    await readers.getByText("production as", { exact: false }).first().click()
+    await expect(readers).toBeVisible()
+    await expect(page.getByRole("dialog", { name: /Edit/ })).toHaveCount(0)
+    expect(await read.boundingBox()).toEqual(box)
+  })
+}
+
 test("the server's shared variables name who reads each one and what is not live yet", async ({
   page,
 }) => {
@@ -145,15 +183,22 @@ test("the server's shared variables name who reads each one and what is not live
   const sentry = sharedRow(page, "Server variables", "SENTRY_DSN")
   await expect(sentry).toContainText("${{server.SENTRY_DSN}}")
   await expect(sentry).toContainText("Read by 2")
-  await expect(sentry.getByRole("link", { name: "worker" })).toHaveAttribute(
-    "href",
-    "/deploy/8/settings/variables",
-  )
+  await sentry.getByRole("button", { name: "Read by 2" }).click()
+  await expect(
+    page
+      .getByRole("list", { name: "Variables reading SENTRY_DSN" })
+      .getByRole("link", { name: "worker" }),
+  ).toHaveAttribute("href", "/deploy/8/settings/variables")
+  await page.keyboard.press("Escape")
   // A reader whose live release started before the change runs the earlier
   // value until it deploys again, in the settings pages' own words.
   const stripe = sharedRow(page, "Server variables", "STRIPE_SECRET_KEY")
   await expect(stripe.getByText("Saved · not live yet")).toBeVisible()
-  await expect(stripe).toContainText("(not live yet)")
+  await stripe.getByRole("button", { name: "Read by 1" }).click()
+  await expect(
+    page.getByRole("list", { name: "Variables reading STRIPE_SECRET_KEY" }),
+  ).toContainText("(not live yet)")
+  await page.keyboard.press("Escape")
   await expect(sharedRow(page, "Server variables", "PUBLIC_API_URL")).toContainText("Not read")
 
   // Revealed in place, through the audited route.

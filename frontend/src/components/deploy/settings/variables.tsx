@@ -1110,8 +1110,9 @@ function VariablesBody({
  * hue, what it holds, where it reaches, and who set it as their face. The row's
  * edge is one width on every row, so down the list the names start on one edge
  * and the values on another; a state goes in the value's column so that it
- * cannot move either. Narrow, the value goes under the name and the rest on the
- * line under that.
+ * cannot move either. Narrow, the value goes under the name and that is the
+ * whole row: where it reaches is on the filter chips and in the editor, because
+ * a third line left empty room under the mark on every row.
  *
  * Revealing a value swaps it for the mask in the same cell. The row is the same
  * height showing it as hiding it, at every width. When it was set is on the
@@ -1201,15 +1202,12 @@ function VariableRow({
       columns={wide}
       className={wide ? "min-h-11 py-1.5" : "py-2"}
       description={
-        wide ? (
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1">{value}</span>
-            {linkState}
-            {state}
-          </span>
-        ) : (
-          value
-        )
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 flex-1">{value}</span>
+          {linkState}
+          {state}
+          {!wide && <span className="sr-only">Reaches {scopeWords(variable.scopes)}</span>}
+        </span>
       }
       trailing={
         wide ? (
@@ -1220,16 +1218,7 @@ function VariableRow({
         ) : undefined
       }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${variable.name}`} />}
-    >
-      {!wide && (
-        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 sm:pl-11">
-          <Reach scopes={variable.scopes} />
-          {state}
-          {linkState}
-          <span className="ml-auto flex">{setBy}</span>
-        </div>
-      )}
-    </ChoiceRow>
+    />
   )
 }
 
