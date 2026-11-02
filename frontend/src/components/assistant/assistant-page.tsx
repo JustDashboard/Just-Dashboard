@@ -227,9 +227,10 @@ export function AssistantPage() {
                 })}
               </ul>
               <p className="mt-3 text-hint leading-relaxed text-muted-foreground">
-                This is what a conversation starts on; anyone asking can change it for theirs. What
-                stays with a person in every mode: reading a secret&rsquo;s value, saved
-                credentials, typed deletions, merging a pull request and running its preview.
+                This is what a conversation starts on; anyone asking can change it for theirs. In
+                every mode the server&rsquo;s backups ask first, and these stay with a person:
+                reading a secret&rsquo;s value, saved credentials, typed deletions, what reaches the
+                host, merging a pull request and running its preview.
               </p>
             </PanelBody>
           </Panel>

@@ -42,6 +42,9 @@ type assistantState struct {
 	// slots bounds how many answers stream at once.
 	slots   chan struct{}
 	options assistant.Options
+	// ringMu holds a change to the keyring from its read to its write, which spans a
+	// check of the provider: a slow save must not bring back a key just removed.
+	ringMu sync.Mutex
 	// diagnosing holds the runs whose failure is being asked about, so a
 	// second press waits for the first answer instead of paying for another.
 	diagnosing sync.Map
@@ -64,6 +67,9 @@ func (s *Server) mountDatabaseAssistantRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/assistant", s.handle(s.handleAssistantSettings))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+		// Who answers is a person's to choose: a key pointing it at a server of its
+		// own would be handed what everybody asks, and could answer with what to do.
+		r.Use(httpx.RequireSession)
 		r.Method(http.MethodPut, "/assistant", s.handle(s.handleAssistantConfigure))
 		r.Method(http.MethodDelete, "/assistant", s.handle(s.handleAssistantRemove))
 	})
@@ -141,6 +147,8 @@ func assistantCheckFailed(err error) error {
 // handleAssistantRemove turns the assistant off and forgets every key.
 func (s *Server) handleAssistantRemove(w http.ResponseWriter, r *http.Request) error {
 	httpx.SetAudit(r, "database.assistant.remove", "", nil)
+	s.assistant.ringMu.Lock()
+	defer s.assistant.ringMu.Unlock()
 	stored, err := s.assistantSettings(r.Context())
 	if err != nil && !errors.Is(err, errAssistantSealed) {
 		return err

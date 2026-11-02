@@ -117,13 +117,16 @@ func (c ToolCall) AgentInput() AgentInput {
 // that does not exist is not refused here: the model is told, and may correct it.
 func AgentCalls(blocks []Block) ([]ToolCall, error) {
 	var calls []ToolCall
+	seen := map[string]bool{}
 	for _, b := range blocks {
 		if b.Type != BlockToolUse {
 			continue
 		}
-		if b.ToolID == "" || len(b.ToolID) > 128 {
+		// An answer is by id, so two calls of one id would both run on one Allow.
+		if b.ToolID == "" || len(b.ToolID) > 128 || seen[b.ToolID] {
 			return nil, ErrMalformedCall
 		}
+		seen[b.ToolID] = true
 		raw, err := checkAgentCall(b.ToolName, b.Input)
 		if err != nil {
 			return nil, err
@@ -201,7 +204,7 @@ func isJSONObject(raw json.RawMessage) bool {
 // OperationLine is one operation as the prompt lists it.
 type OperationLine struct {
 	Name, Title string
-	// Kind is "read", "change" or "destructive".
+	// Kind is "read", "change", "destructive" or "server".
 	Kind string
 }
 
@@ -212,6 +215,7 @@ func writeOperations(b *strings.Builder, lines []OperationLine) {
 		{"read", "Operations that read"},
 		{"change", "Operations that change something"},
 		{"destructive", "Operations that stop, remove or replace something"},
+		{"server", "Operations on the whole server's backups, not only this deployment's, which always wait for the person"},
 	}
 	for _, group := range groups {
 		first := true

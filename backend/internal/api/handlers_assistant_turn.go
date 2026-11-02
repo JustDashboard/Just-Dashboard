@@ -58,6 +58,10 @@ const (
 	// agentBudgetWait bounds how long a press waits for the install's budget of
 	// model calls before it is refused.
 	agentBudgetWait = 20 * time.Second
+	// agentAnswerBytes is the most of a route's answer read to mask it. An answer has
+	// to be whole to be masked: cut, it is no longer JSON and a value in it no longer
+	// matches, so one past this is refused rather than sent in part.
+	agentAnswerBytes = 8 << 20
 )
 
 type operatorRequest struct {
@@ -273,6 +277,9 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 			stream.send(agentCallLine(view))
 			result := s.agentExecute(r.Context(), r, principal, scope, call)
 			stream.send(agentCalledLine(call, result))
+			if result.link != nil {
+				stream.send(map[string]any{"type": "link", "link": result.link})
+			}
 			return result.text, result.ok
 		})
 		c.Answer(results)
@@ -293,9 +300,9 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 	}
 	var usage assistant.Usage
 	var outcome assistant.Outcome
-	ran := []string{}
+	ran, refused := []string{}, []string{}
 	var pending []agentCallView
-	paused := false
+	paused, long := false, false
 	for step := 1; ; step++ {
 		// Each step is a model call on the install's budget; the first was paid for
 		// above. Waiting here is slower, and a person is watching it work.
@@ -303,6 +310,11 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 			if err = s.agentBudget(ctx); err != nil {
 				break
 			}
+		}
+		// A press can outlast the session that made it, or the role it was made
+		// under, and it goes no further than they do.
+		if _, err = s.Authn.Recheck(r, principal); err != nil {
+			break
 		}
 		outcome, err = assistant.Exchange(ctx, client, c, emit)
 		usage = addUsage(usage, outcome.Usage)
@@ -313,7 +325,7 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		var answers []assistant.Block
 		for _, call := range outcome.Pending {
 			view := s.agentView(scope, call)
-			if agentHolds(scope, mode, view.Kind) || (step >= agentSteps && view.Kind != agentKindFree) {
+			if agentHolds(scope, mode, view.Kind) || step >= agentSteps {
 				paused = paused || step >= agentSteps
 				held = append(held, call)
 				pending = append(pending, view)
@@ -326,7 +338,11 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 				stream.send(map[string]any{"type": "link", "link": result.link})
 			}
 			if view.Kind != agentKindFree {
-				ran = append(ran, agentName(call))
+				if result.ok {
+					ran = append(ran, agentName(call))
+				} else {
+					refused = append(refused, agentName(call))
+				}
 			}
 			answers = append(answers, assistant.Block{Type: assistant.BlockToolResult, ToolID: call.ID, Text: result.text, IsError: !result.ok})
 		}
@@ -337,10 +353,22 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		c.Pending = nil
 		c.Answer(answers)
 		mark = c.Mark()
+		if long = c.Long(); long {
+			break
+		}
 	}
 	detail["usage"] = usage
 	if len(ran) > 0 {
 		detail["ran"] = ran
+	}
+	if len(refused) > 0 {
+		detail["refused"] = refused
+	}
+	if long && err == nil {
+		detail["outcome"] = "too_long"
+		httpx.SetAudit(r, action, scope.name, detail)
+		stream.send(map[string]any{"type": "error", "error": map[string]any{"code": "conversation_full", "message": assistant.ErrFull.Error()}})
+		return nil
 	}
 	if outcome.Model != "" && outcome.Model != settings.Model {
 		detail["answeredBy"] = outcome.Model
@@ -445,10 +473,14 @@ func agentName(call assistant.ToolCall) string {
 	return call.Name
 }
 
-// agentHolds is the person's mode: whether a call of a kind waits for their
-// answer. A draft runs nothing until they press Deploy, so nothing done to it needs
-// their leave; a call's asking to read with Ask every time is the old contract.
+// agentHolds is the person's mode: whether a call of a kind waits for their answer.
+// A draft runs nothing until they press Deploy, so nothing done to it needs their
+// leave. What the whole server shares waits in every mode: full access is about the
+// deployment the conversation is about.
 func agentHolds(scope *agentScope, mode assistant.Mode, kind string) bool {
+	if kind == agentKindServer {
+		return true
+	}
 	if kind == agentKindFree || scope.kind == agentScopeDraft {
 		return false
 	}
@@ -526,6 +558,11 @@ func (s *Server) agentExecute(ctx context.Context, r *http.Request, p *httpx.Pri
 	ctx, cancel := context.WithTimeout(ctx, agentCallDeadline+time.Duration(assistant.AgentWaitMax)*time.Second)
 	defer cancel()
 	refuse := func(why string) agentResult { return agentResult{text: why, said: why} }
+	// Asked again for each call, so a role taken away during a press takes effect.
+	p, err := s.Authn.Recheck(r, p)
+	if err != nil {
+		return refuse("The session this was asked under has ended, so nothing was done.")
+	}
 	switch call.Name {
 	case assistant.ToolDescribeOperation:
 		return s.agentDescribe(scope, call.AgentInput().Name)
@@ -607,7 +644,7 @@ func (s *Server) agentWaitForRun(ctx context.Context, summary *deploy.Deployment
 			return agentResult{text: "The run could not be read.", said: "could not be read"}
 		}
 		if snapshot.Run.State.Terminal() || time.Now().After(deadline) {
-			masker, err := s.operatorMasker(ctx, summary, snapshot.Run)
+			masker, err := s.operatorMasker(ctx, summary)
 			if err != nil {
 				return agentResult{text: "The run's secret values could not be read to mask, so nothing was read.", said: "could not be masked"}
 			}
@@ -680,7 +717,7 @@ func agentArguments(scope *agentScope, op agentOperation, raw json.RawMessage) (
 
 // agentDispatch makes one route's request as the assistant.
 func (s *Server) agentDispatch(ctx context.Context, r *http.Request, p *httpx.Principal, scope *agentScope, method string, req mcp.RouteRequest) (*boundedRecorder, error) {
-	return s.dispatchMCP(r.WithContext(ctx), agentDelegate(p, scope), method, req)
+	return s.dispatchKeeping(r.WithContext(ctx), agentDelegate(p, scope), method, req, agentAnswerBytes)
 }
 
 // agentCall runs one operation, through the router, as the person.
@@ -700,7 +737,7 @@ func (s *Server) agentCall(ctx context.Context, r *http.Request, p *httpx.Princi
 	}
 	masker := deploy.NewDiagnosisMasker(nil)
 	if scope.deployment != nil {
-		masker, err = s.operatorMasker(ctx, scope.deployment, deploy.EngineRun{})
+		masker, err = s.operatorMasker(ctx, scope.deployment)
 		if err != nil {
 			return refuse("The environment's secret values could not be read to mask, so nothing was read or changed.")
 		}
@@ -714,21 +751,27 @@ func (s *Server) agentCall(ctx context.Context, r *http.Request, p *httpx.Princi
 		return refuse("The route could not be called.")
 	}
 	if rec.status >= http.StatusBadRequest {
-		return agentRefusal(rec)
+		return agentRefusal(rec, masker)
 	}
-	text := agentAnswer(rec, masker)
-	result := agentResult{text: text, ok: true, said: "done", output: clipText(text, agentOutputBytes)}
+	text, whole := agentAnswer(rec, masker)
 	if op.Grant == mcp.GrantRead {
-		result.said = agentReadWords(rec)
-		return result
+		if !whole {
+			return refuse(text)
+		}
+		return agentResult{text: text, ok: true, said: agentReadWords(rec), output: clipText(text, agentOutputBytes)}
 	}
+	// A change has been made whatever its answer came to, and the model has to know.
+	if !whole {
+		text = fmt.Sprintf(`{"status":%d,"done":true}`, rec.status)
+	}
+	result := agentResult{text: text, ok: true, output: clipText(text, agentOutputBytes)}
 	result.change = s.agentChangeOf(callCtx, r, p, scope, op, req, rec, before, masker)
 	result.said = "Done"
 	return result
 }
 
 // agentRefusal is a route's refusal, which the model reads and may act on.
-func agentRefusal(rec *boundedRecorder) agentResult {
+func agentRefusal(rec *boundedRecorder, masker *deploy.DiagnosisMasker) agentResult {
 	var envelope struct {
 		Error *httpx.APIError `json:"error"`
 	}
@@ -740,29 +783,36 @@ func agentRefusal(rec *boundedRecorder) agentResult {
 	if rec.status >= http.StatusInternalServerError {
 		message = "The dashboard could not do this: " + message
 	}
+	message, _ = masker.Mask(message)
 	return agentResult{text: message, said: message}
 }
 
-// agentAnswer is a route's JSON as the model reads it: every secret value of the
-// environment masked in every string of it, the fields that name a secret withheld
-// whatever a route ever answers, and cut at the read's bound.
-func agentAnswer(rec *boundedRecorder, masker *deploy.DiagnosisMasker) string {
+// agentAnswer is a route's JSON as the model reads it, and whether it could be read:
+// every secret value of the deployment masked in every string of it, the fields that
+// name a secret withheld whatever a route ever answers, and only then cut at the
+// read's bound. An answer that cannot be parsed whole cannot be masked, so none of it
+// is sent, and the text says why.
+func agentAnswer(rec *boundedRecorder, masker *deploy.DiagnosisMasker) (string, bool) {
 	body := bytes.TrimSpace(rec.body.Bytes())
 	if len(body) == 0 {
-		return fmt.Sprintf(`{"status":%d,"done":true}`, rec.status)
+		return fmt.Sprintf(`{"status":%d,"done":true}`, rec.status), true
+	}
+	if rec.total > rec.body.Len() {
+		return fmt.Sprintf("The answer is %d bytes, too long to mask whole, so none of it was read. Ask for less with the operation's parameters.", rec.total), false
 	}
 	var value any
-	var text string
-	if err := json.Unmarshal(body, &value); err == nil {
-		raw, _ := json.Marshal(agentMaskValue(value, masker))
-		text = string(raw)
-	} else {
-		text, _ = masker.Mask(string(body))
+	if err := json.Unmarshal(body, &value); err != nil {
+		return "The answer could not be read to mask it, so none of it was read.", false
 	}
-	if len(text) > maxOperatorResult || rec.total > mcp.ResultBytes {
-		text = clipText(text, maxOperatorResult) + fmt.Sprintf(" (cut: the answer is %d bytes; ask for less with the operation's parameters)", rec.total)
+	raw, err := json.Marshal(agentMaskValue(value, masker))
+	if err != nil {
+		return "The answer could not be written out.", false
 	}
-	return text
+	text := string(raw)
+	if len(text) > maxOperatorResult {
+		text = clipText(text, maxOperatorResult) + fmt.Sprintf(" (cut: the answer is %d bytes; ask for less with the operation's parameters)", len(text))
+	}
+	return text, true
 }
 
 // agentSecretFields are names of a field no answer's value is sent to a model

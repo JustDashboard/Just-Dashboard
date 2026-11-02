@@ -34,6 +34,10 @@ func (s *Server) mountAssistantRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleAssistantSettings))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+			// Who answers and what it may do alone are a person's to choose: a key
+			// pointing it at a server of its own would be handed what everybody asks,
+			// and could answer with what to do.
+			r.Use(httpx.RequireSession)
 			r.Method(http.MethodPost, "/models", s.handle(s.handleAssistantModels))
 			r.Method(http.MethodPut, "/preferences", s.handle(s.handleAssistantPreferences))
 			r.Method(http.MethodPut, "/providers/{preset}", s.handle(s.handleAssistantProviderSave))
@@ -114,6 +118,8 @@ func (s *Server) ringForChange(ctx context.Context) (*assistant.Keyring, error) 
 // typed in rather than under the first question somebody asks.
 func (s *Server) saveAssistantProfile(r *http.Request, preset string, in assistant.Setup, action string, activate bool) (*assistant.Keyring, error) {
 	httpx.SetAudit(r, action, preset, nil)
+	s.assistant.ringMu.Lock()
+	defer s.assistant.ringMu.Unlock()
 	ring, err := s.ringForChange(r.Context())
 	if err != nil {
 		return nil, err
@@ -181,6 +187,8 @@ func (s *Server) handleAssistantProviderSave(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleAssistantProviderRemove(w http.ResponseWriter, r *http.Request) error {
 	preset := chi.URLParam(r, "preset")
 	httpx.SetAudit(r, "assistant.provider.remove", preset, nil)
+	s.assistant.ringMu.Lock()
+	defer s.assistant.ringMu.Unlock()
 	ring, err := s.ringForChange(r.Context())
 	if err != nil {
 		return err
@@ -209,6 +217,8 @@ func (s *Server) handleAssistantProviderActivate(w http.ResponseWriter, r *http.
 		return err
 	}
 	httpx.SetAudit(r, "assistant.provider.activate", preset, map[string]any{"model": in.Model})
+	s.assistant.ringMu.Lock()
+	defer s.assistant.ringMu.Unlock()
 	ring, err := s.ringForChange(r.Context())
 	if err != nil {
 		return err
@@ -307,6 +317,8 @@ func (s *Server) handleAssistantPreferences(w http.ResponseWriter, r *http.Reque
 		return httpx.BadRequest("defaultMode is ask, changes or full")
 	}
 	httpx.SetAudit(r, "assistant.preferences", string(in.DefaultMode), nil)
+	s.assistant.ringMu.Lock()
+	defer s.assistant.ringMu.Unlock()
 	ring, err := s.ringForChange(r.Context())
 	if err != nil {
 		return err

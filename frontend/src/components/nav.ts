@@ -136,6 +136,9 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
       // Beside the Overview rather than in a section: it is about every
       // section at once, and like the Overview it cannot be hidden.
       { title: "Map", href: "/map", icon: ServerMap },
+      // Who the assistant asks, for every page that uses it: about the whole
+      // dashboard rather than a section, so it cannot be hidden either.
+      { title: "Assistant", href: "/assistant", icon: Sparkles },
       {
         title: "Monitoring",
         icon: Monitoring,
@@ -230,7 +233,6 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
   {
     label: "Workspace",
     items: [
-      { title: "Assistant", href: "/assistant", icon: Sparkles },
       { title: "Excalidraw", href: "/excalidraw", icon: ExcalidrawGlyph },
       { title: "Terminal", href: "/terminal", icon: Terminal, capability: "terminal" },
       { title: "Files", href: "/files", icon: FolderOpen },

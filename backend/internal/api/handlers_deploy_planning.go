@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
@@ -536,6 +537,9 @@ func (s *Server) keyDraftGuard(r *http.Request, request deploy.DraftSaveRequest)
 	if err != nil {
 		return err
 	}
+	if principal := httpx.MustPrincipal(r); principal.Assistant {
+		return assistantDraftGuard(principal, draft, request)
+	}
 	if request.Source == nil {
 		return nil
 	}
@@ -543,6 +547,37 @@ func (s *Server) keyDraftGuard(r *http.Request, request deploy.DraftSaveRequest)
 		return err
 	}
 	return keyDraftSource(request.Source)
+}
+
+// assistantDraftGuard is what a key's commit is held to, asked at the save, because
+// the assistant never commits: a person presses Deploy, as a session, and the commit
+// does not ask again. Text in a repository reaches the model through what detection
+// read, so what it saves must not be able to reach past the deployment's own
+// container, nor read a saved credential; and which repository is being deployed was
+// the person's choice.
+func assistantDraftGuard(p *httpx.Principal, draft *deploy.Draft, request deploy.DraftSaveRequest) error {
+	if request.Source != nil {
+		return refuseForDeployKey("what is being deployed is the person's choice, and the assistant configures it")
+	}
+	if request.Dotenv != nil && strings.Contains(*request.Dotenv, "${{") {
+		return refuseForDeployKey("a variable the assistant sets holds a value, and a reference is chosen in the dashboard")
+	}
+	if request.Configuration == nil {
+		return nil
+	}
+	if reasons := hostAuthority(draft.Data.Source, request.Configuration.Build, request.Configuration.Runtime); len(reasons) > 0 {
+		return refuseHostAuthority("this plan", reasons)
+	}
+	previous := draft.VariableReferences()
+	next := *draft
+	next.Data.Configuration = request.Configuration
+	for name, reference := range next.VariableReferences() {
+		held := previous[name]
+		if err := keyReferenceGuard(p, name, "${{"+reference.Kind+"."+reference.Target+"}}", "${{"+held.Kind+"."+held.Target+"}}"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // keyDraftSource refuses a deploy key a draft whose source is a folder on the

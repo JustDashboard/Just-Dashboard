@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -439,6 +440,189 @@ func TestAnAnswerWaitsForTheBudgetRatherThanBeingRefused(t *testing.T) {
 	}
 }
 
+// A schedule runs later with nobody there, and its container command names any
+// container, so what the assistant schedules is held to deploying and restarting. A
+// person's own schedule is not.
+func TestAScheduleTheAssistantWritesCannotRunACommand(t *testing.T) {
+	f := operatorRouterAs(t, auth.RoleAdmin)
+	f.s.assistant.limit = httpx.NewLimiter(6000, 100)
+	schedule := func(action string, config map[string]any) [2]any {
+		return [2]any{assistant.ToolCallOperation, map[string]any{"name": "deployment_schedule_create", "reason": "x", "arguments": map[string]any{
+			"body": map[string]any{"name": "nightly", "expression": "0 3 * * *", "timezone": "UTC", "enabled": true,
+				"steps": []any{map[string]any{"action": action, "config": config}}},
+		}}}
+	}
+	for _, step := range []struct {
+		action string
+		config map[string]any
+	}{
+		{"container_command", map[string]any{"containerId": "some-other-container", "argv": []string{"sh", "-c", "env"}}},
+		{"backup", map[string]any{"jobId": 1}},
+	} {
+		f.provider.queue(claudeCalls("Scheduling.", schedule(step.action, step.config)), claudeAnswer("No."))
+		events := f.ask(t, `{"question":"Schedule it","mode":"full"}`)
+		called := ofType(events, "called")
+		if len(called) != 1 || called[0]["ok"] != false || !strings.Contains(called[0]["said"].(string), "Automation page") {
+			t.Fatalf("%s: %v", step.action, called)
+		}
+	}
+	var saved int
+	if err := f.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_schedules`).Scan(&saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved != 0 {
+		t.Fatalf("%d schedules were saved", saved)
+	}
+	f.provider.queue(claudeCalls("Scheduling.", schedule("restart", map[string]any{})), claudeAnswer("Scheduled."))
+	events := f.ask(t, `{"question":"Restart it nightly","mode":"full"}`)
+	if called := ofType(events, "called"); len(called) != 1 || called[0]["ok"] != true {
+		t.Fatalf("a restart: %v", events)
+	}
+}
+
+// Backups are the whole server's, so full access does not reach them: a read and a run
+// both wait for the person.
+func TestBackupsWaitForThePersonEvenInFullAccess(t *testing.T) {
+	f := operatorRouterAs(t, auth.RoleAdmin)
+	f.provider.queue(claudeCalls("Reading.",
+		[2]any{assistant.ToolCallOperation, map[string]any{"name": "backup_jobs", "reason": "x"}},
+		[2]any{assistant.ToolCallOperation, map[string]any{"name": "backup_run", "reason": "x", "arguments": map[string]any{"id": 1}}}))
+	events := f.ask(t, `{"question":"Back it up","mode":"full"}`)
+	pending, _ := doneOf(t, events)["pending"].([]any)
+	if len(pending) != 2 || pending[0].(map[string]any)["kind"] != "server" || pending[1].(map[string]any)["kind"] != "server" {
+		t.Fatalf("pending = %v", pending)
+	}
+	if len(ofType(events, "called")) != 0 {
+		t.Fatalf("a backup call ran unasked: %v", events)
+	}
+}
+
+// What is masked is all of the deployment: a value since rotated, and a shared variable
+// its references can read, as well as what is set now.
+func TestWhatIsSentIsMaskedAcrossTheDeployment(t *testing.T) {
+	f := operatorRouterAs(t, auth.RoleAdmin)
+	const rotated, shared = "sk-live-rotated-away-old-value-11", "sk-live-shared-across-project-22"
+	variable := fmt.Sprintf("/deploy/%d/environments/%d/variables/API_KEY", f.projectID, f.environmentID)
+	if rec := f.do(http.MethodPut, variable, fmt.Sprintf(`{"revision":1,"value":%q,"sensitivity":"secret","scopes":["runtime"]}`, rotated)); rec.Code != http.StatusOK {
+		t.Fatalf("variable = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := f.do(http.MethodPut, variable, `{"revision":2,"value":"sk-live-the-current-one-is-33","sensitivity":"secret","scopes":["runtime"]}`); rec.Code != http.StatusOK {
+		t.Fatalf("variable = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := f.do(http.MethodPut, fmt.Sprintf("/deploy/%d/shared-variables/SHARED_KEY", f.projectID), fmt.Sprintf(`{"value":%q,"sensitivity":"secret"}`, shared)); rec.Code != http.StatusCreated {
+		t.Fatalf("shared = %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := f.s.Store.DB.Exec(`INSERT INTO deploy_runs(project_id, environment_id, started_at, ended_at, status, state, operation, trigger, actor,
+		requested_at, terminal_code, terminal_reason) VALUES(?, ?, 2000, 2100, 'failed', 'failed', 'deploy', 'manual', 'operator', 2000, 'task_failed', ?)`,
+		f.projectID, f.environmentID, "old="+rotated+" shared="+shared); err != nil {
+		t.Fatal(err)
+	}
+	f.provider.queue(claudeCalls("Reading.", [2]any{assistant.ToolRecentRuns, map[string]any{"limit": 5}}), claudeAnswer("It failed."))
+	f.ask(t, `{"question":"Why?"}`)
+	sent := f.provider.raw[len(f.provider.raw)-1]
+	if strings.Contains(sent, rotated) || strings.Contains(sent, shared) || !strings.Contains(sent, "old=") {
+		t.Fatalf("sent unmasked: %s", sent)
+	}
+}
+
+// A route's answer too long to be read whole is not sent in part, since it could not
+// be masked; the model is told to ask for less.
+func TestAnAnswerTooLongToMaskIsNotSent(t *testing.T) {
+	rec := &boundedRecorder{header: http.Header{}, status: http.StatusOK, limit: 16}
+	if _, err := rec.Write([]byte(`{"value":"sk-live-a-secret-past-the-cut"}`)); err != nil {
+		t.Fatal(err)
+	}
+	text, whole := agentAnswer(rec, deploy.NewDiagnosisMasker([]string{"sk-live-a-secret-past-the-cut"}))
+	if whole || strings.Contains(text, "sk-live") || !strings.Contains(text, "too long") {
+		t.Fatalf("answer = %q %v", text, whole)
+	}
+	broken := &boundedRecorder{header: http.Header{}, status: http.StatusOK}
+	if _, err := broken.Write([]byte(`not json sk-live-a-secret`)); err != nil {
+		t.Fatal(err)
+	}
+	if text, whole := agentAnswer(broken, deploy.NewDiagnosisMasker(nil)); whole || strings.Contains(text, "sk-live") {
+		t.Fatalf("answer = %q %v", text, whole)
+	}
+}
+
+// Steps that read nothing are still steps: a model that only looks operations up
+// pauses like any other, and what it asks next waits.
+func TestLookingThingsUpCountsTowardsTheSteps(t *testing.T) {
+	f := operatorRouterAs(t, auth.RoleAdmin)
+	f.s.assistant.limit = httpx.NewLimiter(6000, 100)
+	answers := []func(http.ResponseWriter){}
+	for range agentSteps {
+		answers = append(answers, claudeCalls("Looking.", [2]any{assistant.ToolDescribeOperation, map[string]any{"name": "nothing_at_all"}}))
+	}
+	f.provider.queue(answers...)
+	done := doneOf(t, f.ask(t, `{"question":"Loop","mode":"ask"}`))
+	if done["paused"] != true {
+		t.Fatalf("done = %v", done)
+	}
+	if len(f.provider.raw) != agentSteps {
+		t.Fatalf("%d requests reached the model", len(f.provider.raw))
+	}
+}
+
+// Who answers and what it may do alone are a person's to choose: an ordinary key is
+// refused, and a key that could would be handed what everybody asks.
+func TestAKeyCannotChooseWhoAnswers(t *testing.T) {
+	s := testServer(t)
+	root := s.Routes().(chi.Routes)
+	for _, route := range [][2]string{
+		{http.MethodPut, "/api/v1/assistant/preferences"},
+		{http.MethodPut, "/api/v1/assistant/providers/{preset}"},
+		{http.MethodPost, "/api/v1/assistant/providers/{preset}/activate"},
+		{http.MethodDelete, "/api/v1/assistant/providers/{preset}"},
+		{http.MethodPost, "/api/v1/assistant/models"},
+		{http.MethodPut, "/api/v1/databases/assistant"},
+		{http.MethodDelete, "/api/v1/databases/assistant"},
+	} {
+		found := false
+		_ = chi.Walk(root, func(method, pattern string, _ http.Handler, middlewares ...func(http.Handler) http.Handler) error {
+			if method == route[0] && pattern == route[1] {
+				found = requiresSession(middlewares)
+			}
+			return nil
+		})
+		if !found {
+			t.Errorf("%s %s does not require a session", route[0], route[1])
+		}
+	}
+}
+
+// A press goes no further than the session that made it: revoked partway, what it asks
+// next does not run.
+func TestAPressStopsWithItsSession(t *testing.T) {
+	f := operatorRouterAs(t, auth.RoleAdmin)
+	operatorLive(t, f)
+	before := runCount(t, f)
+	cookie := signInAs(t, f.s, "someone", auth.RoleAdmin)
+	var userID int64
+	if err := f.s.Store.DB.QueryRow(`SELECT id FROM users WHERE username = 'someone'`).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	f.provider.queue(func(w http.ResponseWriter) {
+		if err := f.s.Auth.RevokeAllSessions(context.Background(), userID); err != nil {
+			t.Error(err)
+		}
+		claudeCalls("Restarting.", restart)(w)
+	}, claudeAnswer("Never reached."))
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/assistant", f.projectID), strings.NewReader(`{"question":"Restart it","mode":"full"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	req.Header.Set(httpx.CSRFHeader, "1")
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	f.s.Routes().ServeHTTP(rec, req)
+	if got := runCount(t, f); got != before {
+		t.Fatalf("a revoked session queued a run: %d → %d (%s)", before, got, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "session this was asked under has ended") {
+		t.Fatalf("answer = %s", rec.Body.String())
+	}
+}
+
 // Asking while a change waits declines it, in words the model reads.
 func TestAQuestionDeclinesAChangeThatWaits(t *testing.T) {
 	f := operatorRouterAs(t, auth.RoleAdmin)
@@ -530,7 +714,7 @@ func TestTheCatalogueIsTheRoutesItSaysItIs(t *testing.T) {
 // The assistant's reach through the gate: an opened route lets it by and no other, and
 // the same delegate as a plain key is refused.
 func TestTheGateOpensOnlyWhatAssistantRoutesSay(t *testing.T) {
-	if !assistantOpens(http.MethodPost, "/deploy/{id}/environments/{env}/schedules") || !assistantOpens(http.MethodGet, "/backups/") {
+	if !assistantOpens(http.MethodPut, "/deploy/{id}/environments/{env}/rollback-policy") || !assistantOpens(http.MethodGet, "/backups/") {
 		t.Fatal("a line of assistantRoutes does not open")
 	}
 	for _, closed := range [][2]string{
@@ -538,6 +722,9 @@ func TestTheGateOpensOnlyWhatAssistantRoutesSay(t *testing.T) {
 		{http.MethodGet, "/deploy/credentials"},
 		{http.MethodDelete, "/deploy/{id}/permanent"},
 		{http.MethodPost, "/backups/runs/{runID}/restore"},
+		{http.MethodPost, "/backups/"},
+		{http.MethodPost, "/backups/{id}/enabled"},
+		{http.MethodPost, "/deploy/{id}/environments"},
 		{http.MethodPost, "/deploy/{id}/pull-requests/{number}/merge"},
 	} {
 		if assistantOpens(closed[0], closed[1]) {

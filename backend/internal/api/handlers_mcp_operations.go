@@ -279,6 +279,8 @@ type boundedRecorder struct {
 	status int
 	body   bytes.Buffer
 	total  int
+	// limit is how much of the body is kept; zero is mcpAnswerBytes.
+	limit int
 }
 
 func (b *boundedRecorder) Header() http.Header { return b.header }
@@ -294,7 +296,11 @@ func (b *boundedRecorder) Write(p []byte) (int, error) {
 		b.status = http.StatusOK
 	}
 	b.total += len(p)
-	if room := mcpAnswerBytes - b.body.Len(); room > 0 {
+	limit := b.limit
+	if limit == 0 {
+		limit = mcpAnswerBytes
+	}
+	if room := limit - b.body.Len(); room > 0 {
 		if len(p) < room {
 			room = len(p)
 		}
@@ -306,6 +312,11 @@ func (b *boundedRecorder) Write(p []byte) (int, error) {
 // dispatchMCP makes a generated tool's request through the router, as the
 // MCP key.
 func (s *Server) dispatchMCP(r *http.Request, p *httpx.Principal, method string, req mcp.RouteRequest) (*boundedRecorder, error) {
+	return s.dispatchKeeping(r, p, method, req, 0)
+}
+
+// dispatchKeeping is dispatchMCP keeping up to limit bytes of the answer.
+func (s *Server) dispatchKeeping(r *http.Request, p *httpx.Principal, method string, req mcp.RouteRequest, limit int) (*boundedRecorder, error) {
 	src := s.deployOpenAPI.Load()
 	if src == nil {
 		return nil, fmt.Errorf("the routes were not built")
@@ -344,7 +355,7 @@ func (s *Server) dispatchMCP(r *http.Request, p *httpx.Principal, method string,
 	if req.Body != nil {
 		inner.Header.Set("Content-Type", "application/json")
 	}
-	rec := &boundedRecorder{header: http.Header{}}
+	rec := &boundedRecorder{header: http.Header{}, limit: limit}
 	handler.ServeHTTP(rec, inner)
 	if rec.status == 0 {
 		rec.status = http.StatusOK

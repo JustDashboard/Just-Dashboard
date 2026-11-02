@@ -266,6 +266,27 @@ func (a *Authenticator) resolveWithPasswordChange(w http.ResponseWriter, r *http
 	}, nil
 }
 
+// Recheck reads a session's principal again for a request that outlasts its own
+// authentication: the dashboard's assistant works for as long as a press takes, and a
+// session revoked or a role changed meanwhile takes effect at its next step. Anything
+// other than a session has nothing to read again and answers as it came.
+func (a *Authenticator) Recheck(r *http.Request, p *Principal) (*Principal, error) {
+	if p == nil || p.Kind != "session" || p.SessionID == "" {
+		return p, nil
+	}
+	found := a.sessionToken(r)
+	if found.token == "" {
+		return nil, ErrUnauthorized
+	}
+	sess, user, err := a.Svc.ResolveSession(r.Context(), found.token)
+	if err != nil || sess.ID != p.SessionID || !sess.TwoFAPassed {
+		return nil, ErrUnauthorized
+	}
+	current := *p
+	current.User, current.Role = user, user.Role
+	return &current, nil
+}
+
 // AuthenticateMCP admits an MCP key and nothing else. A session cookie is
 // not read, so no page in a browser can reach the endpoint and it needs no
 // CSRF header, and a key for the rest of the API is refused: an AI client

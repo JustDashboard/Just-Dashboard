@@ -9,8 +9,11 @@ import type { AssistantMode } from "@/components/assistant/settings"
  * kept free of React so `bun test` reads it without a DOM.
  */
 
-/** What a call does, which decides whether the mode lets it run. */
-export type AgentKind = "free" | "read" | "change" | "destructive"
+/**
+ * What a call does, which decides whether the mode lets it run. `server` reaches what
+ * the whole server shares rather than this deployment, and waits in every mode.
+ */
+export type AgentKind = "free" | "read" | "change" | "destructive" | "server"
 
 export interface AgentCall {
   id: string

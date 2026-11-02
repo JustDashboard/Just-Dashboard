@@ -31,30 +31,45 @@ own, as far as the person's chosen mode lets it. What holds it is below, and
 - **Its reach is a closed list.** `api/handlers_assistant_catalogue.go` reads the operations off the
   router and the deployment API's description, so they cannot drift from the routes. It starts from what
   a deploy key may do (`deployKeyRoutes`), `assistantRoutes` opens the few a key may not because a person
-  is at the dashboard (automation, rollback and scan terms, staging, a domain's DNS record, and backups:
-  listing, running, enabling, adding a database), and `agentClosedRoutes` closes some a key may. The gate
-  (`deployKeyGate`) reads `assistantRoutes` too, so the list is enforced by the router rather than by the
-  catalogue.
+  is at the dashboard (schedules and traffic alerts, rollback and scan terms, a domain's DNS record, and
+  backups), and `agentClosedRoutes` closes some a key may. The gate (`deployKeyGate`) reads
+  `assistantRoutes` too, so the list is enforced by the router rather than by the catalogue. Opening a
+  route takes reading its handler, because a key's rules live in the handlers: `refuseAssistantSchedule`
+  holds a schedule it writes to deploying and restarting, since the step that runs a command names its
+  container and could name any on the server, and adding or removing an environment stays closed, since
+  it would copy production's build and secrets to a branch the model chose.
 - **What stays a person's, in every mode and whatever their role:** a secret's value, saved credentials,
   secret stores, notification channels and log drains (their secrets would go to somebody else's model);
   the routes that take a typed confirmation; merging, commenting and running a pull request's preview
-  (they speak as the dashboard on GitHub, or run someone's code); what reaches the host; restoring a
-  backup; archiving; and pressing Deploy on a new deployment. The model has no way to them. `open_page`
-  gives the person a shortcut to the page instead.
+  (they speak as the dashboard on GitHub, or run someone's code); what reaches the host; making, changing
+  or restoring a backup; adding or removing an environment; archiving; and pressing Deploy on a new
+  deployment. The model has no way to them. `open_page` gives the person a shortcut to the page instead.
+- **Backups ask in every mode.** They are the whole server's rather than this deployment's, so reading
+  them and starting one are `server` calls (`agentKindServer`), which wait for the person even in full
+  access. That is the one thing it reaches past its deployment, and it is why a person has to say yes.
 - **The mode is the server's to hold.** Each press says one (below), and a call the mode holds runs only
   once the person answers it.
 - **What it reads is masked.** Every string of every answer goes through the run diagnosis's masker
-  (`PlanningStore.DiagnosisSecrets`, `deploy.NewDiagnosisMasker`): each secret value of the environment,
-  what its references point at, saved credentials and trigger secrets, and the shapes of keys and tokens.
-  A field named for a secret is withheld whatever a route ever answers (`agentSecretFields`). A call whose
-  values cannot be opened to mask reads and changes nothing.
+  (`PlanningStore.DeploymentSecrets`, `deploy.NewDiagnosisMasker`): every value of every environment of the
+  deployment, including ones since rotated, because a log may still hold them; what their references point
+  at; its shared variables and the server's; saved credentials and trigger secrets; and the shapes of keys
+  and tokens. A value a secret store holds cannot be in that list, because the dashboard reads it at the run
+  and keeps no copy, so only its shape is caught. A field named for a secret is withheld whatever a route
+  ever answers (`agentSecretFields`). An answer has to be whole to be masked, so one too long to read, or that
+  is not JSON, is refused rather than sent in part (`agentAnswer`). A call whose values cannot be opened to
+  mask reads and changes nothing.
+- **It goes no further than the person.** A press can outlast what authorized it, so the session is read
+  again before every step and every call (`Authenticator.Recheck`): one revoked stops it, and a role changed
+  takes effect at the next call. Who answers and the default mode take a session, not a key, because a key
+  pointing it at a server of its own would be handed what everybody asks and could answer with what to do.
 - **What it reads is not instructions.** A log line or a request's path is text somebody else wrote, so a
   model can be told things by it. The prompt says to act on none of it and to tell the person, which is a
   mitigation and not a guarantee, and it is why **Ask before changes** is the default: a change waits for
   a person unless someone chose otherwise.
-- **It is bounded.** A press takes at most `agentSteps` (16) answers; past that, what it asks next waits
-  for the person whatever the mode, so a loop spends nothing more without somebody looking. Each step is a
-  model call on the install's budget. A press's deadline is 20 minutes and a call's is two.
+- **It is bounded.** A press takes at most `agentSteps` (16) answers; past that, whatever it asks next
+  waits for the person in any mode, so a loop spends nothing more without somebody looking. Each step and
+  each press waits for the install's budget of model calls, and a press whose budget stays spent for 20
+  seconds is refused. A conversation past its size ends. A press's deadline is 20 minutes and a call's is two.
 
 ## The modes
 
@@ -62,16 +77,16 @@ own, as far as the person's chosen mode lets it. What holds it is below, and
 | --- | --- | --- |
 | Ask every time (`ask`) | Looking up an operation's parameters, offering a shortcut | Every read and every change |
 | Ask before changes (`changes`, the default) | Reads | Every change |
-| Full access (`full`) | Everything it can reach | Nothing, until `agentSteps` |
+| Full access (`full`) | Everything it can reach on this deployment | Backups, and anything past `agentSteps` |
 
 The page sends the mode on every press; left out, it is the install's default, which an administrator
 sets on `/assistant` (`PUT /assistant/preferences`). Anyone asking may change it for their conversation.
 It is in the audit entry of every press.
 
-A call is one of four kinds (`agentOperation.Kind`): `free` reads nothing of the server, `read`, `change`,
-and `destructive` for a route behind `s.destructive`, a `DELETE`, or one of `mcpDestructiveHints`. A kind
-only changes what the card says and how Allow is drawn; `ask` and `changes` hold `change` and
-`destructive` alike.
+A call is one of five kinds (`agentOperation.Kind`): `free` reads nothing of the server, `read`, `change`,
+`destructive` for a route behind `s.destructive`, a `DELETE`, or one of `mcpDestructiveHints`, and `server`
+for backups, which wait in every mode. `change` and `destructive` differ only in what the card says and how
+Allow is drawn.
 
 ## The route
 
@@ -99,7 +114,8 @@ person and subject (`assistant.Store`) and ends with the process or a change of 
 | `done` | Why it stopped, the tokens, whether the turn was kept, `pending` (the calls waiting, each as `call` carries them), and `paused` when `agentSteps` is why |
 | `error` | Why there is no answer |
 
-A press whose provider fails partway keeps what already ran in the conversation (`c.Mark` is taken after
+A press that fails before it ran what it answered leaves those calls waiting, and the page asks again. One
+whose provider fails partway keeps what already ran in the conversation (`c.Mark` is taken after
 each step), because what ran has run and the next question must be asked knowing that.
 
 Each press is audited as `deploy.assistant.ask` or `deploy.assistant.tool` with the provider, the model,
@@ -151,9 +167,12 @@ person, and goes **Back to chat**. Remote Desktop's sessions outlive their page 
 and it is offered the draft's routes and the reads they are chosen from. Nothing it does to a draft waits
 for leave in any mode (`agentHolds`), because a draft runs nothing until a person commits it, and the commit
 is closed to it: **Deploy stays the person's press**. Their draft is reachable because `Principal.Assistant`
-reads it under their account rather than as a key's own (`deploymentDraftForPrincipal`). A Compose or
-local-folder source stays out of its reach, by the key rule (`keyDraftSource`): the person configures that
-themselves.
+reads it under their account rather than as a key's own (`deploymentDraftForPrincipal`). A person's commit does
+not ask a key's questions, so they are asked at the save (`assistantDraftGuard`), because text in the repository
+reaches the model through what detection read: a plan with host authority — a release task on the host, a
+privileged container, a host path — or that points a variable at a saved credential or store is refused, and
+what is being deployed is not its to change. A Compose or local-folder source stays out of its reach, by the key
+rule (`keyDraftSource`): the person configures that themselves.
 
 `/deploy/new` offers it twice: the switch above the sources, which carries through once a source is chosen,
 and an offer at the head of the plan once one is. It sets up in a column beside the form, the whole screen on
@@ -210,10 +229,12 @@ switch. `new-project/setup-assistant.tsx` and `assist-switch.tsx` are the new de
   streamed calls gathered whole, results answering each by id.
 - `api/handlers_assistant_turn_test.go`, against the fake provider with the whole router under it: a read and a
   change held by the mode; a change run through its route on Allow, audited under the key name; full access
-  running it unasked and held to the person's role; a configuration's diff and shortcut; one deployment's reach;
-  the secret masked out of the prompt and of a route's answer; the step bound; a question declining what waits;
-  a draft configured with Deploy out of reach; the catalogue naming only real routes and nothing that stays a
-  person's; and several providers with one active.
+  running it unasked and held to the person's role; backups waiting in every mode; a schedule held to deploying
+  and restarting; a configuration's diff and shortcut; one deployment's reach; the secret masked out of the prompt
+  and of a route's answer, a rotated value and a shared one too, and an answer too long to mask not sent; the step
+  bound, lookups included; a press stopping with its session; a question declining what waits; a person's answer
+  waiting for the budget; a draft configured with Deploy out of reach; the catalogue naming only real routes and
+  nothing that stays a person's; a key refused the provider's routes; and several providers with one active.
 - `tests/browser/assistant.spec.ts`: the page, Diagnose, a card's Allow and Decline, the mode, a shortcut and the
   dock, a conversation going on behind another page, the model picker, the provider page, a new deployment handed
   over, a role without the capability, the assistant off, and the phone's one pane.

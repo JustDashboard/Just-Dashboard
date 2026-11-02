@@ -137,5 +137,5 @@ export const MODE_LABEL: Record<AssistantMode, string> = {
 export const MODE_DETAIL: Record<AssistantMode, string> = {
   ask: "Every read and every change waits for you.",
   changes: "It reads on its own. Anything that changes something waits for you.",
-  full: "It reads and changes without asking, within your role. Every change is audited.",
+  full: "It reads and changes this deployment without asking, within your role. Every change is audited.",
 }

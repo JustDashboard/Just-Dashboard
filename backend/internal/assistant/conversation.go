@@ -100,6 +100,10 @@ func (c *Conversation) size() int {
 	return n
 }
 
+// Long reports a conversation past the size worth sending whole, which a press of
+// many steps can reach between questions.
+func (c *Conversation) Long() bool { return c.size() > maxHistory }
+
 // Ask appends a question. Calls still waiting are declined in the same
 // message: asking something else is not allowing them.
 func (c *Conversation) Ask(text string) error {

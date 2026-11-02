@@ -328,14 +328,18 @@ A change that weakens any of these has to say so explicitly.
     (`api/handlers_assistant_catalogue.go`), each made through the router under the person's user and role, so
     that route's capability check, audit entry and rate limit apply. It is held to every rule a deploy key is
     (`agentDelegate`, `Principal.Assistant`): variables write-only, no reach past a deployment's own container to
-    the host, no saved credential sent somewhere new, narrowed to the deployment the conversation is about. A
-    secret's value, saved credentials, secret stores, the routes that take a typed confirmation, what speaks as
-    the dashboard on GitHub and a new deployment's commit are not reachable in any mode. Every string it reads is
-    masked before it is sent. How much runs without asking is the mode, which the server holds on every press and
-    which defaults to asking before any change; **Full access is a person choosing to let a change run unseen**,
-    and text the model reads can try to talk it into one, so that default must not move. There is no shell, no
-    command the model writes and no other path from an answer to the host. See
-    [the deployment assistant](../deployments/operator.md).
+    the host, no saved credential sent somewhere new, narrowed to the deployment the conversation is about, its
+    session read again for every call. The one thing past that deployment is the server's backups, which wait for
+    the person in every mode. A key's rules live in the handlers, so a route opened to it in `assistantRoutes` is
+    read first for what a key would have been stopped by; a new deployment's save asks at the save what a key's
+    commit asks (`assistantDraftGuard`), because a person's commit does not. A secret's value, saved credentials,
+    secret stores, the routes that take a typed confirmation, what speaks as the dashboard on GitHub and a new
+    deployment's commit are not reachable in any mode. Every string it reads is masked before it is sent, and an
+    answer that cannot be masked whole is not sent. How much runs without asking is the mode, which the server holds
+    on every press and which defaults to asking before any change; **Full access is a person choosing to let a change
+    run unseen**, and text the model reads can try to talk it into one, so that default must not move, and who
+    answers takes a session rather than a key. There is no shell, no command the model writes and no other path from
+    an answer to the host. See [the deployment assistant](../deployments/operator.md).
 
 14. A vulnerability scanner reads an image; it never reaches the host. `imagescan.ScanSpec` runs Trivy
     with **no network** (`NetworkMode: none`), no capabilities, a read-only root, no new privileges and

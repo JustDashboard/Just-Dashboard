@@ -33,10 +33,10 @@ import (
 // Each is a person's own act in the dashboard; it is a key's lack of a person behind
 // it that closed them.
 var assistantRoutes = map[string]string{
-	// Automation: what happens without anybody pressing Deploy, and what is told
-	// when it goes wrong.
+	// Automation. A schedule runs later with nobody there, so what it may run is held
+	// to deploying and restarting this deployment (refuseAssistantSchedule): the step
+	// that runs a command names its container, and could name any on the server.
 	"POST /deploy/{id}/environments/{env}/schedules":              whyAutomations,
-	"POST /deploy/{id}/environments/{env}/schedules/test":         whyAutomations,
 	"PUT /deploy/{id}/environments/{env}/schedules/{schedule}":    whyAutomations,
 	"DELETE /deploy/{id}/environments/{env}/schedules/{schedule}": whyAutomations,
 	"POST /deploy/{id}/alerts":                                    whyAutomations,
@@ -46,23 +46,19 @@ var assistantRoutes = map[string]string{
 	// The terms a release is kept warm on and whether its images are scanned.
 	"PUT /deploy/{id}/environments/{env}/rollback-policy": whyRollbackTerms,
 	"PUT /deploy/{id}/environments/{env}/vulnerabilities": whyScanTerms,
-	// Staging.
-	"POST /deploy/{id}/environments":         whyEnvironment,
-	"DELETE /deploy/{id}/environments/{env}": whyEnvironment,
 	// A domain's record, with the DNS credentials saved under Certificates, which
 	// the route uses and never answers with.
 	"GET /deploy/{id}/domains/{domain}/dns-record":  whyDNSRecord,
 	"POST /deploy/{id}/domains/{domain}/dns-record": whyDNSRecord,
-	// Backups, which are not deployment routes. Reading them and starting one is
-	// what asking for a backup takes; a job's destination holds credentials, so
-	// the assistant makes one only where the job's own form says nothing of them.
-	"GET /backups":                      "backups are not deployment routes",
-	"GET /backups/resources":            "backups are not deployment routes",
-	"GET /backups/{id}":                 "backups are not deployment routes",
-	"GET /backups/{id}/runs":            "backups are not deployment routes",
-	"POST /backups/{id}/run":            "backups are not deployment routes",
-	"POST /backups/{id}/enabled":        "backups are not deployment routes",
-	"POST /backups/{id}/database-dumps": "backups are not deployment routes",
+	// Backups, which are the whole server's and not this deployment's: reading them
+	// and starting one, each waiting for the person in every mode (agentKindServer).
+	// A job's destination holds credentials and its sources reach anything, so making
+	// or changing one stays on the Backups page.
+	"GET /backups":           "backups are not deployment routes",
+	"GET /backups/resources": "backups are not deployment routes",
+	"GET /backups/{id}":      "backups are not deployment routes",
+	"GET /backups/{id}/runs": "backups are not deployment routes",
+	"POST /backups/{id}/run": "backups are not deployment routes",
 }
 
 // assistantOpens reports whether assistantRoutes opens a route, by its method and
@@ -75,8 +71,10 @@ func assistantOpens(method, pattern string) bool {
 // agentClosedRoutes are routes a key may make and the assistant does not offer.
 var agentClosedRoutes = map[string]string{
 	"POST /deploy/{id}/runs/{run}/diagnosis": "it spends the model budget asking the model, and the assistant can read the run itself",
-	// These answer with a new secret, which would go to the model.
+	// These answer with a new secret, which would go to the model, and which the
+	// person could then never read, since it is masked from the page as well.
 	"POST /deploy/{id}/environments/{env}/triggers/{trigger}/rotate-secret": "its answer is a secret",
+	"POST /deploy/{id}/environments/{env}/triggers":                         "its answer is a secret",
 	// A second deployment is not what a conversation about one is for.
 	"POST /deploy/{id}/duplicate": "a conversation is about one deployment",
 	// A person presses Deploy, and the page beside the assistant holds the draft.
@@ -102,12 +100,17 @@ type agentOperation struct {
 	Page agentPage
 	// Scope is the conversations it is offered to.
 	Scope agentScopeKind
+	// Server is an operation on what the whole server shares rather than the
+	// deployment the conversation is about, which waits for the person in every mode.
+	Server bool
 }
 
 // Kind is what the operation does, as a person's mode decides whether it runs: a
 // read, a change, or one that stops, removes or replaces something.
 func (op agentOperation) Kind() string {
 	switch {
+	case op.Server:
+		return agentKindServer
 	case op.Grant == mcp.GrantRead:
 		return agentKindRead
 	case op.Grant == mcp.GrantDestructive || op.Tool.Annotations.DestructiveHint:
@@ -121,6 +124,7 @@ const (
 	agentKindRead        = "read"
 	agentKindChange      = "change"
 	agentKindDestructive = "destructive"
+	agentKindServer      = "server"
 )
 
 type agentCatalogue struct {
@@ -267,7 +271,8 @@ func objectSchema(required []string, properties map[string]any) map[string]any {
 
 // agentBackupOperations are backups as operations, by hand: they are not in the
 // deployment API's description. What they answer is the Backups page's own read,
-// which never carries a destination's credentials.
+// which never carries a destination's credentials, though it does name every job's
+// folders and destination, which is why even a read waits for the person.
 func agentBackupOperations() []agentOperation {
 	page := agentPage{Label: "Backups", Path: "/backups", Absolute: true}
 	idParam := map[string]any{"type": "integer", "description": "The job's id, as backup_jobs gives it."}
@@ -276,14 +281,14 @@ func agentBackupOperations() []agentOperation {
 		for _, p := range path {
 			required = append(required, p.Name)
 		}
-		return agentOperation{Page: page, Scope: agentScopeDeployment, Operation: mcp.Operation{
+		return agentOperation{Page: page, Scope: agentScopeDeployment, Server: true, Operation: mcp.Operation{
 			ID: name, Method: http.MethodGet, Pattern: pattern, Path: path, Grant: mcp.GrantRead,
 			Tool: mcp.Tool{Name: name, Title: title, Description: description + " It only reads.", InputSchema: objectSchema(required, properties),
 				Annotations: mcp.Annotations{Title: title, ReadOnlyHint: true, IdempotentHint: true}},
 		}}
 	}
 	changing := func(name, title, description, pattern string, properties map[string]any, body bool) agentOperation {
-		return agentOperation{Page: page, Scope: agentScopeDeployment, Operation: mcp.Operation{
+		return agentOperation{Page: page, Scope: agentScopeDeployment, Server: true, Operation: mcp.Operation{
 			ID: name, Method: http.MethodPost, Pattern: pattern, Path: []mcp.Parameter{{Name: "id", Type: "integer"}}, Grant: mcp.GrantWrite, Body: body, BodyRequired: body,
 			Tool: mcp.Tool{Name: name, Title: title, Description: description, InputSchema: objectSchema([]string{"id"}, properties),
 				Annotations: mcp.Annotations{Title: title}},
@@ -295,8 +300,6 @@ func agentBackupOperations() []agentOperation {
 		reading("backup_job", "Read one backup job", "Read one backup job.", "/backups/{id}", []mcp.Parameter{{Name: "id", Type: "integer"}}, map[string]any{"id": idParam}),
 		reading("backup_runs", "Read a backup job's runs", "Read a backup job's recent runs: when each ran, whether it succeeded and how large it was.", "/backups/{id}/runs", []mcp.Parameter{{Name: "id", Type: "integer"}}, map[string]any{"id": idParam}),
 		changing("backup_run", "Run a backup now", "Start a backup job now. It runs on its own, however long it takes: read backup_runs for how it went.", "/backups/{id}/run", map[string]any{"id": idParam}, false),
-		changing("backup_enable", "Turn a backup job on or off", "Turn a backup job's schedule on or off.", "/backups/{id}/enabled", map[string]any{"id": idParam, "body": objectSchema([]string{"enabled"}, map[string]any{"enabled": map[string]any{"type": "boolean"}})}, true),
-		changing("backup_add_database", "Add a database to a backup job", "Add a saved database connection to what a backup job dumps on every run.", "/backups/{id}/database-dumps", map[string]any{"id": idParam, "body": objectSchema([]string{"connectionId"}, map[string]any{"connectionId": map[string]any{"type": "integer", "description": "The saved connection's id, as backup_resources gives it."}})}, true),
 	}
 }
 

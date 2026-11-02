@@ -233,6 +233,7 @@ const KIND_TAG: Record<
   read: { label: "Reads", tone: "default" },
   change: { label: "Changes", tone: "warning" },
   destructive: { label: "Stops or replaces", tone: "danger" },
+  server: { label: "The whole server", tone: "warning" },
 }
 
 /**

@@ -43,7 +43,7 @@ func (s *Server) operatorContext(ctx context.Context, summary *deploy.Deployment
 	}
 	// A run's reason is masked as a read's is; with nothing to mask by, the
 	// line goes without it.
-	masker, _ := s.operatorMasker(ctx, summary, deploy.EngineRun{})
+	masker, _ := s.operatorMasker(ctx, summary)
 	if summary.ActiveRun != nil {
 		out.ActiveRun = runLine(summary.ActiveRun, masker)
 	}
@@ -120,7 +120,7 @@ func (s *Server) operatorRead(ctx context.Context, r *http.Request, p *httpx.Pri
 		if err != nil {
 			return refuse("the runs could not be read")
 		}
-		masker, err := s.operatorMasker(ctx, summary, deploy.EngineRun{})
+		masker, err := s.operatorMasker(ctx, summary)
 		if err != nil {
 			return refuse("the environment's secret values could not be read to mask, so nothing was read")
 		}
@@ -228,14 +228,12 @@ func (s *Server) operatorRead(ctx context.Context, r *http.Request, p *httpx.Pri
 	return refuse("no such read")
 }
 
-// operatorMasker masks the environment's secret values out of what a read
-// sends, as a failed run's diagnosis does: a line the dashboard prints to a
-// page is not therefore a line to send to somebody else's model unmasked.
-func (s *Server) operatorMasker(ctx context.Context, summary *deploy.DeploymentSummary, run deploy.EngineRun) (*deploy.DiagnosisMasker, error) {
-	if run.EnvironmentID == 0 {
-		run.EnvironmentID = summary.EnvironmentID
-	}
-	values, err := s.modules.deployPlanning.DiagnosisSecrets(ctx, run)
+// operatorMasker masks the deployment's secret values out of what is sent to a model:
+// a line the dashboard prints to a page is not therefore a line to send to somebody
+// else's model unmasked. It covers all of the deployment, because the model may name
+// another environment or an older run, and what a log holds may have been rotated.
+func (s *Server) operatorMasker(ctx context.Context, summary *deploy.DeploymentSummary) (*deploy.DiagnosisMasker, error) {
+	values, err := s.modules.deployPlanning.DeploymentSecrets(ctx, summary.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +252,7 @@ func (s *Server) operatorTranscript(ctx context.Context, summary *deploy.Deploym
 	if err != nil {
 		return refuse("the run could not be read")
 	}
-	masker, err := s.operatorMasker(ctx, summary, snapshot.Run)
+	masker, err := s.operatorMasker(ctx, summary)
 	if err != nil {
 		return refuse("the run's secret values could not be read to mask, so nothing was read")
 	}
@@ -278,7 +276,9 @@ func (s *Server) operatorTranscript(ctx context.Context, summary *deploy.Deploym
 		text, _ := masker.Mask(line.Text)
 		lines = append(lines, mcpLine{Step: names[line.StepID], Stream: line.Stream, At: line.At, Text: clipText(text, 2000)})
 	}
-	return answer(map[string]any{"run": mcpRunOf(&snapshot.Run), "steps": steps, "lines": lines, "earlierLines": earlier},
+	view := mcpRunOf(&snapshot.Run)
+	view.Reason, _ = masker.Mask(view.Reason)
+	return answer(map[string]any{"run": view, "steps": steps, "lines": lines, "earlierLines": earlier},
 		fmt.Sprintf("run #%d, %s", in.Run, operatorCount(len(lines), "line")))
 }
 
@@ -295,7 +295,7 @@ func (s *Server) operatorContainerLogs(ctx context.Context, summary *deploy.Depl
 	if err != nil {
 		return refuse("the live release's containers could not be listed")
 	}
-	masker, err := s.operatorMasker(ctx, summary, deploy.EngineRun{})
+	masker, err := s.operatorMasker(ctx, summary)
 	if err != nil {
 		return refuse("the environment's secret values could not be read to mask, so nothing was read")
 	}
