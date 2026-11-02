@@ -6,6 +6,7 @@ import Link from "next/link"
 import { ApiError, del, get, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { relativeTime } from "@/lib/format"
+import { NOT_A_SIGN_IN, secretValueField } from "@/lib/secret-field"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -370,7 +371,7 @@ export function SharedVariables({
                     onChange={(event) =>
                       setDraft({ ...draft, name: event.target.value.toUpperCase() })
                     }
-                    autoComplete="off"
+                    {...NOT_A_SIGN_IN}
                     spellCheck={false}
                     placeholder="STRIPE_SECRET_KEY"
                     className="font-mono"
@@ -392,13 +393,10 @@ export function SharedVariables({
               <InputGroup>
                 <InputGroupInput
                   id="shared-variable-value"
-                  type={draft.sensitivity === "plain" || shown ? "text" : "password"}
+                  {...secretValueField(draft.sensitivity === "secret" && !shown)}
                   value={draft.value}
                   onChange={(event) => setDraft({ ...draft, value: event.target.value })}
-                  autoComplete="off"
-                  spellCheck={false}
                   placeholder={draft.editing ? "Unchanged" : undefined}
-                  className="font-mono"
                 />
                 {draft.sensitivity === "secret" && draft.value && (
                   <InputGroupAddon align="inline-end" className="gap-0 p-0">

@@ -167,6 +167,15 @@ test("the server's shared variables name who reads each one and what is not live
   await editor.getByLabel("Variable name").fill("mailgun_api_key")
   await expect(editor.getByText("${{server.MAILGUN_API_KEY}}")).toBeVisible()
   await editor.getByLabel("Value", { exact: true }).fill("key-123")
+  // Chrome offers saved sign-ins on any form with a password field, whatever
+  // autocomplete says, so the secret is dots on a text field.
+  const value = editor.getByLabel("Value", { exact: true })
+  await expect(editor.locator('input[type="password"]')).toHaveCount(0)
+  await expect(value).toHaveCSS("-webkit-text-security", "disc")
+  await editor.getByRole("button", { name: "Show value" }).click()
+  await expect(value).toHaveCSS("-webkit-text-security", "none")
+  await editor.getByRole("button", { name: "Hide value" }).click()
+  await expect(value).toHaveCSS("-webkit-text-security", "disc")
   await editor.getByRole("button", { name: "Add variable" }).click()
   await expect(page.getByText("Shared variable added")).toBeVisible()
   await expect(sharedRow(page, "Server variables", "MAILGUN_API_KEY")).toBeVisible()
