@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { ReactFlowProvider } from "@xyflow/react"
 import { Page, PageContext } from "@/components/page"
-import { Pane, PaneHeader } from "@/components/panel"
+import { Pane } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePoll } from "@/hooks/use-poll"
@@ -48,7 +48,8 @@ async function readMap(signal: AbortSignal) {
  *
  * A reading page held to the window as a workbench (design system §16), one
  * frame around the rail of systems, a canvas and its inspector, the way a
- * database's Diagram is.
+ * database's Diagram is. Below the width those fit, the canvas alone, edge to
+ * edge.
  */
 export function ServerMapPage() {
   const asked = useSearchParams().get("system") ?? undefined
@@ -99,7 +100,7 @@ export function ServerMapPage() {
   const ready = map && memory.document
 
   return (
-    <Page fill className="max-w-none gap-2 px-2 py-2 md:px-3 md:py-3">
+    <Page fill className="max-w-none gap-2 p-0 lg:px-3 lg:py-3">
       <PageContext title="Map" />
       <div
         ref={root}
@@ -108,29 +109,22 @@ export function ServerMapPage() {
           immersive && "fixed inset-0 z-50 p-3",
         )}
       >
-        <Pane className="min-h-0 flex-1">
+        <Pane className="min-h-0 flex-1 max-lg:rounded-none max-lg:border-0">
           {ready ? (
             <ReactFlowProvider>
               <MapCanvas
                 map={map}
                 doc={memory.document!}
-                status={memory.status}
-                updatedAt={memory.updatedAt}
                 update={memory.update}
-                reset={memory.reset}
-                refresh={read.refresh}
                 full={fullscreen || immersive}
                 onFullscreen={toggleFullscreen}
                 initialSystem={asked}
               />
             </ReactFlowProvider>
           ) : read.error && !map ? (
-            <>
-              <PaneHeader className="h-11" />
-              <div className="p-4">
-                <ErrorState error={read.error} onRetry={read.refresh} />
-              </div>
-            </>
+            <div className="p-4">
+              <ErrorState error={read.error} onRetry={read.refresh} />
+            </div>
           ) : (
             <MapSkeleton />
           )}
@@ -144,9 +138,6 @@ export function ServerMapPage() {
 function MapSkeleton() {
   return (
     <div role="status" aria-label="Reading the server" className="flex min-h-0 flex-1 flex-col">
-      <PaneHeader className="h-11">
-        <Skeleton className="h-7 w-64" />
-      </PaneHeader>
       <div className="grid min-h-0 flex-1 lg:grid-cols-[15rem_minmax(0,1fr)]">
         <div className="space-y-2 border-r border-hairline p-3 max-lg:hidden">
           {[0, 1, 2, 3, 4, 5].map((i) => (

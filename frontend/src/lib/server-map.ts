@@ -84,14 +84,12 @@ export type MapDocument = {
   /** The system the reader was last looking at, flown back to on the next visit. */
   focus?: string
   viewport?: { x: number; y: number; zoom: number }
-  minimap: boolean
 }
 
 export const DEFAULT_DOCUMENT: MapDocument = {
   version: 2,
   positions: {},
   frames: {},
-  minimap: true,
 }
 
 const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n)
@@ -102,13 +100,12 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * A saved document read back defensively: it was written by an older page,
  * or by hand through the API, and a field the canvas cannot use is dropped
  * rather than taking the canvas down with it. A version-1 document placed the
- * boxes of the mind map this replaced; its positions mean nothing here, and
- * only its minimap switch is kept.
+ * boxes of the mind map this replaced; its positions mean nothing here. A
+ * saved minimap switch outlives the minimap only until the next save.
  */
 export function decodeDocument(raw: unknown): MapDocument {
   if (!isRecord(raw)) return DEFAULT_DOCUMENT
-  const minimap = typeof raw.minimap === "boolean" ? raw.minimap : DEFAULT_DOCUMENT.minimap
-  if (raw.version !== 2) return { ...DEFAULT_DOCUMENT, minimap }
+  if (raw.version !== 2) return DEFAULT_DOCUMENT
   const points = (from: unknown) => {
     const out: Record<string, Point> = {}
     if (isRecord(from)) {
@@ -130,7 +127,6 @@ export function decodeDocument(raw: unknown): MapDocument {
     frames: points(raw.frames),
     focus: typeof raw.focus === "string" ? raw.focus : undefined,
     viewport,
-    minimap,
   }
 }
 
