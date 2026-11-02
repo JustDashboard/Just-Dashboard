@@ -1170,13 +1170,12 @@ the page.
   `board.diagram`), a failed deployment's *Ask why it failed*
   (`POST /deploy/{id}/runs/{run}/diagnosis`, the run's record masked on the server first, audited as
   `deploy.run.diagnose`; [the deployment contract](../deployments/implementation.md) says what is sent),
-  and a deployment's *Diagnose* (`POST /deploy/{id}/assistant`, session-only, audited as
-  `deploy.assistant.ask` and `deploy.assistant.tool`): a conversation of its own kind, with its own
-  closed set of read tools — the environment's runs, a run's transcript, the live containers' lines,
-  usage and sizing, container events, host alerts, firewall rules, security updates — each call allowed
-  or declined by the person as `describe_tables` is, masked as the diagnosis is, and a
-  `propose_action` tool that runs nothing but draws a card whose press calls the project's own route
-  ([the deployment operator](../deployments/operator.md)). All of them share the install's budget of
+  and the dashboard's assistant — a deployment's *Diagnose* and page (`POST /deploy/{id}/assistant`),
+  a new deployment's (`POST /deploy/drafts/{draft}/assistant`) and the server's (`POST /assistant/chat`),
+  session-only, audited as `deploy.assistant.ask`/`.tool` and `assistant.chat.ask`/`.tool`: a conversation of
+  its own kind that acts as the person through the dashboard's own API, the databases' routes included —
+  `POST /databases/{id}/query` runs one statement, a read when the statement only reads — its answers masked
+  first, and saved as a chat ([the dashboard's assistant](../deployments/operator.md)). All of them share the install's budget of
   model calls and its four answers at once, and the settings sheet names all four under *Used by*.
 - **Engines** come from the capability table: `assistant` is every engine with a dialect, and
   `assistantPolicy` is PostgreSQL and its forks but CockroachDB. The editor offers the assistant to a

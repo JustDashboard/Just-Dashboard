@@ -77,7 +77,7 @@ Package updates, system users, roles, passkeys, API keys, an audit log and one-c
 <td width="50%" valign="top">
 <a href="docs/features/everywhere.md"><img src="docs/readme/command-palette.png" alt="The command palette"></a>
 <h3><a href="docs/features/everywhere.md">Everywhere</a></h3>
-Ctrl/⌘K search with previews, keyboard shortcuts on every page, and a design built around readings.
+Ctrl/⌘K search with previews, keyboard shortcuts on every page, an assistant that can do anything you can, and a design built around readings.
 </td>
 </tr>
 </table>

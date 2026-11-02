@@ -450,16 +450,42 @@ to and what of the database goes with it, and turns amber while rows are attache
 **The deployment's assistant is the same conversation given a page, because it works.**
 (`components/assistant/agent/`, drawn from AI Elements' registry components, `elements/NOTICE`.) What it did stands
 in the answer as steps, each the product it touched on a tile (§14's argument for a logo: Docker's whale is read
-before its label), with a word lit while it runs (`TextShimmer`) and a badge when it is done. What it changed is a
-card on the success wash with **Open Runtime →** beside it, and what is different in mono, so a change is the loudest
-thing in the column. What it wants to do is a card on the warning or danger wash with each call's own *Allow* and
-*Decline*, its values as `path value` lines rather than JSON, since a person reads it to decide. Full access is amber
-on the toolbar for as long as it is on. A question is right-aligned on `--surface-header`, the answer has the provider's
-real logo beside it, and `BorderBeam` (§11: work is happening inside this frame) runs round the logo's tile and the
-composer while it works. Nothing else moves. Beside it, or a tap away on a phone, the rail says what it has changed
-and read. A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a
-transition on an outline, not a fifth animation. The floating **Back to chat** is the same surface as Remote Desktop's
-dock, in the same corner, and sits above it when both are up.
+before its label), with a word lit while it runs (`TextShimmer`) and a badge that turns from a spinner to a tick or a
+cross as it ends. A route it called itself (`api_request`) is drawn as the request log draws one — the method on a
+recessed chip, a read muted and a write in the method hue, and the path in the path hue (`MethodWord`,
+`RequestPath`) — so `GET /databases/connections` reads as a request before it reads as words; looking routes up
+(`find_routes`) is a muted line with no badge. What it changed is a card on the success wash with **Open Runtime →**
+beside it, and what is different in mono, so a change is the loudest thing in the column. What it wants to do is a card
+on the warning or danger wash with each call's own *Allow* and *Decline*, its values as `path value` lines rather than
+JSON, since a person reads it to decide. Full access is amber on the toolbar for as long as it is on, and the mode
+menu says what each mode does in plain words: full access runs everything without asking; asking before changes holds
+every change. A question is right-aligned on `--surface-header`, the answer has the provider's real logo beside it,
+and `BorderBeam` (§11: work is happening inside this frame) runs round the logo's tile and the composer while it works.
+
+The chat is not in a frame. On a deployment's page and on `/assistant` it is the page's own ground from the header's
+hairline to the window's foot (`ProjectShell` and the server page draw a `fill` page there): the column of messages is
+the one thing that scrolls, the composer sits at the foot with a small margin and nothing under it but the line that
+says what is sent, and the rail is a column after a hairline, never a card. An empty chat centres its mark, title and
+suggestions in the column. The composer draws no focus at all — no ring, no lit border, no glow — because it is the
+page's one place to type and the blinking caret is the whole answer to "is it ready"; a press anywhere on its frame puts
+the caret in it, and the buttons in its toolbar keep the ring for the keyboard.
+
+The rail holds the chats and what the open one has done. **Chats** are the person's saved chats (`agent/chats.ts`,
+`agent/chat-list.tsx`), newest first, each a row of one height in every state: its title, how long ago it moved, a
+lit `signal` dot that breathes while a tab is answering it, and a warning `Tag` while calls in it wait on the person.
+Rename turns the row's own line into the field; delete asks first through `useConfirm`; nothing unfolds under a row.
+The deployment's page lists that deployment's chats; `/assistant` is a chat about the whole server and lists every
+chat under what each is about, and a deployment's chat opens on that deployment's page (`?chat=`). A chat opened
+from the history is read back from the server and folded through the same reducer the stream feeds, so it looks
+exactly as it did and can be carried on. One another tab is answering is followed and says so in a calm bar over the
+box — a breathing dot, *This chat is running in another tab*, and **Take over** — and the tab it was taken from says
+*Continued somewhere else* and stops. Below the chats, what it has changed with a shortcut to each, and what it has
+read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot.
+
+A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a transition
+on an outline, not a fifth animation. The floating **Back to chat** is the same surface as Remote Desktop's dock, in
+the same corner, and sits above it when both are up. `/assistant`'s second tab is the install's settings: who
+answers, what a conversation starts on, and where it works.
 
 **What goes inside a task surface is `components/form.tsx`.** A `Field` is a label at `text-body`,
 a control, and one line under it — a hint, or the error while there is one; `FieldRow` puts two or
@@ -1175,6 +1201,23 @@ beam, the fade, and wire marks that draw the products they connect.
 
 Every one of them honours `prefers-reduced-motion` in JavaScript, because the root CSS rule cannot
 reach a JavaScript-driven animation.
+
+The assistant's chat is the one surface that spends `motion` itself at the scale of a word or a row, because an
+answer arriving is a sequence of small arrivals and a person watches every one. Each is still one of the four
+meanings, each runs 150–250ms on the product's rise curve with nothing springing, and a subtree under
+`MotionConfig reducedMotion="user"` drops every transform for a reader who asked for less: a turn rises in as it
+is asked (one read back from the history does not); the suggestions of an empty chat arrive a beat apart; a step's
+badge crosses from the spinner to a tick or a cross; a step and a long run of steps unfold to their height
+(`animate-collapsible-*`), and opening one lets go of the bottom first, so the row stays under the pointer instead of
+being pushed up by the column following the newest line; a call waiting on the person rises and lights its edge once
+in its tone (`.agent-attention`, the arrival highlight's outline run once on arrival), and so does a change's
+shortcut, in green; *Ask* becomes *Stop* in place — the face eases from the command's blue to a control's while the
+word and glyph cross — rather than one button replacing another; the composer's and the logo's `BorderBeam` fade up
+and away; the answer still arriving ends in a soft caret that breathes (`.agent-streaming`, drawn by the column
+after the last word, never typed into the Markdown); *Thinking* is the shimmer with the seconds counted beside it;
+**Jump to latest** rises in once the reader has scrolled up and sinks away when they are back; the rail's changes
+slide in; and the dock rises in and sinks away, its rows easing their height as they join and leave.
+
 
 Database creation on `/databases/new` and `/deploy/new?source=database` uses one shared catalogue,
 settings `FlowPanel`, and startup sequence (`database/connect/start.tsx`). While a container is being

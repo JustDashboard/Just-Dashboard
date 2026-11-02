@@ -322,24 +322,33 @@ A change that weakens any of these has to say so explicitly.
     changing the scope and unlinking are session-only in the browser (an API key is refused) and root-only at
     the terminal, the heartbeat is a fixed field set that names nothing on the machine below `operate`, and
     the installer never handles a link credential. See [account link](../backend/account-link.md).
-13. The dashboard's assistant is a person's, at the dashboard, and acts as them and no further. Its route is
-    a session's. What it does is a closed set of tools (`assistant.AgentCalls`; a call to anything else refuses
-    the whole answer) over a closed list of the dashboard's own routes, read off the router
-    (`api/handlers_assistant_catalogue.go`), each made through the router under the person's user and role, so
-    that route's capability check, audit entry and rate limit apply. It is held to every rule a deploy key is
-    (`agentDelegate`, `Principal.Assistant`): variables write-only, no reach past a deployment's own container to
-    the host, no saved credential sent somewhere new, narrowed to the deployment the conversation is about, its
-    session read again for every call. The one thing past that deployment is the server's backups, which wait for
-    the person in every mode. A key's rules live in the handlers, so a route opened to it in `assistantRoutes` is
-    read first for what a key would have been stopped by; a new deployment's save asks at the save what a key's
-    commit asks (`assistantDraftGuard`), because a person's commit does not. A secret's value, saved credentials,
-    secret stores, the routes that take a typed confirmation, what speaks as the dashboard on GitHub and a new
-    deployment's commit are not reachable in any mode. Every string it reads is masked before it is sent, and an
-    answer that cannot be masked whole is not sent. How much runs without asking is the mode, which the server holds
-    on every press and which defaults to asking before any change; **Full access is a person choosing to let a change
-    run unseen**, and text the model reads can try to talk it into one, so that default must not move, and who
-    answers takes a session rather than a key. There is no shell, no command the model writes and no other path from
-    an answer to the host. See [the deployment assistant](../deployments/operator.md).
+13. The dashboard's assistant is a person's, at the dashboard, and acts as them: no more than their role, and,
+    since 0.8.5, no less. Its routes are a session's (a deployment's, a new deployment's and the server's,
+    `POST /assistant/chat`). Every call it makes is a request through the dashboard's own router under the
+    person's own session principal (`s.assistantDispatch`, `httpx.WithAssistant`), so the route's capability
+    check, handler rules, rate limit and audit entry apply exactly as to them; the entry records the person with
+    actor `assistant`, so what it did reads apart from what they did. The session is read again before every
+    step and every call (`Authenticator.Recheck`). **It is no longer narrowed to deploy-key rules**: there is no
+    synthetic key, no `assistantRoutes` list and no handler guard that refuses it (`assistantDraftGuard`,
+    `refuseAssistantSchedule` are gone). It reaches every route of `/api/v1` the person could call — databases,
+    backups, Docker, files, the firewall, users and the rest, including what runs commands on the host
+    (scheduled tasks, services, a container's command) — through `api_request`, `find_routes`, a deployment's
+    `call_operation` and its shaped reads. What stays out of its reach is a closed list in
+    `api/handlers_assistant_routes.go` (`agentExclusion`), each line something no role changes: its own routes
+    and those that ask the model; sign-in, password, second factor, passkeys, sessions and minting an API key;
+    uninstalling the dashboard and its account link and usage count (invariants 12 and 16 want the person's own
+    press); WebSockets and streams; webhooks, the MCP endpoint and other machines' routes. What used to be
+    refused is asked instead: how much runs without asking is the mode, which the server holds on every press —
+    "ask" holds every read and change, "changes" (the default) holds every change, and **full access runs
+    everything the person's role allows, unseen**; a draft's own saves never wait, but committing it, discarding
+    it, or a save that changes its source, points a variable at a saved secret or reaches the host waits unless
+    the mode is full. Text the model reads can try to talk it into a change, which is why "changes" stays the
+    default and who answers takes a session. **What is kept from the provider is every secret's value**: every
+    string of every answer is masked before it is sent, in every mode and scope (every deployment's secret
+    values, credential shapes, fields named for a secret, key material; `api/handlers_assistant_mask.go`), and
+    an answer that cannot be masked whole is not sent. A malformed call never refuses the answer: it is answered
+    with what was wrong (`assistant.CheckCalls`). Its saved chats are their owner's alone and sealed with the
+    master key. See [the deployment assistant](../deployments/operator.md).
 
 14. A vulnerability scanner reads an image; it never reaches the host. `imagescan.ScanSpec` runs Trivy
     with **no network** (`NetworkMode: none`), no capabilities, a read-only root, no new privileges and
