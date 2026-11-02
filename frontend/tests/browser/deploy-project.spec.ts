@@ -1984,6 +1984,25 @@ test("a pull-request listing the server cannot answer hides the panel, and an un
   await expect(page.getByRole("heading", { name: "Pull requests", exact: true })).toHaveCount(0)
 })
 
+test("a project's usage reads as the Metrics page does", async ({ page }) => {
+  await mockProject(page, { showcase: true })
+  await page.goto("/deploy/7/runtime")
+  const resources = page.locator("section", {
+    has: page.getByRole("heading", { name: "Resources", exact: true }),
+  })
+  const readings = resources.locator("[data-slot=stat-tile]")
+  await expect(readings).toHaveCount(5)
+  for (const name of ["CPU", "Memory", "Processes", "Network", "Disk I/O"]) {
+    await expect(readings.filter({ hasText: name })).toBeVisible()
+  }
+  for (const name of ["Processor and memory", "Network and disk", "Processes and data moved"]) {
+    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible()
+  }
+  await expect(page.getByRole("heading", { name: "Data moved", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Since it started", exact: true })).toHaveCount(0)
+  await expect(page.getByText(/Recorded every|Live from Docker's stats stream/)).toHaveCount(0)
+})
+
 test.describe("delivery charts on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
 

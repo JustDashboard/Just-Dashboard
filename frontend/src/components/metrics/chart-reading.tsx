@@ -1,6 +1,9 @@
 "use client"
 
+import { cn } from "@/lib/utils"
 import { Meter, utilisationTone } from "@/components/meter"
+import { SeriesKey } from "@/components/overview/readings"
+import type { Tone } from "@/components/tone"
 
 /**
  * A chart's reading now, at the end of its head: the figure beside the key of
@@ -8,9 +11,9 @@ import { Meter, utilisationTone } from "@/components/meter"
  * short meter of how close it is. The words are read once, as a sentence; the
  * figure, the key and the meter are what the eye reads.
  *
- * A project's Runtime heads each container chart with one, and a database's
- * home each activity chart: the number and its shape are read in one place,
- * where a row of tiles over the charts said the same figure twice.
+ * A database's home heads each activity chart with one: the number and its
+ * shape are read in one place, where a row of tiles over the charts said the
+ * same figure twice.
  */
 export function ChartReading({
   label,
@@ -86,5 +89,36 @@ export function SeriesReading({
       note={note}
       meter={meter}
     />
+  )
+}
+
+/**
+ * What a chart's measurement is now, under a page's own row of readings: each
+ * figure keyed by its line's colour, so the head and the legend's Now column
+ * are read as one. Metrics and a project's Runtime head their charts with it.
+ */
+export function HeadReading({
+  items,
+}: {
+  items: { label: string; value: string; color?: string; tone?: Tone }[]
+}) {
+  return (
+    <span className="numeric flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1 text-hint text-muted-foreground">
+      {items.map((item) => (
+        <span key={item.label} className="whitespace-nowrap">
+          {item.color && <SeriesKey color={item.color} />}
+          <span
+            className={cn(
+              "font-medium text-foreground",
+              item.tone === "warning" && "text-warning",
+              item.tone === "danger" && "text-destructive",
+            )}
+          >
+            {item.value}
+          </span>{" "}
+          {item.label}
+        </span>
+      ))}
+    </span>
   )
 }

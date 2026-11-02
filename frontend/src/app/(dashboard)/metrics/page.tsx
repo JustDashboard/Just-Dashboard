@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react"
 import { Download, Pause, Play } from "@/components/icons"
 import { bytes, duration, percent, rate } from "@/lib/format"
-import { cn } from "@/lib/utils"
 import type { MetricEvent, Snapshot } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { useMetrics } from "@/hooks/use-metrics"
@@ -38,7 +37,8 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
 import type { Tone } from "@/components/tone"
 import { ChartPanel } from "@/components/metrics/chart-panel"
-import { RangePicker, windowSpanNote } from "@/components/metrics/range-picker"
+import { RangePicker, windowPhrase } from "@/components/metrics/range-picker"
+import { HeadReading } from "@/components/metrics/chart-reading"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { MomentInspector } from "@/components/metrics/moment-inspector"
 import { getCrosshair, unpinCrosshair } from "@/lib/metrics-crosshair"
@@ -315,7 +315,7 @@ export default function MetricsPage() {
   const zoom = controls.zoomTo
   const loadThreshold = coreThreshold(cores)
   const sensors = snapshot.sensors ?? []
-  const span = spanPhrase(win, live)
+  const span = windowPhrase(win, live)
 
   const exportCsv = () => {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")
@@ -731,26 +731,6 @@ function trendsOf(rows: ChartRow[]): Trends {
 }
 
 /**
- * The window on screen as the tiles' trends cover it: "Last hour" in the
- * head, "the last hour" in each trend's name. A dragged span is its two ends,
- * since the range picker beside the identity line already says how wide it is.
- */
-function spanPhrase(win: MetricsWindow, live: boolean): { head: string; over: string } {
-  const zoomed = windowSpanNote(win)
-  if (!live && zoomed) return { head: zoomed, over: "the window on screen" }
-  const head = live
-    ? "Last 5 minutes"
-    : {
-        live: "Last 5 minutes",
-        "1h": "Last hour",
-        "6h": "Last 6 hours",
-        "24h": "Last 24 hours",
-        "7d": "Last 7 days",
-      }[win.key]
-  return { head, over: `the ${head.toLowerCase()}` }
-}
-
-/**
  * The same span, one window earlier.
  *
  * Anchored to the recorded series' own end rather than to the instant of
@@ -957,37 +937,6 @@ function Readings({
         }
       />
     </StatGrid>
-  )
-}
-
-/**
- * What a chart's measurement is now, in its head: each figure keyed by its
- * line's colour, the way a project's Runtime heads its charts, so the head
- * and the legend's Now column are read as one.
- */
-function HeadReading({
-  items,
-}: {
-  items: { label: string; value: string; color?: string; tone?: Tone }[]
-}) {
-  return (
-    <span className="numeric flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1 text-hint text-muted-foreground">
-      {items.map((item) => (
-        <span key={item.label} className="whitespace-nowrap">
-          {item.color && <SeriesKey color={item.color} />}
-          <span
-            className={cn(
-              "font-medium text-foreground",
-              item.tone === "warning" && "text-warning",
-              item.tone === "danger" && "text-destructive",
-            )}
-          >
-            {item.value}
-          </span>{" "}
-          {item.label}
-        </span>
-      ))}
-    </span>
   )
 }
 

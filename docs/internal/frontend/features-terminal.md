@@ -175,16 +175,16 @@ that does something.
   Environment tab: each name's namespace in its lane hue, each value in its kind's code hue, and
   the kinds — credentials, addresses, paths, switches, numbers — as chips that count and narrow, beside
   a filter that never searches a hidden value). Each other view is the overhauled page it stands in
-  for. **Usage** (`container-usage-tab.tsx`) is a project Runtime's `deploy/runtime-usage.tsx` — every
-  chart headed by its reading now, a Live range off the stats socket beside the recorded ones, the
-  processes chart and what it has done since it started — with the container's own exits, OOM kills
+  for. **Usage** (`container-usage-tab.tsx`) is a project Runtime's `deploy/runtime-usage.tsx` — the
+  Metrics page's five readings over the same chart panels, a Live range off the stats socket beside
+  the recorded ones, the processes chart and the data it has moved since it started — with the container's own exits, OOM kills
   and folded restart loops as the charts' markers (`usage-markers.ts`), then the Metrics page's
   breakdowns read off the same frame: the memory allocation as one bar of programs, active files,
   reclaimable cache and headroom, the quota, host share, throttling and task count as tiles, the
   memory and CPU limits drawn beside the change that sets them, and the interfaces as a framed table
   with an in/out bar per row. `RuntimeUsage` takes `running={false}` for a stopped container: no
-  socket, the recorded hour, and "Not running" rather than a socket waiting forever. The old Pause
-  button went with the old tiles; a recorded range holds the charts still. **Storage**
+  socket, the recorded hour, and "Not running" rather than a socket waiting forever. Pause and Export
+  CSV are the Metrics page's, and a pinned moment holds its inspector over the charts. **Storage**
   (`container-storage-tab.tsx`) is the file manager's workbench: one frame around a rail of the mounts
   — each the path *inside* the container, drawn as its kind in that kind's hue (a database's volume as
   its engine, Docker's socket in red) with where it really lives under it, a tmpfs marked *not kept* —

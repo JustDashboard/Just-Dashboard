@@ -923,16 +923,14 @@ rather than assembling its own recharts tree — adding a measurement should mea
   `yTicks` on `MetricChart` and `ChartPanel` names the ticks. A container's memory chart is scaled to
   its limit and ticks at the limit's quarters, so the top tick names the limit — on Docker's
   container page and on a project's Runtime alike, since both take `useContainerScales`.
-- **A series' hue is the measurement's, not the chart's position.** A project's Runtime draws
-  processor in `--chart-1`, memory in `--chart-4`, received and read in `--chart-2`, sent in
-  `--chart-5`, written in `--chart-4` and processes in `--chart-5`, so five charts that were all one
-  blue read apart at a glance; a chart's reading now in its head carries the same 2×10 key the
-  legend does. The host pages take the five readings' hues from one map (`HUE` in
-  `components/overview/readings.tsx`) — processor `--chart-1`, memory `--chart-2`, load
-  `--chart-3`, network `--chart-5`, disks `--chart-4` — and Metrics draws every line of a
-  measurement in it, so Pressure's CPU, memory and I/O lines are the three tiles' colours; a
-  chart's second line takes the hue furthest from its first (out `--chart-2` against in, write
-  `--chart-3` against read).
+- **A series' hue is the measurement's, not the chart's position.** The five readings' hues come from
+  one map (`HUE` in `components/overview/readings.tsx`) — processor `--chart-1`, memory `--chart-2`,
+  load `--chart-3`, network `--chart-5`, disks `--chart-4` — and Metrics draws every line of a
+  measurement in it, so Pressure's CPU, memory and I/O lines are the three tiles' colours; a chart's
+  second line takes the hue furthest from its first (out `--chart-2` against in, write `--chart-3`
+  against read). A project's Runtime and a container's Usage tab take the same map and the same
+  second lines, with processes in load's hue, because the operator asked that a container's
+  metrics read the same as the host's: its network is the line the host's network is.
 - **A reading's last hour in a deployment page's `StatTile` or an Overview reading line is `TileTrend`**
   (`sparkline.tsx`), the one shape for it: its slot's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
   below two points, which is not yet a shape, nor for a series that never moves on a scale of its
@@ -3057,8 +3055,7 @@ identity line and no tiles (the Databases rule above); what changed, block by bl
   while the newest is under a day old, amber past a week, dashed when there is none, and pulses while
   one is taken. Below `lg` the lanes stack and each node says in words how it is wired.
 - **Activity** draws every view the engine fills as a chart of its own, two to a row, each headed
-  by its newest reading through `ChartReading` (`metrics/chart-reading.tsx`, the Runtime page's head,
-  shared now) with a meter where the server states a ceiling — open sessions against the most it
+  by its newest reading through `ChartReading` (`metrics/chart-reading.tsx`) with a meter where the server states a ceiling — open sessions against the most it
   accepts. Each line takes its measurement's hue (§10): sessions blue, transactions violet, rows read
   green against written magenta, the cache hit rate a line in the brand's pale blue rather than an
   area, which at 99% was one grey slab. The range is one row of presses (1h, 6h, 24h, 7d) over all
@@ -3303,8 +3300,8 @@ is a framed table with a filter that does not search a hidden value. The page dr
 container has — it used to draw only the inline three, so pausing or removing it meant the list.
 
 Each of its other views then took the pass of the page it stands in for, so a reader who has learned
-that page has learned the tab. Usage is a project Runtime's (`deploy/runtime-usage.tsx`): every chart
-headed by its reading now, with the container's own crashes and folded restart loops as its markers,
+that page has learned the tab. Usage is a project Runtime's (`deploy/runtime-usage.tsx`): the Metrics
+page's five readings over its chart panels, with the container's own crashes and folded restart loops as its markers,
 then the Metrics page's breakdowns of the same frame — memory as one allocation bar, quota, share,
 throttling and tasks as tiles, the limits beside the change that sets them, interfaces as a framed
 table with an in/out bar per row. Storage is the file manager's workbench, a rail of mounts drawn as

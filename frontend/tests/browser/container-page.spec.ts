@@ -201,7 +201,7 @@ test("usage marks the restart loop on the runner's charts and says it is not run
   await mockContainerPage(page)
   await page.goto(`/docker/containers/${RUNNER}?tab=usage`)
   await expect(page.getByText("Not running", { exact: true }).first()).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Processor", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Utilisation", exact: true })).toBeVisible()
 })
 
 for (const width of [390, 1280]) {

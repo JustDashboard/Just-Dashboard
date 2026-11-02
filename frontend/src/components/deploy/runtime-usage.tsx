@@ -1,52 +1,54 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
+import { Download, Pause, Play } from "@/components/icons"
 import { ApiError } from "@/lib/api"
-import { bytes, percent } from "@/lib/format"
+import { bytes, percent, rate } from "@/lib/format"
 import { bucketLive, containerRateLabel, peakOf } from "@/lib/container-usage"
-import type { ContainerRow } from "@/lib/metrics-range"
+import { downloadText, rowsToCsv } from "@/lib/metrics-export"
+import { windowLabel, type ContainerRow } from "@/lib/metrics-range"
 import type { ContainerStats, MetricEvent } from "@/lib/types"
 import { useContainerFrame, useContainerLive } from "@/hooks/use-container-live"
+import { IconAction } from "@/components/icon-action"
+import { utilisationTone } from "@/components/meter"
+import { Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { Button } from "@/components/ui/button"
 import { ChartPanel, ChartPlaceholder } from "@/components/metrics/chart-panel"
-import { ChartReading } from "@/components/metrics/chart-reading"
-import { RangePicker } from "@/components/metrics/range-picker"
+import { HeadReading } from "@/components/metrics/chart-reading"
+import { SplitBar } from "@/components/metrics/hardware-panels"
+import { MomentInspector } from "@/components/metrics/moment-inspector"
+import { RangePicker, windowPhrase } from "@/components/metrics/range-picker"
+import { TileTrend } from "@/components/metrics/sparkline"
 import type { Series } from "@/components/metrics/metric-chart"
+import { HUE, LiveBytes, LiveFigure, SeriesKey } from "@/components/overview/readings"
 import { useContainerScales, useContainerUsage } from "@/components/docker/container-usage"
 
-// A hue per measurement rather than the two blues every chart shared, so the
-// page reads as five readings at a glance; in and out, read and write keep a
-// pair each. The peak shares its mean's colour (§10).
+// The Metrics page's colours and words for the same measurements (§10), so a
+// container's network is the line the host's network is. Its processes stand
+// in the slot, and take the hue, of the host's load.
+const OUT = "var(--chart-2)"
+const WRITE = "var(--chart-3)"
+
 const cpuSeries: Series[] = [
-  { key: "cpu", label: "CPU", color: "var(--chart-1)", kind: "area", peakKey: "cpuPeak" },
+  { key: "cpu", label: "CPU", color: HUE.cpu, kind: "area", peakKey: "cpuPeak" },
 ]
 const memSeries: Series[] = [
-  { key: "mem", label: "Memory", color: "var(--chart-4)", kind: "area", peakKey: "memPeak" },
+  { key: "mem", label: "Memory", color: HUE.mem, kind: "area", peakKey: "memPeak" },
 ]
 const netSeries: Series[] = [
-  { key: "netRx", label: "Received", color: "var(--chart-2)", kind: "area", peakKey: "netRxPeak" },
-  { key: "netTx", label: "Sent", color: "var(--chart-5)", kind: "area", peakKey: "netTxPeak" },
+  { key: "netRx", label: "In", color: HUE.net, kind: "area", peakKey: "netRxPeak" },
+  { key: "netTx", label: "Out", color: OUT, kind: "area", peakKey: "netTxPeak" },
 ]
 const diskSeries: Series[] = [
-  {
-    key: "blockRead",
-    label: "Read",
-    color: "var(--chart-2)",
-    kind: "area",
-    peakKey: "blockReadPeak",
-  },
-  {
-    key: "blockWrite",
-    label: "Written",
-    color: "var(--chart-4)",
-    kind: "area",
-    peakKey: "blockWritePeak",
-  },
+  { key: "blockRead", label: "Read", color: HUE.disk, kind: "area", peakKey: "blockReadPeak" },
+  { key: "blockWrite", label: "Write", color: WRITE, kind: "area", peakKey: "blockWritePeak" },
 ]
 const pidsSeries: Series[] = [
-  { key: "pids", label: "Processes", color: "var(--chart-5)", peakKey: "pidsPeak" },
+  { key: "pids", label: "Processes", color: HUE.load, peakKey: "pidsPeak" },
 ]
 
 // Module constants, because `ChartPanel` is memoised on its props (§10).
@@ -56,17 +58,12 @@ const axisBytes = (v: number) => bytes(v, 1).replace(".0 ", " ")
 const formatCount = (v: number) => Math.round(v).toLocaleString()
 
 /**
- * What the selected service is using now, and how it got there.
- *
- * There is no row of figure tiles over the charts any more: the operator asked
- * for it to go, and each of its five figures now heads the chart it moves on —
- * the processor's share beside Processor, memory against its limit beside
- * Memory, what is received and sent beside Network, read and written beside
- * Disk, and the process count beside Processes — so the number and its shape
- * are read in one place, and what the tile's hint said (the quota, the limit,
- * the counters since the start) sits under the charts as the container's
- * lifetime totals. §15 pass 2 allows the exit when each figure's new place is
- * named, and this is that list.
+ * What the selected service is using now, and how it got there, drawn the way
+ * the Metrics page draws the host: a row of five readings that glide to each
+ * frame over their line across the window on screen, then the same chart
+ * panels at the same heights in the same hues, under the same section heads.
+ * The operator asked that the two read as one page, which is why the five
+ * tiles that once left this block are back.
  *
  * The Live range draws the stats socket's last five minutes in five-second
  * buckets, each a mean inside the envelope of its peaks — the shape the
@@ -110,7 +107,15 @@ export function RuntimeUsage({
     containerId,
     running ? { rows: buckets, memoryLimit: stats?.memLimited ? stats.memLimit : 0 } : undefined,
   )
-  const { rows, limit, streaming, history, controls } = usage
+  const { limit, streaming, history, controls } = usage
+
+  // Pausing holds the rows the charts were drawn from while the socket keeps
+  // filling the window behind them, as on Metrics; a recorded range has nothing
+  // moving to pause, so choosing one drops the hold.
+  const [frozen, setFrozen] = useState<ContainerRow[] | null>(null)
+  if (frozen && !streaming) setFrozen(null)
+  const rows = frozen ?? usage.rows
+
   const scales = useContainerScales(rows, limit, streaming)
   const hostEvents = usage.events
   const events = useMemo(
@@ -152,60 +157,78 @@ export function RuntimeUsage({
   const hasDisk =
     rows.length === 0 || rows.some((r) => r.blockRead !== null || r.blockWrite !== null)
 
-  // Each chart's reading now subscribes to the socket's frames on its own,
-  // so the memoised charts are not redrawn every second to change a figure
-  // in their heads (§10) — on a recorded range their rows have not moved.
+  // The reading subscribes to the socket's frames on its own, so the memoised
+  // charts are not redrawn every second to change a figure in a head (§10).
   const fallback = initial?.id === containerId ? initial : undefined
-  const readings = useMemo(
-    () => ({
-      cpu: <Now containerId={containerId} initial={fallback} off={!running} render={cpuNow} />,
-      memory: (
-        <Now containerId={containerId} initial={fallback} off={!running} render={memoryNow} />
-      ),
-      network: (
-        <Now containerId={containerId} initial={fallback} off={!running} render={networkNow} />
-      ),
-      disk: <Now containerId={containerId} initial={fallback} off={!running} render={diskNow} />,
-      processes: (
-        <Now containerId={containerId} initial={fallback} off={!running} render={processesNow} />
-      ),
-    }),
+  const busy = useMemo(
+    () => <BusyNow containerId={containerId} initial={fallback} off={!running} />,
     [containerId, fallback, running],
   )
+  const span = windowPhrase(controls.window, streaming)
+  const exportCsv = () => {
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")
+    const file = `${name}-usage-${windowLabel(controls.window)}-${stamp}.csv`
+    downloadText(file, rowsToCsv(rows))
+  }
 
   return (
-    <Panel plain>
-      <PanelHeader
-        title="Usage"
+    <div className="flex min-w-0 flex-col gap-8">
+      <MomentInspector samples={rows} />
+
+      <Section
+        title="Resources"
         actions={
-          <>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+            {picker && <div className="min-w-0 max-sm:w-full">{picker}</div>}
+            <span className="numeric text-hint text-muted-foreground">{span.head}</span>
             <Status
               tone={!running ? "stopped" : feed.live ? "running" : "notice"}
               live={running && feed.live}
               label={label}
-              className="mr-2"
             />
-            <RangePicker controls={controls} ranges={usage.ranges} />
-          </>
+            <div className="flex max-w-full flex-wrap items-center gap-2">
+              {streaming && (
+                <IconAction
+                  label={frozen ? "Resume live feed" : "Pause live feed"}
+                  onClick={() => setFrozen(frozen ? null : usage.rows)}
+                >
+                  {frozen ? <Play /> : <Pause />}
+                </IconAction>
+              )}
+              <Button variant="outline" size="sm" disabled={rows.length === 0} onClick={exportCsv}>
+                <Download />
+                Export CSV
+              </Button>
+              <RangePicker controls={controls} ranges={usage.ranges} />
+            </div>
+          </div>
         }
       >
-        {picker && <div className="min-w-0 max-sm:w-full sm:mr-auto">{picker}</div>}
-      </PanelHeader>
-      <PanelBody className="space-y-6">
-        {disabled ? (
-          <ChartPlaceholder
-            plain
-            note="History is not being recorded on this server. Set JD_METRICS_RETENTION to keep it."
-          />
-        ) : usage.error ? (
-          <ErrorState error={usage.error} />
-        ) : (
-          <>
-            <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+        <Readings
+          containerId={containerId}
+          initial={fallback}
+          off={!running}
+          rows={rows}
+          limit={limit}
+          over={span.over}
+        />
+      </Section>
+
+      {disabled ? (
+        <ChartPlaceholder
+          plain
+          note="History is not being recorded on this server. Set JD_METRICS_RETENTION to keep it."
+        />
+      ) : usage.error ? (
+        <ErrorState error={usage.error} />
+      ) : (
+        <>
+          <Section title="Processor and memory">
+            <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
               <ChartPanel
                 plain
-                title="Processor"
-                actions={readings.cpu}
+                title="Utilisation"
+                actions={busy}
                 rows={rows}
                 series={cpuSeries}
                 unit="%"
@@ -215,12 +238,11 @@ export function RuntimeUsage({
                 events={events}
                 onZoom={zoom}
                 note={note}
-                height={210}
+                height={190}
               />
               <ChartPanel
                 plain
                 title="Memory"
-                actions={readings.memory}
                 rows={rows}
                 series={memSeries}
                 format={formatBytes}
@@ -231,17 +253,20 @@ export function RuntimeUsage({
                 events={events}
                 onZoom={zoom}
                 note={note}
-                height={210}
+                height={190}
               />
             </div>
+          </Section>
 
-            {(hasNetwork || hasDisk) && (
-              <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+          {(hasNetwork || hasDisk) && (
+            <Section
+              title={hasNetwork && hasDisk ? "Network and disk" : hasNetwork ? "Network" : "Disk"}
+            >
+              <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
                 {hasNetwork && (
                   <ChartPanel
                     plain
-                    title="Network"
-                    actions={readings.network}
+                    title="Throughput"
                     rows={rows}
                     series={netSeries}
                     format={containerRateLabel}
@@ -257,8 +282,7 @@ export function RuntimeUsage({
                 {hasDisk && (
                   <ChartPanel
                     plain
-                    title="Disk"
-                    actions={readings.disk}
+                    title="Disk throughput"
                     rows={rows}
                     series={diskSeries}
                     format={containerRateLabel}
@@ -272,13 +296,14 @@ export function RuntimeUsage({
                   />
                 )}
               </div>
-            )}
+            </Section>
+          )}
 
-            <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+          <Section title="Processes and data moved">
+            <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
               <ChartPanel
                 plain
                 title="Processes"
-                actions={readings.processes}
                 rows={rows}
                 series={pidsSeries}
                 format={formatCount}
@@ -287,173 +312,283 @@ export function RuntimeUsage({
                 events={events}
                 onZoom={zoom}
                 note={note}
-                height={150}
+                height={165}
               />
-              <Lifetime stats={stats} running={running} />
+              <DataMoved stats={stats} running={running} />
             </div>
-
-            <p className="text-hint text-muted-foreground">
-              {streaming
-                ? "Live from Docker's stats stream, a reading a second, drawn as five-second means inside their peaks. A gap is a moment no reading arrived."
-                : `Recorded every ${history?.sampleIntervalSeconds ?? 15}s, drawn in ${history?.stepSeconds ?? "—"}s buckets of means and measured peaks. History follows the container's name across replacements.`}
-            </p>
-          </>
-        )}
-      </PanelBody>
-    </Panel>
+          </Section>
+        </>
+      )}
+    </div>
   )
 }
 
-/** A chart's reading now, from the newest frame of the socket the page holds open. */
-function Now({
+/** The processor now in its chart's head, from the newest frame of the page's socket. */
+function BusyNow({
   containerId,
   initial,
   off,
-  render,
+}: {
+  containerId: string
+  initial?: ContainerStats
+  off: boolean
+}) {
+  const frame = useContainerFrame(containerId)
+  const stats = off ? undefined : (frame.stats ?? initial)
+  if (!stats?.cpuReady) return null
+  return (
+    <HeadReading
+      items={[
+        {
+          label: "busy",
+          value: percent(stats.cpuPercent),
+          color: HUE.cpu,
+          tone: stats.cpuLimit ? utilisationTone(stats.cpuPercent / stats.cpuLimit) : "default",
+        },
+      ]}
+    />
+  )
+}
+
+type Trends = Record<"cpu" | "mem" | "pids" | "net" | "disk", number[]>
+
+/** Each tile's line from the rows the charts draw; a gap is left out, not a drop to zero. */
+function trendsOf(rows: ContainerRow[]): Trends {
+  const out: Trends = { cpu: [], mem: [], pids: [], net: [], disk: [] }
+  for (const row of rows) {
+    if (row.cpu !== null) out.cpu.push(row.cpu)
+    if (row.mem !== null) out.mem.push(row.mem)
+    if (row.pids !== null) out.pids.push(row.pids)
+    if (row.netRx !== null || row.netTx !== null) out.net.push((row.netRx ?? 0) + (row.netTx ?? 0))
+    if (row.blockRead !== null || row.blockWrite !== null) {
+      out.disk.push((row.blockRead ?? 0) + (row.blockWrite ?? 0))
+    }
+  }
+  return out
+}
+
+/**
+ * The Metrics page's readings for one container: five figures from the newest
+ * frame, each gliding to the next, keyed by and drawn over its line across the
+ * window on screen, and each saying what it is a share of. What a tile has no
+ * line for yet keeps a meter where its trend would be, against its ceiling.
+ */
+function Readings({
+  containerId,
+  initial,
+  off,
+  rows,
+  limit,
+  over,
 }: {
   containerId: string
   initial?: ContainerStats
   /** Not running: whatever frame is held is an earlier visit's, not now. */
-  off?: boolean
-  render: (stats?: ContainerStats, now?: ContainerRow) => React.ReactNode
+  off: boolean
+  rows: ContainerRow[]
+  limit: number
+  over: string
 }) {
   const frame = useContainerFrame(containerId)
-  return off ? render() : render(frame.stats ?? initial, frame.now)
-}
+  const stats = off ? undefined : (frame.stats ?? initial)
+  const now = off ? undefined : frame.now
+  const trends = useMemo(() => trendsOf(rows), [rows])
 
-function cpuNow(stats?: ContainerStats) {
+  const trend = (values: number[], name: string, color: string, max?: number) =>
+    values.length < 2 ? undefined : (
+      <TileTrend values={values} max={max} color={color} label={`${name} over ${over}`} />
+    )
   const cpu = stats?.cpuReady ? stats.cpuPercent : undefined
-  return (
-    <ChartReading
-      label="CPU now"
-      color="var(--chart-1)"
-      value={cpu !== undefined ? percent(cpu) : "—"}
-      note={
-        stats?.cpuLimit
-          ? `of a ${stats.cpuLimit}-core quota`
-          : stats?.hostCpus
-            ? `of one core · ${stats.hostCpus} here`
-            : "of one core"
-      }
-      meter={cpu !== undefined && stats?.cpuLimit ? cpu / stats.cpuLimit : undefined}
-    />
+  const quotaShare = cpu !== undefined && stats?.cpuLimit ? cpu / stats.cpuLimit : undefined
+  const cpuTrend = trend(
+    trends.cpu,
+    "CPU",
+    HUE.cpu,
+    stats?.cpuLimit ? stats.cpuLimit * 100 : undefined,
   )
-}
+  const memTrend = trend(trends.mem, "Memory", HUE.mem, limit > 0 ? limit : undefined)
+  const pidsLimit = stats?.pidsLimit ?? 0
+  // A process count sits still for hours, and a line scaled to its own maximum
+  // would not be drawn at all: headroom over the top keeps it a line at its level.
+  const pidsTrend = trend(trends.pids, "Processes", HUE.load, Math.max(...trends.pids, 1) * 1.25)
+  const rx = now?.netRx ?? null
+  const tx = now?.netTx ?? null
+  const read = now?.blockRead ?? null
+  const write = now?.blockWrite ?? null
 
-function memoryNow(stats?: ContainerStats) {
   return (
-    <ChartReading
-      label="Memory now"
-      color="var(--chart-4)"
-      value={stats ? bytes(stats.memUsage) : "—"}
-      note={
-        !stats
-          ? undefined
-          : stats.memLimited
-            ? `of ${bytes(stats.memLimit)}`
-            : stats.memHostPercent !== undefined
-              ? `no limit · ${percent(stats.memHostPercent)} of the host`
-              : "no limit"
-      }
-      meter={stats?.memLimited ? stats.memPercent : undefined}
-    />
-  )
-}
-
-function networkNow(_stats?: ContainerStats, now?: ContainerRow) {
-  return (
-    <span className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-1">
-      <ChartReading
-        label="Received now"
-        color="var(--chart-2)"
-        value={containerRateLabel(now?.netRx)}
-        note="in"
+    <StatGrid columns={5}>
+      <StatTile
+        label={
+          <>
+            <SeriesKey color={HUE.cpu} />
+            CPU
+          </>
+        }
+        meterLabel="CPU"
+        value={cpu !== undefined ? <LiveFigure value={cpu} decimals={1} unit="%" /> : "—"}
+        tone={quotaShare !== undefined ? utilisationTone(quotaShare) : "default"}
+        trend={cpuTrend}
+        meter={cpuTrend ? undefined : quotaShare}
+        hint={
+          !stats
+            ? undefined
+            : stats.cpuLimit
+              ? `of a ${stats.cpuLimit}-core quota`
+              : stats.hostCpus
+                ? `of one core · ${stats.hostCpus} here`
+                : "of one core"
+        }
       />
-      <ChartReading
-        label="Sent now"
-        color="var(--chart-5)"
-        value={containerRateLabel(now?.netTx)}
-        note="out"
+      <StatTile
+        label={
+          <>
+            <SeriesKey color={HUE.mem} />
+            Memory
+          </>
+        }
+        meterLabel="Memory"
+        value={stats ? <LiveBytes value={stats.memUsage} /> : "—"}
+        tone={stats?.memLimited ? utilisationTone(stats.memPercent) : "default"}
+        trend={memTrend}
+        meter={memTrend || !stats?.memLimited ? undefined : stats.memPercent}
+        hint={
+          !stats
+            ? undefined
+            : stats.memLimited
+              ? `of ${bytes(stats.memLimit)}`
+              : stats.memHostPercent !== undefined
+                ? `no limit · ${percent(stats.memHostPercent)} of the host`
+                : "no limit"
+        }
+        trailing={stats ? "used" : undefined}
       />
-    </span>
-  )
-}
-
-function diskNow(_stats?: ContainerStats, now?: ContainerRow) {
-  return (
-    <span className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-1">
-      <ChartReading
-        label="Read now"
-        color="var(--chart-2)"
-        value={containerRateLabel(now?.blockRead)}
-        note="read"
+      <StatTile
+        label={
+          <>
+            <SeriesKey color={HUE.load} />
+            Processes
+          </>
+        }
+        meterLabel="Processes"
+        value={stats ? <LiveFigure value={stats.pids} /> : "—"}
+        tone={pidsLimit > 0 && stats ? utilisationTone((stats.pids / pidsLimit) * 100) : "default"}
+        trend={pidsTrend}
+        meter={pidsTrend || pidsLimit <= 0 || !stats ? undefined : (stats.pids / pidsLimit) * 100}
+        hint={!stats ? undefined : pidsLimit > 0 ? `of ${pidsLimit.toLocaleString()}` : "no limit"}
       />
-      <ChartReading
-        label="Written now"
-        color="var(--chart-4)"
-        value={containerRateLabel(now?.blockWrite)}
-        note="written"
+      <StatTile
+        label={
+          <>
+            <SeriesKey color={HUE.net} />
+            Network
+          </>
+        }
+        value={rx !== null ? <LiveBytes value={rx} suffix="/s" /> : "—"}
+        trend={trend(trends.net, "Network", HUE.net)}
+        hint={tx !== null ? `${rate(tx)} out` : undefined}
+        trailing={rx !== null ? "in" : undefined}
       />
-    </span>
-  )
-}
-
-function processesNow(stats?: ContainerStats) {
-  const limit = stats?.pidsLimit ?? 0
-  return (
-    <ChartReading
-      label="Processes now"
-      color="var(--chart-5)"
-      value={stats ? stats.pids.toLocaleString() : "—"}
-      note={limit > 0 ? `of ${limit.toLocaleString()}` : "no limit"}
-      meter={limit > 0 && stats ? (stats.pids / limit) * 100 : undefined}
-    />
+      <StatTile
+        label={
+          <>
+            <SeriesKey color={HUE.disk} />
+            Disk I/O
+          </>
+        }
+        value={
+          read !== null || write !== null ? (
+            <LiveBytes value={(read ?? 0) + (write ?? 0)} suffix="/s" />
+          ) : (
+            "—"
+          )
+        }
+        trend={trend(trends.disk, "Disk I/O", HUE.disk)}
+        hint={
+          read !== null || write !== null
+            ? `${rate(read)} read · ${rate(write)} written`
+            : undefined
+        }
+      />
+    </StatGrid>
   )
 }
 
 /**
- * What the container has done since it started, and what it may use: the
- * counters Docker keeps from the start and the limits it runs under. These
- * were the tiles' hints, and they are facts about the container rather than
- * about the window on screen, so they stand beside the charts rather than
- * under one of them.
+ * How much the container has moved since it started: Docker's own counters,
+ * which begin again at each start, as a bar each for the network and the disk
+ * in their charts' colours, drawn as the Metrics page draws an interface. The
+ * bars share a scale, so the longer one is where its data mostly went.
+ *
+ * It was six label-and-value pairs under "Since it started", two of which —
+ * the processor quota and the memory limit — had not happened since anything:
+ * they are the CPU and Memory readings' ceilings, and the limit is a line on
+ * the memory chart.
  */
-function Lifetime({ stats, running = true }: { stats?: ContainerStats; running?: boolean }) {
-  const counted = stats?.networkAvailable !== false
-  const facts: [string, string][] = stats
+function DataMoved({ stats, running }: { stats?: ContainerStats; running: boolean }) {
+  const rows = stats
     ? [
-        ["Received", counted ? bytes(stats.netRx) : "not counted"],
-        ["Sent", counted ? bytes(stats.netTx) : "not counted"],
-        ["Read from disk", stats.blockAvailable === false ? "not counted" : bytes(stats.blockRead)],
-        [
-          "Written to disk",
-          stats.blockAvailable === false ? "not counted" : bytes(stats.blockWrite),
-        ],
-        [
-          "Processor",
-          stats.cpuLimit
-            ? `${stats.cpuLimit}-core quota`
-            : `no quota${stats.hostCpus ? ` · ${stats.hostCpus} cores here` : ""}`,
-        ],
-        ["Memory", stats.memLimited ? `${bytes(stats.memLimit)} limit` : "no limit"],
+        {
+          name: "Network",
+          counted: stats.networkAvailable !== false,
+          sides: [
+            { word: "in", value: stats.netRx, color: HUE.net },
+            { word: "out", value: stats.netTx, color: OUT },
+          ],
+        },
+        {
+          name: "Disk",
+          counted: stats.blockAvailable !== false,
+          sides: [
+            { word: "read", value: stats.blockRead, color: HUE.disk },
+            { word: "written", value: stats.blockWrite, color: WRITE },
+          ],
+        },
       ]
     : []
+  const busiest = Math.max(
+    ...rows.map((row) => (row.counted ? row.sides[0].value + row.sides[1].value : 0)),
+    1,
+  )
   return (
     <Panel plain>
-      <PanelHeader title="Since it started" />
-      <PanelBody>
+      <PanelHeader
+        title="Data moved"
+        actions={<span className="text-hint text-muted-foreground">since it started</span>}
+      />
+      <PanelBody className="flex flex-1 flex-col group-data-[plain]/panel:px-0">
         {stats ? (
-          <dl className="grid grid-cols-1 gap-x-8 sm:grid-cols-2">
-            {facts.map(([name, value]) => (
-              <div
-                key={name}
-                className="flex min-w-0 items-baseline justify-between gap-3 border-b border-hairline py-2 text-body"
-              >
-                <dt className="text-muted-foreground">{name}</dt>
-                <dd className="numeric truncate font-medium">{value}</dd>
-              </div>
+          <ul className="flex flex-1 flex-col justify-around gap-5">
+            {rows.map((row) => (
+              <li key={row.name} className="min-w-0 space-y-1.5">
+                <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3">
+                  <span className="text-body font-medium">{row.name}</span>
+                  {row.counted ? (
+                    <span className="numeric flex gap-x-3 text-hint text-muted-foreground">
+                      {row.sides.map((side) => (
+                        <span key={side.word} className="whitespace-nowrap">
+                          <SeriesKey color={side.color} />
+                          <span className="font-medium text-foreground">
+                            {bytes(side.value)}
+                          </span>{" "}
+                          {side.word}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-hint text-muted-foreground">Not counted</span>
+                  )}
+                </div>
+                {row.counted && (
+                  <SplitBar
+                    label={row.sides.map((s) => `${bytes(s.value)} ${s.word}`).join(", ")}
+                    busiest={busiest}
+                    parts={row.sides}
+                  />
+                )}
+              </li>
             ))}
-          </dl>
+          </ul>
         ) : (
           <p className="py-2 text-hint text-muted-foreground">
             {running
