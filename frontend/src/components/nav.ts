@@ -43,6 +43,7 @@ import {
   ShieldCheck,
   ShieldOff,
   SignIn,
+  Sparkles,
   Terminal,
   TerminalWindow,
   ServerMap,
@@ -135,6 +136,9 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
       // Beside the Overview rather than in a section: it is about every
       // section at once, and like the Overview it cannot be hidden.
       { title: "Map", href: "/map", icon: ServerMap },
+      // Who the assistant asks, for every page that uses it: about the whole
+      // dashboard rather than a section, so it cannot be hidden either.
+      { title: "Assistant", href: "/assistant", icon: Sparkles },
       {
         title: "Monitoring",
         icon: Monitoring,
@@ -443,6 +447,7 @@ export type ProjectNavEntry = {
 
 export const PROJECT_NAV: ProjectNavEntry[] = [
   { title: "Overview", path: "", icon: GridSquare },
+  { title: "Assistant", path: "/assistant", icon: Sparkles },
   { title: "Deployments", path: "/deployments", icon: Layers },
   { title: "Logs", path: "/logs", icon: Logs },
   { title: "Runtime", path: "/runtime", icon: Servers },

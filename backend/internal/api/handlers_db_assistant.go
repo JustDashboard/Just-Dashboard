@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +42,9 @@ type assistantState struct {
 	// slots bounds how many answers stream at once.
 	slots   chan struct{}
 	options assistant.Options
+	// ringMu holds a change to the keyring from its read to its write, which spans a
+	// check of the provider: a slow save must not bring back a key just removed.
+	ringMu sync.Mutex
 	// diagnosing holds the runs whose failure is being asked about, so a
 	// second press waits for the first answer instead of paying for another.
 	diagnosing sync.Map
@@ -65,6 +67,9 @@ func (s *Server) mountDatabaseAssistantRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/assistant", s.handle(s.handleAssistantSettings))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+		// Who answers is a person's to choose: a key pointing it at a server of its
+		// own would be handed what everybody asks, and could answer with what to do.
+		r.Use(httpx.RequireSession)
 		r.Method(http.MethodPut, "/assistant", s.handle(s.handleAssistantConfigure))
 		r.Method(http.MethodDelete, "/assistant", s.handle(s.handleAssistantRemove))
 	})
@@ -76,24 +81,13 @@ func (s *Server) mountDatabaseAssistantRoutes(r chi.Router) {
 	})
 }
 
-// assistantSettings is the stored provider, nil when there is none.
+// assistantSettings is the provider every page asks, nil when there is none.
 func (s *Server) assistantSettings(ctx context.Context) (*assistant.Settings, error) {
-	sealed, ok, err := s.Store.Setting(ctx, assistantSettingKey)
+	ring, err := s.assistantRing(ctx)
 	if err != nil {
-		return nil, httpx.Internal(err)
+		return nil, err
 	}
-	if !ok || sealed == "" {
-		return nil, nil
-	}
-	plain, err := s.Sealer.Open(sealed)
-	if err != nil {
-		return nil, errAssistantSealed
-	}
-	var settings assistant.Settings
-	if err := json.Unmarshal([]byte(plain), &settings); err != nil {
-		return nil, errAssistantSealed
-	}
-	return &settings, nil
+	return ring.Current(), nil
 }
 
 var errAssistantSealed = httpx.Err(http.StatusConflict, "assistant_unreadable",
@@ -106,70 +100,36 @@ type assistantSettingsView struct {
 }
 
 func (s *Server) handleAssistantSettings(w http.ResponseWriter, r *http.Request) error {
-	settings, err := s.assistantSettings(r.Context())
-	view := assistantSettingsView{View: assistant.ViewOf(settings)}
+	ring, err := s.assistantRing(r.Context())
+	view := assistantSettingsView{}
 	if errors.Is(err, errAssistantSealed) {
+		view.View = assistant.RingView(nil)
 		view.Problem = errAssistantSealed.Message
 	} else if err != nil {
 		return err
+	} else {
+		view.View = assistant.RingView(ring)
 	}
 	httpx.JSON(w, http.StatusOK, view)
 	return nil
 }
 
-// handleAssistantConfigure saves a provider once the provider has said the
-// key, the address and the model answer — asked without asking the model
-// anything — so a mistyped key is said under the field it was typed in
-// rather than under the first question somebody asks.
+// handleAssistantConfigure saves the provider this route is given and makes it
+// the active one.
 func (s *Server) handleAssistantConfigure(w http.ResponseWriter, r *http.Request) error {
 	var in assistant.Setup
 	if err := httpx.DecodeJSON(r, &in); err != nil {
 		return err
 	}
-	httpx.SetAudit(r, "database.assistant.configure", string(in.Provider), nil)
-	stored, err := s.assistantSettings(r.Context())
-	if err != nil && !errors.Is(err, errAssistantSealed) {
-		return err
+	if in.Provider != assistant.ProviderAnthropic && in.Provider != assistant.ProviderOpenAI {
+		httpx.SetAudit(r, "database.assistant.configure", string(in.Provider), nil)
+		return &httpx.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "choose Anthropic or an OpenAI-compatible server", Field: "provider"}
 	}
-	settings, err := assistant.Prepare(in, stored)
-	var field *assistant.FieldError
-	if errors.As(err, &field) {
-		return &httpx.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: field.Message, Field: field.Field}
-	}
+	ring, err := s.saveAssistantProfile(r, assistant.PresetForSetup(in), in, "database.assistant.configure", true)
 	if err != nil {
 		return err
 	}
-	client, err := assistant.New(settings, s.assistant.options)
-	if err != nil {
-		return httpx.Internal(err)
-	}
-	ctx, cancel := timeoutCtx(r, 20*time.Second)
-	defer cancel()
-	if err := client.Probe(ctx); err != nil {
-		return assistantCheckFailed(err)
-	}
-	settings.UpdatedAt = time.Now().UTC()
-	settings.UpdatedBy = httpx.MustPrincipal(r).Username()
-	plain, err := json.Marshal(settings)
-	if err != nil {
-		return httpx.Internal(err)
-	}
-	sealed, err := s.Sealer.Seal(string(plain))
-	if err != nil {
-		return httpx.Internal(err)
-	}
-	if err := s.Store.SetSetting(r.Context(), assistantSettingKey, sealed); err != nil {
-		return httpx.Internal(err)
-	}
-	detail := map[string]any{
-		"provider": settings.Provider, "model": settings.Model,
-		"keyChanged": stored == nil || stored.Key != settings.Key,
-	}
-	if u, err := url.Parse(settings.BaseURL); err == nil && u.Host != "" {
-		detail["host"] = u.Host
-	}
-	httpx.SetAudit(r, "database.assistant.configure", string(settings.Provider), detail)
-	httpx.JSON(w, http.StatusOK, assistantSettingsView{View: assistant.ViewOf(&settings)})
+	httpx.JSON(w, http.StatusOK, assistantSettingsView{View: assistant.RingView(ring)})
 	return nil
 }
 
@@ -184,20 +144,22 @@ func assistantCheckFailed(err error) error {
 	}
 }
 
-// handleAssistantRemove turns the assistant off and forgets the key.
+// handleAssistantRemove turns the assistant off and forgets every key.
 func (s *Server) handleAssistantRemove(w http.ResponseWriter, r *http.Request) error {
 	httpx.SetAudit(r, "database.assistant.remove", "", nil)
+	s.assistant.ringMu.Lock()
+	defer s.assistant.ringMu.Unlock()
 	stored, err := s.assistantSettings(r.Context())
 	if err != nil && !errors.Is(err, errAssistantSealed) {
 		return err
 	}
-	if err := s.Store.SetSetting(r.Context(), assistantSettingKey, ""); err != nil {
-		return httpx.Internal(err)
+	if err := s.saveAssistantRing(r.Context(), assistant.RingOf(nil)); err != nil {
+		return err
 	}
 	if stored != nil {
 		httpx.SetAudit(r, "database.assistant.remove", string(stored.Provider), map[string]any{"model": stored.Model})
 	}
-	httpx.JSON(w, http.StatusOK, assistantSettingsView{View: assistant.ViewOf(nil)})
+	httpx.JSON(w, http.StatusOK, assistantSettingsView{View: assistant.RingView(nil)})
 	return nil
 }
 

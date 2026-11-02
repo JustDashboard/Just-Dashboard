@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/assistant"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dnsrecords"
@@ -122,6 +123,7 @@ var openapiTags = []struct{ Name, Description string }{
 // values are the type's constants; TestOpenAPIEnumsMatchTheConstants reads
 // the source and fails when a constant is added or a type is left out.
 var openapiEnums = map[reflect.Type][]string{
+	reflect.TypeOf(assistant.Mode("")):             {"ask", "changes", "full"},
 	reflect.TypeOf(deploy.WorkloadProfile("")):     {"web", "static", "worker", "image", "compose", "service", "game", "imported"},
 	reflect.TypeOf(deploy.EnvironmentKind("")):     {"production", "staging", "preview"},
 	reflect.TypeOf(deploy.OwnershipMode("")):       {"managed", "linked", "observed"},
@@ -360,9 +362,11 @@ var deployOperations = map[string]deployOperation{
 	"GET /deploy/{id}/runs/{run}/settings-drift": {Tag: "runs", Summary: "Read what differed between a run's settings and the environment's at the time.", Response: (*deploy.RunSettingsDrift)(nil)},
 	"GET /deploy/{id}/runs/{run}/diagnosis":      {Tag: "runs", Summary: "Read the kept diagnosis of a failed run.", Response: shape{"diagnosis": (*runDiagnosisView)(nil)}},
 	"POST /deploy/{id}/runs/{run}/diagnosis":     {Tag: "runs", Summary: "Ask the configured model to diagnose a failed run, or to diagnose it again.", Request: diagnoseRequest{}, Response: shape{"diagnosis": (*runDiagnosisView)(nil)}},
-	"POST /deploy/{id}/assistant": {Tag: "runs", Summary: "Ask the deployment operator about an environment, or answer the reads it asked for.", Request: operatorRequest{}, Content: "application/x-ndjson",
+	"POST /deploy/{id}/assistant": {Tag: "runs", Summary: "Ask the deployment's assistant anything about an environment, or answer the calls it is waiting on.", Request: operatorRequest{}, Content: "application/x-ndjson",
 		Query: []openapiQuery{{Name: "environment", Type: "integer", Description: "Staging's environment id; production when absent."}},
-		Note:  "A session's route. The answer streams one JSON object a line: start, thinking, text, ran (what each allowed read read), proposal (an action whose card the person may press; nothing has run), done (with the reads waiting for a decision) or error."},
+		Note:  "A session's route. The answer streams one JSON object a line: start, thinking, text, call (a tool call as it starts), called (what became of it, and the shortcut to what it changed), link (a shortcut the assistant offers), done (with the calls waiting for a decision) or error."},
+	"POST /deploy/drafts/{draft}/assistant": {Tag: "drafts", Summary: "Ask the assistant to configure a draft: what it saves runs nothing until a person commits it.", Request: operatorRequest{}, Content: "application/x-ndjson",
+		Note: "A session's route. It streams the lines POST /deploy/{id}/assistant does."},
 
 	// Variables.
 	"GET /deploy/{id}/environments/{env}/variables":                  {Tag: "variables", Summary: "List an environment's variables: name, sensitivity, scopes, the value's digest and whether it awaits a deploy; never a value.", Response: []deploy.DeploymentVariable(nil)},
@@ -882,6 +886,9 @@ type deployOpenAPISource struct {
 	// tools is the MCP tools generated from the same router and description
 	// (handlers_mcp_operations.go), read off them once somebody asks.
 	tools mcpCatalogueSource
+	// agent is what the dashboard's assistant may call, read off the same
+	// router and description (handlers_assistant_catalogue.go).
+	agent agentCatalogueSource
 }
 
 func (src *deployOpenAPISource) document() *openapiDocument {

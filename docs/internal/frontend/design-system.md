@@ -447,6 +447,20 @@ request the model makes of the reader is a fence with the two answers as buttons
 allow*) that becomes one word once answered. Where the question is written, one line says who it goes
 to and what of the database goes with it, and turns amber while rows are attached.
 
+**The deployment's assistant is the same conversation given a page, because it works.**
+(`components/assistant/agent/`, drawn from AI Elements' registry components, `elements/NOTICE`.) What it did stands
+in the answer as steps, each the product it touched on a tile (§14's argument for a logo: Docker's whale is read
+before its label), with a word lit while it runs (`TextShimmer`) and a badge when it is done. What it changed is a
+card on the success wash with **Open Runtime →** beside it, and what is different in mono, so a change is the loudest
+thing in the column. What it wants to do is a card on the warning or danger wash with each call's own *Allow* and
+*Decline*, its values as `path value` lines rather than JSON, since a person reads it to decide. Full access is amber
+on the toolbar for as long as it is on. A question is right-aligned on `--surface-header`, the answer has the provider's
+real logo beside it, and `BorderBeam` (§11: work is happening inside this frame) runs round the logo's tile and the
+composer while it works. Nothing else moves. Beside it, or a tap away on a phone, the rail says what it has changed
+and read. A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a
+transition on an outline, not a fifth animation. The floating **Back to chat** is the same surface as Remote Desktop's
+dock, in the same corner, and sits above it when both are up.
+
 **What goes inside a task surface is `components/form.tsx`.** A `Field` is a label at `text-body`,
 a control, and one line under it — a hint, or the error while there is one; `FieldRow` puts two or
 three side by side; `FormSection` opens a part of a longer form with a title and a hairline;

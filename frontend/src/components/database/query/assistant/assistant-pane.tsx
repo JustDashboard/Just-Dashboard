@@ -18,7 +18,8 @@ import { Markdown } from "@/components/git/markdown"
 import { FormNote } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Well } from "@/components/panel"
-import { ProductGlyph } from "@/components/product-logo"
+import { ModelPicker } from "@/components/assistant/model-picker"
+import { assistantDestination } from "@/components/assistant/settings"
 import { EmptyState, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -175,8 +176,7 @@ export function AssistantPane({
         <h2 className="shrink-0 text-body font-medium">Assistant</h2>
         {configured && !readOnly && (
           <span className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-            <ProductGlyph id={view?.provider === "anthropic" ? "claude" : "openai"} />
-            <span className="truncate">{view?.modelLabel}</span>
+            <ModelPicker settings={view} />
           </span>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-0.5">
@@ -638,12 +638,7 @@ function Composer({
   }
 
   // The address was checked when it was saved, so it parses.
-  const destination =
-    settings.provider === "anthropic"
-      ? "Anthropic"
-      : settings.baseUrl
-        ? new URL(settings.baseUrl).host
-        : "the server"
+  const destination = assistantDestination(settings)
   return (
     <form
       data-slot="assistant-composer"

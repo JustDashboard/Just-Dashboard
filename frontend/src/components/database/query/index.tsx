@@ -22,7 +22,7 @@ import {
   AssistantPane,
   type AssistantContext,
 } from "@/components/database/query/assistant/assistant-pane"
-import { AssistantSettingsSheet } from "@/components/database/query/assistant/settings-sheet"
+import { AssistantSettingsSheet } from "@/components/assistant/settings-sheet"
 import {
   attachable,
   planSource,

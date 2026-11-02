@@ -2363,12 +2363,12 @@ export interface DeploymentOperatorQuery {
 }
 
 /**
- * deploymentOperator is POST /deploy/{id}/assistant: ask the deployment operator about an
- * environment, or answer the reads it asked for.
+ * deploymentOperator is POST /deploy/{id}/assistant: ask the deployment's assistant anything about
+ * an environment, or answer the calls it is waiting on.
  *
- * A session's route. The answer streams one JSON object a line: start, thinking, text, ran (what
- * each allowed read read), proposal (an action whose card the person may press; nothing has run),
- * done (with the reads waiting for a decision) or error.
+ * A session's route. The answer streams one JSON object a line: start, thinking, text, call (a
+ * tool call as it starts), called (what became of it, and the shortcut to what it changed), link
+ * (a shortcut the assistant offers), done (with the calls waiting for a decision) or error.
  *
  * Only an interactive session may call it; no key reaches it. The answer is application/x-ndjson.
  */
@@ -4166,6 +4166,32 @@ export function deploymentWatchPathSimulate(
       path: `/deploy/${pathParam(id)}/environments/${pathParam(env)}/watch-paths/simulate`,
       body,
       accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * draftOperator is POST /deploy/drafts/{draft}/assistant: ask the assistant to configure a draft:
+ * what it saves runs nothing until a person commits it.
+ *
+ * A session's route. It streams the lines POST /deploy/{id}/assistant does.
+ *
+ * Only an interactive session may call it; no key reaches it. The answer is application/x-ndjson.
+ */
+export function draftOperator(
+  client: Client,
+  draft: string,
+  body: OperatorRequest,
+  options?: RequestOptions,
+): Promise<string> {
+  return client.request<string>(
+    {
+      method: "POST",
+      path: `/deploy/drafts/${pathParam(draft)}/assistant`,
+      body,
+      accept: "text",
+      contentType: "application/x-ndjson",
     },
     options,
   )

@@ -29,7 +29,7 @@ Live readings, a map of the whole server, seven days of history, alerts and capa
 <td width="50%" valign="top">
 <a href="docs/features/deployments.md"><img src="docs/readme/deployments.png" alt="Deployment projects"></a>
 <h3><a href="docs/features/deployments.md">Deployments</a></h3>
-Repositories, images, Compose or 157 templates, with previews, canaries and one-click rollback.
+Repositories, images, Compose or 157 templates, with previews, canaries, one-click rollback and an assistant that can run it for you.
 </td>
 </tr>
 <tr>

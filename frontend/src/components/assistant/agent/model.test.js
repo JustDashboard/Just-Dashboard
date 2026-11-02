@@ -1,0 +1,230 @@
+import { describe, expect, test } from "bun:test"
+import {
+  EMPTY_AGENT,
+  agentStatus,
+  answering,
+  applyEvent,
+  beginTurn,
+  changesOf,
+  decideAll,
+  decideStep,
+  endTurn,
+  inputLines,
+  parseEvent,
+  pendingSteps,
+  readLines,
+  readyDecisions,
+  sendDecisions,
+  shownSteps,
+  totalUsage,
+  usageLine,
+} from "./model"
+
+const read = { id: "a", tool: "recent_runs", label: "Read the last 10 runs", kind: "read" }
+const restart = {
+  id: "b",
+  tool: "call_operation",
+  operation: "deployment_run_create",
+  route: "POST /deploy/{id}/environments/{env}/runs",
+  label: "Queue a run",
+  kind: "destructive",
+  reason: "It is stuck.",
+}
+const usage = { input: 100, output: 10 }
+
+const started = () => {
+  const t = beginTurn(EMPTY_AGENT, "t1", "why")
+  return applyEvent(t, "t1", {
+    type: "start",
+    conversation: "c1",
+    provider: "anthropic",
+    model: "m",
+    modelLabel: "Claude",
+    tools: true,
+    mode: "changes",
+  })
+}
+
+const asking = () =>
+  applyEvent(started(), "t1", {
+    type: "done",
+    stop: "tool",
+    usage,
+    model: "m",
+    kept: true,
+    pending: [read, restart],
+  })
+
+describe("reading the stream", () => {
+  test("a line cut across two reads is held for the next", () => {
+    expect(readLines("", '{"a":1}\n{"b"')).toEqual({ lines: ['{"a":1}'], rest: '{"b"' })
+    expect(readLines('{"b"', ":2}\n")).toEqual({ lines: ['{"b":2}'], rest: "" })
+  })
+  test("a line this page cannot read is left out", () => {
+    expect(parseEvent("not json")).toBeNull()
+    expect(parseEvent("3")).toBeNull()
+    expect(parseEvent('{"type":"thinking"}')).toEqual({ type: "thinking" })
+  })
+})
+
+describe("a turn", () => {
+  test("text arrives into one part, and a call starts another", () => {
+    let t = applyEvent(started(), "t1", { type: "text", text: "Read" })
+    t = applyEvent(t, "t1", { type: "text", text: "ing." })
+    t = applyEvent(t, "t1", { type: "call", call: read })
+    expect(t.turns[0].parts.map((part) => part.kind)).toEqual(["text", "step"])
+    expect(t.turns[0].parts[0].text).toBe("Reading.")
+    expect(t.turns[0].phase).toBe("working")
+    expect(answering(t.turns[0])).toBe(true)
+    expect(agentStatus(t)).toEqual({ tone: "working", text: "Read the last 10 runs…" })
+  })
+  test("a call that ran says what it came to, and its change", () => {
+    let t = applyEvent(started(), "t1", { type: "call", call: restart })
+    t = applyEvent(t, "t1", {
+      type: "called",
+      id: "b",
+      tool: "call_operation",
+      ok: true,
+      said: "Done",
+      change: { label: "Run #12", href: "/deploy/7/runs/40" },
+    })
+    const step = t.turns[0].parts[0]
+    expect(step.state).toBe("done")
+    expect(changesOf(t).map((one) => one.change.label)).toEqual(["Run #12"])
+    t = applyEvent(t, "t1", { type: "done", stop: "end", usage, model: "m", kept: true })
+    expect(agentStatus(t)).toEqual({ tone: "done", text: "Changed Run #12" })
+  })
+  test("a call the route refused reads as failed", () => {
+    let t = applyEvent(started(), "t1", { type: "call", call: restart })
+    t = applyEvent(t, "t1", { type: "called", id: "b", tool: "x", ok: false, said: "Forbidden" })
+    expect(t.turns[0].parts[0].state).toBe("failed")
+  })
+  test("the conversation is the server's only once the turn is kept", () => {
+    expect(started().conversation).toBe("")
+    const kept = applyEvent(started(), "t1", {
+      type: "done",
+      stop: "end",
+      usage,
+      model: "m",
+      kept: true,
+    })
+    expect(kept.conversation).toBe("c1")
+    const lost = applyEvent(started(), "t1", {
+      type: "done",
+      stop: "refusal",
+      usage,
+      model: "m",
+      kept: false,
+    })
+    expect(lost.conversation).toBe("")
+    expect(lost.turns[0].phase).toBe("refused")
+  })
+  test("looking up a route is not a step a person reads", () => {
+    const free = { id: "f", tool: "describe_operation", label: "Look up", kind: "free" }
+    let t = applyEvent(started(), "t1", { type: "call", call: free })
+    t = applyEvent(t, "t1", { type: "call", call: read })
+    expect(shownSteps(t.turns[0]).map((step) => step.call.id)).toEqual(["a"])
+  })
+  test("stopping leaves no call reading as running", () => {
+    const t = endTurn(applyEvent(started(), "t1", { type: "call", call: read }), "t1", "stopped")
+    expect(t.turns[0].phase).toBe("stopped")
+    expect(t.turns[0].parts[0].state).toBe("failed")
+    expect(answering(t.turns[0])).toBe(false)
+  })
+  test("usage adds up over the presses of a turn and over the conversation", () => {
+    let t = asking()
+    t = sendDecisions(decideAll(t, true))
+    t = applyEvent(t, "t1", { type: "done", stop: "end", usage, model: "m", kept: true })
+    expect(t.turns[0].usage.input).toBe(200)
+    expect(totalUsage(t).output).toBe(20)
+    expect(usageLine(t.turns[0])).toBe("Claude · 200 tokens in · 20 out")
+    expect(usageLine({ ...t.turns[0], usage: { input: 0, output: 0 } })).toBeUndefined()
+  })
+})
+
+describe("the calls waiting on the person", () => {
+  test("nothing is sent until every call has an answer", () => {
+    let t = asking()
+    expect(pendingSteps(t).length).toBe(2)
+    expect(agentStatus(t).tone).toBe("asking")
+    t = decideStep(t, "a", true)
+    expect(readyDecisions(t)).toBeNull()
+    t = decideStep(t, "b", false)
+    expect(readyDecisions(t)).toEqual({ a: true, b: false })
+  })
+  test("Allow all answers each", () => {
+    expect(readyDecisions(decideAll(asking(), true))).toEqual({ a: true, b: true })
+    expect(readyDecisions(decideAll(asking(), false))).toEqual({ a: false, b: false })
+  })
+  test("sending them waits for the rest, and each then runs", () => {
+    let t = sendDecisions(decideAll(asking(), true))
+    expect(t.turns[0].phase).toBe("waiting")
+    expect(answering(t.turns[0])).toBe(true)
+    t = applyEvent(t, "t1", { type: "call", call: read })
+    expect(t.turns[0].parts[0].state).toBe("running")
+    expect(t.turns[0].parts.filter((part) => part.kind === "step").length).toBe(2)
+    t = applyEvent(t, "t1", { type: "called", id: "b", tool: "x", ok: false, declined: true })
+    expect(t.turns[0].parts[1].state).toBe("declined")
+  })
+  test("a question declines what waits, as the server does", () => {
+    const t = beginTurn(asking(), "t2", "actually")
+    expect(t.turns[0].phase).toBe("done")
+    expect(t.turns[0].parts.every((part) => part.state === "declined")).toBe(true)
+    expect(t.turns[1].phase).toBe("waiting")
+    expect(pendingSteps(t)).toEqual([])
+  })
+  test("an answer that fails asks again, rather than saying Allowed over nothing", () => {
+    const sent = sendDecisions(decideAll(asking(), true))
+    const t = endTurn(sent, "t1", "failed", "It is busy")
+    expect(t.turns[0].phase).toBe("asking")
+    expect(t.turns[0].error).toBe("It is busy")
+    expect(pendingSteps(t).length).toBe(2)
+    expect(pendingSteps(t).every((step) => step.decision === undefined)).toBe(true)
+    // And answering clears the word that said it failed.
+    expect(sendDecisions(decideAll(t, true)).turns[0].error).toBeUndefined()
+  })
+  test("a pause is said on the turn, and answering clears it", () => {
+    const t = applyEvent(started(), "t1", {
+      type: "done",
+      stop: "tool",
+      usage,
+      model: "m",
+      kept: true,
+      pending: [read],
+      paused: true,
+    })
+    expect(t.turns[0].paused).toBe(true)
+    expect(sendDecisions(decideAll(t, true)).turns[0].paused).toBe(false)
+  })
+  test("a change of model is said above the next turn", () => {
+    const t = beginTurn({ ...EMPTY_AGENT, freshNote: "Now Haiku" }, "t1", "hi")
+    expect(t.turns[0].fresh).toBe("Now Haiku")
+    expect(t.freshNote).toBeUndefined()
+  })
+})
+
+describe("what a call would send", () => {
+  test("reads as lines, without the body it comes in", () => {
+    expect(inputLines({ body: { runtime: { port: 3000 }, domains: ["a.example"] } }).lines).toEqual(
+      [
+        { path: "runtime.port", value: "3000" },
+        { path: "domains[0]", value: "a.example" },
+      ],
+    )
+    expect(inputLines({ limit: 5 }).lines).toEqual([{ path: "limit", value: "5" }])
+    expect(inputLines({ flag: false, none: [] }).lines).toEqual([
+      { path: "flag", value: "false" },
+      { path: "none", value: "[]" },
+    ])
+  })
+  test("nothing to say is nothing", () => {
+    expect(inputLines(undefined).lines).toEqual([])
+    expect(inputLines({}).lines).toEqual([])
+  })
+  test("a long one is bounded and says how much is left", () => {
+    const body = Object.fromEntries(Array.from({ length: 20 }, (_, at) => [`k${at}`, at]))
+    const { lines, more } = inputLines({ body })
+    expect(lines.length).toBe(12)
+    expect(more).toBe(8)
+  })
+})

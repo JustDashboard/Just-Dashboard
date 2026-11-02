@@ -2235,6 +2235,15 @@
               "null"
             ]
           },
+          "mode": {
+            "enum": [
+              "ask",
+              "changes",
+              "full"
+            ],
+            "title": "assistant.Mode",
+            "type": "string"
+          },
           "question": {
             "type": "string"
           }
@@ -17423,6 +17432,59 @@
         "x-deploy-key": "allowed"
       }
     },
+    "/deploy/drafts/{draft}/assistant": {
+      "parameters": [
+        {
+          "description": "The draft's id.",
+          "in": "path",
+          "name": "draft",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "A session's route. It streams the lines POST /deploy/{id}/assistant does.",
+        "operationId": "draftOperator",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.operatorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Ask the assistant to configure a draft: what it saves runs nothing until a person commits it.",
+        "tags": [
+          "drafts"
+        ],
+        "x-deploy-key": "refused (session_required): the assistant works for a person at the dashboard, who answers what it asks and is the role it acts under; there is nobody to ask behind a key"
+      }
+    },
     "/deploy/drafts/{draft}/commit": {
       "parameters": [
         {
@@ -19997,7 +20059,7 @@
         }
       ],
       "post": {
-        "description": "A session's route. The answer streams one JSON object a line: start, thinking, text, ran (what each allowed read read), proposal (an action whose card the person may press; nothing has run), done (with the reads waiting for a decision) or error.",
+        "description": "A session's route. The answer streams one JSON object a line: start, thinking, text, call (a tool call as it starts), called (what became of it, and the shortcut to what it changed), link (a shortcut the assistant offers), done (with the calls waiting for a decision) or error.",
         "operationId": "deploymentOperator",
         "parameters": [
           {
@@ -20041,11 +20103,11 @@
             "session": []
           }
         ],
-        "summary": "Ask the deployment operator about an environment, or answer the reads it asked for.",
+        "summary": "Ask the deployment's assistant anything about an environment, or answer the calls it is waiting on.",
         "tags": [
           "runs"
         ],
-        "x-deploy-key": "refused (session_required): the operator reads with a person's leave a call at a time and proposes actions only a person's press runs, in the dashboard"
+        "x-deploy-key": "refused (session_required): the assistant works for a person at the dashboard, who answers what it asks and is the role it acts under; there is nobody to ask behind a key"
       }
     },
     "/deploy/{id}/availability": {

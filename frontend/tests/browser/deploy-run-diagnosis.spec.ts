@@ -99,9 +99,7 @@ async function mockDiagnosis(
   const asked: unknown[] = []
   let kept = options.kept ?? null
   const answers = [...(options.answers ?? [])]
-  await page.route("**/api/v1/databases/assistant", (route) =>
-    json(route, options.settings ?? claude),
-  )
+  await page.route("**/api/v1/assistant", (route) => json(route, options.settings ?? claude))
   await page.route("**/api/v1/deploy/7/runs/84/diagnosis", async (route) => {
     if (route.request().method() === "GET") return json(route, { diagnosis: kept })
     asked.push(route.request().postDataJSON())
@@ -223,7 +221,7 @@ test("an administrator sets the assistant up from the failed run", async ({ page
   await expect(ask).toContainText("The assistant is off.")
   await ask.getByRole("button", { name: "Set up the assistant" }).click()
   await expect(page.getByRole("dialog", { name: "Set up the assistant" })).toBeVisible()
-  await expect(page.getByRole("dialog")).toContainText("a failed deployment’s Ask why it failed")
+  await expect(page.getByRole("dialog")).toContainText("everywhere the dashboard asks a model")
 })
 
 test("an account that may not ask sees an answer somebody asked for, and nothing else", async ({

@@ -164,3 +164,94 @@ func TestOpenAIProbeChecksTheModelIsServed(t *testing.T) {
 		t.Errorf("an address that is not the API: %+v", pe)
 	}
 }
+
+// A provider set up to take tools is offered them, its streamed calls come back
+// whole, and the results go back as messages answering each call by its id.
+func TestAnOpenAICompatibleServerTakesToolsWhenItsSetupSays(t *testing.T) {
+	var got []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		got = append(got, body)
+		chunks(w,
+			`{"model":"gpt","choices":[{"delta":{"content":"Reading."}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"recent_runs","arguments":"{\"li"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"mit\":3}"}},{"index":1,"function":{"name":"host_alerts"}}]}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+			`{"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":4}}`,
+			`[DONE]`,
+		)
+	}))
+	t.Cleanup(server.Close)
+	client, err := New(Settings{Provider: ProviderOpenAI, Model: "gpt", BaseURL: server.URL + "/v1", ToolCalls: true}, Options{})
+	if err != nil || !client.Tools() {
+		t.Fatalf("client = %v, %v", client, err)
+	}
+	c := &Conversation{System: "system", Tools: true, Offer: AgentTools, Check: AgentCalls}
+	if err := c.Ask("why"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Exchange(context.Background(), client, c, func(Event) {})
+	if err != nil || !out.Kept || out.Stop != StopTool || len(out.Pending) != 2 {
+		t.Fatalf("outcome %+v, %v", out, err)
+	}
+	if out.Pending[0].ID != "call_a" || out.Pending[0].Name != "recent_runs" || out.Pending[0].OperatorInput().Limit != 3 {
+		t.Fatalf("first call = %+v", out.Pending[0])
+	}
+	if out.Pending[1].ID != "call_1" || out.Pending[1].Name != "host_alerts" {
+		t.Fatalf("a call with no id was not given one: %+v", out.Pending[1])
+	}
+	tools := got[0]["tools"].([]any)
+	if len(tools) != len(AgentTools) || tools[0].(map[string]any)["function"].(map[string]any)["name"] != "recent_runs" {
+		t.Fatalf("tools = %v", tools)
+	}
+	c.Answer(ToolResults(c.Pending, func(ToolCall) (string, bool) { return `{"runs":[]}`, true }))
+	if _, err := Exchange(context.Background(), client, c, func(Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	messages := got[1]["messages"].([]any)
+	calling := messages[2].(map[string]any)
+	if calling["role"] != "assistant" || len(calling["tool_calls"].([]any)) != 2 || calling["content"] != "Reading." {
+		t.Fatalf("the call was sent back as %v", calling)
+	}
+	answer := messages[3].(map[string]any)
+	if answer["role"] != "tool" || answer["tool_call_id"] != "call_a" || answer["content"] != `{"runs":[]}` {
+		t.Fatalf("the result was sent as %v", answer)
+	}
+}
+
+// One not set up to take them is offered none, as before there was the choice.
+func TestAnOpenAICompatibleServerIsOfferedNoToolsByDefault(t *testing.T) {
+	client, got := openAIFor(t, "", func(w http.ResponseWriter, _ *http.Request) {
+		chunks(w, `{"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}`, `[DONE]`)
+	})
+	if client.Tools() {
+		t.Fatal("a server was offered tools unasked")
+	}
+	if _, err := client.Stream(context.Background(), Request{Tools: AgentTools, Messages: []Message{{Role: "user", Blocks: []Block{text("hi")}}}}, func(Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got.raw[0], `"tools"`) {
+		t.Fatalf("tools were sent: %s", got.raw[0])
+	}
+}
+
+// The models a person chooses from are the server's own list, sorted, and nothing
+// for a server that keeps none.
+func TestModelsComeFromTheServersOwnList(t *testing.T) {
+	client, _ := openAIFor(t, "", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"data":[{"id":"zeta"},{"id":"alpha"}]}`)
+	})
+	models, err := client.Models(context.Background())
+	if err != nil || len(models) != 2 || models[0].ID != "alpha" {
+		t.Fatalf("models = %+v, %v", models, err)
+	}
+	unlisted, _ := openAIFor(t, "", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) })
+	if models, err := unlisted.Models(context.Background()); err != nil || len(models) != 0 {
+		t.Fatalf("no list = %+v, %v", models, err)
+	}
+	claude, _ := New(Settings{Provider: ProviderAnthropic, Model: DefaultAnthropicModel, Key: "k"}, Options{})
+	if models, err := claude.Models(context.Background()); err != nil || len(models) != len(AnthropicModels) {
+		t.Fatalf("claude = %+v, %v", models, err)
+	}
+}

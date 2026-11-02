@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -52,10 +53,14 @@ const DefaultAnthropicModel = "claude-opus-5-5"
 
 // Settings is the provider as it is stored: sealed whole, key included.
 type Settings struct {
-	Provider  Provider  `json:"provider"`
-	Model     string    `json:"model"`
-	BaseURL   string    `json:"baseUrl,omitempty"`
-	Key       string    `json:"key,omitempty"`
+	Provider Provider `json:"provider"`
+	Model    string   `json:"model"`
+	BaseURL  string   `json:"baseUrl,omitempty"`
+	Key      string   `json:"key,omitempty"`
+	// ToolCalls is an OpenAI-compatible model that takes tools. Plenty of local
+	// models refuse a request that offers them, so it is said per provider.
+	// Anthropic's always do.
+	ToolCalls bool      `json:"toolCalls,omitempty"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	UpdatedBy string    `json:"updatedBy"`
 }
@@ -68,6 +73,9 @@ type Setup struct {
 	Model    string   `json:"model"`
 	BaseURL  string   `json:"baseUrl"`
 	Key      string   `json:"key"`
+	// ToolCalls, for a local server, says whether its model takes tools; left
+	// out, what is saved stands.
+	ToolCalls *bool `json:"toolCalls,omitempty"`
 }
 
 // View is the provider as any page may read it. The key is never in it.
@@ -83,6 +91,15 @@ type View struct {
 	// Models is the list the form offers for Anthropic, stated here so the
 	// page holds no second copy of it.
 	Models []Model `json:"models"`
+	// Preset is the active provider; Tools whether it can be offered tools,
+	// which a deployment's assistant acts through.
+	Preset string `json:"preset,omitempty"`
+	Tools  bool   `json:"tools"`
+	// Presets is what the settings offer, Profiles what is saved (no keys), and
+	// DefaultMode the mode a conversation starts in.
+	Presets     []Preset      `json:"presets,omitempty"`
+	Profiles    []ProfileView `json:"profiles,omitempty"`
+	DefaultMode Mode          `json:"defaultMode,omitempty"`
 }
 
 // ViewOf is what GET answers. A nil settings is an assistant that is off.
@@ -94,6 +111,7 @@ func ViewOf(s *Settings) View {
 	v.Configured, v.Provider, v.Model, v.BaseURL = true, s.Provider, s.Model, s.BaseURL
 	v.ModelLabel, v.KeySet = ModelLabel(s.Provider, s.Model), s.Key != ""
 	v.UpdatedAt, v.UpdatedBy = s.UpdatedAt, s.UpdatedBy
+	v.Tools = s.answersTools()
 	return v
 }
 
@@ -114,7 +132,7 @@ func ModelLabel(p Provider, id string) string {
 // history were written for the model that was there.
 func (s Settings) Revision() string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
-		string(s.Provider), s.Model, s.BaseURL, s.Key, s.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		string(s.Provider), s.Model, s.BaseURL, s.Key, strconv.FormatBool(s.ToolCalls), s.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}, "\x00")))
 	return hex.EncodeToString(sum[:8])
 }

@@ -1,9 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useRef } from "react"
-import { ApiError, errorMessage, fetchResponse, get } from "@/lib/api"
+import { ApiError, errorMessage, fetchResponse } from "@/lib/api"
 import { useMemoryState } from "@/lib/view-state"
-import { usePoll } from "@/hooks/use-poll"
 import {
   EMPTY_TRANSCRIPT,
   answering,
@@ -18,44 +17,12 @@ import {
   type Transcript,
 } from "@/components/database/query/assistant/transcript"
 
-export type AssistantProvider = "anthropic" | "openai"
-
-/** `GET /databases/assistant`: the provider as any page may read it. The key is never here. */
-export interface AssistantSettings {
-  configured: boolean
-  provider?: AssistantProvider
-  model?: string
-  modelLabel?: string
-  baseUrl?: string
-  keySet: boolean
-  updatedAt?: string
-  updatedBy?: string
-  /** The Claude models the settings offer, newest tier first. */
-  models: { id: string; label: string }[]
-  /** A saved provider this install cannot read. */
-  problem?: string
-}
-
-/** What the settings form sends to `PUT /databases/assistant`. */
-export interface AssistantSetup {
-  provider: AssistantProvider
-  model: string
-  baseUrl: string
-  key: string
-}
-
-/**
- * The assistant's settings, read once and again when they are saved. They
- * change when an administrator changes them, so the read is slow.
- */
-export function useAssistantSettings(enabled: boolean) {
-  return usePoll<AssistantSettings>(
-    (signal) => get<AssistantSettings>("/databases/assistant", undefined, signal),
-    120_000,
-    [],
-    { enabled },
-  )
-}
+export {
+  useAssistantSettings,
+  type AssistantProvider,
+  type AssistantSettings,
+  type AssistantSetup,
+} from "@/components/assistant/settings"
 
 /**
  * One connection's conversation with the assistant: asking, answering the

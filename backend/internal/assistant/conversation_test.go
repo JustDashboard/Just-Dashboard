@@ -18,6 +18,8 @@ type scripted struct {
 	requests []Request
 }
 
+func (s *scripted) Models(context.Context) ([]Model, error) { return nil, nil }
+
 func (s *scripted) Stream(_ context.Context, req Request, emit func(Event)) (Reply, error) {
 	s.requests = append(s.requests, req)
 	if s.err != nil {

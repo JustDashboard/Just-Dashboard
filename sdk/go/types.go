@@ -3022,6 +3022,16 @@ type MemorySizing struct {
 	Verdict     Verdict  `json:"verdict,omitempty"`
 }
 
+// Mode is one of the values of assistant.Mode.
+type Mode string
+
+// The values of Mode.
+const (
+	ModeAsk     Mode = "ask"
+	ModeChanges Mode = "changes"
+	ModeFull    Mode = "full"
+)
+
 // NotificationAttempt is deploy.NotificationAttempt in the dashboard's source.
 type NotificationAttempt struct {
 	CreatedAt     time.Time  `json:"createdAt,omitzero"`
@@ -3146,6 +3156,7 @@ type OperationsSummary struct {
 type OperatorRequest struct {
 	Conversation string          `json:"conversation,omitempty"`
 	Decisions    map[string]bool `json:"decisions"`
+	Mode         Mode            `json:"mode,omitempty"`
 	Question     string          `json:"question,omitempty"`
 }
 

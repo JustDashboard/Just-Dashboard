@@ -140,9 +140,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// Asking about a failure takes what asking the SQL editor's
 			// assistant takes: it spends the install's model budget.
 			r.Method(http.MethodPost, "/{id}/runs/{run}/diagnosis", s.handle(s.handleDeploymentRunDiagnose))
-			// The operator reads with the person's leave a call at a time and
-			// proposes actions their press runs, so it is a session's: there
-			// is nobody to ask behind a key.
+			// The assistant asks the person before what its mode holds and acts
+			// under their role, so it is a session's: there is nobody to ask
+			// behind a key.
 			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/assistant", s.handle(s.handleDeploymentOperator))
 			// A scan reads the release's images in a container with no
 			// network; it costs the host a few minutes of one CPU, as a
@@ -161,6 +161,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Use(httpx.RequireSession)
 				r.Method(http.MethodPost, "/drafts", s.handle(s.handleDeploymentDraftCreate))
 				r.Method(http.MethodPost, "/drafts/{draft}/commit", s.handle(s.handleDeploymentDraftCommit))
+				// The assistant configuring a new deployment: a draft, which runs
+				// nothing until the person presses Deploy.
+				r.Method(http.MethodPost, "/drafts/{draft}/assistant", s.handle(s.handleDraftOperator))
 				// A template is written on the terms a draft is: it is what
 				// the next deployment is made from.
 				s.mountTemplateWrites(r)

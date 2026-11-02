@@ -64,6 +64,9 @@ type Conversation struct {
 	// editor's: describe_tables, when Tools says the provider takes tools.
 	Offer []Tool
 	Check func([]Block) ([]ToolCall, error)
+	// TurnLimit, when set, stands in for maxTurns: a conversation that takes
+	// many steps to a question counts each as a turn.
+	TurnLimit int
 
 	busy    bool
 	touched time.Time
@@ -97,10 +100,18 @@ func (c *Conversation) size() int {
 	return n
 }
 
+// Long reports a conversation past the size worth sending whole, which a press of
+// many steps can reach between questions.
+func (c *Conversation) Long() bool { return c.size() > maxHistory }
+
 // Ask appends a question. Calls still waiting are declined in the same
 // message: asking something else is not allowing them.
 func (c *Conversation) Ask(text string) error {
-	if c.Turns >= maxTurns || c.size() > maxHistory {
+	limit := maxTurns
+	if c.TurnLimit > 0 {
+		limit = c.TurnLimit
+	}
+	if c.Turns >= limit || c.size() > maxHistory {
 		return ErrFull
 	}
 	blocks := append([]Block(nil), c.Answered...)

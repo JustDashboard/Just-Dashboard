@@ -95,7 +95,7 @@ const (
 	whyPages           = "a route's maintenance and error pages are files on the server beside the proxy's route, and are edited in the dashboard"
 	whyRollbackTerms   = "the terms a release is kept warm and rolled back on are set in the dashboard"
 	whyRehearsalTerms  = "a migration rehearsal restores a database's backup, and which database and on what terms is chosen in the dashboard"
-	whyOperator        = "the operator reads with a person's leave a call at a time and proposes actions only a person's press runs, in the dashboard"
+	whyOperator        = "the assistant works for a person at the dashboard, who answers what it asks and is the role it acts under; there is nobody to ask behind a key"
 	whyDataCopy        = "a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
 	whyPreviewBranch   = "what a database gives previews is a second copy of production's data next to a pull request's code: it is decided in the dashboard"
 	whyScanTerms       = "whether an environment's images are scanned, and from which severity up, is set in the dashboard"
@@ -345,6 +345,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"POST /deploy/github-app/callback":                                               keySession(whyGitHubApp),
 	"DELETE /deploy/github-app/":                                                     keySession(whyGitHubApp),
 	"POST /deploy/{id}/assistant":                                                    keySession(whyOperator),
+	"POST /deploy/drafts/{draft}/assistant":                                          keySession(whyOperator),
 
 	// What an ordinary key reaches and a deploy key does not.
 	"GET /deploy/secret-stores":               keyDeny(whySecretStoreList),
@@ -394,6 +395,11 @@ func (s *Server) deployKeyGate(root chi.Routes) httpx.DeployKeyGate {
 		}
 		pattern := strings.TrimPrefix(root.Find(rctx, r.Method, path), "/api/v1")
 		rule, listed := ruleForDeployKey(r.Method, pattern)
+		// The dashboard's assistant is held to this table too, with the routes
+		// assistantRoutes opens to it and nothing else besides.
+		if p.Assistant && assistantOpens(r.Method, pattern) {
+			rule, listed = deployKeyRule{}, true
+		}
 		switch {
 		case !listed:
 			return httpx.Err(http.StatusForbidden, "key_scope",

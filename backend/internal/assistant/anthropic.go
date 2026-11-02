@@ -41,6 +41,12 @@ type anthropicClient struct {
 
 func (c *anthropicClient) Tools() bool { return true }
 
+// Models is the closed list: the request is shaped for these models, and an
+// older one given the same body answers with a 400.
+func (c *anthropicClient) Models(context.Context) ([]Model, error) {
+	return AnthropicModels, nil
+}
+
 func (c *anthropicClient) headers(req *http.Request) {
 	req.Header.Set("x-api-key", c.key)
 	req.Header.Set("anthropic-version", anthropicVersion)
