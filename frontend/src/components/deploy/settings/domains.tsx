@@ -50,6 +50,7 @@ import { Status, type DotTone } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
+import { HoverTip } from "@/components/deploy/settings/hover-tip"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -84,6 +85,22 @@ import {
   withTypedPassword,
   withoutPassword,
 } from "@/components/deploy/settings/domain-passwords"
+import {
+  PASSWORD_MIN,
+  hostnameFromInput,
+  hostnameProblem,
+  httpsTip,
+  isWildcard,
+  passwordProblem,
+  passwordTip,
+  protectionUserProblem,
+  protectionsIncomplete,
+  redirectTargets,
+  sharedUser,
+  tunnelTip,
+  withRedirect,
+  withoutDomain,
+} from "@/components/deploy/settings/domain-rows"
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useDraftScope, useProject } from "@/components/deploy/project-context"
 import { EdgeRulesForm } from "@/components/deploy/settings/edge-rules"
@@ -98,6 +115,7 @@ import {
 import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
 import { useConfirm } from "@/components/confirm-dialog"
 import {
+  gatesHere,
   hstsOffered,
   hstsPolicyState,
   routeAccessState,
@@ -128,12 +146,14 @@ import {
  * It was a framed card holding a framed box per hostname, each a bag of
  * labelled controls whose labels sat on two baselines, with the certificate
  * as two grey status lines and the port, bind address and two links in a
- * footnote under the card. Now each hostname is one row:
+ * footnote under the card. Now each hostname is one row of one height:
  * the certificate's issuer drawn as itself (Let's Encrypt, from the issuer the
- * live release's certificate names), the name as a link to the site, its
- * route and certificate as readings with the days left, then the two
- * binaries it carries as one segmented control and who owns it. The site and
- * the certificate behind it are verbs in the row's menu rather than
+ * live release's certificate names), the name as a link to the site with one
+ * line of readings under it, then the switches it carries as one segmented
+ * control, who owns it and its menu, all on one axis. The line under the name
+ * holds what isn't the expected answer; what each switch means, who renews the
+ * certificate and what ownership decides are tooltips on the thing itself. The
+ * site and the certificate behind it are verbs in the row's menu rather than
  * underlined links in a footnote.
  *
  * A hostname only ever arrives through "Add domain", which is the one place
@@ -286,6 +306,7 @@ function TailnetForm({
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
+      invalid={blockers.length > 0}
       canEdit={canAdmin}
       onDiscard={() => {
         setRefusal(undefined)
@@ -573,8 +594,20 @@ function DomainsForm({
   const { bindAddress } = configuration.runtime
   const publicBind = bindAddress === "0.0.0.0" || bindAddress === "::"
 
-  const update = (index: number, next: Partial<DomainValue>) =>
+  // A refusal is about the row as it was sent, so changing the row answers it.
+  const update = (index: number, next: Partial<DomainValue>) => {
+    if (rowError?.index === index) setRowError(undefined)
     setDomains(domains.map((item, i) => (i === index ? { ...item, ...next } : item)))
+  }
+
+  // What the rest of the route rules out for a row, said on the switch rather
+  // than left for the server to refuse the whole list over. Both read what is
+  // saved, because the domains are written before the rules under them.
+  const gated = gatesHere(
+    configuration.runtime.forwardAuth,
+    Boolean(configuration.runtime.previewIsolation),
+  )
+  const fenced = Boolean(configuration.runtime.allowFrom?.length)
 
   const typePassword = (hostname: string, password: string) =>
     setPasswords((typed) => withTypedPassword(typed, hostname, password))
@@ -620,7 +653,7 @@ function DomainsForm({
     if (route?.deepLink)
       verbs.push({
         key: "site",
-        label: "Open the serving site",
+        label: "Open the Proxy site",
         icon: Globe,
         run: () => router.push(route.deepLink!),
       })
@@ -640,13 +673,19 @@ function DomainsForm({
         icon: Servers,
         run: () => setRecordFor(domain.hostname),
       })
-    const target = servedNames(domains).find((name) => name !== domain.hostname)
-    if (canAdmin && !domain.redirectTo && target)
+    // A wildcard answers names nobody listed, so it has no address to send
+    // on from and the server refuses it.
+    if (
+      canAdmin &&
+      !domain.redirectTo &&
+      !isWildcard(domain.hostname) &&
+      redirectTargets(domains, domain.hostname).length > 0
+    )
       verbs.push({
         key: "redirect",
         label: "Redirect to another domain",
         icon: CornerUpRight,
-        run: () => update(index, { redirectTo: target, redirectCode: undefined }),
+        run: () => setDomains(withRedirect(domains, domain.hostname)),
       })
     if (canAdmin && domain.redirectTo)
       verbs.push({
@@ -665,15 +704,8 @@ function DomainsForm({
         // goes back to serving the application rather than failing the save.
         run: () => {
           typePassword(domain.hostname, "")
-          setDomains(
-            domains
-              .filter((_, i) => i !== index)
-              .map((item) =>
-                item.redirectTo === domain.hostname
-                  ? { ...item, redirectTo: undefined, redirectCode: undefined }
-                  : item,
-              ),
-          )
+          setRowError(undefined)
+          setDomains(withoutDomain(domains, domain.hostname))
         },
       })
     return verbs
@@ -687,6 +719,7 @@ function DomainsForm({
         dirty={changes > 0}
         changes={changes}
         saving={saving}
+        invalid={protectionsIncomplete(domains, passwords)}
         canEdit={canAdmin}
         onDiscard={() => {
           setRowError(undefined)
@@ -731,7 +764,7 @@ function DomainsForm({
             <EmptyState
               icon={Globe}
               title="No public domains yet"
-              description="Add a hostname to route its traffic here through Proxy, with a certificate issued on the first deployment."
+              description="Add a hostname to route its traffic here through Proxy, with its certificate issued on the next deployment."
             />
           ) : (
             <ul aria-label="Domains" className="@container divide-y divide-hairline">
@@ -752,9 +785,16 @@ function DomainsForm({
                   unsaved={!saved.has(domain.hostname.toLowerCase())}
                   canAdmin={canAdmin}
                   error={rowError?.index === index ? rowError.message : undefined}
-                  targets={servedNames(domains).filter((name) => name !== domain.hostname)}
+                  targets={redirectTargets(domains, domain.hostname)}
                   verbs={verbsFor(domain, index)}
                   onChange={(next) => update(index, next)}
+                  gated={gated}
+                  fenced={fenced}
+                  savedProtection={
+                    configuration.domains.find((item) => item.hostname === domain.hostname)
+                      ?.protection
+                  }
+                  sharedWith={sharedUser(domains, passwords, domain.hostname)}
                   password={passwords[domain.hostname] ?? ""}
                   onPassword={(password) => typePassword(domain.hostname, password)}
                 />
@@ -793,6 +833,9 @@ function DomainsForm({
         open={adding}
         onOpenChange={setAdding}
         unsaved={changes}
+        existing={domains}
+        gated={gated}
+        fenced={fenced}
         onAdd={async (domain) => {
           await persist([...toSave, domain])
           setAdding(false)
@@ -803,11 +846,16 @@ function DomainsForm({
 }
 
 /**
- * One hostname. Wide, it is one line: the issuer's mark, the name with its
- * route and certificate under it, the two binaries it carries as one
- * segmented control, who owns it, and its menu. On a phone the controls take
- * a second line of their own at the full width, and the menu stays pinned to
- * the name — one grid reflowed, so nothing is drawn twice.
+ * One hostname. Wide, it is one line: the issuer's mark, the name with one line
+ * of readings under it, the segmented switches, who owns it and its menu, every
+ * control the same height on the same axis. Narrower than that, the controls
+ * take a second line of their own and the menu stays pinned to the name — one
+ * grid reflowed, so nothing is drawn twice.
+ *
+ * The readings hold what isn't the expected answer. It used to print what the
+ * HTTPS switch beside it already said, and who renews the certificate, and they
+ * wrapped into a stack four lines tall beside controls that sat on none of
+ * them; those are tooltips on the switch and the certificate now.
  */
 function DomainRow({
   domain,
@@ -820,6 +868,10 @@ function DomainRow({
   targets,
   verbs,
   onChange,
+  gated,
+  fenced,
+  savedProtection,
+  sharedWith,
   password,
   onPassword,
 }: {
@@ -834,6 +886,14 @@ function DomainRow({
   targets: string[]
   verbs: Verb[]
   onChange: (next: Partial<DomainValue>) => void
+  /** The route's sign-in applies here, which rules out a password and plain HTTP. */
+  gated: boolean
+  /** The route has a saved address list, which rules out a tunnel. */
+  fenced: boolean
+  /** What this name asks for as saved, so the switch off and on again is not a new password. */
+  savedProtection?: DomainValue["protection"]
+  /** Other names with this user name and another password, of which the route keeps one. */
+  sharedWith: string[]
   /** Typed and not saved. It stays out of `domain`, whose draft is written to the tab's storage. */
   password: string
   onPassword: (password: string) => void
@@ -841,12 +901,13 @@ function DomainRow({
   const host = domain.hostname
   const protection = domain.protection
   const scheme = domain.https ? "https" : "http"
+  const wildcard = isWildcard(host)
   const [routeTone, routeLabel]: [DotTone, string] = unsaved
     ? ["notice", "Not saved yet"]
     : route
       ? [ROUTE_TONE[route.route], ROUTE_LABEL[route.route]]
       : pending
-        ? ["notice", "Added · routes on the next deployment"]
+        ? ["notice", "Routes on the next deployment"]
         : ["unknown", "Not observed"]
   // The certificate the live route has is only this row's answer while the
   // row still asks for what the route serves. Turn HTTPS on or off and the
@@ -858,6 +919,15 @@ function DomainRow({
   const tunnel = Boolean(domain.tunnel)
   const httpsChanging = !tunnel && Boolean(route) && domain.https !== route?.https
   const liveCertificate = route && !unsaved && !httpsChanging && !tunnel ? route : undefined
+  // A plain name's "HTTP only" is what the line already says, and an unread
+  // certificate beside an unread route would be the same two words twice.
+  const certificateRead =
+    liveCertificate &&
+    liveCertificate.certificate !== "not requested" &&
+    !(liveCertificate.certificate === "unavailable" && liveCertificate.route === "unavailable")
+      ? liveCertificate
+      : undefined
+  const renewal = certificateRead && certificateTip(certificateRead)
 
   const issuer = tunnel ? "cloudflare" : issuerProduct(liveCertificate?.certificateIssuer)
 
@@ -865,9 +935,16 @@ function DomainRow({
     protection && onChange({ protection: { ...protection, ...next } })
 
   const nextScheme = domain.https ? "Certificate on deploy" : "HTTP only on deploy"
+  // What the rest of the route holds a switch at. They stay pressable targets
+  // rather than `disabled`, which a browser sends no pointer events to, so the
+  // tooltip can still say why.
+  const httpsHeld = tunnel || (gated && domain.https && !domain.redirectTo)
+  const passwordHeld = gated && !protection
+  const tunnelHeld = !tunnel && (wildcard || fenced)
+  const typedProblem = passwordProblem(password)
 
   return (
-    <li className="grid min-w-0 animate-rise grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 py-3 first:pt-0 @min-[40rem]:grid-cols-[2rem_minmax(0,1fr)_auto_11rem_auto]">
+    <li className="grid min-w-0 animate-rise grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 py-3 first:pt-0 @min-[44rem]:grid-cols-[2rem_minmax(0,1fr)_auto_auto_auto]">
       {/* Keyed on what it draws, so pressing HTTPS swaps the issuer for the
           open lock by rising into it rather than repainting in place. */}
       <ProductLogo
@@ -878,41 +955,40 @@ function DomainRow({
         className="animate-rise"
       />
       <div className="min-w-0 space-y-1">
-        <a
-          href={`${scheme}://${host}/`}
-          target="_blank"
-          rel="noreferrer"
-          aria-label={`Open ${host}`}
-          className="flex max-w-full min-w-0 items-center gap-1.5 rounded-sm font-mono text-sm font-medium focus-ring hover:underline"
-        >
-          <span className="truncate">{host}</span>
-          <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-        </a>
+        {/* A wildcard is every name under it and none in particular, so there
+            is no address to open. */}
+        {wildcard ? (
+          <span className="block truncate font-mono text-sm font-medium" title={host}>
+            {host}
+          </span>
+        ) : (
+          <a
+            href={`${scheme}://${host}/`}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${host}`}
+            title={host}
+            className="flex max-w-full min-w-0 items-center gap-1.5 rounded-sm font-mono text-sm font-medium focus-ring hover:underline"
+          >
+            <span className="truncate">{host}</span>
+            <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+          </a>
+        )}
         {/* One size along the line: the days left and who renews it were
             11px beside 12px readings, two baselines for one row of facts. */}
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <Status key={routeLabel} tone={routeTone} label={routeLabel} className="animate-rise" />
-          {domain.redirectTo && (
-            <span
-              key={domain.redirectTo}
-              className="flex min-w-0 animate-rise items-center gap-1 text-muted-foreground"
-            >
-              <CornerUpRight aria-hidden className="size-3 shrink-0" />
-              <span className="truncate">
-                Redirects to <span className="font-mono">{domain.redirectTo}</span>
-              </span>
+          {/* Each name is served on its own scheme, so a plain one says so
+              whatever the others do. An HTTPS name is the expected answer, and
+              what it does for plain visitors is the switch's tooltip. */}
+          {tunnel && (
+            <span key="tunnel" className="animate-rise text-muted-foreground">
+              Through Cloudflare Tunnel
             </span>
           )}
-          {/* Each name is served on its own scheme: an HTTPS name sends its
-              plain-HTTP visitors on, a plain one is served as asked, whatever
-              the other names on the route do — so the row says which. */}
-          {!domain.redirectTo && (
-            <span key={tunnel ? "tunnel" : scheme} className="animate-rise text-muted-foreground">
-              {tunnel
-                ? "Through Cloudflare Tunnel · HTTPS at Cloudflare's edge"
-                : domain.https
-                  ? "Plain HTTP is redirected to HTTPS"
-                  : "Plain HTTP, no redirect"}
+          {!tunnel && !domain.https && !domain.redirectTo && (
+            <span key="plain" className="animate-rise text-muted-foreground">
+              Plain HTTP, no redirect
             </span>
           )}
           {/* The issuer is the row's mark, so the line carries the state and the
@@ -922,30 +998,35 @@ function DomainRow({
           )}
           {/* One group, so turning HTTPS back on brings the live certificate's
               readings back together rather than popping in one by one. */}
-          {liveCertificate && (
+          {certificateRead && (
             <span className="flex min-w-0 animate-rise flex-wrap items-center gap-x-3 gap-y-1">
-              <CertificateStatus domain={liveCertificate} />
-              {typeof liveCertificate.certificateDaysLeft === "number" &&
-                liveCertificate.certificateDaysLeft > 0 && (
+              {renewal ? (
+                <HoverTip tip={renewal}>
+                  <span tabIndex={0} className="rounded-sm focus-ring">
+                    <CertificateStatus domain={certificateRead} named />
+                  </span>
+                </HoverTip>
+              ) : (
+                <CertificateStatus domain={certificateRead} named />
+              )}
+              {typeof certificateRead.certificateDaysLeft === "number" &&
+                certificateRead.certificateDaysLeft > 0 && (
                   <span
                     className={cn(
                       "numeric",
-                      liveCertificate.certificate === "expiring"
+                      certificateRead.certificate === "expiring"
                         ? "text-warning"
                         : "text-muted-foreground",
                     )}
                   >
-                    {plural(liveCertificate.certificateDaysLeft, "day")} left
+                    {plural(certificateRead.certificateDaysLeft, "day")} left
                   </span>
                 )}
-              {liveCertificate.certificateRenewedBy === "caddy" && (
-                <span className="text-muted-foreground">Renewed by Caddy</span>
-              )}
             </span>
           )}
         </div>
       </div>
-      <div className="col-span-full flex min-w-0 flex-wrap items-center gap-2 pl-11 @min-[40rem]:contents">
+      <div className="col-span-full flex min-w-0 flex-wrap items-center gap-2 pl-11 @min-[44rem]:contents">
         <ToggleGroup
           type="multiple"
           variant="outline"
@@ -953,67 +1034,80 @@ function DomainRow({
             (value): value is string => Boolean(value),
           )}
           onValueChange={(values) => {
+            // A held switch stays as it was, whatever the press said.
+            const through = tunnelHeld ? false : values.includes("tunnel")
+            const guarded = passwordHeld ? false : values.includes("password")
             // Through the tunnel is HTTPS by definition — Cloudflare's edge
             // answers the visitor — so turning it on turns HTTPS on with it.
-            const through = values.includes("tunnel")
+            const https = through || (httpsHeld && !tunnel) || values.includes("https")
             onChange({
-              https: through || values.includes("https"),
-              protection: values.includes("password")
-                ? (protection ?? { username: "" })
-                : undefined,
+              https,
+              protection: guarded ? (protection ?? savedProtection ?? { username: "" }) : undefined,
               tunnel: through || undefined,
             })
-            if (!values.includes("password")) onPassword("")
+            if (!guarded) onPassword("")
           }}
           disabled={!canAdmin}
           className="shrink-0"
         >
-          <ToggleGroupItem
-            value="https"
-            aria-label={`HTTPS on ${host}`}
-            // Held on, not greyed out: the name is HTTPS, at Cloudflare's edge.
-            disabled={tunnel}
-            className={cn(
-              "h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9",
-              tunnel && canAdmin && "disabled:cursor-default disabled:opacity-100",
-            )}
-          >
-            <LockClosed
+          <HoverTip tip={httpsTip({ https: domain.https, tunnel, gated: httpsHeld && !tunnel })}>
+            <Segment
+              value="https"
+              aria-label={`HTTPS on ${host}`}
+              // Held on, not greyed out: the name is HTTPS, at Cloudflare's edge.
+              aria-disabled={httpsHeld || undefined}
               className={cn(
-                "size-3.5 transition-colors",
-                domain.https ? "text-brand" : "text-muted-foreground",
+                "h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9",
+                httpsHeld && "cursor-default hover:bg-transparent",
               )}
-            />
-            HTTPS
-          </ToggleGroupItem>
-          <ToggleGroupItem
-            value="password"
-            aria-label={`Password on ${host}`}
-            className="h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9"
-          >
-            <Key
+            >
+              <LockClosed
+                className={cn(
+                  "size-3.5 transition-colors",
+                  domain.https ? "text-brand" : "text-muted-foreground",
+                )}
+              />
+              HTTPS
+            </Segment>
+          </HoverTip>
+          <HoverTip tip={passwordTip({ guarded: Boolean(protection), gated })}>
+            <Segment
+              value="password"
+              aria-label={`Password on ${host}`}
+              aria-disabled={passwordHeld || undefined}
               className={cn(
-                "size-3.5 transition-colors",
-                protection ? "text-brand" : "text-muted-foreground",
+                "h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9",
+                passwordHeld && "cursor-not-allowed opacity-50 hover:bg-transparent",
               )}
-            />
-            Password
-          </ToggleGroupItem>
-          {/* A wildcard is not routed through a tunnel: each name is a route
-              and a record of its own at Cloudflare. */}
-          {(tunnel || !host.startsWith("*.")) && (
-            <ToggleGroupItem
+            >
+              <Key
+                className={cn(
+                  "size-3.5 transition-colors",
+                  protection ? "text-brand" : "text-muted-foreground",
+                )}
+              />
+              Password
+            </Segment>
+          </HoverTip>
+          {/* Always drawn, so the rows' segments line up down the list and a
+              wildcard's says why it is not offered. */}
+          <HoverTip tip={tunnelTip({ tunnel, wildcard, fenced })}>
+            <Segment
               value="tunnel"
               aria-label={`Cloudflare Tunnel on ${host}`}
-              className="h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9"
+              aria-disabled={tunnelHeld || undefined}
+              className={cn(
+                "h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9",
+                tunnelHeld && "cursor-not-allowed opacity-50 hover:bg-transparent",
+              )}
             >
               <ProductGlyph
                 id="cloudflare"
                 className={cn("transition-opacity", !tunnel && "opacity-50 grayscale")}
               />
               Tunnel
-            </ToggleGroupItem>
-          )}
+            </Segment>
+          </HoverTip>
         </ToggleGroup>
         <OwnershipSelect
           value={domain.ownership}
@@ -1021,36 +1115,48 @@ function DomainRow({
           options={DOMAIN_OWNERSHIP}
           label={`Ownership of ${host}`}
           disabled={!canAdmin}
+          quiet
         />
       </div>
-      <div className="col-start-3 row-start-1 flex justify-end @min-[40rem]:col-start-5">
+      <div className="col-start-3 row-start-1 flex justify-end @min-[44rem]:col-start-5">
         {verbs.length > 0 && <VerbActions dim verbs={verbs} menuLabel={`Actions for ${host}`} />}
       </div>
       {protection && (
         <div className="col-span-full min-w-0 animate-rise pl-11">
           <div className="ml-1 border-l border-hairline pl-4">
             <FieldRow>
-              <Field label="User name" htmlFor={`domain-user-${index}`}>
+              <Field
+                label="User name"
+                htmlFor={`domain-user-${index}`}
+                error={protectionUserProblem(protection.username)}
+                hint={!protection.username && <FieldCheck met={false}>Required</FieldCheck>}
+              >
                 <Input
                   id={`domain-user-${index}`}
                   value={protection.username}
                   readOnly={!canAdmin}
                   autoComplete="off"
+                  aria-invalid={Boolean(protectionUserProblem(protection.username))}
                   className="font-mono"
                   onChange={(event) => setProtection({ username: event.target.value })}
                 />
               </Field>
               {/* The rule is what is needed while typing, lit as it is met;
                   that an empty field keeps the saved one is the placeholder's
-                  "Unchanged", and the rest is behind ⓘ. */}
+                  "Unchanged", and the rest is behind ⓘ. A password already
+                  saved has met it, so nothing is left to light. */}
               <Field
                 label="Password"
                 htmlFor={`domain-password-${index}`}
-                info="Visitors are asked for this user name and password before the site. Left empty, a saved password stays as it is."
+                info="Asked before every name this environment serves, whichever one it is set on; the application never sees it. Left empty, a saved password stays as it is."
                 hint={
-                  <span aria-live="polite">
-                    <FieldCheck met={password.length >= 8}>At least 8 characters</FieldCheck>
-                  </span>
+                  (password || !protection.hash) && (
+                    <span aria-live="polite">
+                      <FieldCheck met={password.length > 0 && !typedProblem}>
+                        {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
+                      </FieldCheck>
+                    </span>
+                  )
                 }
               >
                 <Input
@@ -1065,6 +1171,13 @@ function DomainRow({
                 />
               </Field>
             </FieldRow>
+            {sharedWith.length > 0 && (
+              <FormNote tone="warning" className="mt-3">
+                {sharedWith.join(", ")} {sharedWith.length === 1 ? "has" : "have"} this user name
+                with another password, and the route keeps one password per user. Give each its own
+                user name, or the same password.
+              </FormNote>
+            )}
           </div>
         </div>
       )}
@@ -1137,6 +1250,17 @@ function DomainRow({
 }
 
 /**
+ * One of a row's segments, under a tooltip. The tooltip's trigger hands its
+ * child its own `data-state`, open or closed, which would overwrite the
+ * toggle's on or off and leave every segment looking unpressed.
+ */
+function Segment(props: React.ComponentProps<typeof ToggleGroupItem>) {
+  const own: typeof props & { "data-state"?: string } = { ...props }
+  delete own["data-state"]
+  return <ToggleGroupItem {...own} />
+}
+
+/**
  * The certificate answer for a typed name, as the one word the field carries
  * at its label's edge: ready, issued on the deploy, or needing a decision.
  */
@@ -1185,6 +1309,9 @@ function AddDomainPanel({
   open,
   onOpenChange,
   unsaved,
+  existing,
+  gated,
+  fenced,
   onAdd,
 }: {
   open: boolean
@@ -1195,12 +1322,26 @@ function AddDomainPanel({
    * the sheet has to say so rather than commit it silently.
    */
   unsaved: number
+  /** The names already here, which a new one may not repeat. */
+  existing: DomainValue[]
+  /** The route's sign-in applies, which rules out a password. */
+  gated: boolean
+  /** The route has a saved address list, which rules out a tunnel. */
+  fenced: boolean
   onAdd: (domain: DomainValue) => Promise<void>
 }) {
-  const [hostname, setHostname] = useSessionState("deploy.settings.domains.add.hostname", "")
-  const [https, setHttps] = useSessionState("deploy.settings.domains.add.https", true)
-  const [tunnel, setTunnel] = useSessionState("deploy.settings.domains.add.tunnel", false)
-  const [guarded, setGuarded] = useState(false)
+  // Kept per project: a name half-typed for one is not the next one's.
+  const project = useProject()
+  const scope = `deploy.${project.projectId}.settings.domains.add`
+  const [hostname, setHostname] = useSessionState(`${scope}.hostname`, "")
+  const [https, setHttps] = useSessionState(`${scope}.https`, true)
+  const [wantsTunnel, setTunnel] = useSessionState(`${scope}.tunnel`, false)
+  const [wantsPassword, setGuarded] = useState(false)
+  // What the field has been left holding, so a name still being typed is not
+  // told off for being unfinished.
+  const [left, setLeft] = useState(false)
+  // The name a check could not get an answer for.
+  const [unread, setUnread] = useState<string>()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [checking, setChecking] = useState(false)
@@ -1215,17 +1356,29 @@ function AddDomainPanel({
     setUsername("")
     setPassword("")
     setSuggestion(undefined)
+    setLeft(false)
+    setUnread(undefined)
   }
+
+  const typed = hostnameFromInput(hostname)
+  const problem = hostnameProblem(typed, existing)
+  const wildcard = isWildcard(typed)
+  const tunnelHeld = wildcard || fenced
+  // A switch held off answers off, whatever was pressed before the name was
+  // typed: the server would refuse both.
+  const tunnel = wantsTunnel && !tunnelHeld
+  const guarded = wantsPassword && !gated
 
   // The newest question asked. Leaving the field asks one and the tunnel
   // switch, pressed straight after, asks another; only the newest answer is
   // the sheet's, whichever arrives last.
   const asked = useRef(0)
   const check = async (through = tunnel) => {
-    const value = hostname.trim().toLowerCase()
-    if (!value) return
+    const value = typed
+    if (!value || problem) return
     const question = ++asked.current
     setChecking(true)
+    setUnread(undefined)
     try {
       const answer = await get<DeploymentHostnameSuggestion>("/deploy/hostname", {
         hostname: value,
@@ -1233,13 +1386,14 @@ function AddDomainPanel({
       })
       if (question === asked.current) setSuggestion(answer)
     } catch {
-      // The saved answer stays on screen; the deploy itself is what settles this.
+      // The saved answer stays on screen, and a word says this one was not
+      // read: pressing Check and hearing nothing reads as nothing being wrong.
+      if (question === asked.current) setUnread(value)
     } finally {
       if (question === asked.current) setChecking(false)
     }
   }
 
-  const typed = hostname.trim().toLowerCase()
   // An answer is this sheet's only while it was asked the question the sheet
   // now asks: a tunnel's answer says nothing about a certificate here, and
   // the certificate's says nothing about a tunnel.
@@ -1258,10 +1412,13 @@ function AddDomainPanel({
   const ordered = https && !tunnel && suggestion && !suggestion.covered ? method : undefined
   const record =
     matches && !tunnel && suggestion?.address ? `A  ${typed}  →  ${suggestion.address}` : ""
-  const incomplete = guarded && (!username.trim() || password.length < 8)
+  const typedProblem = passwordProblem(password)
+  const userProblem = protectionUserProblem(username.trim())
+  const incomplete =
+    guarded && (!username.trim() || !password || Boolean(typedProblem || userProblem))
 
   const add = async () => {
-    if (!typed) return
+    if (!typed || problem) return
     setSaving(true)
     try {
       await onAdd({
@@ -1289,7 +1446,11 @@ function AddDomainPanel({
       open={open}
       onOpenChange={(next) => (next ? onOpenChange(true) : close())}
       title="Add domain"
-      description="Point a record at this server and check it before adding it."
+      description={
+        tunnel
+          ? "Route a name on Cloudflare through the tunnel."
+          : "Point a record at this server and check it before adding it."
+      }
       width="md"
       footer={
         <>
@@ -1301,7 +1462,11 @@ function AddDomainPanel({
           <Button variant="outline" onClick={close} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={() => void add()} disabled={!typed || incomplete} pending={saving}>
+          <Button
+            onClick={() => void add()}
+            disabled={!typed || Boolean(problem) || incomplete}
+            pending={saving}
+          >
             Add domain
           </Button>
         </>
@@ -1316,6 +1481,7 @@ function AddDomainPanel({
               ? "The name's zone must be on Cloudflare. Its route and CNAME to the tunnel are set as the release goes live, with the Cloudflare credentials saved under Certificates."
               : "Point a DNS record for the name at this server first. Check reads where it points and whether a certificate can be issued for it."
           }
+          error={left ? problem : undefined}
           // Once checked, what the check found is the Status at the label's
           // edge, the method under the field and the record under that — the
           // server's sentence would be all three again.
@@ -1331,13 +1497,18 @@ function AddDomainPanel({
             )
           }
           trailing={
-            answer && (
+            answer ? (
               <Status
                 key={answer.label}
                 tone={answer.tone}
                 label={answer.label}
                 className="animate-rise"
               />
+            ) : (
+              unread === typed &&
+              typed && (
+                <Status key="unread" tone="unknown" label="Not checked" className="animate-rise" />
+              )
             )
           }
         >
@@ -1345,11 +1516,19 @@ function AddDomainPanel({
             <InputGroupInput
               id="add-domain-hostname"
               value={hostname}
-              onChange={(event) => setHostname(event.target.value)}
-              onBlur={() => void check()}
+              onChange={(event) => {
+                setHostname(event.target.value)
+                setLeft(false)
+              }}
+              onBlur={() => {
+                setHostname(typed)
+                setLeft(true)
+                void check()
+              }}
               placeholder="app.example.com"
               autoComplete="off"
               spellCheck={false}
+              aria-invalid={left && Boolean(problem)}
               className="font-mono"
             />
             <InputGroupAddon align="inline-end" className="gap-0 p-0">
@@ -1357,7 +1536,7 @@ function AddDomainPanel({
               <InputGroupButton
                 aria-label="Check this hostname"
                 pending={checking}
-                disabled={!typed}
+                disabled={!typed || Boolean(problem)}
                 onClick={() => void check()}
               >
                 <RefreshClockwise className="size-3.5" />
@@ -1424,8 +1603,13 @@ function AddDomainPanel({
         <OptionList>
           <OptionRow
             title="Serve through Cloudflare Tunnel"
-            hint="Cloudflare's edge answers the name and HTTPS, and the connector on this host brings the requests here: no record points at this server and no port is opened."
+            hint={
+              !tunnelHeld
+                ? "Cloudflare's edge answers the name and HTTPS, and the connector on this host brings the requests here: no record points at this server and no port is opened."
+                : tunnelTip({ tunnel: false, wildcard, fenced })
+            }
             checked={tunnel}
+            disabled={tunnelHeld}
             onCheckedChange={(next) => {
               setTunnel(next)
               void check(next)
@@ -1433,11 +1617,18 @@ function AddDomainPanel({
           />
           <OptionRow
             title="Ask visitors for a password"
+            hint={passwordTip({ guarded: false, gated })}
             checked={guarded}
+            disabled={gated}
             onCheckedChange={setGuarded}
           >
             <FieldRow>
-              <Field label="User name" htmlFor="add-domain-user">
+              <Field
+                label="User name"
+                htmlFor="add-domain-user"
+                error={userProblem}
+                hint={!username && <FieldCheck met={false}>Required</FieldCheck>}
+              >
                 <Input
                   id="add-domain-user"
                   value={username}
@@ -1453,7 +1644,9 @@ function AddDomainPanel({
                 htmlFor="add-domain-password"
                 hint={
                   <span aria-live="polite">
-                    <FieldCheck met={password.length >= 8}>At least 8 characters</FieldCheck>
+                    <FieldCheck met={password.length > 0 && !typedProblem}>
+                      {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
+                    </FieldCheck>
                   </span>
                 }
               >
@@ -1474,9 +1667,22 @@ function AddDomainPanel({
   )
 }
 
-/** The names that serve the application rather than redirect, in list order. */
-function servedNames(domains: DomainValue[]) {
-  return domains.filter((domain) => !domain.redirectTo).map((domain) => domain.hostname)
+/**
+ * Who issued a certificate and who renews it, as the reading's tooltip: facts
+ * nobody acts on while it is valid, and what they look up when it is not.
+ */
+function certificateTip(route: DeploymentDomainRoute) {
+  // An issuing intermediate's own name (R10) means nothing to a reader; who it
+  // belongs to does, and the row's mark is drawn from the same reading.
+  const issuer =
+    issuerProduct(route.certificateIssuer) === "lets-encrypt"
+      ? "Let's Encrypt"
+      : route.certificateIssuer
+  const parts = [
+    issuer && `Issued by ${issuer}.`,
+    route.certificateRenewedBy === "caddy" && "Renewed by Caddy.",
+  ]
+  return parts.filter(Boolean).join(" ")
 }
 
 type RouteRules = {
@@ -1556,6 +1762,9 @@ function RouteRulesForm({
     message: string
   }>()
   const preview = Boolean(configuration.runtime.previewIsolation)
+  // A tunnel's requests reach the route from its connector, so a list would
+  // refuse every visitor of the name or, with the connector on it, none.
+  const tunnelled = configuration.domains.some((domain) => domain.tunnel)
 
   const onSave = async () => {
     setSaving(true)
@@ -1608,9 +1817,14 @@ function RouteRulesForm({
           placeholder="203.0.113.7 or 10.0.0.0/8"
           values={rules.allowFrom}
           onChange={(allowFrom) => draft.set({ ...rules, allowFrom })}
-          hint="Anyone else is refused with 403, before the password or the sign-in is asked for. Empty lets everyone in."
+          hint={
+            tunnelled
+              ? "Not with a name served through Cloudflare Tunnel: every request reaches this host from the connector, not the visitor's address. Fence that name with Cloudflare Access or a WAF rule."
+              : "Anyone else is refused with 403, before the password or the sign-in is asked for. Empty lets everyone in."
+          }
           error={refusal?.rule === "allowFrom" ? refusal.message : undefined}
-          disabled={!canAdmin}
+          // An entry already saved stays removable, which is the way out.
+          disabled={!canAdmin || (tunnelled && rules.allowFrom.length === 0)}
         />
         <RouteSignIn
           gate={rules.forwardAuth}
@@ -2118,12 +2332,11 @@ function RoutePagesForm({
     }
   }
 
-  const editable: DeploymentPageName[] = [
-    "maintenance",
-    ...ERROR_PAGES.filter((code) => saved.errorPages.includes(code)).map(
-      (code) => String(code) as DeploymentPageName,
-    ),
-  ]
+  // A page exists to edit once its code is saved: one switched on and not yet
+  // saved has no file behind it.
+  const editable = ERROR_PAGES.filter((code) => saved.errorPages.includes(code)).map(
+    (code) => String(code) as DeploymentPageName,
+  )
 
   return (
     <>
@@ -2142,7 +2355,10 @@ function RoutePagesForm({
       >
         <SettingSection
           title="Maintenance page"
-          state={maintenancePolicyState(runtime.maintenance)}
+          state={maintenancePolicyState({
+            retryAfter: retryAfter ?? undefined,
+            bypassFrom: pages.bypassFrom,
+          })}
           status={settingStatus({
             dirty: draft.changed(["retryAfter", "bypassFrom"]),
             refused: refusal?.field === "retryAfter" || refusal?.field === "bypassFrom",
@@ -2197,10 +2413,22 @@ function RoutePagesForm({
               disabled={!canAdmin}
             />
           </Field>
+          {canAdmin && (
+            <div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setEditing("maintenance")}
+              >
+                Edit {PAGE_LABEL.maintenance}
+              </Button>
+            </div>
+          )}
         </SettingSection>
         <SettingSection
           title="Error pages"
-          state={errorPagesState(runtime.errorPages ?? [], runtime.interceptErrors ?? false)}
+          state={errorPagesState(pages.errorPages, pages.interceptErrors)}
           status={settingStatus({
             dirty: draft.changed(["errorPages", "interceptErrors"]),
             refused: refusal?.field === "errorPages" || refusal?.field === "interceptErrors",
@@ -2242,7 +2470,7 @@ function RoutePagesForm({
               {refusal.message}
             </FormNote>
           )}
-          {canAdmin && (
+          {canAdmin && editable.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {editable.map((name) => (
                 <Button
@@ -2258,7 +2486,7 @@ function RoutePagesForm({
             </div>
           )}
           <FormNote>
-            Saved pages are served from the next answer that uses them. Which pages the route
+            An edited page is served from the next answer that uses it. Which pages the route
             answers with, and who is let past, change with the next deployment.
           </FormNote>
         </SettingSection>
