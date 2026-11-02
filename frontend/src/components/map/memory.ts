@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { del, fetchResponse, get, put } from "@/lib/api"
+import { fetchResponse, get, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { DEFAULT_DOCUMENT, decodeDocument, type MapDocument } from "@/lib/server-map"
 import type { MapLayoutResponse } from "@/lib/types"
@@ -16,11 +16,11 @@ import type { MapLayoutResponse } from "@/lib/types"
  * its own, on every browser it signs in from, and no role is too small to
  * keep one: arranging your view of the server changes nothing on it.
  *
- * Saving is debounced and reported, as the diagram's is: the toolbar says
- * "Saved", "Saving…" or that it could not, and a change still waiting when
- * the page goes is sent on the way out on a request the browser keeps alive.
+ * Saving is debounced and speaks only when it fails, with a toast; a change
+ * still waiting when the page goes is sent on the way out on a request the
+ * browser keeps alive.
  */
-export type MemoryStatus = "loading" | "saved" | "saving" | "unsaved" | "failed"
+type MemoryStatus = "loading" | "saved" | "saving" | "unsaved" | "failed"
 
 const SAVE_DELAY = 900
 const PATH = "/map/layout"
@@ -29,7 +29,6 @@ export function useMapMemory() {
   const [state, setState] = useState<{
     document: MapDocument | null
     status: MemoryStatus
-    updatedAt?: string
   }>({ document: null, status: "loading" })
   const pending = useRef<MapDocument | null>(null)
   const flying = useRef<MapDocument | null>(null)
@@ -41,11 +40,7 @@ export function useMapMemory() {
     get<MapLayoutResponse>(PATH)
       .then((res) => {
         if (cancelled) return
-        setState({
-          document: decodeDocument(res?.layout),
-          status: "saved",
-          updatedAt: res?.updatedAt,
-        })
+        setState({ document: decodeDocument(res?.layout), status: "saved" })
       })
       .catch(() => {
         // A map that cannot read its arrangement still draws: laid out fresh,
@@ -64,14 +59,10 @@ export function useMapMemory() {
     flying.current = doc
     setState((s) => ({ ...s, status: "saving" }))
     try {
-      const res = await put<MapLayoutResponse>(PATH, { layout: doc })
+      await put<MapLayoutResponse>(PATH, { layout: doc })
       flying.current = null
       failed.current = false
-      setState((s) => ({
-        ...s,
-        status: pending.current ? "unsaved" : "saved",
-        updatedAt: res.updatedAt,
-      }))
+      setState((s) => ({ ...s, status: pending.current ? "unsaved" : "saved" }))
     } catch (err) {
       flying.current = null
       setState((s) => ({ ...s, status: "failed" }))
@@ -121,17 +112,5 @@ export function useMapMemory() {
     }
   }, [flush])
 
-  const reset = useCallback(async () => {
-    clearTimeout(timer.current)
-    pending.current = null
-    setState({ document: DEFAULT_DOCUMENT, status: "saved" })
-    try {
-      await del(PATH)
-    } catch (err) {
-      setState((s) => ({ ...s, status: "failed" }))
-      notify.error("Could not forget the saved layout", err)
-    }
-  }, [])
-
-  return { document, status, updatedAt: state.updatedAt, update, reset }
+  return { document, update }
 }

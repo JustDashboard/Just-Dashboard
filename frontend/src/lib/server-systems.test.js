@@ -5,8 +5,6 @@ import {
   detectSystems,
   layoutAtlas,
   neighbours,
-  searchNodes,
-  searchSystems,
   settle,
   systemCensus,
   systemTitle,
@@ -452,16 +450,7 @@ describe("settle", () => {
   })
 })
 
-describe("search and wiring", () => {
-  test("a search keeps the systems that hold what it found", () => {
-    const systems = detectSystems(shop())
-    expect(searchSystems(systems, "")).toBeNull()
-    expect([...searchSystems(systems, "pg-data")]).toEqual([systems[0].id])
-    expect(searchSystems(systems, "nothing like it").size).toBe(0)
-    const hits = searchNodes(systems[0], "worker")
-    expect([...hits].map((id) => id.split("/").pop())).toEqual(["container:worker"])
-  })
-
+describe("wiring", () => {
   test("a box's neighbours are what it is wired to inside its system", () => {
     const [system] = detectSystems(shop())
     const db = system.nodes.find((n) => n.itemId === "db:1")
@@ -477,14 +466,14 @@ describe("search and wiring", () => {
 })
 
 describe("the document", () => {
-  test("an older map's arrangement keeps only its minimap switch", () => {
+  test("an older map's arrangement is read as a fresh one", () => {
     const doc = decodeDocument({
       version: 1,
       positions: { "container:a": { x: 1, y: 2 } },
       collapsed: ["branch:jobs"],
       minimap: false,
     })
-    expect(doc).toEqual({ ...DEFAULT_DOCUMENT, minimap: false })
+    expect(doc).toEqual(DEFAULT_DOCUMENT)
     expect(isArranged(doc)).toBe(false)
   })
 
@@ -494,13 +483,16 @@ describe("the document", () => {
       positions: { "system:project:1/db:1": { x: 10, y: 20 }, bad: { x: "no" } },
       focus: "system:project:1",
       viewport: { x: 1, y: 2, zoom: 0 },
-      minimap: true,
     })
     expect(doc.positions).toEqual({ "system:project:1/db:1": { x: 10, y: 20 } })
     expect(doc.focus).toBe("system:project:1")
     expect(doc.viewport).toBeUndefined()
     expect(isArranged(doc)).toBe(true)
     expect(decodeDocument("nonsense")).toEqual(DEFAULT_DOCUMENT)
+    // The minimap is gone; a switch an older page saved goes with the next save.
+    expect(decodeDocument({ version: 2, positions: {}, minimap: true })).not.toHaveProperty(
+      "minimap",
+    )
   })
 
   test("where whole systems were carried is kept, and alone makes the map arranged", () => {
@@ -508,11 +500,10 @@ describe("the document", () => {
       version: 2,
       positions: {},
       frames: { "system:stack:data": { x: 1200, y: -40 }, "system:loose": { x: null, y: 0 } },
-      minimap: true,
     })
     expect(doc.frames).toEqual({ "system:stack:data": { x: 1200, y: -40 } })
     expect(isArranged(doc)).toBe(true)
     // Saved before systems could be carried: none was.
-    expect(decodeDocument({ version: 2, positions: {}, minimap: true }).frames).toEqual({})
+    expect(decodeDocument({ version: 2, positions: {} }).frames).toEqual({})
   })
 })
