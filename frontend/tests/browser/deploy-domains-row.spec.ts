@@ -83,11 +83,10 @@ test("a wildcard has no address to open, nowhere to redirect, and no tunnel", as
 
   const tunnel = page.getByRole("button", { name: "Cloudflare Tunnel on *.example.test" })
   await expect(tunnel).toHaveAttribute("aria-disabled", "true")
-  await tunnel.click({ force: true })
-  await expect(tunnel).toHaveAttribute("aria-pressed", "false")
-  await page.mouse.move(0, 0)
   await tunnel.hover()
   await expect(page.getByRole("tooltip")).toContainText("A wildcard is not routed through a tunnel")
+  await tunnel.click({ force: true })
+  await expect(tunnel).toHaveAttribute("aria-pressed", "false")
 
   await page.getByRole("button", { name: "Actions for *.example.test" }).click()
   await expect(page.getByRole("menuitem", { name: "Redirect to another domain" })).toHaveCount(0)
@@ -164,12 +163,13 @@ test("the route's sign-in and address list hold the switches they rule out", asy
     [password, "Not while sign-in is required", "false"],
     [tunnel, "Not with Only these addresses set", "false"],
   ] as const) {
+    // The tip first: a press closes it until the pointer has left, and a move
+    // away and straight back can land in one frame, which is no leave at all.
+    await control.hover()
+    // By its words, because the last tip can still be fading out beside it.
+    await expect(page.getByRole("tooltip").filter({ hasText: tip })).toBeVisible()
     await control.click({ force: true })
     await expect(control).toHaveAttribute("aria-pressed", pressed)
-    await page.mouse.move(0, 0)
-    await control.hover()
-    await expect(page.getByRole("tooltip")).toContainText(tip)
-    await page.mouse.move(0, 0)
   }
   await expect(page.getByRole("region", { name: "Save changes" })).toHaveCount(0)
 
