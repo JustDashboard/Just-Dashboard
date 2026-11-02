@@ -62,6 +62,9 @@ const publicConfiguration = {
     internalPort: 3000,
     forwardAuth: { provider: "authelia", verify: "http://127.0.0.1:9091/x", signIn: "https://a/" },
     allowFrom: ["203.0.113.7"],
+    edgeRules: [{ name: "block-admin" }],
+    rateLimit: { requests: 10, per: "second" },
+    crowdSec: true,
     hsts: {},
     errorPages: [502],
   },
@@ -72,6 +75,9 @@ test("turning it on says what only a public route has and takes it away", () => 
     "the domains app.example.com, www.app.example.com",
     "the sign-in",
     "the allowed addresses",
+    "the edge rules",
+    "the rate limit",
+    "the CrowdSec list",
     "HSTS",
     "the error pages",
     "the bind address 0.0.0.0, so the container is published on loopback",
@@ -79,7 +85,19 @@ test("turning it on says what only a public route has and takes it away", () => 
   const runtime = tailnetRuntime(publicConfiguration.runtime, ["alice@example.com"])
   expect(runtime.tailnet).toEqual({ allow: ["alice@example.com"] })
   expect(runtime.bindAddress).toBe("127.0.0.1")
-  for (const field of ["forwardAuth", "allowFrom", "hsts", "errorPages", "responseHeaders"])
+  // Every field the server refuses beside a tailnet (validateRouteTailnet).
+  for (const field of [
+    "forwardAuth",
+    "allowFrom",
+    "responseHeaders",
+    "edgeRules",
+    "rateLimit",
+    "crowdSec",
+    "hsts",
+    "maintenance",
+    "errorPages",
+    "interceptErrors",
+  ])
     expect(runtime[field]).toBeUndefined()
   expect(runtime.internalPort).toBe(3000)
   expect(tailnetRuntime(publicConfiguration.runtime, []).tailnet).toEqual({})

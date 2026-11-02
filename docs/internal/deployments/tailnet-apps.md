@@ -19,8 +19,8 @@ exactly, as the tailnet's policy file compares it. At most 64 entries, none twic
 everyone on the tailnet, as a preview's address does — the tailnet is the fence.
 
 `validateRouteTailnet` refuses, on `runtime.tailnet`: a public domain beside it; anything only a public
-route carries (a sign-in, allowed addresses, response headers, HSTS, maintenance, error pages); and
-anything that publishes the container past loopback — the host's network, a fixed host port, extra
+route carries (a sign-in, allowed addresses, response headers, edge rules, a rate limit, the CrowdSec
+list, HSTS, maintenance, error pages); and anything that publishes the container past loopback — the host's network, a fixed host port, extra
 published ports, a bind address other than `127.0.0.1`. A plan with nothing to forward to (no internal
 port, outside Compose) is refused too. The Domains page's switch clears the public rules and a public
 bind address in the same save and says so first (`tailnetSwitchClears`); the host network and the

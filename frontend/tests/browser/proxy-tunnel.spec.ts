@@ -235,9 +235,7 @@ test("a deployment domain is turned to the tunnel from its row, and a new one ch
   await expect(tunnel).toHaveAttribute("aria-pressed", "true")
   // HTTPS is Cloudflare's edge's now, and no certificate here is the row's answer.
   await expect(page.getByRole("button", { name: "HTTPS on api.example.test" })).toBeDisabled()
-  await expect(
-    page.getByText("Through Cloudflare Tunnel · HTTPS at Cloudflare's edge"),
-  ).toBeVisible()
+  await expect(page.getByText("Through Cloudflare Tunnel", { exact: true })).toBeVisible()
   await expect(page.getByText("Certificate valid", { exact: true })).toHaveCount(0)
 
   await page.getByRole("button", { name: "Add domain", exact: true }).click()

@@ -26,6 +26,9 @@ export const EDGE_ACTIONS: { value: DeploymentEdgeAction["kind"]; label: string 
 
 export const REDIRECT_CODES = [301, 302, 307, 308] as const
 
+/** The most a rate limit or its burst may be, as the server holds it. */
+const MAX_RATE = 100_000
+
 const NAME_RE = /^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/
 
 /** A rule's name as the server keeps it: lower-case letters, digits and dashes. */
@@ -101,6 +104,17 @@ export function edgeRuleProblem(rule: DeploymentEdgeRule, others: string[]): str
   }
   if (rule.action.kind === "redirect" && !/^(https?:\/\/[^\s/]+)?\/\S*$/.test(rule.action.location))
     return "A redirect goes to an http or https address, or a path starting with /."
+  return undefined
+}
+
+/** What is wrong with a rate limit before the server is asked, or nothing. */
+export function rateLimitProblem(limit: DeploymentRateLimit | undefined): string | undefined {
+  if (!limit) return undefined
+  if (!Number.isInteger(limit.requests) || limit.requests < 1 || limit.requests > MAX_RATE)
+    return `Between 1 and ${MAX_RATE} requests.`
+  const burst = limit.burst ?? 0
+  if (!Number.isInteger(burst) || burst < 0 || burst > MAX_RATE)
+    return `A burst is between 0 and ${MAX_RATE}.`
   return undefined
 }
 
