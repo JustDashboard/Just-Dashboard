@@ -427,6 +427,7 @@ rail's headings end on.
 | `ChoiceCard` | One thing you pick out of several, in a `ChoiceGrid` — a source, a template, a database engine | Not a `Panel`: a panel is content that happens to be framed, this is a button that happens to be large |
 | `ChoiceRow` | One instance among many of one kind, in a `ChoiceList` — a repository, an image tag, an unfinished setup | Not a `Row`: a `Row` is read, a `ChoiceRow` is taken |
 | `BarList` | A ranked list with the meter's track behind each name and the figure at the right — the top ten of something, with a signal segment for the share that is wrong | Not a chart, and not a `RowList`: nothing here has a second line worth a row |
+| `RankList` | A ranked list read rather than measured: name, figure and share in columns, with `SplitBar` for one strip of a whole over it. Insights uses it | Not a `BarList`: no bar per row, so nothing grows from row to row |
 | `BarReading` | One block of a band: a head, a bar, one line and one strip of marks, the same height in every state (§10) | Not a `BarList`: nothing is listed under the bar, and it is the only thing a band's bar is drawn with |
 
 **Reach for `Panel`/`Pane`/`Page`, and add a variant there rather than a one-off in a feature page.**

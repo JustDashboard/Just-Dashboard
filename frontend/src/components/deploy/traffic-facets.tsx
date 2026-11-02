@@ -6,17 +6,17 @@ import { cn } from "@/lib/utils"
 import { bytes, clock, plural } from "@/lib/format"
 import type { RequestEntry, RequestFacet, RequestSummary } from "@/lib/types"
 import { agentProduct, networkOf, refererProduct } from "@/lib/clients"
-import { latency, latencyShare, latencyTone, statusClass } from "@/lib/requests"
-import { BarList } from "@/components/bar-list"
+import { latency, latencyTone, statusClass, type StatusClass } from "@/lib/requests"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { DimActions } from "@/components/icon-action"
 import { ProductGlyph } from "@/components/product-logo"
+import { RankList, SplitBar, percent } from "@/components/rank-list"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { Visitors } from "@/components/deploy/audience"
-import { LatencyLadder } from "@/components/deploy/latency-ladder"
+import { LatencyReadings } from "@/components/deploy/latency-readings"
 import type { RequestBlockState } from "@/components/deploy/request-blocks"
 import {
   Address,
@@ -45,9 +45,8 @@ import {
  *
  * Two columns rather than three: the lists differ in length, and a
  * three-column grid left a hole under every short one. The long list leads
- * the left column; the right holds the short ones in turn. The response-time
- * ladder spans both, because it is the window's shape rather than one of its
- * lists.
+ * the left column; the right holds the short ones in turn. The response times
+ * span both, because they are the window's shape rather than one of its lists.
  *
  * Every row that names a path, an address, a domain, an agent, a site, a code
  * or a latency narrows the rows above to it on a click — through the API's
@@ -75,7 +74,7 @@ export function TrafficFacets({
   summary: RequestSummary
   slowest?: RequestEntry[]
   latencyKnown: boolean
-  /** The enabled latency alert's line, drawn on the ladder. */
+  /** The enabled latency alert's line, named over the response times. */
   threshold?: number
   onFilterPath: (path: string) => void
   onFilterClient: (ip: string) => void
@@ -104,6 +103,7 @@ export function TrafficFacets({
             100,
         )
       : 0
+  const ofTotal = (count: number) => (summary.total > 0 ? count / summary.total : 0)
   const perAnswer = summary.total > 0 ? summary.bytes / summary.total : 0
   const heaviest = [...summary.paths]
     .filter((path) => (path.bytes ?? 0) > 0)
@@ -141,22 +141,28 @@ export function TrafficFacets({
       )}
 
       {latencyKnown && summary.latency && (
-        <Facet title="Response times" reading={`mean ${latency(summary.latency.mean)}`} index={2}>
-          <LatencySentence latency={summary.latency} />
-          <LatencyLadder latency={summary.latency} threshold={threshold} onPick={onFilterSlow} />
+        <Facet
+          title="Response times"
+          reading={
+            threshold !== undefined
+              ? `your alert fires past ${latency(threshold)}`
+              : "press a figure to see those requests"
+          }
+          index={2}
+        >
+          <LatencyReadings latency={summary.latency} threshold={threshold} onPick={onFilterSlow} />
         </Facet>
       )}
 
       <div className="grid grid-cols-1 gap-x-10 gap-y-8 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-8">
           <Facet title="Pages" reading={tally(summary.paths, "path")} index={2}>
-            <BarList
+            <RankList
               items={rank(summary.paths).map((p) => ({
                 key: p.value,
                 label: <RequestPath path={p.value} />,
                 value: p.count.toLocaleString(),
-                share: p.count / peak(summary.paths),
-                signal: p.count ? p.errors / p.count : 0,
+                share: ofTotal(p.count),
                 hint: pageHint(p, latencyKnown),
                 title: `Show every request to ${p.value}`,
                 onClick: () => onFilterPath(p.value),
@@ -170,7 +176,7 @@ export function TrafficFacets({
             reading={summary.referers.length > 0 ? tally(summary.referers, "site") : undefined}
             index={3}
           >
-            <BarList
+            <RankList
               items={rank(summary.referers).map((r) => {
                 const product = refererProduct(r.value)
                 return {
@@ -183,7 +189,7 @@ export function TrafficFacets({
                   mono: false,
                   label: r.value,
                   value: r.count.toLocaleString(),
-                  share: r.count / peak(summary.referers),
+                  share: r.count / Math.max(sumOf(summary.referers), 1),
                   title: `Show every request that came from ${r.value}`,
                   onClick: () => onFilterReferer(r.value),
                 }
@@ -194,14 +200,13 @@ export function TrafficFacets({
 
           {summary.hosts.length > 1 && (
             <Facet title="Domains" reading={plural(summary.hosts.length, "name")} index={4}>
-              <BarList
+              <RankList
                 items={rank(summary.hosts).map((h) => ({
                   key: h.value,
                   mark: <Globe className="size-3.5 text-muted-foreground" />,
                   label: h.value,
                   value: h.count.toLocaleString(),
-                  share: h.count / peak(summary.hosts),
-                  signal: h.count ? h.errors / h.count : 0,
+                  share: ofTotal(h.count),
                   hint:
                     h.errors > 0 ? (
                       <span className="text-destructive">{h.errors} × 5xx</span>
@@ -230,12 +235,12 @@ export function TrafficFacets({
                 <p className="pb-1 text-hint text-muted-foreground">
                   Heaviest of the busiest pages
                 </p>
-                <BarList
+                <RankList
                   items={heaviest.map((p) => ({
                     key: p.value,
                     label: <RequestPath path={p.value} />,
                     value: bytes(p.bytes ?? 0, 0),
-                    share: (p.bytes ?? 0) / Math.max(heaviest[0].bytes ?? 0, 1),
+                    share: summary.bytes > 0 ? (p.bytes ?? 0) / summary.bytes : undefined,
                     title: `Show every request to ${p.value}`,
                     onClick: () => onFilterPath(p.value),
                   }))}
@@ -256,7 +261,7 @@ export function TrafficFacets({
               .join(" · ")}
             index={2}
           >
-            <BarList
+            <RankList
               items={rank(summary.clients).map((c) => {
                 const scanner = scanners.has(c.value) || (c.probes ?? 0) >= 3
                 const network = networkOf(c.value)
@@ -270,9 +275,7 @@ export function TrafficFacets({
                   ),
                   label: <Address ip={c.value} />,
                   value: c.count.toLocaleString(),
-                  share: c.count / peak(summary.clients),
-                  signal: c.count ? (c.refused ?? 0) / c.count : 0,
-                  tone: "warning" as const,
+                  share: ofTotal(c.count),
                   // The most telling thing about the address, and only that:
                   // the mark already draws the network, so beside a scanner's
                   // tell or a refusal count its word only cost the address
@@ -330,7 +333,7 @@ export function TrafficFacets({
             }
             index={3}
           >
-            <BarList
+            <RankList
               items={agents.slice(0, SHOWN).map(({ facet: a, agent }) => ({
                 key: a.value,
                 mark: agent.product ? (
@@ -345,8 +348,7 @@ export function TrafficFacets({
                 mono: false,
                 label: a.value || "No user agent",
                 value: a.count.toLocaleString(),
-                share: a.count / peak(summary.agents),
-                signal: a.count ? a.errors / a.count : 0,
+                share: ofTotal(a.count),
                 hint:
                   a.errors > 0 ? (
                     <span className="text-destructive">{a.errors} × 5xx</span>
@@ -366,18 +368,28 @@ export function TrafficFacets({
           </Facet>
 
           <Facet title="Status codes" reading={<StatusReading summary={summary} />} index={4}>
-            <BarList
+            {summary.statuses.length > 0 && (
+              <SplitBar
+                className="mb-1.5"
+                parts={summary.statuses.map((s) => ({
+                  key: s.value,
+                  count: s.count,
+                  color: FAMILY_HUE[statusClass(Number(s.value))],
+                }))}
+                label={summary.statuses
+                  .map((s) => `${percent(ofTotal(s.count))} answered ${s.value}`)
+                  .join(", ")}
+              />
+            )}
+            <RankList
               items={summary.statuses.map((s) => {
                 const code = Number(s.value)
-                const klass = statusClass(code)
                 return {
                   key: s.value,
                   mono: false,
                   label: <StatusCode status={code} word />,
                   value: s.count.toLocaleString(),
-                  share: s.count / peak(summary.statuses),
-                  signal: klass === "5xx" || klass === "4xx" ? 1 : 0,
-                  tone: klass === "5xx" ? ("danger" as const) : ("warning" as const),
+                  share: ofTotal(s.count),
                   title: `Show every ${code}`,
                   onClick: () => onFilterStatus(code),
                   trailing: <span aria-hidden className={cn(slot, "shrink-0")} />,
@@ -390,17 +402,28 @@ export function TrafficFacets({
           {latencyKnown && (
             <Facet
               title="Slowest"
-              reading={summary.latency ? `p99 ${latency(summary.latency.p99)}` : undefined}
+              reading={slowest && slowest.length > 0 ? `the ${slowest.length} longest` : undefined}
               index={5}
             >
               {slowest && slowest.length > 0 ? (
-                <ul className="flex flex-col">
-                  {slowest.map((e, i) => (
-                    <li key={`${e.seq ?? i}`}>
-                      <SlowRow entry={e} summary={summary} onFilterPath={onFilterPath} />
-                    </li>
-                  ))}
-                </ul>
+                <div className="-mx-2 min-w-0">
+                  <div
+                    aria-hidden
+                    className={cn(SLOW_COLUMNS, "h-6 px-2 text-micro text-muted-foreground")}
+                  >
+                    <span>Took</span>
+                    <span>Status</span>
+                    <span>Request</span>
+                    <span className="text-right max-sm:hidden">At</span>
+                  </div>
+                  <ul className="flex flex-col">
+                    {slowest.map((e, i) => (
+                      <li key={`${e.seq ?? i}`}>
+                        <SlowRow entry={e} onFilterPath={onFilterPath} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : (
                 <p className="py-3 text-hint text-muted-foreground">No timed requests yet.</p>
               )}
@@ -415,8 +438,8 @@ export function TrafficFacets({
 /**
  * One block: a head that outranks the rows it opens, its reading at the
  * right, a hairline, the list. Each arrives a beat after the one before it,
- * as the fleet's cards do (§11 *arrived*); the whole set remounts when the
- * window moves, so a new window arrives the same way.
+ * as the fleet's cards do (§11 *arrived*). It arrives once: a filter or a new
+ * window changes the figures in place rather than remounting the set.
  */
 export function Facet({
   title,
@@ -441,35 +464,6 @@ export function Facet({
         {children}
       </section>
     </BlurFade>
-  )
-}
-
-/**
- * The ladder's marks in words first: "p50" over a tick is notation, and the
- * question the reader brought is how long a visitor waits. Each figure past a
- * second is amber, as on the ladder.
- */
-function LatencySentence({
-  latency: reading,
-}: {
-  latency: NonNullable<RequestSummary["latency"]>
-}) {
-  const figure = (ms: number) => (
-    <span
-      className={cn(
-        "numeric font-medium text-foreground",
-        latencyTone(ms) === "warning" && "text-warning",
-      )}
-    >
-      {latency(ms)}
-    </span>
-  )
-  return (
-    <p className="mb-2 text-xs text-muted-foreground">
-      Half of the requests were answered within {figure(reading.p50)}, nineteen in twenty within{" "}
-      {figure(reading.p95)}, and the slowest took {figure(reading.max)}. Press a mark to see the
-      requests at least that slow.
-    </p>
   )
 }
 
@@ -507,52 +501,45 @@ function StatusReading({ summary }: { summary: RequestSummary }) {
   )
 }
 
+/** One grid for the head and its rows, so a column of figures reads straight down. */
+const SLOW_COLUMNS =
+  "grid min-w-0 grid-cols-[3.5rem_2.5rem_minmax(0,1fr)] items-center gap-x-3 sm:grid-cols-[3.5rem_2.5rem_minmax(0,1fr)_4rem]"
+
 /**
- * One of the window's slowest requests, laid out as the console lays a row:
- * how long it took against the window's slowest hundredth, then what it was.
- * The figure is amber only past a second — the slowest request of a healthy
- * window can be thirty milliseconds, and colouring it anyway says nothing.
+ * One of the window's slowest requests, in the head's columns: how long, how
+ * it was answered, what it was and when. The figure is amber only past a
+ * second: the slowest of a healthy window can be thirty milliseconds, and
+ * colouring it anyway says nothing. On a phone the clock goes, not the path,
+ * and the title still names the moment.
  */
 function SlowRow({
   entry,
-  summary,
   onFilterPath,
 }: {
   entry: RequestEntry
-  summary: RequestSummary
   onFilterPath: (path: string) => void
 }) {
-  const share = latencyShare(entry.durationMs, summary)
   const slow = latencyTone(entry.durationMs) === "warning"
-  // On a phone the clock goes, not the path: the path is what the row is
-  // read for, and the title still names the moment.
   return (
     <button
       type="button"
       onClick={() => onFilterPath(entry.path)}
       aria-label={`Show every request to ${entry.path}`}
       title={`${clock(entry.time)} — Show every request to ${entry.path}`}
-      className="flex w-full min-w-0 items-center gap-3 rounded-sm px-2 py-1.5 text-left font-mono text-xs focus-ring-inset transition-colors hover:bg-row-hover"
+      className={cn(
+        SLOW_COLUMNS,
+        "h-8 w-full rounded-sm px-2 text-left font-mono text-xs focus-ring-inset transition-colors hover:bg-row-hover",
+      )}
     >
-      <span className="relative w-16 shrink-0 overflow-hidden text-right">
-        {share > 0 && (
-          <span
-            aria-hidden
-            className={cn(
-              "absolute inset-y-0 right-0 rounded-sm",
-              slow ? "bg-wash-warning" : "bg-meter-track",
-            )}
-            style={{ width: `${Math.max(share * 100, 4)}%` }}
-          />
-        )}
-        <span className={cn("numeric relative", slow ? "text-warning" : "text-foreground")}>
-          {latency(entry.durationMs)}
-        </span>
+      <span className={cn("numeric font-medium", slow ? "text-warning" : "text-foreground")}>
+        {latency(entry.durationMs)}
       </span>
-      <MethodWord method={entry.method} className="w-10 shrink-0" />
-      <StatusCode status={entry.status} className="w-8 shrink-0" />
-      <RequestPath path={entry.path} className="flex-1" />
-      <span className="numeric shrink-0 text-muted-foreground/70 max-sm:hidden">
+      <StatusCode status={entry.status} />
+      <span className="flex min-w-0 items-baseline gap-2">
+        <MethodWord method={entry.method} className="shrink-0" />
+        <RequestPath path={entry.path} className="min-w-0 flex-1" />
+      </span>
+      <span className="numeric text-right text-muted-foreground max-sm:hidden">
         {clock(entry.time)}
       </span>
     </button>
@@ -590,11 +577,11 @@ function Scanners({
 }) {
   const scanners = summary.scanners
   const probed = scanners.reduce((n, scanner) => n + (scanner.probes ?? 0), 0)
-  const most = Math.max(1, ...scanners.map((scanner) => scanner.probes ?? 0))
   return (
     <Notice
       tone="warning"
       icon={Warning}
+      className="p-4"
       title={
         <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
           <span>
@@ -619,65 +606,60 @@ function Scanners({
     >
       <p>Addresses that asked for paths only scripts ask for, and were refused.</p>
       <div className="mt-3 grid gap-x-8 gap-y-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <BarList
-          className="-mx-2"
-          items={scanners.map((scanner) => {
-            const network = networkOf(scanner.value)
-            const Place = NETWORK_GLYPH[network.kind]
-            const state = blockState?.(scanner.value)
-            return {
-              key: scanner.value,
-              mark: network.product ? (
-                <ProductGlyph id={network.product} />
-              ) : (
-                <Place className="size-3.5 text-muted-foreground" />
-              ),
-              label: <Address ip={scanner.value} />,
-              value: (scanner.probes ?? 0).toLocaleString(),
-              share: (scanner.probes ?? 0) / most,
-              signal: 1,
-              tone: "warning" as const,
-              title: `Only the requests from ${scanner.value}`,
-              onClick: () => onFilterClient(scanner.value),
-              trailing: onBlock ? (
-                // As wide as the verb on a phone, where a fixed column took
-                // the width the address needed; a column from `sm`, so the
-                // figures still end on one line.
-                <span className="flex justify-end sm:w-20">
-                  {!isPrivate(scanner.value) && (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      className="text-destructive hover:text-destructive"
-                      disabled={Boolean(blockUnavailable) || state === "blocking"}
-                      title={blockUnavailable || undefined}
-                      onClick={() => onBlock(scanner.value)}
-                    >
-                      {state === "blocking" ? "Blocking…" : "Block"}
-                    </Button>
-                  )}
-                </span>
-              ) : undefined,
-            }
-          })}
-        />
+        <div className="min-w-0">
+          <p className="pb-1 text-hint text-muted-foreground">Addresses, by probes</p>
+          <RankList
+            items={scanners.map((scanner) => {
+              const network = networkOf(scanner.value)
+              const Place = NETWORK_GLYPH[network.kind]
+              const state = blockState?.(scanner.value)
+              return {
+                key: scanner.value,
+                mark: network.product ? (
+                  <ProductGlyph id={network.product} />
+                ) : (
+                  <Place className="size-3.5 text-muted-foreground" />
+                ),
+                label: <Address ip={scanner.value} />,
+                value: (scanner.probes ?? 0).toLocaleString(),
+                title: `Only the requests from ${scanner.value}`,
+                onClick: () => onFilterClient(scanner.value),
+                trailing: onBlock ? (
+                  // As wide as the verb on a phone, where a fixed column took
+                  // the width the address needed; a column from `sm`, so the
+                  // figures still end on one line.
+                  <span className="flex justify-end sm:w-20">
+                    {!isPrivate(scanner.value) && (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        className="text-destructive hover:text-destructive"
+                        disabled={Boolean(blockUnavailable) || state === "blocking"}
+                        title={blockUnavailable || undefined}
+                        onClick={() => onBlock(scanner.value)}
+                      >
+                        {state === "blocking" ? "Blocking…" : "Block"}
+                      </Button>
+                    )}
+                  </span>
+                ) : undefined,
+              }
+            })}
+          />
+        </div>
         <div className="min-w-0">
           <p className="pb-1 text-hint text-muted-foreground">Paths they tried</p>
-          <BarList
-            className="-mx-2"
+          <RankList
             items={summary.probes.slice(0, 6).map((probe) => ({
               key: probe.value,
               label: <RequestPath path={probe.value} />,
               value: probe.count.toLocaleString(),
-              share: probe.count / Math.max(1, summary.probes[0]?.count ?? 1),
-              signal: 1,
-              tone: "warning" as const,
               title: `Show every request to ${probe.value}`,
               onClick: () => onFilterPath(probe.value),
             }))}
           />
           {summary.probes.length > 6 && (
-            <p className="px-0 pt-1 text-hint text-muted-foreground">
+            <p className="pt-1 text-hint text-muted-foreground">
               and {plural(summary.probes.length - 6, "more path")}
             </p>
           )}
@@ -704,6 +686,16 @@ function tally(facets: RequestFacet[], one: string, many?: string) {
   return facets.length >= SHOWN ? `top ${SHOWN}` : plural(facets.length, one, many)
 }
 
-function peak(facets: RequestFacet[]) {
-  return Math.max(...facets.map((f) => f.count), 1)
+function sumOf(facets: RequestFacet[]) {
+  return facets.reduce((n, f) => n + f.count, 0)
+}
+
+/** A status family's colour, as the status codes' own words are drawn in it. */
+const FAMILY_HUE: Record<StatusClass, string> = {
+  "2xx": "var(--success)",
+  "3xx": "var(--tag-cyan)",
+  "4xx": "var(--warning)",
+  "5xx": "var(--destructive)",
+  "1xx": "var(--tag-slate)",
+  other: "var(--tag-slate)",
 }

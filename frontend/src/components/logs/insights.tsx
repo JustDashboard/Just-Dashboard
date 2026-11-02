@@ -22,7 +22,7 @@ import { groupScope, overviewFacets, overviewSplit, patternRegex } from "@/lib/l
 import { eventMeta, type LensGroup, type LogLens } from "@/lib/log-lenses"
 import { BarList, type BarListItem } from "@/components/bar-list"
 import { Facet } from "@/components/deploy/traffic-facets"
-import { LatencyLadder } from "@/components/deploy/latency-ladder"
+import { LatencyReadings } from "@/components/deploy/latency-readings"
 import { FieldMark, FieldValue } from "@/components/logs/field-value"
 import { Histogram } from "@/components/logs/histogram"
 import { TileTrend } from "@/components/metrics/sparkline"
@@ -119,7 +119,7 @@ export function Insights(props: InsightsProps) {
   }
 
   const measure = lens?.measure
-  const ladder = measure?.format === "ms" && overview?.measure && overview.measure.count > 0
+  const timed = measure?.format === "ms" && overview?.measure && overview.measure.count > 0
   const lists = overviewFacets(lens).filter(
     (key) =>
       key !== "pattern" &&
@@ -173,13 +173,13 @@ export function Insights(props: InsightsProps) {
           )}
 
           <div className="flex flex-col gap-8 px-5 py-5">
-            {ladder && measure && (
+            {timed && measure && (
               <Facet
                 title={measure.label}
-                reading={`mean ${latency(answer.overview.measure!.mean)} · ${plural(answer.overview.measure!.count, "timed line")}`}
+                reading={plural(answer.overview.measure!.count, "timed line")}
                 index={0}
               >
-                <LatencyLadder
+                <LatencyReadings
                   latency={answer.overview.measure!}
                   onPick={(ms) =>
                     onFilterChange({

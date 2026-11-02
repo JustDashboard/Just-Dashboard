@@ -110,7 +110,6 @@ export function RequestsWorkspace({
   outputFor,
   traceLink,
   renderInline,
-  afterInsights,
   scope,
 }: {
   /**
@@ -157,8 +156,6 @@ export function RequestsWorkspace({
    * with the window it was read in — which names the proxy that answered.
    */
   renderInline?: (entry: RequestEntry, window: DeploymentRequests) => React.ReactNode
-  /** A section the page adds at the end of Insights, over the same window. */
-  afterInsights?: (window: { since?: string; until?: string }) => React.ReactNode
 }) {
   const { can } = useAuth()
   const [live, setLive] = useState(false)
@@ -179,11 +176,18 @@ export function RequestsWorkspace({
     live ? 0 : 10000,
     [base, JSON.stringify(query), JSON.stringify(scope)],
   )
-  const data = poll.data?.window
+  // A filter is a new question of the same record, and `usePoll` rightly forgets
+  // the last answer the moment the question changes. Dropping it here swapped the
+  // whole pane for its skeleton on every press, so the last answer stays on screen
+  // until the new one lands and only the figures move. A different record never
+  // borrows it: that is the rule `usePoll` keeps, and `record` keeps it here.
+  const record = JSON.stringify([base, scope])
+  const [held, setHeld] = useState<{ record: string; answer: Answer }>()
+  if (poll.data && held?.answer !== poll.data) setHeld({ record, answer: poll.data })
+  const answer = poll.data ?? (held?.record === record ? held.answer : undefined)
+  const settling = !poll.data && Boolean(answer)
+  const data = answer?.window
   const blocks = useRequestBlocks(can("system.admin"), subject, data?.driver === "docker-caddy")
-  // The window's own words, for what is keyed on it: resolved against the
-  // clock it would change on every poll, and every poll is not a new window.
-  const windowKey = `${query.range}:${query.since ?? ""}:${query.until ?? ""}`
 
   // The tail picks up exactly where the window's rows end. A cursor rather
   // than a timestamp, because two requests can share a second and the window
@@ -192,7 +196,9 @@ export function RequestsWorkspace({
   const tail = useLiveRequests(
     base,
     live ? { ...narrowing, ...scope } : null,
-    data?.coverage.cursor,
+    // The answer to this question, never the one held over from the last: the
+    // tail continues from where its own window ends.
+    poll.data?.window.coverage.cursor,
   )
 
   const onReset = useCallback(
@@ -204,15 +210,15 @@ export function RequestsWorkspace({
 
   // The export asks again what the rows on screen answered, so the file is
   // the window the reader is looking at rather than a newer one.
-  const exportHref = poll.data
+  const exportHref = answer
     ? `${API_BASE}${base}/requests/export?${new URLSearchParams(
-        Object.entries(poll.data.asked)
+        Object.entries(answer.asked)
           .filter(([, v]) => v !== undefined)
           .map(([k, v]) => [k, String(v)]),
       ).toString()}`
     : undefined
 
-  if (poll.error && !data) {
+  if (poll.error && !poll.data) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <ErrorState error={poll.error} onRetry={poll.refresh} />
@@ -236,30 +242,6 @@ export function RequestsWorkspace({
     const reason =
       data.reason ??
       "Nothing records the requests this deployment serves. A deployment gets one once it has a public route."
-    // Insights still has the page's own section to show: a worker or a
-    // deployment nobody routes to has no requests to rank, and what its
-    // containers threw is then the only ranking it has.
-    const after =
-      view === "insights" && poll.data
-        ? afterInsights?.({ since: poll.data.asked.since, until: poll.data.asked.until })
-        : undefined
-    if (after) {
-      return (
-        <div className="min-h-0 flex-1 overflow-auto">
-          <div className="flex flex-col items-start gap-3 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-start gap-3">
-              <Globe aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 space-y-1">
-                <p className="text-body leading-tight font-medium">{emptyTitle}</p>
-                <p className="text-xs leading-relaxed text-muted-foreground">{reason}</p>
-              </div>
-            </div>
-            {next && <div className="shrink-0 pl-7 sm:pl-0">{next}</div>}
-          </div>
-          {after}
-        </div>
-      )
-    }
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <EmptyState icon={Globe} title={emptyTitle} description={reason} action={next} />
@@ -304,7 +286,6 @@ export function RequestsWorkspace({
   // to scroll. On Requests the chart stays over the rows, which own their scroll.
   const chart = data.summary.buckets.length > 0 && (
     <RequestChart
-      key={`chart:${windowKey}`}
       buckets={data.summary.buckets}
       bucketSeconds={data.summary.bucketSeconds}
       latencyKnown={data.latency}
@@ -331,7 +312,13 @@ export function RequestsWorkspace({
       {bar}
 
       {view === "insights" ? (
-        <div key={`insights:${windowKey}`} className="min-h-0 flex-1 animate-rise overflow-auto">
+        <div
+          aria-busy={settling}
+          className={cn(
+            "min-h-0 flex-1 animate-rise overflow-auto transition-opacity duration-150",
+            settling && "opacity-70",
+          )}
+        >
           <AudienceReadings
             summary={data.summary}
             pages={query.pages}
@@ -355,8 +342,6 @@ export function RequestsWorkspace({
             blockUnavailable={blocks.unavailable}
             dockerIngress={data.driver === "docker-caddy"}
           />
-          {poll.data &&
-            afterInsights?.({ since: poll.data.asked.since, until: poll.data.asked.until })}
           <WindowNotes data={data} className="border-t border-hairline px-3 py-2" />
         </div>
       ) : (
@@ -846,7 +831,7 @@ function RequestFilterBar({
 }
 
 /**
- * A band of response times: at least this slow, at most that. The ladder on
+ * A band of response times: at least this slow, at most that. The figures on
  * Insights sets the floor with a press on a mark; this is where a ceiling is
  * typed — "the requests between 200ms and a second", the middle a p95 hides —
  * and both ends are the chips beside the path that clear them.
@@ -965,7 +950,7 @@ function TookFilter({
 /**
  * What the window is: where it came from and how far it goes. On Requests it
  * ends on the distribution in three figures, each amber past a second; on
- * Insights the ladder draws the same numbers, so they are not said twice.
+ * Insights the response times give the same numbers, so they are not said twice.
  */
 function WindowNotes({
   data,

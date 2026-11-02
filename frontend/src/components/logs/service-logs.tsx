@@ -133,7 +133,7 @@ export type ServiceLogsProps = {
   /**
    * Insights without its row of figures over the chart, for a section that
    * draws no metric cards: the level chips, the chart's busiest column and
-   * the measure's ladder already say what they said.
+   * the measure's figures already say what they said.
    */
   insightTiles?: false
   /** The window History opens on until the reader picks another: a log written weekly reads empty over a day. */

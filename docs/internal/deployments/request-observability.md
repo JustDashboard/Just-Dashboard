@@ -660,11 +660,9 @@ question.
 one source per container the runtime reports — the live release's first, the one readiness follows or
 the project's own before its neighbours, so the application leads its database — then "All services"
 (`stack:<project>`) for a release of several, then older releases' containers, each read through the
-lens its image calls for, in Live and History only. The page has one Insights, the requests', and the
-output's own ranking is an **Output** section at its end (`output-insights.tsx`): the live release's
-exceptions grouped by their error and component and its failed starts, over the same window floored to
-the minute, each opening Output at its last occurrence; with no request record at all Insights is that
-section under a note saying why. **Builds** (`project-builds.tsx`) is the recent runs down a rail —
+lens its image calls for, in Live and History only. The page has one Insights, the requests'; what the
+containers threw is read on Output, and a project with no request record shows the empty state on
+Insights. **Builds** (`project-builds.tsx`) is the recent runs down a rail —
 who started each, how it ended, how long, when — with the chosen one's transcript in the run page's own
 console beside it and a link to the run; below 900 px of the pane's own width the rail is the header's
 picker. `useRunStream` (`run-stream.ts`) is the one reader of a run's stream — resync, dedupe, cap,
@@ -739,33 +737,34 @@ third time. The Requests chart takes a green **Visitors** line on Insights, unde
 scale: a spike of requests with the line flat under it is one client, not a crowd. The p95 chart is
 **Response time**, captioned in words ("19 in 20 of each point's requests answered faster than the
 line"), and the page's tile took the same name — "Slowest tenth" named a statistic, not what a visitor
-waits for. The first list is **Visitors**: the devices, browsers and systems as coloured `BarList`s with
-their marks, and the most active people as rows — the browser over its system (`BadgedLogo`), the
+waits for. The first list is **Visitors**: the devices, browsers and systems as `RankList`s with
+their marks over one `SplitBar`, and the most active people as rows — the browser over its system (`BadgedLogo`), the
 device, the address on its network, the site that sent them, the pages they opened as a trail, and how
 many — each narrowing the window to its address. The address list is **Addresses** now, keeping Block. On Insights the readings and both charts scroll with
 the lists under them, in one scroller under the filter bar: pinned above the lists, they left a pane of
 fixed height a strip a few rows tall to scroll the lists in. On Requests the chart stays over the rows,
 which own their scroll.
-The response-time ladder is said in a sentence over it ("Half of the requests were answered within …").
 
-`TrafficFacets` (Insights) draws each reading as a `BarList` — Tremor's BarList pattern rewritten
-onto the tokens as a house primitive in `components/bar-list.tsx`: the meter's own track behind a
-name, the figure at the right in `.numeric`, and a signal segment inside the bar for the failing or
-refused share, so "the busiest" and "the failing" are one row read two ways. A path row narrows the
-rows to it; a client row narrows to the client and, for an admin, blocks it. Insights opens on a
-response-time ladder (`latency-ladder.tsx`): the window's distribution from the median to the
-slowest on one logarithmic rule, where the gap between the median and the tail is the picture — a
-line of footer text had stated the same numbers and shown none of it — with the span past a second,
-or past the line a latency alert watches, washed amber, and each mark narrowing the rows to the
-requests at least that slow. Every narrowing the page makes is one of the API's own filters —
-`host`, exact `status` codes, `minMs` — and the poll, the socket and the CSV export are asked the
-same query, so what is exported is what is on screen.
+`TrafficFacets` (Insights) draws each reading as a `RankList` (`components/rank-list.tsx`): a name, its
+figure and its share of the whole in columns that end on the head's right edge, with no bar per row.
+A share of the whole that wants a picture is one `SplitBar` over the list (Visitors' breakdowns, Status
+codes, the Came from and On tiles). A failing path says so in its hint. A path row narrows the rows to
+it; a client row narrows to the client and, for an admin, blocks it. **Response times**
+(`latency-readings.tsx`) are four figures in words (Half, 19 in 20, 99 in 100, Slowest), each past a
+second, or past the line a latency alert watches, in amber, and each narrowing the rows to the requests
+at least that slow. The five audience tiles keep one picture line each, so their hints share a baseline.
+**Slowest** is a table with its own column heads. Every narrowing the page makes is one of the API's own
+filters — `host`, exact `status` codes, `minMs` — and the poll, the socket and the CSV export are asked
+the same query, so what is exported is what is on screen.
+
+A filter or a new window holds the last answer on screen, dimmed, until the new one lands
+(`RequestsWorkspace`), and nothing is keyed on the window, so the figures change in place without a
+skeleton or a remount. A different record (`base`, `scope`) never borrows that answer.
 
 `RequestsWorkspace` reads any record by its API base (`/deploy/12`, `/proxy/sites/shop`), so a
 deployment's requests and a site's are one workspace over two routes; the owner adds what it knows
 about one request through one inline slot (`renderInline`, called only for the open row: a
-deployment's lines and proxy, a site's error log), an `emptyAction` (a deployment's Add a domain) and a
-section after Insights. The Took band (at least / at most) is offered only where the record carries
+deployment's lines and proxy, a site's error log) and an `emptyAction` (a deployment's Add a domain). The Took band (at least / at most) is offered only where the record carries
 durations, and the agent and referring-site chips clear themselves like the rest. The bar's controls
 share one face — the path field, the window, Took, Live and Export each an outline control at the
 field's height, a pressed one on the accent ground — where a filled select, bare chips and a ghost
