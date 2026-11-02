@@ -28,7 +28,6 @@ export interface AssistantPreset {
   local?: boolean
   keyRequired: boolean
   keyUrl?: string
-  keyHint?: string
 }
 
 /** A saved provider. Its key is never here. */

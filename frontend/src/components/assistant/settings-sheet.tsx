@@ -46,6 +46,17 @@ const FALLBACK_PRESET: AssistantPreset = {
   keyRequired: true,
 }
 
+/** What each provider's key starts with, for the empty field to say. */
+const KEY_SHAPE: Record<string, string> = {
+  anthropic: "sk-ant-…",
+  openai: "sk-…",
+  openrouter: "sk-or-…",
+  gemini: "AIza…",
+  groq: "gsk_…",
+  deepseek: "sk-…",
+  xai: "xai-…",
+}
+
 function draftOf(
   preset: AssistantPreset,
   profile: AssistantProfile | undefined,
@@ -327,7 +338,7 @@ function SettingsForm({
             keeps
               ? "Leave blank to keep the saved key"
               : preset.keyRequired
-                ? (preset.keyHint ?? "")
+                ? (KEY_SHAPE[preset.id] ?? "")
                 : "Only if the server asks for one"
           }
           hint={

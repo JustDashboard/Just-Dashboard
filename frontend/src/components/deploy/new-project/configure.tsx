@@ -39,7 +39,7 @@ import {
   SetupAssistantOffer,
   draftScope,
 } from "@/components/deploy/new-project/setup-assistant"
-import { agentBusy, useAgentSession } from "@/components/assistant/agent/sessions"
+import { agentBusy, dismissAgent, useAgentSession } from "@/components/assistant/agent/sessions"
 import { planGroups, type PlanRow } from "@/components/deploy/new-project/plan-reading"
 import { StepProject } from "@/components/deploy/new-project/step-project"
 import { StepRuntime } from "@/components/deploy/new-project/step-runtime"
@@ -899,6 +899,10 @@ export function Configure({
   // plan waits for it to finish.
   const assistantSession = useAgentSession(draftScope(flow))
   const assistantWorking = agentBusy(assistantSession)
+  // Once it is deployed there is no setup to go back to, so the dock lets it go.
+  useEffect(() => {
+    if (created) dismissAgent(assistantSession)
+  }, [created, assistantSession])
   // It starts from what the person sees, so what the page holds is saved first. A
   // plan that does not save yet is no reason to refuse: it reads the detection.
   const prepareAssistant = useCallback(async () => {

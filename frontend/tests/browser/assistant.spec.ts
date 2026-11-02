@@ -15,7 +15,6 @@ const PRESETS = [
     product: "claude",
     provider: "anthropic",
     keyRequired: true,
-    keyHint: "sk-ant-…",
     keyUrl: "https://console.anthropic.com/settings/keys",
   },
   {
@@ -26,7 +25,6 @@ const PRESETS = [
     provider: "openai",
     baseUrl: "https://api.openai.com/v1",
     keyRequired: true,
-    keyHint: "sk-…",
     keyUrl: "https://platform.openai.com/api-keys",
   },
   {

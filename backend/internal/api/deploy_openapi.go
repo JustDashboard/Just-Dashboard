@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/assistant"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dnsrecords"
@@ -122,6 +123,7 @@ var openapiTags = []struct{ Name, Description string }{
 // values are the type's constants; TestOpenAPIEnumsMatchTheConstants reads
 // the source and fails when a constant is added or a type is left out.
 var openapiEnums = map[reflect.Type][]string{
+	reflect.TypeOf(assistant.Mode("")):             {"ask", "changes", "full"},
 	reflect.TypeOf(deploy.WorkloadProfile("")):     {"web", "static", "worker", "image", "compose", "service", "game", "imported"},
 	reflect.TypeOf(deploy.EnvironmentKind("")):     {"production", "staging", "preview"},
 	reflect.TypeOf(deploy.OwnershipMode("")):       {"managed", "linked", "observed"},

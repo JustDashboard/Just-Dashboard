@@ -137,6 +137,15 @@ export function ProjectAssistant() {
       </Notice>
     )
   }
+  if (!project.normalized || project.archived) {
+    return (
+      <Notice title="The assistant works on a live project">
+        {project.archived
+          ? "This project is archived. Restore it and the assistant can read and change it."
+          : "This project was made before environments, which are what the assistant acts through, so it cannot work on it."}
+      </Notice>
+    )
+  }
   return (
     <div
       data-slot="project-assistant"

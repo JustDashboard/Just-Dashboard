@@ -231,7 +231,7 @@ function TurnView({
           product={product}
           working={working}
           size="sm"
-          className="mt-0.5 max-sm:hidden"
+          className="mt-0.5 self-start max-sm:hidden"
         />
         <div className="min-w-0 flex-1 space-y-3">
           {groups.map((group, at) => {

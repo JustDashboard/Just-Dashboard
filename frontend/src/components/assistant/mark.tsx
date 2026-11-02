@@ -24,7 +24,7 @@ export function AssistantMark({
 }) {
   return (
     <span
-      className={cn("relative inline-flex shrink-0 self-start rounded-[0.6rem]", className)}
+      className={cn("relative inline-flex shrink-0 rounded-[0.6rem]", className)}
       data-working={working ? "true" : undefined}
     >
       <ProductLogo id={product || undefined} size={size} fallback={Sparkles} />

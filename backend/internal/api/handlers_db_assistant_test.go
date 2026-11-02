@@ -311,7 +311,7 @@ func TestSettingUpTheAssistantChecksTheKeyAndSealsIt(t *testing.T) {
 	if f.provider.paths[0] != "GET /v1/models/claude-sonnet-5-5" {
 		t.Errorf("checked with %v", f.provider.paths)
 	}
-	raw, _, _ := f.s.Store.Setting(t.Context(), assistantSettingKey)
+	raw, _, _ := f.s.Store.Setting(t.Context(), assistantRingKey)
 	if raw == "" || strings.Contains(raw, "sk-ant") {
 		t.Fatalf("the key is not sealed: %q", raw)
 	}
@@ -341,7 +341,7 @@ func TestSettingUpTheAssistantChecksTheKeyAndSealsIt(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"field":"key"`) || !strings.Contains(rec.Body.String(), "did not accept the key") {
 		t.Errorf("a refused key: %d %s", rec.Code, rec.Body.String())
 	}
-	if again, _, _ := f.s.Store.Setting(t.Context(), assistantSettingKey); again != raw {
+	if again, _, _ := f.s.Store.Setting(t.Context(), assistantRingKey); again != raw {
 		t.Error("a refused key replaced the saved provider")
 	}
 

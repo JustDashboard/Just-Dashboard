@@ -37,7 +37,6 @@ type Preset struct {
 	// where a person gets one.
 	KeyRequired bool   `json:"keyRequired"`
 	KeyURL      string `json:"keyUrl,omitempty"`
-	KeyHint     string `json:"keyHint,omitempty"`
 }
 
 // The presets the settings offer, in the order they are drawn.
@@ -58,21 +57,21 @@ const (
 // Presets is the closed list, which the page reads rather than keeps a copy of.
 var Presets = []Preset{
 	{ID: PresetAnthropic, Label: "Anthropic", Detail: "Claude, with your API key", Product: "claude", Provider: ProviderAnthropic,
-		KeyRequired: true, KeyURL: "https://console.anthropic.com/settings/keys", KeyHint: "sk-ant-…"},
+		KeyRequired: true, KeyURL: "https://console.anthropic.com/settings/keys"},
 	{ID: PresetOpenAI, Label: "OpenAI", Detail: "GPT models, with your API key", Product: "openai", Provider: ProviderOpenAI,
-		BaseURL: "https://api.openai.com/v1", KeyRequired: true, KeyURL: "https://platform.openai.com/api-keys", KeyHint: "sk-…"},
+		BaseURL: "https://api.openai.com/v1", KeyRequired: true, KeyURL: "https://platform.openai.com/api-keys"},
 	{ID: PresetOpenRouter, Label: "OpenRouter", Detail: "Hundreds of models behind one key", Product: "openrouter", Provider: ProviderOpenAI,
-		BaseURL: "https://openrouter.ai/api/v1", KeyRequired: true, KeyURL: "https://openrouter.ai/keys", KeyHint: "sk-or-…"},
+		BaseURL: "https://openrouter.ai/api/v1", KeyRequired: true, KeyURL: "https://openrouter.ai/keys"},
 	{ID: PresetGemini, Label: "Google Gemini", Detail: "Gemini, with an AI Studio key", Product: "gemini", Provider: ProviderOpenAI,
-		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", KeyRequired: true, KeyURL: "https://aistudio.google.com/apikey", KeyHint: "AIza…"},
+		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", KeyRequired: true, KeyURL: "https://aistudio.google.com/apikey"},
 	{ID: PresetGroq, Label: "Groq", Detail: "Open models, answered quickly", Product: "groq", Provider: ProviderOpenAI,
-		BaseURL: "https://api.groq.com/openai/v1", KeyRequired: true, KeyURL: "https://console.groq.com/keys", KeyHint: "gsk_…"},
+		BaseURL: "https://api.groq.com/openai/v1", KeyRequired: true, KeyURL: "https://console.groq.com/keys"},
 	{ID: PresetMistral, Label: "Mistral", Detail: "Mistral's own models", Product: "mistral", Provider: ProviderOpenAI,
-		BaseURL: "https://api.mistral.ai/v1", KeyRequired: true, KeyURL: "https://console.mistral.ai/api-keys", KeyHint: ""},
+		BaseURL: "https://api.mistral.ai/v1", KeyRequired: true, KeyURL: "https://console.mistral.ai/api-keys"},
 	{ID: PresetDeepSeek, Label: "DeepSeek", Detail: "DeepSeek's own models", Product: "deepseek", Provider: ProviderOpenAI,
-		BaseURL: "https://api.deepseek.com/v1", KeyRequired: true, KeyURL: "https://platform.deepseek.com/api_keys", KeyHint: "sk-…"},
+		BaseURL: "https://api.deepseek.com/v1", KeyRequired: true, KeyURL: "https://platform.deepseek.com/api_keys"},
 	{ID: PresetXAI, Label: "xAI", Detail: "Grok, with your API key", Product: "xai", Provider: ProviderOpenAI,
-		BaseURL: "https://api.x.ai/v1", KeyRequired: true, KeyURL: "https://console.x.ai", KeyHint: "xai-…"},
+		BaseURL: "https://api.x.ai/v1", KeyRequired: true, KeyURL: "https://console.x.ai"},
 	{ID: PresetOllama, Label: "Ollama", Detail: "A model running on this machine", Product: "ollama", Provider: ProviderOpenAI,
 		BaseURL: "http://127.0.0.1:11434/v1", Local: true},
 	{ID: PresetLMStudio, Label: "LM Studio", Detail: "A model served by LM Studio", Product: "lmstudio", Provider: ProviderOpenAI,

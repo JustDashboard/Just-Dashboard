@@ -180,8 +180,8 @@ func checkOperatorInput(tool string, input json.RawMessage) (OperatorInput, erro
 	return in, nil
 }
 
-// OperatorDeclined is what a read the person declined answers with.
-const OperatorDeclined = "The person declined this read. Answer with what you have, and say what you would need to know."
+// OperatorDeclined is what a call the person declined answers with.
+const OperatorDeclined = "The person declined this. Nothing ran. Carry on with what you have, and say what you would need."
 
 // OperatorContext is what the operator is told about the deployment when a
 // conversation begins: names and states the page already shows, never a

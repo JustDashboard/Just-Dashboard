@@ -3054,6 +3054,14 @@ export interface MemorySizing {
   verdict?: Verdict
 }
 
+/** One of the values of assistant.Mode. */
+export const Mode = {
+  Ask: "ask",
+  Changes: "changes",
+  Full: "full",
+} as const
+export type Mode = (typeof Mode)[keyof typeof Mode]
+
 /** deploy.NotificationAttempt in the dashboard's source. */
 export interface NotificationAttempt {
   createdAt?: string
@@ -3176,7 +3184,7 @@ export interface OperationsSummary {
 export interface OperatorRequest {
   conversation?: string
   decisions?: Record<string, boolean> | null
-  mode?: string
+  mode?: Mode
   question?: string
 }
 
