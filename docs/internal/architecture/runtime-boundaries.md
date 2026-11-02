@@ -323,7 +323,9 @@ leaves the row. Fields a request can choose are bounded in both the row and the 
 128 bytes, `Target` 1000, `Path` 2048, `Detail` 4000, `KeyName` 200, cut on a character boundary and
 ending in `…`). An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
-`Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.
+`Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target. A call the
+dashboard's assistant makes for a person is their entry, under their name and role, with `Actor = assistant`
+(`Principal.Assistant`, [the dashboard's assistant](../deployments/operator.md)).
 
 ## Passkeys
 

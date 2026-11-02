@@ -400,7 +400,7 @@ func assistantFailure(request, turn context.Context, err error) (string, string)
 		return "the answer was stopped", "cancelled"
 	case errors.Is(turn.Err(), context.DeadlineExceeded):
 		return "the answer took longer than five minutes and was stopped", "failed"
-	case errors.Is(err, assistant.ErrMalformedCall):
+	case errors.Is(err, assistant.ErrMalformedCall), errors.Is(err, assistant.ErrUnreadableAnswer):
 		return err.Error() + "; ask again", "failed"
 	}
 	return err.Error(), "failed"
@@ -427,6 +427,9 @@ type assistantStream struct {
 	w       http.ResponseWriter
 	start   map[string]any
 	started bool
+	// keep, when set, is handed every line as it is sent, for a saved chat to
+	// keep what the page was shown.
+	keep func([]byte)
 }
 
 func (st *assistantStream) send(v any) {
@@ -446,6 +449,9 @@ func (st *assistantStream) write(v any) {
 	line, err := json.Marshal(v)
 	if err != nil {
 		return
+	}
+	if st.keep != nil {
+		st.keep(line)
 	}
 	_, _ = st.w.Write(append(line, '\n'))
 	_ = http.NewResponseController(st.w).Flush()

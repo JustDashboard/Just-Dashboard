@@ -156,9 +156,11 @@ func TestTheStoreKeepsConversationsToTheirOwnerAndConnection(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	s.now = func() time.Time { return now }
 
+	// A conversation being begun is held, so its first press can be found (and a
+	// saved chat's taken over) while it runs.
 	c := s.Begin("ann", 1)
-	if _, err := s.Take(c.ID, "ann", 1); !errors.Is(err, ErrGone) {
-		t.Error("a conversation with no kept turn was found")
+	if _, err := s.Take(c.ID, "ann", 1); !errors.Is(err, ErrBusy) {
+		t.Error("a conversation being begun was not held")
 	}
 	s.Release(c)
 	if _, err := s.Take(c.ID, "ann", 1); !errors.Is(err, ErrGone) {

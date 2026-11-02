@@ -90,7 +90,7 @@ func operatorReadLabel(call assistant.ToolCall) string {
 	case assistant.ToolHostAlerts:
 		return "Read the server's firing host alerts"
 	case assistant.ToolFirewallRules:
-		return "Read the firewall's rules for this deployment's ports"
+		return "Read the firewall's rules"
 	case assistant.ToolSecurityUpdates:
 		return "Read the server's pending security updates"
 	}
@@ -100,6 +100,8 @@ func operatorReadLabel(call assistant.ToolCall) string {
 // operatorRead runs one allowed read and answers the model with its JSON,
 // bounded, and the page with a few words of what was read. A read the caller's
 // role could not make through the dashboard's own route answers that instead.
+// summary is nil in a conversation about the whole server, which reads only the
+// host's own: its alerts, its firewall and its updates.
 func (s *Server) operatorRead(ctx context.Context, r *http.Request, p *httpx.Principal, summary *deploy.DeploymentSummary, call assistant.ToolCall) (string, string, bool) {
 	in := call.OperatorInput()
 	refuse := func(why string) (string, string, bool) { return why, why, false }
@@ -193,6 +195,14 @@ func (s *Server) operatorRead(ctx context.Context, r *http.Request, p *httpx.Pri
 		status, err := s.modules.netsec.Status(ctx)
 		if err != nil || status == nil {
 			return refuse("the firewall could not be read")
+		}
+		// A conversation about the server reads every rule; one about a deployment,
+		// those of the ports it is reached on.
+		if summary == nil {
+			return answer(map[string]any{
+				"backend": status.Backend, "available": status.Available, "enabled": status.Enabled, "policy": status.Policy,
+				"rules": status.Rules,
+			}, operatorCount(len(status.Rules), "rule"))
 		}
 		ports := operatorPorts(summary)
 		rules := []any{}

@@ -115,9 +115,15 @@ func AuditMutations(log *audit.Logger) func(http.Handler) http.Handler {
 	}
 }
 
+// principalKind is who acted as the trail records it. The assistant acting for
+// a person is "assistant", with the person's name, so what it did reads apart
+// from what they did themselves.
 func principalKind(p *Principal) string {
-	if p == nil || p.Kind == "" {
+	switch {
+	case p == nil || p.Kind == "":
 		return "anonymous"
+	case p.Assistant:
+		return "assistant"
 	}
 	return p.Kind
 }

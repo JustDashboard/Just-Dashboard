@@ -138,6 +138,15 @@ func (a *Authenticator) authenticate(next http.Handler, allowPasswordChange, all
 
 func (a *Authenticator) authenticateWith(next http.Handler, allowPasswordChange, allowScoped bool, gate DeployKeyGate, log *audit.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The dashboard's assistant making a call for the person whose session
+		// asked it (WithAssistant): their own principal, read again for the
+		// call, so the route decides as it would for them.
+		if person, ok := assistantPerson(r.Context()); ok {
+			p := *person
+			p.FailureReason, p.Assistant = "", true
+			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), &p)))
+			return
+		}
 		// An MCP key's generated tool, dispatched by the MCP endpoint: the
 		// key was authenticated there, and it is admitted here only as a
 		// deploy key would be. Every other group, with no gate, refuses it.

@@ -13,6 +13,9 @@ const (
 	principalKey ctxKey = iota
 	// delegateKey is the MCP key's principal a dispatched tool call carries.
 	delegateKey ctxKey = 300
+	// assistantKey is the person's own principal a call of the dashboard's
+	// assistant carries.
+	assistantKey ctxKey = 301
 )
 
 // Principal is the authenticated identity behind a request, whether it arrived
@@ -38,10 +41,10 @@ type Principal struct {
 	// key table admitted the route, and from there the key is held to every
 	// rule a deploy key is (DeployKey).
 	ViaMCP bool
-	// Assistant is the dashboard's assistant acting for the person whose user and
-	// role these are, which handlers_assistant_turn.go dispatches through the router as an
-	// MCP key of no ID (WithMCPDelegate). It is held to every rule a deploy key is,
-	// and may reach the few further routes assistantRoutes opens to it.
+	// Assistant is the dashboard's assistant acting for the person whose session
+	// this is, which handlers_assistant_turn.go dispatches through the router
+	// (WithAssistant). It is the person — their user, role and session — and
+	// differs only in the audit trail, which records it as the assistant's.
 	Assistant bool
 	IP        string
 	UserAgent string
@@ -123,6 +126,28 @@ func WithMCPDelegate(ctx context.Context, p *Principal) context.Context {
 func mcpDelegate(ctx context.Context) (*Principal, bool) {
 	p, ok := ctx.Value(delegateKey).(*Principal)
 	return p, ok && p != nil && p.Token != nil && p.Token.Scope == auth.ScopeMCP
+}
+
+// WithAssistant is the context of a request the dashboard's assistant makes
+// through the router for the person whose session principal p is, read again
+// for the call (Authenticator.Recheck). Every group's authentication takes the
+// principal from it in place of a credential — the person's own role, so every
+// capability check, rate limit and handler rule applies as to them — marked
+// Assistant so the route's audit entry says the assistant made it. Only a
+// session's principal is carried: the assistant's routes are a session's. A
+// context value is set only by code in this process, so no request from the
+// network carries one.
+//
+// The dispatched request is audited by its own route, so the press's own audit
+// entry is not reachable from it.
+func WithAssistant(ctx context.Context, p *Principal) context.Context {
+	ctx = context.WithValue(ctx, assistantKey, p)
+	return context.WithValue(ctx, auditCtxKey, &auditInfo{})
+}
+
+func assistantPerson(ctx context.Context) (*Principal, bool) {
+	p, ok := ctx.Value(assistantKey).(*Principal)
+	return p, ok && p != nil && p.Kind == "session" && p.User != nil && p.Token == nil
 }
 
 func WithPrincipal(ctx context.Context, p *Principal) context.Context {

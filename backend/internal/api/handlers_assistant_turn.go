@@ -9,6 +9,7 @@ import (
 	"hash/fnv"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,24 +17,29 @@ import (
 	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/assistant"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/mcp"
 )
 
-// The dashboard's assistant acting on a deployment, or on a draft of one. A press
-// asks a question, or answers the calls the last answer is waiting on, and the
-// answer streams back as one JSON object a line while the assistant works: it reads,
-// changes and reads back through tools, as many steps as the question takes, up to
-// agentSteps a press.
+// The dashboard's assistant acting on a deployment, on a draft of one, or on the
+// whole server. A press asks a question, or answers the calls the last answer is
+// waiting on, and the answer streams back as one JSON object a line while the
+// assistant works: it reads, changes and reads back through tools, as many steps
+// as the question takes, up to agentSteps a press.
 //
-// What it may do without asking is the person's mode, decided here on every press
-// (agentHolds), and it can reach nothing a route would refuse them. A change is a
-// request through the dashboard's own router as the person, held to everything a
-// deploy key is (s.agentDispatch), so the route's capability check, audit entry and
-// rate limit all apply. There is no shell, no command the model writes, and no other
-// path from an answer to the host.
+// It acts as the person. Every call is a request through the dashboard's own
+// router under their own session principal (s.assistantDispatch, httpx.WithAssistant),
+// so the route's capability check, handler rules, audit entry and rate limit apply
+// as to them, and the audit entry says the assistant made it. What it may do
+// without asking is the person's mode, decided here on every press (agentHolds):
+// nothing their role allows is refused, and what the old narrowing refused is asked
+// instead, unless the mode is full access. What it reads is masked before the
+// provider is sent it (handlers_assistant_mask.go), in every mode.
+//
+// A conversation is a saved chat: written after every step (saveChat), loaded back
+// when it is not in memory, and carried on by one press at a time, which another
+// press may take over (assistant.Store.TakeChat).
 
 const (
 	maxOperatorQuestion = 4000
@@ -43,7 +49,7 @@ const (
 	// agentSteps bounds how many answers one press takes. Past it, what the
 	// assistant asks next waits for the person whatever the mode, so a loop spends
 	// nothing more without somebody looking.
-	agentSteps = 16
+	agentSteps = 32
 	// agentTurnDeadline is one press's whole deadline, long enough to see a deploy
 	// through.
 	agentTurnDeadline = 20 * time.Minute
@@ -62,10 +68,12 @@ const (
 	// to be whole to be masked: cut, it is no longer JSON and a value in it no longer
 	// matches, so one past this is refused rather than sent in part.
 	agentAnswerBytes = 8 << 20
+	// agentTitleRunes is how much of the first question a chat's title keeps.
+	agentTitleRunes = 80
 )
 
 type operatorRequest struct {
-	// Conversation carries one on; empty begins one.
+	// Conversation carries a chat on; empty begins one.
 	Conversation string `json:"conversation"`
 	// Question is asked; Decisions, instead, answer the calls the last answer is
 	// waiting on — true runs one, false declines it, and a call left out is
@@ -75,6 +83,9 @@ type operatorRequest struct {
 	// Mode is how much may run without asking on this press; left out, the
 	// install's default.
 	Mode assistant.Mode `json:"mode"`
+	// TakeOver carries on a chat a press is running somewhere else: that press
+	// stops, and this one goes on with the chat as it stood.
+	TakeOver bool `json:"takeOver"`
 }
 
 // agentScope is what a conversation is about.
@@ -101,6 +112,12 @@ type agentCallView struct {
 	Kind   string          `json:"kind"`
 	Reason string          `json:"reason,omitempty"`
 	Input  json.RawMessage `json:"input,omitempty"`
+
+	// asks is a call that waits for the person whatever the scope, unless the
+	// mode is full access: what the assistant used to be refused. draftOwn is a
+	// call to the draft a draft's conversation is about, which otherwise never
+	// waits, since a draft runs nothing.
+	asks, draftOwn bool
 }
 
 // agentChange is what a change did, for the page's shortcut to it.
@@ -160,13 +177,117 @@ func (s *Server) handleDraftOperator(w http.ResponseWriter, r *http.Request) err
 		key: int64(sum.Sum64() >> 1), action: "deploy.draft.assistant"})
 }
 
+// handleServerAssistant asks the assistant about the whole server.
+func (s *Server) handleServerAssistant(w http.ResponseWriter, r *http.Request) error {
+	name := "the server"
+	if s.modules.sys != nil {
+		if info, err := s.modules.sys.Host(r.Context()); err == nil && info != nil && info.Hostname != "" {
+			name = info.Hostname
+		}
+	}
+	return s.agentTurn(w, r, &agentScope{kind: agentScopeServer, name: name, action: "assistant.chat"})
+}
+
+// chatInfo is what a new chat about this scope says about itself.
+func (scope *agentScope) chatInfo(question string, settings *assistant.Settings, now time.Time) *assistant.ChatInfo {
+	info := &assistant.ChatInfo{Kind: scope.kind.word(), Name: scope.name, Title: chatTitle(question),
+		Provider: string(settings.Provider), Model: settings.Model, Created: now, Updated: now}
+	if scope.deployment != nil {
+		info.Deployment, info.Environment = scope.deployment.ID, scope.deployment.EnvironmentID
+	}
+	if scope.draft != nil {
+		info.Draft = scope.draft.ID
+	}
+	return info
+}
+
+// chatTitle is a chat's title until it is renamed: its first question, on one
+// line and cut short.
+func chatTitle(question string) string {
+	title := strings.Join(strings.Fields(question), " ")
+	if utf8.RuneCountInString(title) <= agentTitleRunes {
+		return title
+	}
+	runes := []rune(title)
+	cut := string(runes[:agentTitleRunes])
+	if space := strings.LastIndex(cut, " "); space > agentTitleRunes/2 {
+		cut = cut[:space]
+	}
+	return strings.TrimRight(cut, " ,.;:") + "…"
+}
+
+// agentPress is one press: who, about what, in which mode, and what the page has
+// been sent that is not saved yet.
+type agentPress struct {
+	s       *Server
+	r       *http.Request
+	p       *httpx.Principal
+	scope   *agentScope
+	mode    assistant.Mode
+	c       *assistant.Conversation
+	stream  *assistantStream
+	secrets agentSecrets
+	// lines are what the page was sent since the chat was last saved, each with
+	// when, a run of text as one line.
+	lines []map[string]any
+	quiet bool
+	// announced is a chat saved once the page has been sent its first line.
+	announced bool
+}
+
+// keep records a line the page was sent. The text of an answer arrives a piece
+// at a time and is kept as one line, which replays the same.
+func (pr *agentPress) keep(raw []byte) {
+	if pr.quiet {
+		return
+	}
+	var line map[string]any
+	if json.Unmarshal(raw, &line) != nil {
+		return
+	}
+	kind, _ := line["type"].(string)
+	if n := len(pr.lines); n > 0 {
+		last := pr.lines[n-1]
+		switch {
+		case kind == "text" && last["type"] == "text":
+			before, _ := last["text"].(string)
+			more, _ := line["text"].(string)
+			last["text"] = before + more
+			return
+		case kind == "thinking" && last["type"] == "thinking":
+			return
+		}
+	}
+	line["at"] = time.Now().UTC().Format(time.RFC3339)
+	pr.lines = append(pr.lines, line)
+}
+
+// save writes the chat as it stands, once the page knows of it.
+func (pr *agentPress) save(ctx context.Context) {
+	if !pr.stream.started {
+		return
+	}
+	if err := pr.s.saveChat(context.WithoutCancel(ctx), pr.c, pr.lines); err != nil {
+		pr.s.Log.Warn("an assistant chat could not be saved", "chat", pr.c.ID[:8], "err", err)
+		return
+	}
+	pr.lines = nil
+}
+
+func (pr *agentPress) masker(ctx context.Context) (*deploy.DiagnosisMasker, error) {
+	return pr.secrets.get(ctx, pr.s)
+}
+
 func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentScope) error {
 	var req operatorRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
 	req.Question = strings.TrimSpace(req.Question)
-	if (req.Question == "") == (req.Decisions == nil) {
+	// Taking a chat over with nothing to say carries it on from where the press
+	// that was running it put it down.
+	resume := req.TakeOver && req.Conversation != "" && req.Question == "" && req.Decisions == nil
+	if !resume && (req.Question == "") == (req.Decisions == nil) {
 		return httpx.BadRequest("ask a question, or answer the calls the assistant is waiting on")
 	}
 	if len(req.Question) > maxOperatorQuestion || !utf8.ValidString(req.Question) {
@@ -218,56 +339,111 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 	}
 	store := s.assistant.operators
 	principal := httpx.MustPrincipal(r)
-	owner := principal.Username()
+	fresh := req.Conversation == ""
 	var c *assistant.Conversation
-	if req.Conversation == "" {
+	if fresh {
 		if req.Question == "" {
 			return httpx.BadRequest("there is no conversation to answer for")
 		}
-		c = store.Begin(owner, scope.key)
+		c = store.BeginChat(principal.Username(), principal.UserID(), scope.key, scope.chatInfo(req.Question, settings, time.Now().UTC()))
 		s.agentBegin(r.Context(), c, scope)
 		c.Tools = client.Tools()
 		c.Revision = settings.Revision()
 	} else {
-		c, err = store.Take(req.Conversation, owner, scope.key)
+		c, err = store.TakeChat(r.Context(), req.Conversation, principal.UserID(), scope.key, req.TakeOver, s.loadChat)
 		switch {
 		case errors.Is(err, assistant.ErrGone):
-			return httpx.Err(http.StatusNotFound, "conversation_gone", "this conversation has ended: ask again to begin a new one")
+			return httpx.Err(http.StatusNotFound, "conversation_gone", "there is no such chat of yours here: ask again to begin a new one")
 		case errors.Is(err, assistant.ErrBusy):
-			return httpx.Err(http.StatusConflict, "conversation_busy", "this conversation is still answering the last question")
+			return httpx.Err(http.StatusConflict, "chat_busy",
+				"this chat is answering in another tab or browser; take it over to carry it on here")
+		case err != nil:
+			if r.Context().Err() != nil {
+				return nil
+			}
+			return httpx.Internal(err)
+		}
+		if c.Chat == nil || c.Chat.Kind != scope.kind.word() {
+			store.Release(c)
+			return httpx.Err(http.StatusNotFound, "conversation_gone", "that chat is about something else: ask again to begin a new one")
 		}
 		if c.Revision != settings.Revision() {
-			store.End(c)
-			return httpx.Err(http.StatusConflict, "conversation_ended",
-				"the assistant's settings changed since this conversation began: ask again to begin a new one")
+			agentCarryOver(c, settings, client)
 		}
 	}
 	defer store.Release(c)
+	pressCtx, stopPress := context.WithCancelCause(r.Context())
+	defer stopPress(nil)
+	store.Running(c, stopPress)
+
+	press := &agentPress{s: s, r: r, p: principal, scope: scope, mode: mode, c: c}
+	stream := &assistantStream{w: w, keep: press.keep, start: map[string]any{
+		"type": "start", "conversation": c.ID, "title": c.Chat.Title, "provider": settings.Provider, "model": settings.Model,
+		"modelLabel": assistant.ModelLabel(settings.Provider, settings.Model), "tools": c.Tools, "mode": mode,
+	}}
+	press.stream = stream
+	// What the page sent is kept with what it was sent back, for the chat to be
+	// read again as it was; the press saves it, and a press the page never heard
+	// from saves nothing, and a new chat that never began is forgotten.
+	defer func() {
+		if !stream.started && fresh {
+			c.Chat, c.Messages = nil, nil
+			return
+		}
+		press.save(pressCtx)
+	}()
+	act := map[string]any{"type": "question", "text": req.Question}
+	if req.Decisions != nil {
+		act = map[string]any{"type": "decisions", "decisions": req.Decisions}
+	}
+	if raw, err := json.Marshal(act); err == nil && !resume {
+		press.keep(raw)
+	}
 
 	mark := c.Mark()
 	detail := map[string]any{
 		"provider": settings.Provider, "model": settings.Model, "conversation": c.ID[:8], "turn": c.Turns + 1, "mode": mode,
 	}
-	if scope.deployment != nil {
+	switch {
+	case scope.deployment != nil:
 		detail["deploymentId"], detail["environmentId"] = scope.deployment.ID, scope.deployment.EnvironmentID
-	} else {
+	case scope.draft != nil:
 		detail["draft"] = scope.draft.ID
+	default:
+		detail["scope"] = "server"
 	}
-	stream := &assistantStream{w: w, start: map[string]any{
-		"type": "start", "conversation": c.ID, "provider": settings.Provider, "model": settings.Model,
-		"modelLabel": assistant.ModelLabel(settings.Provider, settings.Model), "tools": c.Tools, "mode": mode,
-	}}
+	if req.TakeOver {
+		detail["takeOver"] = true
+	}
 	allowed, declined := []string{}, []string{}
-	if req.Question != "" {
+	var handOver *assistant.Mark
+	// settled is a chat taken over that has nothing to carry on: its last answer
+	// is whole, or it waits on the person, so no step of the model's is due.
+	settled := false
+	var pending []agentCallView
+	if resume {
+		detail["resumed"] = true
+		last := len(c.Messages) - 1
+		if len(c.Pending) > 0 || last < 0 || c.Messages[last].Role != "user" {
+			settled = true
+			for _, call := range c.Pending {
+				pending = append(pending, press.view(pressCtx, call))
+			}
+		}
+	} else if req.Question != "" {
 		if err := c.Ask(req.Question); err != nil {
 			return httpx.Err(http.StatusConflict, "conversation_full", err.Error())
 		}
+		// Taken over before a step of it is kept, the chat is put down with the
+		// question asked: the page shows it, and the press that takes over answers it.
+		asked := c.Mark()
+		handOver = &asked
 	} else {
 		if len(c.Pending) == 0 {
 			return httpx.Err(http.StatusConflict, "nothing_pending", "the assistant is not waiting for an answer")
 		}
 		results := assistant.ToolResults(c.Pending, func(call assistant.ToolCall) (string, bool) {
-			view := s.agentView(scope, call)
+			view := press.view(pressCtx, call)
 			if !req.Decisions[call.ID] {
 				declined = append(declined, agentName(call))
 				stream.send(map[string]any{"type": "called", "id": call.ID, "tool": call.Name, "declined": true, "ok": false})
@@ -275,35 +451,41 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 			}
 			allowed = append(allowed, agentName(call))
 			stream.send(agentCallLine(view))
-			result := s.agentExecute(r.Context(), r, principal, scope, call)
-			stream.send(agentCalledLine(call, result))
-			if result.link != nil {
-				stream.send(map[string]any{"type": "link", "link": result.link})
-			}
-			return result.text, result.ok
+			result := press.execute(pressCtx, call, view)
+			press.sendCalled(call, view, result)
+			return call.NotesText() + result.text, result.ok
 		})
 		c.Answer(results)
 		// What ran has run, so a turn that fails after this goes back to here and
 		// not to before it: the conversation says what is true of the server.
 		mark = c.Mark()
+		press.save(pressCtx)
 		detail["allowed"], detail["declined"] = allowed, declined
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), agentTurnDeadline)
+	ctx, cancel := context.WithTimeout(pressCtx, agentTurnDeadline)
 	defer cancel()
 	emit := func(e assistant.Event) {
 		if e.Thinking {
 			stream.send(map[string]any{"type": "thinking"})
-			return
+		} else {
+			stream.send(map[string]any{"type": "text", "text": e.Text})
 		}
-		stream.send(map[string]any{"type": "text", "text": e.Text})
+		// A chat is saved as soon as the page knows of it, so a list shows it
+		// running and another tab can take it over.
+		if !press.announced {
+			press.announced = true
+			press.save(ctx)
+		}
 	}
 	var usage assistant.Usage
 	var outcome assistant.Outcome
-	ran, refused := []string{}, []string{}
-	var pending []agentCallView
+	ran, refused, malformed := []string{}, []string{}, []string{}
 	paused, long := false, false
-	for step := 1; ; step++ {
+	if settled {
+		outcome.Kept = true
+	}
+	for step := 1; !settled; step++ {
 		// Each step is a model call on the install's budget; the first was paid for
 		// above. Waiting here is slower, and a person is watching it work.
 		if step > 1 {
@@ -324,19 +506,25 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		var held []assistant.ToolCall
 		var answers []assistant.Block
 		for _, call := range outcome.Pending {
-			view := s.agentView(scope, call)
-			if agentHolds(scope, mode, view.Kind) || step >= agentSteps {
+			view := press.view(ctx, call)
+			// A call that cannot run is answered at once with what was wrong, for the
+			// model to correct on its next step, and drawn as a step that failed.
+			if call.Problem != "" {
+				stream.send(agentCallLine(view))
+				press.sendCalled(call, view, agentResult{text: call.Problem, said: clipText(call.Problem, 300)})
+				malformed = append(malformed, call.Name)
+				answers = append(answers, assistant.Block{Type: assistant.BlockToolResult, ToolID: call.ID, Text: call.Problem, IsError: true})
+				continue
+			}
+			if agentHolds(scope, mode, view) || step >= agentSteps {
 				paused = paused || step >= agentSteps
 				held = append(held, call)
 				pending = append(pending, view)
 				continue
 			}
 			stream.send(agentCallLine(view))
-			result := s.agentExecute(ctx, r, principal, scope, call)
-			stream.send(agentCalledLine(call, result))
-			if result.link != nil {
-				stream.send(map[string]any{"type": "link", "link": result.link})
-			}
+			result := press.execute(ctx, call, view)
+			press.sendCalled(call, view, result)
 			if view.Kind != agentKindFree {
 				if result.ok {
 					ran = append(ran, agentName(call))
@@ -344,7 +532,7 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 					refused = append(refused, agentName(call))
 				}
 			}
-			answers = append(answers, assistant.Block{Type: assistant.BlockToolResult, ToolID: call.ID, Text: result.text, IsError: !result.ok})
+			answers = append(answers, assistant.Block{Type: assistant.BlockToolResult, ToolID: call.ID, Text: call.NotesText() + result.text, IsError: !result.ok})
 		}
 		if len(held) > 0 {
 			c.Pending, c.Answered = held, answers
@@ -352,7 +540,8 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		}
 		c.Pending = nil
 		c.Answer(answers)
-		mark = c.Mark()
+		mark, handOver = c.Mark(), nil
+		press.save(ctx)
 		if long = c.Long(); long {
 			break
 		}
@@ -363,6 +552,23 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 	}
 	if len(refused) > 0 {
 		detail["refused"] = refused
+	}
+	if len(malformed) > 0 {
+		detail["malformed"] = malformed
+	}
+	// Carried on somewhere else: this press puts the chat down as it stood after
+	// its last step, and the press that took it goes on from there.
+	if errors.Is(context.Cause(pressCtx), assistant.ErrTakenOver) {
+		if handOver != nil {
+			mark = *handOver
+		}
+		c.Restore(mark)
+		detail["outcome"] = "taken_over"
+		httpx.SetAudit(r, action, scope.name, detail)
+		press.save(pressCtx)
+		press.quiet = true
+		stream.send(map[string]any{"type": "error", "error": map[string]any{"code": "taken_over", "message": "This chat was continued somewhere else."}})
+		return nil
 	}
 	if long && err == nil {
 		detail["outcome"] = "too_long"
@@ -409,6 +615,31 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 	return nil
 }
 
+// sendCalled sends what a call came to, and counts it for the chat: a step for
+// each call made, and a change for each that changed something.
+func (pr *agentPress) sendCalled(call assistant.ToolCall, view agentCallView, result agentResult) {
+	pr.stream.send(agentCalledLine(call, result))
+	if result.link != nil {
+		pr.stream.send(map[string]any{"type": "link", "link": result.link})
+	}
+	pr.c.Chat.Steps++
+	if result.ok && (view.Kind == agentKindChange || view.Kind == agentKindDestructive) {
+		pr.c.Chat.Changes++
+	}
+}
+
+// agentCarryOver carries a saved chat on with the provider set up now. What one
+// model gave back to be sent back as it came — its thinking — another refuses,
+// so a chat that changes model goes on without it; the calls and their results
+// are the same whoever reads them.
+func agentCarryOver(c *assistant.Conversation, settings *assistant.Settings, client assistant.Client) {
+	if c.Chat.Provider != string(settings.Provider) || c.Chat.Model != settings.Model {
+		c.ForgetReasoning()
+	}
+	c.Revision, c.Tools = settings.Revision(), client.Tools()
+	c.Chat.Provider, c.Chat.Model = string(settings.Provider), settings.Model
+}
+
 func addUsage(a, b assistant.Usage) assistant.Usage {
 	return assistant.Usage{Input: a.Input + b.Input, Output: a.Output + b.Output,
 		CacheRead: a.CacheRead + b.CacheRead, CacheWrite: a.CacheWrite + b.CacheWrite}
@@ -428,17 +659,38 @@ func (s *Server) agentBudget(ctx context.Context) error {
 	return nil
 }
 
+// agentOffer sets what a conversation of a scope is offered and how its calls
+// are read, the same whether it begins here or is loaded back.
+func agentOffer(c *assistant.Conversation, kind agentScopeKind) {
+	switch kind {
+	case agentScopeDraft:
+		c.Offer = assistant.SetupTools
+	case agentScopeServer:
+		c.Offer = assistant.ServerTools
+	default:
+		c.Offer = assistant.AgentTools
+	}
+	c.Check, c.TurnLimit = assistant.CheckCalls(c.Offer), assistant.AgentTurnLimit
+}
+
+// apiOverview is what every prompt says about the dashboard's API.
+func (s *Server) apiOverview() assistant.APIOverview {
+	cat := s.apiCatalogue()
+	return assistant.APIOverview{Areas: cat.areas, Excluded: cat.excluded}
+}
+
 // agentBegin writes what a conversation begins knowing.
 func (s *Server) agentBegin(ctx context.Context, c *assistant.Conversation, scope *agentScope) {
-	cat := s.agentCatalogue()
-	c.Check, c.TurnLimit = assistant.AgentCalls, assistant.AgentTurnLimit
-	if scope.kind == agentScopeDeployment {
-		c.Offer = assistant.AgentTools
-		c.System = assistant.AgentSystemPrompt(s.operatorContext(ctx, scope.deployment), cat.lines(agentScopeDeployment))
-		return
+	agentOffer(c, scope.kind)
+	switch scope.kind {
+	case agentScopeDeployment:
+		c.System = assistant.AgentSystemPrompt(s.operatorContext(ctx, scope.deployment), s.agentCatalogue().lines(agentScopeDeployment), s.apiOverview())
+	case agentScopeDraft:
+		c.System = assistant.SetupSystemPrompt(s.draftContext(ctx, scope.draft), s.agentCatalogue().lines(agentScopeDraft), s.apiOverview())
+	default:
+		o := assistant.ServerContext{Server: scope.name, Deployments: s.agentDeployments(ctx)}
+		c.System = assistant.ServerSystemPrompt(o, s.apiOverview())
 	}
-	c.Offer = assistant.SetupTools
-	c.System = assistant.SetupSystemPrompt(s.draftContext(ctx, scope.draft), cat.lines(agentScopeDraft))
 }
 
 // draftContext is what a draft's conversation begins knowing. What the dashboard
@@ -459,7 +711,7 @@ func (s *Server) draftContext(ctx context.Context, draft *deploy.Draft) assistan
 	if draft.Data.Detection != nil {
 		if raw, err := json.Marshal(draft.Data.Detection); err == nil {
 			masked, _ := deploy.NewDiagnosisMasker(nil).Mask(string(raw))
-			out.Detection = clipText(masked, 12_000)
+			out.Detection = clipText(agentMaskShapes(masked), 12_000)
 		}
 	}
 	return out
@@ -467,28 +719,31 @@ func (s *Server) draftContext(ctx context.Context, draft *deploy.Draft) assistan
 
 // agentName is a call as an audit entry names it.
 func agentName(call assistant.ToolCall) string {
-	if call.Name == assistant.ToolCallOperation {
+	switch call.Name {
+	case assistant.ToolCallOperation:
 		return call.AgentInput().Name
+	case assistant.ToolAPIRequest:
+		in := call.RequestInput()
+		return in.Method + " " + in.Path
 	}
 	return call.Name
 }
 
-// agentHolds is the person's mode: whether a call of a kind waits for their answer.
-// A draft runs nothing until they press Deploy, so nothing done to it needs their
-// leave. What the whole server shares waits in every mode: full access is about the
-// deployment the conversation is about.
-func agentHolds(scope *agentScope, mode assistant.Mode, kind string) bool {
-	if kind == agentKindServer {
+// agentHolds is the person's mode: whether a call waits for their answer. Full
+// access runs everything. Otherwise what the assistant used to be refused waits
+// (asks), a draft's own changes run, since a draft runs nothing until it is
+// committed, and the mode decides the rest: "changes" runs reads, "ask" runs
+// nothing unasked. Looking something up is free in every mode.
+func agentHolds(scope *agentScope, mode assistant.Mode, view agentCallView) bool {
+	switch {
+	case view.Kind == agentKindFree, mode == assistant.ModeFull:
+		return false
+	case view.asks:
 		return true
-	}
-	if kind == agentKindFree || scope.kind == agentScopeDraft {
+	case scope.kind == agentScopeDraft && view.draftOwn:
 		return false
-	}
-	switch mode {
-	case assistant.ModeFull:
-		return false
-	case assistant.ModeChanges:
-		return kind != agentKindRead
+	case mode == assistant.ModeChanges:
+		return view.Kind != agentKindRead
 	}
 	return true
 }
@@ -500,14 +755,15 @@ func (s *Server) agentOperationFor(scope *agentScope, name string) (agentOperati
 		return agentOperation{}, false
 	}
 	op, ok := cat.byName[name]
-	if !ok || op.Scope != scope.kind {
+	if !ok || !op.offered(scope.kind) {
 		return agentOperation{}, false
 	}
 	return *op, true
 }
 
-// agentView is a call as the page draws it, and the kind its mode reads.
-func (s *Server) agentView(scope *agentScope, call assistant.ToolCall) agentCallView {
+// view is a call as the page draws it, and the kind its mode reads.
+func (pr *agentPress) view(ctx context.Context, call assistant.ToolCall) agentCallView {
+	s, scope := pr.s, pr.scope
 	view := agentCallView{ID: call.ID, Tool: call.Name, Kind: agentKindRead, Label: operatorReadLabel(call)}
 	switch call.Name {
 	case assistant.ToolDescribeOperation:
@@ -519,8 +775,35 @@ func (s *Server) agentView(scope *agentScope, call assistant.ToolCall) agentCall
 	case assistant.ToolOpenPage:
 		view.Kind = agentKindFree
 		view.Label = "Offer a shortcut"
+	case assistant.ToolFindRoutes:
+		view.Kind = agentKindFree
+		view.Label = "Look up the API's areas"
+		if q := call.FindInput().Query; q != "" {
+			view.Label = "Look up routes: " + clipText(q, 60)
+		}
 	case assistant.ToolWaitForRun:
 		view.Label = fmt.Sprintf("Follow run #%d", call.AgentInput().Run)
+	case assistant.ToolAPIRequest:
+		in := call.RequestInput()
+		view.Reason, view.Input = in.Reason, call.Input
+		view.Route = in.Method + " " + in.Path
+		if len(in.Query) > 0 {
+			view.Route += "?" + in.Query.Encode()
+		}
+		view.Label = in.Method + " " + in.Path
+		route, _ := s.lookupRoute(in.Method, in.Path)
+		if route == nil || route.Excluded != "" {
+			// Nothing will run: it is answered at once with why.
+			view.Kind = agentKindFree
+			break
+		}
+		view.Kind = s.apiRequestKind(ctx, route, in.Path, in.Body)
+		view.Label = routeLabel(route.Words)
+		if scope.kind == agentScopeDraft && strings.HasPrefix(route.Pattern, "/deploy/drafts/{draft}") &&
+			strings.HasPrefix(in.Path+"/", "/deploy/drafts/"+scope.draft.ID+"/") {
+			view.draftOwn = true
+			view.asks = s.agentDraftAsks(ctx, scope, route.Method, strings.TrimSuffix(route.Pattern, "/"), in.Body)
+		}
 	case assistant.ToolCallOperation:
 		in := call.AgentInput()
 		view.Operation, view.Reason = in.Name, in.Reason
@@ -532,10 +815,103 @@ func (s *Server) agentView(scope *agentScope, call assistant.ToolCall) agentCall
 		}
 		view.Kind, view.Label = op.Kind(), op.Tool.Title
 		view.Route = op.Method + " " + op.Pattern
+		// A draft's own operations, and what under /deploy it reads to choose
+		// from, are the draft's: they run nothing.
+		if scope.kind == agentScopeDraft && (!op.Both || op.Kind() == agentKindRead) {
+			var args struct {
+				Body json.RawMessage `json:"body"`
+			}
+			_ = json.Unmarshal(in.Arguments, &args)
+			view.draftOwn = true
+			view.asks = s.agentDraftAsks(ctx, scope, op.Method, op.Pattern, agentBody(args.Body))
+		}
 	default:
 		view.Input = call.Input
 	}
+	if call.Problem != "" {
+		view.Kind = agentKindFree
+	}
 	return view
+}
+
+// routeLabel is a route's words as a call's label: the first clause of its
+// summary, its first letter up.
+func routeLabel(words string) string {
+	if cut := strings.IndexAny(words, ":;("); cut > 0 {
+		words = words[:cut]
+	}
+	if cut := strings.Index(words, ". "); cut > 0 {
+		words = words[:cut]
+	}
+	words = clipText(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(words), ".")), 80)
+	if words == "" {
+		return words
+	}
+	r, size := utf8.DecodeRuneInString(words)
+	return strings.ToUpper(string(r)) + words[size:]
+}
+
+// agentBody is a body a model may have sent as the text of its JSON.
+func agentBody(raw json.RawMessage) json.RawMessage {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		trimmed := strings.TrimSpace(text)
+		if (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) && json.Valid([]byte(trimmed)) {
+			return json.RawMessage(trimmed)
+		}
+	}
+	return raw
+}
+
+// agentDraftAsks is what a draft's conversation asks before it does, whatever
+// the scope would let run: committing the draft, which is pressing Deploy;
+// discarding it; and a save that does what a deploy key's commit is refused —
+// changing what is deployed, pointing a variable at a saved credential, a store
+// or a database, or a plan that reaches past its container to the host. Text in
+// the repository reaches the model through what detection read, so these wait
+// for the person unless they chose full access.
+func (s *Server) agentDraftAsks(ctx context.Context, scope *agentScope, method, pattern string, body json.RawMessage) bool {
+	switch {
+	case method == http.MethodPost && pattern == "/deploy/drafts/{draft}/commit",
+		method == http.MethodDelete && pattern == "/deploy/drafts/{draft}":
+		return true
+	case method != http.MethodPut || pattern != "/deploy/drafts/{draft}":
+		return false
+	}
+	var request deploy.DraftSaveRequest
+	if json.Unmarshal(body, &request) != nil {
+		// The route refuses what it cannot read.
+		return false
+	}
+	draft, err := s.modules.deployPlanning.Get(ctx, scope.draft.ID)
+	if err != nil {
+		return true
+	}
+	source := draft.Data.Source
+	if request.Source != nil {
+		if !reflect.DeepEqual(request.Source, draft.Data.Source) {
+			return true
+		}
+		source = request.Source
+	}
+	if request.Dotenv != nil && strings.Contains(*request.Dotenv, "${{") {
+		return true
+	}
+	if request.Configuration == nil {
+		return false
+	}
+	if len(hostAuthority(source, request.Configuration.Build, request.Configuration.Runtime)) > 0 {
+		return true
+	}
+	previous := draft.VariableReferences()
+	next := *draft
+	next.Data.Configuration = request.Configuration
+	for name, reference := range next.VariableReferences() {
+		if previous[name] != reference {
+			return true
+		}
+	}
+	return false
 }
 
 func agentCallLine(view agentCallView) map[string]any {
@@ -553,13 +929,14 @@ func agentCalledLine(call assistant.ToolCall, result agentResult) map[string]any
 	return line
 }
 
-// agentExecute runs one call the person's mode, or the person, has let through.
-func (s *Server) agentExecute(ctx context.Context, r *http.Request, p *httpx.Principal, scope *agentScope, call assistant.ToolCall) agentResult {
+// execute runs one call the person's mode, or the person, has let through.
+func (pr *agentPress) execute(ctx context.Context, call assistant.ToolCall, view agentCallView) agentResult {
+	s, scope := pr.s, pr.scope
 	ctx, cancel := context.WithTimeout(ctx, agentCallDeadline+time.Duration(assistant.AgentWaitMax)*time.Second)
 	defer cancel()
 	refuse := func(why string) agentResult { return agentResult{text: why, said: why} }
 	// Asked again for each call, so a role taken away during a press takes effect.
-	p, err := s.Authn.Recheck(r, p)
+	p, err := s.Authn.Recheck(pr.r, pr.p)
 	if err != nil {
 		return refuse("The session this was asked under has ended, so nothing was done.")
 	}
@@ -567,21 +944,29 @@ func (s *Server) agentExecute(ctx context.Context, r *http.Request, p *httpx.Pri
 	case assistant.ToolDescribeOperation:
 		return s.agentDescribe(scope, call.AgentInput().Name)
 	case assistant.ToolCallOperation:
-		return s.agentCall(ctx, r, p, scope, call.AgentInput())
+		return pr.callOperation(ctx, p, call.AgentInput())
 	case assistant.ToolOpenPage:
 		return s.agentOpenPage(scope, call.AgentInput())
+	case assistant.ToolFindRoutes:
+		return s.apiCatalogue().findRoutes(call.FindInput())
+	case assistant.ToolAPIRequest:
+		return pr.apiRequest(ctx, p, call.RequestInput(), view)
 	case assistant.ToolWaitForRun:
 		if scope.deployment == nil {
-			return refuse("a draft has no runs")
+			return refuse("wait_for_run follows a deployment's run, and this conversation is not about one: read the run with api_request")
 		}
 		return s.agentWaitForRun(ctx, scope.deployment, call.AgentInput())
 	}
-	if scope.deployment == nil {
-		return refuse("that read is about a deployment, and this one does not exist yet")
-	}
 	readCtx, done := context.WithTimeout(ctx, 60*time.Second)
 	defer done()
-	text, said, ok := s.operatorRead(readCtx, r, p, scope.deployment, call)
+	switch call.Name {
+	case assistant.ToolHostAlerts, assistant.ToolFirewallRules, assistant.ToolSecurityUpdates:
+	default:
+		if scope.deployment == nil {
+			return refuse("that read is about a deployment, and this conversation is not about one")
+		}
+	}
+	text, said, ok := s.operatorRead(readCtx, pr.r, p, scope.deployment, call)
 	return agentResult{text: text, said: said, ok: ok}
 }
 
@@ -589,7 +974,7 @@ func (s *Server) agentExecute(ctx context.Context, r *http.Request, p *httpx.Pri
 func (s *Server) agentDescribe(scope *agentScope, name string) agentResult {
 	op, ok := s.agentOperationFor(scope, name)
 	if !ok {
-		return agentResult{text: "There is no operation called " + name + " in your list.", said: "no such operation"}
+		return agentResult{text: "There is no operation called " + name + " in your list. Your list names them; api_request makes any route by its path.", said: "no such operation"}
 	}
 	raw, err := json.Marshal(map[string]any{
 		"name": op.Tool.Name, "description": op.Tool.Description, "kind": op.Kind(),
@@ -607,8 +992,12 @@ func (s *Server) agentDescribe(scope *agentScope, name string) agentResult {
 
 // agentOpenPage is a shortcut for the page to draw.
 func (s *Server) agentOpenPage(scope *agentScope, in assistant.AgentInput) agentResult {
-	page, ok := agentOpenablePages[in.Page]
-	if !ok || scope.deployment == nil {
+	pages := agentOpenablePages
+	if scope.kind == agentScopeServer {
+		pages = agentServerPages
+	}
+	page, ok := pages[in.Page]
+	if !ok || (scope.kind == agentScopeDeployment && scope.deployment == nil) {
 		return agentResult{text: "That page cannot be offered here.", said: "no such page"}
 	}
 	link := &agentLink{Label: page.Label, Href: agentHref(scope, page), Note: in.Note}
@@ -663,24 +1052,9 @@ func (s *Server) agentWaitForRun(ctx context.Context, summary *deploy.Deployment
 	}
 }
 
-// agentDelegate is the person as the router sees the assistant: their user and
-// role, held to everything a deploy key is, and narrowed to the deployment the
-// conversation is about. A context value is set only by code in this process, so
-// no request from the network carries one.
-func agentDelegate(p *httpx.Principal, scope *agentScope) *httpx.Principal {
-	token := &auth.APIToken{Name: "Assistant", Scope: auth.ScopeMCP, Role: p.Role, Deployments: auth.DeployRun, Operations: true}
-	if scope.deployment != nil {
-		token.DeploymentIDs = []int64{scope.deployment.ID}
-	}
-	delegate := *p
-	delegate.Token, delegate.TokenID, delegate.Kind, delegate.Scope = token, 0, "token", auth.ScopeMCP
-	delegate.Assistant = true
-	return &delegate
-}
-
-// agentRequest fills in what a conversation already knows: the deployment and, by
-// default, the environment, and the draft. The model naming another deployment's
-// id is refused here, and would be by the delegate's narrowing as well.
+// agentArguments fills in what a conversation already knows: the deployment and,
+// by default, the environment, and the draft. call_operation is about the
+// conversation's deployment; another's is api_request's, by its path.
 func agentArguments(scope *agentScope, op agentOperation, raw json.RawMessage) (json.RawMessage, error) {
 	args := map[string]json.RawMessage{}
 	if len(bytes.TrimSpace(raw)) > 0 && string(raw) != "null" {
@@ -692,17 +1066,21 @@ func agentArguments(scope *agentScope, op agentOperation, raw json.RawMessage) (
 		encoded, _ := json.Marshal(value)
 		args[name] = encoded
 	}
+	if body, ok := args["body"]; ok {
+		args["body"] = agentBody(body)
+	}
 	for _, param := range op.Path {
 		given, named := args[param.Name]
 		switch {
 		case param.Name == "id" && scope.deployment != nil && strings.HasPrefix(op.Pattern, "/deploy/{id}"):
 			if named {
-				var id int64
-				if json.Unmarshal(given, &id) != nil || id != scope.deployment.ID {
-					var text string
-					if json.Unmarshal(given, &text) != nil || text != strconv.FormatInt(scope.deployment.ID, 10) {
-						return nil, errors.New("this conversation is about one deployment, and that id is another's")
-					}
+				var id float64
+				var text string
+				same := json.Unmarshal(given, &id) == nil && int64(id) == scope.deployment.ID ||
+					json.Unmarshal(given, &text) == nil && text == strconv.FormatInt(scope.deployment.ID, 10)
+				if !same {
+					return nil, fmt.Errorf("call_operation works on this conversation's deployment (id %d); to reach another deployment, use api_request with its path, such as %s",
+						scope.deployment.ID, strings.Replace(op.Pattern, "{id}", strings.Trim(string(given), `"`), 1))
 				}
 			}
 			set("id", scope.deployment.ID)
@@ -715,17 +1093,13 @@ func agentArguments(scope *agentScope, op agentOperation, raw json.RawMessage) (
 	return json.Marshal(args)
 }
 
-// agentDispatch makes one route's request as the assistant.
-func (s *Server) agentDispatch(ctx context.Context, r *http.Request, p *httpx.Principal, scope *agentScope, method string, req mcp.RouteRequest) (*boundedRecorder, error) {
-	return s.dispatchKeeping(r.WithContext(ctx), agentDelegate(p, scope), method, req, agentAnswerBytes)
-}
-
-// agentCall runs one operation, through the router, as the person.
-func (s *Server) agentCall(ctx context.Context, r *http.Request, p *httpx.Principal, scope *agentScope, in assistant.AgentInput) agentResult {
+// callOperation runs one operation, through the router, as the person.
+func (pr *agentPress) callOperation(ctx context.Context, p *httpx.Principal, in assistant.AgentInput) agentResult {
+	s, scope := pr.s, pr.scope
 	refuse := func(why string) agentResult { return agentResult{text: why, said: why} }
 	op, ok := s.agentOperationFor(scope, in.Name)
 	if !ok {
-		return refuse("There is no operation called " + in.Name + " in your list.")
+		return refuse("There is no operation called " + in.Name + " in your list. Your list names them; api_request makes any route by its path.")
 	}
 	raw, err := agentArguments(scope, op, in.Arguments)
 	if err != nil {
@@ -735,20 +1109,17 @@ func (s *Server) agentCall(ctx context.Context, r *http.Request, p *httpx.Princi
 	if err != nil {
 		return refuse(err.Error())
 	}
-	masker := deploy.NewDiagnosisMasker(nil)
-	if scope.deployment != nil {
-		masker, err = s.operatorMasker(ctx, scope.deployment)
-		if err != nil {
-			return refuse("The environment's secret values could not be read to mask, so nothing was read or changed.")
-		}
+	masker, err := pr.masker(ctx)
+	if err != nil {
+		return refuse("The secret values to mask could not be read, so nothing was read or changed.")
 	}
 	callCtx, cancel := context.WithTimeout(ctx, agentCallDeadline)
 	defer cancel()
 	// A configuration's change is spelled out, which a read each side of it gives.
-	before := s.agentConfiguration(callCtx, r, p, scope, op, req)
-	rec, err := s.agentDispatch(callCtx, r, p, scope, op.Method, req)
+	before := s.agentConfiguration(callCtx, pr.r, p, op, req)
+	rec, err := s.assistantDispatch(callCtx, pr.r, p, op.Method, req)
 	if err != nil {
-		return refuse("The route could not be called.")
+		return refuse(agentDispatchFailure(err))
 	}
 	if rec.status >= http.StatusBadRequest {
 		return agentRefusal(rec, masker)
@@ -765,9 +1136,61 @@ func (s *Server) agentCall(ctx context.Context, r *http.Request, p *httpx.Princi
 		text = fmt.Sprintf(`{"status":%d,"done":true}`, rec.status)
 	}
 	result := agentResult{text: text, ok: true, output: clipText(text, agentOutputBytes)}
-	result.change = s.agentChangeOf(callCtx, r, p, scope, op, req, rec, before, masker)
+	result.change = s.agentChangeOf(callCtx, pr.r, p, scope, op, req, rec, before, masker)
 	result.said = "Done"
 	return result
+}
+
+// apiRequest makes one route's request of the dashboard's API, as the person.
+func (pr *agentPress) apiRequest(ctx context.Context, p *httpx.Principal, in assistant.RequestInput, view agentCallView) agentResult {
+	s := pr.s
+	refuse := func(why string) agentResult { return agentResult{text: why, said: clipText(why, 300)} }
+	route, methods := s.lookupRoute(in.Method, in.Path)
+	switch {
+	case !assistant.CanonicalPath(in.Path):
+		// What was looked up is what will be routed, or nothing is sent.
+		return refuse(fmt.Sprintf("%q is not a route's path.", in.Path))
+	case route == nil && len(methods) > 0:
+		return refuse(fmt.Sprintf("%s takes %s, not %s.", in.Path, strings.Join(methods, ", "), in.Method))
+	case route == nil:
+		return refuse(fmt.Sprintf("No route answers %s %s. find_routes looks them up by words.", in.Method, in.Path))
+	case route.Excluded != "":
+		return refuse(fmt.Sprintf("The assistant cannot make %s %s: %s.", route.Method, route.Path, route.Excluded))
+	}
+	masker, err := pr.masker(ctx)
+	if err != nil {
+		return refuse("The secret values to mask could not be read, so nothing was read or changed.")
+	}
+	callCtx, cancel := context.WithTimeout(ctx, agentCallDeadline)
+	defer cancel()
+	rec, err := s.assistantDispatch(callCtx, pr.r, p, in.Method, mcp.RouteRequest{Path: in.Path, Query: in.Query, Body: in.Body})
+	if err != nil {
+		return refuse(agentDispatchFailure(err))
+	}
+	if rec.status >= http.StatusBadRequest {
+		refusal := agentRefusal(rec, masker)
+		refusal.text = fmt.Sprintf("%s %s answered %d: %s", in.Method, in.Path, rec.status, refusal.text)
+		return refusal
+	}
+	text, whole := agentAnswer(rec, masker)
+	if view.Kind == agentKindRead {
+		if !whole {
+			return refuse(text)
+		}
+		return agentResult{text: text, ok: true, said: agentReadWords(rec), output: clipText(text, agentOutputBytes)}
+	}
+	if !whole {
+		text = fmt.Sprintf(`{"status":%d,"done":true}`, rec.status)
+	}
+	return agentResult{text: text, ok: true, said: "Done", output: clipText(text, agentOutputBytes), change: agentAPIChange(route, in.Path)}
+}
+
+// agentDispatchFailure says why a request could not be made.
+func agentDispatchFailure(err error) string {
+	if errors.Is(err, errDispatchTimeout) {
+		return fmt.Sprintf("The route did not answer within %s, so the answer was not waited for; what it was doing may still finish. Read the state again before trying again.", agentCallDeadline)
+	}
+	return "The route could not be called."
 }
 
 // agentRefusal is a route's refusal, which the model reads and may act on.
@@ -779,30 +1202,45 @@ func agentRefusal(rec *boundedRecorder, masker *deploy.DiagnosisMasker) agentRes
 	message := http.StatusText(rec.status)
 	if envelope.Error != nil && envelope.Error.Message != "" {
 		message = envelope.Error.Message
+		if envelope.Error.Field != "" {
+			message += " (field: " + envelope.Error.Field + ")"
+		}
 	}
 	if rec.status >= http.StatusInternalServerError {
 		message = "The dashboard could not do this: " + message
 	}
-	message, _ = masker.Mask(message)
-	return agentResult{text: message, said: message}
+	message = agentMaskText(message, masker)
+	return agentResult{text: message, said: clipText(message, 300)}
 }
 
-// agentAnswer is a route's JSON as the model reads it, and whether it could be read:
-// every secret value of the deployment masked in every string of it, the fields that
-// name a secret withheld whatever a route ever answers, and only then cut at the
-// read's bound. An answer that cannot be parsed whole cannot be masked, so none of it
-// is sent, and the text says why.
+// agentAnswer is a route's answer as the model reads it, and whether it could be
+// read: every secret masked in every string of it (agentMaskValue), and only then
+// cut at the read's bound. An answer that cannot be read whole cannot be masked, so
+// none of it is sent, and the text says why. Text that is not JSON — a log, a
+// file — is masked as text; anything else is described, not sent.
 func agentAnswer(rec *boundedRecorder, masker *deploy.DiagnosisMasker) (string, bool) {
 	body := bytes.TrimSpace(rec.body.Bytes())
 	if len(body) == 0 {
 		return fmt.Sprintf(`{"status":%d,"done":true}`, rec.status), true
 	}
 	if rec.total > rec.body.Len() {
-		return fmt.Sprintf("The answer is %d bytes, too long to mask whole, so none of it was read. Ask for less with the operation's parameters.", rec.total), false
+		return fmt.Sprintf("The answer is %d bytes, too long to mask whole, so none of it was read. Ask for less with the route's parameters.", rec.total), false
 	}
+	media := strings.ToLower(strings.TrimSpace(strings.Split(rec.header.Get("Content-Type"), ";")[0]))
 	var value any
 	if err := json.Unmarshal(body, &value); err != nil {
-		return "The answer could not be read to mask it, so none of it was read.", false
+		if (strings.HasPrefix(media, "text/") || media == "application/x-ndjson" || media == "application/yaml") && utf8.Valid(body) {
+			text := agentMaskText(string(body), masker)
+			if len(text) > maxOperatorResult {
+				// The newest of a log is its end.
+				text = fmt.Sprintf("(the first %d bytes were left out) ", len(text)-maxOperatorResult) + text[len(text)-maxOperatorResult:]
+			}
+			return text, true
+		}
+		if media == "" || strings.Contains(media, "json") {
+			return "The answer could not be read to mask it, so none of it was read.", false
+		}
+		return fmt.Sprintf("The answer is %s, %d bytes, which is not text the assistant can read. The person can open it from its page.", media, rec.total), false
 	}
 	raw, err := json.Marshal(agentMaskValue(value, masker))
 	if err != nil {
@@ -810,43 +1248,9 @@ func agentAnswer(rec *boundedRecorder, masker *deploy.DiagnosisMasker) (string, 
 	}
 	text := string(raw)
 	if len(text) > maxOperatorResult {
-		text = clipText(text, maxOperatorResult) + fmt.Sprintf(" (cut: the answer is %d bytes; ask for less with the operation's parameters)", len(text))
+		text = clipText(text, maxOperatorResult) + fmt.Sprintf(" (cut: the answer is %d bytes; ask for less with the route's parameters)", len(text))
 	}
 	return text, true
-}
-
-// agentSecretFields are names of a field no answer's value is sent to a model
-// under. No route a deploy key reaches answers with one, by its rules; this is the
-// second lock on it.
-var agentSecretFields = map[string]bool{
-	"secret": true, "password": true, "token": true, "apikey": true, "api_key": true,
-	"privatekey": true, "private_key": true, "accesskey": true, "secretkey": true, "secretaccesskey": true,
-	"webhooksecret": true, "clientsecret": true, "plaintext": true,
-}
-
-func agentMaskValue(value any, masker *deploy.DiagnosisMasker) any {
-	switch v := value.(type) {
-	case string:
-		masked, _ := masker.Mask(v)
-		return masked
-	case []any:
-		out := make([]any, len(v))
-		for i, item := range v {
-			out[i] = agentMaskValue(item, masker)
-		}
-		return out
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for key, item := range v {
-			if _, isString := item.(string); isString && agentSecretFields[strings.ToLower(key)] {
-				out[key] = deploy.DiagnosisMasked
-				continue
-			}
-			out[key] = agentMaskValue(item, masker)
-		}
-		return out
-	}
-	return value
 }
 
 // agentReadWords says a read's answer in a few words: how many of what a list came
@@ -861,11 +1265,11 @@ func agentReadWords(rec *boundedRecorder) string {
 
 // agentConfiguration reads an environment's configuration before a call that
 // changes it, for the change to be spelled out. Nil for any other call.
-func (s *Server) agentConfiguration(ctx context.Context, r *http.Request, p *httpx.Principal, scope *agentScope, op agentOperation, req mcp.RouteRequest) map[string]any {
+func (s *Server) agentConfiguration(ctx context.Context, r *http.Request, p *httpx.Principal, op agentOperation, req mcp.RouteRequest) map[string]any {
 	if op.Grant == mcp.GrantRead || !strings.HasSuffix(op.Pattern, "/environments/{env}/configuration") {
 		return nil
 	}
-	rec, err := s.agentDispatch(ctx, r, p, scope, http.MethodGet, mcp.RouteRequest{Path: req.Path, Query: url.Values{}})
+	rec, err := s.assistantDispatch(ctx, r, p, http.MethodGet, mcp.RouteRequest{Path: req.Path, Query: url.Values{}})
 	if err != nil || rec.status != http.StatusOK {
 		return nil
 	}
@@ -879,7 +1283,7 @@ func (s *Server) agentConfiguration(ctx context.Context, r *http.Request, p *htt
 // agentChangeOf says what a change did and where to see it. A run says which; a
 // configuration says what is different, and points at the page that part is set on.
 func (s *Server) agentChangeOf(ctx context.Context, r *http.Request, p *httpx.Principal, scope *agentScope, op agentOperation, req mcp.RouteRequest, rec *boundedRecorder, before map[string]any, masker *deploy.DiagnosisMasker) *agentChange {
-	if scope.draft != nil {
+	if scope.draft != nil && op.Scope == agentScopeDraft && !op.Both {
 		// A detection or a preflight changes the draft's revision and nothing the
 		// person chose; only a save is a change to show them.
 		if op.Method != http.MethodPut {
@@ -900,7 +1304,7 @@ func (s *Server) agentChangeOf(ctx context.Context, r *http.Request, p *httpx.Pr
 	if before == nil {
 		return change
 	}
-	after, err := s.agentDispatch(ctx, r, p, scope, http.MethodGet, mcp.RouteRequest{Path: req.Path, Query: url.Values{}})
+	after, err := s.assistantDispatch(ctx, r, p, http.MethodGet, mcp.RouteRequest{Path: req.Path, Query: url.Values{}})
 	if err != nil || after.status != http.StatusOK {
 		return change
 	}

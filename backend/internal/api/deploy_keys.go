@@ -395,11 +395,6 @@ func (s *Server) deployKeyGate(root chi.Routes) httpx.DeployKeyGate {
 		}
 		pattern := strings.TrimPrefix(root.Find(rctx, r.Method, path), "/api/v1")
 		rule, listed := ruleForDeployKey(r.Method, pattern)
-		// The dashboard's assistant is held to this table too, with the routes
-		// assistantRoutes opens to it and nothing else besides.
-		if p.Assistant && assistantOpens(r.Method, pattern) {
-			rule, listed = deployKeyRule{}, true
-		}
 		switch {
 		case !listed:
 			return httpx.Err(http.StatusForbidden, "key_scope",

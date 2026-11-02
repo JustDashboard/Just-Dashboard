@@ -1,10 +1,8 @@
 package assistant
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 )
 
@@ -45,7 +43,9 @@ func operatorSchema(required []string, properties map[string]any) json.RawMessag
 	return raw
 }
 
-const approved = " The person approves each call before it runs and may decline it."
+// approved is how every read's description ends: whether it waits is the
+// person's mode, which the model is not to second-guess in words.
+const approved = " Depending on the person's mode it may wait for their leave first."
 
 // OperatorTools are the tools the operator is offered.
 var OperatorTools = []Tool{
@@ -93,8 +93,8 @@ var OperatorTools = []Tool{
 	},
 	{
 		Name: ToolFirewallRules,
-		Description: "Read the host firewall's state and the rules that concern the ports this deployment is reached on (the ingress's 80 and 443, and any port it publishes): " +
-			"whether a rule blocks or allows them." + approved,
+		Description: "Read the host firewall's state and its rules: in a deployment's conversation, the rules that concern the ports it is reached on (the ingress's 80 and 443, and any port it publishes); " +
+			"in the server's, every rule. Whether a rule blocks or allows them." + approved,
 		Schema: operatorSchema(nil, map[string]any{}),
 	},
 	{
@@ -105,7 +105,7 @@ var OperatorTools = []Tool{
 }
 
 // OperatorInput is every field an operator tool takes; each tool's check
-// clears what it does not read.
+// (readOperatorInput) clears what it does not read.
 type OperatorInput struct {
 	Limit   int    `json:"limit,omitempty"`
 	Run     int64  `json:"run,omitempty"`
@@ -119,65 +119,6 @@ func (c ToolCall) OperatorInput() OperatorInput {
 	var in OperatorInput
 	_ = json.Unmarshal(c.Input, &in)
 	return in
-}
-
-func checkOperatorInput(tool string, input json.RawMessage) (OperatorInput, error) {
-	var fields map[string]json.RawMessage
-	if len(bytes.TrimSpace(input)) == 0 {
-		input = json.RawMessage("{}")
-	}
-	if json.Unmarshal(input, &fields) != nil {
-		return OperatorInput{}, ErrMalformedCall
-	}
-	allowed := map[string][]string{
-		ToolRecentRuns: {"limit"}, ToolRunTranscript: {"run", "lines"}, ToolContainerLogs: {"lines", "service"},
-		ToolReleaseMetrics: {}, ToolLifecycleEvents: {"hours"}, ToolHostAlerts: {}, ToolFirewallRules: {},
-		ToolSecurityUpdates: {},
-	}
-	names, known := allowed[tool]
-	if !known {
-		return OperatorInput{}, ErrMalformedCall
-	}
-	for name := range fields {
-		if !slices.Contains(names, name) {
-			return OperatorInput{}, ErrMalformedCall
-		}
-	}
-	var in OperatorInput
-	dec := json.NewDecoder(bytes.NewReader(input))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&in); err != nil {
-		return OperatorInput{}, ErrMalformedCall
-	}
-	bounded := func(value, low, high int) bool { return value == 0 || (value >= low && value <= high) }
-	switch tool {
-	case ToolRecentRuns:
-		if !bounded(in.Limit, 1, OperatorRunsMax) {
-			return OperatorInput{}, ErrMalformedCall
-		}
-		if in.Limit == 0 {
-			in.Limit = OperatorRunsDefault
-		}
-	case ToolRunTranscript, ToolContainerLogs:
-		if !bounded(in.Lines, 1, OperatorLinesMax) || (tool == ToolRunTranscript && in.Run <= 0) {
-			return OperatorInput{}, ErrMalformedCall
-		}
-		if in.Lines == 0 {
-			in.Lines = OperatorLinesDefault
-		}
-		in.Service = strings.TrimSpace(in.Service)
-		if len(in.Service) > operatorServiceMax || strings.ContainsAny(in.Service, "\x00\r\n/") {
-			return OperatorInput{}, ErrMalformedCall
-		}
-	case ToolLifecycleEvents:
-		if !bounded(in.Hours, 1, OperatorHoursMax) {
-			return OperatorInput{}, ErrMalformedCall
-		}
-		if in.Hours == 0 {
-			in.Hours = OperatorHoursDefault
-		}
-	}
-	return in, nil
 }
 
 // OperatorDeclined is what a call the person declined answers with.

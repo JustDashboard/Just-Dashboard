@@ -1170,3 +1170,56 @@
   border-radius: 0.5rem;
   transition: outline-color 400ms ease;
 }
+
+/*
+ * The assistant's small motions (§11, "Motion that arrived with a library"). Each is
+ * one of the four meanings at the scale of a word or a row, and each ends on a frame
+ * that reads correctly when the root reduced-motion rule collapses it.
+ *
+ * The caret at the end of an answer still arriving: a soft bar after the last word,
+ * breathing rather than blinking, drawn by the column rather than typed into the
+ * text, so the answer's Markdown is never cut by it.
+ */
+.agent-streaming > :last-child::after,
+.agent-streaming > :is(ul, ol):last-child > li:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 1em;
+  margin-left: 0.2em;
+  vertical-align: -0.15em;
+  border-radius: 2px;
+  background: var(--signal);
+  animation: agent-caret 1.1s ease-in-out infinite;
+}
+
+@keyframes agent-caret {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/*
+ * Something that arrived and asks to be seen once: a call waiting on the person, a
+ * change's shortcut. Its outline is lit in its own tone and fades to nothing — the
+ * arrival highlight's transition, run once on arrival rather than on a scroll.
+ */
+.agent-attention {
+  outline: 1px solid transparent;
+  outline-offset: 3px;
+  animation: agent-attention 1s ease-out 1;
+}
+
+@keyframes agent-attention {
+  0%,
+  35% {
+    outline-color: var(--agent-attention, var(--signal));
+  }
+  100% {
+    outline-color: transparent;
+  }
+}

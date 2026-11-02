@@ -34,10 +34,19 @@ type ToolCall struct {
 	// the tool's own check read it.
 	Name  string          `json:"tool,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
+	// Problem is why the call cannot run, in words the model is answered with
+	// so it can correct the call. Nothing runs for one that has a problem.
+	Problem string `json:"problem,omitempty"`
+	// Notes are what the check read differently than it was asked — a number
+	// held to its bound, a field nobody reads — told to the model with the
+	// result.
+	Notes []string `json:"notes,omitempty"`
 }
 
-// ErrMalformedCall is an answer that asked for something no tool here does,
-// or asked in a shape that cannot be read. Nothing is run for it.
+// ErrMalformedCall is the SQL editor's answer that asked for something its one
+// tool does not do, or asked in a shape that cannot be read. Nothing is run for
+// it. A deployment's or the server's assistant reads its calls one at a time
+// instead (CheckCalls), and refuses only an answer it cannot read at all.
 var ErrMalformedCall = errors.New("the assistant asked to read the database in a way this dashboard does not offer")
 
 // Calls reads the tool calls an answer ended on. The input of a call was

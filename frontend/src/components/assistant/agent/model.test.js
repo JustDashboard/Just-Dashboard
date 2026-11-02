@@ -9,13 +9,16 @@ import {
   decideAll,
   decideStep,
   endTurn,
+  holdTurn,
   inputLines,
   parseEvent,
   pendingSteps,
   readLines,
   readyDecisions,
+  replayLines,
   sendDecisions,
   shownSteps,
+  takeOverTurn,
   totalUsage,
   usageLine,
 } from "./model"
@@ -226,5 +229,151 @@ describe("what a call would send", () => {
     const { lines, more } = inputLines({ body })
     expect(lines.length).toBe(12)
     expect(more).toBe(8)
+  })
+})
+
+describe("a saved chat read back", () => {
+  const setPort = {
+    id: "c",
+    tool: "api_request",
+    route: "PUT /deploy/7/environments/12/configuration",
+    label: "Save the configuration",
+    kind: "change",
+  }
+  const at = "2026-11-02T10:00:00Z"
+  test("draws the questions and answers as they were", () => {
+    const t = replayLines([
+      { type: "question", text: "why", at },
+      {
+        type: "start",
+        conversation: "c1",
+        provider: "anthropic",
+        model: "m",
+        modelLabel: "Claude",
+        tools: true,
+        mode: "changes",
+        title: "why",
+        at,
+      },
+      { type: "thinking", at },
+      { type: "text", text: "Because.", at },
+      { type: "done", stop: "end", usage, model: "m", kept: true, at },
+    ])
+    expect(t.turns).toHaveLength(1)
+    expect(t.turns[0].question).toBe("why")
+    expect(t.turns[0].phase).toBe("done")
+    expect(t.turns[0].replayed).toBe(true)
+    expect(t.turns[0].parts).toEqual([{ kind: "text", text: "Because." }])
+    expect(t.conversation).toBe("c1")
+    expect(t.title).toBe("why")
+    expect(t.modelLabel).toBe("Claude")
+  })
+  test("an Allow pressed among the lines runs the call it answered", () => {
+    const t = replayLines([
+      { type: "question", text: "fix it" },
+      {
+        type: "start",
+        conversation: "c1",
+        provider: "a",
+        model: "m",
+        modelLabel: "Claude",
+        tools: true,
+        mode: "changes",
+      },
+      { type: "done", stop: "tool", usage, model: "m", kept: true, pending: [setPort, restart] },
+      { type: "decisions", decisions: { c: true } },
+      { type: "call", call: setPort },
+      {
+        type: "called",
+        id: "c",
+        tool: "api_request",
+        ok: true,
+        said: "Done",
+        change: { label: "Runtime", href: "/deploy/7/settings/runtime" },
+      },
+      { type: "called", id: "b", tool: "call_operation", ok: false, declined: true },
+      { type: "text", text: "Saved." },
+      { type: "done", stop: "end", usage, model: "m", kept: true },
+    ])
+    const steps = t.turns[0].parts.filter((part) => part.kind === "step")
+    expect(steps.map((step) => [step.call.id, step.state])).toEqual([
+      ["c", "done"],
+      ["b", "declined"],
+    ])
+    expect(t.turns[0].phase).toBe("done")
+    expect(changesOf(t).map((step) => step.change.label)).toEqual(["Runtime"])
+    expect(totalUsage(t).input).toBe(200)
+  })
+  test("a chat left waiting on the person is asking again", () => {
+    const t = replayLines([
+      { type: "question", text: "restart it" },
+      { type: "done", stop: "tool", usage, model: "m", kept: true, pending: [restart] },
+    ])
+    expect(t.turns[0].phase).toBe("asking")
+    expect(pendingSteps(t).map((step) => step.call.id)).toEqual(["b"])
+  })
+  test("a second question declines what the first left waiting", () => {
+    const t = replayLines([
+      { type: "question", text: "restart it" },
+      { type: "done", stop: "tool", usage, model: "m", kept: true, pending: [restart] },
+      { type: "question", text: "no, leave it" },
+      { type: "text", text: "Left." },
+      { type: "done", stop: "end", usage, model: "m", kept: true },
+    ])
+    expect(t.turns.map((turn) => turn.phase)).toEqual(["done", "done"])
+    expect(t.turns[0].parts[0].state).toBe("declined")
+  })
+  test("a press another tab is still answering stays open, one that died reads stopped", () => {
+    const lines = [
+      { type: "question", text: "why" },
+      { type: "call", call: read },
+    ]
+    const live = replayLines(lines, { running: true })
+    expect(answering(live.turns[0])).toBe(true)
+    expect(live.turns[0].parts[0].state).toBe("running")
+    const dead = replayLines(lines)
+    expect(dead.turns[0].phase).toBe("stopped")
+    expect(dead.turns[0].parts[0].state).toBe("failed")
+  })
+  test("what it cannot read, or what came before any question, is left out", () => {
+    const t = replayLines([null, 3, "x", { type: "text", text: "orphan" }, { nope: true }])
+    expect(t.turns).toEqual([])
+  })
+})
+
+describe("a chat in two tabs", () => {
+  test("a tab whose press was taken over stops cleanly", () => {
+    let t = applyEvent(started(), "t1", { type: "call", call: read })
+    t = applyEvent(t, "t1", {
+      type: "error",
+      error: { code: "taken_over", message: "This chat was continued somewhere else." },
+    })
+    expect(t.turns[0].phase).toBe("moved")
+    expect(t.turns[0].parts[0].state).toBe("failed")
+    expect(answering(t.turns[0])).toBe(false)
+    expect(agentStatus(t)).toEqual({ tone: "idle", text: "Continued somewhere else" })
+  })
+  test("a question refused because another tab has the chat waits, unsent", () => {
+    const t = holdTurn(beginTurn(EMPTY_AGENT, "t1", "why"), "t1")
+    expect(t.turns[0].phase).toBe("held")
+    expect(answering(t.turns[0])).toBe(false)
+    expect(agentStatus(t)).toEqual({ tone: "asking", text: "Running in another tab" })
+    // Asking something else instead replaces it.
+    const next = beginTurn(t, "t2", "something else")
+    expect(next.turns.map((turn) => turn.question)).toEqual(["something else"])
+  })
+  test("an Allow refused the same way keeps its answers for the take over", () => {
+    const sent = sendDecisions(decideAll(asking(), true))
+    const t = holdTurn(sent, "t1")
+    expect(t.turns[0].phase).toBe("asking")
+    expect(pendingSteps(t).every((step) => step.decision === true)).toBe(true)
+  })
+  test("taking over sends the held press and stops what the other tab was answering", () => {
+    let t = replayLines([{ type: "question", text: "why" }, { type: "thinking" }], {
+      running: true,
+    })
+    t = holdTurn(beginTurn(t, "t2", "carry on"), "t2")
+    t = takeOverTurn(t, "t2")
+    expect(t.turns.map((turn) => turn.phase)).toEqual(["stopped", "waiting"])
   })
 })

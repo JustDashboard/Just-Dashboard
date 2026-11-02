@@ -68,6 +68,8 @@ export type AgentEvent =
       modelLabel: string
       tools: boolean
       mode: AssistantMode
+      /** The chat's title: its first question, until it is renamed. */
+      title?: string
     }
   | { type: "thinking" }
   | { type: "text"; text: string }
@@ -93,6 +95,12 @@ export type AgentEvent =
       paused?: boolean
     }
   | { type: "error"; error: { code: string; message: string } }
+  /**
+   * The person's own acts, which only a saved chat's lines carry: each question
+   * asked and each Allow or Decline pressed, in order among what was streamed.
+   */
+  | { type: "question"; text: string; at?: string }
+  | { type: "decisions"; decisions: Record<string, boolean>; at?: string }
 
 export type AgentStepState = "running" | "waiting" | "done" | "failed" | "declined"
 
@@ -122,6 +130,10 @@ export type AgentPhase =
   | "failed"
   | "refused"
   | "cut"
+  /** Not sent: the chat is answering in another tab, and waits to be taken over. */
+  | "held"
+  /** Taken over: another tab carries the chat on, so this one stopped. */
+  | "moved"
 
 export interface AgentTurn {
   id: string
@@ -135,6 +147,8 @@ export interface AgentTurn {
   paused?: boolean
   /** Said above the turn: the model it is asking changed, so it starts fresh. */
   fresh?: string
+  /** Read back from a saved chat rather than seen arriving, so it does not rise. */
+  replayed?: boolean
 }
 
 export interface AgentTranscript {
@@ -149,6 +163,8 @@ export interface AgentTranscript {
   turns: AgentTurn[]
   /** What the next turn says above itself. */
   freshNote?: string
+  /** The saved chat's title. */
+  title?: string
 }
 
 export const EMPTY_AGENT: AgentTranscript = { conversation: "", candidate: "", turns: [] }
@@ -248,12 +264,15 @@ export function sendDecisions(t: AgentTranscript): AgentTranscript {
 
 /** A new turn, waiting for its first line. */
 export function beginTurn(t: AgentTranscript, id: string, question: string): AgentTranscript {
+  // A question that was never sent, because another tab had the chat, gives way to
+  // this one.
+  const base = t.turns.at(-1)?.phase === "held" ? { ...t, turns: t.turns.slice(0, -1) } : t
   // Asking something else declines the calls the last answer waited on, as the
   // server does.
-  const last = t.turns.at(-1)
-  let settled = t
+  const last = base.turns.at(-1)
+  let settled = base
   if (last && last.phase === "asking") {
-    settled = withTurn(t, last.id, (turn) => ({
+    settled = withTurn(base, last.id, (turn) => ({
       ...turn,
       phase: "done",
       parts: turn.parts.map((part) =>
@@ -289,6 +308,7 @@ export function applyEvent(t: AgentTranscript, id: string, event: AgentEvent): A
           modelLabel: event.modelLabel,
           provider: event.provider,
           tools: event.tools,
+          title: event.title || t.title,
         },
         id,
         (turn) => ({ ...turn, model: event.modelLabel }),
@@ -365,7 +385,13 @@ export function applyEvent(t: AgentTranscript, id: string, event: AgentEvent): A
       }))
     }
     case "error":
-      return endTurn(t, id, "failed", event.error.message)
+      return event.error.code === "taken_over"
+        ? endTurn(t, id, "moved", event.error.message)
+        : endTurn(t, id, "failed", event.error.message)
+    case "question":
+    case "decisions":
+      // A saved chat's own lines, which `replayLines` reads; a stream never sends them.
+      return t
   }
 }
 
@@ -373,17 +399,18 @@ export function applyEvent(t: AgentTranscript, id: string, event: AgentEvent): A
 export function endTurn(
   t: AgentTranscript,
   id: string,
-  phase: "stopped" | "failed",
+  phase: "stopped" | "failed" | "moved",
   error?: string,
 ): AgentTranscript {
   return withTurn(t, id, (turn) => {
     // A press that failed before it ran what it answered leaves the calls waiting on
     // the server too, so the person is asked again rather than left with a word
-    // saying "Allowed" over something that never ran.
+    // saying "Allowed" over something that never ran. A press taken over is the
+    // other tab's to answer.
     const waiting = turn.parts.some((part) => isStep(part) && part.state === "waiting")
     return {
       ...turn,
-      phase: waiting ? "asking" : phase,
+      phase: waiting && phase !== "moved" ? "asking" : phase,
       error,
       parts: turn.parts.map((part) => {
         if (!isStep(part)) return part
@@ -395,6 +422,69 @@ export function endTurn(
       }),
     }
   })
+}
+
+/**
+ * A press the server refused because another tab is answering the chat: a question
+ * waits, unsent, to be taken over; Allow and Decline keep their answers for the
+ * same press.
+ */
+export function holdTurn(t: AgentTranscript, id: string): AgentTranscript {
+  return withTurn(t, id, (turn) => {
+    const waiting = turn.parts.some((part) => isStep(part) && part.state === "waiting")
+    return { ...turn, phase: waiting ? "asking" : "held", error: undefined }
+  })
+}
+
+/**
+ * Taking the chat over: the press held here goes ahead, and what the other tab was
+ * answering stops, as the server stops it.
+ */
+export function takeOverTurn(t: AgentTranscript, id: string): AgentTranscript {
+  const settled = t.turns.reduce(
+    (next, turn) => (turn.id !== id && answering(turn) ? endTurn(next, turn.id, "stopped") : next),
+    t,
+  )
+  return withTurn(settled, id, (turn) => ({ ...turn, phase: "waiting", paused: false }))
+}
+
+/**
+ * A saved chat read back: its lines are the person's questions and answers among
+ * everything that was streamed, so folding them through the same reducer draws the
+ * chat exactly as it looked. A press still going in another tab is left answering;
+ * one that ended without its last line, as a restart ends one, reads as stopped.
+ */
+export function replayLines(
+  lines: unknown[],
+  { running = false }: { running?: boolean } = {},
+): AgentTranscript {
+  let t = EMPTY_AGENT
+  let turn = ""
+  for (const line of lines) {
+    if (!line || typeof line !== "object" || typeof (line as AgentEvent).type !== "string") continue
+    const event = line as AgentEvent
+    if (event.type === "question") {
+      turn = `replay-${t.turns.length + 1}`
+      t = beginTurn(t, turn, typeof event.text === "string" ? event.text : "")
+      t = withTurn(t, turn, (one) => ({ ...one, replayed: true }))
+      continue
+    }
+    if (!turn) continue
+    if (event.type === "decisions") {
+      let next = t
+      for (const [id, allow] of Object.entries(event.decisions ?? {})) {
+        next = decideStep(next, id, Boolean(allow))
+      }
+      // A call left out of the answer is declined by the server, and its own line
+      // says so; the turn waits for the rest as it did.
+      t = t.turns.at(-1)?.phase === "asking" ? sendDecisions(next) : next
+      continue
+    }
+    t = applyEvent(t, turn, event)
+  }
+  const last = t.turns.at(-1)
+  if (last && answering(last) && !running) t = endTurn(t, last.id, "stopped")
+  return { ...t, conversation: t.conversation || t.candidate }
 }
 
 /** Whether a turn is still coming in. */
@@ -494,6 +584,10 @@ export function agentStatus(t: AgentTranscript): AgentStatus {
       return { tone: "failed", text: last.error ?? "It did not answer" }
     case "stopped":
       return { tone: "idle", text: "Stopped" }
+    case "held":
+      return { tone: "asking", text: "Running in another tab" }
+    case "moved":
+      return { tone: "idle", text: "Continued somewhere else" }
     case "refused":
     case "cut":
       return { tone: "failed", text: "It did not finish" }
