@@ -53,6 +53,10 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   layers, and the feature group's `AuthenticateFeatures` admits it only as the deploy key gate admits
   a deploy key, marking it `Principal.ViaMCP` (every other group refuses it); see
   [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
+- The dashboard's assistant makes its calls the same way, under a key of no id built for the press with the
+  person's user and role and `Principal.Assistant` set (`agentDelegate`), so it is held to everything a deploy key
+  is, and `deployKeyGate` also admits the few routes `assistantRoutes` opens to it; see
+  [the deployment assistant](../deployments/operator.md).
 - **A deploy key** (`api_tokens.scope = 'deploy'`, minted on `POST /tokens/deploy` by an administrator
   in a session, or from Account → API keys) is what `jd` and CI use, and it **deliberately reopens
   part of the session-only surface**: the deployment writes that were a session's alone — drafts,
