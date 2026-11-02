@@ -1,15 +1,21 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
+  Archive,
   ArrowRight,
+  Bell,
   Check,
   Database,
+  FirewallCheck,
+  Gauge,
   Layers,
   LockClosed,
   LockOpen,
   Rocket,
+  Servers,
   ShieldCheck,
   Sparkles,
   type Icon,
@@ -25,6 +31,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { ExcalidrawGlyph } from "@/components/boards/glyphs"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { Page, PageContext } from "@/components/page"
+import { tabClasses } from "@/components/tabs"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { ErrorState, LoadingPanel } from "@/components/state"
@@ -43,7 +50,20 @@ import {
   type AssistantPreset,
   type AssistantProfile,
 } from "@/components/assistant/settings"
-import { agentModelChanged } from "@/components/assistant/agent/sessions"
+import { AssistantOff } from "@/components/assistant/off"
+import { AgentChat, type AgentSuggestion } from "@/components/assistant/agent/chat"
+import { AgentChatList } from "@/components/assistant/agent/chat-list"
+import { useAgentChats } from "@/components/assistant/agent/chats"
+import { AgentWorkspace } from "@/components/assistant/agent/workspace"
+import {
+  agentChatHref,
+  agentChatId,
+  agentModelChanged,
+  newAgentChat,
+  openAgentChat,
+  useAgentSession,
+  type AgentScope,
+} from "@/components/assistant/agent/sessions"
 
 const MODES: { mode: AssistantMode; icon: Icon }[] = [
   { mode: "ask", icon: LockClosed },
@@ -52,6 +72,12 @@ const MODES: { mode: AssistantMode; icon: Icon }[] = [
 ]
 
 const PLACES: { title: string; detail: string; href: string; icon: Icon }[] = [
+  {
+    title: "The whole server",
+    detail: "Ask about anything on it, from this page's own chat",
+    href: "/assistant",
+    icon: Servers,
+  },
   {
     title: "Deployments",
     detail: "Ask anything, read logs and requests, change settings, take backups",
@@ -78,24 +104,69 @@ const PLACES: { title: string; detail: string; href: string; icon: Icon }[] = [
   },
 ]
 
+const SERVER: AgentScope = { kind: "server", name: "This server" }
+
+const SERVER_SUGGESTIONS: AgentSuggestion[] = [
+  {
+    label: "How is the server doing?",
+    question:
+      "How is this server doing right now: CPU, memory, disk and load, and is anything unhealthy?",
+    icon: Gauge,
+  },
+  {
+    label: "Which containers are unhealthy?",
+    question: "Which containers are stopped, restarting or unhealthy, and why?",
+    product: "docker",
+  },
+  {
+    label: "Anything wrong with the deployments?",
+    question: "Is anything wrong with any deployment: failed runs, failing checks, errors?",
+    icon: Rocket,
+  },
+  {
+    label: "What failed lately?",
+    question: "What failed on this server in the last day: runs, backups, services and alerts?",
+    icon: Bell,
+  },
+  {
+    label: "Certificates expiring?",
+    question: "Which certificates expire in the next month, and will they renew on their own?",
+    product: "caddy",
+  },
+  {
+    label: "Check the firewall",
+    question: "Read the firewall rules and tell me what is open to the internet and why.",
+    icon: FirewallCheck,
+  },
+  {
+    label: "Security updates",
+    question: "Which security updates are waiting, and which of them need a restart?",
+    icon: ShieldCheck,
+  },
+  {
+    label: "What is using the disk?",
+    question: "What is using the most disk space, and what can be cleaned up safely?",
+    icon: Archive,
+  },
+]
+
 /**
- * The assistant's own page: who answers, for the whole install, set up once here;
- * how much it may do; and where it works. Every place that uses it reads what is
- * set here, and a place added later does too.
+ * The assistant's own page. In front, a chat about the whole server, with every
+ * chat the person has had in its history under what each was about: a deployment's
+ * opens on that deployment's page, ready to carry on. Behind a second tab, who
+ * answers — for the whole install, set up once here — how much it may do, and where
+ * it works. Every place that uses it reads what is set there, and a place added
+ * later does too.
  */
 export function AssistantPage() {
   const { can } = useAuth()
-  const admin = can("system.admin")
   const settings = useAssistantSettings(true)
-  const { confirm, dialog } = useConfirm()
-  const [editing, setEditing] = useState<{ preset?: string } | null>(null)
+  const searchParams = useSearchParams()
   const view = settings.data
-  const deployments = usePoll<DeploymentSummary[]>(
-    (signal) => get<DeploymentSummary[]>("/deploy/", undefined, signal),
-    0,
-    [],
-    { enabled: can("service.control") },
-  )
+  // The chat needs a provider and the role that acts; until then the settings are
+  // the page.
+  const chatting =
+    searchParams.get("view") !== "settings" && can("service.control") && view?.configured !== false
 
   if (!view) {
     return (
@@ -109,6 +180,149 @@ export function AssistantPage() {
       </Page>
     )
   }
+  return (
+    <Page
+      fill={chatting}
+      className={cn(chatting ? "gap-0 pt-0 pb-0 md:gap-0 md:pt-0 md:pb-0" : "pt-0 md:pt-0")}
+    >
+      <PageContext title="Assistant" />
+      <nav
+        aria-label="The assistant's views"
+        data-slot="assistant-tabs"
+        className="flex shrink-0 items-end gap-1 border-b border-hairline pt-2 md:pt-3"
+      >
+        {can("service.control") && (
+          <Link
+            href="/assistant"
+            replace
+            aria-current={chatting ? "page" : undefined}
+            className={tabClasses(chatting, "h-10")}
+          >
+            <Sparkles className="size-3.5" />
+            Chat
+          </Link>
+        )}
+        <Link
+          href="/assistant?view=settings"
+          replace
+          aria-current={!chatting ? "page" : undefined}
+          className={tabClasses(!chatting, "h-10")}
+        >
+          Settings
+        </Link>
+      </nav>
+      {chatting ? (
+        <ServerChat settings={settings} />
+      ) : (
+        <AssistantSettingsView settings={settings} />
+      )}
+    </Page>
+  )
+}
+
+/** A chat about the whole server, and beside it every chat the person has had. */
+function ServerChat({ settings }: { settings: ReturnType<typeof useAssistantSettings> }) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const { confirm, dialog } = useConfirm()
+  const [settingUp, setSettingUp] = useState(false)
+  const { can } = useAuth()
+  const view = settings.data!
+  const session = useAgentSession(SERVER)
+  const chats = useAgentChats({}, view.configured)
+
+  const wanted = searchParams.get("chat")
+  const opening = useRef("")
+  useEffect(() => {
+    if (!wanted) opening.current = ""
+    if (!wanted || !view.configured || opening.current === wanted) return
+    opening.current = wanted
+    void openAgentChat(SERVER, wanted)
+  }, [wanted, view.configured])
+
+  const startNew = () => {
+    newAgentChat(SERVER)
+    if (wanted) router.replace("/assistant", { scroll: false })
+  }
+  const product = assistantProduct(view)
+  if (!view.configured) {
+    return (
+      <>
+        <AssistantOff
+          className="m-auto"
+          settings={view}
+          onSetUp={() => setSettingUp(true)}
+          what="it can read the whole server, answer anything about it, and change it for you."
+        />
+        {can("system.admin") && (
+          <AssistantSettingsSheet
+            open={settingUp}
+            settings={view}
+            onClose={() => setSettingUp(false)}
+            onSaved={settings.refresh}
+            confirm={confirm}
+          />
+        )}
+        {dialog}
+      </>
+    )
+  }
+  return (
+    <AgentWorkspace
+      session={session}
+      product={product}
+      chat={
+        <AgentChat
+          key={session.key}
+          session={session}
+          settings={view}
+          title="Ask anything about this server"
+          description="It can read the whole server — containers, deployments, services, logs, certificates and the firewall — and change what you ask it to, as you and under your role."
+          placeholder="Ask anything about this server…"
+          suggestions={SERVER_SUGGESTIONS}
+          sends="what it reads of the server to answer"
+          onNew={startNew}
+        />
+      }
+      chats={
+        <AgentChatList
+          grouped
+          chats={chats.data}
+          error={chats.error}
+          activeId={agentChatId(session)}
+          onNew={startNew}
+          onDeleted={(chat) => {
+            if (chat.id === wanted) router.replace("/assistant", { scroll: false })
+          }}
+          onOpen={(chat) => {
+            if (chat.id === agentChatId(session)) return
+            const href = agentChatHref(chat)
+            if (chat.scope.kind === "server") router.replace(href, { scroll: false })
+            else router.push(href)
+          }}
+        />
+      }
+    />
+  )
+}
+
+/** Who answers, how much it may do, and where it works: the install's settings. */
+function AssistantSettingsView({
+  settings,
+}: {
+  settings: ReturnType<typeof useAssistantSettings>
+}) {
+  const { can } = useAuth()
+  const admin = can("system.admin")
+  const { confirm, dialog } = useConfirm()
+  const [editing, setEditing] = useState<{ preset?: string } | null>(null)
+  const view = settings.data!
+  const deployments = usePoll<DeploymentSummary[]>(
+    (signal) => get<DeploymentSummary[]>("/deploy/", undefined, signal),
+    0,
+    [],
+    { enabled: can("service.control") },
+  )
 
   const setMode = async (defaultMode: AssistantMode) => {
     try {
@@ -127,9 +341,8 @@ export function AssistantPage() {
   const unsaved = presets.filter((preset) => !profileOf(preset))
 
   return (
-    <Page className="animate-rise">
-      <PageContext title="Assistant" />
-      <div className="space-y-6">
+    <>
+      <div className="animate-rise space-y-6">
         <section
           data-slot="assistant-now"
           className="flex min-w-0 flex-wrap items-center gap-4 rounded-xl border border-hairline bg-card p-4"
@@ -228,9 +441,9 @@ export function AssistantPage() {
               </ul>
               <p className="mt-3 text-hint leading-relaxed text-muted-foreground">
                 This is what a conversation starts on; anyone asking can change it for theirs. In
-                every mode the server&rsquo;s backups ask first, and these stay with a person:
-                reading a secret&rsquo;s value, saved credentials, typed deletions, what reaches the
-                host, merging a pull request and running its preview.
+                every mode it acts as the person asking and within their role, every call it makes
+                is audited, and a person&rsquo;s own credentials &mdash; signing in, passkeys,
+                sessions and API keys &mdash; stay out of its reach.
               </p>
             </PanelBody>
           </Panel>
@@ -295,7 +508,7 @@ export function AssistantPage() {
         />
       )}
       {dialog}
-    </Page>
+    </>
   )
 }
 

@@ -22,6 +22,7 @@ import {
   Servers,
   ShieldOff,
   SignIn,
+  Sparkles,
   Terminal,
   UserSettings,
   Users,
@@ -266,6 +267,8 @@ export function isMachine(entry: Pick<AuditEntry, "actor">) {
  * laptop key needs to know which of the two changed something.
  */
 export function keyWords(entry: Pick<AuditEntry, "actor" | "keyId" | "keyName">) {
+  // The assistant acting for the person whose name the entry carries.
+  if (entry.actor === "assistant") return "by the assistant"
   if (entry.actor !== "token") return undefined
   return entry.keyName ? `key ${entry.keyName}` : "API key"
 }
@@ -300,12 +303,16 @@ export function ActorMark({ entry }: { entry: Pick<AuditEntry, "actor" | "userna
       ) : (
         <InitialsMark name={entry.username} size="sm" className="size-8" />
       )}
-      {entry.actor === "token" && (
+      {(entry.actor === "token" || entry.actor === "assistant") && (
         <span
           aria-hidden
           className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-sm border border-hairline bg-background"
         >
-          <Key className="size-2.5 text-muted-foreground" />
+          {entry.actor === "token" ? (
+            <Key className="size-2.5 text-muted-foreground" />
+          ) : (
+            <Sparkles className="size-2.5 text-muted-foreground" />
+          )}
         </span>
       )}
     </span>

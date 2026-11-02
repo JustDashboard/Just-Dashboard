@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ArrowRight, Check, ChevronRight, Cross, Warning } from "@/components/icons"
+import { AnimatePresence, motion } from "motion/react"
+import { ArrowRight, Check, ChevronRight, Cross, LoaderCircle, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { Well } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
@@ -10,33 +11,104 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { TextShimmer } from "@/components/ui/text-shimmer"
+import { MethodWord, RequestPath } from "@/components/deploy/request-marks"
+import { useConversationRelease } from "@/components/assistant/elements/conversation"
 import { stepMark } from "@/components/assistant/agent/marks"
 import { arriveAt } from "@/components/assistant/agent/arrival"
 import {
   inputLines,
+  type AgentCall,
   type AgentChange,
   type AgentLink,
   type AgentStep,
 } from "@/components/assistant/agent/model"
 
+const EASE = [0.16, 1, 0.3, 1] as const
+
+/**
+ * A route the assistant called as the person: the method as the request log draws
+ * it — a read muted, a write in the method hue — on a recessed chip, and the path
+ * beside it in the path hue. `GET /databases/connections` reads as a request before
+ * it reads as words.
+ */
+export function ApiRoute({ route, className }: { route: string; className?: string }) {
+  const space = route.indexOf(" ")
+  const method = space > 0 ? route.slice(0, space).toUpperCase() : ""
+  const path = space > 0 ? route.slice(space + 1) : route
+  return (
+    <span
+      data-slot="agent-route"
+      className={cn("inline-flex max-w-full min-w-0 items-baseline gap-1.5 text-hint", className)}
+    >
+      {method && (
+        <MethodWord
+          method={method}
+          plain={method === "GET"}
+          className="shrink-0 rounded-sm bg-surface-sunken px-1 py-px text-micro font-semibold"
+        />
+      )}
+      <RequestPath path={path} className="text-hint" />
+    </span>
+  )
+}
+
+/** Whether a call is a route the assistant called itself, drawn with its request. */
+const routed = (call: AgentCall) => call.tool === "api_request" && Boolean(call.route)
+
+/** Finding which routes to call: said in a word, as something it looked up. */
+const lookup = (call: AgentCall) => call.kind === "free"
+
+/**
+ * What a call was asked, less what its row already says: a route's method and path
+ * are drawn as the route, and its reason as a sentence, so only its query and body
+ * are left to list.
+ */
+function askedInput(call: AgentCall): unknown {
+  if (call.tool !== "api_request" || !call.input || typeof call.input !== "object")
+    return call.input
+  const rest: Record<string, unknown> = { ...(call.input as Record<string, unknown>) }
+  delete rest.method
+  delete rest.path
+  delete rest.reason
+  return rest
+}
+
 /**
  * One thing the assistant did, or is doing. AI Elements' `tool` and
  * `chain-of-thought`, from its registry (vercel/ai-elements, Apache-2.0), in this
  * product's marks: the product it touched on a tile, and a line of what it came to
- * that lights while it runs. Unfolding one shows what it was asked and what it read.
+ * that lights while it runs. Its badge turns from the working spinner to a tick or
+ * a cross as it ends. Unfolding one shows what it was asked and what it read, and
+ * the fold opens to its height rather than appearing.
  */
-export function StepRow({ step }: { step: AgentStep }) {
+export function StepRow({ step, replayed }: { step: AgentStep; replayed?: boolean }) {
   const [open, setOpen] = useState(false)
+  const release = useConversationRelease()
   const mark = stepMark(step.call)
   const Glyph = mark.icon
-  const details = inputLines(step.call.input).lines.length > 0 || Boolean(step.output)
+  const details =
+    inputLines(askedInput(step.call)).lines.length > 0 ||
+    Boolean(step.output) ||
+    // What went wrong, past what its row has room for.
+    (step.state === "failed" && (step.said?.length ?? 0) > 60) ||
+    Boolean(step.call.reason && !step.change) ||
+    routed(step.call)
   const running = step.state === "running"
+  const quiet = lookup(step.call)
   return (
-    <Collapsible open={open} onOpenChange={setOpen} asChild>
+    <Collapsible
+      open={open}
+      onOpenChange={(next) => {
+        if (next) release()
+        setOpen(next)
+      }}
+      asChild
+    >
       <li
         data-slot="agent-step"
         data-state={step.state}
         data-kind={step.call.kind}
+        data-tool={step.call.tool}
         className="animate-rise"
       >
         <CollapsibleTrigger
@@ -49,8 +121,9 @@ export function StepRow({ step }: { step: AgentStep }) {
           <span
             aria-hidden
             className={cn(
-              "relative grid size-6 shrink-0 place-items-center rounded-md border border-hairline bg-surface-header",
-              running && "border-signal/50",
+              "relative grid size-6 shrink-0 place-items-center rounded-md border transition-colors duration-300",
+              quiet ? "border-transparent" : "border-hairline bg-surface-header",
+              running && !quiet && "border-signal/50",
             )}
           >
             {mark.product ? (
@@ -58,25 +131,33 @@ export function StepRow({ step }: { step: AgentStep }) {
             ) : (
               <Glyph className="size-3.5 text-muted-foreground" />
             )}
-            <StepBadge state={step.state} />
+            {!quiet && <StepBadge state={step.state} />}
           </span>
-          <span className="min-w-0 flex-1 text-body">
+          <span className="min-w-0 flex-1 truncate text-body">
             {running ? (
               <TextShimmer className="max-w-full truncate align-bottom">
                 {step.call.label}
               </TextShimmer>
             ) : (
               <span
-                className={cn(step.state === "declined" && "text-muted-foreground line-through")}
+                className={cn(
+                  step.state === "declined" && "text-muted-foreground line-through",
+                  quiet && "text-muted-foreground",
+                )}
               >
                 {step.call.label}
               </span>
+            )}
+            {routed(step.call) && (
+              <ApiRoute route={step.call.route!} className="ml-2 align-baseline max-sm:hidden" />
             )}
             {step.said && step.state !== "running" && (
               <span
                 className={cn(
                   "ml-2 text-hint",
-                  step.state === "failed" ? "text-destructive" : "text-muted-foreground",
+                  // A call the assistant wrote wrong and corrected is its own slip,
+                  // not something that failed on the server.
+                  step.state === "failed" && !quiet ? "text-destructive" : "text-muted-foreground",
                 )}
               >
                 {step.said}
@@ -89,56 +170,83 @@ export function StepRow({ step }: { step: AgentStep }) {
           {details && (
             <ChevronRight
               aria-hidden
-              className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90"
+              className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-90"
             />
           )}
         </CollapsibleTrigger>
         {details && (
-          <CollapsibleContent className="space-y-2 px-2 pt-1 pb-2 sm:pl-10.5">
-            <StepDetails step={step} />
+          <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+            <div className="space-y-2 px-2 pt-1 pb-2 sm:pl-10.5">
+              <StepDetails step={step} />
+            </div>
           </CollapsibleContent>
         )}
-        {step.change && <ChangeCard change={step.change} reason={step.call.reason} />}
+        {step.change && (
+          <ChangeCard change={step.change} reason={step.call.reason} lit={!replayed} />
+        )}
       </li>
     </Collapsible>
   )
 }
 
+/** The corner of a step's tile: a spinner while it runs, a tick or a cross once it ends. */
 function StepBadge({ state }: { state: AgentStep["state"] }) {
-  if (state === "done")
-    return (
-      <span className="absolute -right-1 -bottom-1 grid size-3 place-items-center rounded-full bg-success text-success-foreground">
-        <Check className="size-2" />
-      </span>
-    )
-  if (state === "failed")
-    return (
-      <span className="absolute -right-1 -bottom-1 grid size-3 place-items-center rounded-full bg-destructive text-white">
-        <Cross className="size-2" />
-      </span>
-    )
-  if (state === "running" || state === "waiting")
-    return (
-      <span
-        className={cn(
-          "absolute -right-0.5 -bottom-0.5 size-2 animate-breathe rounded-full",
-          state === "running" ? "bg-signal" : "bg-warning",
-        )}
-      />
-    )
-  return null
+  return (
+    <span className="absolute -right-1 -bottom-1 grid size-3 place-items-center">
+      <AnimatePresence mode="popLayout" initial={false}>
+        {state === "done" ? (
+          <Badge key="done" className="bg-success text-success-foreground">
+            <Check className="size-2" />
+          </Badge>
+        ) : state === "failed" ? (
+          <Badge key="failed" className="bg-destructive text-white">
+            <Cross className="size-2" />
+          </Badge>
+        ) : state === "running" ? (
+          <Badge key="running" className="bg-card text-signal">
+            <LoaderCircle className="size-3 animate-spin" />
+          </Badge>
+        ) : state === "waiting" ? (
+          <Badge key="waiting" className="size-2 animate-breathe bg-warning" />
+        ) : null}
+      </AnimatePresence>
+    </span>
+  )
+}
+
+function Badge({ className, children }: { className?: string; children?: React.ReactNode }) {
+  return (
+    <motion.span
+      className={cn("grid size-3 place-items-center rounded-full", className)}
+      initial={{ opacity: 0, scale: 0.4 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.4 }}
+      transition={{ duration: 0.18, ease: EASE }}
+    >
+      {children}
+    </motion.span>
+  )
 }
 
 function StepDetails({ step }: { step: AgentStep }) {
   return (
     <>
-      {step.call.operation && (
-        <p className="truncate font-mono text-hint text-muted-foreground">{step.call.operation}</p>
+      {routed(step.call) ? (
+        <ApiRoute route={step.call.route!} />
+      ) : (
+        step.call.operation && (
+          <p className="truncate font-mono text-hint text-muted-foreground">
+            {step.call.operation}
+          </p>
+        )
       )}
       {step.call.reason && !step.change && (
         <p className="text-hint leading-relaxed text-muted-foreground">{step.call.reason}</p>
       )}
-      <InputLines input={step.call.input} flush />
+      {step.state === "failed" && step.said && step.said.length > 60 && (
+        <p className="text-hint leading-relaxed text-muted-foreground">{step.said}</p>
+      )}
+      <InputLines input={askedInput(step.call)} flush />
       {step.output && (
         <Well className="max-h-56 p-2.5 text-hint whitespace-pre-wrap" aria-label="What it read">
           {step.output}
@@ -149,7 +257,16 @@ function StepDetails({ step }: { step: AgentStep }) {
 }
 
 /** What a change did, the shortcut straight to it, and what is different now. */
-function ChangeCard({ change, reason }: { change: AgentChange; reason?: string }) {
+function ChangeCard({
+  change,
+  reason,
+  lit,
+}: {
+  change: AgentChange
+  reason?: string
+  /** Arrived just now, rather than read back: its shortcut is lit once. */
+  lit?: boolean
+}) {
   return (
     <div
       data-slot="agent-change"
@@ -161,7 +278,7 @@ function ChangeCard({ change, reason }: { change: AgentChange; reason?: string }
           <span className="font-medium text-success">Changed</span>
           {reason && <span className="text-muted-foreground"> · {reason}</span>}
         </span>
-        <Shortcut label={change.label} href={change.href} />
+        <Shortcut label={change.label} href={change.href} lit={lit} />
       </div>
       {change.diff && change.diff.length > 0 && (
         <ul className="space-y-0.5 pl-5.5 font-mono text-hint">
@@ -180,10 +297,20 @@ function ChangeCard({ change, reason }: { change: AgentChange; reason?: string }
   )
 }
 
-/** A press straight to the page, the back way being the dock's. */
-export function Shortcut({ label, href }: { label: string; href: string }) {
+/**
+ * A press straight to the page, the back way being the dock's. `lit` is a shortcut
+ * that has just arrived: its outline is lit in the change's green once and fades,
+ * so the way to what changed is the first thing the eye finds.
+ */
+export function Shortcut({ label, href, lit }: { label: string; href: string; lit?: boolean }) {
   return (
-    <Button asChild size="xs" variant="outline" data-slot="agent-shortcut">
+    <Button
+      asChild
+      size="xs"
+      variant="outline"
+      data-slot="agent-shortcut"
+      className={cn(lit && "agent-attention [--agent-attention:var(--success)]")}
+    >
       <Link href={href} onClick={() => arriveAt(href)}>
         Open {label}
         <ArrowRight />
@@ -240,7 +367,8 @@ const KIND_TAG: Record<
  * What it wants to do, waiting on the person's answer: AI Elements' `confirmation`.
  * Nothing it names has run. Each has its own Allow, so a person can take the read
  * and leave the restart; the press runs it through the route the project's own
- * button calls, as them.
+ * button calls, as them. It arrives with a rise and its edge lit once in its tone,
+ * because it is the one thing in the column that waits on the reader.
  */
 export function ApprovalCard({
   steps,
@@ -256,14 +384,21 @@ export function ApprovalCard({
   const open = steps.filter((step) => step.decision === undefined)
   const destructive = steps.some((step) => step.call.kind === "destructive")
   return (
-    <section
+    <motion.section
       data-slot="agent-approval"
       aria-label={
         steps.length === 1 ? "A call waiting for your answer" : "Calls waiting for your answer"
       }
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.22, ease: EASE }}
       className={cn(
-        "animate-rise space-y-2.5 rounded-xl border p-3",
+        "space-y-2.5 rounded-xl border p-3",
         destructive ? "border-rule-danger bg-wash-danger" : "border-rule-warning bg-wash-warning",
+        active &&
+          (destructive
+            ? "agent-attention [--agent-attention:var(--destructive)]"
+            : "agent-attention [--agent-attention:var(--warning)]"),
       )}
     >
       <p className="flex items-center gap-2 text-body font-medium">
@@ -297,39 +432,53 @@ export function ApprovalCard({
                 </span>
                 <span className="min-w-0 flex-1 text-body font-medium">{step.call.label}</span>
                 <Tag tone={tag.tone}>{tag.label}</Tag>
-                {step.decision !== undefined ? (
-                  <span className="text-hint font-medium text-muted-foreground">
-                    {step.decision ? "Allowed" : "Declined"}
-                  </span>
-                ) : (
-                  active && (
-                    <span className="flex shrink-0 gap-1.5">
-                      <Button
-                        size="xs"
-                        variant={step.call.kind === "destructive" ? "destructive" : "default"}
-                        aria-label={`Allow: ${step.call.label}`}
-                        onClick={() => onDecide(step.call.id, true)}
+                <AnimatePresence mode="popLayout" initial={false}>
+                  {step.decision !== undefined ? (
+                    <motion.span
+                      key="decided"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.15 }}
+                      className="text-hint font-medium text-muted-foreground"
+                    >
+                      {step.decision ? "Allowed" : "Declined"}
+                    </motion.span>
+                  ) : (
+                    active && (
+                      <motion.span
+                        key="decide"
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.12 }}
+                        className="flex shrink-0 gap-1.5"
                       >
-                        Allow
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        aria-label={`Decline: ${step.call.label}`}
-                        onClick={() => onDecide(step.call.id, false)}
-                      >
-                        Decline
-                      </Button>
-                    </span>
-                  )
-                )}
+                        <Button
+                          size="xs"
+                          variant={step.call.kind === "destructive" ? "destructive" : "default"}
+                          aria-label={`Allow: ${step.call.label}`}
+                          onClick={() => onDecide(step.call.id, true)}
+                        >
+                          Allow
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          aria-label={`Decline: ${step.call.label}`}
+                          onClick={() => onDecide(step.call.id, false)}
+                        >
+                          Decline
+                        </Button>
+                      </motion.span>
+                    )
+                  )}
+                </AnimatePresence>
               </div>
+              {routed(step.call) && <ApiRoute route={step.call.route!} className="pl-8.5" />}
               {step.call.reason && (
                 <p className="pl-8.5 text-body leading-relaxed text-muted-foreground">
                   {step.call.reason}
                 </p>
               )}
-              <InputLines input={step.call.input} />
+              <InputLines input={askedInput(step.call)} />
             </li>
           )
         })}
@@ -344,6 +493,6 @@ export function ApprovalCard({
           </Button>
         </div>
       )}
-    </section>
+    </motion.section>
   )
 }

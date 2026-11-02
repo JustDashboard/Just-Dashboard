@@ -9,7 +9,11 @@ import {
   Globe,
   Key,
   Logs,
+  MagnifyingGlass,
   Rocket,
+  Servers,
+  Terminal,
+  Users,
   SettingsSliders,
   ShieldCheck,
   Sparkles,
@@ -38,6 +42,8 @@ const TOOLS: Record<string, StepMark> = {
   firewall_rules: { icon: FirewallCheck },
   security_updates: { icon: ShieldCheck },
   wait_for_run: { icon: Rocket },
+  find_routes: { icon: MagnifyingGlass },
+  describe_operation: { icon: MagnifyingGlass },
 }
 
 const ROUTES: [string, StepMark][] = [
@@ -64,6 +70,22 @@ const ROUTES: [string, StepMark][] = [
   ["/runs", { icon: Rocket }],
   ["/run", { icon: Rocket }],
   ["/sleep", { product: "docker", icon: Box }],
+  // The server's own routes, which a whole-server chat calls.
+  ["/docker", { product: "docker", icon: Box }],
+  ["/containers", { product: "docker", icon: Box }],
+  ["/proxy", { product: "caddy", icon: Globe }],
+  ["/certificates", { product: "caddy", icon: ShieldCheck }],
+  ["/firewall", { icon: FirewallCheck }],
+  ["/security", { icon: ShieldCheck }],
+  ["/alerts", { icon: Bell }],
+  ["/metrics", { icon: Gauge }],
+  ["/system/services", { icon: Servers }],
+  ["/services", { icon: Servers }],
+  ["/processes", { icon: Terminal }],
+  ["/users", { icon: Users }],
+  ["/packages", { icon: Archive }],
+  ["/logs", { icon: Logs }],
+  ["/deploy", { icon: Rocket }],
 ]
 
 export function stepMark(call: AgentCall): StepMark {

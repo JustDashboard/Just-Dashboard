@@ -118,6 +118,7 @@ export function SetupAssistant({
         />
       ) : (
         <AgentChat
+          key={session.key}
           compact
           session={session}
           settings={view}

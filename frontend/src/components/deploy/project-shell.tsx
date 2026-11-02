@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import {
   ArrowCircleUp,
   ArrowRight,
@@ -85,6 +85,9 @@ import {
  */
 export function ProjectShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
+  // The assistant's page is a conversation, which is the window under the header
+  // rather than a page that scrolls: it fills what is left, down to the foot.
+  const fill = usePathname().endsWith("/assistant")
   const { confirm, dialog } = useConfirm()
   const [versionOpen, setVersionOpen] = useState(false)
   const [testPullOpen, setTestPullOpen] = useState(false)
@@ -164,7 +167,7 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   const domain = project.operations?.domains.domains.find((route) => route.hostname === hostOf(url))
 
   return (
-    <Page className="pt-4 md:pt-5">
+    <Page fill={fill} className={cn("pt-4 md:pt-5", fill && "gap-0 pb-0 md:gap-0 md:pb-0")}>
       <PageContext title={record.name} />
 
       <section
@@ -255,7 +258,9 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
 
       {/* On a phone the header's row has no room for the switch beside the
           command, so it takes a row of its own under the facts. */}
-      {project.staging && <EnvironmentSwitch className="-mt-2 sm:hidden" />}
+      {project.staging && (
+        <EnvironmentSwitch className={cn("sm:hidden", fill ? "mt-3 mb-1" : "-mt-2")} />
+      )}
       {children}
       {dialog}
       <DeployVersionDialog open={versionOpen} onOpenChange={setVersionOpen} />
