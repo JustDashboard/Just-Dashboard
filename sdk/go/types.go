@@ -3158,6 +3158,7 @@ type OperatorRequest struct {
 	Decisions    map[string]bool `json:"decisions"`
 	Mode         Mode            `json:"mode,omitempty"`
 	Question     string          `json:"question,omitempty"`
+	TakeOver     bool            `json:"takeOver,omitempty"`
 }
 
 // Outcome is secretstore.Outcome in the dashboard's source.

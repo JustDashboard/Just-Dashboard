@@ -74,8 +74,13 @@ func operatorRouterAs(t *testing.T, role auth.Role) *operatorFixture {
 	})
 	r.Use(httpx.AuditMutations(s.Audit))
 	s.mountDeployRoutes(r)
+	s.mountAssistantRoutes(r)
 	// A call is made through the whole router, which this builds.
 	s.Routes()
+	// The person the fixture signs in as is a user, whose chats are saved.
+	if _, err := s.Store.DB.Exec(`INSERT INTO users(id, username, password_hash, role, created_at) VALUES(1, 'operator', 'x', ?, 0)`, string(role)); err != nil {
+		t.Fatal(err)
+	}
 	projectID, environmentID := seedCommittedDeployment(t, s, "shop",
 		deploy.DraftSourceConfig{Kind: deploy.SourceGit, Mode: deploy.SourceModeGitURL, URL: "https://github.com/acme/shop.git", Ref: "main"},
 		deploy.SourceIdentity{Kind: deploy.SourceGit, Revision: strings.Repeat("e", 40)})
@@ -300,12 +305,13 @@ func TestAChangeWaitsForThePersonAndThenRunsThroughItsRoute(t *testing.T) {
 	if detail, _ := f.audit(t, "deploy.run.request"); !strings.Contains(detail, `"operation":"restart"`) {
 		t.Fatalf("the restart was audited as %s", detail)
 	}
-	var key string
-	if err := f.s.Store.DB.QueryRow(`SELECT COALESCE(key_name, '') FROM audit_log WHERE action = 'deploy.run.request' ORDER BY id DESC LIMIT 1`).Scan(&key); err != nil {
+	// The route's own entry is the person's, marked as the assistant's.
+	var actor, username, key string
+	if err := f.s.Store.DB.QueryRow(`SELECT actor, username, COALESCE(key_name, '') FROM audit_log WHERE action = 'deploy.run.request' ORDER BY id DESC LIMIT 1`).Scan(&actor, &username, &key); err != nil {
 		t.Fatal(err)
 	}
-	if key != "Assistant" {
-		t.Fatalf("the audit entry says it was %q", key)
+	if actor != "assistant" || username != "operator" || key != "" {
+		t.Fatalf("the audit entry says it was %q by %q (key %q)", actor, username, key)
 	}
 }
 
@@ -384,8 +390,8 @@ func TestAConfigurationChangeSaysWhatIsDifferentAndWhereToSeeIt(t *testing.T) {
 	}
 }
 
-// A conversation is about one deployment. Its id is filled in, naming another is
-// refused, and a route of another's environment is too.
+// call_operation is about the conversation's deployment. Its id is filled in, naming
+// another is pointed at api_request, and a route of another's environment is refused.
 func TestAConversationReachesOneDeployment(t *testing.T) {
 	f := operatorRouterAs(t, auth.RoleAdmin)
 	f.provider.queue(
@@ -400,7 +406,7 @@ func TestAConversationReachesOneDeployment(t *testing.T) {
 	if len(called) != 3 || called[0]["ok"] != false || called[1]["ok"] != true || called[2]["ok"] != false {
 		t.Fatalf("called = %v", called)
 	}
-	if !strings.Contains(called[0]["said"].(string), "one deployment") {
+	if !strings.Contains(called[0]["said"].(string), "api_request") {
 		t.Fatalf("another deployment's id = %v", called[0])
 	}
 }
@@ -440,10 +446,9 @@ func TestAnAnswerWaitsForTheBudgetRatherThanBeingRefused(t *testing.T) {
 	}
 }
 
-// A schedule runs later with nobody there, and its container command names any
-// container, so what the assistant schedules is held to deploying and restarting. A
-// person's own schedule is not.
-func TestAScheduleTheAssistantWritesCannotRunACommand(t *testing.T) {
+// A schedule that runs a command is the person's to allow, as any change is, and
+// full access writes it: what the assistant used to be refused is asked instead.
+func TestAScheduleThatRunsACommandIsAskedForNotRefused(t *testing.T) {
 	f := operatorRouterAs(t, auth.RoleAdmin)
 	f.s.assistant.limit = httpx.NewLimiter(6000, 100)
 	schedule := func(action string, config map[string]any) [2]any {
@@ -452,48 +457,21 @@ func TestAScheduleTheAssistantWritesCannotRunACommand(t *testing.T) {
 				"steps": []any{map[string]any{"action": action, "config": config}}},
 		}}}
 	}
-	for _, step := range []struct {
-		action string
-		config map[string]any
-	}{
-		{"container_command", map[string]any{"containerId": "some-other-container", "argv": []string{"sh", "-c", "env"}}},
-		{"backup", map[string]any{"jobId": 1}},
-	} {
-		f.provider.queue(claudeCalls("Scheduling.", schedule(step.action, step.config)), claudeAnswer("No."))
-		events := f.ask(t, `{"question":"Schedule it","mode":"full"}`)
-		called := ofType(events, "called")
-		if len(called) != 1 || called[0]["ok"] != false || !strings.Contains(called[0]["said"].(string), "Automation page") {
-			t.Fatalf("%s: %v", step.action, called)
-		}
+	command := schedule("container_command", map[string]any{"containerId": "some-container", "argv": []string{"sh", "-c", "env"}})
+	f.provider.queue(claudeCalls("Scheduling.", command))
+	events := f.ask(t, `{"question":"Schedule it","mode":"changes"}`)
+	if pending, _ := doneOf(t, events)["pending"].([]any); len(pending) != 1 || len(ofType(events, "called")) != 0 {
+		t.Fatalf("a command's schedule did not wait: %v", events)
+	}
+	f.provider.queue(claudeCalls("Scheduling.", command), claudeAnswer("Done."))
+	events = f.ask(t, `{"question":"Schedule it","mode":"full"}`)
+	called := ofType(events, "called")
+	if len(called) != 1 || strings.Contains(fmt.Sprint(called[0]["said"]), "Automation page") {
+		t.Fatalf("full access was refused by the old guard: %v", called)
 	}
 	var saved int
-	if err := f.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_schedules`).Scan(&saved); err != nil {
-		t.Fatal(err)
-	}
-	if saved != 0 {
-		t.Fatalf("%d schedules were saved", saved)
-	}
-	f.provider.queue(claudeCalls("Scheduling.", schedule("restart", map[string]any{})), claudeAnswer("Scheduled."))
-	events := f.ask(t, `{"question":"Restart it nightly","mode":"full"}`)
-	if called := ofType(events, "called"); len(called) != 1 || called[0]["ok"] != true {
-		t.Fatalf("a restart: %v", events)
-	}
-}
-
-// Backups are the whole server's, so full access does not reach them: a read and a run
-// both wait for the person.
-func TestBackupsWaitForThePersonEvenInFullAccess(t *testing.T) {
-	f := operatorRouterAs(t, auth.RoleAdmin)
-	f.provider.queue(claudeCalls("Reading.",
-		[2]any{assistant.ToolCallOperation, map[string]any{"name": "backup_jobs", "reason": "x"}},
-		[2]any{assistant.ToolCallOperation, map[string]any{"name": "backup_run", "reason": "x", "arguments": map[string]any{"id": 1}}}))
-	events := f.ask(t, `{"question":"Back it up","mode":"full"}`)
-	pending, _ := doneOf(t, events)["pending"].([]any)
-	if len(pending) != 2 || pending[0].(map[string]any)["kind"] != "server" || pending[1].(map[string]any)["kind"] != "server" {
-		t.Fatalf("pending = %v", pending)
-	}
-	if len(ofType(events, "called")) != 0 {
-		t.Fatalf("a backup call ran unasked: %v", events)
+	if err := f.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_schedules`).Scan(&saved); err != nil || saved != 1 {
+		t.Fatalf("full access saved %d schedules (%v)", saved, err)
 	}
 }
 
@@ -637,32 +615,33 @@ func TestAQuestionDeclinesAChangeThatWaits(t *testing.T) {
 	}
 }
 
-// A call for anything but its tools runs nothing and keeps nothing; a call for an
-// operation not offered is told so, and may correct itself.
-func TestACallOutsideItsToolsIsRefused(t *testing.T) {
+// A call for anything but its tools runs nothing, and the model is told so and
+// goes on; a call for an operation not offered is told so too.
+func TestACallOutsideItsToolsIsAnsweredWithWhy(t *testing.T) {
 	f := operatorRouterAs(t, auth.RoleAdmin)
-	f.provider.queue(claudeCalls("", [2]any{"run_shell", map[string]any{"command": "id"}}))
+	f.s.assistant.limit = httpx.NewLimiter(6000, 100)
+	f.provider.queue(claudeCalls("", [2]any{"run_shell", map[string]any{"command": "id"}}), claudeAnswer("I have no shell."))
 	events := f.ask(t, `{"question":"Run id"}`)
-	if errors := ofType(events, "error"); len(errors) != 1 || !strings.Contains(errors[0]["error"].(map[string]any)["message"].(string), "does not offer") {
+	called := ofType(events, "called")
+	if len(called) != 1 || called[0]["ok"] != false || !strings.Contains(called[0]["said"].(string), "no tool called") || len(ofType(events, "error")) != 0 {
 		t.Fatalf("events = %v", events)
 	}
-	f.s.assistant.limit = httpx.NewLimiter(6000, 100)
-	for _, name := range []string{"deployment_variable_reveal", "credential_list", "deployment_delete_permanent", "nothing_at_all"} {
-		f.provider.queue(
-			claudeCalls("Trying.", [2]any{assistant.ToolCallOperation, map[string]any{"name": name, "reason": "x"}}),
-			claudeAnswer("I cannot."),
-		)
-		events := f.ask(t, `{"question":"Try","mode":"full"}`)
-		called := ofType(events, "called")
-		if len(called) != 1 || called[0]["ok"] != false || !strings.Contains(called[0]["said"].(string), "no operation") {
-			t.Fatalf("%s = %v", name, events)
-		}
+	if sent := f.provider.raw[len(f.provider.raw)-1]; !strings.Contains(sent, `"is_error":true`) || !strings.Contains(sent, "api_request") {
+		t.Fatalf("the model was not told: %s", sent)
+	}
+	f.provider.queue(
+		claudeCalls("Trying.", [2]any{assistant.ToolCallOperation, map[string]any{"name": "nothing_at_all", "reason": "x"}}),
+		claudeAnswer("I cannot."),
+	)
+	events = f.ask(t, `{"question":"Try","mode":"full"}`)
+	called = ofType(events, "called")
+	if len(called) != 1 || called[0]["ok"] != false || !strings.Contains(called[0]["said"].(string), "no operation") {
+		t.Fatalf("nothing_at_all = %v", events)
 	}
 }
 
-// What stays a person's is not in the catalogue whatever their role: a secret's value,
-// saved credentials, secret stores, the typed deletions, what speaks as the dashboard
-// on GitHub, and what reaches the host. Every line that opens a route names a real one,
+// The catalogue is every route under /deploy the person could make, but for what no
+// request of the assistant's makes; every line that names a route names a real one,
 // and every change says where it is shown.
 func TestTheCatalogueIsTheRoutesItSaysItIs(t *testing.T) {
 	s := testServer(t)
@@ -672,69 +651,59 @@ func TestTheCatalogueIsTheRoutesItSaysItIs(t *testing.T) {
 		t.Fatalf("the catalogue cannot be built: %v", cat.err)
 	}
 	routes := map[string]bool{}
-	_ = chi.Walk(root, func(method, pattern string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+	handlers := map[string]bool{}
+	_ = chi.Walk(root, func(method, pattern string, h http.Handler, _ ...func(http.Handler) http.Handler) error {
 		routes[method+" "+strings.TrimSuffix(strings.TrimPrefix(pattern, "/api/v1"), "/")] = true
+		handlers[handlerName(h)] = true
 		return nil
 	})
-	for route := range assistantRoutes {
+	for route := range agentExcludedRoutes {
 		if !routes[route] {
-			t.Errorf("assistantRoutes names %s, which the router does not have", route)
+			t.Errorf("agentExcludedRoutes names %s, which the router does not have", route)
 		}
 	}
-	for route := range agentClosedRoutes {
+	for route := range agentReadingPosts {
 		if !routes[route] {
-			t.Errorf("agentClosedRoutes names %s, which the router does not have", route)
+			t.Errorf("agentReadingPosts names %s, which the router does not have", route)
 		}
 	}
-	closed := []string{
-		"/reveal", "/credentials", "/secret-stores", "/permanent", "/remove-managed", "/removal-plan",
-		"/merge", "/comment", "/approve", "/reject", "/preview", "/github-app", "/import/", "/assistant",
-		"/commit", "/key/", "/restore", "/download", "/notifications", "/log-drains",
+	for handler := range agentStreamHandlers {
+		if !handlers[handler] {
+			t.Errorf("agentStreamHandlers names %s, which no route has", handler)
+		}
 	}
+	offered := map[string]bool{}
 	for _, op := range cat.ops {
-		for _, part := range closed {
-			if strings.Contains(op.Pattern, part) && op.Grant != mcp.GrantRead {
-				t.Errorf("%s %s is offered and should stay a person's (%s)", op.Method, op.Pattern, part)
+		offered[op.Method+" "+op.Pattern] = true
+		for _, closed := range []string{"/assistant", "/hooks/", "/stream"} {
+			if strings.Contains(op.Pattern, closed) {
+				t.Errorf("%s %s is offered and no request of the assistant's makes it", op.Method, op.Pattern)
 			}
 		}
-		if strings.Contains(op.Pattern, "/reveal") || strings.Contains(op.Pattern, "/credentials") {
-			t.Errorf("%s %s reads a secret", op.Method, op.Pattern)
-		}
-		if op.Grant != mcp.GrantRead && op.Scope == agentScopeDeployment {
+		if op.Grant != mcp.GrantRead && op.offered(agentScopeDeployment) {
 			if _, listed := agentPageOf(op.Pattern); !listed {
 				t.Errorf("%s %s changes something and no line says where it is shown (agentPages)", op.Method, op.Pattern)
 			}
 		}
 	}
-	if _, ok := cat.byName["deployment_draft_commit"]; ok {
-		t.Error("the assistant can press Deploy")
-	}
-}
-
-// The assistant's reach through the gate: an opened route lets it by and no other, and
-// the same delegate as a plain key is refused.
-func TestTheGateOpensOnlyWhatAssistantRoutesSay(t *testing.T) {
-	if !assistantOpens(http.MethodPut, "/deploy/{id}/environments/{env}/rollback-policy") || !assistantOpens(http.MethodGet, "/backups/") {
-		t.Fatal("a line of assistantRoutes does not open")
-	}
-	for _, closed := range [][2]string{
-		{http.MethodGet, "/deploy/{id}/environments/{env}/variables/{name}/reveal"},
-		{http.MethodGet, "/deploy/credentials"},
-		{http.MethodDelete, "/deploy/{id}/permanent"},
-		{http.MethodPost, "/backups/runs/{runID}/restore"},
-		{http.MethodPost, "/backups/"},
-		{http.MethodPost, "/backups/{id}/enabled"},
-		{http.MethodPost, "/deploy/{id}/environments"},
-		{http.MethodPost, "/deploy/{id}/pull-requests/{number}/merge"},
+	// What the old narrowing kept from it is the person's to allow now.
+	for _, route := range []string{
+		"GET /deploy/{id}/environments/{env}/variables", "GET /deploy/{id}/environments/{env}/variables/{name}/reveal",
+		"GET /deploy/credentials", "POST /deploy/{id}/duplicate", "POST /deploy/drafts/{draft}/commit",
+		"POST /deploy/{id}/environments/{env}/variables/{name}/generate", "DELETE /deploy/{id}/permanent",
 	} {
-		if assistantOpens(closed[0], closed[1]) {
-			t.Errorf("%s %s is open to the assistant", closed[0], closed[1])
+		if !offered[route] {
+			t.Errorf("%s is not offered", route)
 		}
+	}
+	if offered["POST /deploy/{id}/runs/{run}/diagnosis"] || offered["POST /deploy/{id}/assistant"] {
+		t.Error("the assistant can ask itself")
 	}
 }
 
 // A draft's conversation saves a draft and reads back, without asking in any mode,
-// since nothing runs until the person presses Deploy; and it can press nothing.
+// since nothing runs until it is committed; committing it is pressing Deploy, which
+// it asks for unless the mode is full access.
 func TestADraftsConversationConfiguresItWithoutAsking(t *testing.T) {
 	f := operatorRouterAs(t, auth.RoleAdmin)
 	rec := f.do(http.MethodPost, "/deploy/drafts", `{}`)
@@ -759,18 +728,20 @@ func TestADraftsConversationConfiguresItWithoutAsking(t *testing.T) {
 	stream := f.do(http.MethodPost, "/deploy/drafts/"+draft.ID+"/assistant", `{"question":"Set it up","mode":"ask"}`)
 	events := lines(t, stream)
 	called := ofType(events, "called")
-	if len(called) != 2 || called[0]["ok"] != true || called[1]["ok"] != false {
+	if len(called) != 1 || called[0]["ok"] != true {
 		t.Fatalf("called = %v (%s)", called, stream.Body.String())
 	}
-	if doneOf(t, events)["pending"] != nil {
-		t.Fatalf("a draft's save waited: %v", events)
+	pending, _ := doneOf(t, events)["pending"].([]any)
+	if len(pending) != 1 || pending[0].(map[string]any)["operation"] != "deployment_draft_commit" {
+		t.Fatalf("pressing Deploy did not wait for the person: %v", events)
 	}
 	got := f.do(http.MethodGet, "/deploy/drafts/"+draft.ID, "")
 	if !strings.Contains(got.Body.String(), "shop-by-assistant") {
 		t.Fatalf("the draft was not saved: %s", got.Body.String())
 	}
 	first := f.provider.raw[0]
-	if !strings.Contains(first, "deployment_draft_save") || strings.Contains(first, "deployment_run_create") || strings.Contains(first, `"name":"recent_runs"`) {
+	if !strings.Contains(first, "deployment_draft_save") || strings.Contains(first, "deployment_run_create") || strings.Contains(first, `"name":"recent_runs"`) ||
+		!strings.Contains(first, `"name":"api_request"`) {
 		t.Fatalf("the draft's conversation was offered the wrong tools: %s", first)
 	}
 }

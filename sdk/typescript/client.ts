@@ -2368,7 +2368,9 @@ export interface DeploymentOperatorQuery {
  *
  * A session's route. The answer streams one JSON object a line: start, thinking, text, call (a
  * tool call as it starts), called (what became of it, and the shortcut to what it changed), link
- * (a shortcut the assistant offers), done (with the calls waiting for a decision) or error.
+ * (a shortcut the assistant offers), done (with the calls waiting for a decision) or error. A
+ * conversation is a saved chat (GET /assistant/chats): carried on by its id, it is answered 409
+ * chat_busy while a press runs it elsewhere unless takeOver stops that press.
  *
  * Only an interactive session may call it; no key reaches it. The answer is application/x-ndjson.
  */

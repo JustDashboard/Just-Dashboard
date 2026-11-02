@@ -29,6 +29,19 @@ const assistantRingKey = "assistant.keyring"
 // mountAssistantRoutes is called in the feature group.
 func (s *Server) mountAssistantRoutes(r chi.Router) {
 	r.Route("/assistant", func(r chi.Router) {
+		// The assistant about the whole server (handlers_assistant_turn.go). It acts
+		// as the person who asks, so it is a session's, as a deployment's is, and
+		// it asks for what a deployment's does.
+		r.With(httpx.RequireCapability(auth.CapServiceControl), httpx.RequireSession).
+			Method(http.MethodPost, "/chat", s.handle(s.handleServerAssistant))
+		// The person's own saved chats, whichever they are about
+		// (handlers_assistant_chats.go): theirs alone, by session or their key.
+		r.Route("/chats", func(r chi.Router) {
+			r.Method(http.MethodGet, "/", s.handle(s.handleAssistantChats))
+			r.Method(http.MethodGet, "/{chat}", s.handle(s.handleAssistantChat))
+			r.Method(http.MethodPatch, "/{chat}", s.handle(s.handleAssistantChatRename))
+			r.Method(http.MethodDelete, "/{chat}", s.handle(s.handleAssistantChatDelete))
+		})
 		// Who answers and with what, which every page that offers the assistant
 		// reads. The key is never in the answer.
 		r.Method(http.MethodGet, "/", s.handle(s.handleAssistantSettings))

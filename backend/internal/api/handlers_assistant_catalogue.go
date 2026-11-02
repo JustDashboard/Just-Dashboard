@@ -14,76 +14,13 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// What the dashboard's assistant may call: the operations it is offered, read off
-// the router and the deployment API's description, so they cannot drift from the
-// routes. It starts from everything a deploy key may do (deployKeyRoutes), with
-// that key's every rule — variables write-only, nothing that reaches past a
-// deployment's own container to the host, no saved credential sent somewhere new.
-// assistantRoutes opens a few routes a key may not, because a person is at the
-// dashboard asking, and agentClosedRoutes closes some a key may.
-//
-// What stays closed whichever the person's role, and the words the model is told:
-// a secret's value, saved credentials, secret stores and notification channels
-// (their secrets would go to somebody else's model); the routes that take a typed
-// confirmation (a person's by their nature); merging, commenting and previews (they
-// speak as the dashboard on GitHub, or run a pull request's code); and whatever
-// reaches the host.
-
-// assistantRoutes are the routes the assistant may make and a deploy key may not.
-// Each is a person's own act in the dashboard; it is a key's lack of a person behind
-// it that closed them.
-var assistantRoutes = map[string]string{
-	// Automation. A schedule runs later with nobody there, so what it may run is held
-	// to deploying and restarting this deployment (refuseAssistantSchedule): the step
-	// that runs a command names its container, and could name any on the server.
-	"POST /deploy/{id}/environments/{env}/schedules":              whyAutomations,
-	"PUT /deploy/{id}/environments/{env}/schedules/{schedule}":    whyAutomations,
-	"DELETE /deploy/{id}/environments/{env}/schedules/{schedule}": whyAutomations,
-	"POST /deploy/{id}/alerts":                                    whyAutomations,
-	"PUT /deploy/{id}/alerts/{alert}":                             whyAutomations,
-	"DELETE /deploy/{id}/alerts/{alert}":                          whyAutomations,
-	"POST /deploy/{id}/alerts/{alert}/test":                       whyAutomations,
-	// The terms a release is kept warm on and whether its images are scanned.
-	"PUT /deploy/{id}/environments/{env}/rollback-policy": whyRollbackTerms,
-	"PUT /deploy/{id}/environments/{env}/vulnerabilities": whyScanTerms,
-	// A domain's record, with the DNS credentials saved under Certificates, which
-	// the route uses and never answers with.
-	"GET /deploy/{id}/domains/{domain}/dns-record":  whyDNSRecord,
-	"POST /deploy/{id}/domains/{domain}/dns-record": whyDNSRecord,
-	// Backups, which are the whole server's and not this deployment's: reading them
-	// and starting one, each waiting for the person in every mode (agentKindServer).
-	// A job's destination holds credentials and its sources reach anything, so making
-	// or changing one stays on the Backups page.
-	"GET /backups":           "backups are not deployment routes",
-	"GET /backups/resources": "backups are not deployment routes",
-	"GET /backups/{id}":      "backups are not deployment routes",
-	"GET /backups/{id}/runs": "backups are not deployment routes",
-	"POST /backups/{id}/run": "backups are not deployment routes",
-}
-
-// assistantOpens reports whether assistantRoutes opens a route, by its method and
-// its chi pattern under /api/v1.
-func assistantOpens(method, pattern string) bool {
-	_, open := assistantRoutes[method+" "+strings.TrimSuffix(pattern, "/")]
-	return open
-}
-
-// agentClosedRoutes are routes a key may make and the assistant does not offer.
-var agentClosedRoutes = map[string]string{
-	"POST /deploy/{id}/runs/{run}/diagnosis": "it spends the model budget asking the model, and the assistant can read the run itself",
-	// These answer with a new secret, which would go to the model, and which the
-	// person could then never read, since it is masked from the page as well.
-	"POST /deploy/{id}/environments/{env}/triggers/{trigger}/rotate-secret": "its answer is a secret",
-	"POST /deploy/{id}/environments/{env}/triggers":                         "its answer is a secret",
-	// A second deployment is not what a conversation about one is for.
-	"POST /deploy/{id}/duplicate": "a conversation is about one deployment",
-	// A person presses Deploy, and the page beside the assistant holds the draft.
-	"POST /deploy/drafts":                                            "a conversation is about the draft it began on",
-	"POST /deploy/drafts/{draft}/commit":                             "creating the deployment is the person's press of Deploy",
-	"DELETE /deploy/drafts/{draft}":                                  "the page discards a setup",
-	"GET /deploy/drafts":                                             "a conversation is about the draft it began on",
-	"POST /deploy/{id}/environments/{env}/variables/{name}/generate": "a person is shown the value once, and a key never",
-}
+// What the dashboard's assistant may call by name: a deployment's operations,
+// read off the router and the deployment API's description, so they cannot drift
+// from the routes. It is every route under /deploy the person could make — the
+// assistant makes it as them, so their role is what decides — but for what no
+// request of the assistant's makes (agentExclusion): its own routes, a run's
+// diagnosis, which asks the model, a webhook, and the live streams. The rest of
+// the dashboard is api_request's, by method and path (handlers_assistant_routes.go).
 
 // agentScopeKind is what a conversation is about.
 type agentScopeKind int
@@ -91,26 +28,35 @@ type agentScopeKind int
 const (
 	agentScopeDeployment agentScopeKind = iota
 	agentScopeDraft
+	agentScopeServer
 )
+
+// word is a scope as a saved chat names it.
+func (k agentScopeKind) word() string {
+	switch k {
+	case agentScopeDraft:
+		return "draft"
+	case agentScopeServer:
+		return "server"
+	}
+	return "deployment"
+}
 
 // agentOperation is one operation the assistant may call.
 type agentOperation struct {
 	mcp.Operation
 	// Page is where what it changes is shown.
 	Page agentPage
-	// Scope is the conversations it is offered to.
+	// Scope is the conversations it is offered to: a deployment's routes to a
+	// deployment's, a draft's to a draft's, and the rest under /deploy to both.
 	Scope agentScopeKind
-	// Server is an operation on what the whole server shares rather than the
-	// deployment the conversation is about, which waits for the person in every mode.
-	Server bool
+	Both  bool
 }
 
 // Kind is what the operation does, as a person's mode decides whether it runs: a
 // read, a change, or one that stops, removes or replaces something.
 func (op agentOperation) Kind() string {
 	switch {
-	case op.Server:
-		return agentKindServer
 	case op.Grant == mcp.GrantRead:
 		return agentKindRead
 	case op.Grant == mcp.GrantDestructive || op.Tool.Annotations.DestructiveHint:
@@ -119,12 +65,16 @@ func (op agentOperation) Kind() string {
 	return agentKindChange
 }
 
+// offered reports whether a conversation of this scope is offered it.
+func (op agentOperation) offered(scope agentScopeKind) bool {
+	return op.Both && scope != agentScopeServer || op.Scope == scope
+}
+
 const (
 	agentKindFree        = "free"
 	agentKindRead        = "read"
 	agentKindChange      = "change"
 	agentKindDestructive = "destructive"
-	agentKindServer      = "server"
 )
 
 type agentCatalogue struct {
@@ -147,31 +97,30 @@ func (s *Server) agentCatalogue() *agentCatalogue {
 	return src.agent.cat
 }
 
-// agentScopeOf says which conversations are offered a route, if any. A deployment's
-// conversation reaches that deployment's routes and a few reads of
-// what they are chosen from; a draft's, that draft and those reads.
-func agentScopeOf(pattern string, method string) (agentScopeKind, bool) {
-	catalogue := method == http.MethodGet && (strings.HasPrefix(pattern, "/deploy/templates") ||
-		strings.HasPrefix(pattern, "/deploy/blueprints") || pattern == "/deploy/hostname")
+// agentScopeOf says which conversations are offered a route: a deployment's
+// routes to its conversation, a draft's to its, and every other route under
+// /deploy — the lists, credentials, templates, new drafts — to both.
+func agentScopeOf(pattern string) (agentScopeKind, bool) {
 	switch {
-	case strings.HasPrefix(pattern, "/deploy/drafts/{draft}") || catalogue:
-		return agentScopeDraft, true
+	case strings.HasPrefix(pattern, "/deploy/drafts/{draft}"):
+		return agentScopeDraft, false
 	case strings.HasPrefix(pattern, "/deploy/{id}"):
-		return agentScopeDeployment, true
+		return agentScopeDeployment, false
 	}
-	return 0, false
+	return agentScopeDeployment, true
 }
 
 func buildAgentCatalogue(root chi.Routes, doc *openapiDocument) *agentCatalogue {
 	cat := &agentCatalogue{byName: map[string]*agentOperation{}}
 	type walked struct {
 		method, pattern string
+		handler         string
 		middlewares     []func(http.Handler) http.Handler
 	}
 	var routes []walked
-	_ = chi.Walk(root, func(method, pattern string, _ http.Handler, middlewares ...func(http.Handler) http.Handler) error {
+	_ = chi.Walk(root, func(method, pattern string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
 		if strings.HasPrefix(pattern, "/api/v1/deploy/") {
-			routes = append(routes, walked{method, strings.TrimPrefix(pattern, "/api/v1"), middlewares})
+			routes = append(routes, walked{method, strings.TrimPrefix(pattern, "/api/v1"), handlerName(handler), middlewares})
 		}
 		return nil
 	})
@@ -189,22 +138,15 @@ func buildAgentCatalogue(root chi.Routes, doc *openapiDocument) *agentCatalogue 
 	paths, _ := document["paths"].(map[string]any)
 	for _, rt := range routes {
 		key := rt.method + " " + rt.pattern
-		trimmed := rt.method + " " + strings.TrimSuffix(rt.pattern, "/")
-		if _, closed := agentClosedRoutes[trimmed]; closed {
-			continue
-		}
-		rule, listed := ruleForDeployKey(rt.method, rt.pattern)
-		open := listed && rule.session == "" && rule.deny == ""
-		if !open && !assistantOpens(rt.method, rt.pattern) {
-			continue
-		}
-		scope, reachable := agentScopeOf(rt.pattern, rt.method)
-		if !reachable {
+		if agentExclusion(rt.method, rt.pattern, rt.handler) != "" {
 			continue
 		}
 		item, _ := paths[rt.pattern].(map[string]any)
 		op, _ := item[strings.ToLower(rt.method)].(map[string]any)
-		if op == nil || mcpUnanswerable(op) != "" {
+		if op == nil {
+			continue
+		}
+		if responses, _ := op["responses"].(map[string]any); responses["101"] != nil {
 			continue
 		}
 		grant := mcp.GrantRead
@@ -223,9 +165,9 @@ func buildAgentCatalogue(root chi.Routes, doc *openapiDocument) *agentCatalogue 
 			return cat
 		}
 		page, _ := agentPageOf(rt.pattern)
-		cat.ops = append(cat.ops, agentOperation{Operation: built, Page: page, Scope: scope})
+		scope, both := agentScopeOf(rt.pattern)
+		cat.ops = append(cat.ops, agentOperation{Operation: built, Page: page, Scope: scope, Both: both})
 	}
-	cat.ops = append(cat.ops, agentBackupOperations()...)
 	for i := range cat.ops {
 		name := cat.ops[i].Tool.Name
 		if _, taken := cat.byName[name]; taken {
@@ -261,53 +203,11 @@ func agentParameterHint(pattern, name string) string {
 	return ""
 }
 
-func objectSchema(required []string, properties map[string]any) map[string]any {
-	schema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
-	if len(required) > 0 {
-		schema["required"] = required
-	}
-	return schema
-}
-
-// agentBackupOperations are backups as operations, by hand: they are not in the
-// deployment API's description. What they answer is the Backups page's own read,
-// which never carries a destination's credentials, though it does name every job's
-// folders and destination, which is why even a read waits for the person.
-func agentBackupOperations() []agentOperation {
-	page := agentPage{Label: "Backups", Path: "/backups", Absolute: true}
-	idParam := map[string]any{"type": "integer", "description": "The job's id, as backup_jobs gives it."}
-	reading := func(name, title, description, pattern string, path []mcp.Parameter, properties map[string]any) agentOperation {
-		required := []string{}
-		for _, p := range path {
-			required = append(required, p.Name)
-		}
-		return agentOperation{Page: page, Scope: agentScopeDeployment, Server: true, Operation: mcp.Operation{
-			ID: name, Method: http.MethodGet, Pattern: pattern, Path: path, Grant: mcp.GrantRead,
-			Tool: mcp.Tool{Name: name, Title: title, Description: description + " It only reads.", InputSchema: objectSchema(required, properties),
-				Annotations: mcp.Annotations{Title: title, ReadOnlyHint: true, IdempotentHint: true}},
-		}}
-	}
-	changing := func(name, title, description, pattern string, properties map[string]any, body bool) agentOperation {
-		return agentOperation{Page: page, Scope: agentScopeDeployment, Server: true, Operation: mcp.Operation{
-			ID: name, Method: http.MethodPost, Pattern: pattern, Path: []mcp.Parameter{{Name: "id", Type: "integer"}}, Grant: mcp.GrantWrite, Body: body, BodyRequired: body,
-			Tool: mcp.Tool{Name: name, Title: title, Description: description, InputSchema: objectSchema([]string{"id"}, properties),
-				Annotations: mcp.Annotations{Title: title}},
-		}}
-	}
-	return []agentOperation{
-		reading("backup_jobs", "List the server's backup jobs", "List the backup jobs: each one's name, what it backs up (folders, and the databases it dumps), where it goes, its schedule, whether it is enabled and when it last ran.", "/backups/", nil, map[string]any{}),
-		reading("backup_resources", "List what can be backed up", "List what a backup job can cover on this server: the databases, volumes and folders.", "/backups/resources", nil, map[string]any{}),
-		reading("backup_job", "Read one backup job", "Read one backup job.", "/backups/{id}", []mcp.Parameter{{Name: "id", Type: "integer"}}, map[string]any{"id": idParam}),
-		reading("backup_runs", "Read a backup job's runs", "Read a backup job's recent runs: when each ran, whether it succeeded and how large it was.", "/backups/{id}/runs", []mcp.Parameter{{Name: "id", Type: "integer"}}, map[string]any{"id": idParam}),
-		changing("backup_run", "Run a backup now", "Start a backup job now. It runs on its own, however long it takes: read backup_runs for how it went.", "/backups/{id}/run", map[string]any{"id": idParam}, false),
-	}
-}
-
 // lines lists a conversation's operations for its prompt.
 func (c *agentCatalogue) lines(scope agentScopeKind) []assistant.OperationLine {
 	out := []assistant.OperationLine{}
 	for _, op := range c.ops {
-		if op.Scope != scope {
+		if !op.offered(scope) {
 			continue
 		}
 		out = append(out, assistant.OperationLine{Name: op.Tool.Name, Title: op.Tool.Title, Kind: op.Kind()})
@@ -331,6 +231,18 @@ var agentPages = []struct {
 	match string
 	page  agentPage
 }{
+	// What the whole install's deployments share, each on a page of its own.
+	{"/deploy/shared-variables", agentPage{Label: "Shared variables", Path: "/deploy/variables", Absolute: true}},
+	{"/deploy/credentials", agentPage{Label: "Credentials", Path: "/deploy/credentials", Absolute: true}},
+	{"/deploy/secret-stores", agentPage{Label: "Secret stores", Path: "/deploy/secret-stores", Absolute: true}},
+	{"/deploy/notifications", agentPage{Label: "Notifications", Path: "/deploy/notifications", Absolute: true}},
+	{"/deploy/log-drains", agentPage{Label: "Log drains", Path: "/deploy/drains", Absolute: true}},
+	{"/deploy/templates", agentPage{Label: "Templates", Path: "/deploy/templates", Absolute: true}},
+	{"/deploy/drafts", agentPage{Label: "New deployment", Path: "/deploy/new", Absolute: true}},
+	{"/deploy/blueprints", agentPage{Label: "New deployment", Path: "/deploy/new", Absolute: true}},
+	{"/deploy/game", agentPage{Label: "New deployment", Path: "/deploy/new", Absolute: true}},
+	{"/deploy/import", agentPage{Label: "Deployments", Path: "/deploy", Absolute: true}},
+	{"/deploy/github-app", agentPage{Label: "Deployments", Path: "/deploy", Absolute: true}},
 	{"/variables", agentPage{Label: "Variables", Path: "/settings/variables"}},
 	{"/shared-variables", agentPage{Label: "Variables", Path: "/settings/variables"}},
 	{"/dns-record", agentPage{Label: "Domains", Path: "/settings/domains"}},
@@ -361,6 +273,10 @@ var agentPages = []struct {
 	{"/logs", agentPage{Label: "Logs", Path: "/logs"}},
 	{"/watch-paths", agentPage{Label: "General", Path: "/settings/general", Section: "automatic-deployment"}},
 	{"/environments", agentPage{Label: "Overview", Path: ""}},
+	// Whatever else a deployment's route changes is its overview's, and a route
+	// under /deploy with no deployment is the list's.
+	{"/deploy/{id}", agentPage{Label: "Overview", Path: ""}},
+	{"/deploy/", agentPage{Label: "Deployments", Path: "/deploy", Absolute: true}},
 }
 
 func agentPageOf(pattern string) (agentPage, bool) {

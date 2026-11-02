@@ -193,23 +193,6 @@ func (s *Server) handleDeploymentSchedules(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
-// refuseAssistantSchedule holds what the dashboard's assistant may schedule to
-// deploying and restarting. A schedule runs later with nobody there, and the other
-// steps reach past the deployment: a container command names its container and a
-// backup its job, whichever they are, so a model writing one would be a command of
-// its own in any container on the server.
-func refuseAssistantSchedule(r *http.Request, req deploy.ScheduleWrite) error {
-	if !httpx.MustPrincipal(r).Assistant {
-		return nil
-	}
-	for _, step := range req.Steps {
-		if step.Action != "deploy" && step.Action != "restart" {
-			return refuseForDeployKey("a schedule the assistant writes deploys or restarts this deployment, and " + step.Action + " is set on the Automation page")
-		}
-	}
-	return nil
-}
-
 func (s *Server) handleDeploymentScheduleCreate(w http.ResponseWriter, r *http.Request) error {
 	projectID, environmentID, err := deploymentEnvironmentIDs(r)
 	if err != nil {
@@ -217,9 +200,6 @@ func (s *Server) handleDeploymentScheduleCreate(w http.ResponseWriter, r *http.R
 	}
 	var req deploy.ScheduleWrite
 	if err = httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	if err := refuseAssistantSchedule(r, req); err != nil {
 		return err
 	}
 	if err := s.refuseContainerScheduleWhileSleeping(r.Context(), projectID, environmentID, req); err != nil {
@@ -244,9 +224,6 @@ func (s *Server) handleDeploymentScheduleUpdate(w http.ResponseWriter, r *http.R
 	}
 	var req deploy.ScheduleWrite
 	if err = httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	if err := refuseAssistantSchedule(r, req); err != nil {
 		return err
 	}
 	if err := s.refuseContainerScheduleWhileSleeping(r.Context(), projectID, environmentID, req); err != nil {

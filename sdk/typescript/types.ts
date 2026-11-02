@@ -3186,6 +3186,7 @@ export interface OperatorRequest {
   decisions?: Record<string, boolean> | null
   mode?: Mode
   question?: string
+  takeOver?: boolean
 }
 
 /** secretstore.Outcome in the dashboard's source. */
