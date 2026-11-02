@@ -13,6 +13,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Textarea } from "@/components/ui/textarea"
+import { NOT_A_SIGN_IN, secretValueField } from "@/lib/secret-field"
 import type { DbConnection, DeploymentDetectedDatabase } from "@/lib/types"
 import { ProjectDatabase } from "@/components/deploy/project-database"
 import { ProductGlyph } from "@/components/product-logo"
@@ -136,7 +137,7 @@ export function EnvironmentEditor({
               <Input
                 id={`env-key-${index}`}
                 value={row.name}
-                autoComplete="off"
+                {...NOT_A_SIGN_IN}
                 spellCheck={false}
                 placeholder="DATABASE_URL"
                 className="font-mono"
@@ -157,11 +158,9 @@ export function EnvironmentEditor({
               <InputGroup>
                 <InputGroupInput
                   id={`env-value-${index}`}
-                  type="password"
-                  autoComplete="new-password"
+                  {...secretValueField(true)}
                   value={row.value}
                   placeholder={valuePlaceholder(row, planned[row.name])}
-                  className="font-mono"
                   onChange={(event) =>
                     update(index, {
                       value: event.target.value,

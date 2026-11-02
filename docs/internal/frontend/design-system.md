@@ -606,6 +606,12 @@ empty value is ignored, because Radix lets a second press clear the choice and h
 an answer. Two binaries that belong to one row — a domain's HTTPS and its password, a variable's
 Secret or Config — are one outline `ToggleGroup`, not two switches.
 
+**A value the operator stores is not a password field.** Chrome ignores `autocomplete="off"` on a form
+with a `type="password"` field: it offers saved sign-ins there and reads the text field before it as
+the username. The three variable editors take `secretValueField` and `NOT_A_SIGN_IN` from
+`lib/secret-field.ts`, a text field drawn as dots with `-webkit-text-security`, and it stays a text
+field while masked because Chrome remembers a field that has ever been a password one.
+
 **A rule a value has to meet is lit as it is met.** `FieldCheck` (`form.tsx`) sits under the field
 it belongs to — a credential's name rules, a Telegram channel's token and chat id, a password's
 length and mix — so an error is
