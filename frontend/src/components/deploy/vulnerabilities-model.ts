@@ -4,6 +4,7 @@ import type {
   ImageScanPolicy,
   ImageScanReading,
   VulnerabilityCounts,
+  VulnerabilityFinding,
   VulnerabilitySeverity,
 } from "@/lib/types"
 import type { DotTone } from "@/components/status-dot"
@@ -154,4 +155,142 @@ export function shortDigest(digest: string | undefined) {
   if (!digest) return ""
   const [, hex = digest] = digest.split(":")
   return hex.slice(0, 12)
+}
+
+/** A severity's colour on the bar and its key: the worst red, down to a quiet blue. */
+export const SEVERITY_COLOR: Record<Exclude<VulnerabilitySeverity, "UNKNOWN">, string> = {
+  CRITICAL: "var(--destructive)",
+  HIGH: "color-mix(in oklab, var(--destructive) 62%, var(--warning))",
+  MEDIUM: "var(--warning)",
+  LOW: "var(--chart-2)",
+}
+
+/** The scan's sentence: how many, in which release, and how many can be fixed. */
+export function scanLead(scan: ImageScan) {
+  const { counts, fixableCounts } = scan.summary
+  const total = countAtLeast(counts, "LOW")
+  const fixable = countAtLeast(fixableCounts, "LOW")
+  if (total === 0)
+    return { title: `No known vulnerabilities in release ${scan.releaseNumber}`, fix: undefined }
+  const noun = total === 1 ? "vulnerability" : "vulnerabilities"
+  return {
+    title: `${total} known ${noun} in release ${scan.releaseNumber}`,
+    fix:
+      fixable === 0
+        ? "None has a fix yet"
+        : fixable === total
+          ? total === 1
+            ? "It has a fix"
+            : `All ${total} have a fix`
+          : `${fixable} of ${total} ${fixable === 1 ? "has" : "have"} a fix`,
+  }
+}
+
+/**
+ * Trivy repeats the package in front of its titles, sometimes twice
+ * ("undici: undici: Denial of Service"), beside a name already on the row.
+ */
+export function cleanTitle(title: string | undefined, pkg: string) {
+  if (!title) return undefined
+  const prefix = `${pkg.toLowerCase()}:`
+  let text = title.trim()
+  while (text.toLowerCase().startsWith(prefix)) text = text.slice(prefix.length).trim()
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : undefined
+}
+
+const compareVersions = (a: string, b: string) =>
+  a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+
+/**
+ * The version to move to, from Trivy's list of every release line that has the
+ * fix ("6.29.1, 7.30.1, 8.12.2"): the one on the line already installed, since
+ * that is the upgrade nobody has to think about; the first listed otherwise.
+ */
+export function nearestFix(installed: string, fixed: string | undefined) {
+  if (!fixed) return undefined
+  const listed = fixed
+    .split(",")
+    .map((version) => version.trim())
+    .filter(Boolean)
+  const line = installed.split(".")[0]
+  const sameLine = listed
+    .filter((version) => version.split(".")[0] === line)
+    .filter((version) => compareVersions(version, installed) >= 0)
+    .sort(compareVersions)
+  return sameLine[0] ?? listed[0]
+}
+
+export type FindingGroup = {
+  package: string
+  installed: string
+  /** The one version that fixes every finding here. */
+  fix?: string
+  target: string
+  class?: string
+  fromBase: boolean
+  findings: VulnerabilityFinding[]
+  counts: VulnerabilityCounts
+  worst: VulnerabilitySeverity
+}
+
+/**
+ * The findings as what there is to do: one upgrade per package, however many
+ * advisories it answers. Six rows naming undici and brace-expansion were two
+ * upgrades. Worst first, keeping the server's order within a severity.
+ */
+export function groupFindings(findings: VulnerabilityFinding[]): FindingGroup[] {
+  const groups = new Map<string, FindingGroup>()
+  for (const finding of findings) {
+    const key = `${finding.package}\u0000${finding.installed}\u0000${finding.target}`
+    let group = groups.get(key)
+    if (!group) {
+      group = {
+        package: finding.package,
+        installed: finding.installed,
+        target: finding.target,
+        class: finding.class,
+        fromBase: false,
+        findings: [],
+        counts: { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+        worst: finding.severity,
+      }
+      groups.set(key, group)
+    }
+    group.findings.push(finding)
+    group.fromBase ||= Boolean(finding.fromBase)
+    const fix = nearestFix(finding.installed, finding.fixed)
+    if (fix && (!group.fix || compareVersions(fix, group.fix) > 0)) group.fix = fix
+    if (finding.severity !== "UNKNOWN") group.counts[COUNT_KEY[finding.severity]]++
+    if (RANK[finding.severity] > RANK[group.worst]) group.worst = finding.severity
+  }
+  return [...groups.values()].sort((a, b) => RANK[b.worst] - RANK[a.worst])
+}
+
+const LOCK_PRODUCTS: [RegExp, string][] = [
+  [/package-lock\.json|node\.js|npm/i, "npm"],
+  [/yarn\.lock/i, "yarn"],
+  [/pnpm-lock/i, "pnpm"],
+  [/bun\.lock/i, "bun"],
+  [/go\.(mod|sum)|gobinary|\bgo\b/i, "go"],
+  [/cargo|rust/i, "rust"],
+  [/poetry\.lock|pipfile|requirements|uv\.lock|python/i, "python"],
+  [/gemfile|ruby/i, "ruby"],
+  [/composer|php/i, "php"],
+  [/pom\.xml|\.jar|gradle|java/i, "java"],
+  [/\.deps\.json|packages\.lock|dotnet|\.net/i, "dotnet"],
+]
+
+const OS_PRODUCTS = ["alpine", "debian", "ubuntu", "centos", "fedora", "rocky", "almalinux", "arch"]
+
+/**
+ * The mark a finding's package is drawn on: the distribution for an OS package,
+ * the ecosystem for a library. A Compose service is in front of the target
+ * ("web · Node.js"), so both read the whole string.
+ */
+export function findingProduct(group: Pick<FindingGroup, "class" | "target">) {
+  const target = group.target.toLowerCase()
+  const os = OS_PRODUCTS.find((name) => target.includes(name))
+  if (group.class === "os-pkgs") return os ?? "linux"
+  const lock = LOCK_PRODUCTS.find(([pattern]) => pattern.test(group.target))
+  return lock?.[1] ?? os
 }

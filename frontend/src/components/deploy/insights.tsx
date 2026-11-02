@@ -8,12 +8,14 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentInsights } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { BarList } from "@/components/bar-list"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { Rocket } from "@/components/icons"
+import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
+import { StatusDot } from "@/components/status-dot"
 import { formatDuration } from "@/components/deploy/vocabulary"
 import { causeTitle } from "@/components/deploy/failure-cause"
-import { NumberTicker } from "@/components/ui/number-ticker"
+import { deliveryLead } from "@/components/deploy/delivery-model"
+import { WireMark, WireNode } from "@/components/deploy/wire"
 import {
   Select,
   SelectContent,
@@ -69,15 +71,11 @@ function dayLabel(date: string) {
  * cannot be read as more than it is. The caller hides this for legacy
  * projects, which the engine never scored.
  *
- * Four figures, not five: the failure streak was a tile of its own that sat
- * alone on a row at most widths, and it is a fact about the success rate —
- * its count is that tile's trailing reading now, and when the last failure
- * happened is said beside the chart that draws it. The release time carries
- * the window's shape in its trend; how often the project ships already has
- * its shape in the chart of releases per day under the tiles; the rate
- * fills, and keeps a meter. On the Overview, recent runs sit between these
- * readings and the historical charts, so its shorter tiles leave room for
- * the records that explain them.
+ * On the Overview that is a sentence on the source's own mark, the wiring's
+ * shape, over the releases per day: "14 releases in the last 30 days, all
+ * successful" where four `StatTile`s left the reader to make that sentence out
+ * of a rate, a median, a dash and a frequency. The recent runs follow as the
+ * records that explain them.
  *
  * `onFailureClick` lets a page that lists the runs narrow to the failed ones
  * from a reason's row.
@@ -94,16 +92,19 @@ export function Insights({
   projectId,
   onFailureClick,
   children,
-  presentation = "tiles",
+  presentation = "overview",
+  mark,
   environmentId,
 }: {
   projectId: number
   /** Staging's figures in place of the project's, which leave staging out. */
   environmentId?: number
   onFailureClick?: (code: string) => void
-  /** Overview records placed between the delivery figures and their history. */
+  /** The Overview's records, under the delivery figures. */
   children?: React.ReactNode
-  presentation?: "tiles" | "history"
+  presentation?: "overview" | "history"
+  /** Where the releases come from, as a `product-logo` id: the Overview's lead stands on it. */
+  mark?: string
 }) {
   const history = presentation === "history"
   const [range, setRange] = useViewState<(typeof WINDOWS)[number][0]>("deploy.insights.range", "30")
@@ -191,10 +192,7 @@ export function Insights({
       className={cn(
         "grid min-w-0 gap-x-10",
         history ? "gap-y-8" : "gap-y-6",
-        (history || failures) &&
-          (children
-            ? "2xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]"
-            : "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"),
+        (history || failures) && "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
       )}
     >
       <div className="min-w-0 space-y-2">
@@ -389,6 +387,8 @@ export function Insights({
     </div>
   )
 
+  const lead = !history && data && data.runs > 0 ? deliveryLead(data, seconds) : undefined
+
   return (
     <div className={children ? "space-y-8" : undefined}>
       <Panel plain>
@@ -409,7 +409,7 @@ export function Insights({
             </Select>
           }
         />
-        <PanelBody className={children ? undefined : "space-y-6"}>
+        <PanelBody className={cn("space-y-6", lead && "pt-4")}>
           {insights.error && <ErrorState error={insights.error} />}
           {insights.loading && !data && <LoadingRows rows={2} />}
           {data && data.runs === 0 && (
@@ -417,88 +417,39 @@ export function Insights({
               No release finished in this window. Figures appear after the first deployment ends.
             </EmptyNote>
           )}
-          {!history && data && data.runs > 0 && (
-            <>
-              <StatGrid
-                columns={4}
-                dense
-                className={children ? "[&_[data-slot=stat-tile]]:py-3" : undefined}
-              >
-                <StatTile
-                  label="Success rate"
-                  value={
-                    decided ? (
-                      <>
-                        <NumberTicker value={Math.round(data.successRate * 100)} />%
-                      </>
-                    ) : (
-                      "—"
-                    )
-                  }
-                  meter={decided ? data.successRate * 100 : undefined}
-                  tone={data.failureStreak > 0 ? "warning" : "default"}
-                  trailing={
-                    data.failureStreak > 0 && (
-                      <span className="text-destructive">{data.failureStreak} failed in a row</span>
-                    )
-                  }
-                  hint={`${data.succeeded} of ${decided} decided release${decided === 1 ? "" : "s"}`}
-                />
-                <StatTile
-                  label="Median release"
-                  value={seconds(data.medianDurationSeconds)}
-                  trend={
-                    !children && (
-                      <TileTrend
-                        // Only the days something shipped: a day with no release
-                        // has no duration, and drawing it at zero would say the
-                        // releases got faster.
-                        values={durationValues}
-                        label={`Median release time per day over the last ${data.windowDays} days`}
-                        color="var(--chart-2)"
-                      />
-                    )
-                  }
-                  hint={`p95 ${seconds(data.p95DurationSeconds)} · claim to finish`}
-                />
-                <StatTile
-                  label="Recovery time"
-                  value={data.recoveredFailures ? seconds(data.meanRecoverySeconds) : "—"}
-                  hint={
-                    data.recoveredFailures
-                      ? `mean over ${data.recoveredFailures} recovered failure${data.recoveredFailures === 1 ? "" : "s"}`
-                      : data.failed
-                        ? "no failure followed by a success yet"
-                        : "no failures in this window"
-                  }
-                />
-                {/* No trend of its own: its shape is the Releases per day chart
-                  below the records, and a day's zero or one drew as noise. */}
-                <StatTile
-                  label="Deploys per week"
-                  value={<NumberTicker value={data.deploysPerWeek} decimalPlaces={1} />}
-                  hint={`${data.succeeded} successful over ${data.windowDays} days`}
-                />
-              </StatGrid>
-            </>
+          {lead && data && (
+            <WireNode
+              mark={
+                <span className="relative flex">
+                  <WireMark tone="logo" size="md">
+                    {hasProductLogo(mark) ? <ProductGlyph id={mark} /> : <Rocket aria-hidden />}
+                  </WireMark>
+                  <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
+                    <StatusDot
+                      tone={
+                        data.failureStreak > 0 ? "danger" : data.failed > 0 ? "warning" : "running"
+                      }
+                    />
+                  </span>
+                </span>
+              }
+              title={lead.title}
+              hint={
+                <>
+                  {lead.hint}
+                  {data.failureStreak > 0 && (
+                    <span className="ml-2 text-destructive">
+                      {data.failureStreak} failed in a row
+                    </span>
+                  )}
+                </>
+              }
+            />
           )}
-          {!children && charts}
+          {charts}
         </PanelBody>
       </Panel>
       {children}
-      {children && charts && (
-        <Panel plain>
-          <PanelHeader
-            title="Release history"
-            actions={
-              <span className="text-hint text-muted-foreground">
-                {WINDOWS.find(([value]) => value === range)?.[1]}
-              </span>
-            }
-          />
-          <PanelBody>{charts}</PanelBody>
-        </Panel>
-      )}
     </div>
   )
 }

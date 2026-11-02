@@ -8,11 +8,12 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentEnvironmentConfiguration } from "@/lib/types"
-import type { Tone } from "@/components/tone"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Cpu, Layers, Box } from "@/components/icons"
+import { HUE } from "@/components/overview/readings"
+import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Status } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
 import { InfoTip } from "@/components/form"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -25,15 +26,19 @@ import {
   cores,
   cpuReadings,
   fleetSummary,
+  gaugeScale,
   historyLine,
   isOff,
   memoryReadings,
   mib,
+  sizingLead,
+  suggestionVerb,
   verdictTone,
   type EnvironmentSizing,
   type FleetSizing,
   type SizingVerdict,
 } from "@/components/deploy/sizing-model"
+import { WireMark, WireNode } from "@/components/deploy/wire"
 
 /**
  * Applying a suggestion is the configuration write Runtime settings make:
@@ -79,26 +84,24 @@ function useApplySizing(onApplied: () => void) {
   return { applying, apply }
 }
 
-function tileTone(verdict: SizingVerdict): Tone {
-  if (verdict === "too_tight") return "danger"
-  if (verdict === "oversized") return "warning"
-  return "default"
-}
-
 /**
  * The project overview's Right-size card: the verdict and the one verb in the
- * head, each limit's suggestion as a figure with the readings it came from
- * under it, and why. A Compose stack has nothing in its plan to size and a
- * read that fails has nothing to say, so neither draws a card.
+ * head, then a sentence on what the project runs and why, and each limit as what
+ * to do with it over a gauge of what was used against where the limit would go.
+ * A Compose stack has nothing in its plan to size and a read that fails has
+ * nothing to say, so neither draws a card.
  */
 export function RightSizeCard({
   projectId,
   environmentId,
   onApplied,
+  product,
 }: {
   projectId: number
   environmentId: number
   onApplied?: () => void
+  /** What the containers run, as a `product-logo` id. */
+  product?: string
 }) {
   const { can } = useAuth()
   const state = usePoll(
@@ -140,13 +143,13 @@ export function RightSizeCard({
         }
       />
       <PanelBody>
-        <SizingBody sizing={sizing} />
+        <SizingBody sizing={sizing} product={product} />
       </PanelBody>
     </Panel>
   )
 }
 
-function SizingBody({ sizing }: { sizing: EnvironmentSizing }) {
+function SizingBody({ sizing, product }: { sizing: EnvironmentSizing; product?: string }) {
   if (sizing.status === "unavailable")
     return <p className="text-body text-muted-foreground">{sizing.reason}</p>
   const { memory, cpu } = sizing
@@ -161,48 +164,151 @@ function SizingBody({ sizing }: { sizing: EnvironmentSizing }) {
     ...(cpu.verdict === "right" ? [] : cpu.reasons.slice(0, 1)),
   ]
   return (
-    <div className="min-w-0 space-y-3">
-      {/* Not dense: on a phone each limit takes the width, and its readings
-          line is read whole rather than cut at the limit. */}
-      <StatGrid columns={2}>
-        <StatTile
-          label={
-            <span className="inline-flex items-center gap-1.5">
-              Memory{" "}
-              <InfoTip label="How the memory suggestion is worked out">{MEMORY_RULE}</InfoTip>
+    <div className="min-w-0 space-y-5 pt-1">
+      <WireNode
+        mark={
+          <span className="relative flex">
+            <WireMark tone="logo" size="md">
+              {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Box aria-hidden />}
+            </WireMark>
+            <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
+              <StatusDot tone={verdictTone(sizing.verdict)} />
             </span>
-          }
-          value={mib(memory.suggestedMb)}
-          trailing={memory.verdict === "right" ? "fits" : "suggested"}
-          tone={tileTone(memory.verdict)}
-          hint={memoryReadings(memory)}
-        />
-        <StatTile
-          label={
-            <span className="inline-flex items-center gap-1.5">
-              CPU <InfoTip label="How the CPU suggestion is worked out">{CPU_RULE}</InfoTip>
+          </span>
+        }
+        title={sizingLead(sizing.verdict, sizing.projectName)}
+        hint={
+          <>
+            {reasons.map((reason) => (
+              <span key={reason} className="block">
+                {reason}
+              </span>
+            ))}
+            <span className="block">
+              From {historyLine(sizing.window)}
+              {memory.oomKills > 0 || !sizing.oom.watching
+                ? ""
+                : ", and no OOM kill since the event log began listening"}
+              .{sizing.pending && " The saved limits apply with the next release."}
             </span>
-          }
-          value={cores(cpu.suggested)}
-          trailing={cpu.verdict === "right" ? "fits" : "suggested"}
-          tone={tileTone(cpu.verdict)}
-          hint={cpuReadings(cpu)}
+          </>
+        }
+      />
+      <div className="grid min-w-0 gap-x-10 gap-y-5 lg:grid-cols-2">
+        <LimitLine
+          name="Memory"
+          glyph={<Layers aria-hidden />}
+          hue={HUE.mem}
+          rule={<InfoTip label="How the memory suggestion is worked out">{MEMORY_RULE}</InfoTip>}
+          verdict={memory.verdict}
+          suggestion={mib(memory.suggestedMb)}
+          used={memory.p95Mb}
+          peak={memory.peakMb}
+          suggested={memory.suggestedMb}
+          limit={memory.limitMb}
+          readings={memoryReadings(memory)}
         />
-      </StatGrid>
-      {reasons.length > 0 && (
-        <ul className="space-y-1 text-body">
-          {reasons.map((reason) => (
-            <li key={reason}>{reason}</li>
-          ))}
-        </ul>
-      )}
-      <p className="text-hint text-muted-foreground">
-        From {historyLine(sizing.window)}: the 95th percentile of what it used, plus headroom
-        {memory.oomKills > 0 || !sizing.oom.watching
-          ? ""
-          : ", and no OOM kill of the live release since the event log began listening"}
-        .{sizing.pending && " The saved limits apply with the next release."}
-      </p>
+        <LimitLine
+          name="CPU"
+          glyph={<Cpu aria-hidden />}
+          hue={HUE.cpu}
+          rule={<InfoTip label="How the CPU suggestion is worked out">{CPU_RULE}</InfoTip>}
+          verdict={cpu.verdict}
+          suggestion={cores(cpu.suggested)}
+          used={cpu.p95}
+          peak={cpu.peak}
+          suggested={cpu.suggested}
+          limit={cpu.limit}
+          readings={cpuReadings(cpu)}
+        />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One limit: what to do with it, in words, over a gauge. The solid run is what
+ * it used most of the time, the paler run its peak, and the brand's tick where
+ * the suggestion would put the limit; a limit already set is the tick in the
+ * foreground, so "far too big" and "about to hit it" are both visible at once.
+ */
+function LimitLine({
+  name,
+  glyph,
+  hue,
+  rule,
+  verdict,
+  suggestion,
+  used,
+  peak,
+  suggested,
+  limit,
+  readings,
+}: {
+  name: string
+  glyph: React.ReactNode
+  hue: string
+  rule: React.ReactNode
+  verdict: SizingVerdict
+  suggestion: string
+  used: number
+  peak: number
+  suggested: number
+  limit: number
+  readings: string
+}) {
+  const scale = gaugeScale([suggested, peak, limit])
+  const at = (value: number) => `${(value / scale) * 100}%`
+  const verb = suggestionVerb(verdict)
+  return (
+    <div className="flex min-w-0 items-start gap-3.5" data-slot="limit-line">
+      <WireMark size="md" hue={hue}>
+        {glyph}
+      </WireMark>
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div>
+          <p className="eyebrow flex items-center gap-1.5">
+            {name} {rule}
+          </p>
+          <p className="text-body leading-snug font-medium">
+            {verb && <>{verb} </>}
+            <span className="numeric">{suggestion}</span>
+            {!verb && <span className="font-normal text-muted-foreground"> fits</span>}
+          </p>
+        </div>
+        <div
+          role="img"
+          aria-label={`${name}: ${readings}; suggested ${suggestion}`}
+          className="relative flex h-4 animate-rise items-center"
+        >
+          <span className="absolute inset-x-0 h-2 rounded-sm bg-meter-track" />
+          <span
+            className="absolute left-0 h-2 rounded-l-sm"
+            style={{
+              width: at(peak),
+              minWidth: 3,
+              background: `color-mix(in oklab, ${hue} 40%, transparent)`,
+            }}
+          />
+          <span
+            className="absolute left-0 h-2 rounded-l-sm"
+            style={{ width: at(used), minWidth: 3, background: hue }}
+          />
+          {limit > 0 && (
+            <span
+              data-slot="limit-tick"
+              className="absolute h-full w-px bg-foreground"
+              style={{ left: at(limit) }}
+            />
+          )}
+          <span
+            data-slot="suggested-tick"
+            className="absolute h-full w-0.5 rounded-full bg-brand"
+            style={{ left: at(suggested) }}
+          />
+        </div>
+        <p className="numeric text-hint text-muted-foreground">{readings}</p>
+      </div>
     </div>
   )
 }

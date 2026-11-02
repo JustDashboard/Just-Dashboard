@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
+  availabilityLead,
+  dayTone,
+  dayWords,
   availabilityPercent,
   availabilityReading,
   availabilityTone,
@@ -119,5 +122,81 @@ describe("a tile's reading", () => {
         false,
       ),
     ).toEqual({ value: "—", hint: "nothing recorded yet", tone: "default" })
+  })
+})
+
+describe("availabilityLead", () => {
+  const wins = (
+    seven,
+    thirty,
+    day = window({ window: "24h", seconds: DAY, observedSeconds: DAY, coverageSeconds: DAY }),
+  ) => ({
+    down: false,
+    windows: [day, seven, thirty],
+  })
+  const short = {
+    downSeconds: 1200,
+    incidents: 3,
+    ratio: 0.9941,
+    coverageSeconds: 2 * DAY,
+    observedSeconds: 2 * DAY,
+  }
+
+  test("names how far the record reaches, not the window it was asked over", () => {
+    const lead = availabilityLead(
+      wins(window(short), window({ ...short, window: "30d", seconds: 30 * DAY })),
+    )
+    expect(lead.title).toBe("Up 99.41% of the last 2 days")
+    expect(lead.hint).toBe("20 min down across 3 incidents, none in the last 24 hours")
+    expect(lead.tone).toBe("warning")
+  })
+
+  test("a steady record says there was none", () => {
+    expect(
+      availabilityLead(
+        wins(
+          window({}),
+          window({
+            window: "30d",
+            seconds: 30 * DAY,
+            coverageSeconds: 30 * DAY,
+            observedSeconds: 30 * DAY,
+          }),
+        ),
+      ),
+    ).toEqual({ title: "No downtime in the last 30 days", tone: "running" })
+  })
+
+  test("down now outranks every figure", () => {
+    const lead = availabilityLead({ ...wins(window(short), window(short)), down: true })
+    expect(lead.title).toBe("The live release is down right now")
+    expect(lead.tone).toBe("danger")
+  })
+
+  test("no figure yet says so rather than claiming a clean record", () => {
+    const empty = window({ ratio: undefined, observedSeconds: 0 })
+    expect(availabilityLead({ down: false, windows: [empty] }).title).toBe("Nothing recorded yet")
+  })
+})
+
+describe("a day on the ribbon", () => {
+  const day = (observedSeconds, downSeconds, incidents = 0) => ({
+    from: "2026-10-30T00:00:00Z",
+    observedSeconds,
+    downSeconds,
+    incidents,
+  })
+
+  test("unrecorded time is unknown, not up", () => {
+    expect(dayTone(day(0, 0))).toBe("unknown")
+    expect(dayWords(day(0, 0))).toBe("nothing recorded")
+  })
+
+  test("any downtime shows, and a bad day is the red one", () => {
+    expect(dayTone(day(DAY, 0))).toBe("up")
+    expect(dayTone(day(DAY, 60, 1))).toBe("dented")
+    expect(dayTone(day(DAY, 1200, 3))).toBe("down")
+    expect(dayWords(day(DAY, 1200, 3))).toBe("20 min down · 3 incidents")
+    expect(dayWords(day(DAY, 60, 1))).toBe("1 min down · 1 incident")
   })
 })

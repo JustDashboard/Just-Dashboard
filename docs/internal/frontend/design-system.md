@@ -932,8 +932,8 @@ rather than assembling its own recharts tree — adding a measurement should mea
   measurement in it, so Pressure's CPU, memory and I/O lines are the three tiles' colours; a
   chart's second line takes the hue furthest from its first (out `--chart-2` against in, write
   `--chart-3` against read).
-- **A reading's last hour in a deployment page's `StatTile` is `TileTrend`** (`sparkline.tsx`), the
-  one shape for it: the tile's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
+- **A reading's last hour in a deployment page's `StatTile` or an Overview reading line is `TileTrend`**
+  (`sparkline.tsx`), the one shape for it: its slot's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
   below two points, which is not yet a shape, nor for a series that never moves on a scale of its
   own — scaled to its own maximum a flat line fills the band and reads as a full meter — and the
   tile's trend band then collapses rather than leave a gap. With a fixed `max` a flat line sits at
@@ -3528,7 +3528,8 @@ reading page is revamped:
   the operator's request, and that is the other side of the same line: there the containers are read
   down their columns before any one is taken, so the overview's table keeps hairlines and a wash and
   its rows open by a press anywhere on them;
-- a **figure** is still a `StatTile` (§15 pass 2) in either register.
+- a **figure** is still a `StatTile` (§15 pass 2) in either register, with one page excepted: a
+  project's Overview, below.
 
 A page that is mostly readings with one run of choices in it takes the edge on that one run. That is
 the honest answer to "use it everywhere": everywhere something is picked.
@@ -3543,6 +3544,28 @@ from, whether a database is created or an existing one used, the saved connectio
 traffic-alert rules on Automation are the counter-example on the same page: a rule is read against
 its threshold, with a `Meter` carrying a tick where the line is, and opens nothing, so its rows stay
 rows you read.
+
+### A project's Overview reads in sentences
+
+At the operator's request in 0.8.5 the Overview carries no `StatTile`: "I don't like them", "clean text
+and easy to understand", and sections added later that "feel like they don't belong". The top of that
+page already says everything in the wiring's words, so what follows it now takes the wiring's shape, and
+a new block on this page takes it too:
+
+- **A block opens on a `WireNode`:** a real mark (`WireMark tone="logo"` and a `ProductGlyph`, with the
+  block's state as the `StatusDot` in its corner, as Runtime's node has it), then the reading as a sentence
+  and its detail. What the runtime is on Right-size, Trivy on Vulnerabilities, Docker on Availability and
+  the source's forge on Delivery: each mark is where the block's evidence comes from.
+- **Then its one coloured picture:** each limit's gauge, the severities' bar, the ribbon of days, the
+  releases per day. The hues are the existing ones (§3, §10), and the reading it replaces is said in the
+  words beside it, so nothing is colour alone.
+- **The live readings are lines,** `ReadingLine` in `deploy/live-readings.tsx`: a measurement's glyph on
+  its own tint (`WireMark hue`, the `HUE` map's colours), a name, the reading as words ("0.1% of one core"),
+  a detail and its last hour at the line's end. Each is one height in every state and opens the page that
+  has the rest.
+
+The Deployments tab's history and every other page keep `StatTile`: this is the Overview's register of
+speech, not a retirement of the figure.
 
 ### What register B does not get
 

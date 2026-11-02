@@ -4454,6 +4454,15 @@
       },
       "deploy.Availability": {
         "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.AvailabilityDay"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "down": {
             "type": "boolean"
           },
@@ -4492,6 +4501,28 @@
           }
         },
         "title": "deploy.Availability",
+        "type": "object"
+      },
+      "deploy.AvailabilityDay": {
+        "properties": {
+          "downSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "from": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "incidents": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "observedSeconds": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "deploy.AvailabilityDay",
         "type": "object"
       },
       "deploy.AvailabilityWindow": {
@@ -16673,7 +16704,7 @@
     },
     "summary": "The deployment routes of a Just Dashboard, as its router mounts them.",
     "title": "Just Dashboard deployment API",
-    "version": "0.8.1"
+    "version": "0.8.4"
   },
   "openapi": "3.1.0",
   "paths": {
