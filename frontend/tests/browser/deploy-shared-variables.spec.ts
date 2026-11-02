@@ -157,8 +157,7 @@ test("the server's shared variables name who reads each one and what is not live
   await expect(sharedRow(page, "Server variables", "PUBLIC_API_URL")).toContainText("Not read")
 
   // Revealed in place, through the audited route.
-  await sentry.getByRole("button", { name: "Actions for SENTRY_DSN" }).click()
-  await page.getByRole("menuitem", { name: "Reveal value" }).click()
+  await sentry.getByRole("button", { name: "Reveal value" }).click()
   await expect(sentry.getByText("revealed-sentry_dsn")).toBeVisible()
 
   // A new one: the sheet says how it will be read before it is saved.
@@ -263,8 +262,7 @@ test("shared variables at 1280 and 390 @shots", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto("/deploy/variables")
   const sentry = sharedRow(page, "Server variables", "SENTRY_DSN")
-  await sentry.getByRole("button", { name: "Actions for SENTRY_DSN" }).click()
-  await page.getByRole("menuitem", { name: "Reveal value" }).click()
+  await sentry.getByRole("button", { name: "Reveal value" }).click()
   await expect(sentry.getByText("revealed-sentry_dsn")).toBeVisible()
   await shot("shared-server-1280")
 

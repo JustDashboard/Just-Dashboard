@@ -15,9 +15,8 @@ import { InitialsMark } from "@/components/account/user-avatar"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
 import { Page, PageContext } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, variableProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
@@ -42,7 +41,7 @@ import {
 } from "@/components/ui/select"
 import { Copy, Eye, EyeOff, Linked, Pencil, Plus, Trash } from "@/components/icons"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { ValueType, VariableMark } from "@/components/deploy/settings/variable-type"
+import { RevealedValue, ValueType, VariableMark } from "@/components/deploy/settings/variable-type"
 import {
   parseSharedReference,
   readersByProject,
@@ -216,27 +215,33 @@ export function SharedVariables({
     })
 
   const verbsFor = (variable: DeploymentSharedVariable): Verb[] => {
-    const verbs: Verb[] = [
-      {
-        key: "copy",
-        label: "Copy reference",
-        icon: Copy,
-        run: () => void copyText(variable.reference, "Reference copied"),
-      },
-    ]
+    const value = revealed[variable.name]
+    const isShown = value !== undefined
+    // Both inline in every state, so the row's edge is one width and revealing
+    // a value moves nothing. The copy takes what the row is showing.
+    const verbs: Verb[] = []
+    if (canEdit)
+      verbs.push({
+        key: "reveal",
+        label: isShown ? "Hide value" : "Reveal value",
+        icon: isShown ? EyeOff : Eye,
+        inline: true,
+        progressive: "Revealing…",
+        disabled: revealing === variable.name,
+        run: () => void reveal(variable),
+      })
+    verbs.push({
+      key: "copy",
+      label: isShown ? `Copy ${variable.name}` : "Copy reference",
+      icon: Copy,
+      inline: true,
+      run: () =>
+        void (isShown
+          ? copyText(value, `${variable.name} copied`)
+          : copyText(variable.reference, "Reference copied")),
+    })
     if (canEdit) {
-      const isShown = revealed[variable.name] !== undefined
-      verbs.push(
-        {
-          key: "reveal",
-          label: isShown ? "Hide value" : "Reveal value",
-          icon: isShown ? EyeOff : Eye,
-          progressive: "Revealing…",
-          disabled: revealing === variable.name,
-          run: () => void reveal(variable),
-        },
-        { key: "edit", label: "Edit", icon: Pencil, run: () => edit(variable) },
-      )
+      verbs.push({ key: "edit", label: "Edit", icon: Pencil, run: () => edit(variable) })
     }
     if (canRemove) {
       verbs.push({
@@ -426,10 +431,12 @@ export function SharedVariables({
 }
 
 /**
- * One shared variable: its name, the reference that reads it, and who
- * changed it when; at its edge whether a reader still runs an earlier value
- * and how many read it; under it the readers themselves, each a link to the
- * variables page it is read from. Narrow, the edge goes under the name.
+ * One shared variable, drawn as an environment's variable is: its name and the
+ * reference that reads it on one line, and at its edge whether a reader still
+ * runs an earlier value, how many read it and who changed it. Under it the
+ * readers themselves, each a link to the variables page it is read from. Its
+ * value, revealed, takes the reference's place. Narrow, the reference goes
+ * under the name and the edge under that.
  */
 function SharedRow({
   variable,
@@ -453,11 +460,32 @@ function SharedRow({
     <Status key="waiting" tone="notice" label="Saved · not live yet" className="animate-rise" />
   )
   const count = (
-    <span className="numeric text-hint whitespace-nowrap text-muted-foreground">
+    <span
+      // One width, so the edge is the same on every row and the values line up.
+      className={cn(
+        "numeric text-hint whitespace-nowrap text-muted-foreground",
+        wide && "w-14 text-right",
+      )}
+    >
       {variable.usedBy.length === 0 ? "Not read" : `Read by ${variable.usedBy.length}`}
     </span>
   )
   const readers = readersByProject(variable.usedBy)
+  const value =
+    revealed !== undefined ? (
+      <RevealedValue name={variable.name} value={revealed} />
+    ) : (
+      <span className="block h-4 truncate font-mono leading-4 text-foreground/90">
+        {variable.reference}
+      </span>
+    )
+  const changed = `Changed ${relativeTime(variable.updatedAt)}${variable.updatedBy ? ` by ${variable.updatedBy}` : ""}`
+  const changedBy = variable.updatedBy && (
+    <span title={changed} className="inline-flex shrink-0">
+      <span className="sr-only">{changed}</span>
+      <InitialsMark name={variable.updatedBy} size="xs" className="size-4" />
+    </span>
+  )
   return (
     <ChoiceRow
       index={index}
@@ -466,39 +494,35 @@ function SharedRow({
       onSelect={onEdit}
       leading={<VariableMark variable={variable} product={variableProduct(variable.name)} />}
       title={<span className="font-mono">{variable.name}</span>}
+      columns={wide}
+      className={wide ? "min-h-11 py-1.5" : "py-2"}
       description={
-        <>
-          <span className="font-mono text-foreground/90">{variable.reference}</span>
-          <span> · changed {relativeTime(variable.updatedAt)} </span>
-          {variable.updatedBy && (
-            <span title={variable.updatedBy}>
-              <span className={cn(!wide && "sr-only")}>by </span>
-              <InitialsMark
-                name={variable.updatedBy}
-                size="xs"
-                className="inline-flex size-3.5 align-[-3px]"
-              />
-              <span className={cn(!wide && "sr-only")}> {variable.updatedBy}</span>
-            </span>
-          )}
-        </>
+        wide ? (
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 flex-1">{value}</span>
+            {state}
+          </span>
+        ) : (
+          value
+        )
       }
       trailing={
         wide ? (
           <>
-            {state}
             {count}
+            {changedBy}
           </>
         ) : undefined
       }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${variable.name}`} />}
     >
-      {(!wide || readers.length > 0 || revealed !== undefined) && (
+      {(!wide || readers.length > 0) && (
         <div className="min-w-0 space-y-2 sm:pl-11">
           {!wide && (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               {count}
               {state}
+              {changedBy && <span className="ml-auto flex">{changedBy}</span>}
             </div>
           )}
           {readers.length > 0 && (
@@ -526,24 +550,6 @@ function SharedRow({
                 </li>
               ))}
             </ul>
-          )}
-          {revealed !== undefined && (
-            // The value invites a click to select it, and the row around it
-            // opens the editor on a press — so a press here stays here.
-            <div
-              onClick={(event) => event.stopPropagation()}
-              className="flex min-w-0 animate-rise items-start gap-1"
-            >
-              <Well className="min-w-0 flex-1 py-1.5 font-mono text-hint break-all select-all">
-                {revealed}
-              </Well>
-              <IconAction
-                label={`Copy ${variable.name}`}
-                onClick={() => void copyText(revealed, `${variable.name} copied`)}
-              >
-                <Copy />
-              </IconAction>
-            </div>
           )}
         </div>
       )}

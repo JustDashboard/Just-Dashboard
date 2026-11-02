@@ -302,6 +302,7 @@ export function ChoiceRow({
   title,
   verb,
   description,
+  columns,
   trailing,
   actions,
   onSelect,
@@ -318,6 +319,12 @@ export function ChoiceRow({
   /** The accessible name of the title control — "Import Wayy01/api". */
   verb: string
   description?: React.ReactNode
+  /**
+   * The title and the description side by side rather than one over the other,
+   * for a list read down its columns: every name starts on one edge and every
+   * value on another, as long as the row's edge is the same width on each row.
+   */
+  columns?: boolean
   trailing?: React.ReactNode
   /**
    * A second thing you can do to this row — discard it, rename it — drawn
@@ -373,7 +380,12 @@ export function ChoiceRow({
   const line = (
     <>
       {leading && <span className="flex shrink-0 items-center">{leading}</span>}
-      <span className="min-w-0 flex-1">
+      <span
+        className={cn(
+          "min-w-0 flex-1",
+          columns && "grid grid-cols-[minmax(0,5fr)_minmax(0,6fr)] items-center gap-3",
+        )}
+      >
         {disabled ? (
           <span className="block max-w-full min-w-0 truncate text-body font-medium">{title}</span>
         ) : href ? (
@@ -383,7 +395,7 @@ export function ChoiceRow({
             href={href}
             aria-label={verb}
             onClick={(event) => event.stopPropagation()}
-            className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
+            className="block max-w-full min-w-0 truncate rounded-sm text-left text-body font-medium focus-ring"
           >
             {title}
           </Link>
@@ -399,7 +411,7 @@ export function ChoiceRow({
               event.stopPropagation()
               go()
             }}
-            className="block max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring"
+            className="block max-w-full min-w-0 truncate rounded-sm text-left text-body font-medium focus-ring"
           >
             {title}
           </button>

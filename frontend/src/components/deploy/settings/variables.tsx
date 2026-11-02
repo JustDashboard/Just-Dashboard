@@ -32,16 +32,9 @@ import {
   OptionList,
   OptionRow,
 } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
 import { Well } from "@/components/panel"
-import {
-  hasProductLogo,
-  ProductGlyph,
-  ProductGlyphs,
-  ProductLogo,
-  variableProduct,
-} from "@/components/product-logo"
+import { ProductGlyph, ProductLogo, variableProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
@@ -90,7 +83,7 @@ import {
   REFUSAL_WORD,
 } from "@/components/deploy/settings/dotenv"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { ValueType, VariableMark } from "@/components/deploy/settings/variable-type"
+import { RevealedValue, ValueType, VariableMark } from "@/components/deploy/settings/variable-type"
 import { SharedReferencePicker, SharedVariables } from "@/components/deploy/shared-variables"
 import { StoreReferenceLabel, StoreReferencePicker } from "@/components/deploy/secret-store-picker"
 import { SettingSection, SettingsPage } from "@/components/deploy/settings/setting-card"
@@ -122,8 +115,9 @@ import {
  * Where §15 pass 2's figures went: this page takes the `/git` exit. Every
  * count — how many variables, how many secret, pending, reaching the build,
  * holding a reference — is on a filter chip over the list, where it also
- * narrows the list to what it counts; a tile could only have said it. The
- * products the environment talks to sit under the section's title.
+ * narrows the list to what it counts; a tile could only have said it. Nothing
+ * sits under the section's title: the strip of services that did was each row's
+ * own mark said again, and one logo there read as a stray icon.
  *
  * `compact` is for the automation agent's preview-environment sheet: a sheet
  * cannot open a second sheet, so there the editor stays inline above the
@@ -139,16 +133,23 @@ type Sensitivity = DeploymentVariable["sensitivity"]
  * left the reader to guess that a build sees a secret only through a mount
  * that is gone when the step ends.
  */
-const SCOPES: { scope: Scope; word: string; title: string }[] = [
-  { scope: "build", word: "build", title: "Build — through temporary secret mounts" },
+const SCOPES: { scope: Scope; word: string; slot: string; title: string }[] = [
+  {
+    scope: "build",
+    word: "build",
+    slot: "build",
+    title: "Build — through temporary secret mounts",
+  },
   {
     scope: "runtime",
     word: "runtime",
+    slot: "runtime",
     title: "Runtime — as an environment variable in the container",
   },
   {
     scope: "release_task",
     word: "release task",
+    slot: "release",
     title: "Release task — only the tasks that list it",
   },
 ]
@@ -598,7 +599,7 @@ function VariablesBody({
     })
 
   const verbsFor = (variable: DeploymentVariable): Verb[] => {
-    const isRevealed = Boolean(revealed[variable.name])
+    const isRevealed = revealed[variable.name] !== undefined
     // Any one row action in flight disables the rest: two quick actions
     // otherwise race the revision refresh into a conflict.
     const verbs: Verb[] = [
@@ -611,6 +612,16 @@ function VariablesBody({
         run: () => (isRevealed ? hide(variable) : void reveal(variable)),
       },
     ]
+    // Inline whether or not the value is showing, so the row's edge is one
+    // width on every row and revealing a value moves nothing.
+    verbs.push({
+      key: "copy",
+      label: `Copy ${variable.name}`,
+      icon: Copy,
+      inline: true,
+      disabled: Boolean(rowBusy),
+      run: () => void copyValue(variable),
+    })
     if (canEdit)
       verbs.push({
         key: "edit",
@@ -618,13 +629,6 @@ function VariablesBody({
         icon: Pencil,
         run: () => loadIntoForm(variable),
       })
-    verbs.push({
-      key: "copy",
-      label: "Copy value",
-      icon: Copy,
-      disabled: Boolean(rowBusy),
-      run: () => void copyValue(variable),
-    })
     // Compact is a preview environment inside the Automation page: the
     // project's Databases page is not where its links live.
     if (variable.reference?.kind === "database" && !compact)
@@ -662,10 +666,6 @@ function VariablesBody({
   const filtered = sorted.filter(
     (variable) => active.test(variable) && variable.name.toLowerCase().includes(needle),
   )
-  // Only the ones with a mark: a product drawn as nothing was counted in the
-  // glyphs' "+N" as if it were overflow.
-  const products = [...new Set(sorted.map(productOf).filter(hasProductLogo))]
-
   const nameProblem = name && !NAME.test(name.trim())
   const exists =
     !editingName && variables.some((variable) => variable.name === name.trim().toUpperCase())
@@ -895,11 +895,13 @@ function VariablesBody({
       </div>
     ) : (
       <div className="min-w-0 space-y-4">
-        <div className="min-w-0 space-y-3">
+        {/* The chips take what they need and the search the rest, so all eight
+            still leave it a usable width on one line. A phone keeps it on top. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           <SearchInput
             aria-label="Search variables"
             placeholder="Search variables…"
-            containerClassName="sm:w-full"
+            containerClassName="sm:order-last sm:w-auto sm:min-w-40 sm:flex-1"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -944,7 +946,7 @@ function VariablesBody({
           // again in their stagger rather than leaving the survivors standing
           // in the gaps; typing in the search does not, or every keystroke
           // would replay it.
-          <ChoiceList key={filter} aria-label="Environment variables">
+          <ChoiceList key={filter} aria-label="Environment variables" className="space-y-1.5">
             {filtered.map((variable, index) => (
               <VariableRow
                 key={variable.name}
@@ -1028,11 +1030,8 @@ function VariablesBody({
 
   return (
     <>
-      {/* The head carries the services the environment talks to and not how
-          many variables there are: the "All" chip under it is that count. */}
       <SettingSection
         title="Environment variables"
-        state={products.length > 0 && <ProductGlyphs ids={products} />}
         actions={
           canEdit && (
             <>
@@ -1109,16 +1108,16 @@ function VariablesBody({
 }
 
 /**
- * A variable in the list. Its name in the family's hue, what it holds on the
- * line under it — a mask, or the database it points at — and who set it, as
- * their face. Where the list's column is wide the card is one line: its edge
- * carries its pending state, the state of the database a reference reads, and
- * the three places it can reach, which are the same width on every row, so
- * down the list the states end on one edge. The database's state was a band
- * of its own under the name, the one reading that made a row two lines tall
- * with its verbs level with the name. Narrower, all of it goes under the name
- * at the card's full width. A revealed value always takes a line of its own:
- * it is there to be selected and copied, not read past.
+ * A variable in the list, one line wide: its mark, its name in the family's
+ * hue, what it holds, where it reaches, and who set it as their face. The row's
+ * edge is one width on every row, so down the list the names start on one edge
+ * and the values on another; a state goes in the value's column so that it
+ * cannot move either. Narrow, the value goes under the name and the rest on the
+ * line under that.
+ *
+ * Revealing a value swaps it for the mask in the same cell. The row is the same
+ * height showing it as hiding it, at every width. When it was set is on the
+ * face and in the editor: on every row it took the room the value needed.
  */
 function VariableRow({
   variable,
@@ -1156,12 +1155,11 @@ function VariableRow({
   const state = rotating ? (
     <Status key="rotating" tone="running" label="Rotating…" className="animate-rise" />
   ) : variable.pending ? (
-    <Status
-      key={`pending-${change}`}
-      tone="warning"
-      label={change ? `Pending · ${change}` : "Pending"}
-      className="animate-rise"
-    />
+    // What kind of change is the page's strip's to say, and on one line those
+    // words were taking the room the value needs.
+    <span key={`pending-${change}`} title={change ? `Pending · ${change}` : undefined}>
+      <Status tone="warning" label="Pending" className="animate-rise" />
+    </span>
   ) : browserInlined(variable.name) && !variable.scopes.includes("build") ? (
     // The bundle is compiled while the build runs; a runtime-only value is
     // undefined in every visitor's browser however it is set here.
@@ -1174,15 +1172,25 @@ function VariableRow({
   const linkState = link && link.status !== "connected" && (
     <Status tone={LINK_STATUS[link.status].tone} label={LINK_STATUS[link.status].label} />
   )
-  // Wide, the edge holds the states and the reach; narrow, all of it goes
-  // under the name, the three slots first so they line up down the list.
-  const under = !wide && (
-    <>
-      <Reach scopes={variable.scopes} />
-      {state}
-      {linkState}
-    </>
+  const setBy = (
+    <span
+      title={`Set ${relativeTime(variable.createdAt)} by ${variable.createdBy}`}
+      className="inline-flex shrink-0"
+    >
+      <span className="sr-only">
+        Set {relativeTime(variable.createdAt)} by {variable.createdBy}
+      </span>
+      <InitialsMark name={variable.createdBy} size="xs" className="size-4" />
+    </span>
   )
+  const value =
+    revealed !== undefined ? (
+      <RevealedValue name={variable.name} value={revealed} />
+    ) : (
+      <span className="block h-4 truncate leading-4">
+        <ValueLine variable={variable} link={link} projectId={projectId} compact={compact} />
+      </span>
+    )
   return (
     <ChoiceRow
       index={index}
@@ -1192,48 +1200,35 @@ function VariableRow({
       busy={rotating}
       leading={<VariableMark variable={variable} product={product} />}
       title={<VariableName name={variable.name} hue={hue} />}
+      columns={wide}
+      className={wide ? "min-h-11 py-1.5" : "py-2"}
       description={
-        <ValueLine
-          variable={variable}
-          link={link}
-          projectId={projectId}
-          compact={compact}
-          wide={wide}
-        />
+        wide ? (
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 flex-1">{value}</span>
+            {linkState}
+            {state}
+          </span>
+        ) : (
+          value
+        )
       }
       trailing={
         wide ? (
           <>
-            {linkState}
-            {state}
             <Reach scopes={variable.scopes} />
+            {setBy}
           </>
         ) : undefined
       }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${variable.name}`} />}
     >
-      {(under || revealed !== undefined) && (
-        <div className="min-w-0 space-y-2 sm:pl-11">
-          {under && <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{under}</div>}
-          {revealed !== undefined && (
-            // The value invites a click to select it, and the row around it
-            // opens the editor on a press — so a press here stays here. It
-            // rises in, because Reveal put it there.
-            <div
-              onClick={(event) => event.stopPropagation()}
-              className="flex min-w-0 animate-rise items-start gap-1"
-            >
-              <Well className="min-w-0 flex-1 py-1.5 font-mono text-hint break-all select-all">
-                {revealed}
-              </Well>
-              <IconAction
-                label={`Copy ${variable.name}`}
-                onClick={() => void copyText(revealed, `${variable.name} copied`)}
-              >
-                <Copy />
-              </IconAction>
-            </div>
-          )}
+      {!wide && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 sm:pl-11">
+          <Reach scopes={variable.scopes} />
+          {state}
+          {linkState}
+          <span className="ml-auto flex">{setBy}</span>
         </div>
       )}
     </ChoiceRow>
@@ -1253,21 +1248,19 @@ function VariableName({ name, hue }: { name: string; hue?: string }) {
 }
 
 /**
- * What the variable holds, and who set it when. Narrow, the person is their
- * face alone — the name was what the line lost to its ellipsis on most rows.
+ * What the variable holds: a mask, or what it reads. What kind of reference it
+ * is goes to a reader by name; the glyph already says so to everyone else.
  */
 function ValueLine({
   variable,
   link,
   projectId,
   compact,
-  wide,
 }: {
   variable: DeploymentVariable
   link?: DeploymentDatabaseLink
   projectId: number
   compact: boolean
-  wide: boolean
 }) {
   const reference = variable.reference
   return (
@@ -1288,9 +1281,7 @@ function ValueLine({
                 {link.name}
               </Link>
             )}
-            {/* Narrow, the engine's glyph and the database's name already say
-                what this is, and the line's room goes to who set it. */}
-            <span className={cn(!wide && "sr-only")}> · reference</span>
+            <span className="sr-only"> · reference</span>
           </>
         ) : (
           <>database #{reference.target} · reference</>
@@ -1314,12 +1305,12 @@ function ValueLine({
               {reference.kind}.{reference.target}
             </Link>
           )}
-          <span className={cn(!wide && "sr-only")}> · shared</span>
+          <span className="sr-only"> · shared</span>
         </>
       ) : reference?.kind === "store" ? (
         <>
           <StoreReferenceLabel target={reference.target} compact={compact} />
-          <span className={cn(!wide && "sr-only")}> · secret store</span>
+          <span className="sr-only"> · secret store</span>
         </>
       ) : reference ? (
         <>
@@ -1330,27 +1321,6 @@ function ValueLine({
         </>
       ) : (
         <span className="font-mono">{variable.masked}</span>
-      )}
-      <span> · set {relativeTime(variable.createdAt)} </span>
-      {wide ? (
-        <>
-          <span>by </span>
-          <InitialsMark
-            name={variable.createdBy}
-            size="xs"
-            className="inline-flex size-3.5 align-[-3px]"
-          />{" "}
-          {variable.createdBy}
-        </>
-      ) : (
-        <span title={variable.createdBy}>
-          <span className="sr-only">by {variable.createdBy}</span>
-          <InitialsMark
-            name={variable.createdBy}
-            size="xs"
-            className="inline-flex size-3.5 align-[-3px]"
-          />
-        </span>
       )}
     </>
   )
@@ -1373,7 +1343,7 @@ function Reach({ scopes }: { scopes: Scope[] }) {
         const lit = scopes.includes(item.scope)
         return (
           <span key={`${item.scope}-${lit}`} aria-hidden className="inline-flex animate-rise">
-            <Tag className={lit ? "text-foreground/85" : "opacity-25"}>{item.word}</Tag>
+            <Tag className={lit ? "text-foreground/85" : "opacity-25"}>{item.slot}</Tag>
           </span>
         )
       })}
