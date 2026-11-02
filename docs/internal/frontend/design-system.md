@@ -2870,7 +2870,7 @@ The passes, in order. Each one is a diff you can review on its own.
 
 **What the Overview looks like after these passes**, as a checklist for the page you are on: the
 machine's identity line first (`HostIdentity` — its distribution drawn as itself, the processor and
-hypervisor as bare marks among its facts); Shortcuts, a run of `ProductCard`s; a Resources `Section`
+hypervisor as bare marks among its facts); Shortcuts, a run of four `ShortcutCard`s; a Resources `Section`
 whose head carries the socket's `Status live` and the way on to Metrics, holding a four-tile
 `StatGrid` of the readings that move — each carrying its last hour in the tile's `trend` slot where a
 meter would be, keyed before its name by its line's colour, its figure gliding to every frame — over
@@ -2885,14 +2885,25 @@ which is not one. Everything that arrived, rose.
 product does: Terminal, Excalidraw, Files and Remote Desktop were nowhere on it, Databases
 and Backups were one figure each, and the only thing it offered to *start* was a project. Nothing
 above was taken back; what the page gained is the answer to "what was I doing, and how do I start the
-next thing". **Shortcuts** opens the page under the identity line: a `ProductCard` per thing a visit
+next thing". **Shortcuts** opens the page under the identity line: a card per thing a visit
 starts, each counting what it adds to (*6 projects*, *3 open · operator*) so it is data rather than a
-caption (pass 8), two to a row on a phone and four across from `xl`, and gated
+caption (pass 8), and gated
 on the section and on the capability its destination checks — a shortcut that opens a refusal is a
 dead button. New drawing makes the drawing where it is pressed, as the list's own New does, and
-opens it. When Stickyboard left in 0.8 its card went with it, and Add a site took the place,
-after New project as the Proxy section follows Deploy in the sidebar: the next thing an app needs
-is a name in front of it, and it opens the Sites form from `?new=1`. Under Deployments, three
+opens it.
+
+The run grew to eight and in 0.8.5 was cut, at the operator's request, to the four that are started
+from here rather than from their own pages: New project, New terminal, New drawing and Browse files.
+Add a site, Add a database, Add a computer and Back up each have a section one press away that opens
+on the same verb; the list of sites, read only to count on its card, went with it. Four took a card
+of their own, `ShortcutCard` in `overview/shortcuts.tsx`, rather than `ProductCard`: that is a button
+you pick one of in a form, and these go somewhere, so each is a link across its whole face that opens
+in a new tab like any other. The run is laid out against the content's width by a container query, two
+by two until 42rem and four across after it, because the sidebar makes the window's width no guide to
+what a card has. A card stays about 56px tall on a phone and 60px beside a wide run, and its end glyph
+— `Plus` to make, `ArrowRight` to go — gives way wherever the label needs the room.
+
+Under Deployments, three
 **pairs**: the shells open on the server (`workspace.tsx`
 — working first, each drawn as the program in it, a row opening `/terminal?session=` on that session)
 beside the drawings edited last, each its own preview; the databases (the
