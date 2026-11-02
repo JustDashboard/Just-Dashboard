@@ -9,6 +9,7 @@ import { ApiError, del, get, post, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { plural, relativeTime } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
+import { NOT_A_SIGN_IN, secretValueField } from "@/lib/secret-field"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -715,7 +716,7 @@ function VariablesBody({
                 id="variable-name"
                 value={name}
                 onChange={(event) => changeName(event.target.value.toUpperCase())}
-                autoComplete="off"
+                {...NOT_A_SIGN_IN}
                 spellCheck={false}
                 placeholder="STRIPE_SECRET_KEY"
                 className="font-mono"
@@ -751,17 +752,14 @@ function VariablesBody({
           <InputGroup>
             <InputGroupInput
               id="variable-value"
-              type={reference || sensitivity === "plain" || shown ? "text" : "password"}
+              {...secretValueField(!reference && sensitivity === "secret" && !shown)}
               value={value}
               onChange={(event) => {
                 setValue(event.target.value)
                 if (valueError) setValueError("")
               }}
-              autoComplete="off"
-              spellCheck={false}
               aria-invalid={Boolean(valueError)}
               placeholder={reference ? "${{database.11}}" : undefined}
-              className="font-mono"
             />
             <InputGroupAddon align="inline-end" className="gap-0 p-0">
               {!reference && sensitivity === "secret" && value && (
