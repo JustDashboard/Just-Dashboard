@@ -78,6 +78,13 @@ export interface ActiveWork {
   run?: EngineRun
 }
 
+/** api.agentImage in the dashboard's source. */
+export interface AgentImage {
+  data?: string
+  mediaType?: string
+  thumb?: AssistantImage
+}
+
 /** githubapp.AppSummary in the dashboard's source. */
 export interface AppSummary {
   createdAt?: string
@@ -130,6 +137,12 @@ export const ArtifactKind = {
   Export: "export",
 } as const
 export type ArtifactKind = (typeof ArtifactKind)[keyof typeof ArtifactKind]
+
+/** assistant.Image in the dashboard's source. */
+export interface AssistantImage {
+  data?: string
+  mediaType?: string
+}
 
 /** accesslog.Audience in the dashboard's source. */
 export interface Audience {
@@ -214,7 +227,7 @@ export interface Blueprint {
   fixtures?: Fixture[] | null
   iconId?: string
   id?: string
-  image?: Image
+  image?: BlueprintImage
   inputs?: Input[] | null
   name?: string
   operations?: Operations
@@ -244,7 +257,7 @@ export interface BlueprintDetail {
   fixtures?: Fixture[] | null
   iconId?: string
   id?: string
-  image?: Image
+  image?: BlueprintImage
   inputs?: Input[] | null
   name?: string
   operations?: Operations
@@ -260,6 +273,15 @@ export interface BlueprintDetail {
   update?: Update
   version?: string
   volumes?: Volume[] | null
+}
+
+/** blueprint.Image in the dashboard's source. */
+export interface BlueprintImage {
+  command?: string[] | null
+  platforms?: string[] | null
+  pullPolicy?: string
+  reference?: string
+  tagPolicy?: string
 }
 
 /** blueprint.Operation in the dashboard's source. */
@@ -2761,15 +2783,6 @@ export interface Identity {
   state?: string
 }
 
-/** blueprint.Image in the dashboard's source. */
-export interface Image {
-  command?: string[] | null
-  platforms?: string[] | null
-  pullPolicy?: string
-  reference?: string
-  tagPolicy?: string
-}
-
 /** deploy.ImageBuildIssue in the dashboard's source. */
 export interface ImageBuildIssue {
   code?: string
@@ -3184,6 +3197,7 @@ export interface OperationsSummary {
 export interface OperatorRequest {
   conversation?: string
   decisions?: Record<string, boolean> | null
+  images?: AgentImage[] | null
   mode?: Mode
   question?: string
   takeOver?: boolean
@@ -4642,7 +4656,7 @@ export interface Service {
   egress?: boolean
   environment?: Environment[] | null
   healthcheck?: Healthcheck
-  image?: Image
+  image?: BlueprintImage
   name?: string
   ports?: Port[] | null
   purpose?: string
