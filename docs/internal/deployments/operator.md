@@ -150,12 +150,14 @@ back, which the next would refuse (`agentCarryOver`). `assistant_chats` keeps on
 is about, the model, when, its steps and changes, whether calls wait, and the conversation and its title sealed
 with the master key, as the keyring is — and `assistant_chat_lines` what the page was shown, a sealed batch per
 save. A chat goes with its owner and with the deployment it is about (`ON DELETE CASCADE`). Each person keeps
-their newest 200.
+their newest 200. `assistant_chat_images` keeps each image pasted into a chat whole, sealed, for the page to open
+large; it goes with its chat (see Pasted images).
 
 | Route | Does |
 | --- | --- |
 | `GET /assistant/chats[?deployment=&draft=&scope=server]` | The person's chats, the newest first, at most 100: id, title, scope, times, provider, model, `running`, `waiting`, steps, changes |
 | `GET /assistant/chats/{chat}` | One chat and its `lines`: each question and each Allow/Decline press, and every line the stream sent, as sent, with `at`; a run of text is kept as one line |
+| `GET /assistant/chats/{chat}/images/{image}` | An image pasted into it, whole, as its bytes (`private, immutable`, `nosniff`, a sandboxing CSP); `404 not_found` once only its thumbnail is kept |
 | `PATCH /assistant/chats/{chat}` | Renames it (`{"title"}`) |
 | `DELETE /assistant/chats/{chat}` | Deletes it; `409 chat_busy` while a press runs it |
 
@@ -239,8 +241,20 @@ body up to about 9.5 MB for them (`httpx.DecodeJSONWithin`); every other JSON bo
 that are not the format they claim (`http.DetectContentType`), and an image past 1.5 MB or a thumbnail past 96 KB,
 each with a 400 that says which. The images go into the conversation before the question's words, as an
 Anthropic `image` block or an OpenAI-compatible `image_url` part with a data address. A model that reads no
-images answers with its provider's error. The saved chat's question line keeps only the thumbnails, so a chat
-read back draws them; the conversation keeps the images themselves, sealed with the rest of it. To keep a chat of
+images answers with its provider's error. The saved chat's question line keeps the thumbnails, so a chat read
+back draws them, and names each image by an id with its size (`{mediaType, data, id, width, height}`; the size is
+read from the image's header, `assistant.ImageSize`). The image itself is kept whole beside the chat in
+`assistant_chat_images`, sealed, and read back from `GET /assistant/chats/{chat}/images/{image}`, the owner's
+alone. Each person keeps their newest 60 (`chatImageRetention`, some 30 MB of screenshots and at most about
+120); an older one opens as its thumbnail, and the viewer says only a small copy is kept.
+
+A thumbnail opens the image large (`components/image-lightbox.tsx`, which the README and pull request pictures
+use too): in the box before it is sent, from the data the page made, and in a question after, from this tab's copy
+or the server's. The viewer makes room for the image from its size and draws the thumbnail there while the image
+arrives, so nothing jumps; arrows, the arrow keys or a swipe walk a question's images, a click on one larger than
+the window shows it pixel for pixel, and Escape gives focus back to the thumbnail.
+
+The conversation keeps the images too, sealed with the rest of it, for the model. To keep a chat of
 many screenshots a size worth sending and saving after every step, it keeps the newest 8 and at most 6 MB of them
 whole, the newest question's always, and the older ones read as "(an image the person pasted earlier, left out to
 keep the chat short)". An image counts for about 1,600 tokens against the chat's length, not for its bytes. The

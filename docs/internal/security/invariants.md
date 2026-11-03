@@ -349,8 +349,8 @@ A change that weakens any of these has to say so explicitly.
     an answer that cannot be masked whole is not sent. What the person sends is theirs and goes as it is: a
     question's words, and the images pasted with it, which masking cannot read (the box says so while one
     waits). A malformed call never refuses the answer: it is answered
-    with what was wrong (`assistant.CheckCalls`). Its saved chats are their owner's alone and sealed with the
-    master key. See [the deployment assistant](../deployments/operator.md).
+    with what was wrong (`assistant.CheckCalls`). Its saved chats, and the images pasted into them, are their
+    owner's alone and sealed with the master key. See [the deployment assistant](../deployments/operator.md).
 
 14. A vulnerability scanner reads an image; it never reaches the host. `imagescan.ScanSpec` runs Trivy
     with **no network** (`NetworkMode: none`), no capabilities, a read-only root, no new privileges and

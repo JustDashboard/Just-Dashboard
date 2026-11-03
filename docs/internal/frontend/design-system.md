@@ -468,7 +468,11 @@ the one thing that scrolls, the composer sits at the foot with a small margin an
 says what is sent, and the rail is a column after a hairline, never a card. An empty chat centres its mark, title and
 suggestions in the column. The composer draws no focus at all — no ring, no lit border, no glow — because it is the
 page's one place to type and the blinking caret is the whole answer to "is it ready"; a press anywhere on its frame puts
-the caret in it, and the buttons in its toolbar keep the ring for the keyboard.
+the caret in it, and the buttons in its toolbar keep the ring for the keyboard. An image waiting in it, or asked with a
+question, is a thumbnail that opens large on a press (`ImageLightbox`, `components/image-lightbox.tsx`, which README
+and pull request pictures open in too): the picture as large as the window allows over a dark ground, room made for it
+from its size with the thumbnail drawn there until it lands, so nothing jumps; arrows, keys or a swipe for the rest, a
+click for pixel for pixel, Escape back to the thumbnail. A tile pops in when an image is pasted and out when removed.
 
 The rail holds the chats and what the open one has done. **Chats** are the person's saved chats (`agent/chats.ts`,
 `agent/chat-list.tsx`), newest first, each a row of one height in every state: its title, how long ago it moved, a
