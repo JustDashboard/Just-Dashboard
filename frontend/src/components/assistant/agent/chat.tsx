@@ -20,6 +20,7 @@ import {
   answering,
   pendingSteps,
   usageLine,
+  type AgentImage,
   type AgentPart,
   type AgentStep,
   type AgentTurn,
@@ -39,6 +40,7 @@ import {
   type AgentSession,
 } from "@/components/assistant/agent/sessions"
 import { FormNote } from "@/components/form"
+import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox"
 import type { PastedImage } from "@/components/assistant/agent/images"
 import { Markdown } from "@/components/git/markdown"
 import { Well } from "@/components/panel"
@@ -49,6 +51,58 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { cn } from "@/lib/utils"
 import type { Icon } from "@/components/icons"
+
+/**
+ * The images a question was asked with, each a thumbnail that opens large: the
+ * image whole when this tab sent it or the server keeps it, else the thumbnail.
+ */
+function QuestionImages({ images }: { images: AgentImage[] }) {
+  const [open, setOpen] = useState<number>()
+  const shown = useMemo(
+    () =>
+      images.map((image, at): LightboxImage => ({
+        src: image.full ?? image.thumb,
+        placeholder: image.thumb,
+        width: image.width,
+        height: image.height,
+        alt: images.length > 1 ? `Image ${at + 1} of the question` : "The question's image",
+        download: `pasted-image-${at + 1}${extensionOf(image.full ?? image.thumb)}`,
+      })),
+    [images],
+  )
+  return (
+    <>
+      <ul data-slot="agent-question-images" className="flex flex-wrap justify-end gap-2">
+        {images.map((image, at) => (
+          <li key={at}>
+            <button
+              type="button"
+              aria-label={`Open image ${at + 1} of the question`}
+              data-slot="agent-question-image"
+              className="block cursor-zoom-in overflow-hidden rounded-md border border-hairline focus-ring"
+              onClick={() => setOpen(at)}
+            >
+              {/* A thumbnail as a data address: nothing for Next to optimise. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={image.thumb}
+                alt={`Image ${at + 1} of the question`}
+                className="block max-h-40 max-w-56 object-contain transition-[filter] duration-150 hover:brightness-90"
+              />
+            </button>
+          </li>
+        ))}
+      </ul>
+      <ImageLightbox images={shown} at={open} onAt={setOpen} onClose={() => setOpen(undefined)} />
+    </>
+  )
+}
+
+/** The file extension an image's address says it is, for saving it. */
+function extensionOf(src: string) {
+  const type = /^data:image\/(png|jpeg|gif|webp);/.exec(src)?.[1]
+  return type ? `.${type === "jpeg" ? "jpg" : type}` : ""
+}
 
 export interface AgentSuggestion {
   label: string
@@ -430,21 +484,7 @@ function TurnView({
         data-slot="agent-question"
         className="ml-auto w-fit max-w-[85%] space-y-2 rounded-xl bg-surface-header px-3.5 py-2.5"
       >
-        {turn.images && turn.images.length > 0 && (
-          <ul data-slot="agent-question-images" className="flex flex-wrap justify-end gap-2">
-            {turn.images.map((src, at) => (
-              <li key={at}>
-                {/* A thumbnail as a data address: nothing for Next to optimise. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={src}
-                  alt={`Image ${at + 1} of the question`}
-                  className="max-h-40 max-w-56 rounded-md border border-hairline object-contain"
-                />
-              </li>
-            ))}
-          </ul>
-        )}
+        {turn.images && turn.images.length > 0 && <QuestionImages images={turn.images} />}
         {turn.question && (
           <p className="text-body break-words whitespace-pre-wrap">{turn.question}</p>
         )}

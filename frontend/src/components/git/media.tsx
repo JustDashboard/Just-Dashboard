@@ -1,12 +1,11 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState } from "react"
-import { Dialog as DialogPrimitive } from "radix-ui"
-import { ChevronLeft, ChevronRight, Cross, External } from "@/components/icons"
+import { createContext, useContext, useState } from "react"
+import { External } from "@/components/icons"
 import { forgeMediaUrl } from "@/hooks/use-github"
 import { isForgeMedia } from "@/lib/markdown"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
+import { ImageLightbox } from "@/components/image-lightbox"
 
 type Media = { src: string; alt: string }
 
@@ -95,129 +94,21 @@ export function MediaLightbox({ media, children }: { media: Media[]; children: R
   const [at, setAt] = useState<number>()
   const open = (src: string) => {
     const index = media.findIndex((item) => item.src === src)
-    if (index >= 0) {
-      setZoomed(false)
-      setAt(index)
-    }
+    if (index >= 0) setAt(index)
   }
-  // Full size, panned: a wide screenshot fitted to a phone is too small to read.
-  const [zoomed, setZoomed] = useState(false)
-  const current = at === undefined ? undefined : media[at]
-  const step = (by: number) => {
-    setZoomed(false)
-    setAt((index) =>
-      index === undefined ? index : Math.min(media.length - 1, Math.max(0, index + by)),
-    )
-  }
-
-  useEffect(() => {
-    if (at === undefined) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "ArrowLeft") step(-1)
-      if (event.key === "ArrowRight") step(1)
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-    // `step` only reads through the setter.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [at === undefined])
-
   return (
     <Lightbox.Provider value={open}>
       {children}
-      <DialogPrimitive.Root open={!!current} onOpenChange={(next) => !next && setAt(undefined)}>
-        <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/95" />
-          <DialogPrimitive.Content
-            aria-describedby={undefined}
-            className="fixed inset-0 z-50 flex flex-col outline-none"
-          >
-            <div className="flex h-12 shrink-0 items-center gap-2 px-3 text-white">
-              <DialogPrimitive.Title className="min-w-0 flex-1 truncate text-body">
-                {current?.alt || "Image"}
-              </DialogPrimitive.Title>
-              {media.length > 1 && at !== undefined && (
-                <span className="numeric shrink-0 text-hint text-white/70">
-                  {at + 1} of {media.length}
-                </span>
-              )}
-              {current && (
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  asChild
-                  className="text-white hover:bg-white/10 hover:text-white"
-                >
-                  <a
-                    href={current.src}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    aria-label="Open the original"
-                  >
-                    <External className="size-4" />
-                  </a>
-                </Button>
-              )}
-              <DialogPrimitive.Close asChild>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Close"
-                  className="text-white hover:bg-white/10 hover:text-white"
-                >
-                  <Cross className="size-4" />
-                </Button>
-              </DialogPrimitive.Close>
-            </div>
-            <div className="relative min-h-0 flex-1">
-              <div
-                className={cn(
-                  "absolute inset-0 flex px-2 pb-2",
-                  zoomed ? "overflow-auto" : "items-center justify-center",
-                )}
-              >
-                {current && (
-                  // eslint-disable-next-line @next/next/no-img-element -- our own route, already sized
-                  <img
-                    src={forgeMediaUrl(current.src)}
-                    alt={current.alt}
-                    onClick={() => setZoomed((value) => !value)}
-                    className={cn(
-                      zoomed
-                        ? "m-auto max-w-none cursor-zoom-out"
-                        : "max-h-full max-w-full cursor-zoom-in object-contain",
-                    )}
-                  />
-                )}
-              </div>
-              {media.length > 1 && at !== undefined && (
-                <>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label="Previous image"
-                    disabled={at === 0}
-                    onClick={() => step(-1)}
-                    className="absolute top-1/2 left-2 -translate-y-1/2 bg-black/50 text-white hover:bg-black/70 hover:text-white"
-                  >
-                    <ChevronLeft className="size-5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label="Next image"
-                    disabled={at === media.length - 1}
-                    onClick={() => step(1)}
-                    className="absolute top-1/2 right-2 -translate-y-1/2 bg-black/50 text-white hover:bg-black/70 hover:text-white"
-                  >
-                    <ChevronRight className="size-5" />
-                  </Button>
-                </>
-              )}
-            </div>
-          </DialogPrimitive.Content>
-        </DialogPrimitive.Portal>
-      </DialogPrimitive.Root>
+      <ImageLightbox
+        images={media.map((item) => ({
+          src: forgeMediaUrl(item.src),
+          alt: item.alt,
+          original: item.src,
+        }))}
+        at={at}
+        onAt={setAt}
+        onClose={() => setAt(undefined)}
+      />
     </Lightbox.Provider>
   )
 }

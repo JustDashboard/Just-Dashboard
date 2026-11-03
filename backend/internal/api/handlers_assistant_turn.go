@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -245,6 +246,9 @@ type agentPress struct {
 	// lines are what the page was sent since the chat was last saved, each with
 	// when, a run of text as one line.
 	lines []map[string]any
+	// images are what the person pasted since then, whole, for the page to open
+	// one large; the question's line names each by its id.
+	images []chatImage
 	quiet bool
 	// announced is a chat saved once the page has been sent its first line.
 	announced bool
@@ -282,11 +286,11 @@ func (pr *agentPress) save(ctx context.Context) {
 	if !pr.stream.started {
 		return
 	}
-	if err := pr.s.saveChat(context.WithoutCancel(ctx), pr.c, pr.lines); err != nil {
+	if err := pr.s.saveChat(context.WithoutCancel(ctx), pr.c, pr.lines, pr.images...); err != nil {
 		pr.s.Log.Warn("an assistant chat could not be saved", "chat", pr.c.ID[:8], "err", err)
 		return
 	}
-	pr.lines = nil
+	pr.lines, pr.images = nil, nil
 }
 
 func (pr *agentPress) masker(ctx context.Context) (*deploy.DiagnosisMasker, error) {
@@ -417,12 +421,17 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		press.save(pressCtx)
 	}()
 	act := map[string]any{"type": "question", "text": req.Question}
-	if len(req.Images) > 0 {
-		// The saved chat draws the question with the thumbnails; the images
-		// themselves are in the conversation the model is sent.
-		thumbs := make([]assistant.Image, len(req.Images))
+	if len(req.Images) > 0 && !resume {
+		// The saved chat draws the question with the thumbnails, and keeps each
+		// image whole beside it for the page to open large, by its id.
+		thumbs := make([]map[string]any, len(req.Images))
 		for i, img := range req.Images {
-			thumbs[i] = img.Thumb
+			kept := chatImage{ID: rand.Text(), Image: img.Image}
+			thumbs[i] = map[string]any{"mediaType": img.Thumb.MediaType, "data": img.Thumb.Data, "id": kept.ID}
+			if width, height, ok := assistant.ImageSize(img.Image); ok {
+				thumbs[i]["width"], thumbs[i]["height"] = width, height
+			}
+			press.images = append(press.images, kept)
 		}
 		act["images"] = thumbs
 	}

@@ -558,6 +558,25 @@
         "title": "api.DataCopyTable",
         "type": "object"
       },
+      "api.agentImage": {
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "thumb": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/assistant.Image"
+              }
+            ]
+          }
+        },
+        "title": "api.agentImage",
+        "type": "object"
+      },
       "api.archivedDeployment": {
         "properties": {
           "archivedAt": {
@@ -2235,6 +2254,15 @@
               "null"
             ]
           },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/api.agentImage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "mode": {
             "enum": [
               "ask",
@@ -2939,6 +2967,18 @@
           }
         },
         "title": "api.watchSimulationRequest",
+        "type": "object"
+      },
+      "assistant.Image": {
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          }
+        },
+        "title": "assistant.Image",
         "type": "object"
       },
       "blueprint.Acceptance": {

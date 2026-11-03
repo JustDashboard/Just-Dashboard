@@ -489,6 +489,98 @@ test("a screenshot pasted into the box goes with the question, and alone is one"
   expect(sent[1].images).toHaveLength(1)
 })
 
+/** A one-pixel PNG: a thumbnail, or an image the server keeps whole. */
+const PIXEL =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+
+test("a pasted image opens large before it is sent, after, and from a saved chat", async ({
+  page,
+}) => {
+  const shot = { mediaType: "image/png", data: PIXEL, width: 1568, height: 784 }
+  await mockAssistant(
+    page,
+    [[start, { type: "text", text: "That is a 502 from the proxy." }, done()]],
+    {
+      chats: [savedChat("c-shot", "What is this error?")],
+      lines: {
+        "c-shot": [
+          {
+            type: "question",
+            text: "What is this error?",
+            images: [
+              { ...shot, id: "img-1" },
+              { ...shot, id: "img-gone" },
+            ],
+            at: ago(30),
+          },
+          { ...start, conversation: "c-shot", at: ago(30) },
+          { type: "text", text: "A 502.", at: ago(30) },
+          done({ at: ago(30) }),
+        ],
+      },
+    },
+  )
+  const kept: string[] = []
+  await page.route("**/api/v1/assistant/chats/c-shot/images/*", (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").at(-1)!
+    kept.push(id)
+    if (id !== "img-1") {
+      return route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "not_found", message: "only a small copy" } }),
+      })
+    }
+    return route.fulfill({ contentType: "image/png", body: Buffer.from(PIXEL, "base64") })
+  })
+  await page.goto("/deploy/7/assistant")
+  const lightbox = page.locator("[data-slot='lightbox']")
+  const picture = lightbox.locator("[data-slot='lightbox-picture']")
+
+  // Before it is sent: the tile opens the image as it will be sent, at its size.
+  await pasteScreenshot(page)
+  const open = chat(page).getByRole("button", { name: "Open image 1" })
+  await open.click()
+  await expect(lightbox).toBeVisible()
+  await expect(lightbox.getByRole("heading")).toHaveText("The image to send")
+  await expect(picture).toHaveAttribute("data-state", "ready")
+  await expect(picture.locator("img").last()).toHaveAttribute("src", /^data:image\/png;base64,/)
+  const box = (await picture.boundingBox())!
+  expect(Math.round(box.width / box.height)).toBe(2)
+  // A press in it stays in it: the box behind does not take the caret.
+  await picture.click()
+  await expect(lightbox).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(lightbox).toHaveCount(0)
+  await expect(open).toBeFocused()
+  await expect(chat(page).locator("[data-slot='prompt-image']")).toHaveCount(1)
+
+  // Sent, the question's image opens whole, not as its thumbnail.
+  await ask(page, "What is this error?")
+  await expect(chat(page)).toContainText("That is a 502 from the proxy.")
+  await chat(page).getByRole("button", { name: "Open image 1 of the question" }).click()
+  await expect(picture.locator("img").last()).toHaveAttribute("src", /^data:image\/png;base64,/)
+  await lightbox.getByRole("button", { name: "Close" }).click()
+  await expect(lightbox).toHaveCount(0)
+
+  // A saved chat's opens from where the server keeps it, and one it no longer
+  // keeps opens as its thumbnail and says so.
+  await page.goto("/deploy/7/assistant?chat=c-shot")
+  await chat(page).getByRole("button", { name: "Open image 1 of the question" }).click()
+  await expect(lightbox).toContainText("1 of 2")
+  await expect(picture).toHaveAttribute("data-state", "ready")
+  await expect(picture.locator("img").last()).toHaveAttribute(
+    "src",
+    /\/api\/v1\/assistant\/chats\/c-shot\/images\/img-1$/,
+  )
+  await page.keyboard.press("ArrowRight")
+  await expect(lightbox).toContainText("2 of 2")
+  await expect(lightbox.locator("[data-slot='lightbox-note']")).toHaveText(
+    "Only a small copy of this image is kept.",
+  )
+  expect(kept).toEqual(["img-1", "img-gone"])
+})
+
 test("a shortcut goes to the page, and the dock goes back to the chat", async ({ page }) => {
   await mockAssistant(page, [
     [

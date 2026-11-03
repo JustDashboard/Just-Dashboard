@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useSyncExternalStore } from "react"
-import { ApiError, errorMessage, fetchResponse, get } from "@/lib/api"
+import { API_BASE, ApiError, errorMessage, fetchResponse, get } from "@/lib/api"
 import type { AssistantMode } from "@/components/assistant/settings"
 import {
   EMPTY_AGENT,
@@ -22,7 +22,7 @@ import {
   type AgentTranscript,
 } from "@/components/assistant/agent/model"
 import type { AgentChatSummary } from "@/components/assistant/agent/chats"
-import type { PastedImage } from "@/components/assistant/agent/images"
+import { imageSource, type PastedImage } from "@/components/assistant/agent/images"
 
 /**
  * The conversations going on in this tab, kept outside any page.
@@ -318,7 +318,12 @@ export function askAgent(session: AgentSession, question: string, images: Pasted
     session.transcript,
     turn,
     question,
-    images.map((image) => image.src),
+    images.map((image) => ({
+      thumb: image.src,
+      full: imageSource(image),
+      width: image.width,
+      height: image.height,
+    })),
   )
   publish()
   const body: Record<string, unknown> = { conversation: session.transcript.conversation, question }
@@ -460,8 +465,16 @@ function follow(session: AgentSession) {
   following.set(session.key, timer)
 }
 
+/** Where an image pasted into a saved chat is read whole, by its id. */
+export function agentChatImageUrl(chat: string, image: string) {
+  return `${API_BASE}/assistant/chats/${encodeURIComponent(chat)}/images/${encodeURIComponent(image)}`
+}
+
 function readBack(read: { chat: AgentChatSummary; lines: unknown[] }, id: string) {
-  const transcript = replayLines(read.lines ?? [], { running: read.chat.running })
+  const transcript = replayLines(read.lines ?? [], {
+    running: read.chat.running,
+    imageAt: (image) => agentChatImageUrl(id, image),
+  })
   return { ...transcript, conversation: id, title: read.chat.title || transcript.title }
 }
 

@@ -109,7 +109,7 @@ export type AgentEvent =
    * The person's own acts, which only a saved chat's lines carry: each question
    * asked and each Allow or Decline pressed, in order among what was streamed.
    */
-  | { type: "question"; text: string; images?: { mediaType: string; data: string }[]; at?: string }
+  | { type: "question"; text: string; images?: AgentSavedImage[]; at?: string }
   | { type: "decisions"; decisions: Record<string, boolean>; at?: string }
 
 export type AgentStepState = "running" | "waiting" | "done" | "failed" | "declined"
@@ -145,11 +145,33 @@ export type AgentPhase =
   /** Taken over: another tab carries the chat on, so this one stopped. */
   | "moved"
 
+/**
+ * An image as a saved chat's question keeps it: its thumbnail, and the id the
+ * whole image is kept under, with its size, for it to be opened large.
+ */
+export interface AgentSavedImage {
+  mediaType: string
+  data: string
+  id?: string
+  width?: number
+  height?: number
+}
+
+/** An image asked with a question, as the chat draws it and opens it. */
+export interface AgentImage {
+  /** The thumbnail, as an address an `<img>` draws. */
+  thumb: string
+  /** The image whole, when this tab has it or the server keeps it. */
+  full?: string
+  width?: number
+  height?: number
+}
+
 export interface AgentTurn {
   id: string
   question: string
-  /** The images asked with it, as thumbnails an `<img>` draws. */
-  images?: string[]
+  /** The images asked with it. */
+  images?: AgentImage[]
   parts: AgentPart[]
   phase: AgentPhase
   error?: string
@@ -279,7 +301,7 @@ export function beginTurn(
   t: AgentTranscript,
   id: string,
   question: string,
-  images: string[] = [],
+  images: AgentImage[] = [],
 ): AgentTranscript {
   // A question that was never sent, because another tab had the chat, gives way to
   // this one.
@@ -483,7 +505,14 @@ export function takeOverTurn(t: AgentTranscript, id: string): AgentTranscript {
  */
 export function replayLines(
   lines: unknown[],
-  { running = false }: { running?: boolean } = {},
+  {
+    running = false,
+    imageAt,
+  }: {
+    running?: boolean
+    /** Where an image the server keeps whole is read, by its id. */
+    imageAt?: (id: string) => string
+  } = {},
 ): AgentTranscript {
   let t = EMPTY_AGENT
   let turn = ""
@@ -492,12 +521,20 @@ export function replayLines(
     const event = line as AgentEvent
     if (event.type === "question") {
       turn = `replay-${t.turns.length + 1}`
-      const thumbs = Array.isArray(event.images)
+      const images = Array.isArray(event.images)
         ? event.images
             .filter((one) => typeof one?.mediaType === "string" && typeof one?.data === "string")
-            .map((one) => `data:${one.mediaType};base64,${one.data}`)
+            .map((one): AgentImage => {
+              const image: AgentImage = { thumb: `data:${one.mediaType};base64,${one.data}` }
+              if (typeof one.id === "string" && one.id && imageAt) image.full = imageAt(one.id)
+              if (Number(one.width) > 0 && Number(one.height) > 0) {
+                image.width = Number(one.width)
+                image.height = Number(one.height)
+              }
+              return image
+            })
         : []
-      t = beginTurn(t, turn, typeof event.text === "string" ? event.text : "", thumbs)
+      t = beginTurn(t, turn, typeof event.text === "string" ? event.text : "", images)
       t = withTurn(t, turn, (one) => ({ ...one, replayed: true }))
       continue
     }

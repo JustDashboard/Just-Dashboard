@@ -27,6 +27,9 @@ export interface PastedImage extends EncodedImage {
   thumb: EncodedImage
   /** The thumbnail as an address an `<img>` draws. */
   src: string
+  /** The size it is sent at, in pixels. */
+  width: number
+  height: number
 }
 
 /** A width and height held to `edge` on the longest side, in proportion. */
@@ -110,9 +113,10 @@ export async function prepareImage(file: Blob): Promise<PastedImage> {
   try {
     let edge = IMAGE_EDGE
     let blob: Blob | undefined
+    let size = { width: bitmap.width, height: bitmap.height }
     // A screenshot fits at once; a photograph may take a smaller size or two.
     for (let attempt = 0; attempt < 4; attempt++) {
-      const size = fitWithin(bitmap.width, bitmap.height, edge)
+      size = fitWithin(bitmap.width, bitmap.height, edge)
       blob = await encode(draw(bitmap, size, false), "image/png")
       if (blob.size > TARGET_BYTES)
         blob = await encode(draw(bitmap, size, true), "image/jpeg", 0.85)
@@ -133,6 +137,7 @@ export async function prepareImage(file: Blob): Promise<PastedImage> {
       data: await base64(blob),
       thumb,
       src: imageSource(thumb),
+      ...size,
     }
   } finally {
     bitmap.close()

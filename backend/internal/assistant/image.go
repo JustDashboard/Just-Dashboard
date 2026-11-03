@@ -1,8 +1,13 @@
 package assistant
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"image"
+	_ "image/gif"  // ImageSize reads a GIF's size
+	_ "image/jpeg" // and a JPEG's
+	_ "image/png"  // and a PNG's
 	"net/http"
 	"slices"
 )
@@ -87,4 +92,19 @@ func (c *Conversation) leaveOutOldImages() {
 			}
 		}
 	}
+}
+
+// ImageSize is an image's width and height in pixels, read from its header, so
+// a page can make room for it before it arrives. A WebP's is not read: no
+// decoder for it is built in, and the page sends PNG or JPEG.
+func ImageSize(img Image) (width, height int, ok bool) {
+	raw, err := base64.StdEncoding.DecodeString(img.Data)
+	if err != nil {
+		return 0, 0, false
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return 0, 0, false
+	}
+	return config.Width, config.Height, true
 }

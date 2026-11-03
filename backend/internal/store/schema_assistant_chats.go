@@ -44,4 +44,20 @@ CREATE TABLE IF NOT EXISTS assistant_chat_lines (
   lines_enc TEXT NOT NULL,
   PRIMARY KEY (chat_id, seq)
 );
+
+-- The images pasted into a chat, whole, as the model was sent them, for the
+-- page to open one large: a question's line keeps only a thumbnail to draw it
+-- with. Sealed as the chat is. Each person keeps their newest few dozen
+-- (api.chatImageRetention); an older one opens as its thumbnail. owner_id is
+-- the chat's, beside it for that count.
+CREATE TABLE IF NOT EXISTS assistant_chat_images (
+  chat_id    TEXT NOT NULL REFERENCES assistant_chats(id) ON DELETE CASCADE,
+  id         TEXT NOT NULL,
+  owner_id   INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  media_type TEXT NOT NULL,
+  data_enc   TEXT NOT NULL,
+  PRIMARY KEY (chat_id, id)
+);
+CREATE INDEX IF NOT EXISTS assistant_chat_images_owner ON assistant_chat_images(owner_id, created_at);
 `
