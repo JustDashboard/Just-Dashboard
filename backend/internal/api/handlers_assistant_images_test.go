@@ -123,3 +123,75 @@ func TestAPastedImageThatIsNotOneIsRefused(t *testing.T) {
 		t.Fatalf("a refused question reached the model: %d", len(f.provider.raw))
 	}
 }
+
+// A pasted image is kept whole with its chat, sealed, for the page to open large:
+// its question's line names it, with its size, beside the thumbnail it draws. It
+// is its owner's alone, and each person keeps their newest chatImageRetention.
+func TestAPastedImageOpensWholeFromTheSavedChat(t *testing.T) {
+	f := operatorRouterAs(t, auth.RoleAdmin)
+	shot := pastedPNG(t, 40, true)
+	f.provider.queue(claudeAnswer("That is a 502 from the proxy."))
+	id := conversationOf(f.ask(t, pasted(t, "What is this error?", shot)))
+	read := f.do(http.MethodGet, "/assistant/chats/"+id, "")
+	var got struct {
+		Lines []struct {
+			Type   string `json:"type"`
+			Images []struct {
+				ID, MediaType, Data string
+				Width, Height       int
+			} `json:"images"`
+		} `json:"lines"`
+	}
+	if err := json.Unmarshal(read.Body.Bytes(), &got); err != nil || len(got.Lines) == 0 || len(got.Lines[0].Images) != 1 {
+		t.Fatalf("read = %d %s", read.Code, read.Body.String())
+	}
+	kept := got.Lines[0].Images[0]
+	if kept.ID == "" || kept.Width != 40 || kept.Height != 40 || kept.Data != pastedPNG(t, 8, false).Data {
+		t.Fatalf("the question's image is %+v", kept)
+	}
+	whole := f.do(http.MethodGet, "/assistant/chats/"+id+"/images/"+kept.ID, "")
+	want, _ := base64.StdEncoding.DecodeString(shot.Data)
+	h := whole.Header()
+	if whole.Code != http.StatusOK || !bytes.Equal(whole.Body.Bytes(), want) || h.Get("Content-Type") != "image/png" ||
+		h.Get("X-Content-Type-Options") != "nosniff" || !strings.HasPrefix(h.Get("Content-Security-Policy"), "sandbox") ||
+		!strings.HasPrefix(h.Get("Cache-Control"), "private") {
+		t.Fatalf("the image = %d %v (%d bytes)", whole.Code, h, whole.Body.Len())
+	}
+	var sealed string
+	if err := f.s.Store.DB.QueryRow(`SELECT data_enc FROM assistant_chat_images WHERE id = ?`, kept.ID).Scan(&sealed); err != nil ||
+		strings.Contains(sealed, shot.Data[:64]) {
+		t.Fatalf("the image is kept as it was sent (%v)", err)
+	}
+	if rec := f.do(http.MethodGet, "/assistant/chats/"+id+"/images/nothing", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("an image that is not kept = %d", rec.Code)
+	}
+	if rec := f.as(t, 2, "someone-else").do(http.MethodGet, "/assistant/chats/"+id+"/images/"+kept.ID, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("somebody else's = %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Past the newest chatImageRetention, the oldest go.
+	for i := range chatImageRetention {
+		if _, err := f.s.Store.DB.Exec(`INSERT INTO assistant_chat_images(chat_id, id, owner_id, created_at, media_type, data_enc)
+			VALUES(?, ?, 1, ?, 'image/png', 'x')`, id, fmt.Sprintf("old-%03d", i), 1000+i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.provider.queue(claudeAnswer("The same page."))
+	if events := f.ask(t, strings.Replace(pasted(t, "And this?", shot), `{`, `{"conversation":"`+id+`",`, 1)); len(ofType(events, "error")) != 0 {
+		t.Fatalf("events = %v", events)
+	}
+	count := func(query string, args ...any) int {
+		var n int
+		if err := f.s.Store.DB.QueryRow(query, args...).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(`SELECT COUNT(*) FROM assistant_chat_images WHERE owner_id = 1`); n != chatImageRetention {
+		t.Fatalf("%d images kept", n)
+	}
+	if count(`SELECT COUNT(*) FROM assistant_chat_images WHERE id IN ('old-000', 'old-001')`) != 0 ||
+		count(`SELECT COUNT(*) FROM assistant_chat_images WHERE id = ?`, kept.ID) != 1 {
+		t.Fatal("the oldest were not the ones to go")
+	}
+}

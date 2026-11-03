@@ -3,9 +3,13 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -31,7 +35,18 @@ const (
 	// chatListLimit is how many one list answers with, the newest first.
 	chatListLimit = 100
 	chatTitleMax  = 200
+	// chatImageRetention is how many pasted images each person keeps whole, to
+	// be opened large: some 30 MB of screenshots, at most 120. An older one
+	// opens as the thumbnail its question keeps.
+	chatImageRetention = 60
 )
+
+// chatImage is a pasted image kept whole with its chat, named by the id its
+// question's line gives it.
+type chatImage struct {
+	ID string
+	assistant.Image
+}
 
 // chatScope is what a chat is about, as the page reads it.
 type chatScope struct {
@@ -60,9 +75,10 @@ type chatSummary struct {
 }
 
 // saveChat writes a chat as it stands, and appends what the page was shown since
-// it was last saved. A chat saved for the first time may push its owner's oldest
-// past chatRetention, and those go.
-func (s *Server) saveChat(ctx context.Context, c *assistant.Conversation, lines []map[string]any) error {
+// it was last saved and the images pasted since. A chat saved for the first time
+// may push its owner's oldest past chatRetention, and those go; an image may push
+// their oldest images past chatImageRetention.
+func (s *Server) saveChat(ctx context.Context, c *assistant.Conversation, lines []map[string]any, images ...chatImage) error {
 	if c.Chat == nil || c.OwnerID == 0 {
 		return errors.New("not a saved chat")
 	}
@@ -85,6 +101,16 @@ func (s *Server) saveChat(ctx context.Context, c *assistant.Conversation, lines 
 			return err
 		}
 		if sealedLines, err = s.Sealer.Seal(string(raw)); err != nil {
+			return err
+		}
+	}
+	sealedImages := make([]string, len(images))
+	for i, img := range images {
+		raw, err := base64.StdEncoding.DecodeString(img.Data)
+		if err != nil {
+			return err
+		}
+		if sealedImages[i], err = s.Sealer.Seal(string(raw)); err != nil {
 			return err
 		}
 	}
@@ -116,6 +142,19 @@ func (s *Server) saveChat(ctx context.Context, c *assistant.Conversation, lines 
 		if _, err := tx.ExecContext(ctx, `INSERT INTO assistant_chat_lines(chat_id, seq, lines_enc)
 			VALUES(?, COALESCE((SELECT MAX(seq) + 1 FROM assistant_chat_lines WHERE chat_id = ?), 0), ?)`,
 			c.ID, c.ID, sealedLines); err != nil {
+			return err
+		}
+	}
+	for i, img := range images {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO assistant_chat_images(chat_id, id, owner_id, created_at, media_type, data_enc)
+			VALUES(?, ?, ?, ?, ?, ?)`, c.ID, img.ID, c.OwnerID, info.Updated.Unix(), img.MediaType, sealedImages[i]); err != nil {
+			return err
+		}
+	}
+	if len(images) > 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM assistant_chat_images WHERE rowid IN (
+			SELECT rowid FROM assistant_chat_images WHERE owner_id = ?
+			ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?)`, c.OwnerID, chatImageRetention); err != nil {
 			return err
 		}
 	}
@@ -302,6 +341,44 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) err
 		return httpx.Internal(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"chat": chat, "lines": lines})
+	return nil
+}
+
+// handleAssistantChatImage is an image pasted into one of the person's chats,
+// whole, for the page to open large. One past chatImageRetention is gone, and
+// the page opens the thumbnail its question keeps.
+func (s *Server) handleAssistantChatImage(w http.ResponseWriter, r *http.Request) error {
+	chat, err := s.chatFor(r)
+	if err != nil {
+		return err
+	}
+	var mediaType, sealed string
+	err = s.Store.DB.QueryRowContext(r.Context(), `SELECT media_type, data_enc FROM assistant_chat_images WHERE chat_id = ? AND id = ?`,
+		chat.ID, chi.URLParam(r, "image")).Scan(&mediaType, &sealed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return httpx.Err(http.StatusNotFound, "not_found", "only a small copy of this image is kept")
+	}
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	plain, err := s.Sealer.Open(sealed)
+	if err != nil {
+		return errAssistantSealed
+	}
+	// Only the formats CheckImage let in were kept, and each was the format it
+	// named; nothing here is drawn as anything else.
+	if !slices.Contains(assistant.ImageTypes, mediaType) {
+		return httpx.Internal(fmt.Errorf("a kept image is %q", mediaType))
+	}
+	h := w.Header()
+	h.Set("Content-Type", mediaType)
+	h.Set("Content-Length", strconv.Itoa(len(plain)))
+	// An image never changes under its id; it is the person's own.
+	h.Set("Cache-Control", "private, max-age=31536000, immutable")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, plain)
 	return nil
 }
 

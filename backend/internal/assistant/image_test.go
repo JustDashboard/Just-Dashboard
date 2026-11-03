@@ -51,6 +51,22 @@ func TestCheckImageReadsWhatItIs(t *testing.T) {
 	}
 }
 
+// An image's size is read from its header, for the page to make room for it;
+// what is not an image it can read has none.
+func TestImageSizeReadsTheHeader(t *testing.T) {
+	if w, h, ok := ImageSize(pngImage(t, 24)); !ok || w != 24 || h != 24 {
+		t.Fatalf("a 24px PNG = %d×%d %v", w, h, ok)
+	}
+	for _, img := range []Image{
+		{MediaType: "image/png", Data: "not base64!"},
+		{MediaType: "image/webp", Data: base64.StdEncoding.EncodeToString([]byte("RIFF\x00\x00\x00\x00WEBPVP8 "))},
+	} {
+		if _, _, ok := ImageSize(img); ok {
+			t.Errorf("%s has a size", img.MediaType)
+		}
+	}
+}
+
 // A question's images go before its words, where a model reads them best; an
 // image alone is a question with no empty text beside it; and a chat of many
 // screenshots keeps the newest whole and says the older ones were there.

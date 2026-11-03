@@ -39,6 +39,7 @@ func (s *Server) mountAssistantRoutes(r chi.Router) {
 		r.Route("/chats", func(r chi.Router) {
 			r.Method(http.MethodGet, "/", s.handle(s.handleAssistantChats))
 			r.Method(http.MethodGet, "/{chat}", s.handle(s.handleAssistantChat))
+			r.Method(http.MethodGet, "/{chat}/images/{image}", s.handle(s.handleAssistantChatImage))
 			r.Method(http.MethodPatch, "/{chat}", s.handle(s.handleAssistantChatRename))
 			r.Method(http.MethodDelete, "/{chat}", s.handle(s.handleAssistantChatDelete))
 		})

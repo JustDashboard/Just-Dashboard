@@ -21,7 +21,8 @@ func TestAssistantChatSchemaOnlyAddsTables(t *testing.T) {
 }
 
 // The tables arrive on a new install and on one upgraded from 0.6.6, and a chat
-// goes with its owner, with the deployment it is about, and its lines with it.
+// goes with its owner, with the deployment it is about, and its lines and
+// images with it.
 func TestAssistantChatsReachFreshAndUpgradedInstalls(t *testing.T) {
 	upgraded := t.TempDir()
 	script, err := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
@@ -62,6 +63,8 @@ func TestAssistantChatsReachFreshAndUpgradedInstalls(t *testing.T) {
 			exec(`INSERT INTO assistant_chats(id, owner_id, scope_kind, deployment_id, created_at, updated_at) VALUES('a', ?, 'deployment', ?, 1, 1)`, owner, project)
 			exec(`INSERT INTO assistant_chats(id, owner_id, scope_kind, created_at, updated_at) VALUES('b', ?, 'server', 1, 1)`, owner)
 			exec(`INSERT INTO assistant_chat_lines(chat_id, seq, lines_enc) VALUES('a', 0, 'x'), ('b', 0, 'y')`)
+			exec(`INSERT INTO assistant_chat_images(chat_id, id, owner_id, created_at, media_type, data_enc)
+				VALUES('a', 'i', ?, 1, 'image/png', 'x'), ('b', 'j', ?, 1, 'image/png', 'y')`, owner, owner)
 			count := func(query string) int {
 				var n int
 				if err := st.DB.QueryRow(query).Scan(&n); err != nil {
@@ -70,11 +73,13 @@ func TestAssistantChatsReachFreshAndUpgradedInstalls(t *testing.T) {
 				return n
 			}
 			exec(`DELETE FROM deploy_projects WHERE id = ?`, project)
-			if count(`SELECT COUNT(*) FROM assistant_chats`) != 1 || count(`SELECT COUNT(*) FROM assistant_chat_lines`) != 1 {
+			if count(`SELECT COUNT(*) FROM assistant_chats`) != 1 || count(`SELECT COUNT(*) FROM assistant_chat_lines`) != 1 ||
+				count(`SELECT COUNT(*) FROM assistant_chat_images`) != 1 {
 				t.Fatal("a deployment's chat did not go with it")
 			}
 			exec(`DELETE FROM users WHERE id = ?`, owner)
-			if count(`SELECT COUNT(*) FROM assistant_chats`) != 0 || count(`SELECT COUNT(*) FROM assistant_chat_lines`) != 0 {
+			if count(`SELECT COUNT(*) FROM assistant_chats`) != 0 || count(`SELECT COUNT(*) FROM assistant_chat_lines`) != 0 ||
+				count(`SELECT COUNT(*) FROM assistant_chat_images`) != 0 {
 				t.Fatal("a person's chats did not go with them")
 			}
 		})
