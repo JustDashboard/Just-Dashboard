@@ -22,6 +22,7 @@ import {
   type AgentTranscript,
 } from "@/components/assistant/agent/model"
 import type { AgentChatSummary } from "@/components/assistant/agent/chats"
+import type { PastedImage } from "@/components/assistant/agent/images"
 
 /**
  * The conversations going on in this tab, kept outside any page.
@@ -308,14 +309,23 @@ async function stream(session: AgentSession, turn: string, body: Record<string, 
   }
 }
 
-export function askAgent(session: AgentSession, question: string) {
+export function askAgent(session: AgentSession, question: string, images: PastedImage[] = []) {
   if (session.flight) return
   // Asking something else lets go of a press that was waiting to take over.
   session.held = undefined
   const turn = crypto.randomUUID()
-  session.transcript = beginTurn(session.transcript, turn, question)
+  session.transcript = beginTurn(
+    session.transcript,
+    turn,
+    question,
+    images.map((image) => image.src),
+  )
   publish()
-  void stream(session, turn, { conversation: session.transcript.conversation, question })
+  const body: Record<string, unknown> = { conversation: session.transcript.conversation, question }
+  if (images.length > 0) {
+    body.images = images.map(({ mediaType, data, thumb }) => ({ mediaType, data, thumb }))
+  }
+  void stream(session, turn, body)
 }
 
 /**

@@ -224,6 +224,31 @@ and what happens next"), with only runs, logs and metrics to read. Asked "what i
 the last runs and the sizing verdict and reported them, then guessed the purpose from the configuration because
 nothing it had could open the README. The draft's assistant keeps its own brief: it has one task.
 
+## Pasted images
+
+A deployment's, a new deployment's and the server's chat take images with a question: pasted into the box,
+dropped on its frame or picked with the toolbar's image button (`elements/prompt.tsx`, `acceptImages`). An image
+alone is a question; a chat that begins with one is titled "A pasted image". The page makes each small before it
+is sent (`agent/images.ts`): its longest side is held to 1568 pixels, what the models read at full detail, and it
+is a PNG, or a JPEG when the PNG passes a megabyte, shrinking further if a photograph needs it. A 320-pixel JPEG
+thumbnail goes with it.
+
+The turn takes `images: [{mediaType, data, thumb}]`, at most 4 (`assistant.MaxImages`), and the route reads a
+body up to about 9.5 MB for them (`httpx.DecodeJSONWithin`); every other JSON body stays at 4 MB.
+`assistant.CheckImage` refuses a format other than PNG, JPEG, GIF or WebP, base64 that does not decode, bytes
+that are not the format they claim (`http.DetectContentType`), and an image past 1.5 MB or a thumbnail past 96 KB,
+each with a 400 that says which. The images go into the conversation before the question's words, as an
+Anthropic `image` block or an OpenAI-compatible `image_url` part with a data address. A model that reads no
+images answers with its provider's error. The saved chat's question line keeps only the thumbnails, so a chat
+read back draws them; the conversation keeps the images themselves, sealed with the rest of it. To keep a chat of
+many screenshots a size worth sending and saving after every step, it keeps the newest 8 and at most 6 MB of them
+whole, the newest question's always, and the older ones read as "(an image the person pasted earlier, left out to
+keep the chat short)". An image counts for about 1,600 tokens against the chat's length, not for its bytes. The
+audit entry says how many images a question carried.
+
+**An image is not masked.** Masking reads text, so a secret in a screenshot reaches the model. The box says so
+while an image waits, and `SECURITY.md` says it too.
+
 ## A shortcut to what it changed
 
 `called` names where a change is shown. `agentPages` maps a route under `/deploy` to its page and section;
@@ -326,7 +351,9 @@ are the new deployment's.
   audited as the person with actor `assistant`; full access running it unasked and held to the person's role; a
   schedule that runs a command asked for, not refused; a Claude answer with a bad call going on, the bad call
   not shown on the page; another deployment's README read through `read_source`, its secret masked
-  (`api/handlers_assistant_source_test.go`); variables read
+  (`api/handlers_assistant_source_test.go`); a pasted screenshot reaching the model before the words, kept as a
+  thumbnail in the saved chat, an image alone asked, a body past 4 MB taken, and what is not an image refused
+  (`api/handlers_assistant_images_test.go`); variables read
   through `api_request` with the secret masked; backups listed and one started, held in "changes" and run in
   full; a read-only SQL statement run unasked and a writing one held; excluded routes refused with their reason;
   the server's chat masking secret-named fields, key material and every deployment's values; a configuration's
@@ -335,11 +362,16 @@ are the new deployment's.
   after a restart; a chat its owner's alone; a take-over stopping the press; retention; a deployment's chats going
   with it. `api/handlers_assistant_routes_test.go`: every streaming handler excluded, read off the source;
   `find_routes`; every page with an address.
+- `assistant/image_test.go`: an image read for what it is; images before the words, an image alone, the newest
+  kept and the older left out, a saved chat keeping them, and each provider's shape.
+  `components/assistant/agent/images.test.js`: the size held to 1568 pixels, only images taken, at most four,
+  and a saved question drawn with its thumbnails.
 - `deploy/source_reading_test.go`: the README of the commit that would be built, not the working tree, the top
   folder folders first, a path not in the commit said; a way up read from the top, a link out, `.git` and a
   binary file refused or named, and the read held to its size.
 - `store/schema_assistant_chats_test.go`: the tables on a fresh and an upgraded install, and a chat going with its
   owner and its deployment.
-- `tests/browser/assistant.spec.ts`: the page, Diagnose, a card's Allow and Decline, the mode, a shortcut and the
+- `tests/browser/assistant.spec.ts`: the page, Diagnose, a card's Allow and Decline, the mode, a screenshot pasted
+  and sent at 1568 pixels, one taken out and an image alone asked, a shortcut and the
   dock, a conversation going on behind another page, the model picker, the provider page, a new deployment handed
   over, a role without the capability, the assistant off, and the phone's one pane.

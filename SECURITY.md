@@ -23,7 +23,9 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   host account's home, and uninstalling with a wipe, asks for a typed phrase checked on the server.
 - Every state-changing request lands in the audit log.
 - The assistant, when you set one up, sends your question and what it reads to the model you chose, with
-  every secret value masked first: the model's provider never sees one. It acts through the dashboard's own
+  every secret value masked first: the model's provider never sees one. An image you paste into its chat is
+  the exception: it is sent as it is, because masking reads text, so a secret in a screenshot reaches the
+  model, as the box says while one waits to be sent. It acts through the dashboard's own
   routes as you, with your whole role — whatever you could do in the dashboard, including what runs commands
   on the host — and every change is in the audit log under your name, marked as the assistant's. It cannot
   sign in, change your password, second factor, passkeys or sessions, make an API key, uninstall the

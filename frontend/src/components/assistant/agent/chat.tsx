@@ -39,6 +39,7 @@ import {
   type AgentSession,
 } from "@/components/assistant/agent/sessions"
 import { FormNote } from "@/components/form"
+import type { PastedImage } from "@/components/assistant/agent/images"
 import { Markdown } from "@/components/git/markdown"
 import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
@@ -100,7 +101,7 @@ export function AgentChat({
   const mode: AssistantMode = session.mode ?? settings?.defaultMode ?? "changes"
   const last = transcript.turns.at(-1)
   const waiting = pendingSteps(transcript)
-  const ask = (question: string) => askAgent(session, question)
+  const ask = (question: string, images: PastedImage[] = []) => askAgent(session, question, images)
   const column = cn(!compact && "mx-auto w-full max-w-3xl")
   return (
     <MotionConfig reducedMotion="user">
@@ -189,6 +190,13 @@ export function AgentChat({
             disabled={session.loading}
             label="Ask the assistant"
             placeholder={placeholder}
+            acceptImages
+            imagesNote={
+              <FormNote>
+                Images are sent as they are: masking reads text, so a secret in a screenshot reaches
+                the model.
+              </FormNote>
+            }
             rows={compact ? 1 : 2}
             note={
               waiting.length > 0 &&
@@ -420,9 +428,26 @@ function TurnView({
       )}
       <div
         data-slot="agent-question"
-        className="ml-auto w-fit max-w-[85%] rounded-xl bg-surface-header px-3.5 py-2.5"
+        className="ml-auto w-fit max-w-[85%] space-y-2 rounded-xl bg-surface-header px-3.5 py-2.5"
       >
-        <p className="text-body break-words whitespace-pre-wrap">{turn.question}</p>
+        {turn.images && turn.images.length > 0 && (
+          <ul data-slot="agent-question-images" className="flex flex-wrap justify-end gap-2">
+            {turn.images.map((src, at) => (
+              <li key={at}>
+                {/* A thumbnail as a data address: nothing for Next to optimise. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={src}
+                  alt={`Image ${at + 1} of the question`}
+                  className="max-h-40 max-w-56 rounded-md border border-hairline object-contain"
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+        {turn.question && (
+          <p className="text-body break-words whitespace-pre-wrap">{turn.question}</p>
+        )}
       </div>
       <div className="flex min-w-0 gap-3">
         <AssistantMark

@@ -164,6 +164,10 @@ func encodeAnthropicBlock(b Block) (json.RawMessage, error) {
 		return json.Marshal(result)
 	case BlockRaw:
 		return b.Raw, nil
+	case BlockImage:
+		return json.Marshal(map[string]any{"type": "image", "source": map[string]string{
+			"type": "base64", "media_type": b.Image.MediaType, "data": b.Image.Data,
+		}})
 	}
 	return nil, fmt.Errorf("a %q block cannot be sent to Anthropic", b.Type)
 }

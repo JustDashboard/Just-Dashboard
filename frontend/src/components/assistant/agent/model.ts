@@ -109,7 +109,7 @@ export type AgentEvent =
    * The person's own acts, which only a saved chat's lines carry: each question
    * asked and each Allow or Decline pressed, in order among what was streamed.
    */
-  | { type: "question"; text: string; at?: string }
+  | { type: "question"; text: string; images?: { mediaType: string; data: string }[]; at?: string }
   | { type: "decisions"; decisions: Record<string, boolean>; at?: string }
 
 export type AgentStepState = "running" | "waiting" | "done" | "failed" | "declined"
@@ -148,6 +148,8 @@ export type AgentPhase =
 export interface AgentTurn {
   id: string
   question: string
+  /** The images asked with it, as thumbnails an `<img>` draws. */
+  images?: string[]
   parts: AgentPart[]
   phase: AgentPhase
   error?: string
@@ -273,7 +275,12 @@ export function sendDecisions(t: AgentTranscript): AgentTranscript {
 }
 
 /** A new turn, waiting for its first line. */
-export function beginTurn(t: AgentTranscript, id: string, question: string): AgentTranscript {
+export function beginTurn(
+  t: AgentTranscript,
+  id: string,
+  question: string,
+  images: string[] = [],
+): AgentTranscript {
   // A question that was never sent, because another tab had the chat, gives way to
   // this one.
   const base = t.turns.at(-1)?.phase === "held" ? { ...t, turns: t.turns.slice(0, -1) } : t
@@ -294,7 +301,17 @@ export function beginTurn(t: AgentTranscript, id: string, question: string): Age
     ...settled,
     candidate: "",
     freshNote: undefined,
-    turns: [...settled.turns, { id, question, parts: [], phase: "waiting", fresh: t.freshNote }],
+    turns: [
+      ...settled.turns,
+      {
+        id,
+        question,
+        ...(images.length > 0 && { images }),
+        parts: [],
+        phase: "waiting",
+        fresh: t.freshNote,
+      },
+    ],
   }
 }
 
@@ -475,7 +492,12 @@ export function replayLines(
     const event = line as AgentEvent
     if (event.type === "question") {
       turn = `replay-${t.turns.length + 1}`
-      t = beginTurn(t, turn, typeof event.text === "string" ? event.text : "")
+      const thumbs = Array.isArray(event.images)
+        ? event.images
+            .filter((one) => typeof one?.mediaType === "string" && typeof one?.data === "string")
+            .map((one) => `data:${one.mediaType};base64,${one.data}`)
+        : []
+      t = beginTurn(t, turn, typeof event.text === "string" ? event.text : "", thumbs)
       t = withTurn(t, turn, (one) => ({ ...one, replayed: true }))
       continue
     }
