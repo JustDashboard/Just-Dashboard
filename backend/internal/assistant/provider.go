@@ -28,6 +28,8 @@ type Block struct {
 	// as it came: a thinking block, whose signature binds it to the
 	// conversation it was written in.
 	Raw json.RawMessage
+	// Image is an image the person pasted with a question.
+	Image *Image
 }
 
 type BlockType string
@@ -37,6 +39,7 @@ const (
 	BlockToolUse    BlockType = "tool_use"
 	BlockToolResult BlockType = "tool_result"
 	BlockRaw        BlockType = "raw"
+	BlockImage      BlockType = "image"
 )
 
 type Message struct {

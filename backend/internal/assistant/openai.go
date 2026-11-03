@@ -138,8 +138,9 @@ func (c *openAIClient) Probe(ctx context.Context) error {
 type openAIMessage struct {
 	Role string `json:"role"`
 	// Content is empty on an assistant message that only calls tools, which is
-	// sent as null: several servers refuse an empty string there.
-	Content    *string          `json:"content"`
+	// sent as null: several servers refuse an empty string there. A question
+	// with images is a list of parts, the images first.
+	Content    any              `json:"content"`
 	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
 }
@@ -164,10 +165,15 @@ func openAIMessages(m Message) []openAIMessage {
 	var out []openAIMessage
 	var text []string
 	var calls []openAIToolCall
+	var images []map[string]any
 	for _, b := range m.Blocks {
 		switch b.Type {
 		case BlockText:
 			text = append(text, b.Text)
+		case BlockImage:
+			images = append(images, map[string]any{"type": "image_url", "image_url": map[string]string{
+				"url": "data:" + b.Image.MediaType + ";base64," + b.Image.Data,
+			}})
 		case BlockToolUse:
 			call := openAIToolCall{ID: b.ToolID, Type: "function"}
 			call.Function.Name, call.Function.Arguments = b.ToolName, string(b.Input)
@@ -187,6 +193,13 @@ func openAIMessages(m Message) []openAIMessage {
 			message.Content = &joined
 		}
 		return append(out, message)
+	}
+	if len(images) > 0 {
+		parts := images
+		if len(text) > 0 {
+			parts = append(parts, map[string]any{"type": "text", "text": strings.Join(text, "\n\n")})
+		}
+		return append(out, openAIMessage{Role: m.Role, Content: parts})
 	}
 	if len(text) > 0 {
 		out = append(out, textMessage(m.Role, strings.Join(text, "\n\n")))

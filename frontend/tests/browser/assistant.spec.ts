@@ -429,6 +429,66 @@ test("the mode is chosen beside the question and sent with it", async ({ page })
   await expect(approval(page)).toHaveCount(0)
 })
 
+/** Pastes a screenshot into the box, as the system's screenshot tool leaves one. */
+async function pasteScreenshot(page: Page, width = 2400, height = 1200) {
+  await chat(page)
+    .getByRole("textbox", { name: "Ask the assistant" })
+    .evaluate(
+      async (element, size) => {
+        const canvas = document.createElement("canvas")
+        canvas.width = size.width
+        canvas.height = size.height
+        const context = canvas.getContext("2d")!
+        context.fillStyle = "#c33"
+        context.fillRect(0, 0, size.width, size.height)
+        const blob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((made) => resolve(made!), "image/png"),
+        )
+        const data = new DataTransfer()
+        data.items.add(new File([blob], "screenshot.png", { type: "image/png" }))
+        element.dispatchEvent(
+          new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
+        )
+      },
+      { width, height },
+    )
+}
+
+test("a screenshot pasted into the box goes with the question, and alone is one", async ({
+  page,
+}) => {
+  const { sent } = await mockAssistant(page, [
+    [start, { type: "text", text: "That is a 502 from the proxy." }, done()],
+    [start, { type: "text", text: "The same page, smaller." }, done()],
+  ])
+  await page.goto("/deploy/7/assistant")
+  const tiles = chat(page).locator("[data-slot='prompt-image']")
+  await pasteScreenshot(page)
+  await expect(tiles).toHaveCount(1)
+  await expect(chat(page)).toContainText("Images are sent as they are")
+  await ask(page, "What is this error?")
+  await expect(chat(page)).toContainText("That is a 502 from the proxy.")
+  const [first] = sent[0].images as { mediaType: string; data: string; thumb: { data: string } }[]
+  // Made small before it left: its longest side is what a model reads at full detail.
+  const png = Buffer.from(first.data, "base64")
+  expect(first.mediaType).toBe("image/png")
+  expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1568, 784])
+  expect(Buffer.from(first.thumb.data, "base64").length).toBeLessThan(96 * 1024)
+  await expect(chat(page).locator("[data-slot='agent-question-images'] img")).toHaveCount(1)
+  await expect(tiles).toHaveCount(0)
+
+  // One taken out is not sent; an image alone is a question.
+  await pasteScreenshot(page, 600, 400)
+  await pasteScreenshot(page, 600, 400)
+  await expect(tiles).toHaveCount(2)
+  await chat(page).getByRole("button", { name: "Remove image 2" }).click()
+  await expect(tiles).toHaveCount(1)
+  await chat(page).getByRole("button", { name: "Ask", exact: true }).click()
+  await expect(chat(page)).toContainText("The same page, smaller.")
+  expect(sent[1].question).toBe("")
+  expect(sent[1].images).toHaveLength(1)
+})
+
 test("a shortcut goes to the page, and the dock goes back to the chat", async ({ page }) => {
   await mockAssistant(page, [
     [
