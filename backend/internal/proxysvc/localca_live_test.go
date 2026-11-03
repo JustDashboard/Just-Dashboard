@@ -122,7 +122,10 @@ func TestLiveNginxServesALocalCACertificateAndItsRenewal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(issued.CertPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+	// Put in place as a new file, as the renewal writes one: nginx keeps a
+	// certificate across a reload while its file has the same inode and mtime
+	// second, and this one follows the issue within the second.
+	if err := writeAtomicMode(issued.CertPath, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	service := New(root, "")
@@ -131,8 +134,7 @@ func TestLiveNginxServesALocalCACertificateAndItsRenewal(t *testing.T) {
 	}
 	settle := func(want *big.Int) *x509.Certificate {
 		t.Helper()
-		// A reload takes a moment; a runner slowed by the race detector, longer.
-		deadline := time.Now().Add(20 * time.Second)
+		deadline := time.Now().Add(5 * time.Second)
 		for {
 			served, err := serve("app.lan.test")
 			if err == nil && served.SerialNumber.Cmp(want) == 0 {
