@@ -20,15 +20,31 @@ describe("pasted images", () => {
     expect(takeImages(0, ["a", "b"])).toEqual({ taken: ["a", "b"], left: 0 })
   })
   test("a question shows its images, and a saved chat draws them again", () => {
-    const asked = beginTurn(EMPTY_AGENT, "t1", "", ["data:image/jpeg;base64,AAA"])
-    expect(asked.turns[0].images).toEqual(["data:image/jpeg;base64,AAA"])
+    const pasted = { thumb: "data:image/jpeg;base64,AAA", full: "data:image/png;base64,BBB" }
+    const asked = beginTurn(EMPTY_AGENT, "t1", "", [pasted])
+    expect(asked.turns[0].images).toEqual([pasted])
     expect(beginTurn(EMPTY_AGENT, "t1", "plain").turns[0].images).toBeUndefined()
     const thumb = { mediaType: "image/jpeg", data: "QUJD" }
     const replayed = replayLines([
       { type: "question", text: "What is this?", images: [thumb, { mediaType: 1 }] },
       { type: "text", text: "A 502." },
     ])
-    expect(replayed.turns[0].images).toEqual([imageSource(thumb)])
+    expect(replayed.turns[0].images).toEqual([{ thumb: imageSource(thumb) }])
     expect(replayed.turns[0].question).toBe("What is this?")
+  })
+  test("a saved chat's image opens whole from where the server keeps it, at its size", () => {
+    const kept = { mediaType: "image/jpeg", data: "QUJD", id: "img 1", width: 1568, height: 980 }
+    const lines = [{ type: "question", text: "", images: [kept, { ...kept, id: "", width: "x" }] }]
+    const replayed = replayLines(lines, { imageAt: (id) => `/chat/c1/images/${id}` })
+    expect(replayed.turns[0].images).toEqual([
+      { thumb: imageSource(kept), full: "/chat/c1/images/img 1", width: 1568, height: 980 },
+      { thumb: imageSource(kept) },
+    ])
+    // Read without a place to read them, only the thumbnails are drawn.
+    expect(replayLines(lines).turns[0].images[0]).toEqual({
+      thumb: imageSource(kept),
+      width: 1568,
+      height: 980,
+    })
   })
 })

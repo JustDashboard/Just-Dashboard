@@ -15,16 +15,19 @@ import { cn } from "@/lib/utils"
 import {
   MAX_IMAGES,
   imageFiles,
+  imageSource,
   prepareImage,
   takeImages,
   type PastedImage,
 } from "@/components/assistant/agent/images"
+import { ImageLightbox } from "@/components/image-lightbox"
 
 /**
  * AI Elements' `prompt-input`, reduced to what this product sends: one question,
  * and, where `acceptImages` says, images with it. A screenshot is pasted into the
  * box, dropped on the frame or picked with the toolbar's first button, and waits
- * above the words as a thumbnail with a way to take it out. An image alone is a
+ * above the words as a thumbnail with a way to take it out; a press on the
+ * thumbnail opens it large, to check it is the right one. An image alone is a
  * question. A frame with the box and a toolbar under it, so what it is asked with
  * — the model, how much it may do — sits beside the press that asks. A beam runs
  * round the frame while it works (§11's `BorderBeam`: work is happening in here),
@@ -75,6 +78,8 @@ export function PromptInput({
   const [reading, setReading] = useState(0)
   const [problem, setProblem] = useState("")
   const [dragging, setDragging] = useState(false)
+  // The image opened large, by its place among those waiting.
+  const [viewing, setViewing] = useState<number>()
   const box = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
   const ready = !busy && !disabled && reading === 0 && (question.trim() !== "" || images.length > 0)
@@ -126,7 +131,10 @@ export function PromptInput({
           // The frame's own ground and the toolbar's gaps are the box's too; a
           // control in the toolbar keeps its press.
           const target = event.target as HTMLElement
+          // A press in the opened image's dialog reaches here through React, from
+          // outside the frame: it is the dialog's.
           if (
+            !event.currentTarget.contains(target) ||
             target === box.current ||
             target.closest("button, a, input, [role='combobox'], [data-slot='prompt-images']")
           )
@@ -166,34 +174,59 @@ export function PromptInput({
         </AnimatePresence>
         {(images.length > 0 || reading > 0) && (
           <ul data-slot="prompt-images" className="flex flex-wrap gap-2 px-3 pt-3">
-            {images.map((image, at) => (
-              <li key={image.id} data-slot="prompt-image" className="relative">
-                {/* A data address of a thumbnail made here: nothing for Next to optimise. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={image.src}
-                  alt={`Image ${at + 1}`}
-                  className="size-14 rounded-md border border-hairline object-cover"
-                />
-                <button
-                  type="button"
-                  aria-label={`Remove image ${at + 1}`}
-                  className="absolute -top-1.5 -right-1.5 grid size-5 place-items-center rounded-full border border-border bg-card text-muted-foreground shadow-sm focus-ring transition-colors hover:text-foreground"
-                  onClick={() => setImages((held) => held.filter((one) => one.id !== image.id))}
+            <AnimatePresence initial={false} mode="popLayout">
+              {images.map((image, at) => (
+                <motion.li
+                  key={image.id}
+                  layout
+                  data-slot="prompt-image"
+                  className="relative"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
                 >
-                  <Cross aria-hidden className="size-3" />
-                </button>
-              </li>
-            ))}
-            {Array.from({ length: reading }, (_, at) => (
-              <li
-                key={`reading-${at}`}
-                aria-label="Reading an image"
-                className="grid size-14 place-items-center rounded-md border border-hairline bg-surface-sunken"
-              >
-                <LoaderCircle aria-hidden className="size-4 animate-spin text-muted-foreground" />
-              </li>
-            ))}
+                  <button
+                    type="button"
+                    aria-label={`Open image ${at + 1}`}
+                    title="Open it large"
+                    data-slot="prompt-image-open"
+                    className="block cursor-zoom-in overflow-hidden rounded-md border border-hairline focus-ring"
+                    onClick={() => setViewing(at)}
+                  >
+                    {/* A data address of a thumbnail made here: nothing for Next to optimise. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={image.src}
+                      alt={`Image ${at + 1}`}
+                      className="block size-14 object-cover transition-[filter] duration-150 hover:brightness-90"
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Remove image ${at + 1}`}
+                    className="absolute -top-1.5 -right-1.5 grid size-5 place-items-center rounded-full border border-border bg-card text-muted-foreground shadow-sm focus-ring transition-colors hover:text-foreground"
+                    onClick={() => setImages((held) => held.filter((one) => one.id !== image.id))}
+                  >
+                    <Cross aria-hidden className="size-3" />
+                  </button>
+                </motion.li>
+              ))}
+              {Array.from({ length: reading }, (_, at) => (
+                <motion.li
+                  key={`reading-${at}`}
+                  layout
+                  aria-label="Reading an image"
+                  className="grid size-14 place-items-center rounded-md border border-hairline bg-surface-sunken"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.16 }}
+                >
+                  <LoaderCircle aria-hidden className="size-4 animate-spin text-muted-foreground" />
+                </motion.li>
+              ))}
+            </AnimatePresence>
           </ul>
         )}
         <textarea
@@ -262,6 +295,20 @@ export function PromptInput({
           <AskButton busy={busy} ready={ready} onStop={onStop} />
         </div>
       </div>
+      {acceptImages && (
+        <ImageLightbox
+          images={images.map((image, at) => ({
+            src: imageSource(image),
+            placeholder: image.src,
+            width: image.width,
+            height: image.height,
+            alt: images.length > 1 ? `Image ${at + 1} to send` : "The image to send",
+          }))}
+          at={viewing !== undefined && viewing < images.length ? viewing : undefined}
+          onAt={setViewing}
+          onClose={() => setViewing(undefined)}
+        />
+      )}
     </form>
   )
 }
