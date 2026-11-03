@@ -458,7 +458,8 @@ test("a question streams an answer whose statement opens in a tab of its own", a
   const statement = pane(page).locator("[data-slot=assistant-statement]")
   await expect(statement).toContainText("LEFT JOIN orders o ON o.customer_id = c.id")
   await expect(pane(page)).toContainText("keeps customers who have no orders yet")
-  await expect(pane(page)).toContainText("Claude Opus 5.5 · 2,140 tokens in · 186 out")
+  // What the model read from its cache is input too: 2,140 new and 1,890 cached.
+  await expect(pane(page)).toContainText("Claude Opus 5.5 · 4,030 tokens in · 186 out")
   // Nothing was attached that the reader did not attach.
   expect(sent.asked[0]).toEqual({
     conversation: "",

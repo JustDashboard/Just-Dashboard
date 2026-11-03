@@ -133,6 +133,9 @@ func (c *Conversation) size() int {
 	for _, m := range c.Messages {
 		for _, b := range m.Blocks {
 			n += len(b.Text) + len(b.Input) + len(b.Raw)
+			if b.Image != nil {
+				n += imageWeight
+			}
 		}
 	}
 	return n
@@ -179,9 +182,10 @@ func (c *Conversation) Shrink() {
 	}
 }
 
-// Ask appends a question. Calls still waiting are declined in the same
+// Ask appends a question, with any images the person pasted before its words,
+// where a model reads them best. Calls still waiting are declined in the same
 // message: asking something else is not allowing them.
-func (c *Conversation) Ask(text string) error {
+func (c *Conversation) Ask(text string, images ...Image) error {
 	limit := maxTurns
 	if c.TurnLimit > 0 {
 		limit = c.TurnLimit
@@ -191,8 +195,15 @@ func (c *Conversation) Ask(text string) error {
 	}
 	blocks := append([]Block(nil), c.Answered...)
 	blocks = append(blocks, ToolResults(c.Pending, func(ToolCall) (string, bool) { return Declined, false })...)
-	blocks = append(blocks, Block{Type: BlockText, Text: text})
+	for i := range images {
+		blocks = append(blocks, Block{Type: BlockImage, Image: &images[i]})
+	}
+	// A provider refuses an empty text block, and an image may be the whole question.
+	if text != "" || len(images) == 0 {
+		blocks = append(blocks, Block{Type: BlockText, Text: text})
+	}
 	c.Pending, c.Answered = nil, nil
+	defer c.leaveOutOldImages()
 	// A question nothing answered yet — a chat taken over before its answer —
 	// is asked again with this one, in one message, as providers take them.
 	if last := len(c.Messages) - 1; last >= 0 && c.Messages[last].Role == "user" {
@@ -505,12 +516,13 @@ type savedBlock struct {
 	Input    string    `json:"input,omitempty"`
 	IsError  bool      `json:"isError,omitempty"`
 	Raw      string    `json:"raw,omitempty"`
+	Image    *Image    `json:"image,omitempty"`
 }
 
 func saveBlocks(blocks []Block) []savedBlock {
 	out := make([]savedBlock, len(blocks))
 	for i, b := range blocks {
-		out[i] = savedBlock{Type: b.Type, Text: b.Text, ToolID: b.ToolID, ToolName: b.ToolName, Input: string(b.Input), IsError: b.IsError, Raw: string(b.Raw)}
+		out[i] = savedBlock{Type: b.Type, Text: b.Text, ToolID: b.ToolID, ToolName: b.ToolName, Input: string(b.Input), IsError: b.IsError, Raw: string(b.Raw), Image: b.Image}
 	}
 	return out
 }
@@ -518,7 +530,7 @@ func saveBlocks(blocks []Block) []savedBlock {
 func loadBlocks(saved []savedBlock) []Block {
 	out := make([]Block, len(saved))
 	for i, b := range saved {
-		out[i] = Block{Type: b.Type, Text: b.Text, ToolID: b.ToolID, ToolName: b.ToolName, IsError: b.IsError}
+		out[i] = Block{Type: b.Type, Text: b.Text, ToolID: b.ToolID, ToolName: b.ToolName, IsError: b.IsError, Image: b.Image}
 		if b.Input != "" {
 			out[i].Input = json.RawMessage(b.Input)
 		}

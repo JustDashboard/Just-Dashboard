@@ -2,6 +2,7 @@ import {
   Archive,
   Bell,
   Box,
+  Code,
   Database,
   FirewallCheck,
   Gauge,
@@ -41,6 +42,9 @@ const TOOLS: Record<string, StepMark> = {
   host_alerts: { icon: Bell },
   firewall_rules: { icon: FirewallCheck },
   security_updates: { icon: ShieldCheck },
+  // A repository may be GitHub's, another forge's or a folder on the host, so it
+  // is drawn as code rather than as one of them.
+  read_source: { icon: Code },
   wait_for_run: { icon: Rocket },
   find_routes: { icon: MagnifyingGlass },
   describe_operation: { icon: MagnifyingGlass },

@@ -346,7 +346,9 @@ A change that weakens any of these has to say so explicitly.
     default and who answers takes a session. **What is kept from the provider is every secret's value**: every
     string of every answer is masked before it is sent, in every mode and scope (every deployment's secret
     values, credential shapes, fields named for a secret, key material; `api/handlers_assistant_mask.go`), and
-    an answer that cannot be masked whole is not sent. A malformed call never refuses the answer: it is answered
+    an answer that cannot be masked whole is not sent. What the person sends is theirs and goes as it is: a
+    question's words, and the images pasted with it, which masking cannot read (the box says so while one
+    waits). A malformed call never refuses the answer: it is answered
     with what was wrong (`assistant.CheckCalls`). Its saved chats are their owner's alone and sealed with the
     master key. See [the deployment assistant](../deployments/operator.md).
 

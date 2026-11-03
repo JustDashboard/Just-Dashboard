@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/assistant"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/mcp"
@@ -86,7 +87,21 @@ type operatorRequest struct {
 	// TakeOver carries on a chat a press is running somewhere else: that press
 	// stops, and this one goes on with the chat as it stood.
 	TakeOver bool `json:"takeOver"`
+	// Images are what the person pasted with the question, each with a small
+	// copy the saved chat keeps to draw the question again.
+	Images []agentImage `json:"images"`
 }
+
+// agentImage is a pasted image as the page sends it: the image the model reads,
+// made small by the page, and a thumbnail for the chat's own record.
+type agentImage struct {
+	assistant.Image
+	Thumb assistant.Image `json:"thumb"`
+}
+
+// agentRequestBytes bounds a question's body: a question's words and its
+// images, each with its thumbnail, as base64.
+const agentRequestBytes = 1<<20 + assistant.MaxImages*((assistant.MaxImageBytes+assistant.MaxThumbBytes)*4/3+1024)
 
 // agentScope is what a conversation is about.
 type agentScope struct {
@@ -280,18 +295,23 @@ func (pr *agentPress) masker(ctx context.Context) (*deploy.DiagnosisMasker, erro
 
 func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentScope) error {
 	var req operatorRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := httpx.DecodeJSONWithin(r, &req, agentRequestBytes); err != nil {
 		return err
 	}
 	req.Question = strings.TrimSpace(req.Question)
+	// An image is a question on its own: a screenshot of an error asks about it.
+	asked := req.Question != "" || len(req.Images) > 0
 	// Taking a chat over with nothing to say carries it on from where the press
 	// that was running it put it down.
-	resume := req.TakeOver && req.Conversation != "" && req.Question == "" && req.Decisions == nil
-	if !resume && (req.Question == "") == (req.Decisions == nil) {
+	resume := req.TakeOver && req.Conversation != "" && !asked && req.Decisions == nil
+	if !resume && asked == (req.Decisions != nil) {
 		return httpx.BadRequest("ask a question, or answer the calls the assistant is waiting on")
 	}
 	if len(req.Question) > maxOperatorQuestion || !utf8.ValidString(req.Question) {
 		return httpx.BadRequest("a question is at most %d characters", maxOperatorQuestion)
+	}
+	if err := checkAgentImages(req.Images); err != nil {
+		return err
 	}
 	if req.Mode != "" && !req.Mode.Valid() {
 		return httpx.BadRequest("mode is ask, changes or full")
@@ -342,10 +362,14 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 	fresh := req.Conversation == ""
 	var c *assistant.Conversation
 	if fresh {
-		if req.Question == "" {
+		if !asked {
 			return httpx.BadRequest("there is no conversation to answer for")
 		}
-		c = store.BeginChat(principal.Username(), principal.UserID(), scope.key, scope.chatInfo(req.Question, settings, time.Now().UTC()))
+		title := req.Question
+		if title == "" && len(req.Images) > 0 {
+			title = "A pasted image"
+		}
+		c = store.BeginChat(principal.Username(), principal.UserID(), scope.key, scope.chatInfo(title, settings, time.Now().UTC()))
 		s.agentBegin(r.Context(), c, scope)
 		c.Tools = client.Tools()
 		c.Revision = settings.Revision()
@@ -393,6 +417,15 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		press.save(pressCtx)
 	}()
 	act := map[string]any{"type": "question", "text": req.Question}
+	if len(req.Images) > 0 {
+		// The saved chat draws the question with the thumbnails; the images
+		// themselves are in the conversation the model is sent.
+		thumbs := make([]assistant.Image, len(req.Images))
+		for i, img := range req.Images {
+			thumbs[i] = img.Thumb
+		}
+		act["images"] = thumbs
+	}
 	if req.Decisions != nil {
 		act = map[string]any{"type": "decisions", "decisions": req.Decisions}
 	}
@@ -415,6 +448,9 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 	if req.TakeOver {
 		detail["takeOver"] = true
 	}
+	if len(req.Images) > 0 {
+		detail["images"] = len(req.Images)
+	}
 	allowed, declined := []string{}, []string{}
 	var handOver *assistant.Mark
 	// settled is a chat taken over that has nothing to carry on: its last answer
@@ -430,8 +466,12 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 				pending = append(pending, press.view(pressCtx, call))
 			}
 		}
-	} else if req.Question != "" {
-		if err := c.Ask(req.Question); err != nil {
+	} else if asked {
+		images := make([]assistant.Image, len(req.Images))
+		for i, img := range req.Images {
+			images[i] = img.Image
+		}
+		if err := c.Ask(req.Question, images...); err != nil {
 			return httpx.Err(http.StatusConflict, "conversation_full", err.Error())
 		}
 		// Taken over before a step of it is kept, the chat is put down with the
@@ -508,10 +548,10 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		for _, call := range outcome.Pending {
 			view := press.view(ctx, call)
 			// A call that cannot run is answered at once with what was wrong, for the
-			// model to correct on its next step, and drawn as a step that failed.
+			// model to correct on its next step. It is the model's slip, not something
+			// done on the server, so the page is not shown it: a chat shows what the
+			// assistant did, and the audit entry still counts it.
 			if call.Problem != "" {
-				stream.send(agentCallLine(view))
-				press.sendCalled(call, view, agentResult{text: call.Problem, said: clipText(call.Problem, 300)})
 				malformed = append(malformed, call.Name)
 				answers = append(answers, assistant.Block{Type: assistant.BlockToolResult, ToolID: call.ID, Text: call.Problem, IsError: true})
 				continue
@@ -957,17 +997,68 @@ func (pr *agentPress) execute(ctx context.Context, call assistant.ToolCall, view
 		}
 		return s.agentWaitForRun(ctx, scope.deployment, call.AgentInput())
 	}
-	readCtx, done := context.WithTimeout(ctx, 60*time.Second)
+	// Reading a repository fetches it first, which the checkout bounds itself at
+	// a minute and more; the other reads are the store's and Docker's.
+	readFor := 60 * time.Second
+	if call.Name == assistant.ToolReadSource {
+		readFor = agentCallDeadline
+	}
+	readCtx, done := context.WithTimeout(ctx, readFor)
 	defer done()
+	summary := scope.deployment
 	switch call.Name {
 	case assistant.ToolHostAlerts, assistant.ToolFirewallRules, assistant.ToolSecurityUpdates:
+	case assistant.ToolReadSource:
+		if id := call.OperatorInput().Deployment; id > 0 && (summary == nil || summary.ID != id) {
+			other, err := s.agentDeployment(readCtx, p, id)
+			if err != nil {
+				return refuse(err.Error())
+			}
+			summary = other
+		}
+		if summary == nil {
+			return refuse("read_source reads one deployment's code: name it with deployment, its id as your list gives it")
+		}
 	default:
-		if scope.deployment == nil {
+		if summary == nil {
 			return refuse("that read is about a deployment, and this conversation is not about one")
 		}
 	}
-	text, said, ok := s.operatorRead(readCtx, pr.r, p, scope.deployment, call)
+	text, said, ok := s.operatorRead(readCtx, pr.r, p, summary, call)
 	return agentResult{text: text, said: said, ok: ok}
+}
+
+// checkAgentImages reads what was pasted with a question: at most
+// assistant.MaxImages, each an image of a format every provider reads, made small,
+// with a thumbnail smaller still.
+func checkAgentImages(images []agentImage) error {
+	if len(images) > assistant.MaxImages {
+		return httpx.BadRequest("a question carries at most %d images", assistant.MaxImages)
+	}
+	for _, img := range images {
+		if err := assistant.CheckImage(img.Image, assistant.MaxImageBytes); err != nil {
+			return httpx.BadRequest("%s", err.Error())
+		}
+		if err := assistant.CheckImage(img.Thumb, assistant.MaxThumbBytes); err != nil {
+			return httpx.BadRequest("an image's thumbnail: %s", err.Error())
+		}
+	}
+	return nil
+}
+
+// agentDeployment is another deployment a call names, its production
+// environment, read under what the deployment's own assistant asks of a role.
+func (s *Server) agentDeployment(ctx context.Context, p *httpx.Principal, id int64) (*deploy.DeploymentSummary, error) {
+	if !p.Can(auth.CapServiceControl) {
+		return nil, fmt.Errorf("your role does not reach a deployment's assistant reads (%s)", auth.CapServiceControl)
+	}
+	summary, err := s.modules.deployRuns.EnvironmentDeploymentSummary(ctx, id, 0, deploy.QueueBudget{
+		Heavy: s.Cfg.DeployHeavySlots, Light: s.Cfg.DeployLightSlots,
+	})
+	if err != nil || summary == nil || summary.EnvironmentID <= 0 {
+		return nil, fmt.Errorf("there is no deployment %d with an environment to read", id)
+	}
+	return summary, nil
 }
 
 // agentDescribe is one operation's parameters.

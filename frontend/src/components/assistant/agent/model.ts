@@ -56,6 +56,16 @@ export interface AgentUsage {
   cacheWrite?: number
 }
 
+/**
+ * Every token the model read. Anthropic counts what it read from its cache, and
+ * what it wrote there, apart from `input`, which is then only what was new: a
+ * long chat read almost wholly from the cache would say "6 tokens in". An
+ * OpenAI-compatible server counts the cache inside `input` and sends neither.
+ */
+export function inputTokens(usage: AgentUsage): number {
+  return usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)
+}
+
 export type AgentStop = "end" | "tool" | "length" | "refusal"
 
 /** One line of a streamed answer. */
@@ -99,7 +109,7 @@ export type AgentEvent =
    * The person's own acts, which only a saved chat's lines carry: each question
    * asked and each Allow or Decline pressed, in order among what was streamed.
    */
-  | { type: "question"; text: string; at?: string }
+  | { type: "question"; text: string; images?: { mediaType: string; data: string }[]; at?: string }
   | { type: "decisions"; decisions: Record<string, boolean>; at?: string }
 
 export type AgentStepState = "running" | "waiting" | "done" | "failed" | "declined"
@@ -138,6 +148,8 @@ export type AgentPhase =
 export interface AgentTurn {
   id: string
   question: string
+  /** The images asked with it, as thumbnails an `<img>` draws. */
+  images?: string[]
   parts: AgentPart[]
   phase: AgentPhase
   error?: string
@@ -263,7 +275,12 @@ export function sendDecisions(t: AgentTranscript): AgentTranscript {
 }
 
 /** A new turn, waiting for its first line. */
-export function beginTurn(t: AgentTranscript, id: string, question: string): AgentTranscript {
+export function beginTurn(
+  t: AgentTranscript,
+  id: string,
+  question: string,
+  images: string[] = [],
+): AgentTranscript {
   // A question that was never sent, because another tab had the chat, gives way to
   // this one.
   const base = t.turns.at(-1)?.phase === "held" ? { ...t, turns: t.turns.slice(0, -1) } : t
@@ -284,7 +301,17 @@ export function beginTurn(t: AgentTranscript, id: string, question: string): Age
     ...settled,
     candidate: "",
     freshNote: undefined,
-    turns: [...settled.turns, { id, question, parts: [], phase: "waiting", fresh: t.freshNote }],
+    turns: [
+      ...settled.turns,
+      {
+        id,
+        question,
+        ...(images.length > 0 && { images }),
+        parts: [],
+        phase: "waiting",
+        fresh: t.freshNote,
+      },
+    ],
   }
 }
 
@@ -465,7 +492,12 @@ export function replayLines(
     const event = line as AgentEvent
     if (event.type === "question") {
       turn = `replay-${t.turns.length + 1}`
-      t = beginTurn(t, turn, typeof event.text === "string" ? event.text : "")
+      const thumbs = Array.isArray(event.images)
+        ? event.images
+            .filter((one) => typeof one?.mediaType === "string" && typeof one?.data === "string")
+            .map((one) => `data:${one.mediaType};base64,${one.data}`)
+        : []
+      t = beginTurn(t, turn, typeof event.text === "string" ? event.text : "", thumbs)
       t = withTurn(t, turn, (one) => ({ ...one, replayed: true }))
       continue
     }
@@ -544,10 +576,10 @@ export function inputLines(input: unknown): {
 /** The usage line under an answer. */
 export function usageLine(turn: AgentTurn): string | undefined {
   const usage = turn.usage
-  if (!usage || (usage.input === 0 && usage.output === 0)) return undefined
+  if (!usage || (inputTokens(usage) === 0 && usage.output === 0)) return undefined
   return [
     turn.model,
-    `${usage.input.toLocaleString("en-US")} tokens in`,
+    `${inputTokens(usage).toLocaleString("en-US")} tokens in`,
     `${usage.output.toLocaleString("en-US")} out`,
   ]
     .filter(Boolean)
