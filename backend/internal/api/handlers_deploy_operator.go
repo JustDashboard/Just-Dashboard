@@ -93,6 +93,11 @@ func operatorReadLabel(call assistant.ToolCall) string {
 		return "Read the firewall's rules"
 	case assistant.ToolSecurityUpdates:
 		return "Read the server's pending security updates"
+	case assistant.ToolReadSource:
+		if len(in.Paths) == 0 {
+			return "Read the repository's README and top folder"
+		}
+		return "Read " + clipText(strings.Join(in.Paths, ", "), 80) + " in the repository"
 	}
 	return call.Name
 }
@@ -137,6 +142,8 @@ func (s *Server) operatorRead(ctx context.Context, r *http.Request, p *httpx.Pri
 		return s.operatorTranscript(ctx, summary, in, answer, refuse)
 	case assistant.ToolContainerLogs:
 		return s.operatorContainerLogs(ctx, summary, in, answer, refuse)
+	case assistant.ToolReadSource:
+		return s.operatorSource(ctx, summary, in, answer, refuse)
 	case assistant.ToolReleaseMetrics:
 		targets, err := s.modules.deployPlanning.SizingTargets(ctx, summary.ID, summary.EnvironmentID)
 		if err != nil || len(targets) == 0 {
@@ -342,6 +349,41 @@ func (s *Server) operatorContainerLogs(ctx context.Context, summary *deploy.Depl
 }
 
 // operatorCount is a count as a read's few words say it: "1 run", "12 runs".
+// operatorSource reads the deployment's code from the commit a deployment would
+// build now, masked as a log is: a repository can hold a value the deployment
+// keeps as a secret.
+func (s *Server) operatorSource(ctx context.Context, summary *deploy.DeploymentSummary, in assistant.OperatorInput, answer operatorAnswer, refuse operatorRefusal) (string, string, bool) {
+	if s.modules.deployChecker == nil {
+		return refuse("the deployment's source cannot be read on this install")
+	}
+	read, err := s.modules.deployChecker.ReadSource(ctx, summary.ID, summary.EnvironmentID, in.Paths)
+	if err != nil {
+		return refuse(deploy.SourceReadFailure(err))
+	}
+	masker, err := s.operatorMasker(ctx, summary)
+	if err != nil {
+		return refuse("the environment's secret values could not be read to mask, so nothing was read")
+	}
+	read.Repository = summary.SourceRepository
+	for i := range read.Files {
+		read.Files[i].Content, _ = masker.Mask(read.Files[i].Content)
+	}
+	var said []string
+	for _, file := range read.Files {
+		said = append(said, file.Path)
+	}
+	if len(said) > 3 {
+		said = append(said[:2], operatorCount(len(read.Files)-2, "more file"))
+	}
+	if len(read.Folders) > 0 {
+		said = append(said, operatorCount(len(read.Folders), "folder"))
+	}
+	if len(said) == 0 {
+		said = append(said, "nothing it asked for")
+	}
+	return answer(read, strings.Join(said, ", "))
+}
+
 func operatorCount(n int, noun string) string {
 	if n == 1 {
 		return "1 " + noun

@@ -13,6 +13,7 @@ import { stepMark } from "@/components/assistant/agent/marks"
 import {
   agentStatus,
   changesOf,
+  inputTokens,
   shownSteps,
   totalUsage,
   type AgentStep,
@@ -182,10 +183,10 @@ function Activity({ session, className }: { session: AgentSession; className?: s
           </ul>
         </section>
       )}
-      {usage.input + usage.output > 0 && (
+      {inputTokens(usage) + usage.output > 0 && (
         <p className="numeric mt-auto text-micro text-muted-foreground">
-          {usage.input.toLocaleString("en-US")} tokens in · {usage.output.toLocaleString("en-US")}{" "}
-          out
+          {inputTokens(usage).toLocaleString("en-US")} tokens in ·{" "}
+          {usage.output.toLocaleString("en-US")} out
         </p>
       )}
     </div>

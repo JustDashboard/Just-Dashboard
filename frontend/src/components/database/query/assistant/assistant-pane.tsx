@@ -37,6 +37,7 @@ import { Toggle } from "@/components/ui/toggle"
 import { ReadError } from "@/components/database/redis/read-error"
 import { useDatabase } from "@/components/database/shell/database-context"
 import type { SchemaTable } from "@/components/database/query/completion"
+import { inputTokens } from "@/components/assistant/agent/model"
 import {
   isStatementFence,
   pendingCalls,
@@ -414,11 +415,11 @@ function TurnView({
             The answer reached its length limit and was cut off.
           </p>
         )}
-        {settled && turn.usage && (turn.usage.input > 0 || turn.usage.output > 0) && (
+        {settled && turn.usage && (inputTokens(turn.usage) > 0 || turn.usage.output > 0) && (
           <p className="numeric text-hint text-muted-foreground">
             {[
               turn.model,
-              `${turn.usage.input.toLocaleString("en-US")} tokens in`,
+              `${inputTokens(turn.usage).toLocaleString("en-US")} tokens in`,
               `${turn.usage.output.toLocaleString("en-US")} out`,
             ]
               .filter(Boolean)

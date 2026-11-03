@@ -66,7 +66,8 @@ func conversationOf(events []map[string]any) string {
 
 // A Claude answer with a call past its bounds, an arguments object written as its
 // text, and a call for a tool that does not exist runs what it can, answers the
-// rest with why, and the turn goes on to its answer.
+// rest with why, and the turn goes on to its answer. The page is shown the two
+// calls that ran, not the one that was the model's slip.
 func TestAClaudeAnswerWithABadCallGoesOnThroughTheRouter(t *testing.T) {
 	f := operatorRouterAs(t, auth.RoleAdmin)
 	operatorLive(t, f)
@@ -83,7 +84,7 @@ func TestAClaudeAnswerWithABadCallGoesOnThroughTheRouter(t *testing.T) {
 		t.Fatalf("the answer was refused: %v", errs)
 	}
 	called := ofType(events, "called")
-	if len(called) != 3 || called[0]["ok"] != true || called[1]["ok"] != true || called[2]["ok"] != false {
+	if len(called) != 2 || called[0]["ok"] != true || called[1]["ok"] != true || len(ofType(events, "call")) != 2 {
 		t.Fatalf("called = %v", called)
 	}
 	if doneOf(t, events)["kept"] != true || len(f.provider.raw) != 2 {

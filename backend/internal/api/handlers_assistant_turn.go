@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/assistant"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/mcp"
@@ -508,10 +509,10 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		for _, call := range outcome.Pending {
 			view := press.view(ctx, call)
 			// A call that cannot run is answered at once with what was wrong, for the
-			// model to correct on its next step, and drawn as a step that failed.
+			// model to correct on its next step. It is the model's slip, not something
+			// done on the server, so the page is not shown it: a chat shows what the
+			// assistant did, and the audit entry still counts it.
 			if call.Problem != "" {
-				stream.send(agentCallLine(view))
-				press.sendCalled(call, view, agentResult{text: call.Problem, said: clipText(call.Problem, 300)})
 				malformed = append(malformed, call.Name)
 				answers = append(answers, assistant.Block{Type: assistant.BlockToolResult, ToolID: call.ID, Text: call.Problem, IsError: true})
 				continue
@@ -957,17 +958,50 @@ func (pr *agentPress) execute(ctx context.Context, call assistant.ToolCall, view
 		}
 		return s.agentWaitForRun(ctx, scope.deployment, call.AgentInput())
 	}
-	readCtx, done := context.WithTimeout(ctx, 60*time.Second)
+	// Reading a repository fetches it first, which the checkout bounds itself at
+	// a minute and more; the other reads are the store's and Docker's.
+	readFor := 60 * time.Second
+	if call.Name == assistant.ToolReadSource {
+		readFor = agentCallDeadline
+	}
+	readCtx, done := context.WithTimeout(ctx, readFor)
 	defer done()
+	summary := scope.deployment
 	switch call.Name {
 	case assistant.ToolHostAlerts, assistant.ToolFirewallRules, assistant.ToolSecurityUpdates:
+	case assistant.ToolReadSource:
+		if id := call.OperatorInput().Deployment; id > 0 && (summary == nil || summary.ID != id) {
+			other, err := s.agentDeployment(readCtx, p, id)
+			if err != nil {
+				return refuse(err.Error())
+			}
+			summary = other
+		}
+		if summary == nil {
+			return refuse("read_source reads one deployment's code: name it with deployment, its id as your list gives it")
+		}
 	default:
-		if scope.deployment == nil {
+		if summary == nil {
 			return refuse("that read is about a deployment, and this conversation is not about one")
 		}
 	}
-	text, said, ok := s.operatorRead(readCtx, pr.r, p, scope.deployment, call)
+	text, said, ok := s.operatorRead(readCtx, pr.r, p, summary, call)
 	return agentResult{text: text, said: said, ok: ok}
+}
+
+// agentDeployment is another deployment a call names, its production
+// environment, read under what the deployment's own assistant asks of a role.
+func (s *Server) agentDeployment(ctx context.Context, p *httpx.Principal, id int64) (*deploy.DeploymentSummary, error) {
+	if !p.Can(auth.CapServiceControl) {
+		return nil, fmt.Errorf("your role does not reach a deployment's assistant reads (%s)", auth.CapServiceControl)
+	}
+	summary, err := s.modules.deployRuns.EnvironmentDeploymentSummary(ctx, id, 0, deploy.QueueBudget{
+		Heavy: s.Cfg.DeployHeavySlots, Light: s.Cfg.DeployLightSlots,
+	})
+	if err != nil || summary == nil || summary.EnvironmentID <= 0 {
+		return nil, fmt.Errorf("there is no deployment %d with an environment to read", id)
+	}
+	return summary, nil
 }
 
 // agentDescribe is one operation's parameters.

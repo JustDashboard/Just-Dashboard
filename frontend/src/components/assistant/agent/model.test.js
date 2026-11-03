@@ -21,6 +21,7 @@ import {
   takeOverTurn,
   totalUsage,
   usageLine,
+  inputTokens,
 } from "./model"
 
 const read = { id: "a", tool: "recent_runs", label: "Read the last 10 runs", kind: "read" }
@@ -142,6 +143,21 @@ describe("a turn", () => {
     expect(totalUsage(t).output).toBe(20)
     expect(usageLine(t.turns[0])).toBe("Claude · 200 tokens in · 20 out")
     expect(usageLine({ ...t.turns[0], usage: { input: 0, output: 0 } })).toBeUndefined()
+  })
+  test("what the model read from its cache counts as tokens in", () => {
+    const cached = { input: 6, output: 571, cacheRead: 41_200, cacheWrite: 900 }
+    expect(inputTokens(cached)).toBe(42_106)
+    expect(
+      usageLine({
+        id: "t",
+        question: "q",
+        parts: [],
+        phase: "done",
+        model: "Claude",
+        usage: cached,
+      }),
+    ).toBe("Claude · 42,106 tokens in · 571 out")
+    expect(inputTokens({ input: 300, output: 1 })).toBe(300)
   })
 })
 

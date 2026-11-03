@@ -56,6 +56,16 @@ export interface AgentUsage {
   cacheWrite?: number
 }
 
+/**
+ * Every token the model read. Anthropic counts what it read from its cache, and
+ * what it wrote there, apart from `input`, which is then only what was new: a
+ * long chat read almost wholly from the cache would say "6 tokens in". An
+ * OpenAI-compatible server counts the cache inside `input` and sends neither.
+ */
+export function inputTokens(usage: AgentUsage): number {
+  return usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)
+}
+
 export type AgentStop = "end" | "tool" | "length" | "refusal"
 
 /** One line of a streamed answer. */
@@ -544,10 +554,10 @@ export function inputLines(input: unknown): {
 /** The usage line under an answer. */
 export function usageLine(turn: AgentTurn): string | undefined {
   const usage = turn.usage
-  if (!usage || (usage.input === 0 && usage.output === 0)) return undefined
+  if (!usage || (inputTokens(usage) === 0 && usage.output === 0)) return undefined
   return [
     turn.model,
-    `${usage.input.toLocaleString("en-US")} tokens in`,
+    `${inputTokens(usage).toLocaleString("en-US")} tokens in`,
     `${usage.output.toLocaleString("en-US")} out`,
   ]
     .filter(Boolean)

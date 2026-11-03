@@ -115,6 +115,7 @@ func takes(tool string) string {
 		ToolHostAlerts:        "It takes nothing.",
 		ToolFirewallRules:     "It takes nothing.",
 		ToolSecurityUpdates:   "It takes nothing.",
+		ToolReadSource:        fmt.Sprintf("It takes paths (a list of at most %d files or folders in the repository, such as README.md or src) and deployment (a deployment's id, for one other than this conversation's).", SourcePathsMax),
 		ToolDescribeOperation: "It takes name (an operation's name, as your list gives it).",
 		ToolCallOperation:     "It takes name (an operation's name, as your list gives it), arguments (an object: path and query parameters by name, the JSON body under body) and reason.",
 		ToolWaitForRun:        fmt.Sprintf("It takes run (a run's number) and seconds (1–%d).", AgentWaitMax),
@@ -348,8 +349,55 @@ func readOperatorInput(tool string, f *fields) OperatorInput {
 		}
 	case ToolLifecycleEvents:
 		in.Hours = int(f.bounded("hours", 1, OperatorHoursMax, OperatorHoursDefault, "since_hours"))
+	case ToolReadSource:
+		in.Paths = f.list(SourcePathsMax, sourcePathMax, "paths", "path", "files", "file", "folders", "folder")
+		if id, given := f.whole("deployment", "deployment_id", "deploymentId", "project", "project_id", "id"); given {
+			if id <= 0 {
+				f.fail("deployment is a deployment's id, a whole number above 0.")
+			}
+			in.Deployment = id
+		}
 	}
 	return in
+}
+
+// list reads a field of text values: a list of them, the text of a list, or one
+// value written on its own. Past bound values, the rest are left out and said.
+func (f *fields) list(bound, each int, names ...string) []string {
+	raw, name := f.take(names...)
+	if raw == nil {
+		return nil
+	}
+	var values []any
+	if json.Unmarshal(raw, &values) != nil {
+		var one string
+		if json.Unmarshal(raw, &one) != nil {
+			f.fail(fmt.Sprintf("%s has to be a list of text, and %s is not one.", name, clipLine(string(raw), 80)))
+			return nil
+		}
+		if trimmed := strings.TrimSpace(one); !strings.HasPrefix(trimmed, "[") || json.Unmarshal([]byte(trimmed), &values) != nil {
+			values = []any{one}
+		}
+	}
+	out := []string{}
+	for _, v := range values {
+		text, ok := v.(string)
+		text = strings.TrimSpace(text)
+		switch {
+		case !ok:
+			f.note(fmt.Sprintf("%s holds %s, which is not text and was ignored", name, clipLine(fmt.Sprint(v), 40)))
+		case text == "":
+		case len(text) > each || strings.ContainsRune(text, 0):
+			f.fail(fmt.Sprintf("%s holds %q, which is not a path.", name, clipLine(text, 60)))
+		default:
+			out = append(out, text)
+		}
+	}
+	if len(out) > bound {
+		f.note(fmt.Sprintf("%s held %d values; the first %d were read", name, len(out), bound))
+		out = out[:bound]
+	}
+	return out
 }
 
 func readAgentInput(tool string, f *fields, pages []string) AgentInput {

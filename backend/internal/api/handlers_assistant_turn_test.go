@@ -616,15 +616,18 @@ func TestAQuestionDeclinesAChangeThatWaits(t *testing.T) {
 }
 
 // A call for anything but its tools runs nothing, and the model is told so and
-// goes on; a call for an operation not offered is told so too.
+// goes on; the person is not shown the model's slip. A call for an operation not
+// offered is told so too.
 func TestACallOutsideItsToolsIsAnsweredWithWhy(t *testing.T) {
 	f := operatorRouterAs(t, auth.RoleAdmin)
 	f.s.assistant.limit = httpx.NewLimiter(6000, 100)
 	f.provider.queue(claudeCalls("", [2]any{"run_shell", map[string]any{"command": "id"}}), claudeAnswer("I have no shell."))
 	events := f.ask(t, `{"question":"Run id"}`)
-	called := ofType(events, "called")
-	if len(called) != 1 || called[0]["ok"] != false || !strings.Contains(called[0]["said"].(string), "no tool called") || len(ofType(events, "error")) != 0 {
-		t.Fatalf("events = %v", events)
+	if len(ofType(events, "call")) != 0 || len(ofType(events, "called")) != 0 || len(ofType(events, "error")) != 0 {
+		t.Fatalf("the page was shown the slip: %v", events)
+	}
+	if doneOf(t, events)["kept"] != true {
+		t.Fatalf("the turn did not go on: %v", events)
 	}
 	if sent := f.provider.raw[len(f.provider.raw)-1]; !strings.Contains(sent, `"is_error":true`) || !strings.Contains(sent, "api_request") {
 		t.Fatalf("the model was not told: %s", sent)
@@ -634,7 +637,7 @@ func TestACallOutsideItsToolsIsAnsweredWithWhy(t *testing.T) {
 		claudeAnswer("I cannot."),
 	)
 	events = f.ask(t, `{"question":"Try","mode":"full"}`)
-	called = ofType(events, "called")
+	called := ofType(events, "called")
 	if len(called) != 1 || called[0]["ok"] != false || !strings.Contains(called[0]["said"].(string), "no operation") {
 		t.Fatalf("nothing_at_all = %v", events)
 	}

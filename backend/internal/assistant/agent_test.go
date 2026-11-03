@@ -263,3 +263,71 @@ func TestAnAgentConversationOutlastsTheEditorsTurnCount(t *testing.T) {
 		t.Fatalf("the editor's count is gone: %v", err)
 	}
 }
+
+// The deployment's and the server's assistant are told to talk as a general
+// assistant does and to answer the question asked from where its answer is: what a
+// project is from its code, not from its runs. The incident-report closing they
+// used to be given is gone.
+func TestTheAssistantIsToldToAnswerWhatWasAsked(t *testing.T) {
+	prompts := map[string]string{
+		"deployment": AgentSystemPrompt(OperatorContext{Deployment: "shop"}, nil, APIOverview{}),
+		"server":     ServerSystemPrompt(ServerContext{Server: "web-1"}, APIOverview{}),
+	}
+	for scope, prompt := range prompts {
+		for _, want := range []string{
+			"the way a good general assistant does", "Answer the question that was asked", `"What is this project?" asks what its code is`,
+			"read_source", "needs no tools at all", "Do not add a status report", "do not mention them",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("the %s prompt lacks %q", scope, want)
+			}
+		}
+		if strings.Contains(prompt, "Be brief: what you found or did, the evidence") {
+			t.Errorf("the %s prompt still asks for an incident report", scope)
+		}
+	}
+	if !strings.Contains(prompts["deployment"], `"this project", "the app" or "it" means that deployment`) {
+		t.Error("the deployment prompt does not say what \"this project\" is")
+	}
+	if toolNamed(AgentTools, ToolReadSource).Name == "" || toolNamed(ServerTools, ToolReadSource).Name == "" {
+		t.Fatal("read_source is not offered")
+	}
+	if !strings.Contains(string(toolNamed(ServerTools, ToolReadSource).Schema), `"required":["deployment"]`) {
+		t.Errorf("the server's read_source does not ask which deployment: %s", toolNamed(ServerTools, ToolReadSource).Schema)
+	}
+}
+
+// read_source takes its paths however a model writes them: a list, one path on its
+// own, the text of a list; past its bound the rest are left out and said.
+func TestReadSourceTakesPathsHoweverTheyAreWritten(t *testing.T) {
+	many := `["1","2","3","4","5","6","7","8","9","10"]`
+	calls, err := AgentCalls([]Block{
+		operatorCall("t1", ToolReadSource, `{}`),
+		operatorCall("t2", ToolReadSource, `{"path":"README.md"}`),
+		operatorCall("t3", ToolReadSource, `{"paths":"[\"go.mod\",\"cmd\"]","deployment":"#4"}`),
+		operatorCall("t4", ToolReadSource, `{"paths":`+many+`}`),
+		operatorCall("t5", ToolReadSource, `{"paths":["src",7]}`),
+		operatorCall("t6", ToolReadSource, `{"deployment":-2}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in := calls[0].OperatorInput(); len(in.Paths) != 0 || calls[0].Problem != "" {
+		t.Fatalf("nothing = %+v %s", in, calls[0].Problem)
+	}
+	if in := calls[1].OperatorInput(); len(in.Paths) != 1 || in.Paths[0] != "README.md" {
+		t.Fatalf("one path = %+v", in)
+	}
+	if in := calls[2].OperatorInput(); len(in.Paths) != 2 || in.Paths[1] != "cmd" || in.Deployment != 4 {
+		t.Fatalf("a list as text = %+v", in)
+	}
+	if in := calls[3].OperatorInput(); len(in.Paths) != SourcePathsMax || !strings.Contains(calls[3].NotesText(), "the first 8 were read") {
+		t.Fatalf("too many = %+v %q", in, calls[3].NotesText())
+	}
+	if in := calls[4].OperatorInput(); len(in.Paths) != 1 || !strings.Contains(calls[4].NotesText(), "not text") {
+		t.Fatalf("a number among them = %+v %q", in, calls[4].NotesText())
+	}
+	if !strings.Contains(calls[5].Problem, "deployment is a deployment's id") {
+		t.Fatalf("a bad id = %q", calls[5].Problem)
+	}
+}

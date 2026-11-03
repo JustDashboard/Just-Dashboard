@@ -11,7 +11,7 @@ The things that work the same on every page.
 - **Ctrl/⌘K** searches projects, sites, containers, databases, repos and pages
 - Previews each result with what it is connected to
 - Keyboard shortcuts on every page — press **?** to see them
-- An assistant on your own model for the whole server: ask it anything, and it reads and changes what you could — databases, backups, Docker, files, the firewall, deployments — as you, asking before changes unless you give it full access, with secret values masked before your model sees them. Its chats are saved, so you can come back to one later or from another browser
+- An assistant on your own model for the whole server: ask it anything, as you would any assistant, and it reads and changes what you could — databases, backups, Docker, files, the firewall, deployments and their code — as you, asking before changes unless you give it full access, with secret values masked before your model sees them. Its chats are saved, so you can come back to one later or from another browser
 - Every page remembers where you left it
 - A consistent, dark design built around readings rather than tiles
 

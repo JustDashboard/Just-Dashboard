@@ -2,10 +2,11 @@
 
 A project's **Assistant** page (`/deploy/{id}/assistant`) is the dashboard's assistant asked about one
 environment of one deployment, and the server's own chat (`POST /assistant/chat`) is the same assistant asked
-about the whole server. It answers anything and does what it is asked: it reads logs, requests, metrics and a
-database's rows, sets variables, domains and limits, runs a backup, deploys and rolls back, and reaches the rest
-of the dashboard — databases, backups, Docker, files, the firewall, the proxy, users — through the dashboard's
-own API. **Diagnose** on the overview opens the deployment's page and asks the diagnostic question. A new
+about the whole server. It answers anything and does what it is asked: it reads a project's code, logs,
+requests, metrics and a database's rows, sets variables, domains and limits, runs a backup, deploys and rolls
+back, and reaches the rest of the dashboard — databases, backups, Docker, files, the firewall, the proxy, users —
+through the dashboard's own API. It is meant to be talked to as any general assistant is, and to look at the
+server only when the question is about it ([how it answers](#how-it-answers)). **Diagnose** on the overview opens the deployment's page and asks the diagnostic question. A new
 deployment can be handed to it too: it configures the draft, and the person presses Deploy (below).
 
 It asks the provider the install set up once ([the assistant's providers](#providers)), the same one the
@@ -176,13 +177,16 @@ whole input written as the text of one is read as the object, a number written a
 name is read loosely, and an argument put beside `arguments` is read as one of them — and the model is told
 each in a note before the call's result. A call that cannot run at all — no such tool, a required field
 missing, input that is not JSON — is answered with an `is_error` result saying what was wrong and what the
-tool takes, drawn as a failed step, and the turn goes on. Only an answer whose calls cannot be told apart (a
+tool takes, and the turn goes on. It is the model's slip, not something done on the server, so the page is not
+sent it: it used to be drawn as a failed step, and a made-up `deploy_get` read "There is no tool called…" to the
+person, words meant for the model. The audit entry still lists it under `malformed`. Only an answer whose calls cannot be told apart (a
 call with no id, two under one) is refused, as `assistant.ErrUnreadableAnswer`.
 
 | Tool | Offered to | Does | Kind |
 | --- | --- | --- | --- |
 | `recent_runs`, `run_transcript`, `container_logs`, `release_metrics`, `lifecycle_events` | Deployment | The reads shaped and bounded for a model (`assistant/operator.go`, `api/handlers_deploy_operator.go`): 20 runs, 300 lines, 168 hours | `read` |
 | `host_alerts`, `firewall_rules`, `security_updates` | Deployment, server | The host's own reads; `host_alerts` asks `system.admin`, and the server's `firewall_rules` reads every rule | `read` |
+| `read_source` | Deployment, server | A deployment's code at the commit a deployment would build now (`deploy.DeploymentChecker.ReadSource`, through the private, temporary checkout detection reads): up to 8 `paths`, each folder listed and each file read as text, 16 KB a file and 18 KB a read, binary files named without their bytes, `.git` and links out of the checkout refused. With no paths it lists the top folder and reads the README. Masked with the deployment's secret values. A deployment's chat reads its own unless it names another `deployment`; the server's must name one | `read` |
 | `describe_operation` | Deployment, draft | One operation's parameters and JSON body | `free` |
 | `call_operation` | Deployment, draft | Runs one operation under `/deploy` by name. `id` and `draft` are filled in, and another deployment's id is pointed at `api_request`; `env` defaults to the conversation's | by the route |
 | `wait_for_run` | Deployment | Waits for a run to end, or for up to 120 seconds | `read` |
@@ -203,6 +207,22 @@ dashboard through `api_request` and `find_routes`, lists the API's areas — eac
 count of routes, a sentence (`agentAreaBlurbs`) and a few reads, built from `chi.Walk` when the catalogue is —
 says how to learn a body's shape (GET the resource first, or read the 400 the route answers), how to query a
 database, what it cannot reach, and that secret values reach it masked.
+
+## <a id="how-it-answers"></a>How it answers
+
+The deployment's and the server's prompts open with who it is to the person (`writeCharacter`): the assistant
+they would talk to anywhere, naturally and about anything, that can also see and work on their server. "How to
+answer" (`writeWork`) then says to answer the question asked and only that; to look something up only when the
+answer depends on it, and where the answer is (what a project is or does from its code with `read_source`, a
+failure from its runs, logs, events and metrics, the rest through the API; a general question with no tools); to
+write as a person talks, without a status report or a list of other things it could read; to back what it says
+with what it read and say when it is inferring; and to leave its own failed calls out of the answer. A deployment's
+chat is told that "this project" and "the app" mean that deployment.
+
+This replaced an incident responder's brief ("find out what is wrong", "be brief: what you found, the evidence,
+and what happens next"), with only runs, logs and metrics to read. Asked "what is this project about?", it read
+the last runs and the sizing verdict and reported them, then guessed the purpose from the configuration because
+nothing it had could open the README. The draft's assistant keeps its own brief: it has one task.
 
 ## A shortcut to what it changed
 
@@ -276,6 +296,8 @@ application's own log lines; drawn by `chat.tsx`, `step.tsx`, `mode-menu.tsx` an
 person's chats listed by `chat-list.tsx` from `chats.ts`. What lasts is the
 server's: a chat is read back from `GET /assistant/chats/{chat}` and its lines replayed through the same model, so
 it opens again as it looked in another tab, another browser or after a restart (see [saved chats](#saved-chats)).
+The usage line under an answer and in the rail counts every token the model read (`inputTokens`): Anthropic
+counts what it read from and wrote to its cache apart from `input`, so a long chat once read "6 tokens in".
 `components/assistant/elements/` is AI Elements (vercel/ai-elements, Apache-2.0, see its `NOTICE`), adapted to
 this product's marks. `components/deploy/project-assistant.tsx` is the project's page: the conversation, and
 beside it its chats and what it did with a shortcut to each change; `?chat=<id>` opens a saved chat there.
@@ -289,8 +311,9 @@ are the new deployment's.
 ## Tests
 
 - `assistant/agent_test.go`, `assistant/calls_test.go`: calls read to their tools, bounds held and said, unknown
-  fields said, arguments and whole inputs written as text read, a call that cannot run answered with why, only an
-  unreadable answer refused; a Claude answer streamed with parallel calls, one bad, round-tripped through
+  fields said, arguments and whole inputs written as text read, `read_source`'s paths however they are written, a
+  call that cannot run answered with why, only an unreadable answer refused; the prompts telling it to answer
+  what was asked, as a general assistant, from the code for what a project is; a Claude answer streamed with parallel calls, one bad, round-tripped through
   Anthropic with its thinking and every call answered; the same through an OpenAI-compatible server; the prompts;
   a saved conversation loaded as it was, a long chat shrunk, and a chat loaded, owned, busy and taken over.
 - `assistant/keyring_test.go`: an earlier setup as a keyring of one, a hosted preset keeping its address, a key
@@ -301,7 +324,9 @@ are the new deployment's.
 - `api/handlers_assistant_turn_test.go` and `api/handlers_assistant_chats_test.go`, against the fake provider with
   the whole router under it: a read and a change held by the mode; a change run through its route on Allow,
   audited as the person with actor `assistant`; full access running it unasked and held to the person's role; a
-  schedule that runs a command asked for, not refused; a Claude answer with a bad call going on; variables read
+  schedule that runs a command asked for, not refused; a Claude answer with a bad call going on, the bad call
+  not shown on the page; another deployment's README read through `read_source`, its secret masked
+  (`api/handlers_assistant_source_test.go`); variables read
   through `api_request` with the secret masked; backups listed and one started, held in "changes" and run in
   full; a read-only SQL statement run unasked and a writing one held; excluded routes refused with their reason;
   the server's chat masking secret-named fields, key material and every deployment's values; a configuration's
@@ -310,6 +335,9 @@ are the new deployment's.
   after a restart; a chat its owner's alone; a take-over stopping the press; retention; a deployment's chats going
   with it. `api/handlers_assistant_routes_test.go`: every streaming handler excluded, read off the source;
   `find_routes`; every page with an address.
+- `deploy/source_reading_test.go`: the README of the commit that would be built, not the working tree, the top
+  folder folders first, a path not in the commit said; a way up read from the top, a link out, `.git` and a
+  binary file refused or named, and the read held to its size.
 - `store/schema_assistant_chats_test.go`: the tables on a fresh and an upgraded install, and a chat going with its
   owner and its deployment.
 - `tests/browser/assistant.spec.ts`: the page, Diagnose, a card's Allow and Decline, the mode, a shortcut and the

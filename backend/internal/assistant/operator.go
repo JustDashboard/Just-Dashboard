@@ -20,6 +20,7 @@ const (
 	ToolHostAlerts      = "host_alerts"
 	ToolFirewallRules   = "firewall_rules"
 	ToolSecurityUpdates = "security_updates"
+	ToolReadSource      = "read_source"
 )
 
 // The bounds an operator read is held to, which the tools' descriptions state.
@@ -32,6 +33,10 @@ const (
 	OperatorHoursMax     = 168
 	operatorReasonMax    = 500
 	operatorServiceMax   = 128
+	// SourcePathsMax is how many paths one read_source call reads, as the
+	// deploy package's SourceReadPathsMax.
+	SourcePathsMax = 8
+	sourcePathMax  = 512
 )
 
 func operatorSchema(required []string, properties map[string]any) json.RawMessage {
@@ -102,6 +107,33 @@ var OperatorTools = []Tool{
 		Description: "Read the host's pending package updates that are security updates, by package, with the installed and the candidate version." + approved,
 		Schema:      operatorSchema(nil, map[string]any{}),
 	},
+	readSourceTool(false),
+}
+
+// readSourceTool reads a deployment's code. A deployment's conversation reads its
+// own unless it names another; the server's names the one it means.
+func readSourceTool(named bool) Tool {
+	properties := map[string]any{
+		"paths": map[string]any{
+			"type": "array", "maxItems": SourcePathsMax,
+			"items":       map[string]any{"type": "string", "maxLength": sourcePathMax},
+			"description": "Files to read and folders to list, relative to the repository's top, such as README.md, package.json or src. Leave it out to list the top folder and read the README.",
+		},
+		"deployment": map[string]any{"type": "integer", "minimum": 1, "description": "The deployment's id, for one other than this conversation's."},
+	}
+	var required []string
+	if named {
+		properties["deployment"] = map[string]any{"type": "integer", "minimum": 1, "description": "The deployment's id, as your list gives it."}
+		required = []string{"deployment"}
+	}
+	return Tool{
+		Name: ToolReadSource,
+		Description: fmt.Sprintf("Read a deployment's source code: the repository it is built from, at the commit a deployment would build now. "+
+			"Files are read as text (each cut at 16 KB) and folders are listed, at most %d paths a call. "+
+			"Use it for what the project is and does, how it is built, and what its code or its configuration files say: the README and the manifest (package.json, go.mod, pyproject.toml, Dockerfile) first."+approved,
+			SourcePathsMax),
+		Schema: operatorSchema(required, properties),
+	}
 }
 
 // OperatorInput is every field an operator tool takes; each tool's check
@@ -112,6 +144,9 @@ type OperatorInput struct {
 	Lines   int    `json:"lines,omitempty"`
 	Service string `json:"service,omitempty"`
 	Hours   int    `json:"hours,omitempty"`
+	// Paths and Deployment are read_source's.
+	Paths      []string `json:"paths,omitempty"`
+	Deployment int64    `json:"deployment,omitempty"`
 }
 
 // Input reads a call's checked input back.
