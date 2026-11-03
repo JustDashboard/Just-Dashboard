@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -783,23 +784,31 @@ func TestProcNginxProcessesPlacesAStartOnTheWallClock(t *testing.T) {
 		cmd.Process.Kill()
 		cmd.Wait()
 	})
-	procs, err := procNginxProcesses("/proc")
-	if err != nil {
-		t.Fatal(err)
+	// Start returns once the exec has begun; the kernel sets the new command
+	// line a moment after, so a read straight away can find it empty.
+	var procs []nginxProcess
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		procs, err = procNginxProcesses("/proc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.IndexFunc(procs, func(p nginxProcess) bool { return p.PID == cmd.Process.Pid })
+		if i >= 0 && (procs[i].Title != "" || time.Now().After(deadline)) {
+			p := procs[i]
+			if p.PPID != os.Getpid() || p.Title != binary+" 30" {
+				t.Errorf("read as %+v", p)
+			}
+			if p.Start.Before(before) || p.Start.After(after.Add(20*time.Millisecond)) {
+				t.Errorf("started %v, between %v and %v", p.Start, before, after)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pid %d not among %+v", cmd.Process.Pid, procs)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	for _, p := range procs {
-		if p.PID != cmd.Process.Pid {
-			continue
-		}
-		if p.PPID != os.Getpid() || p.Title != binary+" 30" {
-			t.Errorf("read as %+v", p)
-		}
-		if p.Start.Before(before) || p.Start.After(after.Add(20*time.Millisecond)) {
-			t.Errorf("started %v, between %v and %v", p.Start, before, after)
-		}
-		return
-	}
-	t.Fatalf("pid %d not among %+v", cmd.Process.Pid, procs)
 }
 
 // Against the real nginx, run in a private prefix: an edit nginx has not read

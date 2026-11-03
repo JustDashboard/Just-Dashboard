@@ -407,7 +407,13 @@ http {
 	if out, err := reload.CombinedOutput(); err != nil {
 		t.Fatalf("reload: %v: %s", err, out)
 	}
-	if got := ask(true); !got.Current || got.Staging {
+	// ask(true) waits the few seconds a reload takes; a runner slowed by the
+	// race detector can take longer to swap nginx's workers.
+	got := ask(true)
+	for tries := 1; !got.Current && tries < 5; tries++ {
+		got = ask(true)
+	}
+	if !got.Current || got.Staging {
 		t.Fatalf("after the reload: %+v", got)
 	}
 }

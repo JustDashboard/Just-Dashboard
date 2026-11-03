@@ -131,7 +131,8 @@ func TestLiveNginxServesALocalCACertificateAndItsRenewal(t *testing.T) {
 	}
 	settle := func(want *big.Int) *x509.Certificate {
 		t.Helper()
-		deadline := time.Now().Add(5 * time.Second)
+		// A reload takes a moment; a runner slowed by the race detector, longer.
+		deadline := time.Now().Add(20 * time.Second)
 		for {
 			served, err := serve("app.lan.test")
 			if err == nil && served.SerialNumber.Cmp(want) == 0 {
