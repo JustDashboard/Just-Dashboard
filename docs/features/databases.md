@@ -23,8 +23,8 @@ A control center for every database on the server, even the ones nothing has con
 <table>
 <tr>
 <td width="50%" valign="top">
-<a href="../readme/database-assistant.png"><img src="../readme/database-assistant.png" alt="The SQL editor with the assistant beside it, answering with statements to open or insert"></a>
-<p align="center"><b>SQL assistant</b><br><sub>Ask for a statement, an error or a plan explained</sub></p>
+<a href="../readme/database-assistant.png"><img src="../readme/database-assistant.png" alt="The SQL editor with the assistant beside it: the statement and its result attached, and an answer whose statement opens in a tab or is inserted"></a>
+<p align="center"><b>The assistant</b><br><sub>Its own page, and beside the SQL editor with what you attach</sub></p>
 </td>
 <td width="50%" valign="top">
 <a href="../readme/database-explain.png"><img src="../readme/database-explain.png" alt="A measured plan with a hash join and a sequential scan flagged as misjudged"></a>
