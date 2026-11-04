@@ -36,7 +36,9 @@ var runCommandTool = Tool{
 		"Use it for what the dashboard's routes do not do — a program's own status or version, a config file's syntax check, installing something, " +
 		"what is listening or filling the disk — and prefer api_request where a route does the job. It is not interactive: nothing can be typed into it, " +
 		"so give a program the flags it needs to run without asking (apt-get -y, systemctl --no-pager, git --no-pager). " +
-		"Its working directory is the account's home; write cd /path && … for another. It answers with the exit code and the end of its output, secret values masked." +
+		"Its working directory is the account's home; write cd /path && … for another. It answers with the exit code and the end of its output, secret values masked. " +
+		"A line that changes packages or restarts Docker, or runs sudo that may ask for a password, is typed into this chat's terminal window instead, as terminal_run would, " +
+		"where it outlives the dashboard restarting and can be answered; its answer then says so, and terminal_read follows it." +
 		agentRoleLine + agentHoldLine,
 	Schema: operatorSchema([]string{"command", "reason"}, map[string]any{
 		"command": map[string]any{"type": "string", "maxLength": CommandMax, "description": "The command line, as typed into a shell."},
@@ -584,4 +586,143 @@ func segmentKind(words []string) string {
 		return CommandChange
 	}
 	return CommandRead
+}
+
+// What run_command types into the chat's terminal window instead of running it
+// on its own. A line run on its own is a child of the dashboard's process, in
+// its container: when Docker restarts, every container restarts with it, and a
+// package upgrade restarts Docker when Docker is one of the packages — so an
+// upgrade run on its own stopped itself halfway, and dpkg with it. The window is
+// held on the host outside the dashboard (term.Manager.HoldSessions), and goes
+// on whatever happens to it; and a window can ask a question, or for sudo's
+// password, which the person answers on the page.
+
+// Why a line goes to the terminal window, as the model is told it.
+const (
+	TerminalForPackages = "it changes the server's packages, which can take minutes, stop to ask about a changed config file, and restart Docker — and with it this dashboard, which would stop a command it runs on its own halfway"
+	TerminalForDocker   = "it restarts Docker, which restarts this dashboard with every other container, and would stop a command it runs on its own halfway"
+	TerminalForSudo     = "sudo may ask for a password, which only a terminal can take: the person types it on the page, and it never reaches you"
+)
+
+// packageChanges are the words, by package manager, that change what is
+// installed.
+var packageChanges = map[string][]string{
+	"apt":      {"install", "reinstall", "upgrade", "full-upgrade", "dist-upgrade", "remove", "purge", "autoremove"},
+	"apt-get":  {"install", "reinstall", "upgrade", "dist-upgrade", "remove", "purge", "autoremove", "build-dep"},
+	"aptitude": {"install", "reinstall", "upgrade", "safe-upgrade", "full-upgrade", "dist-upgrade", "remove", "purge"},
+	"dnf":      {"install", "reinstall", "upgrade", "update", "distro-sync", "downgrade", "remove", "erase", "autoremove"},
+	"yum":      {"install", "reinstall", "upgrade", "update", "distro-sync", "downgrade", "remove", "erase", "autoremove"},
+	"microdnf": {"install", "reinstall", "upgrade", "update", "remove"},
+	"zypper":   {"install", "in", "update", "up", "dist-upgrade", "dup", "patch", "remove", "rm"},
+	"apk":      {"add", "del", "upgrade", "fix"},
+	"snap":     {"install", "refresh", "remove", "revert"},
+}
+
+// packagePrograms change packages whatever they are given.
+var packagePrograms = setOf("unattended-upgrade", "unattended-upgrades", "do-release-upgrade")
+
+// dpkgChanges are dpkg's actions that change what is installed.
+var dpkgChanges = setOf("-i", "--install", "-r", "--remove", "-P", "--purge", "--configure", "--unpack")
+
+// dockerUnits are the services whose restart restarts every container.
+var dockerUnits = setOf("docker", "docker.service", "docker.socket", "containerd", "containerd.service")
+
+// dockerRestarts are systemctl's and service's words that stop a service.
+var dockerRestarts = setOf("restart", "stop", "try-restart", "reload-or-restart", "try-reload-or-restart", "kill")
+
+// CommandForTerminal is why a line given to run_command is better typed into the
+// chat's terminal window, or "" when it runs as well on its own: a line that
+// changes packages, or restarts Docker.
+func CommandForTerminal(line string) string {
+	segments, _ := splitCommand(line)
+	for _, words := range segments {
+		words = unwrap(words)
+		if len(words) == 0 {
+			continue
+		}
+		program := filepath.Base(words[0])
+		args := words[1:]
+		plain := nonFlags(args)
+		switch {
+		case packagePrograms[program],
+			slices.ContainsFunc(plain, func(w string) bool { return slices.Contains(packageChanges[program], w) }),
+			program == "dpkg" && anyArg(args, func(a string) bool { return dpkgChanges[a] }),
+			program == "pacman" && anyArg(args, pacmanChanges):
+			return TerminalForPackages
+		case program == "systemctl" && len(plain) > 1 && dockerRestarts[plain[0]] &&
+			slices.ContainsFunc(plain[1:], func(w string) bool { return dockerUnits[w] }):
+			return TerminalForDocker
+		case program == "service" && len(plain) > 1 && dockerUnits[plain[0]] && dockerRestarts[plain[1]]:
+			return TerminalForDocker
+		}
+	}
+	return ""
+}
+
+// pacmanChanges is a pacman operation that installs, upgrades or removes: -S
+// without a query's letters, -U and -R.
+func pacmanChanges(arg string) bool {
+	switch arg {
+	case "--sync", "--upgrade", "--remove":
+		return true
+	}
+	if !strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "--") {
+		return false
+	}
+	letters := arg[1:]
+	switch {
+	case strings.ContainsAny(letters, "UR"):
+		return true
+	case strings.Contains(letters, "S"):
+		return !strings.ContainsAny(letters, "silgpc")
+	}
+	return false
+}
+
+// CommandAsksSudo reports whether a line runs something under sudo that may ask
+// for a password: sudo without -n or -S.
+func CommandAsksSudo(line string) bool {
+	segments, _ := splitCommand(line)
+	for _, words := range segments {
+		if sudoAsks(words) {
+			return true
+		}
+	}
+	return false
+}
+
+// sudoAsks walks a simple command's wrappers, as unwrap does, for a sudo that
+// may ask.
+func sudoAsks(words []string) bool {
+	for len(words) > 0 {
+		w := words[0]
+		if strings.Contains(w, "=") && !strings.HasPrefix(w, "-") && !strings.HasPrefix(w, "=") {
+			words = words[1:]
+			continue
+		}
+		valued, wraps := wrappers[w]
+		if !wraps {
+			return false
+		}
+		words = words[1:]
+		quiet := false
+		for len(words) > 0 && strings.HasPrefix(words[0], "-") {
+			flag := words[0]
+			words = words[1:]
+			if w == "sudo" && (flag == "--non-interactive" || flag == "--stdin" ||
+				!strings.HasPrefix(flag, "--") && strings.ContainsAny(flag[1:], "nS")) {
+				quiet = true
+			}
+			if slices.Contains(valued, flag) && len(words) > 0 {
+				words = words[1:]
+			}
+		}
+		if w == "sudo" && !quiet {
+			return true
+		}
+		if w == "timeout" && len(words) > 0 {
+			words = words[1:]
+		}
+	}
+	return false
 }

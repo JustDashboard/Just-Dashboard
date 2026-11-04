@@ -420,6 +420,8 @@ export type DirEntry = {
   size: number
   isDir: boolean
   entries: number
+  /** The scan ran out of time or work before it had counted all of it: `size` is a floor. */
+  partial?: boolean
 }
 
 export type ContainerPort = { ip?: string; privatePort: number; publicPort?: number; type: string }

@@ -227,6 +227,75 @@ func TestTheTerminalIsHeldLikeTheShell(t *testing.T) {
 	}
 }
 
+// run_command types a line that changes packages into the chat's window rather
+// than running it on its own: on its own it is a child of the dashboard's
+// container, and an upgrade that restarts Docker restarts that container,
+// stopping the upgrade halfway. A sudo that may ask for a password goes there
+// too, where the person can type it. Every other line runs on its own, as before.
+func TestRunCommandTypesAPackageChangeIntoTheWindow(t *testing.T) {
+	f := databaseAssistantAs(t, auth.RoleAdmin)
+	m := withHeldTerminal(t, f)
+	bin := t.TempDir()
+	for name, script := range map[string]string{
+		"apt-get": "#!/bin/sh\necho \"fake apt-get $*\"\n",
+		"sudo":    "#!/bin/sh\nprintf '[sudo] password for someone: '\nread -r pw\necho \"ran $*\"\n",
+	} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := "PATH=" + bin + ":$PATH "
+	f.provider.queue(
+		claudeCalls("Installing.", terminalCall(assistant.ToolRunCommand, map[string]any{"command": path + "apt-get install -y jq", "reason": "Installing jq."})),
+		claudeAnswer("Installed."),
+	)
+	events := lines(t, f.do(http.MethodPost, "/assistant/chat", `{"question":"Install jq","mode":"full"}`))
+	called := calledTerminal(t, events)
+	if called["terminal"].(map[string]any)["state"] != "finished" || !strings.Contains(fmt.Sprint(called["output"]), "fake apt-get install -y jq") {
+		t.Fatalf("the install = %v", called)
+	}
+	if change, _ := called["change"].(map[string]any); change == nil || !strings.HasPrefix(fmt.Sprint(change["href"]), "/terminal?session=") {
+		t.Fatalf("the install's change = %v", called)
+	}
+	told := false
+	for _, sent := range f.provider.raw {
+		told = told || strings.Contains(sent, "typed into this chat's terminal window rather than run on its own")
+	}
+	if !told {
+		t.Fatal("the model was not told where its line ran")
+	}
+	chat := conversationOf(events)
+	if windows := m.List(); len(windows) != 1 || windows[0].WindowName != agentTerminalWindow(chat) {
+		t.Fatalf("windows = %+v", windows)
+	}
+	if detail, _ := f.audit(t, "assistant.chat.ask"); !strings.Contains(detail, "terminal: PATH=") {
+		t.Errorf("audit = %s", detail)
+	}
+
+	f.provider.queue(
+		claudeCalls("Looking.", terminalCall(assistant.ToolRunCommand, map[string]any{"command": "echo on-its-own", "reason": "x"})),
+		claudeAnswer("Fine."),
+	)
+	events = lines(t, f.do(http.MethodPost, "/assistant/chat", fmt.Sprintf(`{"conversation":%q,"question":"And?","mode":"full"}`, chat)))
+	if called := ofType(events, "called"); len(called) != 1 || called[0]["terminal"] != nil || called[0]["said"] != "exit 0" ||
+		!strings.Contains(fmt.Sprint(called[0]["output"]), "on-its-own") {
+		t.Fatalf("a line that reads = %v", called)
+	}
+
+	if os.Geteuid() == 0 {
+		return // the terminal's account is root, whose sudo asks nothing
+	}
+	f.provider.queue(
+		claudeCalls("Restarting.", terminalCall(assistant.ToolRunCommand, map[string]any{"command": path + "sudo systemctl restart nginx", "reason": "x"})),
+		claudeAnswer("It is waiting for your password."),
+	)
+	events = lines(t, f.do(http.MethodPost, "/assistant/chat", fmt.Sprintf(`{"conversation":%q,"question":"Restart nginx","mode":"full"}`, chat)))
+	called = calledTerminal(t, events)
+	if view := called["terminal"].(map[string]any); view["state"] != "password" || called["said"] != "waiting for your password" {
+		t.Fatalf("a sudo = %v", called)
+	}
+}
+
 func TestTerminalTextIsWhatAPersonReads(t *testing.T) {
 	for _, c := range []struct{ raw, want string }{
 		{"\x1b]0;~\x07\x1b[36m~/src\x1b[0m\r\n\x1b[36m>\x1b[0m ls\r\n", "~/src\n> ls"},

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/assistant"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -195,15 +196,21 @@ func assistantOutcomeWord(o assistant.Outcome) string {
 // Nothing is written until the first line is: an error before then is
 // answered as an ordinary error, with its status.
 type assistantStream struct {
+	// mu is held for each line, which keepAlive writes from a goroutine of its own.
+	mu      sync.Mutex
 	w       http.ResponseWriter
 	start   map[string]any
 	started bool
 	// keep, when set, is handed every line as it is sent, for a saved chat to
 	// keep what the page was shown.
 	keep func([]byte)
+	// last is when the last line went out.
+	last time.Time
 }
 
 func (st *assistantStream) send(v any) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
 	if !st.started {
 		st.started = true
 		h := st.w.Header()
@@ -216,6 +223,7 @@ func (st *assistantStream) send(v any) {
 	st.write(v)
 }
 
+// write sends one line; the caller holds mu.
 func (st *assistantStream) write(v any) {
 	line, err := json.Marshal(v)
 	if err != nil {
@@ -224,6 +232,53 @@ func (st *assistantStream) write(v any) {
 	if st.keep != nil {
 		st.keep(line)
 	}
-	_, _ = st.w.Write(append(line, '\n'))
+	st.flush(append(line, '\n'))
+}
+
+func (st *assistantStream) flush(line []byte) {
+	_, _ = st.w.Write(line)
 	_ = http.NewResponseController(st.w).Flush()
+	st.last = time.Now()
+}
+
+// agentStreamQuiet is the longest an answer's stream goes without a line. A
+// command, a terminal's wait or a model thinking can say nothing for minutes,
+// and a connection that carries nothing for that long is one a proxy in front
+// of the dashboard closes — nginx's default is a minute, Cloudflare's a hundred
+// seconds — which the page could only read as the answer failing, and which
+// stopped the press, and the command with it.
+var agentStreamQuiet = 15 * time.Second
+
+// agentPing is the line keepAlive writes: it says nothing, and the page passes
+// over it. A saved chat does not keep it.
+var agentPing = []byte(`{"type":"ping"}` + "\n")
+
+// keepAlive writes a ping whenever the stream has said nothing for quiet, once
+// it has begun, until the returned stop is called; stop returns once nothing
+// more will be written. It looks every second, so no gap is much longer than
+// quiet: looking every third of it let one run to quiet and a third, which is
+// exactly a proxy's twenty seconds against fifteen.
+func (st *assistantStream) keepAlive(quiet time.Duration) (stop func()) {
+	done, ended := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(ended)
+		tick := time.NewTicker(max(min(quiet/15, time.Second), time.Millisecond))
+		defer tick.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-tick.C:
+				st.mu.Lock()
+				if st.started && time.Since(st.last) >= quiet {
+					st.flush(agentPing)
+				}
+				st.mu.Unlock()
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-ended
+	}
 }

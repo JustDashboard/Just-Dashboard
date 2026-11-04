@@ -107,6 +107,11 @@ export type AgentEvent =
     }
   | { type: "error"; error: { code: string; message: string } }
   /**
+   * Said by the server when an answer has been quiet for a while — a command
+   * running, a model thinking — so a proxy in front of it keeps the connection.
+   */
+  | { type: "ping" }
+  /**
    * The person's own acts, which only a saved chat's lines carry: each question
    * asked and each Allow or Decline pressed, in order among what was streamed.
    */
@@ -132,16 +137,15 @@ export interface AgentTerminal {
   prompt?: string
 }
 
-/** The terminal's tools, which work in the chat's own window. */
-export const TERMINAL_TOOLS = ["terminal_run", "terminal_send", "terminal_read"]
-
 /** The newest call in a chat that left its terminal window in a state worth saying. */
 export function latestTerminal(transcript: AgentTranscript): AgentStep | undefined {
   for (let at = transcript.turns.length - 1; at >= 0; at--) {
     const parts = transcript.turns[at].parts
     for (let i = parts.length - 1; i >= 0; i--) {
       const part = parts[i]
-      if (part.kind === "step" && TERMINAL_TOOLS.includes(part.call.tool) && part.terminal) {
+      // Any call the window answered: run_command types a line that changes
+      // packages, or that may ask for a sudo password, into the window too.
+      if (part.kind === "step" && part.terminal) {
         return part
       }
     }
@@ -527,6 +531,12 @@ export function applyEvent(t: AgentTranscript, id: string, event: AgentEvent): A
     case "question":
     case "decisions":
       // A saved chat's own lines, which `replayLines` reads; a stream never sends them.
+      return t
+    case "ping":
+      return t
+    default:
+      // A line of a newer server's than this page knows: passed over, rather than
+      // ending the transcript.
       return t
   }
 }

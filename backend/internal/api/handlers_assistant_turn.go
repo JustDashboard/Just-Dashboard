@@ -483,6 +483,9 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		}
 		press.save(pressCtx)
 	}()
+	// Deferred after the save, so it has stopped before the save reads the stream.
+	stopKeepAlive := stream.keepAlive(agentStreamQuiet)
+	defer stopKeepAlive()
 	act := map[string]any{"type": "question", "text": req.Question}
 	if len(req.Images) > 0 && !resume {
 		// The saved chat draws the question with the thumbnails, and keeps each

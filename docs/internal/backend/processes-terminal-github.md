@@ -411,6 +411,10 @@ rest. For what runs long or asks something, the assistant has a window of its ow
 created for the person and named `assistant-<chat id>`, that it types into and reads (`Session.Write`,
 `Session.Subscribe`) and whose foreground job (`Session.Foreground`, the same kernel answer the activity line
 reads) says when what it typed has finished; see [the terminal](../deployments/operator.md#the-terminal).
+A line run to its end is a child of the dashboard's process, in its container, so it stops when Docker restarts
+that container — which upgrading Docker's own packages does — while a window is held outside it; so
+`run_command` types a line that changes packages or restarts Docker, or a `sudo` that may ask for a password,
+into the window instead wherever windows are held.
 
 ## GitHub sign-in
 
