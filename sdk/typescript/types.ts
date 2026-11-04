@@ -78,6 +78,12 @@ export interface ActiveWork {
   run?: EngineRun
 }
 
+/** api.agentAttachment in the dashboard's source. */
+export interface AgentAttachment {
+  label?: string
+  text?: string
+}
+
 /** api.agentImage in the dashboard's source. */
 export interface AgentImage {
   data?: string
@@ -494,6 +500,12 @@ export interface Change {
   ttl?: number
   type?: Type
   want?: string[] | null
+}
+
+/** assistant.ChatAbout in the dashboard's source. */
+export interface ChatAbout {
+  path?: string
+  title?: string
 }
 
 /** blueprint.Check in the dashboard's source. */
@@ -3195,6 +3207,8 @@ export interface OperationsSummary {
 
 /** api.operatorRequest in the dashboard's source. */
 export interface OperatorRequest {
+  about?: ChatAbout | null
+  attached?: AgentAttachment[] | null
   conversation?: string
   decisions?: Record<string, boolean> | null
   images?: AgentImage[] | null

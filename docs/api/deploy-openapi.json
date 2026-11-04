@@ -558,6 +558,18 @@
         "title": "api.DataCopyTable",
         "type": "object"
       },
+      "api.agentAttachment": {
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "title": "api.agentAttachment",
+        "type": "object"
+      },
       "api.agentImage": {
         "properties": {
           "data": {
@@ -2242,6 +2254,25 @@
       },
       "api.operatorRequest": {
         "properties": {
+          "about": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/assistant.ChatAbout"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attached": {
+            "items": {
+              "$ref": "#/components/schemas/api.agentAttachment"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "conversation": {
             "type": "string"
           },
@@ -2967,6 +2998,18 @@
           }
         },
         "title": "api.watchSimulationRequest",
+        "type": "object"
+      },
+      "assistant.ChatAbout": {
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "title": "assistant.ChatAbout",
         "type": "object"
       },
       "assistant.Image": {

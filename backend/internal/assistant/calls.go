@@ -87,6 +87,8 @@ func readCall(b Block, offered, pages []string) ToolCall {
 		value = readFindInput(in)
 	case ToolAPIRequest:
 		value = readRequestInput(in)
+	case ToolRunCommand:
+		value = readCommandInput(in)
 	default:
 		value = readOperatorInput(b.ToolName, in)
 	}
@@ -122,6 +124,7 @@ func takes(tool string) string {
 		ToolOpenPage:          "It takes page (one of the pages its schema lists) and note.",
 		ToolFindRoutes:        "It takes query (words to look for in the dashboard's routes, or empty for its areas) and optionally method.",
 		ToolAPIRequest:        "It takes method (GET, POST, PUT, PATCH or DELETE), path (under /api/v1, such as /databases), query (an object), body (JSON) and reason.",
+		ToolRunCommand:        fmt.Sprintf("It takes command (the line to run, as typed into a shell), timeout (1–%d seconds) and reason.", CommandWaitMax),
 	}
 	return what[tool]
 }

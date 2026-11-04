@@ -91,7 +91,29 @@ type operatorRequest struct {
 	// Images are what the person pasted with the question, each with a small
 	// copy the saved chat keeps to draw the question again.
 	Images []agentImage `json:"images"`
+	// Attached is what the page the question was asked on hands over with it at
+	// the person's choice — the SQL editor's statement, its last result or error —
+	// each sent to the model with the question and drawn on it by its label alone.
+	Attached []agentAttachment `json:"attached"`
+	// About is the page a chat about the whole server was opened from, read on the
+	// press that begins it.
+	About *assistant.ChatAbout `json:"about"`
 }
+
+// agentAttachment is one thing handed over with a question, by its label.
+type agentAttachment struct {
+	Label string `json:"label"`
+	Text  string `json:"text"`
+}
+
+// Bounds on what is handed over with a question, and on where a chat was opened.
+const (
+	maxAgentAttached      = 4
+	maxAgentAttachedLabel = 60
+	maxAgentAttachedText  = 20_000
+	maxAboutPath          = 512
+	maxAboutTitle         = 120
+)
 
 // agentImage is a pasted image as the page sends it: the image the model reads,
 // made small by the page, and a thumbnail for the chat's own record.
@@ -102,14 +124,18 @@ type agentImage struct {
 
 // agentRequestBytes bounds a question's body: a question's words and its
 // images, each with its thumbnail, as base64.
-const agentRequestBytes = 1<<20 + assistant.MaxImages*((assistant.MaxImageBytes+assistant.MaxThumbBytes)*4/3+1024)
+const agentRequestBytes = 1<<20 + assistant.MaxImages*((assistant.MaxImageBytes+assistant.MaxThumbBytes)*4/3+1024) +
+	maxAgentAttached*(maxAgentAttachedText*6+maxAgentAttachedLabel*6)
 
 // agentScope is what a conversation is about.
 type agentScope struct {
 	kind       agentScopeKind
 	deployment *deploy.DeploymentSummary
 	draft      *deploy.Draft
-	name       string
+	database   *dbConnection
+	// about is the page a server chat was opened from.
+	about *assistant.ChatAbout
+	name  string
 	// key tells one conversation's subject from another's in its store.
 	key int64
 	// action is the audit entry's name for a question; ".tool" is its answers.
@@ -193,6 +219,22 @@ func (s *Server) handleDraftOperator(w http.ResponseWriter, r *http.Request) err
 		key: int64(sum.Sum64() >> 1), action: "deploy.draft.assistant"})
 }
 
+// handleDatabaseAssistant asks the assistant about one database connection. A
+// protected connection never reaches here: the guard in front of every database
+// route refuses it, and agentProtected keeps the other scopes' calls out of it.
+func (s *Server) handleDatabaseAssistant(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	conn, _, err := s.dbConnRow(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	return s.agentTurn(w, r, &agentScope{kind: agentScopeDatabase, database: conn, name: conn.Name,
+		key: conn.ID, action: "database.assistant"})
+}
+
 // handleServerAssistant asks the assistant about the whole server.
 func (s *Server) handleServerAssistant(w http.ResponseWriter, r *http.Request) error {
 	name := "the server"
@@ -214,6 +256,10 @@ func (scope *agentScope) chatInfo(question string, settings *assistant.Settings,
 	if scope.draft != nil {
 		info.Draft = scope.draft.ID
 	}
+	if scope.database != nil {
+		info.Database = scope.database.ID
+	}
+	info.About = scope.about
 	return info
 }
 
@@ -249,7 +295,9 @@ type agentPress struct {
 	// images are what the person pasted since then, whole, for the page to open
 	// one large; the question's line names each by its id.
 	images []chatImage
-	quiet bool
+	quiet  bool
+	// commands are the lines run_command ran, masked, for the audit entry.
+	commands []string
 	// announced is a chat saved once the page has been sent its first line.
 	announced bool
 }
@@ -316,6 +364,19 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 	}
 	if err := checkAgentImages(req.Images); err != nil {
 		return err
+	}
+	if err := checkAgentAttached(req.Attached); err != nil {
+		return err
+	}
+	if len(req.Attached) > 0 && req.Question == "" && len(req.Images) == 0 {
+		return httpx.BadRequest("what is attached goes with a question")
+	}
+	if req.About != nil && scope.kind == agentScopeServer && req.Conversation == "" {
+		about, err := checkAgentAbout(*req.About)
+		if err != nil {
+			return err
+		}
+		scope.about = about
 	}
 	if req.Mode != "" && !req.Mode.Valid() {
 		return httpx.BadRequest("mode is ask, changes or full")
@@ -435,6 +496,13 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		}
 		act["images"] = thumbs
 	}
+	if len(req.Attached) > 0 && !resume {
+		labels := make([]string, len(req.Attached))
+		for i, a := range req.Attached {
+			labels[i] = a.Label
+		}
+		act["attached"] = labels
+	}
 	if req.Decisions != nil {
 		act = map[string]any{"type": "decisions", "decisions": req.Decisions}
 	}
@@ -451,8 +519,13 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		detail["deploymentId"], detail["environmentId"] = scope.deployment.ID, scope.deployment.EnvironmentID
 	case scope.draft != nil:
 		detail["draft"] = scope.draft.ID
+	case scope.database != nil:
+		detail["databaseId"] = scope.database.ID
 	default:
 		detail["scope"] = "server"
+		if scope.about != nil {
+			detail["about"] = scope.about.Path
+		}
 	}
 	if req.TakeOver {
 		detail["takeOver"] = true
@@ -480,7 +553,14 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		for i, img := range req.Images {
 			images[i] = img.Image
 		}
-		if err := c.Ask(req.Question, images...); err != nil {
+		if len(req.Attached) > 0 {
+			labels := make([]string, len(req.Attached))
+			for i, a := range req.Attached {
+				labels[i] = a.Label
+			}
+			detail["attached"] = labels
+		}
+		if err := c.Ask(agentQuestion(req.Question, req.Attached), images...); err != nil {
 			return httpx.Err(http.StatusConflict, "conversation_full", err.Error())
 		}
 		// Taken over before a step of it is kept, the chat is put down with the
@@ -605,6 +685,9 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 	if len(malformed) > 0 {
 		detail["malformed"] = malformed
 	}
+	if len(press.commands) > 0 {
+		detail["commands"] = press.commands
+	}
 	// Carried on somewhere else: this press puts the chat down as it stood after
 	// its last step, and the press that took it goes on from there.
 	if errors.Is(context.Cause(pressCtx), assistant.ErrTakenOver) {
@@ -716,6 +799,8 @@ func agentOffer(c *assistant.Conversation, kind agentScopeKind) {
 		c.Offer = assistant.SetupTools
 	case agentScopeServer:
 		c.Offer = assistant.ServerTools
+	case agentScopeDatabase:
+		c.Offer = assistant.DatabaseTools
 	default:
 		c.Offer = assistant.AgentTools
 	}
@@ -736,8 +821,10 @@ func (s *Server) agentBegin(ctx context.Context, c *assistant.Conversation, scop
 		c.System = assistant.AgentSystemPrompt(s.operatorContext(ctx, scope.deployment), s.agentCatalogue().lines(agentScopeDeployment), s.apiOverview())
 	case agentScopeDraft:
 		c.System = assistant.SetupSystemPrompt(s.draftContext(ctx, scope.draft), s.agentCatalogue().lines(agentScopeDraft), s.apiOverview())
+	case agentScopeDatabase:
+		c.System = assistant.DatabaseSystemPrompt(s.databaseContext(ctx, scope.database), s.apiOverview())
 	default:
-		o := assistant.ServerContext{Server: scope.name, Deployments: s.agentDeployments(ctx)}
+		o := assistant.ServerContext{Server: scope.name, Deployments: s.agentDeployments(ctx), About: scope.about}
 		c.System = assistant.ServerSystemPrompt(o, s.apiOverview())
 	}
 }
@@ -832,6 +919,11 @@ func (pr *agentPress) view(ctx context.Context, call assistant.ToolCall) agentCa
 		}
 	case assistant.ToolWaitForRun:
 		view.Label = fmt.Sprintf("Follow run #%d", call.AgentInput().Run)
+	case assistant.ToolRunCommand:
+		in := call.CommandInput()
+		view.Reason, view.Input = in.Reason, call.Input
+		view.Kind = assistant.ClassifyCommand(in.Command)
+		view.Label = "Run " + clipText(strings.Join(strings.Fields(in.Command), " "), 80)
 	case assistant.ToolAPIRequest:
 		in := call.RequestInput()
 		view.Reason, view.Input = in.Reason, call.Input
@@ -844,6 +936,12 @@ func (pr *agentPress) view(ctx context.Context, call assistant.ToolCall) agentCa
 		if route == nil || route.Excluded != "" {
 			// Nothing will run: it is answered at once with why.
 			view.Kind = agentKindFree
+			break
+		}
+		if s.agentProtected(ctx, route, in.Path) != "" {
+			// Nothing will run: it is answered at once with why.
+			view.Kind = agentKindFree
+			view.Label = routeLabel(route.Words)
 			break
 		}
 		view.Kind = s.apiRequestKind(ctx, route, in.Path, in.Body)
@@ -1000,6 +1098,8 @@ func (pr *agentPress) execute(ctx context.Context, call assistant.ToolCall, view
 		return s.apiCatalogue().findRoutes(call.FindInput())
 	case assistant.ToolAPIRequest:
 		return pr.apiRequest(ctx, p, call.RequestInput(), view)
+	case assistant.ToolRunCommand:
+		return pr.runCommand(ctx, p, call.CommandInput())
 	case assistant.ToolWaitForRun:
 		if scope.deployment == nil {
 			return refuse("wait_for_run follows a deployment's run, and this conversation is not about one: read the run with api_request")
@@ -1093,8 +1193,11 @@ func (s *Server) agentDescribe(scope *agentScope, name string) agentResult {
 // agentOpenPage is a shortcut for the page to draw.
 func (s *Server) agentOpenPage(scope *agentScope, in assistant.AgentInput) agentResult {
 	pages := agentOpenablePages
-	if scope.kind == agentScopeServer {
+	switch scope.kind {
+	case agentScopeServer:
 		pages = agentServerPages
+	case agentScopeDatabase:
+		pages = agentDatabasePages
 	}
 	page, ok := pages[in.Page]
 	if !ok || (scope.kind == agentScopeDeployment && scope.deployment == nil) {
@@ -1107,8 +1210,12 @@ func (s *Server) agentOpenPage(scope *agentScope, in assistant.AgentInput) agent
 // agentHref is a page's address for a conversation.
 func agentHref(scope *agentScope, page agentPage) string {
 	href := page.Path
-	if !page.Absolute && scope.deployment != nil {
+	switch {
+	case page.Absolute:
+	case scope.deployment != nil:
 		href = "/deploy/" + strconv.FormatInt(scope.deployment.ID, 10) + page.Path
+	case scope.database != nil:
+		href = "/databases/" + strconv.FormatInt(scope.database.ID, 10) + page.Path
 	}
 	if page.Section != "" {
 		href += "#" + page.Section
@@ -1256,6 +1363,9 @@ func (pr *agentPress) apiRequest(ctx context.Context, p *httpx.Principal, in ass
 		return refuse(fmt.Sprintf("No route answers %s %s. find_routes looks them up by words.", in.Method, in.Path))
 	case route.Excluded != "":
 		return refuse(fmt.Sprintf("The assistant cannot make %s %s: %s.", route.Method, route.Path, route.Excluded))
+	}
+	if why := s.agentProtected(ctx, route, in.Path); why != "" {
+		return refuse(why)
 	}
 	masker, err := pr.masker(ctx)
 	if err != nil {

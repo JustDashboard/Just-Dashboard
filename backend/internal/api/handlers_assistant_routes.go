@@ -111,8 +111,8 @@ var agentExcludedRoutes = map[string]string{
 // agentExcludedAreas are whole parts of the API, by the start of their path.
 var agentExcludedAreas = []struct{ prefix, why string }{
 	{"/assistant", "the assistant's own routes: its chats, its provider and its keys"},
-	{"/databases/assistant", "the SQL editor's assistant and its provider"},
-	{"/databases/{id}/assistant", "the SQL editor's assistant, which asks the model itself"},
+	{"/databases/assistant", "the assistant's provider, under its old address"},
+	{"/databases/{id}/assistant", "a database's assistant: this is it"},
 	{"/deploy/{id}/assistant", "a deployment's assistant: this is it"},
 	{"/deploy/drafts/{draft}/assistant", "a new deployment's assistant: this is it"},
 	{"/auth/", "signing in and out and the second factor are the person's own"},

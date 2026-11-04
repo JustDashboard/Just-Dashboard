@@ -29,6 +29,7 @@ const (
 	agentScopeDeployment agentScopeKind = iota
 	agentScopeDraft
 	agentScopeServer
+	agentScopeDatabase
 )
 
 // word is a scope as a saved chat names it.
@@ -38,6 +39,8 @@ func (k agentScopeKind) word() string {
 		return "draft"
 	case agentScopeServer:
 		return "server"
+	case agentScopeDatabase:
+		return "database"
 	}
 	return "deployment"
 }
@@ -67,7 +70,17 @@ func (op agentOperation) Kind() string {
 
 // offered reports whether a conversation of this scope is offered it.
 func (op agentOperation) offered(scope agentScopeKind) bool {
-	return op.Both && scope != agentScopeServer || op.Scope == scope
+	return op.Both && (scope == agentScopeDeployment || scope == agentScopeDraft) || op.Scope == scope
+}
+
+// agentScopeNamed is a saved chat's kind read back, and whether it is one.
+func agentScopeNamed(word string) (agentScopeKind, bool) {
+	for _, kind := range []agentScopeKind{agentScopeDeployment, agentScopeDraft, agentScopeServer, agentScopeDatabase} {
+		if kind.word() == word {
+			return kind, true
+		}
+	}
+	return agentScopeDeployment, false
 }
 
 const (
