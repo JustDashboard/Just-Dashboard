@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import Link from "next/link"
 import { Copy, Fullscreen, SettingsGear, SidebarRightClose, Sparkles } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
@@ -63,6 +64,14 @@ export function QueryAssistant({
   const { conn, engine, readOnly, href } = useDatabase()
   const view = settings.data
   const configured = view?.configured === true
+  // Read again only when what the tab holds changes, not on every line of an answer.
+  const { statement, result, failed, plan } = context
+  const attachable = useMemo(
+    () => queryAttachables({ statement, result, failed, plan }),
+    // The failure and the plan are rebuilt by the editor each render; their words are what count.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [statement, result, failed?.sql, failed?.error, plan?.sql, plan?.text],
+  )
 
   const suggestions: AgentSuggestion[] = []
   if (context.failed) {
@@ -135,7 +144,7 @@ export function QueryAssistant({
         placeholder="Orders from the last 30 days with their customer's email"
         suggestions={suggestions}
         sends={`what you attach and what it reads of ${conn.name} to answer`}
-        attachable={queryAttachables(context)}
+        attachable={attachable}
         codeBlock={statements}
       />
     )

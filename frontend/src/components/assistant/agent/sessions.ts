@@ -26,6 +26,7 @@ import {
 } from "@/components/assistant/agent/model"
 import type { AgentChatSummary } from "@/components/assistant/agent/chats"
 import { imageSource, type PastedImage } from "@/components/assistant/agent/images"
+import { boundAbout } from "@/components/assistant/agent/about"
 
 /**
  * The conversations going on in this tab, kept outside any page.
@@ -541,12 +542,14 @@ function readBack(read: { chat: AgentChatSummary; lines: unknown[] }, id: string
     running: read.chat.running,
     imageAt: (image) => agentChatImageUrl(id, image),
   })
-  const about = read.chat.scope?.about
+  // Drawn as a link back, so it is held to the dashboard's own addresses whoever
+  // wrote it.
+  const about = read.chat.scope?.about ? boundAbout(read.chat.scope.about) : undefined
   return {
     ...transcript,
     conversation: id,
     title: read.chat.title || transcript.title,
-    ...(about?.path && about.title && { about: { path: about.path, title: about.title } }),
+    ...(about && { about }),
   }
 }
 
