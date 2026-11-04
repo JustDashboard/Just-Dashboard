@@ -3,6 +3,7 @@
 import { useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import {
+  Database,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -76,7 +77,7 @@ export function AgentChatList({
       subject: {
         mark: <ScopeGlyph chat={chat} />,
         name: chat.title || "Untitled chat",
-        facts: chat.scope.name,
+        facts: chatFacts(chat),
       },
       description: (
         <p>
@@ -160,7 +161,12 @@ const KIND_ICON: Record<AgentChatSummary["scope"]["kind"], Icon> = {
   server: Servers,
   deployment: Rocket,
   draft: SettingsSliders,
+  database: Database,
 }
+
+/** What a chat is about, in a few words: the page it was begun from, else its subject. */
+const chatFacts = (chat: AgentChatSummary) =>
+  chat.scope.about?.title ? `About ${chat.scope.about.title}` : chat.scope.name
 
 function ScopeGlyph({ chat }: { chat: AgentChatSummary }) {
   const Glyph = KIND_ICON[chat.scope.kind] ?? Servers
@@ -178,7 +184,10 @@ interface ChatGroup {
   chats: AgentChatSummary[]
 }
 
-/** Every chat under what it is about: the server's first, then each deployment's. */
+/**
+ * Every chat under what it is about: the server's first, then each deployment's and
+ * each connection's under its name, and new deployments' last.
+ */
 function groupChats(chats: AgentChatSummary[]): ChatGroup[] {
   const groups = new Map<string, ChatGroup>()
   for (const chat of chats) {
@@ -188,11 +197,13 @@ function groupChats(chats: AgentChatSummary[]): ChatGroup[] {
         ? "server"
         : scope.kind === "deployment"
           ? `deployment.${scope.deployment}`
-          : "drafts"
+          : scope.kind === "database"
+            ? `database.${scope.database}`
+            : "drafts"
     const label =
       scope.kind === "server"
         ? "This server"
-        : scope.kind === "deployment"
+        : scope.kind === "deployment" || scope.kind === "database"
           ? scope.name
           : "New deployments"
     let group = groups.get(key)
@@ -202,9 +213,10 @@ function groupChats(chats: AgentChatSummary[]): ChatGroup[] {
     }
     group.chats.push(chat)
   }
-  return [...groups.values()].sort((a, b) =>
-    a.key === "server" ? -1 : b.key === "server" ? 1 : a.key === "drafts" ? 1 : 0,
-  )
+  // The server's first and new deployments' last; the rest keep the order their
+  // newest chat put them in.
+  const rank = (group: ChatGroup) => (group.key === "server" ? 0 : group.key === "drafts" ? 2 : 1)
+  return [...groups.values()].sort((a, b) => rank(a) - rank(b))
 }
 
 function ChatRow({
@@ -258,6 +270,8 @@ function ChatRow({
         <button
           type="button"
           onClick={onOpen}
+          // The page a chat was begun from is said on a hover, not on a second line.
+          title={chat.scope.about?.title ? chatFacts(chat) : undefined}
           className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md pr-1 pl-2 text-left focus-ring-inset"
         >
           <span aria-hidden className="relative flex size-1.5 shrink-0">

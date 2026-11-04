@@ -1934,6 +1934,11 @@ var addedColumns = []struct{ table, column, spec string }{
 	// link the request console draws beside a request's trace id. Drains
 	// made before had no traces to link to.
 	{"deploy_log_drains", "trace_url", "TEXT NOT NULL DEFAULT ''"},
+	// A chat may be about a database connection, and one about the whole server
+	// may say which page it was opened from (sealed, as its title is). Chats
+	// saved before were neither.
+	{"assistant_chats", "database_id", "INTEGER NOT NULL DEFAULT 0"},
+	{"assistant_chats", "about_enc", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

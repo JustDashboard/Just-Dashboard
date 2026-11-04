@@ -207,8 +207,19 @@ A change that weakens any of these has to say so explicitly.
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
    operations (bind-mount source, build context, a new stack's directory). Host commands go through
    `hostexec` with an argv, never a shell string. Request-defined shell source is confined to `deploy.Deployer.shell`, deliberately:
-   those are pipelines an admin stored for their own project, not anything supplied per request. Do not add
-   a second request-defined shell, and do not "fix" that one into an argv. A git clone's parent and an
+   those are pipelines an admin stored for their own project, not anything supplied per request — and, since
+   0.8.5, to the assistant's `run_command` (`term.Manager.RunCommand`), which is the terminal's own way of running
+   a line handed a line to run: the terminal's account and login shell, under the terminal capability checked on
+   every call, with a built environment (never the dashboard's own, which holds its secrets), nothing on standard
+   input, a deadline that stops its process group, its output masked, each line in the press's audit entry, and,
+   unless the person chose full access, an Allow for every line that is not a plain read
+   ([the assistant's modes](../deployments/operator.md#the-modes)). It is a shell on purpose, as the terminal is;
+   the argv rule is about the dashboard's own features never building a shell string out of what a request
+   carries. The assistant's terminal (`terminal_run`, `terminal_send`) is not a third: it types into a real window
+   of the terminal's own, as the person would at the Terminal page, under the same capability, with each line in
+   the audit entry. A password a command asks for is never the model's to type: the person types it into the
+   window from the chat (`POST /assistant/chats/{chat}/terminal`), and it reaches no provider, saved line or audit
+   entry. Do not add a third request-defined shell, and do not "fix" either into an argv. A git clone's parent and an
    `init` target go through `gitx.ResolveDir` against `JD_GIT_ROOTS` — the Git page's own boundary — and a
    clone can only create a directory that does not exist. Terminal startup also uses
    a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. An
@@ -323,8 +334,8 @@ A change that weakens any of these has to say so explicitly.
     the terminal, the heartbeat is a fixed field set that names nothing on the machine below `operate`, and
     the installer never handles a link credential. See [account link](../backend/account-link.md).
 13. The dashboard's assistant is a person's, at the dashboard, and acts as them: no more than their role, and,
-    since 0.8.5, no less. Its routes are a session's (a deployment's, a new deployment's and the server's,
-    `POST /assistant/chat`). Every call it makes is a request through the dashboard's own router under the
+    since 0.8.5, no less. Its routes are a session's (a deployment's, a new deployment's, a database connection's,
+    `POST /databases/{id}/assistant`, and the server's, `POST /assistant/chat`). Every call it makes is a request through the dashboard's own router under the
     person's own session principal (`s.assistantDispatch`, `httpx.WithAssistant`), so the route's capability
     check, handler rules, rate limit and audit entry apply exactly as to them; the entry records the person with
     actor `assistant`, so what it did reads apart from what they did. The session is read again before every
@@ -333,11 +344,14 @@ A change that weakens any of these has to say so explicitly.
     `refuseAssistantSchedule` are gone). It reaches every route of `/api/v1` the person could call — databases,
     backups, Docker, files, the firewall, users and the rest, including what runs commands on the host
     (scheduled tasks, services, a container's command) — through `api_request`, `find_routes`, a deployment's
-    `call_operation` and its shaped reads. What stays out of its reach is a closed list in
+    `call_operation` and its shaped reads, and runs a shell line on the host as the terminal would
+    (`run_command`, invariant 6), which takes the terminal capability. What stays out of its reach is a closed list in
     `api/handlers_assistant_routes.go` (`agentExclusion`), each line something no role changes: its own routes
     and those that ask the model; sign-in, password, second factor, passkeys, sessions and minting an API key;
     uninstalling the dashboard and its account link and usage count (invariants 12 and 16 want the person's own
-    press); WebSockets and streams; webhooks, the MCP endpoint and other machines' routes. What used to be
+    press); WebSockets and streams; webhooks, the MCP endpoint and other machines' routes. A database connection
+    the operator protected is out of every chat's reach as well (`agentProtected`): its own chat is refused by the
+    guard, and a call into its routes is answered with why, so nothing in it is sent to a model. What used to be
     refused is asked instead: how much runs without asking is the mode, which the server holds on every press —
     "ask" holds every read and change, "changes" (the default) holds every change, and **full access runs
     everything the person's role allows, unseen**; a draft's own saves never wait, but committing it, discarding
@@ -345,10 +359,10 @@ A change that weakens any of these has to say so explicitly.
     the mode is full. Text the model reads can try to talk it into a change, which is why "changes" stays the
     default and who answers takes a session. **What is kept from the provider is every secret's value**: every
     string of every answer is masked before it is sent, in every mode and scope (every deployment's secret
-    values, credential shapes, fields named for a secret, key material; `api/handlers_assistant_mask.go`), and
-    an answer that cannot be masked whole is not sent. What the person sends is theirs and goes as it is: a
-    question's words, and the images pasted with it, which masking cannot read (the box says so while one
-    waits). A malformed call never refuses the answer: it is answered
+    values, credential shapes, fields named for a secret, key material; `api/handlers_assistant_mask.go`), a
+    shell line's output included, and an answer that cannot be masked whole is not sent. What the person sends
+    is theirs and goes as it is: a question's words, what they attach from the SQL editor, and the images pasted
+    with it, which masking cannot read (the box says so while one waits). A malformed call never refuses the answer: it is answered
     with what was wrong (`assistant.CheckCalls`). Its saved chats, and the images pasted into them, are their
     owner's alone and sealed with the master key. See [the deployment assistant](../deployments/operator.md).
 

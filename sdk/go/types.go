@@ -88,6 +88,12 @@ type ActiveWork struct {
 	Run           EngineRun `json:"run,omitzero"`
 }
 
+// AgentAttachment is api.agentAttachment in the dashboard's source.
+type AgentAttachment struct {
+	Label string `json:"label,omitempty"`
+	Text  string `json:"text,omitempty"`
+}
+
 // AgentImage is api.agentImage in the dashboard's source.
 type AgentImage struct {
 	Data      string         `json:"data,omitempty"`
@@ -510,6 +516,12 @@ type Change struct {
 	TTL        int64    `json:"ttl,omitempty"`
 	Type       Type     `json:"type,omitempty"`
 	Want       []string `json:"want"`
+}
+
+// ChatAbout is assistant.ChatAbout in the dashboard's source.
+type ChatAbout struct {
+	Path  string `json:"path,omitempty"`
+	Title string `json:"title,omitempty"`
 }
 
 // Check is blueprint.Check in the dashboard's source.
@@ -3167,12 +3179,14 @@ type OperationsSummary struct {
 
 // OperatorRequest is api.operatorRequest in the dashboard's source.
 type OperatorRequest struct {
-	Conversation string          `json:"conversation,omitempty"`
-	Decisions    map[string]bool `json:"decisions"`
-	Images       []AgentImage    `json:"images"`
-	Mode         Mode            `json:"mode,omitempty"`
-	Question     string          `json:"question,omitempty"`
-	TakeOver     bool            `json:"takeOver,omitempty"`
+	About        *ChatAbout        `json:"about,omitempty"`
+	Attached     []AgentAttachment `json:"attached"`
+	Conversation string            `json:"conversation,omitempty"`
+	Decisions    map[string]bool   `json:"decisions"`
+	Images       []AgentImage      `json:"images"`
+	Mode         Mode              `json:"mode,omitempty"`
+	Question     string            `json:"question,omitempty"`
+	TakeOver     bool              `json:"takeOver,omitempty"`
 }
 
 // Outcome is secretstore.Outcome in the dashboard's source.

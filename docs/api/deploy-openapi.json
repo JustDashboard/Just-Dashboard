@@ -558,6 +558,18 @@
         "title": "api.DataCopyTable",
         "type": "object"
       },
+      "api.agentAttachment": {
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "title": "api.agentAttachment",
+        "type": "object"
+      },
       "api.agentImage": {
         "properties": {
           "data": {
@@ -2242,6 +2254,25 @@
       },
       "api.operatorRequest": {
         "properties": {
+          "about": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/assistant.ChatAbout"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attached": {
+            "items": {
+              "$ref": "#/components/schemas/api.agentAttachment"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "conversation": {
             "type": "string"
           },
@@ -2967,6 +2998,18 @@
           }
         },
         "title": "api.watchSimulationRequest",
+        "type": "object"
+      },
+      "assistant.ChatAbout": {
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "title": "assistant.ChatAbout",
         "type": "object"
       },
       "assistant.Image": {
@@ -20102,7 +20145,7 @@
         }
       ],
       "post": {
-        "description": "A session's route. The answer streams one JSON object a line: start, thinking, text, call (a tool call as it starts), called (what became of it, and the shortcut to what it changed), link (a shortcut the assistant offers), done (with the calls waiting for a decision) or error. A conversation is a saved chat (GET /assistant/chats): carried on by its id, it is answered 409 chat_busy while a press runs it elsewhere unless takeOver stops that press.",
+        "description": "A session's route. The answer streams one JSON object a line: start, thinking, text, call (a tool call as it starts), called (what became of it, the shortcut to what it changed, and for a terminal call the chat's window and what it waits on), link (a shortcut the assistant offers), done (with the calls waiting for a decision) or error. A conversation is a saved chat (GET /assistant/chats): carried on by its id, it is answered 409 chat_busy while a press runs it elsewhere unless takeOver stops that press.",
         "operationId": "deploymentOperator",
         "parameters": [
           {

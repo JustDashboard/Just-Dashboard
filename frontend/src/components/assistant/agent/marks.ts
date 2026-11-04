@@ -48,6 +48,12 @@ const TOOLS: Record<string, StepMark> = {
   wait_for_run: { icon: Rocket },
   find_routes: { icon: MagnifyingGlass },
   describe_operation: { icon: MagnifyingGlass },
+  // A command on the host, as the terminal's account runs it.
+  run_command: { icon: Terminal },
+  // The chat's own terminal window, typed into and read.
+  terminal_run: { icon: Terminal },
+  terminal_send: { icon: Terminal },
+  terminal_read: { icon: Terminal },
 }
 
 const ROUTES: [string, StepMark][] = [

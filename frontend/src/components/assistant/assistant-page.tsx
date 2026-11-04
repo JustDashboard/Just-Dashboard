@@ -8,16 +8,21 @@ import {
   ArrowRight,
   Bell,
   Check,
+  CodeBracket,
   Database,
   FirewallCheck,
   Gauge,
+  Information,
   Layers,
   LockClosed,
   LockOpen,
+  Question,
   Rocket,
   Servers,
   ShieldCheck,
   Sparkles,
+  Terminal,
+  Warning,
   type Icon,
 } from "@/components/icons"
 import { get, put } from "@/lib/api"
@@ -55,6 +60,7 @@ import { AgentChat, type AgentSuggestion } from "@/components/assistant/agent/ch
 import { AgentChatList } from "@/components/assistant/agent/chat-list"
 import { useAgentChats } from "@/components/assistant/agent/chats"
 import { AgentWorkspace } from "@/components/assistant/agent/workspace"
+import { readAbout } from "@/components/assistant/agent/about"
 import {
   agentChatHref,
   agentChatId,
@@ -79,6 +85,12 @@ const PLACES: { title: string; detail: string; href: string; icon: Icon }[] = [
     icon: Servers,
   },
   {
+    title: "Ask from any page",
+    detail: "Ask beside Search begins a chat about the page you are on",
+    href: "/assistant",
+    icon: Question,
+  },
+  {
     title: "Deployments",
     detail: "Ask anything, read logs and requests, change settings, take backups",
     href: "/deploy",
@@ -91,10 +103,22 @@ const PLACES: { title: string; detail: string; href: string; icon: Icon }[] = [
     icon: Layers,
   },
   {
-    title: "SQL editor",
-    detail: "Write and explain statements against a database's structure",
+    title: "Databases",
+    detail: "Each connection's own Assistant: what it holds, slow queries, access, backups",
     href: "/databases",
     icon: Database,
+  },
+  {
+    title: "SQL editor",
+    detail: "The same chat beside the editor, with the statement or a result attached",
+    href: "/databases",
+    icon: CodeBracket,
+  },
+  {
+    title: "Commands on the host",
+    detail: "Runs a shell command as the terminal's account, after asking unless on full access",
+    href: "/terminal",
+    icon: Terminal,
   },
   {
     title: "Excalidraw",
@@ -105,6 +129,25 @@ const PLACES: { title: string; detail: string; href: string; icon: Icon }[] = [
 ]
 
 const SERVER: AgentScope = { kind: "server", name: "This server" }
+
+/** What a chat begun from a page by Ask offers first: the page, not the server. */
+const ABOUT_SUGGESTIONS: AgentSuggestion[] = [
+  {
+    label: "What am I looking at?",
+    question: "What am I looking at on this page, and what does it tell me?",
+    icon: Information,
+  },
+  {
+    label: "Is anything wrong here?",
+    question: "Is anything wrong with what this page shows, and what should I do about it?",
+    icon: Warning,
+  },
+  {
+    label: "What can I do from here?",
+    question: "What can I do from this page, and what would you do next?",
+    icon: Sparkles,
+  },
+]
 
 const SERVER_SUGGESTIONS: AgentSuggestion[] = [
   {
@@ -240,6 +283,25 @@ function ServerChat({ settings }: { settings: ReturnType<typeof useAssistantSett
     void openAgentChat(SERVER, wanted)
   }, [wanted, view.configured])
 
+  // Ask from another page arrives naming it: a new chat about that page, begun
+  // once, and the address let go of so a reload does not begin another.
+  const aboutPath = searchParams.get("about")
+  const aboutTitle = searchParams.get("title")
+  const begun = useRef("")
+  useEffect(() => {
+    if (!aboutPath) {
+      begun.current = ""
+      return
+    }
+    if (!view.configured || begun.current === aboutPath) return
+    begun.current = aboutPath
+    const about = readAbout({
+      get: (name) => (name === "about" ? aboutPath : name === "title" ? aboutTitle : null),
+    })
+    if (about) newAgentChat(SERVER, about)
+    router.replace("/assistant", { scroll: false })
+  }, [aboutPath, aboutTitle, view.configured, router])
+
   const startNew = () => {
     newAgentChat(SERVER)
     if (wanted) router.replace("/assistant", { scroll: false })
@@ -276,10 +338,18 @@ function ServerChat({ settings }: { settings: ReturnType<typeof useAssistantSett
           key={session.key}
           session={session}
           settings={view}
-          title="Ask anything about this server"
+          title={
+            session.transcript.about
+              ? `Ask about ${session.transcript.about.title}`
+              : "Ask anything about this server"
+          }
           description="It can read the whole server — containers, deployments, services, logs, certificates and the firewall — and change what you ask it to, as you and under your role."
-          placeholder="Ask anything about this server…"
-          suggestions={SERVER_SUGGESTIONS}
+          placeholder={
+            session.transcript.about
+              ? `Ask about ${session.transcript.about.title}…`
+              : "Ask anything about this server…"
+          }
+          suggestions={session.transcript.about ? ABOUT_SUGGESTIONS : SERVER_SUGGESTIONS}
           sends="what it reads of the server to answer"
           onNew={startNew}
         />
@@ -452,7 +522,7 @@ function AssistantSettingsView({
             <PanelBody flush>
               <ul className="divide-y divide-hairline">
                 {PLACES.map((place) => (
-                  <li key={place.href}>
+                  <li key={place.title}>
                     <Link
                       href={place.href}
                       className="group flex min-w-0 items-center gap-3 px-4 py-3 focus-ring transition-colors hover:bg-row-hover"

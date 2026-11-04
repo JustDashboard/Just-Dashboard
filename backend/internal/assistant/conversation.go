@@ -95,19 +95,22 @@ type Conversation struct {
 // ChatInfo is what a saved chat says about itself besides what the model is
 // sent: what it is about, its title, and what it has done.
 type ChatInfo struct {
-	// Kind is "deployment", "draft" or "server".
-	Kind        string    `json:"kind"`
-	Deployment  int64     `json:"deployment,omitempty"`
-	Environment int64     `json:"environment,omitempty"`
-	Draft       string    `json:"draft,omitempty"`
-	Name        string    `json:"name"`
-	Title       string    `json:"title"`
-	Provider    string    `json:"provider"`
-	Model       string    `json:"model"`
-	Created     time.Time `json:"created"`
-	Updated     time.Time `json:"updated"`
-	Steps       int       `json:"steps"`
-	Changes     int       `json:"changes"`
+	// Kind is "deployment", "draft", "server" or "database".
+	Kind        string `json:"kind"`
+	Deployment  int64  `json:"deployment,omitempty"`
+	Environment int64  `json:"environment,omitempty"`
+	Draft       string `json:"draft,omitempty"`
+	Database    int64  `json:"database,omitempty"`
+	// About is the page a chat about the server was opened from.
+	About    *ChatAbout `json:"about,omitempty"`
+	Name     string     `json:"name"`
+	Title    string     `json:"title"`
+	Provider string     `json:"provider"`
+	Model    string     `json:"model"`
+	Created  time.Time  `json:"created"`
+	Updated  time.Time  `json:"updated"`
+	Steps    int        `json:"steps"`
+	Changes  int        `json:"changes"`
 }
 
 // Mark is where a conversation stood before a turn, to go back to when the

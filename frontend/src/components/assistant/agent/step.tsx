@@ -1,14 +1,25 @@
 "use client"
 
-import { useState } from "react"
+import { createContext, useContext, useState } from "react"
 import Link from "next/link"
 import { AnimatePresence, motion } from "motion/react"
-import { ArrowRight, Check, ChevronRight, Cross, LoaderCircle, Warning } from "@/components/icons"
+import {
+  ArrowRight,
+  Check,
+  ChevronRight,
+  Cross,
+  LoaderCircle,
+  LockClosed,
+  TerminalWindow,
+  Warning,
+} from "@/components/icons"
+import { errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Well } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { MethodWord, RequestPath } from "@/components/deploy/request-marks"
@@ -52,6 +63,16 @@ export function ApiRoute({ route, className }: { route: string; className?: stri
   )
 }
 
+/**
+ * What a chat's terminal can be asked from its step: the newest call that left the
+ * window in a state worth saying, and how the person types into it. The chat that
+ * draws the steps provides it; a step drawn anywhere else says nothing of its window.
+ */
+export const AgentTerminalContext = createContext<{
+  latest?: string
+  type: (text: string) => Promise<void>
+} | null>(null)
+
 /** Whether a call is a route the assistant called itself, drawn with its request. */
 const routed = (call: AgentCall) => call.tool === "api_request" && Boolean(call.route)
 
@@ -59,17 +80,50 @@ const routed = (call: AgentCall) => call.tool === "api_request" && Boolean(call.
 const lookup = (call: AgentCall) => call.kind === "free"
 
 /**
+ * The shell command a call runs on the host, when it runs one: drawn as itself in
+ * mono, because a person reads the command, not a sentence about it, to decide.
+ */
+export function commandOf(call: AgentCall): string | undefined {
+  if (call.tool !== "run_command" && call.tool !== "terminal_run") return
+  if (!call.input || typeof call.input !== "object") return
+  const command = (call.input as Record<string, unknown>).command
+  return typeof command === "string" && command.trim() ? command : undefined
+}
+
+/** A command as it will run, whole and wrapped, with the prompt's `$` before it. */
+function CommandLine({ command, className }: { command: string; className?: string }) {
+  return (
+    <pre
+      data-slot="agent-command"
+      className={cn(
+        "max-h-40 overflow-auto rounded-md bg-surface-sunken px-2.5 py-1.5 font-mono text-hint leading-relaxed break-all whitespace-pre-wrap",
+        className,
+      )}
+    >
+      <span aria-hidden className="text-muted-foreground select-none">
+        ${" "}
+      </span>
+      {command}
+    </pre>
+  )
+}
+
+/**
  * What a call was asked, less what its row already says: a route's method and path
  * are drawn as the route, and its reason as a sentence, so only its query and body
  * are left to list.
  */
 function askedInput(call: AgentCall): unknown {
-  if (call.tool !== "api_request" || !call.input || typeof call.input !== "object")
-    return call.input
+  if (!call.input || typeof call.input !== "object") return call.input
   const rest: Record<string, unknown> = { ...(call.input as Record<string, unknown>) }
-  delete rest.method
-  delete rest.path
-  delete rest.reason
+  if (call.tool === "api_request") {
+    delete rest.method
+    delete rest.path
+    delete rest.reason
+  } else if (commandOf(call)) {
+    delete rest.command
+    delete rest.reason
+  } else return call.input
   return rest
 }
 
@@ -86,7 +140,9 @@ export function StepRow({ step, replayed }: { step: AgentStep; replayed?: boolea
   const release = useConversationRelease()
   const mark = stepMark(step.call)
   const Glyph = mark.icon
+  const command = commandOf(step.call)
   const details =
+    Boolean(command) ||
     inputLines(askedInput(step.call)).lines.length > 0 ||
     Boolean(step.output) ||
     // What went wrong, past what its row has room for.
@@ -95,6 +151,13 @@ export function StepRow({ step, replayed }: { step: AgentStep; replayed?: boolea
     routed(step.call)
   const running = step.state === "running"
   const quiet = lookup(step.call)
+  // The newest call into the chat's terminal, left asking the person or the model
+  // something, is waiting rather than done, whatever the call itself came to.
+  const terminal = useContext(AgentTerminalContext)
+  const waitingOn =
+    step.state === "done" &&
+    terminal?.latest === step.call.id &&
+    (step.terminal?.state === "password" || step.terminal?.state === "input")
   return (
     <Collapsible
       open={open}
@@ -131,21 +194,24 @@ export function StepRow({ step, replayed }: { step: AgentStep; replayed?: boolea
             ) : (
               <Glyph className="size-3.5 text-muted-foreground" />
             )}
-            {!quiet && <StepBadge state={step.state} />}
+            {!quiet && <StepBadge state={waitingOn ? "waiting" : step.state} />}
           </span>
           <span className="min-w-0 flex-1 truncate text-body">
             {running ? (
-              <TextShimmer className="max-w-full truncate align-bottom">
-                {step.call.label}
+              <TextShimmer
+                className={cn("max-w-full truncate align-bottom", command && "font-mono text-hint")}
+              >
+                {command ?? step.call.label}
               </TextShimmer>
             ) : (
               <span
                 className={cn(
                   step.state === "declined" && "text-muted-foreground line-through",
                   quiet && "text-muted-foreground",
+                  command && "font-mono text-hint",
                 )}
               >
-                {step.call.label}
+                {command ?? step.call.label}
               </span>
             )}
             {routed(step.call) && (
@@ -184,6 +250,7 @@ export function StepRow({ step, replayed }: { step: AgentStep; replayed?: boolea
         {step.change && (
           <ChangeCard change={step.change} reason={step.call.reason} lit={!replayed} />
         )}
+        {step.terminal && <TerminalNote step={step} />}
       </li>
     </Collapsible>
   )
@@ -229,8 +296,10 @@ function Badge({ className, children }: { className?: string; children?: React.R
 }
 
 function StepDetails({ step }: { step: AgentStep }) {
+  const command = commandOf(step.call)
   return (
     <>
+      {command && <CommandLine command={command} />}
       {routed(step.call) ? (
         <ApiRoute route={step.call.route!} />
       ) : (
@@ -247,8 +316,12 @@ function StepDetails({ step }: { step: AgentStep }) {
         <p className="text-hint leading-relaxed text-muted-foreground">{step.said}</p>
       )}
       <InputLines input={askedInput(step.call)} flush />
+      {step.terminal && <Shortcut label="Terminal" href={terminalHref(step.terminal.session)} />}
       {step.output && (
-        <Well className="max-h-56 p-2.5 text-hint whitespace-pre-wrap" aria-label="What it read">
+        <Well
+          className="max-h-56 p-2.5 text-hint whitespace-pre-wrap"
+          aria-label={command ? "What it printed" : "What it read"}
+        >
           {step.output}
         </Well>
       )}
@@ -473,6 +546,11 @@ export function ApprovalCard({
                 </AnimatePresence>
               </div>
               {routed(step.call) && <ApiRoute route={step.call.route!} className="pl-8.5" />}
+              {commandOf(step.call) && (
+                <div className="pl-8.5">
+                  <CommandLine command={commandOf(step.call)!} className="bg-card" />
+                </div>
+              )}
               {step.call.reason && (
                 <p className="pl-8.5 text-body leading-relaxed text-muted-foreground">
                   {step.call.reason}
@@ -494,5 +572,115 @@ export function ApprovalCard({
         </div>
       )}
     </motion.section>
+  )
+}
+
+const terminalHref = (session: string) => `/terminal?session=${encodeURIComponent(session)}`
+
+/**
+ * Under the newest call into the chat's terminal, what its window is doing when
+ * that is worth a line: still running there, asking something, or asking for a
+ * password — which is the person's to type, in a field that sends it to the window
+ * and nowhere else.
+ */
+function TerminalNote({ step }: { step: AgentStep }) {
+  const terminal = useContext(AgentTerminalContext)
+  const held = step.terminal!
+  if (!terminal || terminal.latest !== step.call.id) return null
+  if (held.state === "password") return <PasswordField step={step} />
+  if (held.state !== "running" && held.state !== "input") return null
+  return (
+    <div
+      data-slot="agent-terminal"
+      data-state={held.state}
+      className="mx-1 mt-1 mb-1.5 flex min-w-0 animate-rise flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border border-hairline bg-surface-header px-2.5 py-2 sm:mr-0 sm:ml-10.5"
+    >
+      <TerminalWindow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 basis-40 text-hint leading-snug">
+        {held.state === "running" ? (
+          <span className="text-muted-foreground">Still running in its terminal</span>
+        ) : (
+          <>
+            <span className="text-muted-foreground">Asking </span>
+            <span className="font-mono">{held.prompt}</span>
+          </>
+        )}
+      </span>
+      <Shortcut label="Terminal" href={terminalHref(held.session)} />
+    </div>
+  )
+}
+
+/**
+ * The password a command in the chat's terminal is waiting for. It is typed here
+ * and sent to the window alone: never to the assistant, never into the chat.
+ */
+function PasswordField({ step }: { step: AgentStep }) {
+  const terminal = useContext(AgentTerminalContext)!
+  const held = step.terminal!
+  const [value, setValue] = useState("")
+  const [state, setState] = useState<"idle" | "sending" | "sent">("idle")
+  const [error, setError] = useState<string>()
+  const send = async () => {
+    if (!value || state === "sending") return
+    setState("sending")
+    setError(undefined)
+    try {
+      await terminal.type(value)
+      setValue("")
+      setState("sent")
+    } catch (err) {
+      setState("idle")
+      setError(errorMessage(err))
+    }
+  }
+  return (
+    <div
+      data-slot="agent-terminal"
+      data-state="password"
+      className="mx-1 mt-1 mb-1.5 animate-rise space-y-2 rounded-lg border border-rule-warning bg-wash-warning px-2.5 py-2 sm:mr-0 sm:ml-10.5"
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+        <LockClosed aria-hidden className="size-3.5 shrink-0 text-warning" />
+        <span className="min-w-0 flex-1 basis-40 text-hint leading-snug">
+          <span className="font-medium text-warning">
+            {state === "sent" ? "Sent to the terminal" : "Waiting for your password"}
+          </span>
+          {held.prompt && state !== "sent" && (
+            <span className="font-mono text-muted-foreground"> · {held.prompt}</span>
+          )}
+        </span>
+        <Shortcut label="Terminal" href={terminalHref(held.session)} />
+      </div>
+      {state !== "sent" && (
+        <form
+          className="flex min-w-0 gap-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void send()
+          }}
+        >
+          <Input
+            type="password"
+            autoComplete="off"
+            aria-label="Password for the terminal"
+            placeholder="Password"
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            className="h-8 min-w-0 flex-1"
+          />
+          <Button type="submit" size="sm" disabled={!value || state === "sending"}>
+            Send
+          </Button>
+        </form>
+      )}
+      <p className="text-micro leading-relaxed text-muted-foreground">
+        {error ? (
+          <span className="text-destructive">{error}</span>
+        ) : (
+          "It goes straight into the terminal window. The assistant never sees it, and it is not saved."
+        )}
+      </p>
+    </div>
   )
 }

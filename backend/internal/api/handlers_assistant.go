@@ -42,6 +42,7 @@ func (s *Server) mountAssistantRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/{chat}/images/{image}", s.handle(s.handleAssistantChatImage))
 			r.Method(http.MethodPatch, "/{chat}", s.handle(s.handleAssistantChatRename))
 			r.Method(http.MethodDelete, "/{chat}", s.handle(s.handleAssistantChatDelete))
+			s.mountAssistantTerminalRoutes(r)
 		})
 		// Who answers and with what, which every page that offers the assistant
 		// reads. The key is never in the answer.

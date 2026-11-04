@@ -54,7 +54,10 @@ type chatScope struct {
 	Deployment  int64  `json:"deployment,omitempty"`
 	Environment int64  `json:"environment,omitempty"`
 	Draft       string `json:"draft,omitempty"`
+	Database    int64  `json:"database,omitempty"`
 	Name        string `json:"name"`
+	// About is the page a chat about the server was opened from.
+	About *assistant.ChatAbout `json:"about,omitempty"`
 }
 
 // chatSummary is a chat as the page lists it.
@@ -117,6 +120,16 @@ func (s *Server) saveChat(ctx context.Context, c *assistant.Conversation, lines 
 	info := c.Chat
 	info.Updated = time.Now().UTC()
 	deployment := sql.NullInt64{Int64: info.Deployment, Valid: info.Deployment > 0}
+	sealedAbout := ""
+	if info.About != nil {
+		raw, err := json.Marshal(info.About)
+		if err != nil {
+			return err
+		}
+		if sealedAbout, err = s.Sealer.Seal(string(raw)); err != nil {
+			return err
+		}
+	}
 	tx, err := s.Store.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -128,14 +141,14 @@ func (s *Server) saveChat(ctx context.Context, c *assistant.Conversation, lines 
 	// a press, which may have begun before the rename.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO assistant_chats(id, owner_id, scope_kind, deployment_id, environment_id, draft_id, scope_name, scope_key,
-		  title_enc, provider, model, created_at, updated_at, steps, changes, waiting, conversation_enc)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		  title_enc, provider, model, created_at, updated_at, steps, changes, waiting, conversation_enc, database_id, about_enc)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET scope_name = excluded.scope_name, provider = excluded.provider, model = excluded.model,
 		  updated_at = excluded.updated_at, steps = excluded.steps, changes = excluded.changes, waiting = excluded.waiting,
 		  conversation_enc = excluded.conversation_enc`,
 		c.ID, c.OwnerID, info.Kind, deployment, info.Environment, info.Draft, info.Name, c.Connection,
 		sealedTitle, info.Provider, info.Model, info.Created.Unix(), info.Updated.Unix(), info.Steps, info.Changes,
-		len(c.Pending) > 0, sealedState); err != nil {
+		len(c.Pending) > 0, sealedState, info.Database, sealedAbout); err != nil {
 		return err
 	}
 	if sealedLines != "" {
@@ -193,16 +206,16 @@ func (s *Server) saveChat(ctx context.Context, c *assistant.Conversation, lines 
 // is about. A chat that is not saved is assistant.ErrGone.
 func (s *Server) loadChat(ctx context.Context, id string) (*assistant.Conversation, error) {
 	row := s.Store.DB.QueryRowContext(ctx, `SELECT owner_id, scope_kind, COALESCE(deployment_id, 0), environment_id, draft_id, scope_name,
-		scope_key, title_enc, provider, model, created_at, updated_at, steps, changes, conversation_enc
+		scope_key, title_enc, provider, model, created_at, updated_at, steps, changes, conversation_enc, database_id, about_enc
 		FROM assistant_chats WHERE id = ?`, id)
 	var (
-		info                assistant.ChatInfo
-		owner, key          int64
-		created, updated    int64
-		sealedTitle, sealed string
+		info                             assistant.ChatInfo
+		owner, key                       int64
+		created, updated                 int64
+		sealedTitle, sealed, sealedAbout string
 	)
 	err := row.Scan(&owner, &info.Kind, &info.Deployment, &info.Environment, &info.Draft, &info.Name, &key, &sealedTitle,
-		&info.Provider, &info.Model, &created, &updated, &info.Steps, &info.Changes, &sealed)
+		&info.Provider, &info.Model, &created, &updated, &info.Steps, &info.Changes, &sealed, &info.Database, &sealedAbout)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, assistant.ErrGone
 	}
@@ -221,14 +234,9 @@ func (s *Server) loadChat(ctx context.Context, id string) (*assistant.Conversati
 		info.Title = title
 	}
 	info.Created, info.Updated = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
+	info.About = s.openAbout(sealedAbout)
 	c.OwnerID, c.Connection, c.Chat = owner, key, &info
-	kind := agentScopeDeployment
-	switch info.Kind {
-	case "draft":
-		kind = agentScopeDraft
-	case "server":
-		kind = agentScopeServer
-	}
+	kind, _ := agentScopeNamed(info.Kind)
 	agentOffer(c, kind)
 	return c, nil
 }
@@ -236,7 +244,7 @@ func (s *Server) loadChat(ctx context.Context, id string) (*assistant.Conversati
 // chatRow is a chat's listed columns, read for its owner.
 func (s *Server) chatRows(ctx context.Context, where string, args ...any) ([]chatSummary, error) {
 	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id, scope_kind, COALESCE(deployment_id, 0), environment_id, draft_id, scope_name,
-		title_enc, provider, model, created_at, updated_at, steps, changes, waiting
+		title_enc, provider, model, created_at, updated_at, steps, changes, waiting, database_id, about_enc
 		FROM assistant_chats WHERE `+where+` ORDER BY updated_at DESC, created_at DESC, id LIMIT ?`, append(args, chatListLimit)...)
 	if err != nil {
 		return nil, err
@@ -245,14 +253,16 @@ func (s *Server) chatRows(ctx context.Context, where string, args ...any) ([]cha
 	out := []chatSummary{}
 	for rows.Next() {
 		var (
-			c                chatSummary
-			sealedTitle      string
-			created, updated int64
+			c                        chatSummary
+			sealedTitle, sealedAbout string
+			created, updated         int64
 		)
 		if err := rows.Scan(&c.ID, &c.Scope.Kind, &c.Scope.Deployment, &c.Scope.Environment, &c.Scope.Draft, &c.Scope.Name,
-			&sealedTitle, &c.Provider, &c.Model, &created, &updated, &c.Steps, &c.Changes, &c.Waiting); err != nil {
+			&sealedTitle, &c.Provider, &c.Model, &created, &updated, &c.Steps, &c.Changes, &c.Waiting,
+			&c.Scope.Database, &sealedAbout); err != nil {
 			return nil, err
 		}
+		c.Scope.About = s.openAbout(sealedAbout)
 		if title, err := s.Sealer.Open(sealedTitle); err == nil {
 			c.Title = title
 		}
@@ -294,9 +304,16 @@ func (s *Server) handleAssistantChats(w http.ResponseWriter, r *http.Request) er
 	if draft := q.Get("draft"); draft != "" {
 		where, args = append(where, "draft_id = ?"), append(args, draft)
 	}
+	if raw := q.Get("database"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			return httpx.BadRequest("database is a database connection's id")
+		}
+		where, args = append(where, "scope_kind = 'database' AND database_id = ?"), append(args, id)
+	}
 	if scope := q.Get("scope"); scope != "" {
-		if scope != "server" && scope != "deployment" && scope != "draft" {
-			return httpx.BadRequest("scope is server, deployment or draft")
+		if _, ok := agentScopeNamed(scope); !ok {
+			return httpx.BadRequest("scope is server, deployment, draft or database")
 		}
 		where, args = append(where, "scope_kind = ?"), append(args, scope)
 	}
@@ -430,4 +447,21 @@ func (s *Server) handleAssistantChatDelete(w http.ResponseWriter, r *http.Reques
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+// openAbout reads a chat's sealed page back, nil when there is none or it does
+// not open.
+func (s *Server) openAbout(sealed string) *assistant.ChatAbout {
+	if sealed == "" {
+		return nil
+	}
+	plain, err := s.Sealer.Open(sealed)
+	if err != nil {
+		return nil
+	}
+	var about assistant.ChatAbout
+	if json.Unmarshal([]byte(plain), &about) != nil || about.Path == "" {
+		return nil
+	}
+	return &about
 }

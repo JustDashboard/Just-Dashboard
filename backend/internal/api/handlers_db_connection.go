@@ -292,6 +292,11 @@ func (s *Server) forgetConnection(ctx context.Context, id int64, actor string) (
 	}
 	s.modules.dbs.Close(id)
 	s.dbConns.forget(id)
+	// Its assistant's chats go with it, as a deployment's do with the deployment:
+	// they are about something that is no longer there, and quote what was in it.
+	if _, err := s.Store.DB.ExecContext(ctx, `DELETE FROM assistant_chats WHERE scope_kind = 'database' AND database_id = ?`, id); err != nil {
+		s.Log.Warn("a forgotten connection's assistant chats could not be removed", "connection", id, "err", err)
+	}
 	return forgottenConnection{
 		removed: true, origin: origin,
 		ignored: s.afterConnectionForgotten(ctx, id, origin, actor),
