@@ -59,17 +59,49 @@ const routed = (call: AgentCall) => call.tool === "api_request" && Boolean(call.
 const lookup = (call: AgentCall) => call.kind === "free"
 
 /**
+ * The shell command a call runs on the host, when it runs one: drawn as itself in
+ * mono, because a person reads the command, not a sentence about it, to decide.
+ */
+export function commandOf(call: AgentCall): string | undefined {
+  if (call.tool !== "run_command" || !call.input || typeof call.input !== "object") return
+  const command = (call.input as Record<string, unknown>).command
+  return typeof command === "string" && command.trim() ? command : undefined
+}
+
+/** A command as it will run, whole and wrapped, with the prompt's `$` before it. */
+function CommandLine({ command, className }: { command: string; className?: string }) {
+  return (
+    <pre
+      data-slot="agent-command"
+      className={cn(
+        "max-h-40 overflow-auto rounded-md bg-surface-sunken px-2.5 py-1.5 font-mono text-hint leading-relaxed break-all whitespace-pre-wrap",
+        className,
+      )}
+    >
+      <span aria-hidden className="text-muted-foreground select-none">
+        ${" "}
+      </span>
+      {command}
+    </pre>
+  )
+}
+
+/**
  * What a call was asked, less what its row already says: a route's method and path
  * are drawn as the route, and its reason as a sentence, so only its query and body
  * are left to list.
  */
 function askedInput(call: AgentCall): unknown {
-  if (call.tool !== "api_request" || !call.input || typeof call.input !== "object")
-    return call.input
+  if (!call.input || typeof call.input !== "object") return call.input
   const rest: Record<string, unknown> = { ...(call.input as Record<string, unknown>) }
-  delete rest.method
-  delete rest.path
-  delete rest.reason
+  if (call.tool === "api_request") {
+    delete rest.method
+    delete rest.path
+    delete rest.reason
+  } else if (commandOf(call)) {
+    delete rest.command
+    delete rest.reason
+  } else return call.input
   return rest
 }
 
@@ -86,7 +118,9 @@ export function StepRow({ step, replayed }: { step: AgentStep; replayed?: boolea
   const release = useConversationRelease()
   const mark = stepMark(step.call)
   const Glyph = mark.icon
+  const command = commandOf(step.call)
   const details =
+    Boolean(command) ||
     inputLines(askedInput(step.call)).lines.length > 0 ||
     Boolean(step.output) ||
     // What went wrong, past what its row has room for.
@@ -135,17 +169,20 @@ export function StepRow({ step, replayed }: { step: AgentStep; replayed?: boolea
           </span>
           <span className="min-w-0 flex-1 truncate text-body">
             {running ? (
-              <TextShimmer className="max-w-full truncate align-bottom">
-                {step.call.label}
+              <TextShimmer
+                className={cn("max-w-full truncate align-bottom", command && "font-mono text-hint")}
+              >
+                {command ?? step.call.label}
               </TextShimmer>
             ) : (
               <span
                 className={cn(
                   step.state === "declined" && "text-muted-foreground line-through",
                   quiet && "text-muted-foreground",
+                  command && "font-mono text-hint",
                 )}
               >
-                {step.call.label}
+                {command ?? step.call.label}
               </span>
             )}
             {routed(step.call) && (
@@ -229,8 +266,10 @@ function Badge({ className, children }: { className?: string; children?: React.R
 }
 
 function StepDetails({ step }: { step: AgentStep }) {
+  const command = commandOf(step.call)
   return (
     <>
+      {command && <CommandLine command={command} />}
       {routed(step.call) ? (
         <ApiRoute route={step.call.route!} />
       ) : (
@@ -248,7 +287,10 @@ function StepDetails({ step }: { step: AgentStep }) {
       )}
       <InputLines input={askedInput(step.call)} flush />
       {step.output && (
-        <Well className="max-h-56 p-2.5 text-hint whitespace-pre-wrap" aria-label="What it read">
+        <Well
+          className="max-h-56 p-2.5 text-hint whitespace-pre-wrap"
+          aria-label={command ? "What it printed" : "What it read"}
+        >
           {step.output}
         </Well>
       )}
@@ -473,6 +515,11 @@ export function ApprovalCard({
                 </AnimatePresence>
               </div>
               {routed(step.call) && <ApiRoute route={step.call.route!} className="pl-8.5" />}
+              {commandOf(step.call) && (
+                <div className="pl-8.5">
+                  <CommandLine command={commandOf(step.call)!} className="bg-card" />
+                </div>
+              )}
               {step.call.reason && (
                 <p className="pl-8.5 text-body leading-relaxed text-muted-foreground">
                   {step.call.reason}

@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import {
+  ATTACHED_LABEL,
+  ATTACHED_TEXT,
   EMPTY_AGENT,
+  MAX_ATTACHED,
   agentStatus,
   answering,
   applyEvent,
   beginTurn,
+  boundAttached,
   changesOf,
   decideAll,
   decideStep,
@@ -248,6 +252,33 @@ describe("what a call would send", () => {
   })
 })
 
+describe("what a question carries", () => {
+  test("its attachments are drawn by their labels, never their text", () => {
+    const t = beginTurn(EMPTY_AGENT, "t1", "why did it fail", [], ["statement", "error"])
+    expect(t.turns[0].attached).toEqual(["statement", "error"])
+    // A question with nothing attached carries no empty list.
+    expect(beginTurn(EMPTY_AGENT, "t2", "hello").turns[0]).not.toHaveProperty("attached")
+  })
+
+  test("goes within the server's bounds: four at most, each label and text cut", () => {
+    const sent = boundAttached([
+      { label: "  statement ", text: "SELECT 1" },
+      { label: "nothing", text: "  " },
+      { label: "", text: "orphan" },
+      { label: "r".repeat(ATTACHED_LABEL + 10), text: "x".repeat(ATTACHED_TEXT + 500) },
+      { label: "c", text: "c" },
+      { label: "d", text: "d" },
+      { label: "e", text: "e" },
+    ])
+    expect(sent).toHaveLength(MAX_ATTACHED)
+    expect(sent[0]).toEqual({ label: "statement", text: "SELECT 1" })
+    expect([...sent[1].label]).toHaveLength(ATTACHED_LABEL)
+    expect([...sent[1].text].length).toBeLessThanOrEqual(ATTACHED_TEXT)
+    expect(sent[1].text.endsWith("…")).toBe(true)
+    expect(sent.map((one) => one.label).slice(2)).toEqual(["c", "d"])
+  })
+})
+
 describe("a saved chat read back", () => {
   const setPort = {
     id: "c",
@@ -284,6 +315,37 @@ describe("a saved chat read back", () => {
     expect(t.title).toBe("why")
     expect(t.modelLabel).toBe("Claude")
   })
+  test("a question's attachments come back as their labels", () => {
+    const t = replayLines([
+      { type: "question", text: "explain", attached: ["plan", 7, "", "statement"], at },
+      { type: "text", text: "It scans." },
+      { type: "done", stop: "end", usage, model: "m", kept: true },
+    ])
+    expect(t.turns[0].attached).toEqual(["plan", "statement"])
+    expect(replayLines([{ type: "question", text: "hi" }]).turns[0]).not.toHaveProperty("attached")
+  })
+
+  test("a command it ran on the host reads back with what it printed", () => {
+    const run = {
+      id: "r1",
+      tool: "run_command",
+      label: "Run df -h",
+      kind: "read",
+      input: { command: "df -h" },
+    }
+    const t = replayLines([
+      { type: "question", text: "disk?" },
+      { type: "call", call: run },
+      { type: "called", id: "r1", tool: "run_command", ok: false, said: "exit 2", output: "no" },
+      { type: "done", stop: "end", usage, model: "m", kept: true },
+    ])
+    const [step] = shownSteps(t.turns[0])
+    expect(step.state).toBe("failed")
+    expect(step.said).toBe("exit 2")
+    expect(step.output).toBe("no")
+    expect(inputLines(step.call.input).lines).toEqual([{ path: "command", value: "df -h" }])
+  })
+
   test("an Allow pressed among the lines runs the call it answered", () => {
     const t = replayLines([
       { type: "question", text: "fix it" },

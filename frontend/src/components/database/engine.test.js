@@ -176,6 +176,7 @@ describe("which pages an engine has", () => {
     const redis = engineOf("redis", CATALOGUE)
     expect(ids(redis)).toEqual([
       "home",
+      "assistant",
       "data",
       "query",
       "performance",
@@ -186,7 +187,7 @@ describe("which pages an engine has", () => {
       "alerts",
       "settings",
     ])
-    expect(titles(redis).slice(1, 3)).toEqual(["Keys", "Console"])
+    expect(titles(redis).slice(2, 4)).toEqual(["Keys", "Console"])
     for (const section of ["schema", "diagram", "search", "generate"])
       expect(redis.has(section)).toBe(false)
   })
@@ -195,6 +196,7 @@ describe("which pages an engine has", () => {
     const mongo = engineOf("mongodb", CATALOGUE)
     expect(ids(mongo)).toEqual([
       "home",
+      "assistant",
       "data",
       "query",
       "schema",
@@ -206,7 +208,7 @@ describe("which pages an engine has", () => {
       "alerts",
       "settings",
     ])
-    expect(titles(mongo).slice(1, 3)).toEqual(["Documents", "Aggregations"])
+    expect(titles(mongo).slice(2, 4)).toEqual(["Documents", "Aggregations"])
   })
 
   test("Import is a page of the engines that can restore under another name, and nobody else", () => {

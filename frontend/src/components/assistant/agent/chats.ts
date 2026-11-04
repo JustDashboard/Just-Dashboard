@@ -18,11 +18,16 @@ export interface AgentChatSummary {
   id: string
   title: string
   scope: {
-    kind: "deployment" | "draft" | "server"
+    kind: "deployment" | "draft" | "database" | "server"
     deployment?: number
     environment?: number
     draft?: string
+    /** The connection a database's chat is about. */
+    database?: number
+    /** The connection's, deployment's or draft's name, or the server's. */
     name: string
+    /** The page a server chat was begun from, by Ask on it. */
+    about?: { path: string; title: string }
   }
   createdAt: string
   updatedAt: string
@@ -36,9 +41,13 @@ export interface AgentChatSummary {
   changes: number
 }
 
-/** Which chats a list holds: one deployment's, the server's, a draft's, or all. */
+/** Which chats a list holds: one deployment's, one connection's, the server's, a draft's, or all. */
 export type AgentChatsQuery =
-  { deployment: number } | { scope: "server" } | { draft: string } | Record<string, never>
+  | { deployment: number }
+  | { database: number }
+  | { scope: "server" | "database" }
+  | { draft: string }
+  | Record<string, never>
 
 /**
  * A list of saved chats, read again whenever this tab begins or finishes one, and

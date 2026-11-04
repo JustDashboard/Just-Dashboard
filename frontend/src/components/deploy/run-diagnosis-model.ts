@@ -1,4 +1,4 @@
-import type { AssistantSettings } from "@/components/database/query/assistant/use-assistant"
+import type { AssistantSettings } from "@/components/assistant/settings"
 import type { DeploymentRunDiagnosis } from "@/lib/types"
 
 /**
