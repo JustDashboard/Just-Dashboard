@@ -147,6 +147,7 @@ group's `system.admin`; a database's behind the guard that refuses a protected c
 | `link` | A shortcut it offers (`open_page`): a label, an address and a note |
 | `done` | Why it stopped, the tokens, whether the turn was kept, `pending` (the calls waiting, each as `call` carries them), and `paused` when `agentSteps` is why |
 | `error` | Why there is no answer (`assistant_failed`, `conversation_full`, `taken_over`) |
+| `ping` | Nothing: written when the stream has been quiet for 15 seconds — a command running, a terminal's wait, a model thinking — because a proxy in front of the dashboard closes a connection that carries nothing for a minute (nginx) or a hundred seconds (Cloudflare), which the page could only read as the answer failing, and which stopped the press and the command it was running. The page passes over it, and the saved chat does not keep it (`assistantStream.keepAlive`) |
 
 A press that fails before it ran what it answered leaves those calls waiting, and the page asks again. One
 whose provider fails partway keeps what already ran in the conversation (`c.Mark` is taken after
@@ -230,6 +231,18 @@ An answer to the model is its JSON, masked and cut at 24,000 bytes.
 cleanest answer. What it cannot do — a command that runs longer than five minutes, asks a question, wants a
 password, or that the person wants to watch — is the terminal's (`assistant/terminal.go`,
 `api/handlers_assistant_terminal.go`).
+
+`run_command` hands some lines to the terminal itself (`commandForTerminal`), wherever windows are held: a line
+run on its own is a child of the dashboard's process, in its container, and a package upgrade that upgrades
+Docker restarts every container — the dashboard's with it — which stopped the upgrade halfway, dpkg and all, and
+cut the press off. So a line that changes packages (`apt`/`apt-get`/`aptitude`/`dnf`/`yum`/`zypper`/`apk`/`snap`
+installs, upgrades and removals, `dpkg -i`/`--configure`, `pacman -S`/`-U`/`-R`, `unattended-upgrade`,
+`do-release-upgrade`) or restarts Docker (`systemctl restart|stop … docker|containerd`, `service docker
+restart`) is typed into the chat's window as `terminal_run` would (`assistant.CommandForTerminal`), and so is a
+`sudo` without `-n` or `-S` when the terminal's account is not root (`assistant.CommandAsksSudo`), since only a
+window can take its password. It waits up to the command's own time, at most `terminal_run`'s two minutes, and
+answers as `terminal_run` does, first saying why it went to the window. A line of several lines, or a host whose
+windows are not held, runs on its own as before.
 
 - **One window per chat, a real one.** The chat's first `terminal_run` opens a window of the Terminal page's
   (`term.Manager.Create`) as the person: owned by them, titled for the chat and named

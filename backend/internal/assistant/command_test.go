@@ -213,3 +213,66 @@ func TestTheTerminalsCallsAreChecked(t *testing.T) {
 		t.Errorf("the prompt does not say how a password is typed")
 	}
 }
+
+// What run_command types into the chat's terminal window: a line that changes
+// packages, which can restart Docker and with it the dashboard, or that restarts
+// Docker itself. Reading about packages runs on its own.
+func TestCommandForTerminal(t *testing.T) {
+	for line, want := range map[string]string{
+		"sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y upgrade": TerminalForPackages,
+		"apt install -y jq": TerminalForPackages,
+		"apt-get -o Dpkg::Options::=--force-confold dist-upgrade -y": TerminalForPackages,
+		"sudo dnf -y update":                          TerminalForPackages,
+		"yum install nginx":                           TerminalForPackages,
+		"zypper dup":                                  TerminalForPackages,
+		"apk add curl":                                TerminalForPackages,
+		"snap refresh":                                TerminalForPackages,
+		"sudo dpkg -i ./thing.deb":                    TerminalForPackages,
+		"dpkg --configure -a":                         TerminalForPackages,
+		"pacman -Syu --noconfirm":                     TerminalForPackages,
+		"pacman -R vim":                               TerminalForPackages,
+		"sudo unattended-upgrade -d":                  TerminalForPackages,
+		"timeout 600 sudo apt-get upgrade -y":         TerminalForPackages,
+		"sudo systemctl restart docker":               TerminalForDocker,
+		"systemctl stop docker.socket docker.service": TerminalForDocker,
+		"sudo service docker restart":                 TerminalForDocker,
+		"systemctl restart containerd":                TerminalForDocker,
+		"apt-get update":                              "",
+		"apt list --upgradable":                       "",
+		"apt-cache policy docker-ce":                  "",
+		"dnf check-update":                            "",
+		"dpkg -l | grep docker":                       "",
+		"pacman -Ss vim":                              "",
+		"pacman -Qi vim":                              "",
+		"snap list":                                   "",
+		"systemctl status docker":                     "",
+		"systemctl restart nginx":                     "",
+		"docker ps":                                   "",
+		"grep -r upgrade /var/log/apt/history.log":    "",
+	} {
+		if got := CommandForTerminal(line); got != want {
+			t.Errorf("%q = %q, want %q", line, got, want)
+		}
+	}
+}
+
+func TestCommandAsksSudo(t *testing.T) {
+	for line, want := range map[string]bool{
+		"sudo systemctl restart nginx":                  true,
+		"sudo -u postgres psql -c 'select 1'":           true,
+		"FOO=1 sudo -E make install":                    true,
+		"timeout 30 sudo ls /root":                      true,
+		"cd /srv && sudo git pull":                      true,
+		"sudo -n systemctl restart nginx":               false,
+		"sudo --non-interactive true":                   false,
+		"sudo -nE true":                                 false,
+		"echo secret | sudo -S true":                    false,
+		"systemctl status nginx":                        false,
+		"grep sudo /var/log/auth.log":                   false,
+		"echo 'sudo is mentioned, not run' > /dev/null": false,
+	} {
+		if got := CommandAsksSudo(line); got != want {
+			t.Errorf("%q = %v, want %v", line, got, want)
+		}
+	}
+}

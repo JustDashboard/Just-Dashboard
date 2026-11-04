@@ -481,8 +481,16 @@ two-gigabyte log.
   forty-one walks) and reports `Truncated` rather than quoting a partial total. A symlink counts as the
   link, or a tree with links into /usr reports the size of the operating system.
 - **`GET /system/disk-usage` is a file operation.** Its requested mount passes through `files.Resolve`,
-  recursive visits and top-level children are capped, and only two scans run concurrently. A result limit
-  controls the response size; it is not mistaken for a bound on the work needed to rank those results.
+  and only two scans run concurrently. The walk (`sysinfo.DirBreakdown`) is bounded by a 45-second deadline
+  and five million visits, and is read by four workers, each run in the host's mount namespace through
+  `modules.onHost` — a goroutine does not inherit it, so one started inside a single `onHost` would count this
+  container's files. It stays on the scanned mount: a child that is another filesystem (`/proc`, `/sys`, a
+  second disk) is left out, or `/proc/kcore` would count as 128 TiB. When the deadline or the work runs out it
+  answers with what it counted, each entry it did not finish marked `partial` — a floor, which the Metrics page
+  writes as "at least" — and so is an entry part of which could not be read; it used to refuse any tree past a
+  quarter of a million entries, which is every server's `/` with Docker on it. Only a directory with more than
+  10,000 entries directly inside it is refused (`422 disk_scan_limit`). A result limit controls the response
+  size; it is not mistaken for a bound on the work needed to rank those results.
 
 Bookmarks live in the `settings` table (`handlers_files_browse.go`), not the browser — which directory
 matters is a fact about the server and should be there from a phone. Recent folders are the opposite and

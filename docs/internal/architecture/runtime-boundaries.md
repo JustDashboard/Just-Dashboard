@@ -126,7 +126,8 @@ and chmod, which act *on* a symlink.
 
 The Files page's handlers (and `GET /system/disk-usage`) use `modules.hostFiles`, the same `Service`
 made with `OnHost(InHostMounts)`: every exported operation, `Resolve` included, runs whole in the host's
-mount namespace, so the page sees `/tmp`, `/usr` and `/var/lib` as the terminal does and a path is never
+mount namespace (the disk scan's walk, which several workers share, runs each worker through
+`modules.onHost` itself, since a goroutine started inside `InHostMounts` is back in the container's), so the page sees `/tmp`, `/usr` and `/var/lib` as the terminal does and a path is never
 resolved in one tree and opened in another. Every other caller keeps `modules.files`, in the container's
 view, because it resolves a path and then opens it itself. The roots and the checks are identical in
 both; only the tree they are evaluated against differs. Resolving through `/host` was the alternative

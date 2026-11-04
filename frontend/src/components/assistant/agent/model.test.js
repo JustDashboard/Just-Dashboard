@@ -493,4 +493,30 @@ test("a terminal call keeps its window, and the newest one is what the chat asks
   expect(latest?.call.id).toBe("b")
   expect(latest?.terminal).toEqual({ session: "ws", state: "password", prompt: "Password:" })
   expect(latestTerminal(EMPTY_AGENT)).toBeUndefined()
+
+  // run_command types a line that changes packages, or may ask for sudo's
+  // password, into the window too, and its password is asked for the same way.
+  t = applyEvent(t, "q", {
+    type: "call",
+    call: { id: "d", tool: "run_command", label: "z", kind: "change" },
+  })
+  t = applyEvent(t, "q", {
+    type: "called",
+    id: "d",
+    tool: "run_command",
+    ok: true,
+    said: "waiting for your password",
+    terminal: { session: "ws", state: "password", prompt: "[sudo] password for ubuntu:" },
+  })
+  expect(latestTerminal(t)?.call.id).toBe("d")
+})
+
+test("a ping, or a line this page does not know, leaves the answer as it was", () => {
+  let t = beginTurn(EMPTY_AGENT, "q", "Update the packages")
+  t = applyEvent(t, "q", { type: "text", text: "Updating." })
+  const before = t
+  t = applyEvent(t, "q", { type: "ping" })
+  expect(t).toBe(before)
+  t = applyEvent(t, "q", { type: "something-newer", what: 1 })
+  expect(t).toBe(before)
 })

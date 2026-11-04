@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -44,6 +45,11 @@ func (pr *agentPress) runCommand(ctx context.Context, p *httpx.Principal, in ass
 	timeout := in.Timeout
 	if timeout <= 0 {
 		timeout = assistant.CommandWaitDefault
+	}
+	if why := pr.commandForTerminal(in.Command); why != "" {
+		if result, ok := pr.commandInTerminal(ctx, p, in.Command, timeout, why); ok {
+			return result
+		}
 	}
 	pr.commands = append(pr.commands, clipText(agentMaskText(strings.Join(strings.Fields(in.Command), " "), masker), agentCommandAudit))
 	result, err := s.modules.term.RunCommand(ctx, in.Command, time.Duration(timeout)*time.Second)
@@ -88,6 +94,48 @@ func (pr *agentPress) runCommand(ctx context.Context, p *httpx.Principal, in ass
 		text: text, said: said, ok: !result.TimedOut && result.ExitCode == 0,
 		output: tailText(output, agentOutputBytes),
 	}
+}
+
+// commandForTerminal is why a line is typed into the chat's terminal window
+// rather than run on its own (assistant.CommandForTerminal), or "". Only where
+// windows are held outside the dashboard: one that is not would stop with it as
+// the line run on its own does, and is not opened at all (term.HoldSessions). A
+// line of several lines stays a run of its own, since a window would run each as
+// it was typed.
+func (pr *agentPress) commandForTerminal(line string) string {
+	m := pr.s.modules.term
+	if m == nil || !m.Holding() || strings.ContainsAny(line, "\r\n") {
+		return ""
+	}
+	if why := assistant.CommandForTerminal(line); why != "" {
+		return why
+	}
+	if account, err := m.Account(); err == nil && !account.IsRoot() && assistant.CommandAsksSudo(line) {
+		return assistant.TerminalForSudo
+	}
+	return ""
+}
+
+// commandInTerminal types a run_command line into the chat's terminal window, as
+// terminal_run would, waiting for it up to the command's own time (at most
+// terminal_run's); false when no window could be opened, for the line to run on
+// its own as before.
+func (pr *agentPress) commandInTerminal(ctx context.Context, p *httpx.Principal, line string, timeout int, why string) (agentResult, bool) {
+	title := ""
+	if pr.c.Chat != nil {
+		title = pr.c.Chat.Title
+	}
+	if _, err := pr.s.chatTerminal(ctx, p, pr.c.ID, title, true); err != nil {
+		return agentResult{}, false
+	}
+	input, err := json.Marshal(assistant.TerminalInput{Command: line, Wait: min(timeout, assistant.TerminalWaitMax)})
+	if err != nil {
+		return agentResult{}, false
+	}
+	result := pr.terminal(ctx, p, assistant.ToolCall{Name: assistant.ToolTerminalRun, Input: input})
+	result.text = "It was typed into this chat's terminal window rather than run on its own, because " + why +
+		". It goes on in the window whatever happens to the dashboard, and the person can watch it there. " + result.text
+	return result, true
 }
 
 // commandChange is a shell line that changed something, said as a change: the

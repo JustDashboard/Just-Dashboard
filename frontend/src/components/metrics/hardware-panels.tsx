@@ -360,8 +360,10 @@ export function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
       )
       setBreakdown((prev) => ({ ...prev, [mountpoint]: entries }))
     } catch {
-      // A scan that times out or hits an unreadable tree is not worth a toast;
-      // the row simply stays un-expanded.
+      // A scan that runs out of time answers with what it counted, each entry it
+      // did not finish said to be "at least"; what still fails here — a directory
+      // of more than 10,000 entries, two scans already running — is not worth a
+      // toast, and the row simply stays un-expanded.
     } finally {
       setScanning(null)
     }
@@ -415,7 +417,15 @@ export function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
                       {breakdown[mount.mountpoint].map((entry) => (
                         <div key={entry.path} className="flex justify-between gap-2 text-hint">
                           <span className="truncate font-mono">{entry.name}</span>
-                          <span className="numeric shrink-0 text-muted-foreground">
+                          <span
+                            className="numeric shrink-0 text-muted-foreground"
+                            title={
+                              entry.partial
+                                ? "The scan ran out of time before it had counted all of it"
+                                : undefined
+                            }
+                          >
+                            {entry.partial && "at least "}
                             {bytes(entry.size)}
                           </span>
                         </div>

@@ -217,7 +217,9 @@ A change that weakens any of these has to say so explicitly.
    the argv rule is about the dashboard's own features never building a shell string out of what a request
    carries. The assistant's terminal (`terminal_run`, `terminal_send`) is not a third: it types into a real window
    of the terminal's own, as the person would at the Terminal page, under the same capability, with each line in
-   the audit entry. A password a command asks for is never the model's to type: the person types it into the
+   the audit entry. A `run_command` line that changes packages, restarts Docker or runs a `sudo` that may ask is
+   typed into that window instead (`commandForTerminal`), so that an upgrade restarting Docker does not stop it
+   halfway; its kind, and the Allow that kind needs, are still the line's own. A password a command asks for is never the model's to type: the person types it into the
    window from the chat (`POST /assistant/chats/{chat}/terminal`), and it reaches no provider, saved line or audit
    entry. Do not add a third request-defined shell, and do not "fix" either into an argv. A git clone's parent and an
    `init` target go through `gitx.ResolveDir` against `JD_GIT_ROOTS` — the Git page's own boundary — and a

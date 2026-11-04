@@ -111,6 +111,27 @@ test("each resource reads what it is now beside what it did", async ({ page }) =
   await expect(disks.locator(":scope > li")).toHaveCount(2)
   await expect(disks.getByRole("button", { name: "scan" })).toHaveCount(2)
 
+  // A scan that ran out of time answers with what it counted, and says which
+  // figures are floors.
+  await page.route("**/api/v1/system/disk-usage?*", (route) =>
+    route.fulfill({
+      json: [
+        {
+          name: "home",
+          path: "/home",
+          size: 4 * 1024 ** 3,
+          isDir: true,
+          entries: 900,
+          partial: true,
+        },
+        { name: "var", path: "/var", size: 2 * 1024 ** 3, isDir: true, entries: 300 },
+      ],
+    }),
+  )
+  await disks.getByRole("button", { name: "scan" }).first().click()
+  await expect(disks.getByText("at least 4.0 GB", { exact: true })).toBeVisible()
+  await expect(disks.getByText("2.0 GB", { exact: true })).toBeVisible()
+
   // A sensor whose driver names the processor's maker carries its mark.
   await expect(
     panel("Temperatures").locator("li", { hasText: "k10temp_Tctl" }).locator("img[src$='amd.svg']"),
