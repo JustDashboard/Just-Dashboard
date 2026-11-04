@@ -2,13 +2,7 @@
 
 import { useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
-import {
-  Cross,
-  Image as ImageGlyph,
-  LoaderCircle,
-  PaperAirplane,
-  StopCircle,
-} from "@/components/icons"
+import { ArrowUp, Cross, Image as ImageGlyph, LoaderCircle } from "@/components/icons"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -314,21 +308,26 @@ export function PromptInput({
 }
 
 /**
- * One button that is Ask while it is quiet and Stop while it works: the face eases
- * from the command's blue to a control's, and the word and its glyph cross over in
- * place, so the press under the pointer is never a different button that jumped in.
+ * One round button that is Ask while it is quiet and Stop while it works, as the
+ * chat apps people know draw it: an arrow up on the command's blue to send, a
+ * square on the text's own colour to stop. The glyph crosses over in place, so the
+ * press under the pointer is never a different button that jumped in; the name is
+ * the word, since there is none to read.
  */
 function AskButton({ busy, ready, onStop }: { busy: boolean; ready: boolean; onStop: () => void }) {
   return (
     <Button
       type={busy ? "button" : "submit"}
-      size="sm"
-      variant={busy ? "outline" : "default"}
+      size="icon-sm"
+      variant="default"
       data-slot="prompt-send"
       data-state={busy ? "stop" : "ask"}
-      // The word crossing over is two words for a moment; the name is one.
       aria-label={busy ? "Stop" : "Ask"}
-      className="relative shrink-0 overflow-hidden transition-[background-color,border-color,color,opacity] duration-200"
+      title={busy ? "Stop" : "Ask"}
+      className={cn(
+        "relative shrink-0 overflow-hidden rounded-full transition-[background-color,color,opacity] duration-200 disabled:opacity-40",
+        busy && "bg-foreground text-background hover:bg-foreground/85",
+      )}
       disabled={!busy && !ready}
       onClick={
         busy
@@ -342,14 +341,18 @@ function AskButton({ busy, ready, onStop }: { busy: boolean; ready: boolean; onS
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.span
           key={busy ? "stop" : "ask"}
-          className="inline-flex items-center gap-1.5"
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
+          aria-hidden
+          className="flex items-center justify-center"
+          initial={{ opacity: 0, scale: 0.6 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.6 }}
           transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
         >
-          {busy ? <StopCircle /> : <PaperAirplane />}
-          {busy ? "Stop" : "Ask"}
+          {busy ? (
+            <span className="block size-2.5 rounded-[2px] bg-current" />
+          ) : (
+            <ArrowUp className="size-4 [&_path]:stroke-[2.5]" />
+          )}
         </motion.span>
       </AnimatePresence>
     </Button>

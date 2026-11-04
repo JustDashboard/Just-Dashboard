@@ -468,7 +468,9 @@ the one thing that scrolls, the composer sits at the foot with a small margin an
 says what is sent, and the rail is a column after a hairline, never a card. An empty chat centres its mark, title and
 suggestions in the column. The composer draws no focus at all — no ring, no lit border, no glow — because it is the
 page's one place to type and the blinking caret is the whole answer to "is it ready"; a press anywhere on its frame puts
-the caret in it, and the buttons in its toolbar keep the ring for the keyboard. An image waiting in it, or asked with a
+the caret in it, and the buttons in its toolbar keep the ring for the keyboard. Its send is one round button
+at the box's corner, as the chat apps people know draw it: an arrow up on the command's blue to ask, turning in
+place into a square on the text's own colour to stop while it answers, its name the word since there is none. An image waiting in it, or asked with a
 question, is a thumbnail that opens large on a press (`ImageLightbox`, `components/image-lightbox.tsx`, which README
 and pull request pictures open in too): the picture as large as the window allows over a dark ground, room made for it
 from its size with the thumbnail drawn there until it lands, so nothing jumps; arrows, keys or a swipe for the rest, a
