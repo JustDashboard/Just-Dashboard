@@ -30,6 +30,7 @@ test("Redis and MongoDB have only their own pages, under their own names", async
   await expect(rail(page).getByText("cache", { exact: true })).toBeVisible()
   expect(await railPages(page)).toEqual([
     "Home",
+    "Assistant",
     "Keys",
     "Console",
     "Performance",
@@ -50,6 +51,7 @@ test("Redis and MongoDB have only their own pages, under their own names", async
   await expect(rail(page).getByText("app", { exact: true })).toBeVisible()
   expect(await railPages(page)).toEqual([
     "Home",
+    "Assistant",
     "Documents",
     "Aggregations",
     "Schema",
