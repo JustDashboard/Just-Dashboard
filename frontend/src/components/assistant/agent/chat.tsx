@@ -445,7 +445,7 @@ function AboutChip({ about }: { about: AgentAbout }) {
     <Link
       href={about.path}
       data-slot="agent-about"
-      className="mx-auto flex w-fit max-w-full min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-hairline bg-surface-header px-2.5 py-1 text-hint text-muted-foreground focus-ring transition-colors hover:text-foreground"
+      className="mx-auto flex w-fit max-w-full min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-hairline bg-surface-header px-2.5 py-1 text-hint text-muted-foreground focus-ring transition-colors hover:text-foreground"
     >
       <CornerUpLeft aria-hidden className="size-3.5 shrink-0" />
       <span className="min-w-0 truncate">

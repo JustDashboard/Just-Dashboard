@@ -437,24 +437,32 @@ Before these existed, fourteen pages read as fourteen products.
 `no-restricted-imports` enforces it. A page never opens one itself.
 
 **A conversation is a column of the workbench, not a window over it.** The SQL editor's assistant
-(`database/query/assistant/`) is the editor's third column, on its right with a hairline and a resize
-handle, and lies over the editor like the rail where the frame cannot hold three columns. A question is
-a recessed block on `--surface-header` with what it carried as `Tag`s (*statement*, *result · 20
-rows*), never their values; an answer is the product's Markdown on the pane's own ground, and a
-statement in it is a sunken block with its verbs in words — *Open in a tab*, *Insert*, *Copy* —
-drawn only once the answer has finished, because a statement still arriving may not be whole. A
-request the model makes of the reader is a fence with the two answers as buttons (*Allow*, *Don't
-allow*) that becomes one word once answered. Where the question is written, one line says who it goes
-to and what of the database goes with it, and turns amber while rows are attached.
+(`database/query/query-assistant.tsx`) is the editor's third column, on its right with a hairline and a
+resize handle, and lies over the editor like the rail where the frame cannot hold three columns. It is
+not a second assistant: it draws `AgentChat` compact on the connection's own session, so a chat begun
+there is the one in front on the connection's Assistant page, and the dock stays off both. What the tab
+holds goes with a question only by the reader's press, as toggles over the box — *Statement*, *Result ·
+3 rows*, *Error*, *Plan* (`query/attachments.ts`, a result as a small text table) — and the question
+carries them as `Tag`s (*statement*, *result · 20 rows*), never their values. A statement in an answer is
+a sunken block with its verbs in words — *Open in a tab*, *Insert*, *Copy* — drawn only once the answer
+has finished, because a statement still arriving may not be whole; `AgentChat`'s `codeBlock` is where a
+place gives a fenced block its verbs, rather than forking the chat. The line under the box says who it
+goes to and what of the database goes with it, and turns amber while rows are attached.
 
 **The deployment's assistant is the same conversation given a page, because it works.**
-(`components/assistant/agent/`, drawn from AI Elements' registry components, `elements/NOTICE`.) What it did stands
+(`components/assistant/agent/`, drawn from AI Elements' registry components, `elements/NOTICE`.) A database's
+is the same page (`agent/subject-page.tsx`, `SubjectAssistant`): each subject passes only its scope, its words,
+its suggestions and what refuses it — an archived project, a protected connection, which says *Nothing about
+<name> is sent to the assistant while it is protected* in place of the chat. What it did stands
 in the answer as steps, each the product it touched on a tile (§14's argument for a logo: Docker's whale is read
 before its label), with a word lit while it runs (`TextShimmer`) and a badge that turns from a spinner to a tick or a
 cross as it ends. A route it called itself (`api_request`) is drawn as the request log draws one — the method on a
 recessed chip, a read muted and a write in the method hue, and the path in the path hue (`MethodWord`,
 `RequestPath`) — so `GET /databases/connections` reads as a request before it reads as words; looking routes up
-(`find_routes`) is a muted line with no badge. What it changed is a card on the success wash with **Open Runtime →**
+(`find_routes`) is a muted line with no badge. A command it runs on the host (`run_command`) is drawn as the
+command itself in mono, on the terminal's mark, with its exit beside it and what it printed in the step's well;
+waiting on the person, the card shows it whole in a sunken mono block after a `$`, because the command, not a
+sentence about it, is what a person reads to decide. What it changed is a card on the success wash with **Open Runtime →**
 beside it, and what is different in mono, so a change is the loudest thing in the column. What it wants to do is a card
 on the warning or danger wash with each call's own *Allow* and *Decline*, its values as `path value` lines rather than
 JSON, since a person reads it to decide. Full access is amber on the toolbar for as long as it is on, and the mode
@@ -462,8 +470,9 @@ menu says what each mode does in plain words: full access runs everything withou
 every change. A question is right-aligned on `--surface-header`, the answer has the provider's real logo beside it,
 and `BorderBeam` (§11: work is happening inside this frame) runs round the logo's tile and the composer while it works.
 
-The chat is not in a frame. On a deployment's page and on `/assistant` it is the page's own ground from the header's
-hairline to the window's foot (`ProjectShell` and the server page draw a `fill` page there): the column of messages is
+The chat is not in a frame. On a deployment's page, a connection's and `/assistant` it is the page's own ground from the
+header's hairline to the window's foot (`ProjectShell` and the server page draw a `fill` page there, and a connection's
+Assistant is a workbench section under its strip): the column of messages is
 the one thing that scrolls, the composer sits at the foot with a small margin and nothing under it but the line that
 says what is sent, and the rail is a column after a hairline, never a card. An empty chat centres its mark, title and
 suggestions in the column. The composer draws no focus at all — no ring, no lit border, no glow — because it is the
@@ -478,8 +487,12 @@ The rail holds the chats and what the open one has done. **Chats** are the perso
 `agent/chat-list.tsx`), newest first, each a row of one height in every state: its title, how long ago it moved, a
 lit `signal` dot that breathes while a tab is answering it, and a warning `Tag` while calls in it wait on the person.
 Rename turns the row's own line into the field; delete asks first through `useConfirm`; nothing unfolds under a row.
-The deployment's page lists that deployment's chats; `/assistant` is a chat about the whole server and lists every
-chat under what each is about, and a deployment's chat opens on that deployment's page (`?chat=`). A chat opened
+The deployment's page lists that deployment's chats and a connection's page that connection's; `/assistant` is a
+chat about the whole server and lists every chat under what each is about, and a deployment's or a connection's chat
+opens on its own page (`?chat=`). A server chat begun by **Ask** from another page carries that page
+(`AgentTranscript.about`): a small square chip at the head of the column, *About shop · Logs*, is the way back to it,
+the empty chat offers questions about the page rather than the server, and the server is told the page with the press
+that begins the chat and never again. A chat opened
 from the history is read back from the server and folded through the same reducer the stream feeds, so it looks
 exactly as it did and can be carried on. One another tab is answering is followed and says so in a calm bar over the
 box — a breathing dot, *This chat is running in another tab*, and **Take over** — and the tab it was taken from says
