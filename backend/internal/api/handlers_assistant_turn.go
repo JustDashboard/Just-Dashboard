@@ -190,6 +190,8 @@ type agentResult struct {
 	output string
 	change *agentChange
 	link   *agentLink
+	// terminal is the chat's window, for a call of the terminal's.
+	terminal *agentTerminalView
 }
 
 // handleDeploymentOperator asks the assistant about one environment
@@ -924,6 +926,23 @@ func (pr *agentPress) view(ctx context.Context, call assistant.ToolCall) agentCa
 		view.Reason, view.Input = in.Reason, call.Input
 		view.Kind = assistant.ClassifyCommand(in.Command)
 		view.Label = "Run " + clipText(strings.Join(strings.Fields(in.Command), " "), 80)
+	case assistant.ToolTerminalRun, assistant.ToolTerminalSend, assistant.ToolTerminalRead:
+		in := call.TerminalInput()
+		view.Reason, view.Input = in.Reason, call.Input
+		view.Kind = assistant.TerminalKind(call)
+		switch call.Name {
+		case assistant.ToolTerminalRun:
+			view.Label = "In the terminal: " + clipText(strings.Join(strings.Fields(in.Command), " "), 80)
+		case assistant.ToolTerminalSend:
+			view.Label = "Type into the terminal"
+			if in.Text != "" && !strings.Contains(in.Text, "[REDACTED]") {
+				view.Label = "Type " + clipText(strconv.Quote(in.Text), 60)
+			} else if len(in.Keys) > 0 {
+				view.Label = "Press " + strings.Join(in.Keys, ", ")
+			}
+		default:
+			view.Label = "Read the terminal"
+		}
 	case assistant.ToolAPIRequest:
 		in := call.RequestInput()
 		view.Reason, view.Input = in.Reason, call.Input
@@ -1073,6 +1092,9 @@ func agentCalledLine(call assistant.ToolCall, result agentResult) map[string]any
 	if result.change != nil {
 		line["change"] = result.change
 	}
+	if result.terminal != nil {
+		line["terminal"] = result.terminal
+	}
 	return line
 }
 
@@ -1080,9 +1102,12 @@ func agentCalledLine(call assistant.ToolCall, result agentResult) map[string]any
 func (pr *agentPress) execute(ctx context.Context, call assistant.ToolCall, view agentCallView) agentResult {
 	s, scope := pr.s, pr.scope
 	deadline := agentCallDeadline + time.Duration(assistant.AgentWaitMax)*time.Second
-	if call.Name == assistant.ToolRunCommand {
+	switch call.Name {
+	case assistant.ToolRunCommand:
 		// A command keeps to its own time, up to the most it may ask for.
 		deadline = time.Duration(assistant.CommandWaitMax)*time.Second + agentCallDeadline
+	case assistant.ToolTerminalRun, assistant.ToolTerminalSend, assistant.ToolTerminalRead:
+		deadline = time.Duration(call.TerminalInput().Wait)*time.Second + agentCallDeadline
 	}
 	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
@@ -1105,6 +1130,8 @@ func (pr *agentPress) execute(ctx context.Context, call assistant.ToolCall, view
 		return pr.apiRequest(ctx, p, call.RequestInput(), view)
 	case assistant.ToolRunCommand:
 		return pr.runCommand(ctx, p, call.CommandInput())
+	case assistant.ToolTerminalRun, assistant.ToolTerminalSend, assistant.ToolTerminalRead:
+		return pr.terminal(ctx, p, call)
 	case assistant.ToolWaitForRun:
 		if scope.deployment == nil {
 			return refuse("wait_for_run follows a deployment's run, and this conversation is not about one: read the run with api_request")

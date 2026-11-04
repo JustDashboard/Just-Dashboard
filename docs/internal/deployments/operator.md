@@ -7,8 +7,9 @@ editor's column) is the same assistant asked about one connection, and the serve
 **Ask** in the top bar of every page, which opens a chat that knows the page it was opened from. It answers anything and does what it is asked: it reads a project's code, logs,
 requests, metrics and a database's rows, sets variables, domains and limits, runs a backup, deploys and rolls
 back, and reaches the rest of the dashboard — databases, backups, Docker, files, the firewall, the proxy, users —
-through the dashboard's own API, and the host itself through a shell command (`run_command`) as the terminal
-would run it. It is meant to be talked to as any general assistant is, and to look at the
+through the dashboard's own API, and the host itself: a shell command run to its end (`run_command`), or a
+real terminal window of the chat's own that it types into and reads, for what runs long, asks a question or
+wants a password ([the terminal](#the-terminal)). It is meant to be talked to as any general assistant is, and to look at the
 server only when the question is about it ([how it answers](#how-it-answers)). **Diagnose** on the overview opens the deployment's page and asks the diagnostic question. A new
 deployment can be handed to it too: it configures the draft, and the person presses Deploy (below).
 
@@ -180,6 +181,7 @@ large; it goes with its chat (see Pasted images).
 | `GET /assistant/chats/{chat}/images/{image}` | An image pasted into it, whole, as its bytes (`private, immutable`, `nosniff`, a sandboxing CSP); `404 not_found` once only its thumbnail is kept |
 | `PATCH /assistant/chats/{chat}` | Renames it (`{"title"}`) |
 | `DELETE /assistant/chats/{chat}` | Deletes it; `409 chat_busy` while a press runs it |
+| `POST /assistant/chats/{chat}/terminal` | Types the person's own `text` (and Enter unless `enter` is false) into the chat's terminal window: a password a command asked for, or any answer. Terminal capability, a session; `404 no_terminal` when the chat has none open; audited as `assistant.terminal.input` with the byte count only ([the terminal](#the-terminal)) |
 
 A chat a press is running answers a second press `409 chat_busy`. `takeOver: true` cancels the running press
 (its stream ends with a `taken_over` line) and goes on once it has let go: with the person's question, or with
@@ -215,9 +217,51 @@ call with no id, two under one) is refused, as `assistant.ErrUnreadableAnswer`.
 | `find_routes` | Every scope | Looks the API up by words or an area, with each route's method, path, words and kind, and the matching routes it cannot make with the reason; an empty query lists the areas | `free` |
 | `api_request` | Every scope | Makes any route of `/api/v1` as the person: `method`, `path`, `query`, `body`, `reason`. A route into a protected database connection is answered with why and reads nothing (`agentProtected`) | by the route |
 | `run_command` | Deployment, server, database | Runs one shell line on the host as the terminal's account (`term.Manager.RunCommand`): its login shell with `-l -c`, through `su` for an account that is not the dashboard's own, in the account's home, with a built environment (never the dashboard's, which holds its secrets: `PATH`, `HOME`, `USER`, `SHELL`, `TERM=dumb`, `DEBIAN_FRONTEND=noninteractive`, pagers off), nothing on standard input, and a deadline of 60 seconds or the call's `timeout` up to 300, past which its whole process group is stopped. It takes the terminal capability, checked on every call, and the terminal turned on. Its answer is the exit code, the account, how long it took and the last 24,000 bytes of what it wrote, masked; the page is sent its last 4 KB | by the line |
+| `terminal_run` | Deployment, server, database | Types one command line and Enter into the chat's own terminal window, opening it the first time, and answers with what it printed once it is back at the prompt, quiet on a question or a password, or after `wait` seconds (20 by default, at most 120), when it goes on running ([the terminal](#the-terminal)) | by the line |
+| `terminal_send` | Deployment, server, database | Types `text` (with Enter unless `enter` is false) and presses `keys` by name (`ctrl-c`, `up`, `enter`…) into the chat's window, and answers as `terminal_run` does. A masked value is refused | `change` |
+| `terminal_read` | Deployment, server, database | Waits up to `wait` seconds (30 by default, at most 300) and reads what the window printed since the last call | `read` |
 | `open_page` | Deployment, server, database | Offers a shortcut to a page from a closed list (`AgentPages`, `ServerPages`, `DatabasePages` under `/databases/{id}`) | `free` |
 
 An answer to the model is its JSON, masked and cut at 24,000 bytes.
+
+## The terminal
+
+`run_command` runs a line to its end with nobody at the keyboard, which is what most questions want and is its
+cleanest answer. What it cannot do — a command that runs longer than five minutes, asks a question, wants a
+password, or that the person wants to watch — is the terminal's (`assistant/terminal.go`,
+`api/handlers_assistant_terminal.go`).
+
+- **One window per chat, a real one.** The chat's first `terminal_run` opens a window of the Terminal page's
+  (`term.Manager.Create`) as the person: owned by them, titled for the chat and named
+  `assistant-<chat id>`, held on the host like any other, so it outlives the press, the page and a restart —
+  after which it is found again by its name. The person sees it on the Terminal page
+  (`/terminal?session=<workspace>`, which the page links from the call) and may type into it there. It keeps its
+  directory and environment between commands, as a shell does. It takes the terminal capability and the
+  terminal turned on, on every call, and a host that cannot hold a window (no systemd) refuses it with why,
+  pointing at `run_command`.
+- **What it printed, all of it.** A subscriber gathers what the window prints as it arrives, so nothing between
+  two calls is missed, and each call answers with what arrived since the last (the end of it past 256 KiB, said),
+  cleaned of the terminal's own codes — colours, titles, cursor moves; a line as a carriage return last left it,
+  so a progress bar is its final state; backspaces applied (`terminalText`) — and masked like any answer. The
+  model is sent its last 16,000 bytes and the page its last 4 KB.
+- **When a call answers.** It waits until what runs is back at the prompt — the kernel's foreground group on the
+  window's terminal (`term.Session.Foreground`), so a builtin is never mistaken for a job and a prompt drawn by
+  anything is never mistaken for the shell's — or has gone quiet on a password prompt (1.2 seconds) or on a
+  question (`[y/N]`, a line ending in `?`, `:`, `>` or `]`, 2.5 seconds), or until its `wait` runs out, when it
+  says the command is still running and goes on in the window. Its answer says which, and the page is sent the
+  same as `terminal` on the call: the window's workspace, the state (`finished`, `running`, `password`,
+  `input`, `closed`) and what it asked.
+- **A password is the person's.** On a password prompt the model is told not to type it or ask for it, but to
+  say in a line that it is waiting and read on with a long wait. The page shows the person a field under the call
+  that types what they write straight into the window (`POST /assistant/chats/{chat}/terminal`, `{"text", "enter"}`,
+  the chat's owner with the terminal capability, in a session): it is in no request to the provider, no saved
+  line, and the audit entry `assistant.terminal.input` records only how many bytes. A program that reads a
+  password turns the terminal's echo off, so it is not in what the window prints either; one that does not would
+  print it, and the field says so. `terminal_send` refuses a masked value outright, so the model cannot send a
+  `[REDACTED]` back as if it were the secret.
+- **Held like the shell.** A command line is read as `run_command`'s is (`ClassifyCommand`); whatever is typed
+  into a running program is a change, since an answer to a question is a decision; and a read is a read. The
+  press's audit entry lists each line typed (`terminal: …`) and each answer (`typed: …`, keys by name), masked.
 
 ## What it begins knowing
 
@@ -408,6 +452,11 @@ are the new deployment's.
 - `assistant/command_test.go`: what a shell line is read as — reads, changes and destructive lines, a redirection,
   a substitution, a subshell or a background job never a read — a `run_command` call checked like the others,
   and every chat but a new deployment's offered the shell.
+- `api/handlers_assistant_terminal_test.go`, with real held windows: a password prompt answered by the person
+  through the chat's route and never sent to the provider, the saved chat or the audit entry; a question
+  answered, a long command followed and stopped with Ctrl-C, what was printed read without its codes, a window
+  found again after it was forgotten; and the capability, a chat with no window, a masked value and the mode
+  held. `assistant/command_test.go` checks the terminal's calls and keys.
 - `api/handlers_assistant_database_test.go`: a connection's chat beginning with its structure and no row, offered
   the dashboard and the shell but not a deployment's tools, listed under the connection and carried on only as
   its own; a protected connection refused its chat and kept from the server's; what the editor attaches sent

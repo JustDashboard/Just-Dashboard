@@ -407,7 +407,10 @@ inherited — this process's carries the dashboard's secrets — and says there 
 as its own process group (`hostexec.RunGroup`), so a deadline stops everything it started, and keeps the last
 64 KiB of what it wrote, output and errors as they came. The API checks the terminal capability for every line
 (`api/handlers_assistant_command.go`); [the deployment assistant](../deployments/operator.md#the-tools) says the
-rest.
+rest. For what runs long or asks something, the assistant has a window of its own instead — an ordinary window,
+created for the person and named `assistant-<chat id>`, that it types into and reads (`Session.Write`,
+`Session.Subscribe`) and whose foreground job (`Session.Foreground`, the same kernel answer the activity line
+reads) says when what it typed has finished; see [the terminal](../deployments/operator.md#the-terminal).
 
 ## GitHub sign-in
 

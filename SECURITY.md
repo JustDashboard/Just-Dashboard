@@ -28,11 +28,13 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   model, as the box says while one waits to be sent. It acts through the dashboard's own
   routes as you, with your whole role — whatever you could do in the dashboard, including what runs commands
   on the host — and every change is in the audit log under your name, marked as the assistant's. If your role
-  has the terminal, it can also run a shell command on the server as the terminal would, as the terminal's
-  account; a command that is not a plain read waits for your Allow unless you gave it full access, and each one
-  it runs is in the audit log. It cannot sign in, change your password, second factor, passkeys or sessions,
-  make an API key, uninstall the dashboard, attach to a terminal or a stream, or read a database connection
-  you marked protected. It asks before any change unless you give it full access,
+  has the terminal, it can also run shell commands on the server as the terminal's account, in a terminal window
+  of its own that you can open and watch on the Terminal page; a command that is not a plain read, and anything
+  it types into a running program, waits for your Allow unless you gave it full access, and each one is in the
+  audit log. When a command asks for a password, you type it into a field in the chat that goes straight to the
+  terminal: the assistant and its model never see it, and it is not saved or logged. It cannot sign in, change your password, second factor, passkeys or sessions,
+  make an API key, uninstall the dashboard, attach to your own terminal windows or a stream, or read a database
+  connection you marked protected. It asks before any change unless you give it full access,
   which runs everything your role allows without asking. Text it reads, such as a log line, can try to talk a
   model into something, so leave "Ask before changes" on where someone else's text can reach it. Its chats
   are yours alone, saved encrypted on the server.

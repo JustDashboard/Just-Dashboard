@@ -143,3 +143,16 @@ func (t *tailBuffer) String() (string, int) {
 	defer t.mu.Unlock()
 	return string(t.buf), t.cut
 }
+
+// Foreground reports whether a job other than the shell holds a window's
+// terminal, and the job's name: the kernel's own answer, read off the PTY, so a
+// caller typing into the window knows when what it typed has finished. The
+// instant between a job ending and the shell taking the terminal back counts as
+// the job's.
+func (s *Session) Foreground() (busy bool, process string) {
+	fg, busy, process, _, transition := s.inspect()
+	if fg <= 0 {
+		return false, ""
+	}
+	return busy || transition, process
+}

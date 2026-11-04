@@ -40,6 +40,8 @@ type assistantState struct {
 	// ringMu holds a change to the keyring from its read to its write, which spans a
 	// check of the provider: a slow save must not bring back a key just removed.
 	ringMu sync.Mutex
+	// terminals are the chats' terminal windows (handlers_assistant_terminal.go).
+	terminals *agentTerminals
 	// diagnosing holds the runs whose failure is being asked about, so a
 	// second press waits for the first answer instead of paying for another.
 	diagnosing sync.Map
@@ -48,6 +50,7 @@ type assistantState struct {
 func newAssistantState() *assistantState {
 	return &assistantState{
 		operators: assistant.NewStore(),
+		terminals: newAgentTerminals(),
 		limit:     httpx.NewLimiter(20, 6),
 		slots:     make(chan struct{}, 4),
 		options:   assistant.Options{HTTP: assistant.NewHTTPClient()},

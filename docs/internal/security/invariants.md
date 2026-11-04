@@ -215,7 +215,11 @@ A change that weakens any of these has to say so explicitly.
    unless the person chose full access, an Allow for every line that is not a plain read
    ([the assistant's modes](../deployments/operator.md#the-modes)). It is a shell on purpose, as the terminal is;
    the argv rule is about the dashboard's own features never building a shell string out of what a request
-   carries. Do not add a third request-defined shell, and do not "fix" either into an argv. A git clone's parent and an
+   carries. The assistant's terminal (`terminal_run`, `terminal_send`) is not a third: it types into a real window
+   of the terminal's own, as the person would at the Terminal page, under the same capability, with each line in
+   the audit entry. A password a command asks for is never the model's to type: the person types it into the
+   window from the chat (`POST /assistant/chats/{chat}/terminal`), and it reaches no provider, saved line or audit
+   entry. Do not add a third request-defined shell, and do not "fix" either into an argv. A git clone's parent and an
    `init` target go through `gitx.ResolveDir` against `JD_GIT_ROOTS` — the Git page's own boundary — and a
    clone can only create a directory that does not exist. Terminal startup also uses
    a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. An

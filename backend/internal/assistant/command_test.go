@@ -154,3 +154,62 @@ func TestThePromptsOfferTheShell(t *testing.T) {
 		t.Errorf("the server prompt does not say where it was opened: %s", server)
 	}
 }
+
+// The terminal's calls are read as the others are: a command is one line, keys
+// are read by their usual names, waits are held to their bounds, and the mode
+// reads a command by what it does and anything typed as a change.
+func TestTheTerminalsCallsAreChecked(t *testing.T) {
+	check := CheckCalls(ServerTools)
+	calls, err := check([]Block{
+		{Type: BlockToolUse, ToolID: "a", ToolName: ToolTerminalRun, Input: []byte(`{"command":"apt-get upgrade","wait":9999,"reason":"x"}`)},
+		{Type: BlockToolUse, ToolID: "b", ToolName: ToolTerminalRun, Input: []byte(`{"command":"ls\nrm -rf /","reason":"x"}`)},
+		{Type: BlockToolUse, ToolID: "c", ToolName: ToolTerminalSend, Input: []byte(`{"text":"y","keys":["Ctrl+C","Return","^C"],"reason":"x"}`)},
+		{Type: BlockToolUse, ToolID: "d", ToolName: ToolTerminalSend, Input: []byte(`{"keys":["F13"],"reason":"x"}`)},
+		{Type: BlockToolUse, ToolID: "e", ToolName: ToolTerminalSend, Input: []byte(`{"text":"2","enter":false,"reason":"x"}`)},
+		{Type: BlockToolUse, ToolID: "f", ToolName: ToolTerminalRead, Input: []byte(`{}`)},
+		{Type: BlockToolUse, ToolID: "g", ToolName: ToolTerminalRun, Input: []byte(`{"command":"df -h"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in := calls[0].TerminalInput(); in.Command != "apt-get upgrade" || in.Wait != TerminalWaitMax || calls[0].Problem != "" {
+		t.Errorf("a = %+v %q", in, calls[0].Problem)
+	}
+	if !strings.Contains(calls[1].Problem, "one line") {
+		t.Errorf("b = %q", calls[1].Problem)
+	}
+	if in := calls[2].TerminalInput(); strings.Join(in.Keys, ",") != "ctrl-c,enter,ctrl-c" || in.Typed() != "y\r\x03\r\x03" {
+		t.Errorf("c = %+v %q", in, in.Typed())
+	}
+	if !strings.Contains(calls[3].Problem, `no key "F13"`) {
+		t.Errorf("d = %q", calls[3].Problem)
+	}
+	if in := calls[4].TerminalInput(); in.Typed() != "2" {
+		t.Errorf("e = %q", in.Typed())
+	}
+	if in := calls[5].TerminalInput(); in.Wait != TerminalReadDefault {
+		t.Errorf("f = %+v", in)
+	}
+	for i, want := range []string{CommandChange, CommandChange, CommandChange, CommandChange, CommandChange, CommandRead, CommandRead} {
+		if i == 1 || i == 3 {
+			continue
+		}
+		if got := TerminalKind(calls[i]); got != want {
+			t.Errorf("call %d is %s, want %s", i, got, want)
+		}
+	}
+	for name, tools := range map[string][]Tool{"deployment": AgentTools, "server": ServerTools, "database": DatabaseTools} {
+		count := 0
+		for _, tool := range tools {
+			if tool.Name == ToolTerminalRun || tool.Name == ToolTerminalSend || tool.Name == ToolTerminalRead {
+				count++
+			}
+		}
+		if count != 3 {
+			t.Errorf("%s's chat has %d of the terminal's tools", name, count)
+		}
+	}
+	if prompt := ServerSystemPrompt(ServerContext{}, APIOverview{}); !strings.Contains(prompt, "Never type a password") || !strings.Contains(prompt, "terminal_read with a long wait") {
+		t.Errorf("the prompt does not say how a password is typed")
+	}
+}
