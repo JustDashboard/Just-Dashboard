@@ -1404,7 +1404,7 @@ test("a password the terminal asks for is typed by the person, straight into the
   await expect(card).toHaveAttribute("data-state", "password")
   await expect(card).toContainText("Waiting for your password")
   await expect(card).toContainText("[sudo] password for ubuntu:")
-  await expect(card.getByRole("link", { name: /Open in Terminal/ })).toHaveAttribute(
+  await expect(card.getByRole("link", { name: "Open Terminal" })).toHaveAttribute(
     "href",
     "/terminal?session=ws-42",
   )
@@ -1458,7 +1458,7 @@ test("a command still running in the terminal says so, with the way to its windo
   const card = chat(page).locator("[data-slot='agent-terminal']")
   await expect(card).toHaveAttribute("data-state", "running")
   await expect(card).toContainText("Still running in its terminal")
-  await expect(card.getByRole("link", { name: /Open in Terminal/ })).toHaveAttribute(
+  await expect(card.getByRole("link", { name: "Open Terminal" })).toHaveAttribute(
     "href",
     "/terminal?session=ws-7",
   )

@@ -462,7 +462,11 @@ recessed chip, a read muted and a write in the method hue, and the path in the p
 (`find_routes`) is a muted line with no badge. A command it runs on the host (`run_command`) is drawn as the
 command itself in mono, on the terminal's mark, with its exit beside it and what it printed in the step's well;
 waiting on the person, the card shows it whole in a sunken mono block after a `$`, because the command, not a
-sentence about it, is what a person reads to decide. What it changed is a card on the success wash with **Open Runtime →**
+sentence about it, is what a person reads to decide. A call into the chat's own terminal window draws its command in mono like a shell line, and only the newest
+one says what the window is doing under it when that is worth a line — *Still running in its terminal* or what it
+is asking, on the header surface, with **Open Terminal →** — and, for a password, a card on the warning wash with
+a password field and **Send**, saying the text goes straight to the window and never to the assistant; its tile
+shows the waiting dot rather than a tick while it waits. What it changed is a card on the success wash with **Open Runtime →**
 beside it, and what is different in mono, so a change is the loudest thing in the column. What it wants to do is a card
 on the warning or danger wash with each call's own *Allow* and *Decline*, its values as `path value` lines rather than
 JSON, since a person reads it to decide. Full access is amber on the toolbar for as long as it is on, and the mode

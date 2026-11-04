@@ -63,6 +63,16 @@ export function ApiRoute({ route, className }: { route: string; className?: stri
   )
 }
 
+/**
+ * What a chat's terminal can be asked from its step: the newest call that left the
+ * window in a state worth saying, and how the person types into it. The chat that
+ * draws the steps provides it; a step drawn anywhere else says nothing of its window.
+ */
+export const AgentTerminalContext = createContext<{
+  latest?: string
+  type: (text: string) => Promise<void>
+} | null>(null)
+
 /** Whether a call is a route the assistant called itself, drawn with its request. */
 const routed = (call: AgentCall) => call.tool === "api_request" && Boolean(call.route)
 
@@ -141,6 +151,13 @@ export function StepRow({ step, replayed }: { step: AgentStep; replayed?: boolea
     routed(step.call)
   const running = step.state === "running"
   const quiet = lookup(step.call)
+  // The newest call into the chat's terminal, left asking the person or the model
+  // something, is waiting rather than done, whatever the call itself came to.
+  const terminal = useContext(AgentTerminalContext)
+  const waitingOn =
+    step.state === "done" &&
+    terminal?.latest === step.call.id &&
+    (step.terminal?.state === "password" || step.terminal?.state === "input")
   return (
     <Collapsible
       open={open}
@@ -177,7 +194,7 @@ export function StepRow({ step, replayed }: { step: AgentStep; replayed?: boolea
             ) : (
               <Glyph className="size-3.5 text-muted-foreground" />
             )}
-            {!quiet && <StepBadge state={step.state} />}
+            {!quiet && <StepBadge state={waitingOn ? "waiting" : step.state} />}
           </span>
           <span className="min-w-0 flex-1 truncate text-body">
             {running ? (
@@ -299,9 +316,7 @@ function StepDetails({ step }: { step: AgentStep }) {
         <p className="text-hint leading-relaxed text-muted-foreground">{step.said}</p>
       )}
       <InputLines input={askedInput(step.call)} flush />
-      {step.terminal && (
-        <Shortcut label="Open in Terminal" href={terminalHref(step.terminal.session)} />
-      )}
+      {step.terminal && <Shortcut label="Terminal" href={terminalHref(step.terminal.session)} />}
       {step.output && (
         <Well
           className="max-h-56 p-2.5 text-hint whitespace-pre-wrap"
@@ -560,16 +575,6 @@ export function ApprovalCard({
   )
 }
 
-/**
- * What a chat's terminal can be asked from its step: the newest call that left the
- * window in a state worth saying, and how the person types into it. The chat that
- * draws the steps provides it; a step drawn anywhere else says nothing of its window.
- */
-export const AgentTerminalContext = createContext<{
-  latest?: string
-  type: (text: string) => Promise<void>
-} | null>(null)
-
 const terminalHref = (session: string) => `/terminal?session=${encodeURIComponent(session)}`
 
 /**
@@ -601,7 +606,7 @@ function TerminalNote({ step }: { step: AgentStep }) {
           </>
         )}
       </span>
-      <Shortcut label="Open in Terminal" href={terminalHref(held.session)} />
+      <Shortcut label="Terminal" href={terminalHref(held.session)} />
     </div>
   )
 }
@@ -645,7 +650,7 @@ function PasswordField({ step }: { step: AgentStep }) {
             <span className="font-mono text-muted-foreground"> · {held.prompt}</span>
           )}
         </span>
-        <Shortcut label="Open in Terminal" href={terminalHref(held.session)} />
+        <Shortcut label="Terminal" href={terminalHref(held.session)} />
       </div>
       {state !== "sent" && (
         <form
