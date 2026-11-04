@@ -155,6 +155,14 @@ func TestTheTerminalAnswersAQuestionAndStopsALongCommand(t *testing.T) {
 	if state(1) != "finished" || !strings.Contains(fmt.Sprint(called[1]["output"]), "answer-y") {
 		t.Fatalf("the answer = %v", called[1])
 	}
+	// What was typed and finished changed something, and says where it shows; what
+	// is still running has not said yet.
+	if change, _ := called[1]["change"].(map[string]any); change == nil || !strings.HasPrefix(fmt.Sprint(change["href"]), "/terminal?session=") {
+		t.Fatalf("the answer's change = %v", called[1])
+	}
+	if called[2]["change"] != nil {
+		t.Fatalf("a running command said it changed something: %v", called[2])
+	}
 	if state(2) != "running" || !strings.Contains(fmt.Sprint(called[2]["output"]), "started-mark") || called[2]["said"] != "still running" {
 		t.Fatalf("the long one = %v", called[2])
 	}

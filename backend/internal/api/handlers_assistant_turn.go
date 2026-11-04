@@ -1129,9 +1129,9 @@ func (pr *agentPress) execute(ctx context.Context, call assistant.ToolCall, view
 	case assistant.ToolAPIRequest:
 		return pr.apiRequest(ctx, p, call.RequestInput(), view)
 	case assistant.ToolRunCommand:
-		return pr.runCommand(ctx, p, call.CommandInput())
+		return commandChange(pr.runCommand(ctx, p, call.CommandInput()), view)
 	case assistant.ToolTerminalRun, assistant.ToolTerminalSend, assistant.ToolTerminalRead:
-		return pr.terminal(ctx, p, call)
+		return commandChange(pr.terminal(ctx, p, call), view)
 	case assistant.ToolWaitForRun:
 		if scope.deployment == nil {
 			return refuse("wait_for_run follows a deployment's run, and this conversation is not about one: read the run with api_request")

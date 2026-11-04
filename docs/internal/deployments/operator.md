@@ -262,6 +262,10 @@ password, or that the person wants to watch — is the terminal's (`assistant/te
 - **Held like the shell.** A command line is read as `run_command`'s is (`ClassifyCommand`); whatever is typed
   into a running program is a change, since an answer to a question is a decision; and a read is a read. The
   press's audit entry lists each line typed (`terminal: …`) and each answer (`typed: …`, keys by name), masked.
+- **What it changed is said as a change.** A shell line read as a change that succeeded — `run_command` with exit
+  0, a terminal call once its window is back at the prompt — carries a `change` like a route's (`commandChange`),
+  so it is in the chat's list of what it did: a terminal's goes to its window, and a line run to its end to the
+  audit log, which lists it.
 
 ## What it begins knowing
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -87,6 +88,26 @@ func (pr *agentPress) runCommand(ctx context.Context, p *httpx.Principal, in ass
 		text: text, said: said, ok: !result.TimedOut && result.ExitCode == 0,
 		output: tailText(output, agentOutputBytes),
 	}
+}
+
+// commandChange is a shell line that changed something, said as a change: the
+// chat's list of what it did names it, with the way to where it shows — its
+// terminal window, or, for a line run to its end, the audit entry that lists it.
+// A line in the terminal that has not finished has not changed anything yet that
+// can be said.
+func commandChange(result agentResult, view agentCallView) agentResult {
+	if !result.ok || result.change != nil || (view.Kind != agentKindChange && view.Kind != agentKindDestructive) {
+		return result
+	}
+	if result.terminal != nil {
+		if result.terminal.State != terminalFinished {
+			return result
+		}
+		result.change = &agentChange{Label: "Terminal", Href: "/terminal?session=" + url.QueryEscape(result.terminal.Session)}
+		return result
+	}
+	result.change = &agentChange{Label: "Audit log", Href: "/audit"}
+	return result
 }
 
 // tailText is the end of a text, at most n bytes of it.

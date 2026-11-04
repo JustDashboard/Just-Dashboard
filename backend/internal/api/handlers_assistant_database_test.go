@@ -259,6 +259,14 @@ func TestRunCommandIsTheTerminalsAndAsksBeforeItWrites(t *testing.T) {
 		t.Fatalf("a read = %v", events)
 	}
 
+	// A line that changes something, run, is said as a change with where it shows.
+	made := t.TempDir() + "/made-by-the-assistant"
+	f.provider.queue(claudeCalls("Making it.", [2]any{assistant.ToolRunCommand, map[string]any{"command": "touch " + made, "reason": "Making it."}}), claudeAnswer("Made."))
+	events = lines(t, f.do(http.MethodPost, "/assistant/chat", `{"question":"Make it","mode":"full"}`))
+	if called := ofType(events, "called"); len(called) != 1 || called[0]["change"] == nil || called[0]["change"].(map[string]any)["href"] != "/audit" {
+		t.Fatalf("a change = %v", called)
+	}
+
 	// A command past its time is stopped and says so.
 	f.provider.queue(claudeCalls("Waiting.", [2]any{assistant.ToolRunCommand, map[string]any{"command": "sleep 30", "timeout": 1, "reason": "Waiting."}}), claudeAnswer("It took too long."))
 	events = lines(t, f.do(http.MethodPost, "/assistant/chat", `{"question":"Wait","mode":"full"}`))
