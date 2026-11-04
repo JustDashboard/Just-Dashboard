@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react"
-import { ChevronRight, Plus, Sparkles } from "@/components/icons"
+import { ChevronRight, CornerUpLeft, Plus, Sparkles } from "@/components/icons"
 import {
   assistantDestination,
   assistantProduct,
@@ -20,6 +21,8 @@ import {
   answering,
   pendingSteps,
   usageLine,
+  type AgentAbout,
+  type AgentAttachment,
   type AgentImage,
   type AgentPart,
   type AgentStep,
@@ -45,10 +48,12 @@ import type { PastedImage } from "@/components/assistant/agent/images"
 import { Markdown } from "@/components/git/markdown"
 import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
+import { Toggle } from "@/components/ui/toggle"
 import { cn } from "@/lib/utils"
 import type { Icon } from "@/components/icons"
 
@@ -109,7 +114,33 @@ export interface AgentSuggestion {
   question: string
   product?: string
   icon?: Icon
+  /** What goes with the question, as the box's own attachments would send it. */
+  attached?: AgentAttachment[]
 }
+
+/**
+ * Something on the page a question can carry, offered beside the box as a toggle
+ * the person presses: the statement in the editor, its last result. Nothing goes
+ * unless it is pressed, and `rows` marks what holds somebody's data, which the
+ * line under the box then says in amber.
+ */
+export interface AgentAttachable extends AgentAttachment {
+  id: string
+  /** A result: how many of its rows go. */
+  rows?: number
+  /** The toggle's own name, for a reader that cannot see its word. */
+  description: string
+}
+
+/**
+ * A fenced block of an answer drawn as something to act on — a statement the SQL
+ * editor opens in a tab — or `null` for the plain well. `finished` is the answer
+ * having ended: a block still arriving may not be whole, so its verbs wait.
+ */
+export type AgentCodeBlock = (
+  block: { lang: string; v: string },
+  answer: { finished: boolean; question: string },
+) => React.ReactNode | null | undefined
 
 const EASE = [0.16, 1, 0.3, 1] as const
 
@@ -134,6 +165,8 @@ export function AgentChat({
   compact,
   sends,
   onNew,
+  attachable = [],
+  codeBlock,
 }: {
   session: AgentSession
   settings: AssistantSettings | undefined
@@ -148,6 +181,9 @@ export function AgentChat({
   sends: string
   /** A new chat, where the page has more to do for one than the store. */
   onNew?: () => void
+  /** What of the page a question may carry, each by the person's press. */
+  attachable?: AgentAttachable[]
+  codeBlock?: AgentCodeBlock
 }) {
   const { transcript } = session
   const busy = agentBusy(session)
@@ -155,7 +191,22 @@ export function AgentChat({
   const mode: AssistantMode = session.mode ?? settings?.defaultMode ?? "changes"
   const last = transcript.turns.at(-1)
   const waiting = pendingSteps(transcript)
-  const ask = (question: string, images: PastedImage[] = []) => askAgent(session, question, images)
+  // The attachments pressed, by id; one the page no longer offers is not sent.
+  const [chosen, setChosen] = useState<string[]>([])
+  const carried = attachable.filter((one) => chosen.includes(one.id))
+  const rows = carried.reduce((sum, one) => sum + (one.rows ?? 0), 0)
+  const ask = (question: string, images: PastedImage[] = []) => {
+    askAgent(
+      session,
+      question,
+      images,
+      carried.map(({ label, text }) => ({ label, text })),
+    )
+    // Rows go with the one question they were pressed for; the statement stays on.
+    setChosen((held) => held.filter((id) => !attachable.find((one) => one.id === id)?.rows))
+  }
+  const suggest = (suggestion: AgentSuggestion) =>
+    askAgent(session, suggestion.question, [], suggestion.attached)
   const column = cn(!compact && "mx-auto w-full max-w-3xl")
   return (
     <MotionConfig reducedMotion="user">
@@ -182,6 +233,7 @@ export function AgentChat({
             busy={agentWorking(session)}
             contentClassName={cn(compact ? "gap-5 p-3" : "px-4 pt-6 pb-6", column)}
           >
+            {transcript.about && <AboutChip about={transcript.about} />}
             {transcript.turns.length === 0 && (
               <Empty
                 product={product}
@@ -189,7 +241,7 @@ export function AgentChat({
                 description={description}
                 suggestions={suggestions}
                 compact={compact}
-                onAsk={ask}
+                onAsk={suggest}
               />
             )}
             {transcript.turns.map((turn) => (
@@ -199,6 +251,7 @@ export function AgentChat({
                 product={product}
                 current={turn === last}
                 elsewhere={session.elsewhere && turn === last}
+                codeBlock={codeBlock}
                 onDecide={(id, allow) => decideAgent(session, id, allow)}
               />
             ))}
@@ -238,6 +291,32 @@ export function AgentChat({
               </Reveal>
             )}
           </AnimatePresence>
+          {attachable.length > 0 && (
+            <div
+              data-slot="agent-attach"
+              role="group"
+              aria-label="What goes with the question"
+              className="flex min-w-0 flex-wrap items-center gap-1.5 px-3 pb-1.5"
+            >
+              {attachable.map((one) => (
+                <Toggle
+                  key={one.id}
+                  size="sm"
+                  variant="outline"
+                  pressed={chosen.includes(one.id)}
+                  onPressedChange={(on) =>
+                    setChosen((held) =>
+                      on ? [...held, one.id] : held.filter((id) => id !== one.id),
+                    )
+                  }
+                  aria-label={one.description}
+                  className="h-7 px-2 text-xs data-[state=off]:text-muted-foreground"
+                >
+                  {one.label.charAt(0).toUpperCase() + one.label.slice(1)}
+                </Toggle>
+              ))}
+            </div>
+          )}
           <PromptInput
             busy={busy}
             // A chat still being read back has no conversation to carry on yet.
@@ -281,8 +360,16 @@ export function AgentChat({
             onStop={() => stopAgent(session)}
             className="pb-2"
           />
-          <p className="px-4 pb-2 text-micro text-pretty text-muted-foreground">
-            {`Sends ${assistantDestination(settings)} your question, ${sends}, with secret values masked.`}
+          <p
+            data-slot="agent-sends"
+            className={cn(
+              "px-4 pb-2 text-micro text-pretty transition-colors duration-300",
+              rows > 0 ? "text-warning" : "text-muted-foreground",
+            )}
+          >
+            {rows > 0
+              ? `Sends ${assistantDestination(settings)} your question with ${rows.toLocaleString("en-US")} ${rows === 1 ? "row" : "rows"} of the result, ${sends}, with secret values masked.`
+              : `Sends ${assistantDestination(settings)} your question, ${sends}, with secret values masked.`}
           </p>
         </div>
       </div>
@@ -349,6 +436,25 @@ function ChatBar({
   )
 }
 
+/**
+ * The page a chat was begun from, at the head of the conversation: what the person
+ * was looking at when they pressed Ask, and the way back to it.
+ */
+function AboutChip({ about }: { about: AgentAbout }) {
+  return (
+    <Link
+      href={about.path}
+      data-slot="agent-about"
+      className="mx-auto flex w-fit max-w-full min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-hairline bg-surface-header px-2.5 py-1 text-hint text-muted-foreground focus-ring transition-colors hover:text-foreground"
+    >
+      <CornerUpLeft aria-hidden className="size-3.5 shrink-0" />
+      <span className="min-w-0 truncate">
+        About <span className="font-medium text-foreground">{about.title}</span>
+      </span>
+    </Link>
+  )
+}
+
 /** The empty chat: who answers, what it can do, and questions one press from asked. */
 function Empty({
   product,
@@ -363,7 +469,7 @@ function Empty({
   description: string
   suggestions: AgentSuggestion[]
   compact?: boolean
-  onAsk: (question: string) => void
+  onAsk: (suggestion: AgentSuggestion) => void
 }) {
   return (
     <motion.div
@@ -386,7 +492,15 @@ function Empty({
       {suggestions.length > 0 && (
         <div className="flex max-w-2xl flex-wrap justify-center gap-2 pt-2">
           {suggestions.map((suggestion, index) => (
-            <Suggestion key={suggestion.label} {...suggestion} index={index} onAsk={onAsk} />
+            <Suggestion
+              key={suggestion.label}
+              label={suggestion.label}
+              question={suggestion.question}
+              product={suggestion.product}
+              icon={suggestion.icon}
+              index={index}
+              onAsk={() => onAsk(suggestion)}
+            />
           ))}
         </div>
       )}
@@ -453,6 +567,7 @@ function TurnView({
   product,
   current,
   elsewhere,
+  codeBlock,
   onDecide,
 }: {
   turn: AgentTurn
@@ -460,6 +575,7 @@ function TurnView({
   current: boolean
   /** Being answered in another tab, and followed here. */
   elsewhere: boolean
+  codeBlock?: AgentCodeBlock
   onDecide: (id: string | "all", allow: boolean) => void
 }) {
   const working = answering(turn)
@@ -488,6 +604,17 @@ function TurnView({
         {turn.question && (
           <p className="text-body break-words whitespace-pre-wrap">{turn.question}</p>
         )}
+        {turn.attached && turn.attached.length > 0 && (
+          <p
+            data-slot="agent-question-attached"
+            aria-label="Attached"
+            className="flex flex-wrap justify-end gap-x-2 gap-y-0.5"
+          >
+            {turn.attached.map((label) => (
+              <Tag key={label}>{label}</Tag>
+            ))}
+          </p>
+        )}
       </div>
       <div className="flex min-w-0 gap-3">
         <AssistantMark
@@ -505,14 +632,16 @@ function TurnView({
                     key={at}
                     className={cn(working && group.last && "agent-streaming")}
                     source={group.text}
-                    code={(block) => (
-                      <Well
-                        className="max-h-96 p-2.5 text-hint whitespace-pre"
-                        aria-label={block.lang}
-                      >
-                        {block.v}
-                      </Well>
-                    )}
+                    code={(block) =>
+                      codeBlock?.(block, { finished: !working, question: turn.question }) ?? (
+                        <Well
+                          className="max-h-96 p-2.5 text-hint whitespace-pre"
+                          aria-label={block.lang}
+                        >
+                          {block.v}
+                        </Well>
+                      )
+                    }
                   />
                 )
               case "steps":

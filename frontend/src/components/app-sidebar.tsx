@@ -64,6 +64,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { heldHref, useHeldSessions } from "@/components/remote-desktop/held-sessions"
+import { AskAboutPage } from "@/components/assistant/ask-about"
 import { REMOTE_DESKTOP_HREF } from "@/lib/remote-desktop"
 
 /**
@@ -318,7 +319,12 @@ export function AppSidebar() {
           <SidebarTrigger className="size-8 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:hidden" />
         </div>
 
-        <SearchButton onOpen={palette.open} />
+        {/* Ask stands beside Search because it is the other thing a person may
+            want from any page; the phone's strip carries its own. */}
+        <div className="flex min-w-0 items-center gap-1.5">
+          <SearchButton onOpen={palette.open} />
+          <AskAboutPage className="h-9 group-data-[collapsible=icon]:hidden max-md:hidden" />
+        </div>
       </SidebarHeader>
 
       {/* `overflow-x-hidden` is what makes the slide a slide: the panel arrives

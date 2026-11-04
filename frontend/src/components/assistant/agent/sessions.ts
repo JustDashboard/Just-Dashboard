@@ -8,6 +8,7 @@ import {
   answering,
   applyEvent,
   beginTurn,
+  boundAttached,
   decideAll,
   decideStep,
   endTurn,
@@ -18,11 +19,14 @@ import {
   replayLines,
   sendDecisions,
   takeOverTurn,
+  type AgentAbout,
+  type AgentAttachment,
   type AgentEvent,
   type AgentTranscript,
 } from "@/components/assistant/agent/model"
 import type { AgentChatSummary } from "@/components/assistant/agent/chats"
 import { imageSource, type PastedImage } from "@/components/assistant/agent/images"
+import { boundAbout } from "@/components/assistant/agent/about"
 
 /**
  * The conversations going on in this tab, kept outside any page.
@@ -32,7 +36,7 @@ import { imageSource, type PastedImage } from "@/components/assistant/agent/imag
  * the dock in the shell says how it is doing and goes back to it. Remote Desktop's
  * sessions outlive their page the same way.
  *
- * Each subject — a deployment's environment, a draft, the server — has one chat in
+ * Each subject — a deployment's environment, a draft, a database, the server — has one chat in
  * front at a time; another opened from its history, or a new one, takes its place
  * while the one before goes on answering. A chat is the server's and is saved
  * there, so one opened again is read back from it (`openAgentChat`), and one another
@@ -53,6 +57,11 @@ export type AgentScope =
       environmentName: string
     }
   | { kind: "draft"; draftId: string; name: string }
+  | { kind: "database"; databaseId: number; name: string }
+  /**
+   * The whole server. Which page a chat of it was begun from is the chat's own
+   * (`AgentTranscript.about`), not the subject's: every server chat shares this one.
+   */
   | { kind: "server"; name: string }
 
 export interface AgentSession {
@@ -83,21 +92,42 @@ export interface AgentSession {
   moved: boolean
 }
 
-export const agentScopeKey = (scope: AgentScope) =>
-  scope.kind === "draft"
-    ? `draft.${scope.draftId}`
-    : scope.kind === "server"
-      ? "server"
-      : `deploy.${scope.environmentId}`
+export function agentScopeKey(scope: AgentScope) {
+  switch (scope.kind) {
+    case "draft":
+      return `draft.${scope.draftId}`
+    case "database":
+      return `database.${scope.databaseId}`
+    case "server":
+      return "server"
+    case "deployment":
+      return `deploy.${scope.environmentId}`
+  }
+}
 
-export const agentPageOf = (scope: AgentScope) =>
-  // The new-project page opens exactly where it was left; naming the draft would ask
-  // it to start that draft over.
-  scope.kind === "draft"
-    ? "/deploy/new"
-    : scope.kind === "server"
-      ? "/assistant"
-      : `/deploy/${scope.projectId}/assistant`
+export function agentPageOf(scope: AgentScope) {
+  switch (scope.kind) {
+    case "draft":
+      // The new-project page opens exactly where it was left; naming the draft
+      // would ask it to start that draft over.
+      return "/deploy/new"
+    case "database":
+      return `/databases/${scope.databaseId}/assistant`
+    case "server":
+      return "/assistant"
+    case "deployment":
+      return `/deploy/${scope.projectId}/assistant`
+  }
+}
+
+/**
+ * Every page that draws a subject's chat in front, which the dock stays off: a
+ * database's is its own page and the column beside its SQL editor.
+ */
+export function agentPagesOf(scope: AgentScope): string[] {
+  const page = agentPageOf(scope)
+  return scope.kind === "database" ? [page, `/databases/${scope.databaseId}/query`] : [page]
+}
 
 /** The saved chat a session is, once the server has named it. */
 export const agentChatId = (session: AgentSession) =>
@@ -110,6 +140,8 @@ export function agentChatHref(chat: Pick<AgentChatSummary, "id" | "scope">) {
     return `/deploy/${scope.deployment}/assistant?chat=${encodeURIComponent(chat.id)}`
   if (scope.kind === "draft" && scope.draft)
     return `/deploy/new?draft=${encodeURIComponent(scope.draft)}`
+  if (scope.kind === "database" && scope.database)
+    return `/databases/${scope.database}/assistant?chat=${encodeURIComponent(chat.id)}`
   return `/assistant?chat=${encodeURIComponent(chat.id)}`
 }
 
@@ -151,11 +183,11 @@ export function onAgentChatsChanged(listener: () => void) {
   }
 }
 
-function blank(scope: AgentScope, mode?: AssistantMode): AgentSession {
+function blank(scope: AgentScope, mode?: AssistantMode, about?: AgentAbout): AgentSession {
   return {
     key: crypto.randomUUID(),
     scope,
-    transcript: EMPTY_AGENT,
+    transcript: about ? { ...EMPTY_AGENT, about } : EMPTY_AGENT,
     mode,
     dismissed: false,
     flight: null,
@@ -215,9 +247,16 @@ function wrote(transcript: AgentTranscript, id: string) {
 }
 
 function turnPath(scope: AgentScope) {
-  if (scope.kind === "draft") return `/deploy/drafts/${encodeURIComponent(scope.draftId)}/assistant`
-  if (scope.kind === "server") return "/assistant/chat"
-  return `/deploy/${scope.projectId}/assistant`
+  switch (scope.kind) {
+    case "draft":
+      return `/deploy/drafts/${encodeURIComponent(scope.draftId)}/assistant`
+    case "database":
+      return `/databases/${scope.databaseId}/assistant`
+    case "server":
+      return "/assistant/chat"
+    case "deployment":
+      return `/deploy/${scope.projectId}/assistant`
+  }
 }
 
 /** The chat is answering a press in another tab: the server's word for it. */
@@ -309,11 +348,22 @@ async function stream(session: AgentSession, turn: string, body: Record<string, 
   }
 }
 
-export function askAgent(session: AgentSession, question: string, images: PastedImage[] = []) {
+/**
+ * One question, with what goes with it: images pasted into the box, and what the
+ * page let the person attach — the statement in the editor, a result — of which
+ * the chat draws only the labels.
+ */
+export function askAgent(
+  session: AgentSession,
+  question: string,
+  images: PastedImage[] = [],
+  attached: AgentAttachment[] = [],
+) {
   if (session.flight) return
   // Asking something else lets go of a press that was waiting to take over.
   session.held = undefined
   const turn = crypto.randomUUID()
+  const carried = boundAttached(attached)
   session.transcript = beginTurn(
     session.transcript,
     turn,
@@ -324,11 +374,18 @@ export function askAgent(session: AgentSession, question: string, images: Pasted
       width: image.width,
       height: image.height,
     })),
+    carried.map((one) => one.label),
   )
   publish()
   const body: Record<string, unknown> = { conversation: session.transcript.conversation, question }
   if (images.length > 0) {
     body.images = images.map(({ mediaType, data, thumb }) => ({ mediaType, data, thumb }))
+  }
+  if (carried.length > 0) body.attached = carried
+  // The page a chat was begun from is told with the press that begins it on the
+  // server; after that it is part of what the conversation already knows.
+  if (!body.conversation && session.scope.kind === "server" && session.transcript.about) {
+    body.about = session.transcript.about
   }
   void stream(session, turn, body)
 }
@@ -391,14 +448,24 @@ export function stopAgent(session: AgentSession) {
  * A new chat in front for the subject. The one before goes on if it is answering,
  * and stays in the history either way.
  */
-export function newAgentChat(scope: AgentScope): AgentSession {
+export function newAgentChat(scope: AgentScope, about?: AgentAbout): AgentSession {
   const before = currentFor(scope)
-  if (before.transcript.turns.length === 0 && !before.loading && !before.opened) return before
-  const fresh = blank(scope, before.mode)
+  if (before.transcript.turns.length === 0 && !before.loading && !before.opened) {
+    // An empty chat in front is the new one; it takes the page it is now begun
+    // from, or lets go of one it was begun from before.
+    if (!sameAbout(before.transcript.about, about)) {
+      before.transcript = about ? { ...before.transcript, about } : { ...EMPTY_AGENT }
+      publish()
+    }
+    return before
+  }
+  const fresh = blank(scope, before.mode, about)
   install(fresh)
   publish()
   return fresh
 }
+
+const sameAbout = (a?: AgentAbout, b?: AgentAbout) => a?.path === b?.path && a?.title === b?.title
 
 export function setAgentMode(session: AgentSession, mode: AssistantMode) {
   session.mode = mode
@@ -475,7 +542,15 @@ function readBack(read: { chat: AgentChatSummary; lines: unknown[] }, id: string
     running: read.chat.running,
     imageAt: (image) => agentChatImageUrl(id, image),
   })
-  return { ...transcript, conversation: id, title: read.chat.title || transcript.title }
+  // Drawn as a link back, so it is held to the dashboard's own addresses whoever
+  // wrote it.
+  const about = read.chat.scope?.about ? boundAbout(read.chat.scope.about) : undefined
+  return {
+    ...transcript,
+    conversation: id,
+    title: read.chat.title || transcript.title,
+    ...(about && { about }),
+  }
 }
 
 /**

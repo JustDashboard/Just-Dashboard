@@ -109,7 +109,14 @@ export type AgentEvent =
    * The person's own acts, which only a saved chat's lines carry: each question
    * asked and each Allow or Decline pressed, in order among what was streamed.
    */
-  | { type: "question"; text: string; images?: AgentSavedImage[]; at?: string }
+  | {
+      type: "question"
+      text: string
+      images?: AgentSavedImage[]
+      /** What the person attached to it, by its label: its text is never kept to draw. */
+      attached?: string[]
+      at?: string
+    }
   | { type: "decisions"; decisions: Record<string, boolean>; at?: string }
 
 export type AgentStepState = "running" | "waiting" | "done" | "failed" | "declined"
@@ -172,6 +179,8 @@ export interface AgentTurn {
   question: string
   /** The images asked with it. */
   images?: AgentImage[]
+  /** The labels of what it carried — "statement", "result · 20 rows" — never their text. */
+  attached?: string[]
   parts: AgentPart[]
   phase: AgentPhase
   error?: string
@@ -199,6 +208,53 @@ export interface AgentTranscript {
   freshNote?: string
   /** The saved chat's title. */
   title?: string
+  /** The page the chat was begun from, which its first question told the server. */
+  about?: AgentAbout
+}
+
+/** A page of the dashboard a chat was begun from: where it is, and what it is called. */
+export interface AgentAbout {
+  path: string
+  title: string
+}
+
+/**
+ * Something the person attached to a question, which the model reads with it: the
+ * statement in the editor, a result, an error, a plan. The page draws only the label.
+ */
+export interface AgentAttachment {
+  label: string
+  text: string
+}
+
+/** How many a question carries, and how long each part may be, as the server bounds them. */
+export const MAX_ATTACHED = 4
+export const ATTACHED_LABEL = 60
+export const ATTACHED_TEXT = 20_000
+
+/**
+ * What a question carries, as the server takes it: at most four, each label and
+ * text cut to its length, and an empty one left out. A text cut short says so, so
+ * the model does not read the end of a table as the end of the data.
+ */
+export function boundAttached(attached: AgentAttachment[]): AgentAttachment[] {
+  return attached
+    .map((one) => ({ label: one.label.trim(), text: one.text }))
+    .filter((one) => one.label !== "" && one.text.trim() !== "")
+    .slice(0, MAX_ATTACHED)
+    .map((one) => ({
+      label: clip(one.label, ATTACHED_LABEL),
+      text:
+        [...one.text].length > ATTACHED_TEXT
+          ? `${[...one.text].slice(0, ATTACHED_TEXT - 2).join("")}\n…`
+          : one.text,
+    }))
+}
+
+/** A string cut to `max` characters, counted as a person counts them, with an ellipsis. */
+function clip(text: string, max: number) {
+  const points = [...text]
+  return points.length > max ? `${points.slice(0, max - 1).join("")}…` : text
 }
 
 export const EMPTY_AGENT: AgentTranscript = { conversation: "", candidate: "", turns: [] }
@@ -302,6 +358,7 @@ export function beginTurn(
   id: string,
   question: string,
   images: AgentImage[] = [],
+  attached: string[] = [],
 ): AgentTranscript {
   // A question that was never sent, because another tab had the chat, gives way to
   // this one.
@@ -329,6 +386,7 @@ export function beginTurn(
         id,
         question,
         ...(images.length > 0 && { images }),
+        ...(attached.length > 0 && { attached }),
         parts: [],
         phase: "waiting",
         fresh: t.freshNote,
@@ -534,7 +592,10 @@ export function replayLines(
               return image
             })
         : []
-      t = beginTurn(t, turn, typeof event.text === "string" ? event.text : "", images)
+      const attached = Array.isArray(event.attached)
+        ? event.attached.filter((label): label is string => typeof label === "string" && !!label)
+        : []
+      t = beginTurn(t, turn, typeof event.text === "string" ? event.text : "", images, attached)
       t = withTurn(t, turn, (one) => ({ ...one, replayed: true }))
       continue
     }

@@ -17,7 +17,7 @@ A control center for every database on the server, even the ones nothing has con
 ## Working in the data
 
 - Table editor with staged, reviewed edits and a SQL editor with plans and stored programs (DELIMITER, GO and PL/SQL scripts)
-- An optional SQL assistant on your own key (Anthropic, OpenAI, Gemini, OpenRouter and others) or local model, set up once for the whole dashboard, told the schema and never the rows
+- An optional assistant on your own key (Anthropic, OpenAI, Gemini, OpenRouter and others) or local model, set up once for the whole dashboard: every connection has its own Assistant page to ask what it holds, what is slow, who can write to it and whether it is backed up, and the same chat sits beside the SQL editor, where the statement, a result, an error or a plan goes with a question only when you attach it. A protected connection is never sent to it
 - Schema browser, diagram, code generation, mock seed data written parents first, performance
 
 <table>

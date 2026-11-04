@@ -17,7 +17,7 @@ import { agentStatus, changesOf } from "@/components/assistant/agent/model"
 import {
   agentBusy,
   agentHref,
-  agentPageOf,
+  agentPagesOf,
   agentWorking,
   dismissAgent,
   endAgentSessions,
@@ -50,8 +50,9 @@ export function AgentDock() {
       // A chat read back from the history and put aside is not going on anywhere;
       // the one in front for its subject is, and so is one still answering.
       (isCurrentAgent(session) || agentBusy(session)) &&
-      // On its own page the chat is the page, and a setup's has the same one.
-      pathname !== agentPageOf(session.scope).split("?")[0],
+      // On its own page the chat is the page, and a setup's has the same one; a
+      // database's is also the column beside its SQL editor.
+      !agentPagesOf(session.scope).some((page) => pathname === page.split("?")[0]),
   )
   // Signing out, which remounts the shell for the next account, ends them.
   useEffect(() => endAgentSessions, [])

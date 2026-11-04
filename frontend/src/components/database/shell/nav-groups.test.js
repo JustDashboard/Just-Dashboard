@@ -14,9 +14,9 @@ const titles = (engine) =>
   ])
 
 describe("a database's pages as the rail's panel", () => {
-  test("Home alone, then the four groups and Settings' pages, in the engine's own words", () => {
+  test("Home and its Assistant, then the four groups and Settings' pages, in the engine's own words", () => {
     expect(titles(served("redis"))).toEqual([
-      [undefined, ["Home"]],
+      [undefined, ["Home", "Assistant"]],
       ["Work", ["Keys", "Console"]],
       ["Insights", ["Performance", "Logs"]],
       ["Operate", ["Access", "Backups", "Import", "Alerts"]],
@@ -59,6 +59,14 @@ describe("a database's pages as the rail's panel", () => {
       expect(pages(fork(flavor)).map((item) => item.title)).not.toContain("Version")
     }
     expect(pages(served("mysql")).map((item) => item.title)).not.toContain("Version")
+  })
+
+  test("the Assistant is offered only to a role that may control services", () => {
+    const [home] = databaseNavGroups(served("redis"), (section) => `/databases/7/${section}`)
+    expect(home.items.map((item) => [item.title, item.capability])).toEqual([
+      ["Home", undefined],
+      ["Assistant", "service.control"],
+    ])
   })
 
   test("a group the engine has nothing in is left out", () => {

@@ -3,6 +3,7 @@ import {
   Bell,
   ChartActivity,
   CloudDownload,
+  Code,
   CodeBracket,
   FileText,
   GridSquare,
@@ -62,6 +63,7 @@ export type EngineKind = "sql" | "document" | "keyvalue" | "cache" | "search"
 /** The pages one database can have. `home` is the path with nothing after the id. */
 export type SectionId =
   | "home"
+  | "assistant"
   | "data"
   | "query"
   | "search"
@@ -776,6 +778,18 @@ const SECTIONS: SectionSpec[] = [
     thing: "home",
   },
   {
+    // Beside Home, as a project's is beside its Overview: a conversation about
+    // this connection, which every kind of engine has. It is the window under the
+    // strip, so it is held to it like a workbench.
+    id: "assistant",
+    group: "home",
+    title: "Assistant",
+    icon: Sparkles,
+    kinds: ["sql", "document", "keyvalue", "cache", "search"],
+    workbench: true,
+    thing: "assistant",
+  },
+  {
     id: "data",
     group: "work",
     title: "Data",
@@ -823,7 +837,8 @@ const SECTIONS: SectionSpec[] = [
     id: "generate",
     group: "schema",
     title: "Generate",
-    icon: Sparkles,
+    // Sparkles is the assistant's, in the rail beside it.
+    icon: Code,
     kinds: ["sql"],
     needs: "orm",
     thing: "code generation",

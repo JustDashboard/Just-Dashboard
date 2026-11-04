@@ -2,7 +2,14 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { CheckCircle, Logout, MagnifyingGlass, Plus, RefreshClockwise } from "@/components/icons"
+import {
+  CheckCircle,
+  Logout,
+  MagnifyingGlass,
+  Plus,
+  RefreshClockwise,
+  Sparkles,
+} from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -26,6 +33,8 @@ import {
   type KnownDatabase,
 } from "@/components/database/shell/nav-groups"
 import { databaseIdFrom } from "@/components/database/shell/routes"
+import { askAboutHref, isAssistantPage } from "@/components/assistant/agent/about"
+import { pageTitle } from "@/components/assistant/ask-about"
 import { useSearchInventory } from "@/components/command-search/use-inventory"
 import { COMMAND_ICONS, KINDS, PAGE_PRODUCTS, ResultMark } from "@/components/command-search/marks"
 import { KEYCAP, Keycaps } from "@/components/command-search/keycaps"
@@ -290,7 +299,7 @@ function Palette({
             ...(learned?.driver === current.connection.driver ? learned : {}),
           },
           drivers.data,
-        ).sections
+        ).sections.filter((page) => page.id !== "assistant" || can("service.control"))
       : []
 
   const shown = (entries: NavEntry[]) =>
@@ -396,6 +405,19 @@ function Palette({
         run: () => void testNginx(),
       },
     )
+  }
+  if (can("service.control") && !isAssistantPage(pathname)) {
+    commands.push({
+      id: "command:ask",
+      kind: "command",
+      title: "Ask the assistant about this page",
+      detail: "Assistant",
+      icon: Sparkles,
+      hint: "Begins a chat about the whole server, told which page you are on.",
+      keywords: ["assistant", "ai", "chat", "help", "explain"],
+      explicit: true,
+      run: () => router.push(askAboutHref(currentHref, pageTitle(pathname))),
+    })
   }
   commands.push({
     id: "command:logout",

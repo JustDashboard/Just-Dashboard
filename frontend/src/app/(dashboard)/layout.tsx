@@ -18,6 +18,7 @@ import { WorkspaceCommandsProvider } from "@/components/workspace/commands"
 import { NetworkChangeConfirmation } from "@/components/network/change-confirmation"
 import { HeldSessionsHost, HeldSessionsProvider } from "@/components/remote-desktop/held-sessions"
 import { AgentDock } from "@/components/assistant/agent/dock"
+import { AskAboutPage } from "@/components/assistant/ask-about"
 
 /**
  * The page's name in the tab is what tells a row of dashboard tabs apart. This
@@ -90,8 +91,12 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                     <SidebarTrigger className="-ml-0.5 size-8 text-muted-foreground" />
                     <Logo />
                     {/* A phone has no ⌘K and the rail's search field is inside
-                      a closed sheet, so search had no way in at all here. */}
-                    <MobileSearch />
+                      a closed sheet, so search had no way in at all here; nor
+                      had asking the assistant about the page. */}
+                    <div className="ml-auto flex items-center gap-1">
+                      <AskAboutPage />
+                      <MobileSearch />
+                    </div>
                   </header>
                   {/* The scroll lives here rather than on the document, which lets a
               page ask for the remaining height (`<Page fill>`) instead of
@@ -126,7 +131,7 @@ function MobileSearch() {
       variant="ghost"
       size="icon-sm"
       aria-label="Search"
-      className="ml-auto text-muted-foreground"
+      className="text-muted-foreground"
       onClick={palette.open}
     >
       <MagnifyingGlass className="size-4" />
