@@ -93,6 +93,7 @@ export type AgentEvent =
       said?: string
       output?: string
       change?: AgentChange
+      terminal?: AgentTerminal
     }
   | { type: "link"; link: AgentLink }
   | {
@@ -121,6 +122,32 @@ export type AgentEvent =
 
 export type AgentStepState = "running" | "waiting" | "done" | "failed" | "declined"
 
+/**
+ * The chat's terminal window, under a call that typed into it or read it: which
+ * window (`/terminal?session=` opens it), what it is doing now, and what it asked.
+ */
+export interface AgentTerminal {
+  session: string
+  state: "finished" | "running" | "password" | "input" | "closed"
+  prompt?: string
+}
+
+/** The terminal's tools, which work in the chat's own window. */
+export const TERMINAL_TOOLS = ["terminal_run", "terminal_send", "terminal_read"]
+
+/** The newest call in a chat that left its terminal window in a state worth saying. */
+export function latestTerminal(transcript: AgentTranscript): AgentStep | undefined {
+  for (let at = transcript.turns.length - 1; at >= 0; at--) {
+    const parts = transcript.turns[at].parts
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const part = parts[i]
+      if (part.kind === "step" && TERMINAL_TOOLS.includes(part.call.tool) && part.terminal) {
+        return part
+      }
+    }
+  }
+}
+
 export interface AgentStep {
   kind: "step"
   call: AgentCall
@@ -130,6 +157,7 @@ export interface AgentStep {
   said?: string
   output?: string
   change?: AgentChange
+  terminal?: AgentTerminal
 }
 
 /** A piece of an answer, in the order it arrived. */
@@ -456,6 +484,7 @@ export function applyEvent(t: AgentTranscript, id: string, event: AgentEvent): A
           said: event.said,
           output: event.output,
           change: event.change,
+          terminal: event.terminal,
         })),
       )
     case "link":

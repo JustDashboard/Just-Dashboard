@@ -16,9 +16,15 @@ import { Conversation } from "@/components/assistant/elements/conversation"
 import { PromptInput } from "@/components/assistant/elements/prompt"
 import { Suggestion } from "@/components/assistant/elements/suggestion"
 import { ModeMenu } from "@/components/assistant/agent/mode-menu"
-import { ApprovalCard, LinkCard, StepRow } from "@/components/assistant/agent/step"
+import {
+  AgentTerminalContext,
+  ApprovalCard,
+  LinkCard,
+  StepRow,
+} from "@/components/assistant/agent/step"
 import {
   answering,
+  latestTerminal,
   pendingSteps,
   usageLine,
   type AgentAbout,
@@ -54,6 +60,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Toggle } from "@/components/ui/toggle"
+import { post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { Icon } from "@/components/icons"
 
@@ -207,172 +214,190 @@ export function AgentChat({
   }
   const suggest = (suggestion: AgentSuggestion) =>
     askAgent(session, suggestion.question, [], suggestion.attached)
+  // What a command in the chat's terminal asks the person: the newest call that
+  // left it waiting, and the way to type into it. A password typed while the
+  // assistant has stopped working is the person's go-ahead, so it carries on.
+  const terminalStep = latestTerminal(transcript)?.call.id
+  const terminal = useMemo(
+    () => ({
+      latest: terminalStep,
+      type: async (text: string) => {
+        await post(`/assistant/chats/${encodeURIComponent(agentChatId(session))}/terminal`, {
+          text,
+        })
+        if (!agentBusy(session)) askAgent(session, "I've typed the password.")
+      },
+    }),
+    [terminalStep, session],
+  )
   const column = cn(!compact && "mx-auto w-full max-w-3xl")
   return (
     <MotionConfig reducedMotion="user">
-      <div data-slot="agent-chat" className="flex min-h-0 flex-1 flex-col">
-        {session.loading ? (
-          <ChatLoading className={column} />
-        ) : session.loadError ? (
-          <div className={cn("flex-1 p-4", column)}>
-            <Notice tone="danger" title="This chat could not be read">
-              <p>{session.loadError}</p>
-              <Button
-                size="xs"
-                variant="outline"
-                className="mt-2"
-                onClick={() => void openAgentChat(session.scope, agentChatId(session))}
-              >
-                Try again
-              </Button>
-            </Notice>
-          </div>
-        ) : (
-          <Conversation
-            label="Conversation with the assistant"
-            busy={agentWorking(session)}
-            contentClassName={cn(compact ? "gap-5 p-3" : "px-4 pt-6 pb-6", column)}
-          >
-            {transcript.about && <AboutChip about={transcript.about} />}
-            {transcript.turns.length === 0 && (
-              <Empty
-                product={product}
-                title={title}
-                description={description}
-                suggestions={suggestions}
-                compact={compact}
-                onAsk={suggest}
-              />
-            )}
-            {transcript.turns.map((turn) => (
-              <TurnView
-                key={turn.id}
-                turn={turn}
-                product={product}
-                current={turn === last}
-                elsewhere={session.elsewhere && turn === last}
-                codeBlock={codeBlock}
-                onDecide={(id, allow) => decideAgent(session, id, allow)}
-              />
-            ))}
-          </Conversation>
-        )}
-        <div className={cn("shrink-0", column)}>
-          <AnimatePresence initial={false}>
-            {transcript.tools === false && (
-              <Reveal key="tools">
-                <div className="px-3 pb-2">
-                  <FormNote tone="warning">
-                    This model is set up without tools, so it can only answer from what the page
-                    shows. Turn tools on in its settings, or switch to a provider that has them.
-                  </FormNote>
-                </div>
-              </Reveal>
-            )}
-            {!session.flight && (session.elsewhere || session.held) && (
-              <Reveal key="elsewhere">
-                <ChatBar
-                  slot="agent-elsewhere"
-                  live
-                  text="This chat is running in another tab."
-                  action="Take over"
-                  onAction={() => takeOverAgent(session)}
-                />
-              </Reveal>
-            )}
-            {!session.flight && !session.elsewhere && session.moved && (
-              <Reveal key="moved">
-                <ChatBar
-                  slot="agent-moved"
-                  text="Continued somewhere else."
-                  action="Open it here"
-                  onAction={() => void openAgentChat(session.scope, agentChatId(session))}
-                />
-              </Reveal>
-            )}
-          </AnimatePresence>
-          {attachable.length > 0 && (
-            <div
-              data-slot="agent-attach"
-              role="group"
-              aria-label="What goes with the question"
-              className="flex min-w-0 flex-wrap items-center gap-1.5 px-3 pb-1.5"
-            >
-              {attachable.map((one) => (
-                <Toggle
-                  key={one.id}
-                  size="sm"
+      <AgentTerminalContext.Provider value={terminal}>
+        <div data-slot="agent-chat" className="flex min-h-0 flex-1 flex-col">
+          {session.loading ? (
+            <ChatLoading className={column} />
+          ) : session.loadError ? (
+            <div className={cn("flex-1 p-4", column)}>
+              <Notice tone="danger" title="This chat could not be read">
+                <p>{session.loadError}</p>
+                <Button
+                  size="xs"
                   variant="outline"
-                  pressed={chosen.includes(one.id)}
-                  onPressedChange={(on) =>
-                    setChosen((held) =>
-                      on ? [...held, one.id] : held.filter((id) => id !== one.id),
-                    )
-                  }
-                  aria-label={one.description}
-                  className="h-7 px-2 text-xs data-[state=off]:text-muted-foreground"
+                  className="mt-2"
+                  onClick={() => void openAgentChat(session.scope, agentChatId(session))}
                 >
-                  {one.label.charAt(0).toUpperCase() + one.label.slice(1)}
-                </Toggle>
-              ))}
+                  Try again
+                </Button>
+              </Notice>
             </div>
+          ) : (
+            <Conversation
+              label="Conversation with the assistant"
+              busy={agentWorking(session)}
+              contentClassName={cn(compact ? "gap-5 p-3" : "px-4 pt-6 pb-6", column)}
+            >
+              {transcript.about && <AboutChip about={transcript.about} />}
+              {transcript.turns.length === 0 && (
+                <Empty
+                  product={product}
+                  title={title}
+                  description={description}
+                  suggestions={suggestions}
+                  compact={compact}
+                  onAsk={suggest}
+                />
+              )}
+              {transcript.turns.map((turn) => (
+                <TurnView
+                  key={turn.id}
+                  turn={turn}
+                  product={product}
+                  current={turn === last}
+                  elsewhere={session.elsewhere && turn === last}
+                  codeBlock={codeBlock}
+                  onDecide={(id, allow) => decideAgent(session, id, allow)}
+                />
+              ))}
+            </Conversation>
           )}
-          <PromptInput
-            busy={busy}
-            // A chat still being read back has no conversation to carry on yet.
-            disabled={session.loading}
-            label="Ask the assistant"
-            placeholder={placeholder}
-            acceptImages
-            imagesNote={
-              <FormNote>
-                Images are sent as they are: masking reads text, so a secret in a screenshot reaches
-                the model.
-              </FormNote>
-            }
-            rows={compact ? 1 : 2}
-            note={
-              waiting.length > 0 &&
-              !session.held && (
-                <FormNote>Asking something else declines what it is waiting on.</FormNote>
-              )
-            }
-            toolbar={
-              <>
-                <ModelPicker settings={settings} onChanged={agentModelChanged} />
-                <ModeMenu mode={mode} onChange={(next) => setAgentMode(session, next)} />
-                {transcript.turns.length > 0 && (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="ghost"
-                    aria-label="New chat"
-                    onClick={onNew ?? (() => newAgentChat(session.scope))}
-                    className="text-muted-foreground"
+          <div className={cn("shrink-0", column)}>
+            <AnimatePresence initial={false}>
+              {transcript.tools === false && (
+                <Reveal key="tools">
+                  <div className="px-3 pb-2">
+                    <FormNote tone="warning">
+                      This model is set up without tools, so it can only answer from what the page
+                      shows. Turn tools on in its settings, or switch to a provider that has them.
+                    </FormNote>
+                  </div>
+                </Reveal>
+              )}
+              {!session.flight && (session.elsewhere || session.held) && (
+                <Reveal key="elsewhere">
+                  <ChatBar
+                    slot="agent-elsewhere"
+                    live
+                    text="This chat is running in another tab."
+                    action="Take over"
+                    onAction={() => takeOverAgent(session)}
+                  />
+                </Reveal>
+              )}
+              {!session.flight && !session.elsewhere && session.moved && (
+                <Reveal key="moved">
+                  <ChatBar
+                    slot="agent-moved"
+                    text="Continued somewhere else."
+                    action="Open it here"
+                    onAction={() => void openAgentChat(session.scope, agentChatId(session))}
+                  />
+                </Reveal>
+              )}
+            </AnimatePresence>
+            {attachable.length > 0 && (
+              <div
+                data-slot="agent-attach"
+                role="group"
+                aria-label="What goes with the question"
+                className="flex min-w-0 flex-wrap items-center gap-1.5 px-3 pb-1.5"
+              >
+                {attachable.map((one) => (
+                  <Toggle
+                    key={one.id}
+                    size="sm"
+                    variant="outline"
+                    pressed={chosen.includes(one.id)}
+                    onPressedChange={(on) =>
+                      setChosen((held) =>
+                        on ? [...held, one.id] : held.filter((id) => id !== one.id),
+                      )
+                    }
+                    aria-label={one.description}
+                    className="h-7 px-2 text-xs data-[state=off]:text-muted-foreground"
                   >
-                    <Plus />
-                    <span className="max-sm:hidden">New</span>
-                  </Button>
-                )}
-              </>
-            }
-            onAsk={ask}
-            onStop={() => stopAgent(session)}
-            className="pb-2"
-          />
-          <p
-            data-slot="agent-sends"
-            className={cn(
-              "px-4 pb-2 text-micro text-pretty transition-colors duration-300",
-              rows > 0 ? "text-warning" : "text-muted-foreground",
+                    {one.label.charAt(0).toUpperCase() + one.label.slice(1)}
+                  </Toggle>
+                ))}
+              </div>
             )}
-          >
-            {rows > 0
-              ? `Sends ${assistantDestination(settings)} your question with ${rows.toLocaleString("en-US")} ${rows === 1 ? "row" : "rows"} of the result, ${sends}, with secret values masked.`
-              : `Sends ${assistantDestination(settings)} your question, ${sends}, with secret values masked.`}
-          </p>
+            <PromptInput
+              busy={busy}
+              // A chat still being read back has no conversation to carry on yet.
+              disabled={session.loading}
+              label="Ask the assistant"
+              placeholder={placeholder}
+              acceptImages
+              imagesNote={
+                <FormNote>
+                  Images are sent as they are: masking reads text, so a secret in a screenshot
+                  reaches the model.
+                </FormNote>
+              }
+              rows={compact ? 1 : 2}
+              note={
+                waiting.length > 0 &&
+                !session.held && (
+                  <FormNote>Asking something else declines what it is waiting on.</FormNote>
+                )
+              }
+              toolbar={
+                <>
+                  <ModelPicker settings={settings} onChanged={agentModelChanged} />
+                  <ModeMenu mode={mode} onChange={(next) => setAgentMode(session, next)} />
+                  {transcript.turns.length > 0 && (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      aria-label="New chat"
+                      onClick={onNew ?? (() => newAgentChat(session.scope))}
+                      className="text-muted-foreground"
+                    >
+                      <Plus />
+                      <span className="max-sm:hidden">New</span>
+                    </Button>
+                  )}
+                </>
+              }
+              onAsk={ask}
+              onStop={() => stopAgent(session)}
+              className="pb-2"
+            />
+            <p
+              data-slot="agent-sends"
+              className={cn(
+                "px-4 pb-2 text-micro text-pretty transition-colors duration-300",
+                rows > 0 ? "text-warning" : "text-muted-foreground",
+              )}
+            >
+              {rows > 0
+                ? `Sends ${assistantDestination(settings)} your question with ${rows.toLocaleString("en-US")} ${rows === 1 ? "row" : "rows"} of the result, ${sends}, with secret values masked.`
+                : `Sends ${assistantDestination(settings)} your question, ${sends}, with secret values masked.`}
+            </p>
+          </div>
         </div>
-      </div>
+      </AgentTerminalContext.Provider>
     </MotionConfig>
   )
 }

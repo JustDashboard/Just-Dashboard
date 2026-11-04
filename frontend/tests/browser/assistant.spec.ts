@@ -1361,3 +1361,106 @@ test("on a phone handing it over is the whole screen, with the way back", async 
   await expect(panel).toHaveCount(0)
   await expect(page.locator("[data-slot='setup-assistant-offer']")).toBeVisible()
 })
+
+/* ------------------------------------------------------------ the terminal */
+
+test("a password the terminal asks for is typed by the person, straight into the window", async ({
+  page,
+}) => {
+  const asking = {
+    id: "t1",
+    tool: "terminal_run",
+    label: "In the terminal: sudo apt-get update",
+    kind: "change",
+    reason: "Refreshing the package lists.",
+    input: { command: "sudo apt-get update", wait: 20 },
+  }
+  const mocked = await mockAssistant(page, [
+    [
+      start,
+      { type: "call", call: asking },
+      {
+        type: "called",
+        id: "t1",
+        tool: "terminal_run",
+        ok: true,
+        said: "waiting for your password",
+        output: "[sudo] password for ubuntu:",
+        terminal: { session: "ws-42", state: "password", prompt: "[sudo] password for ubuntu:" },
+      },
+      { type: "text", text: "It is waiting for your password." },
+      done(),
+    ],
+    [start, { type: "text", text: "The package lists are up to date." }, done()],
+  ])
+  const typed: unknown[] = []
+  await page.route(/\/api\/v1\/assistant\/chats\/[^/]+\/terminal$/, (route) => {
+    typed.push(route.request().postDataJSON())
+    return route.fulfill({ status: 204 })
+  })
+  await page.goto("/deploy/7/assistant")
+  await ask(page, "Update the package lists")
+  const card = chat(page).locator("[data-slot='agent-terminal']")
+  await expect(card).toHaveAttribute("data-state", "password")
+  await expect(card).toContainText("Waiting for your password")
+  await expect(card).toContainText("[sudo] password for ubuntu:")
+  await expect(card.getByRole("link", { name: /Open in Terminal/ })).toHaveAttribute(
+    "href",
+    "/terminal?session=ws-42",
+  )
+  await expect(
+    chat(page).locator("[data-slot='agent-step'][data-tool='terminal_run']"),
+  ).toContainText("sudo apt-get update")
+  const field = card.getByLabel("Password for the terminal")
+  await expect(field).toHaveAttribute("type", "password")
+  await field.fill("correct-horse-battery")
+  await card.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(card).toContainText("Sent to the terminal")
+  expect(typed).toEqual([{ text: "correct-horse-battery" }])
+  // The assistant carries on, told only that it was typed.
+  await expect(chat(page)).toContainText("The package lists are up to date.")
+  expect(mocked.sent).toHaveLength(2)
+  expect(mocked.sent[1]).toMatchObject({ conversation: "c1", question: "I've typed the password." })
+  expect(JSON.stringify(mocked.sent)).not.toContain("correct-horse-battery")
+})
+
+test("a command still running in the terminal says so, with the way to its window", async ({
+  page,
+}) => {
+  await mockAssistant(page, [
+    [
+      start,
+      {
+        type: "call",
+        call: {
+          id: "t1",
+          tool: "terminal_run",
+          label: "In the terminal: apt-get upgrade -y",
+          kind: "change",
+          input: { command: "apt-get upgrade -y", wait: 20 },
+        },
+      },
+      {
+        type: "called",
+        id: "t1",
+        tool: "terminal_run",
+        ok: true,
+        said: "still running",
+        output: "Unpacking libssl3 ...",
+        terminal: { session: "ws-7", state: "running" },
+      },
+      { type: "text", text: "It is still upgrading; I will check back." },
+      done(),
+    ],
+  ])
+  await page.goto("/deploy/7/assistant")
+  await ask(page, "Upgrade everything")
+  const card = chat(page).locator("[data-slot='agent-terminal']")
+  await expect(card).toHaveAttribute("data-state", "running")
+  await expect(card).toContainText("Still running in its terminal")
+  await expect(card.getByRole("link", { name: /Open in Terminal/ })).toHaveAttribute(
+    "href",
+    "/terminal?session=ws-7",
+  )
+  await expect(card.getByLabel("Password for the terminal")).toHaveCount(0)
+})

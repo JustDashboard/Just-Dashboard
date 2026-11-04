@@ -15,6 +15,7 @@ import {
   endTurn,
   holdTurn,
   inputLines,
+  latestTerminal,
   parseEvent,
   pendingSteps,
   readLines,
@@ -454,4 +455,42 @@ describe("a chat in two tabs", () => {
     t = takeOverTurn(t, "t2")
     expect(t.turns.map((turn) => turn.phase)).toEqual(["stopped", "waiting"])
   })
+})
+
+test("a terminal call keeps its window, and the newest one is what the chat asks about", () => {
+  let t = beginTurn(EMPTY_AGENT, "q", "Upgrade it")
+  const call = (id) => ({
+    id,
+    tool: "terminal_run",
+    label: "x",
+    kind: "change",
+    input: { command: "x" },
+  })
+  t = applyEvent(t, "q", { type: "call", call: call("a") })
+  t = applyEvent(t, "q", {
+    type: "called",
+    id: "a",
+    tool: "terminal_run",
+    ok: true,
+    said: "still running",
+    terminal: { session: "ws", state: "running" },
+  })
+  t = applyEvent(t, "q", { type: "call", call: call("b") })
+  t = applyEvent(t, "q", {
+    type: "called",
+    id: "b",
+    tool: "terminal_run",
+    ok: true,
+    said: "waiting for your password",
+    terminal: { session: "ws", state: "password", prompt: "Password:" },
+  })
+  t = applyEvent(t, "q", {
+    type: "call",
+    call: { id: "c", tool: "api_request", label: "y", kind: "read" },
+  })
+  t = applyEvent(t, "q", { type: "called", id: "c", tool: "api_request", ok: true })
+  const latest = latestTerminal(t)
+  expect(latest?.call.id).toBe("b")
+  expect(latest?.terminal).toEqual({ session: "ws", state: "password", prompt: "Password:" })
+  expect(latestTerminal(EMPTY_AGENT)).toBeUndefined()
 })
