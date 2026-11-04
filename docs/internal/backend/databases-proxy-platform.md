@@ -829,8 +829,9 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
   - *Refused*: rows, structure, imports, an import from another server, a restore, a copy, the drop,
     a major-version upgrade and its revert, roles, privileges, settings, extensions, keys, streams, ACL
     users, documents, collections, indexes, validation rules, the profiler, a statistics reset,
-    row-level security policies and their switches, and the editor's assistant, which changes nothing
-    but would send the connection's structure to a model.
+    row-level security policies and their switches, and the connection's assistant, which would send
+    what is in it to a model (every other chat's call into a protected connection is answered with why by
+    `agentProtected`, so nothing in it reaches a model from anywhere).
   It guards the dashboard's own controls and is as strong as the classification — a `SELECT` that
   calls a function of the operator's own which writes passes (the built-in ones that run SQL or outlive
   the rollback are not reads, see [the query runner](#the-query-runner)); it is not a sandbox around the
@@ -1095,13 +1096,14 @@ a saved query
 (`GET`/`POST …/queries`, `PUT`/`DELETE …/queries/{qid}`, `db_saved_queries`) is dashboard state, so it
 stays editable on a protected connection.
 
-### The editor's assistant
+### A connection's assistant
 
-The SQL editor carries an assistant beside the statement (`internal/assistant`,
-`api/handlers_db_assistant.go`): it drafts a statement from a question, says why a statement failed
-and what a plan does, and on PostgreSQL drafts row-level security policies. It is off until an
-administrator chooses who answers it, and what it is sent and what it may do are decided here, not by
-the page.
+A connection has the dashboard's one assistant, told about that connection
+(`api/handlers_assistant_database.go`, `POST /databases/{id}/assistant`): the same conversation as a
+deployment's and the server's ([the dashboard's assistant](../deployments/operator.md)), on the connection's own
+*Assistant* page and in the SQL editor's third column, which are one chat. It replaced the editor's own
+assistant, which drafted statements from the structure alone and ran nothing; what it is sent and what it may do
+are decided here, not by the page.
 
 - **The provider is the operator's own, set up once for every page.** It is chosen on `/assistant`, among
   Anthropic — a Claude model from a closed list (`assistant.AnthropicModels`) and an API key — hosted providers
@@ -1116,71 +1118,44 @@ the page.
   there) — so a mistyped key is refused under its field. The key is never read back, and a blank key keeps the
   stored one only for the same provider at the same address, so a key is never sent to a server typed in after it.
   No provider request follows a redirect, because the key travels in a header.
-- **What is sent is the structure.** A conversation begins by reading the schema in focus through the
-  catalogue the schema pages use (`assistant.ReadSchema`: `ListTables`, `BuildSchemaGraphWithLimit`
-  for 150 tables, and `DescribeTable` for up to eight more the first question names) and writing it
-  into the system prompt as tables and views with their columns, types, keys and references — never
-  row estimates, defaults or comments, any of which can be a value somebody typed. It is bounded
-  (`assistant.SchemaText`): the tables the question names, then the tables they reference and are
-  referenced by, then the rest, described up to 48,000 characters, named up to 12,000, then counted.
-  A row reaches the model only in a result attached to a question by the person asking: at most 50
-  rows of 30 columns and 200 characters a value, held to that on the server whatever the page sent.
-  The page cuts to the same bounds before sending, because the editor's results carry long text and
-  bytea whole and fifty rows of them would pass the request's 4 MiB limit.
-  The editor's statement, an error or a plan go only with the question that carries them, and every
-  value of the database stays out of the audit entry.
-- **Nothing runs.** A statement the assistant writes is text: the page opens it in a tab or writes it
-  at the cursor when the person presses to, and their own Run sends it, through the classifier like
-  any other. The one tool the model is offered, `describe_tables`, reads more of the same structure,
-  and only once the person allows it: an answer that asks for it ends with the calls pending, and
-  `POST …/assistant` with `allow: true` runs them (`false` declines them, which the model is told). A
-  question asked instead declines them too. The input of a call is checked field by field before
-  anybody is asked (`assistant.Calls`), and a call for anything else, or one that cannot be read,
-  runs nothing. An OpenAI-compatible server is offered no tool: many local models refuse a request
-  that carries one, so it is told the bounded schema and asked to say what it is missing.
-- **A conversation is held on the server** (`assistant.Store`), in memory, per person and
-  connection. Its system prompt and its tool are fixed when it begins and every turn is appended, so
-  what the provider is sent is the request before with the new turn added — the prompt cache, and the
-  reasoning a tool call was made with on the newest Claude models, both depend on that. A turn that
-  does not finish — stopped, failed, refused, cut off in the middle of a call — is undone back to
-  where it began. At most 200 conversations, 30 minutes idle and 40 turns; a restart, a change of the
-  settings (`Settings.Revision`) or another schema begins a new one.
-- **Refused on a protected connection, bounded and audited.** `POST /databases/{id}/assistant` is not
-  on `protectedRoutesAllowed`, so a protected connection refuses it with `409 connection_read_only`
-  before anything is read or sent. It takes `service.control`, the query route's capability. The
-  install has one budget of model calls whoever asks (20 a minute, a burst of 6) and answers four at
-  once. Each call is audited as `database.assistant.ask` or `database.assistant.tool`: the
-  connection, the person, the task, the provider and model, the tokens under `usage` (the audit log
-  redacts any field whose name says token; a turn stopped or failed part-way records what the provider
-  had counted by then, which for Anthropic is the input and for an OpenAI-compatible server, whose count
-  comes last, nothing), how it ended (`answered`, `asked`, `cut`, `refused`,
-  `cancelled`, `failed`) and what was attached by kind and count, never the question or a value.
-- **The answer streams** as one JSON object a line (`application/x-ndjson`): `start` (the
-  conversation, the model, what the schema text holds), `thinking`, `text`, `described` (what an
-  allowed call read), and `done` (why it ended, the tokens, the calls pending, whether the turn was
-  kept) or `error`. Everything that can refuse the request does so before the provider is asked, as an
-  ordinary error with its status, and closing the request stops the provider's answer. The Anthropic
-  request is the streamed Messages API, spoken over HTTP rather than through the SDK because it is one
-  request and the other provider is plain HTTP anyway: effort `medium`, thinking left adaptive, the
-  system prompt cached and the conversation under automatic caching, and the server-side refusal
-  fallback (`fallbacks: "default"`) for Opus and Sonnet. The OpenAI-compatible request carries the
-  model, the messages, the stream and the usage option, and nothing a server might not know.
+- **A chat begins knowing the connection and its structure, never a row.** The system prompt
+  (`assistant.DatabaseSystemPrompt`, `Server.databaseContext`) names the connection, its engine and version,
+  host, database, what it serves and the operator's notes, and — for a SQL engine that answers within eight
+  seconds — the structure of its default schema through the catalogue the schema pages use
+  (`assistant.ReadSchema`: `ListTables`, `BuildSchemaGraphWithLimit` for 150 tables) written as tables and views
+  with their columns, types, keys and references (`assistant.SchemaText`, bounded to 48,000 characters described
+  and 12,000 named) — never row estimates, defaults or comments, any of which can be a value somebody typed. One
+  that does not answer in time is read by the model later, through the routes.
+- **It reads and changes the connection as the person.** It is offered `api_request`/`find_routes`, `run_command`
+  and `open_page` with the connection's pages (`assistant.DatabaseTools`), and reaches the connection through its
+  routes under the person's own role: `POST /databases/{id}/query` runs one statement — a read, which the default
+  mode runs unasked, when the classifier says the statement only reads — and the rest of its routes read and
+  change the structure, the data, users, backups and settings, each through its own handler, classifier and
+  audit entry. A row reaches the model when a call reads it, masked like every answer.
+- **What the editor attaches goes with the question.** The editor's column can hand over the statement, the last
+  result (at most 50 rows of 30 columns, 200 characters a value, as a text table), the last error and the plan,
+  each by the person's own toggle, as a question's `attached` items (at most four, a label of 60 characters and
+  20,000 characters of text each). They are written after the question for the model; the page, the saved chat
+  and the audit entry keep the labels alone.
+- **A statement it writes is text until somebody runs it.** In the editor, a finished answer's statement offers
+  *Open in a tab*, *Insert* and *Copy*, and the person's own Run sends it through the classifier like any other.
+- **Refused on a protected connection, everywhere.** `POST /databases/{id}/assistant` is not on
+  `protectedRoutesAllowed`, so a protected connection refuses it with `409 connection_read_only` before anything is
+  read or sent, and any other chat's call to a protected connection's routes is answered with why and reads
+  nothing (`agentProtected`); only the list of connections and the connection's own record answer, so the
+  assistant can say it is protected. It takes `service.control` and a session, as a deployment's does, and its
+  presses are audited as `database.assistant.ask`/`.tool` with the connection's id. A connection's chats are
+  deleted with it (`forgetConnection`).
 - **The same provider answers three other questions**, each sent only when somebody presses for it:
   a drawing's *Describe a diagram* (`POST /boards/diagram`, the prompt alone, audited as
   `board.diagram`), a failed deployment's *Ask why it failed*
   (`POST /deploy/{id}/runs/{run}/diagnosis`, the run's record masked on the server first, audited as
   `deploy.run.diagnose`; [the deployment contract](../deployments/implementation.md) says what is sent),
-  and the dashboard's assistant — a deployment's *Diagnose* and page (`POST /deploy/{id}/assistant`),
-  a new deployment's (`POST /deploy/drafts/{draft}/assistant`) and the server's (`POST /assistant/chat`),
-  session-only, audited as `deploy.assistant.ask`/`.tool` and `assistant.chat.ask`/`.tool`: a conversation of
-  its own kind that acts as the person through the dashboard's own API, the databases' routes included —
-  `POST /databases/{id}/query` runs one statement, a read when the statement only reads — its answers masked
-  first, and saved as a chat ([the dashboard's assistant](../deployments/operator.md)). All of them share the install's budget of
-  model calls and its four answers at once, and the settings sheet names all four under *Used by*.
-- **Engines** come from the capability table: `assistant` is every engine with a dialect, and
-  `assistantPolicy` is PostgreSQL and its forks but CockroachDB. The editor offers the assistant to a
-  role with `service.control` on those engines; a failed statement and a plan offer a question of
-  their own once it is set up.
+  and the dashboard's assistant on its other subjects — a deployment's *Diagnose* and page
+  (`POST /deploy/{id}/assistant`), a new deployment's (`POST /deploy/drafts/{draft}/assistant`) and the server's
+  (`POST /assistant/chat`), session-only, audited as `deploy.assistant.ask`/`.tool` and
+  `assistant.chat.ask`/`.tool`. All of them share the install's budget of model calls (20 a minute, a burst of 6)
+  and its four answers at once.
 
 ### The table editor: rows, values and cells
 
@@ -3131,7 +3106,7 @@ and `protectReadOnlyConnections`.
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
-| `POST` | `/databases/{id}/assistant` | `service.control` | — | `database.assistant.ask`, `.tool` | refused |
+| `POST` | `/databases/{id}/assistant` | `service.control`, session | — | `database.assistant.ask`, `.tool` | refused |
 | `GET` | `/databases/{id}/browse` | read | — | — | — |
 | `GET` | `/databases/{id}/cell` | read | — | — | — |
 | `POST` | `/databases/{id}/changes` | `service.control` | by content: a delete | `database.rows.change` | by content |

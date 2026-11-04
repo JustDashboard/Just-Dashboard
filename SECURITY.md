@@ -27,9 +27,12 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   the exception: it is sent as it is, because masking reads text, so a secret in a screenshot reaches the
   model, as the box says while one waits to be sent. It acts through the dashboard's own
   routes as you, with your whole role — whatever you could do in the dashboard, including what runs commands
-  on the host — and every change is in the audit log under your name, marked as the assistant's. It cannot
-  sign in, change your password, second factor, passkeys or sessions, make an API key, uninstall the
-  dashboard, or attach to a terminal or a stream. It asks before any change unless you give it full access,
+  on the host — and every change is in the audit log under your name, marked as the assistant's. If your role
+  has the terminal, it can also run a shell command on the server as the terminal would, as the terminal's
+  account; a command that is not a plain read waits for your Allow unless you gave it full access, and each one
+  it runs is in the audit log. It cannot sign in, change your password, second factor, passkeys or sessions,
+  make an API key, uninstall the dashboard, attach to a terminal or a stream, or read a database connection
+  you marked protected. It asks before any change unless you give it full access,
   which runs everything your role allows without asking. Text it reads, such as a log line, can try to talk a
   model into something, so leave "Ask before changes" on where someone else's text can reach it. Its chats
   are yours alone, saved encrypted on the server.

@@ -1,11 +1,14 @@
 # The deployment assistant
 
 A project's **Assistant** page (`/deploy/{id}/assistant`) is the dashboard's assistant asked about one
-environment of one deployment, and the server's own chat (`POST /assistant/chat`) is the same assistant asked
-about the whole server. It answers anything and does what it is asked: it reads a project's code, logs,
+environment of one deployment, a database connection's **Assistant** page (`/databases/{id}/assistant`, and the SQL
+editor's column) is the same assistant asked about one connection, and the server's own chat
+(`POST /assistant/chat`) is the same assistant asked about the whole server — reached from `/assistant`, and from
+**Ask** in the top bar of every page, which opens a chat that knows the page it was opened from. It answers anything and does what it is asked: it reads a project's code, logs,
 requests, metrics and a database's rows, sets variables, domains and limits, runs a backup, deploys and rolls
 back, and reaches the rest of the dashboard — databases, backups, Docker, files, the firewall, the proxy, users —
-through the dashboard's own API. It is meant to be talked to as any general assistant is, and to look at the
+through the dashboard's own API, and the host itself through a shell command (`run_command`) as the terminal
+would run it. It is meant to be talked to as any general assistant is, and to look at the
 server only when the question is about it ([how it answers](#how-it-answers)). **Diagnose** on the overview opens the deployment's page and asks the diagnostic question. A new
 deployment can be handed to it too: it configures the draft, and the person presses Deploy (below).
 
@@ -88,7 +91,7 @@ instead, unless they chose full access. What still holds it is below, and
 | Mode | Runs without asking | Waits for the person |
 | --- | --- | --- |
 | Ask every time (`ask`) | Looking up an operation or a route, offering a shortcut | Every read and every change |
-| Ask before changes (`changes`, the default) | Reads, including a SQL statement that only reads | Every change |
+| Ask before changes (`changes`, the default) | Reads, including a SQL statement and a shell command that only read | Every change |
 | Full access (`full`) | Everything the person's role allows | Anything past `agentSteps` |
 
 The page sends the mode on every press; left out, it is the install's default, which an administrator
@@ -102,10 +105,21 @@ what the card says and how Allow is drawn. An `api_request` is read by its metho
 `POST /databases/{id}/query` is a read when its one statement is (`dbx.SingleStatementFor`, risk `read`), so a
 database is asked about without an Allow for each query in "changes".
 
+A `run_command` line is read by `assistant.ClassifyCommand`, conservatively, so that a misreading costs an Allow
+rather than a write nobody saw: it is a `read` only when it is plain — nothing written by a redirection except to
+`/dev/null` or another stream, no `$( )` or backticks, no subshell, group, here-document or background job — and
+every command in it is a program that only reads (`readPrograms`), or one that both reads and writes used with a
+subcommand or flags that only read (`systemctl status`, `docker ps`, `git log`, `nginx -t`, `crontab -l`,
+`iptables -L`), with the flags that make a reader write (`find -exec`/`-delete`, `sort -o`, `date -s`,
+`dmesg -c`, `journalctl --vacuum-*`) read as a change. It is `destructive` when any part removes, stops, kills,
+wipes or reboots (`rm`, `dd`, `mkfs.*`, `kill`, `reboot`, `systemctl stop`, `docker rm`, `apt purge`,
+`git reset`, `iptables -F`, `crontab -r`), and a `change` otherwise — `sed`, `curl`, an interpreter, an unknown
+program, anything not plain.
+
 ## The routes
 
-`POST /deploy/{id}/assistant[?environment=]`, `POST /deploy/drafts/{draft}/assistant` and `POST /assistant/chat`
-(`api/handlers_assistant_turn.go`) take a question or the answers to the calls the last answer is waiting on,
+`POST /deploy/{id}/assistant[?environment=]`, `POST /deploy/drafts/{draft}/assistant`, `POST /databases/{id}/assistant`
+and `POST /assistant/chat` (`api/handlers_assistant_turn.go`) take a question or the answers to the calls the last answer is waiting on,
 and stream the answer back as one JSON object a line (`application/x-ndjson`):
 
 | Body | What it does |
@@ -114,9 +128,12 @@ and stream the answer back as one JSON object a line (`application/x-ndjson`):
 | `{"conversation": "<id>", "question": "…"}` | Asks again in it; calls still waiting are declined in the same message |
 | `{"conversation": "<id>", "decisions": {"<call id>": true, …}}` | Answers the waiting calls: `true` runs one, `false` declines it, and a call left out is declined |
 | `…, "takeOver": true` | Carries on a chat a press is running elsewhere: that press stops, and this one goes on with the chat as it stood |
+| `…, "attached": [{"label": "Statement", "text": "…"}]` | Hands over up to four things with a question — the SQL editor's statement, last result, error or plan — each a one-line label of at most 60 characters and at most 20,000 characters of text. The model reads them after the question; the question's line, the saved chat and the audit entry keep the labels alone |
+| `{"conversation": "", "question": "…", "about": {"path": "/docker/stacks/web", "title": "web"}}` | The server's chat only, on the press that begins it: the page it was opened from (a dashboard path of at most 512 characters and a title of 120), which the prompt names and the chat keeps, sealed |
 
 Each is **session-only** and asks `service.control` (a deployment's sits in its group; the draft's in the draft
-group's `system.admin`): there is nobody to ask behind a key. A chat a press is running answers `409 chat_busy`
+group's `system.admin`; a database's behind the guard that refuses a protected connection with
+`409 connection_read_only`): there is nobody to ask behind a key. A chat a press is running answers `409 chat_busy`
 (JSON, not a stream) unless `takeOver` is set; the press it stops sends
 `{"type":"error","error":{"code":"taken_over",…}}` and ends.
 
@@ -134,10 +151,11 @@ A press that fails before it ran what it answered leaves those calls waiting, an
 whose provider fails partway keeps what already ran in the conversation (`c.Mark` is taken after
 each step), because what ran has run and the next question must be asked knowing that.
 
-Each press is audited as `deploy.assistant.ask`/`.tool`, `deploy.draft.assistant.ask`/`.tool` or
-`assistant.chat.ask`/`.tool`, with the provider, the model, the mode, the chat's first eight characters, the
-tokens, what ran, what was refused, the calls that could not run (`malformed`), what was allowed and declined by
-name, and `takeOver`. What was read is not written into the audit log. Every change it makes is also the route's
+Each press is audited as `deploy.assistant.ask`/`.tool`, `deploy.draft.assistant.ask`/`.tool`,
+`database.assistant.ask`/`.tool` or `assistant.chat.ask`/`.tool`, with the provider, the model, the mode, the
+chat's first eight characters, the tokens, what ran, what was refused, the calls that could not run (`malformed`),
+what was allowed and declined by name, `takeOver`, the labels of what was attached, the page a server chat was
+opened from (`about`), and each shell line it ran (`commands`, masked and cut at 300 characters). What was read is not written into the audit log. Every change it makes is also the route's
 own entry, as the person, with actor `assistant`.
 
 ## Saved chats
@@ -149,13 +167,15 @@ provider was last sent it. A chat carried on by another model goes on without th
 back, which the next would refuse (`agentCarryOver`). `assistant_chats` keeps one row per chat — owner, what it
 is about, the model, when, its steps and changes, whether calls wait, and the conversation and its title sealed
 with the master key, as the keyring is — and `assistant_chat_lines` what the page was shown, a sealed batch per
-save. A chat goes with its owner and with the deployment it is about (`ON DELETE CASCADE`). Each person keeps
+save. A chat goes with its owner and with the deployment it is about (`ON DELETE CASCADE`), and a database's
+with its connection (`forgetConnection`); `database_id` and the sealed `about_enc` were added to the table for
+those two scopes. Each person keeps
 their newest 200. `assistant_chat_images` keeps each image pasted into a chat whole, sealed, for the page to open
 large; it goes with its chat (see Pasted images).
 
 | Route | Does |
 | --- | --- |
-| `GET /assistant/chats[?deployment=&draft=&scope=server]` | The person's chats, the newest first, at most 100: id, title, scope, times, provider, model, `running`, `waiting`, steps, changes |
+| `GET /assistant/chats[?deployment=&draft=&database=&scope=]` | The person's chats, the newest first, at most 100: id, title, scope (with `database` for a connection's and `about` for a server chat opened from a page), times, provider, model, `running`, `waiting`, steps, changes. `scope` is `server`, `deployment`, `draft` or `database` |
 | `GET /assistant/chats/{chat}` | One chat and its `lines`: each question and each Allow/Decline press, and every line the stream sent, as sent, with `at`; a run of text is kept as one line |
 | `GET /assistant/chats/{chat}/images/{image}` | An image pasted into it, whole, as its bytes (`private, immutable`, `nosniff`, a sandboxing CSP); `404 not_found` once only its thumbnail is kept |
 | `PATCH /assistant/chats/{chat}` | Renames it (`{"title"}`) |
@@ -193,8 +213,9 @@ call with no id, two under one) is refused, as `assistant.ErrUnreadableAnswer`.
 | `call_operation` | Deployment, draft | Runs one operation under `/deploy` by name. `id` and `draft` are filled in, and another deployment's id is pointed at `api_request`; `env` defaults to the conversation's | by the route |
 | `wait_for_run` | Deployment | Waits for a run to end, or for up to 120 seconds | `read` |
 | `find_routes` | Every scope | Looks the API up by words or an area, with each route's method, path, words and kind, and the matching routes it cannot make with the reason; an empty query lists the areas | `free` |
-| `api_request` | Every scope | Makes any route of `/api/v1` as the person: `method`, `path`, `query`, `body`, `reason` | by the route |
-| `open_page` | Deployment, server | Offers a shortcut to a page from a closed list (`AgentPages`, `ServerPages`) | `free` |
+| `api_request` | Every scope | Makes any route of `/api/v1` as the person: `method`, `path`, `query`, `body`, `reason`. A route into a protected database connection is answered with why and reads nothing (`agentProtected`) | by the route |
+| `run_command` | Deployment, server, database | Runs one shell line on the host as the terminal's account (`term.Manager.RunCommand`): its login shell with `-l -c`, through `su` for an account that is not the dashboard's own, in the account's home, with a built environment (never the dashboard's, which holds its secrets: `PATH`, `HOME`, `USER`, `SHELL`, `TERM=dumb`, `DEBIAN_FRONTEND=noninteractive`, pagers off), nothing on standard input, and a deadline of 60 seconds or the call's `timeout` up to 300, past which its whole process group is stopped. It takes the terminal capability, checked on every call, and the terminal turned on. Its answer is the exit code, the account, how long it took and the last 24,000 bytes of what it wrote, masked; the page is sent its last 4 KB | by the line |
+| `open_page` | Deployment, server, database | Offers a shortcut to a page from a closed list (`AgentPages`, `ServerPages`, `DatabasePages` under `/databases/{id}`) | `free` |
 
 An answer to the model is its JSON, masked and cut at 24,000 bytes.
 
@@ -204,7 +225,11 @@ An answer to the model is its JSON, masked and cut at 24,000 bytes.
 — the server's hostname, the deployment and environment, the source, the build, the address, the health,
 the live release, the run in progress and the last run, masked — and how to work, and it lists the
 deployment's operations, grouped by what they do. `assistant.ServerSystemPrompt` is told the server's hostname
-and its deployments by id, name and last run. Every prompt (`writeAPI`) tells the model it has the whole
+and its deployments by id, name and last run, and, for a chat opened with **Ask** on a page, that page's title and
+address, with "this" most likely meaning what it shows. `assistant.DatabaseSystemPrompt` is told the connection —
+its name and id, engine and version, host, database, what it serves and the operator's notes — and, for a SQL
+engine that answers within eight seconds, the structure of its schema in focus, never a row
+([a connection's assistant](../backend/databases-proxy-platform.md#a-connections-assistant)). Every prompt (`writeAPI`) tells the model it has the whole
 dashboard through `api_request` and `find_routes`, lists the API's areas — each first path segment with its
 count of routes, a sentence (`agentAreaBlurbs`) and a few reads, built from `chi.Walk` when the catalogue is —
 says how to learn a body's shape (GET the resource first, or read the 400 the route answers), how to query a
@@ -212,7 +237,7 @@ database, what it cannot reach, and that secret values reach it masked.
 
 ## <a id="how-it-answers"></a>How it answers
 
-The deployment's and the server's prompts open with who it is to the person (`writeCharacter`): the assistant
+The deployment's, the database's and the server's prompts open with who it is to the person (`writeCharacter`): the assistant
 they would talk to anywhere, naturally and about anything, that can also see and work on their server. "How to
 answer" (`writeWork`) then says to answer the question asked and only that; to look something up only when the
 answer depends on it, and where the answer is (what a project is or does from its code with `read_source`, a
@@ -380,6 +405,15 @@ are the new deployment's.
   kept and the older left out, a saved chat keeping them, and each provider's shape.
   `components/assistant/agent/images.test.js`: the size held to 1568 pixels, only images taken, at most four,
   and a saved question drawn with its thumbnails.
+- `assistant/command_test.go`: what a shell line is read as — reads, changes and destructive lines, a redirection,
+  a substitution, a subshell or a background job never a read — a `run_command` call checked like the others,
+  and every chat but a new deployment's offered the shell.
+- `api/handlers_assistant_database_test.go`: a connection's chat beginning with its structure and no row, offered
+  the dashboard and the shell but not a deployment's tools, listed under the connection and carried on only as
+  its own; a protected connection refused its chat and kept from the server's; what the editor attaches sent
+  with the question and kept by label alone; a server chat saying the page it was opened from; a connection's
+  chats going with it; a shell line that reads run unasked and masked, ones that write or destroy waiting, a slow
+  one stopped, and the terminal's capability and switch held; a database's shortcuts its pages.
 - `deploy/source_reading_test.go`: the README of the commit that would be built, not the working tree, the top
   folder folders first, a path not in the commit said; a way up read from the top, a link out, `.git` and a
   binary file refused or named, and the read held to its size.

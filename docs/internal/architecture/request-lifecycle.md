@@ -59,7 +59,10 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   `Principal.Assistant` so the route's audit entry records actor `assistant`. It is not a key and the deploy key gate
   never sees it: the route's capability check, handler rules and rate limit decide as they do for the person, and
   the request carries the CSRF header a page sends. A WebSocket or a stream is not made this way, nor the short list
-  in `agentExclusion`; see [the deployment assistant](../deployments/operator.md).
+  in `agentExclusion`, nor a route into a protected database connection (`agentProtected`). A command it runs on the
+  host (`run_command`) is not a request at all: it is the terminal's own way of running a line
+  (`term.Manager.RunCommand`), checked against the terminal capability on every call; see
+  [the deployment assistant](../deployments/operator.md).
 - **A deploy key** (`api_tokens.scope = 'deploy'`, minted on `POST /tokens/deploy` by an administrator
   in a session, or from Account → API keys) is what `jd` and CI use, and it **deliberately reopens
   part of the session-only surface**: the deployment writes that were a session's alone — drafts,
@@ -390,8 +393,8 @@ What the list lets through is of three kinds:
 
 Everything else is refused: rows, structure, imports, a restore, a copy, the drop, a major-version
 upgrade and its revert, accounts and privileges, settings, extensions, keys, documents, collections and
-indexes — and the SQL editor's assistant, which changes nothing but would send the connection's
-structure to a model. Two things reach a
+indexes — and the connection's assistant, which would send what is in it to a model; every other
+chat's call into a protected connection is answered with why and reads nothing (`agentProtected`). Two things reach a
 protected connection from outside its own path and are held to the same answer: restoring a backup
 run into it (`POST /backups/runs/{runID}/restore-database`), and a request addressed to a
 neighbouring connection on the same server that would reset the account it signs in with, or
