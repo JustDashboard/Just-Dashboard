@@ -1079,7 +1079,12 @@ func agentCalledLine(call assistant.ToolCall, result agentResult) map[string]any
 // execute runs one call the person's mode, or the person, has let through.
 func (pr *agentPress) execute(ctx context.Context, call assistant.ToolCall, view agentCallView) agentResult {
 	s, scope := pr.s, pr.scope
-	ctx, cancel := context.WithTimeout(ctx, agentCallDeadline+time.Duration(assistant.AgentWaitMax)*time.Second)
+	deadline := agentCallDeadline + time.Duration(assistant.AgentWaitMax)*time.Second
+	if call.Name == assistant.ToolRunCommand {
+		// A command keeps to its own time, up to the most it may ask for.
+		deadline = time.Duration(assistant.CommandWaitMax)*time.Second + agentCallDeadline
+	}
+	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 	refuse := func(why string) agentResult { return agentResult{text: why, said: why} }
 	// Asked again for each call, so a role taken away during a press takes effect.

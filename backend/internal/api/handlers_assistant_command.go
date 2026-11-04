@@ -49,15 +49,19 @@ func (pr *agentPress) runCommand(ctx context.Context, p *httpx.Principal, in ass
 	switch {
 	case errors.Is(err, term.ErrDisabled):
 		return refuse("The terminal is turned off on this install, so nothing was run.")
-	case errors.Is(err, context.Canceled):
-		return refuse("The command was stopped with the answer.")
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return refuse("The command was stopped with the answer, before it finished.")
 	case err != nil:
 		return refuse("The command could not be started: " + agentMaskText(err.Error(), masker))
 	}
 	output := agentMaskText(result.Output, masker)
 	if len(output) > maxOperatorResult {
-		result.Cut += len(output) - maxOperatorResult
-		output = output[len(output)-maxOperatorResult:]
+		cut := len(output) - maxOperatorResult
+		for cut < len(output) && !utf8Start(output[cut]) {
+			cut++
+		}
+		result.Cut += cut
+		output = output[cut:]
 	}
 	said := fmt.Sprintf("exit %d", result.ExitCode)
 	var head strings.Builder
