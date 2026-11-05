@@ -54,6 +54,7 @@ import {
   Wrench,
   ArrowLeftRight,
   Plus,
+  Hub,
 } from "@/components/icons"
 import type { Capability } from "@/lib/types"
 import { sectionOf, type SectionKey } from "@/lib/sidebar-sections"
@@ -77,6 +78,13 @@ export type NavChild = {
   icon: React.ComponentType<{ className?: string }>
   /** Hidden unless the signed-in role holds this capability. */
   capability?: Capability
+  /**
+   * Drawn only while this server is linked to a Just Hub, or while you are on
+   * it. An unlinked server's rail is exactly what it was before hubs existed;
+   * the page is still one word away in search, and the hub's Connect button
+   * opens it directly.
+   */
+  hubLink?: boolean
 }
 
 export type NavItem = {
@@ -85,6 +93,8 @@ export type NavItem = {
   icon: React.ComponentType<{ className?: string }>
   /** Hidden unless the signed-in role holds this capability. */
   capability?: Capability
+  /** See `NavChild.hubLink`. */
+  hubLink?: boolean
   /**
    * A feature large enough to be several pages. The row opens a panel holding
    * exactly these, and the first of them is the section's own landing page —
@@ -392,6 +402,15 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
             icon: Link,
             capability: "system.admin",
           },
+          // Beside Connect: the other place this server can report to. The
+          // name is the product's, since the page is about one hub.
+          {
+            title: "Hub",
+            href: "/dashboard/hub",
+            icon: Hub,
+            capability: "system.admin",
+            hubLink: true,
+          },
         ],
       },
     ],
@@ -509,18 +528,22 @@ function hideableKey(href: string): SectionKey | null {
  * where you are — and a group goes when nothing in it is left to draw, which
  * is why the role is asked here rather than beside the call: Server
  * configuration with Packages hidden is empty to an account that cannot see
- * System users or the audit log.
+ * System users or the audit log. A `hubLink` page follows the same rule with
+ * `hubLinked` in place of the account's choice: drawn while this server is
+ * linked to a hub, and while you are on it either way.
  */
 export function shownFor(
-  entry: { href?: string; capability?: Capability; children?: NavEntry[] },
+  entry: { href?: string; capability?: Capability; children?: NavEntry[]; hubLink?: boolean },
   hidden: ReadonlySet<string>,
   pathname: string,
   can: (capability: Capability) => boolean,
+  hubLinked = false,
 ): boolean {
   if (entry.capability && !can(entry.capability)) return false
   if (entry.href === undefined) {
-    return (entry.children ?? []).some((child) => shownFor(child, hidden, pathname, can))
+    return (entry.children ?? []).some((child) => shownFor(child, hidden, pathname, can, hubLinked))
   }
+  if (entry.hubLink && !hubLinked && !navMatches(entry.href, pathname)) return false
   const key = hideableKey(entry.href)
   return !key || !hidden.has(key) || navMatches(entry.href, pathname)
 }
