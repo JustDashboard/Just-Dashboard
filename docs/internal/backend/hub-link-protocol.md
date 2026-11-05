@@ -1635,7 +1635,9 @@ put a ticket in a query string, a log, a redirect or its own activity log.
 3. `POST /api/v1/auth/hub/enter` with `{"ticket": "<ticket>"}`, and `"replace": true` beside it only after
    the person pressed Continue, with the header `X-JD-CSRF: 1`.
 4. On `200`, navigate to the response's `next` with `location.replace`.
-5. On an error, show the message, a link to `/login`, and nothing else. It never retries a ticket.
+5. On an error, say why in words of the page's own for the error's `code` (the API's `message` is a lower-case
+   clause for other text, and is said only for a code the page does not know), a link to `/login`, and nothing
+   else. It never retries a ticket.
 
 The page loads nothing from another origin, and the ticket leaves the page only in the redeem call's body.
 
@@ -1792,7 +1794,7 @@ signing GitHub out stay open to a hub session: they only take power away.
 | `hub.session.revoke` | Hub sessions were revoked by a link or switch event (9.3) with no single grant behind it | `system` | `reason`, `sessionsRevoked` |
 
 Refusals at steps 1 and 2 are audited too, with only the code, so probing a server that has sign-in off is
-visible.
+visible. Every entry's status is the one the redeem answered: `200`, or the refusal's status in 9.7.
 
 ### 9.11 Failure modes
 

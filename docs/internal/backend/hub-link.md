@@ -341,7 +341,8 @@ any, is revoked in that transaction; when it is another account's complete sessi
 `"replace": true`, which `/hub/enter` sends after the person pressed Continue, and otherwise nothing is made and
 the answer is `409 other_account_signed_in`. A hub session has `auth_method = 'hub'`, `twofa_passed = 1`, the grant's hub
 user in `sessions.hub_user`, and lasts two hours at most and one hour idle. Every outcome writes `hub.signin`:
-the account (or `anonymous`) as username, `hub:<name>` as actor once the signature held, and the ticket's
+the account (or `anonymous`) as username, `hub:<name>` as actor once the signature held, the status the redeem
+answered (`200`, or the refusal's own: `401`, `403`, `409` or `500`), and the ticket's
 `hubUser`, `userId`, `nonce`, `tsLogin`, `tsNode`, `deviceCheck`, and `sessionId` or the refusal's `code`.
 
 **Grants** (`hub_signin_grants`, one row per account, one account per hub user) name the link's `serverId`; a
@@ -406,7 +407,10 @@ of its own closure and calls `history.replaceState(null, "", "/hub/enter")` befo
 (the ticket's `userId` read for display only), and asks the same without a name when the read answers anything
 but `200` or `401`, or nothing; it redeems unasked only for nobody (`401`), the same account, or a session still
 owing its second factor. It posts the redeem with `X-JD-CSRF: 1`, with `"replace": true` after Continue, and
-`location.replace`s to `next`. A refusal shows the server's message and a link to `/login`, and the ticket is never sent twice. The page
+`location.replace`s to `next`. A refusal shows the page's own sentence for its code (`HUB_ENTER_REFUSALS`: each
+step of 9.7, the sign-in rate limit and a server error, each naming the page's **Sign in on this server** where it
+sends the person there, never the API's lower-case clause or its "sign in here"; an unknown code is the server's
+message made a sentence) and a link to `/login`, and the ticket is never sent twice. The page
 loads nothing: its style and mark are inline.
 
 ## Verification
@@ -477,5 +481,6 @@ key a reply announces never signing a ticket, a grant refused when the link went
 while `Allow` waited, and, through the real local API client, a tailscaled answer that names no login or node
 refused at step 10 while an error status skips it. `hub-signin.spec.ts` holds `/hub/enter` to section 9.5 in a browser
 (asking without a name when the session read fails, and `replace` only after Continue; `hub-enter.test.js` runs
-the page's script against each answer) and covers Settings → Hub's opt-in, the hub's name, an administrator
+the page's script against each answer, and holds every refusal code in `hublink/ticket.go` to a sentence of the
+page's own) and covers Settings → Hub's opt-in, the hub's name, an administrator
 removing another account's grant, and the panel paused on an idle link for an administrator and for a reader.

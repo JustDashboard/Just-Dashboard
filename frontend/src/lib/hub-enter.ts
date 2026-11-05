@@ -61,11 +61,50 @@ export function safeNext(next: unknown): string {
 }
 
 /**
+ * What the page says for each refusal of §9.7, and for the two answers that can come before the
+ * redeem runs (the sign-in rate limit of §9.6, and a server error), keyed by the answer's code.
+ * The API's own messages are lower-case clauses meant to sit inside other text, and they say
+ * "sign in here" beside a button that says "Sign in on this server"; the page says each in a
+ * sentence of its own that names that button. A code not listed here is said as the server's
+ * message, made a sentence.
+ */
+export const HUB_ENTER_REFUSALS: Readonly<Record<string, string>> = {
+  hub_signin_disabled:
+    "Signing in through Just Hub is not turned on for this server. Sign in on this server instead.",
+  hub_not_linked:
+    "This server is not connected to a Just Hub it can trust right now. Sign in on this server instead.",
+  bad_ticket:
+    "This sign-in link is not one this server can read. Open the server again from Just Hub.",
+  wrong_server:
+    "This sign-in link was made for another server, or by another hub. Open this server from the Just Hub it is connected to.",
+  ticket_expired:
+    "This sign-in link has expired. Open the server again from Just Hub, and if it keeps happening, check this server's clock.",
+  mfa_stale:
+    "Just Hub did not confirm your authenticator code recently enough. Open the server again from Just Hub.",
+  wrong_device:
+    "This sign-in link was made for another device or another tailnet login. Open the server from Just Hub on this device.",
+  ticket_used:
+    "This sign-in link has already been used. Open the server again from Just Hub, or sign in on this server.",
+  not_permitted:
+    "This account does not let that Just Hub user sign it in. Sign in on this server, and turn it on in Settings → Hub.",
+  account_unavailable:
+    "This account cannot be signed in through Just Hub right now. Sign in on this server instead.",
+  other_account_signed_in:
+    "This browser is signed in to another account on this server. Open the server again from Just Hub to choose which account to use.",
+  rate_limited:
+    "Too many sign-in attempts from this address. Wait a minute, then open the server again from Just Hub.",
+  internal:
+    "This server could not finish signing you in. Open it again from Just Hub, or sign in on this server.",
+}
+
+/**
  * The script, as the browser runs it. It is plain ES2017 so it needs no build step, and it repeats
- * the three helpers above rather than importing them: there is nothing to import from here.
+ * the three helpers above rather than importing them: there is nothing to import from here. The
+ * refusals are written into it as data.
  */
 export const HUB_ENTER_SCRIPT = `(function () {
   "use strict";
+  var refusals = ${JSON.stringify(HUB_ENTER_REFUSALS)};
   var match = /(?:^#|&)ticket=([^&]*)/.exec(location.hash);
   var ticket = "";
   if (match) {
@@ -81,6 +120,16 @@ export const HUB_ENTER_SCRIPT = `(function () {
     ticket = "";
     el("message").textContent = message;
     show("failed");
+  }
+  // The page's sentence for a refusal's code; any other code is the server's message, as a
+  // sentence, and no message at all is the page's own.
+  function refusal(error) {
+    var code = error && typeof error.code === "string" ? error.code : "";
+    if (Object.prototype.hasOwnProperty.call(refusals, code)) return refusals[code];
+    var message = error && typeof error.message === "string" ? error.message.trim() : "";
+    if (!message) return "This server did not accept the sign-in link. Open it again from Just Hub, or sign in on this server.";
+    message = message.charAt(0).toUpperCase() + message.slice(1);
+    return /[.!?]$/.test(message) ? message : message + ".";
   }
   function userId(t) {
     var segment = t.split(".")[2];
@@ -114,8 +163,7 @@ export const HUB_ENTER_SCRIPT = `(function () {
         location.replace(next);
         return;
       }
-      fail(answer.error && typeof answer.error.message === "string" ? answer.error.message :
-        "This server did not accept the sign-in link.");
+      fail(refusal(answer.error));
     }, function () {
       fail("This server could not be reached. Open it again from Just Hub.");
     });

@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import {
   HUB_ENTER_PATH,
+  HUB_ENTER_REFUSALS,
   HUB_ENTER_SCRIPT,
   hubEnterDocument,
   safeNext,
@@ -105,9 +106,10 @@ describe("the document", () => {
 
 /**
  * Runs the page's script against a stand-in document: the session read answers with `session`
- * (a status and a body, or "offline" for no answer), and the redeem answers 200.
+ * (a status and a body, or "offline" for no answer), and the redeem with `redeemed`, 200 unless
+ * a test says otherwise.
  */
-async function enter(session, userId = 1) {
+async function enter(session, userId = 1, redeemed = { status: 200, body: { next: "/landed" } }) {
   const elements = {}
   const el = (id) =>
     (elements[id] ??= {
@@ -132,7 +134,7 @@ async function enter(session, userId = 1) {
         : answer(session.status, session.body)
     }
     world.redeems.push(JSON.parse(options.body))
-    return answer(200, { next: "/landed" })
+    return answer(redeemed.status, redeemed.body)
   }
   const document = { readyState: "complete", getElementById: el, addEventListener() {} }
   const location = {
@@ -213,6 +215,67 @@ describe("who the browser is signed in as (§9.5 step 2)", () => {
       expect(el("ask-known").hidden).toBe(true)
       expect(world.redeems).toHaveLength(0)
     }
+  })
+})
+
+// Every refusal of §9.7, as the backend names them (hublink/ticket.go), and the two answers that can
+// come before the redeem runs: the sign-in rate limit (§9.6) and a server error.
+const backendCodes = () => {
+  const ticket = readFileSync(
+    join(import.meta.dir, "../../../backend/internal/hublink/ticket.go"),
+    "utf8",
+  )
+  const block = ticket.slice(
+    ticket.indexOf("codeSignInDisabled"),
+    ticket.indexOf(")", ticket.indexOf("codeSignInDisabled")),
+  )
+  return [...block.matchAll(/code\w+\s*=\s*"([a-z_]+)"/g)].map((m) => m[1])
+}
+
+describe("a refusal, as the page says it", () => {
+  test("every code has a sentence of the page's own, naming the page's button", () => {
+    const codes = backendCodes()
+    expect(codes).toContain("ticket_used")
+    expect(codes).toContain("other_account_signed_in")
+    for (const code of [...codes, "rate_limited", "internal"]) {
+      const said = HUB_ENTER_REFUSALS[code]
+      expect(said, code).toBeString()
+      expect(said, code).toMatch(/^[A-Z].*\.$/)
+      // The button under it says "Sign in on this server"; "here" names nothing on the page.
+      expect(said, code).not.toMatch(/sign in here|slow down/i)
+      if (/sign in on/i.test(said)) expect(said, code).toMatch(/[Ss]ign in on this server/)
+    }
+  })
+
+  test("the page shows its own sentence, not the API's lower-case message", async () => {
+    for (const [code, status] of [
+      ["ticket_used", 401],
+      ["hub_signin_disabled", 403],
+      ["other_account_signed_in", 409],
+      ["rate_limited", 429],
+      ["internal", 500],
+    ]) {
+      const { el } = await enter({ status: 401, body: {} }, 1, {
+        status,
+        body: { error: { code, message: "too many requests, slow down" } },
+      })
+      expect(el("failed").hidden).toBe(false)
+      expect(el("message").textContent).toBe(HUB_ENTER_REFUSALS[code])
+    }
+  })
+
+  test("a code the page does not know is the server's message as a sentence, and no answer the page's own", async () => {
+    const odd = await enter({ status: 401, body: {} }, 1, {
+      status: 403,
+      body: {
+        error: { code: "csrf_required", message: "this request needs the X-JD-CSRF header" },
+      },
+    })
+    expect(odd.el("message").textContent).toBe("This request needs the X-JD-CSRF header.")
+    const bare = await enter({ status: 401, body: {} }, 1, { status: 502, body: null })
+    expect(bare.el("message").textContent).toBe(
+      "This server did not accept the sign-in link. Open it again from Just Hub, or sign in on this server.",
+    )
   })
 })
 

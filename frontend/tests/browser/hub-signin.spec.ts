@@ -210,7 +210,11 @@ test.describe("/hub/enter", () => {
     await page.goto(`/hub/enter#ticket=${ticketFor(1)}`)
     const alert = page.getByRole("alert")
     await expect(alert.getByRole("heading", { name: "Could not sign you in" })).toBeVisible()
-    await expect(alert).toContainText("this sign-in link has already been used")
+    // The page's own sentence, naming its own button, not the API's lower-case clause.
+    await expect(alert).toContainText(
+      "This sign-in link has already been used. Open the server again from Just Hub, or sign in on this server.",
+    )
+    await expect(alert).not.toContainText("sign in here")
     await expect(alert.getByRole("link", { name: "Sign in on this server" })).toHaveAttribute(
       "href",
       "/login",

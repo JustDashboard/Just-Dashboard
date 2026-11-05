@@ -55,7 +55,7 @@ func (s *Service) Redeem(ctx context.Context, r RedeemRequest) (*Redeemed, *Sign
 	a := signInAudit{req: r, username: "anonymous", actor: "anonymous"}
 	out, err := s.redeem(ctx, r, &a)
 	if err != nil {
-		a.code = err.Code
+		a.code, a.status = err.Code, err.Status
 		s.recordRedeem(ctx, a, false)
 		return nil, err
 	}
@@ -64,13 +64,15 @@ func (s *Service) Redeem(ctx context.Context, r RedeemRequest) (*Redeemed, *Sign
 }
 
 // signInAudit is what the hub.signin entry says, filled in as the steps pass
-// (section 9.10).
+// (section 9.10). A refusal's code and status are the ones the redeem
+// answered, so the entry records its status as every audited request does.
 type signInAudit struct {
 	req       RedeemRequest
 	username  string
 	actor     string
 	userID    int64
 	code      string
+	status    int
 	kid       string
 	payload   *TicketPayload
 	device    *DeviceCheck
@@ -227,7 +229,7 @@ func (s *Service) recordRedeem(ctx context.Context, a signInAudit, ok bool) {
 	if ok {
 		detail["sessionId"] = a.sessionID
 	} else {
-		status = http.StatusUnauthorized
+		status = a.status
 	}
 	target := ""
 	if a.payload != nil {

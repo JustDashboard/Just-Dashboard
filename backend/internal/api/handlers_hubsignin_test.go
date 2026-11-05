@@ -329,8 +329,15 @@ func TestATicketIsRefusedAtTheStepThatFailsAndAudited(t *testing.T) {
 	if len(failures) != len(cases) {
 		t.Fatalf("%d hub.signin entries for %d refusals", len(failures), len(cases))
 	}
+	// Each entry records the status the redeem answered, as every audited
+	// request does: 403 for a refusal at the grant, 401 for one at the ticket.
+	answered := map[string]int{}
+	for _, c := range cases {
+		answered[c.code] = c.status
+	}
 	for _, f := range failures {
-		if f.Success || !strings.Contains(f.Detail, `"code"`) {
+		code, _ := decodeMap(t, f.Detail)["code"].(string)
+		if f.Success || code == "" || f.Status != answered[code] {
 			t.Fatalf("refusal audit = %+v", f)
 		}
 	}
@@ -372,14 +379,15 @@ func TestSignInNeedsTheSwitchTheLinkAndTheGrant(t *testing.T) {
 			t.Fatalf("switched off = %d %s", w.Code, w.Body)
 		}
 		rows := e.audits("hub.signin")
-		if len(rows) != 1 || rows[0].Success || rows[0].Actor != "anonymous" || rows[0].Detail != `{"code":"hub_signin_disabled"}` {
-			t.Fatalf("a probe of a server with sign-in off is audited with only its code: %+v", rows)
+		if len(rows) != 1 || rows[0].Success || rows[0].Status != http.StatusForbidden || rows[0].Actor != "anonymous" ||
+			rows[0].Detail != `{"code":"hub_signin_disabled"}` {
+			t.Fatalf("a probe of a server with sign-in off is audited with only its code and its 403: %+v", rows)
 		}
 	})
 	t.Run("no link", func(t *testing.T) {
 		e := newSignInEnv(t)
 		ticket := e.ticket(e.hub.PrivateKey(), nil)
-		if w := e.admin.do(http.MethodDelete, "/api/v1/dashboard/hub", "", nil); w.Code != 204 {
+		if w := e.admin.do(http.MethodDelete, "/api/v1/dashboard/hub", "", nil); w.Code != 200 {
 			t.Fatalf("disconnect = %d %s", w.Code, w.Body)
 		}
 		if w := e.redeem(ticket, "", ""); w.Code != 403 || codeOf(t, w) != "hub_not_linked" {
@@ -801,6 +809,9 @@ func TestRedeemingReplacesTheBrowsersSession(t *testing.T) {
 	}
 	if !alive(other) {
 		t.Fatal("a refused redeem ended the browser's session")
+	}
+	if rows := e.audits("hub.signin"); len(rows) != 1 || rows[0].Success || rows[0].Status != http.StatusConflict {
+		t.Fatalf("the refusal's audit entry = %+v", rows)
 	}
 	var n int
 	e.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM sessions WHERE auth_method = 'hub'`).Scan(&n)
