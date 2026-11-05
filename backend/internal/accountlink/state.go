@@ -210,32 +210,56 @@ func (k kv) delTx(ctx context.Context, tx *sql.Tx, names ...string) error {
 // take the write lock when they begin. It changes nothing unless the stored
 // link is serverID's, and reports the state as it stands afterwards.
 func (k kv) updateState(ctx context.Context, serverID string, change func(*State) bool) (State, bool, error) {
+	return k.updateStateTx(ctx, serverID, func(_ *sql.Tx, st *State) (bool, error) { return change(st), nil })
+}
+
+// updateStateTx is updateState for a change that writes more than the state in
+// the same transaction. An error from change rolls all of it back.
+func (k kv) updateStateTx(ctx context.Context, serverID string, change func(*sql.Tx, *State) (bool, error)) (State, bool, error) {
 	var out State
 	found := false
 	err := k.tx(ctx, func(tx *sql.Tx) error {
-		var raw string
-		err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, k.key(keyState)).Scan(&raw)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
+		st, ok, err := k.stateTx(ctx, tx)
+		if err != nil || !ok || st.ServerID != serverID {
 			return err
 		}
-		var st State
-		if err := json.Unmarshal([]byte(raw), &st); err != nil {
-			return fmt.Errorf("%s is unreadable: %w", k.key(keyState), err)
-		}
-		if st.ServerID != serverID {
-			return nil
-		}
 		found, out = true, st
-		if !change(&st) {
-			return nil
+		changed, err := change(tx, &st)
+		if err != nil || !changed {
+			return err
 		}
 		out = st
 		return k.putTx(ctx, tx, keyState, st)
 	})
 	return out, found && err == nil, err
+}
+
+// stateTx reads the stored link inside a transaction.
+func (k kv) stateTx(ctx context.Context, tx *sql.Tx) (State, bool, error) {
+	var raw string
+	err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, k.key(keyState)).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return State{}, false, nil
+	}
+	if err != nil {
+		return State{}, false, err
+	}
+	var st State
+	if err := json.Unmarshal([]byte(raw), &st); err != nil {
+		return State{}, false, fmt.Errorf("%s is unreadable: %w", k.key(keyState), err)
+	}
+	return st, st.ServerID != "", nil
+}
+
+// statusTx reads the status inside a transaction; one that cannot be read is
+// only a missing hint.
+func (k kv) statusTx(ctx context.Context, tx *sql.Tx) runtimeStatus {
+	var s runtimeStatus
+	var raw string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, k.key(keyStatus)).Scan(&raw); err == nil {
+		_ = json.Unmarshal([]byte(raw), &s)
+	}
+	return s
 }
 
 func (k kv) state(ctx context.Context) (State, bool, error) {

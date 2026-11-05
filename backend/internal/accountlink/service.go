@@ -299,7 +299,7 @@ func (s *Service) run(ctx context.Context) {
 			if s.hooks.Admit == nil && errors.Is(refused, ErrSiteChanged) {
 				msg = fmt.Sprintf("this server is linked to %s but JD_ACCOUNT_URL is now %s; set it back or unlink", st.URL, s.siteURL)
 			}
-			s.setHeartbeatError(ctx, msg)
+			s.setHeartbeatError(ctx, st.ServerID, msg)
 			s.pause(ctx, s.idle)
 		case linked:
 			s.runLinked(ctx, st)
@@ -463,12 +463,12 @@ func (s *Service) commandLoop(ctx context.Context, st State) {
 			if ctx.Err() != nil || s.linkEnded(ctx, cur, err) {
 				return
 			}
-			s.setPollError(ctx, s.describeError(err))
+			s.setPollError(ctx, cur.ServerID, s.describeError(err))
 			sleep(ctx, bo.next())
 			continue
 		}
 		bo.reset()
-		s.setPollError(ctx, "")
+		s.setPollError(ctx, cur.ServerID, "")
 		for _, cmd := range resp.Commands {
 			if ctx.Err() != nil {
 				return
@@ -627,7 +627,7 @@ func (s *Service) sendHeartbeat(ctx context.Context, st State, patient bool) err
 	id, _, err := loadIdentity(ctx, s.kv, s.sealer)
 	if err != nil || id == nil {
 		err = fmt.Errorf("link identity: %w", firstErr(err, ErrIdentityUnreadable))
-		s.setHeartbeatError(ctx, s.describeError(err))
+		s.setHeartbeatError(ctx, st.ServerID, s.describeError(err))
 		return err
 	}
 	snap, err := s.host.Collect(ctx)
@@ -651,7 +651,7 @@ func (s *Service) sendHeartbeat(ctx context.Context, st State, patient bool) err
 	var extra map[string]json.RawMessage
 	if s.hooks.HeartbeatExtra != nil {
 		if extra, err = s.hooks.HeartbeatExtra(ctx, st); err != nil {
-			s.setHeartbeatError(ctx, s.describeError(err))
+			s.setHeartbeatError(ctx, st.ServerID, s.describeError(err))
 			return err
 		}
 	}
@@ -662,24 +662,25 @@ func (s *Service) sendHeartbeat(ctx context.Context, st State, patient bool) err
 	s.hbTimes = append(s.hbTimes, time.Now())
 	c := s.newClientAt(s.originFor(st.URL), id)
 	var resp heartbeatResponse
+	var write ReplyWrite
 	if s.p.ReplyView {
 		var full viewHeartbeatResponse
 		full, err = c.heartbeatView(ctx, st.ServerID, body)
 		if err == nil && s.hooks.OnReply != nil {
-			err = s.hooks.OnReply(ctx, st, Reply{Fleet: full.Fleet, Notices: full.Notices, SignIn: full.SignIn, At: s.now()})
+			write, err = s.hooks.OnReply(ctx, st, Reply{Fleet: full.Fleet, Notices: full.Notices, SignIn: full.SignIn, At: s.now()})
 		}
 		resp = full.base()
 	} else {
 		resp, err = c.heartbeat(ctx, st.ServerID, body)
 	}
 	if err != nil {
-		s.setHeartbeatError(ctx, s.describeError(err))
+		s.setHeartbeatError(ctx, st.ServerID, s.describeError(err))
 		return err
 	}
 	s.mu.Lock()
 	s.lastSnapshot = body
 	s.mu.Unlock()
-	s.noteHeartbeat(ctx, st, resp)
+	s.noteHeartbeat(ctx, st, resp, write)
 	return nil
 }
 
@@ -702,25 +703,39 @@ func (s *Service) heartbeatWait() time.Duration {
 }
 
 // noteHeartbeat records a good exchange and takes what the site announced in
-// it: a successor key, and how often it wants to hear from this server.
-func (s *Service) noteHeartbeat(ctx context.Context, st State, resp heartbeatResponse) {
+// it: a successor key, and how often it wants to hear from this server. write,
+// when set, is what the instance keeps from the reply, written in the same
+// transaction.
+func (s *Service) noteHeartbeat(ctx context.Context, st State, resp heartbeatResponse, write ReplyWrite) {
 	now := s.now()
+	ctx = context.WithoutCancel(ctx)
+	var after func()
 	// Read and written back inside one transaction, and only if the link is
 	// still this one: a link ended while this was in flight has nothing left
-	// to record on, and a scope changed meanwhile must not be put back.
-	_, current, err := s.kv.updateState(ctx, st.ServerID, func(cur *State) bool {
+	// to record on, a scope changed meanwhile must not be put back, and what
+	// an old link's peer said must not reappear as a new link's.
+	_, current, err := s.kv.updateStateTx(ctx, st.ServerID, func(tx *sql.Tx, cur *State) (bool, error) {
 		changed := false
 		if hb := clampInt(resp.HeartbeatSeconds, 10, 600); resp.HeartbeatSeconds != 0 && hb != cur.HeartbeatSeconds {
 			cur.HeartbeatSeconds, changed = hb, true
 		}
+		if write != nil {
+			var err error
+			if after, err = write(ctx, tx); err != nil {
+				return false, err
+			}
+		}
 		if s.p.IgnoreAnnouncedKeys {
-			return changed
+			return changed, nil
 		}
 		if keys, rotated := mergeSiteKeysMatching(cur.SiteKeys, resp.SiteKeys, now, s.p.RotationKidPattern); rotated {
 			cur.SiteKeys, changed = keys, true
 		}
-		return changed
+		return changed, nil
 	})
+	if err == nil && current {
+		runAfter(after)
+	}
 	if s.p.IgnoreAnnouncedKeys && len(resp.SiteKeys) > 0 {
 		s.mu.Lock()
 		first := s.keysIgnoredFor != st.ServerID
@@ -735,7 +750,13 @@ func (s *Service) noteHeartbeat(ctx context.Context, st State, resp heartbeatRes
 		s.log.Warn("could not store what the "+s.p.Peer+" announced in a heartbeat", "err", err)
 	}
 	if current {
-		s.setStatus(ctx, func(rs *runtimeStatus) { rs.LastHeartbeatAt, rs.HeartbeatError = &now, "" })
+		s.setStatus(ctx, st.ServerID, func(rs *runtimeStatus) { rs.LastHeartbeatAt, rs.HeartbeatError = &now, "" })
+	}
+}
+
+func runAfter(after func()) {
+	if after != nil {
+		after()
 	}
 }
 
@@ -843,36 +864,57 @@ func (s *Service) onClear(ctx context.Context, tx *sql.Tx) error {
 
 // ------------------------------------------------------------------ status --
 
-// setStatus changes the small record of how the last exchanges went, and
-// writes it only when it changed.
-func (s *Service) setStatus(ctx context.Context, change func(*runtimeStatus)) {
+// setStatus changes the small record of how the last exchanges with the link
+// serverID went, and writes it only when it changed. The write is skipped when
+// that link is gone or another is stored: an exchange that ends after a
+// disconnect has nothing to report on, and must not leave its error on the
+// next link's page.
+func (s *Service) setStatus(ctx context.Context, serverID string, change func(*runtimeStatus)) {
+	ctx = context.WithoutCancel(ctx)
 	before := s.kv.status(ctx)
 	after := before
 	change(&after)
-	b1, _ := json.Marshal(before)
-	b2, _ := json.Marshal(after)
-	if string(b1) == string(b2) {
+	if sameStatus(before, after) {
 		return
 	}
-	if err := s.kv.put(context.WithoutCancel(ctx), keyStatus, after); err != nil {
+	err := s.kv.tx(ctx, func(tx *sql.Tx) error {
+		cur, linked, err := s.kv.stateTx(ctx, tx)
+		if err != nil || !linked || cur.ServerID != serverID {
+			return err
+		}
+		now := s.kv.statusTx(ctx, tx)
+		next := now
+		change(&next)
+		if sameStatus(now, next) {
+			return nil
+		}
+		return s.kv.putTx(ctx, tx, keyStatus, next)
+	})
+	if err != nil {
 		s.log.Debug("could not store the "+s.p.Name+" status", "err", err)
 	}
 }
 
-// An exchange cut short because the connector is stopping, or the link is being
-// ended, failed for no reason the page should report.
-func (s *Service) setHeartbeatError(ctx context.Context, msg string) {
-	if msg != "" && ctx.Err() != nil {
-		return
-	}
-	s.setStatus(ctx, func(rs *runtimeStatus) { rs.HeartbeatError = msg })
+func sameStatus(a, b runtimeStatus) bool {
+	b1, _ := json.Marshal(a)
+	b2, _ := json.Marshal(b)
+	return string(b1) == string(b2)
 }
 
-func (s *Service) setPollError(ctx context.Context, msg string) {
+// An exchange cut short because the connector is stopping, or the link is being
+// ended, failed for no reason the page should report.
+func (s *Service) setHeartbeatError(ctx context.Context, serverID, msg string) {
 	if msg != "" && ctx.Err() != nil {
 		return
 	}
-	s.setStatus(ctx, func(rs *runtimeStatus) { rs.PollError = msg })
+	s.setStatus(ctx, serverID, func(rs *runtimeStatus) { rs.HeartbeatError = msg })
+}
+
+func (s *Service) setPollError(ctx context.Context, serverID, msg string) {
+	if msg != "" && ctx.Err() != nil {
+		return
+	}
+	s.setStatus(ctx, serverID, func(rs *runtimeStatus) { rs.PollError = msg })
 }
 
 // describeError says in a sentence why an exchange failed, for the person

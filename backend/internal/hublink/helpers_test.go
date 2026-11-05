@@ -103,6 +103,9 @@ type fakeHub struct {
 	headers    []http.Header
 	// reply adds to or replaces fields of the heartbeat reply.
 	reply map[string]any
+	// hold, when set, keeps the next heartbeat's answer until it is closed;
+	// arrived is closed once that heartbeat has been accepted.
+	hold, arrived chan struct{}
 }
 
 func newFakeHub(t *testing.T, now time.Time) *fakeHub {
@@ -264,6 +267,13 @@ func (h *fakeHub) signed(w http.ResponseWriter, r *http.Request, body []byte, pa
 	switch {
 	case r.Method == http.MethodPost && path == "/heartbeat":
 		h.heartbeats = append(h.heartbeats, append([]byte(nil), body...))
+		if hold, arrived := h.hold, h.arrived; hold != nil {
+			h.hold, h.arrived = nil, nil
+			close(arrived)
+			h.mu.Unlock()
+			<-hold
+			h.mu.Lock()
+		}
 		reply := map[string]any{
 			"ok": true, "heartbeatSeconds": 15, "pendingCommands": len(h.queue),
 			"fleet": []map[string]any{{
@@ -368,6 +378,16 @@ func (h *fakeHub) setReply(k string, v any) {
 		h.reply = map[string]any{}
 	}
 	h.reply[k] = v
+}
+
+// holdNextHeartbeat keeps the next heartbeat's answer until release is
+// called; arrived is closed once the hub has accepted that heartbeat.
+func (h *fakeHub) holdNextHeartbeat() (arrived <-chan struct{}, release func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	hold, got := make(chan struct{}), make(chan struct{})
+	h.hold, h.arrived = hold, got
+	return got, func() { close(hold) }
 }
 
 func (h *fakeHub) addToken(tok string) {

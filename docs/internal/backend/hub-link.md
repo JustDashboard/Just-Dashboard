@@ -56,7 +56,7 @@ The hooks the hub link uses:
 | Hook | What the hub link does with it |
 | --- | --- |
 | `Admit` | The URL rule as it applies to a stored link (below). It replaces the account link's "still `JD_ACCOUNT_URL`" check everywhere that check ran: the top loop, the heartbeat, a manual sync and whether an unlink tells anyone |
-| `OnReply` | Decodes and checks `fleet`, `notices` and `signIn` and caches them in `hub.link.view`. A reply that does not decode strictly fails the heartbeat and nothing in it is used |
+| `OnReply` | Decodes and checks `fleet`, `notices` and `signIn`, and returns the write that caches them in `hub.link.view`, which the engine runs inside the heartbeat's own transaction only while the link is still the one it was sent for. A reply that does not decode strictly fails the heartbeat and nothing in it is used |
 | `OnClear` | Deletes `hub.link.view` in the same transaction that ends a link (disconnect, removal in the hub) or stores a new one |
 | `HeartbeatExtra` | Unused. Hub sign-in adds `signIn` to the body here; the engine keeps such keys whole and cuts the snapshot's lists to make room |
 
@@ -129,8 +129,13 @@ strict decoding passes, and never applied (`IgnoreAnnouncedKeys` in the profile)
 end changes, and a warning is logged once per link. A reply is authenticated by TLS alone, and a key pinned from
 one could sign commands; a new hub key needs a new link.
 
-The cache (`hub.link.view`) names the `serverId` it came from, so a reply that lands after the link changed is
-never shown for the new one, and it is cleared with the link.
+**Writes belong to the link they describe** (protocol 8.9). `OnReply` only checks the reply and hands back its
+write; the engine runs it in the transaction that records the heartbeat (`noteHeartbeat`, `kv.updateStateTx`),
+which re-reads `hub.link.state` first and writes nothing, neither the interval nor the view, when the stored link
+is gone or has another `serverId`. `setStatus` (the last heartbeat time and the last errors in `hub.link.status`)
+does the same check in its own transaction. A reply that lands after a disconnect therefore leaves no cached view
+and no status behind, and cannot bring an old hub's fleet, notices or sign-in users back under a new link. The
+cache also names the `serverId` it came from, and is cleared with the link.
 
 ## Local API
 

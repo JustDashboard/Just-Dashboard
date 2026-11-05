@@ -1,6 +1,7 @@
 package hublink
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -498,6 +499,46 @@ func TestARestoredDatabaseKeepsLinking(t *testing.T) {
 	}
 	if s, _ := e.svc.Status(t.Context(), true); len(e.hub.heartbeatBodies()) != beats+1 || s.Admin.Link.LastError != "" {
 		t.Fatalf("after the restore: %d heartbeats, last error %q", len(e.hub.heartbeatBodies())-beats, s.Admin.Link.LastError)
+	}
+}
+
+// What a heartbeat reply changes is written only while the link it was sent for
+// is still the stored one (protocol 8.9, HL-14). A reply that lands after a
+// disconnect leaves no cached view and no status behind, and a link made at
+// once to another hub serves nothing of the old hub's before its own first
+// reply.
+func TestAReplyThatLandsAfterADisconnectWritesNothing(t *testing.T) {
+	e := newEnv(t)
+	e.link(accountlink.ScopeObserve)
+	e.hub.setReply("notices", []map[string]any{{"id": "old", "level": "warning", "title": "From the old hub", "body": "", "at": vectorNow}})
+	e.hub.setReply("signIn", map[string]any{"users": []string{"owner"}})
+	arrived, release := e.hub.holdNextHeartbeat()
+	done := make(chan error, 1)
+	go func() { done <- e.svc.Sync(context.WithoutCancel(t.Context())) }()
+	<-arrived
+	if _, err := e.svc.Disconnect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if err := <-done; err != nil {
+		t.Fatalf("the late sync = %v", err)
+	}
+	for _, key := range []string{"hub.link.view", "hub.link.status", "hub.link.state"} {
+		if raw, ok, _ := e.st.Setting(t.Context(), key); ok {
+			t.Errorf("%s was written by a reply that landed after the disconnect: %s", key, raw)
+		}
+	}
+
+	// Another hub at once: a new server id, and nothing of the old one served.
+	e.hub.mu.Lock()
+	e.hub.serverID = "9c4e2b10-0000-4000-8000-000000000005"
+	e.hub.label = "hub-2"
+	e.hub.reply = nil
+	e.hub.mu.Unlock()
+	e.link(accountlink.ScopeObserve)
+	s, _ := e.svc.Status(t.Context(), true)
+	if len(s.Notices) != 0 || len(s.Fleet) != 0 || s.SignIn.Offered || len(s.SignIn.Users) != 0 || s.Admin.Link.LastError != "" {
+		t.Fatalf("the new link serves the old hub's view: %+v", s)
 	}
 }
 

@@ -444,7 +444,7 @@ func TestNotingAHeartbeatAndChangingTheScopeDoNotOverwriteEachOther(t *testing.T
 		defer wg.Done()
 		for i := 0; i < rounds; i++ {
 			e.svc.noteHeartbeat(t.Context(), st, heartbeatResponse{OK: true, HeartbeatSeconds: 30,
-				SiteKeys: []wireSiteKey{{Kid: fmt.Sprintf("k-%03d", i), PublicKey: pub}}})
+				SiteKeys: []wireSiteKey{{Kid: fmt.Sprintf("k-%03d", i), PublicKey: pub}}}, nil)
 		}
 	}()
 	go func() {
@@ -484,7 +484,7 @@ func TestNothingIsSentToASiteThatIsNotTheOneTheLinkWasMadeWith(t *testing.T) {
 		t.Fatalf("sendHeartbeat = %v", err)
 	}
 	// A heartbeat answer never merges keys into a link it was not made for.
-	moved.noteHeartbeat(t.Context(), st, heartbeatResponse{SiteKeys: []wireSiteKey{{Kid: "x", PublicKey: pubB64(seedKey(t, vectorServerSeed))}}})
+	moved.noteHeartbeat(t.Context(), st, heartbeatResponse{SiteKeys: []wireSiteKey{{Kid: "x", PublicKey: pubB64(seedKey(t, vectorServerSeed))}}}, nil)
 	if cur, _, _ := moved.Linked(t.Context()); len(cur.SiteKeys) != 1 {
 		// noteHeartbeat itself is only reached from a send; this documents
 		// that the guard above is what keeps the other site's keys out.

@@ -353,20 +353,26 @@ func (s *Service) ownSuffix(ctx context.Context) string {
 }
 
 // onReply is the engine's hook for every successful heartbeat reply: it checks
-// the view and keeps it for the dashboard's own pages.
-func (s *Service) onReply(ctx context.Context, st accountlink.State, r accountlink.Reply) error {
+// the view and hands back its write, which the engine runs in the transaction
+// that records the heartbeat and only while the stored link is still the one
+// the heartbeat was sent for (section 8.9, "Writes belong to the link they
+// describe"). A reply that lands after a disconnect therefore cannot bring
+// back the old hub's fleet, notices or sign-in users.
+func (s *Service) onReply(ctx context.Context, st accountlink.State, r accountlink.Reply) (accountlink.ReplyWrite, error) {
 	v, err := readView(st, r, s.testOrigin, func() string { return s.ownSuffix(ctx) })
 	if err != nil {
-		return err
+		return nil, err
 	}
 	raw, err := json.Marshal(v)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := s.st.SetSetting(context.WithoutCancel(ctx), keyView, string(raw)); err != nil {
-		s.log.Warn("could not keep what the hub sent with a heartbeat", "err", err)
-	}
-	return nil
+	return func(ctx context.Context, tx *sql.Tx) (func(), error) {
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+			keyView, string(raw))
+		return nil, err
+	}, nil
 }
 
 // onClear forgets the view with the link it belongs to. Hub sign-in's grants

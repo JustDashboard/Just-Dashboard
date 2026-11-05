@@ -99,6 +99,11 @@ type Reply struct {
 	At time.Time
 }
 
+// ReplyWrite is what an instance keeps from a heartbeat reply, written inside
+// the transaction that re-reads the link. What it returns, when not nil, runs
+// once that transaction has committed.
+type ReplyWrite func(ctx context.Context, tx *sql.Tx) (after func(), err error)
+
 // Hooks are the points where an instance adds behaviour of its own. Each is
 // optional.
 type Hooks struct {
@@ -108,8 +113,10 @@ type Hooks struct {
 	Admit func(ctx context.Context, st State) error
 	// OnReply receives the view part of every successful heartbeat reply of a
 	// ReplyView profile, before anything in the reply is used. An error fails
-	// the heartbeat.
-	OnReply func(ctx context.Context, st State, r Reply) error
+	// the heartbeat. What it returns, when not nil, is written in the
+	// transaction that records the heartbeat, and only if the stored link is
+	// still st: a reply that lands after its link ended writes nothing.
+	OnReply func(ctx context.Context, st State, r Reply) (ReplyWrite, error)
 	// OnClear runs inside the transaction that ends a link (unlink, removal by
 	// the peer) or starts a new one, to delete what the instance keeps beside
 	// the engine's own keys.
