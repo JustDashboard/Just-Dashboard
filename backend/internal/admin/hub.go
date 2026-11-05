@@ -199,7 +199,9 @@ func hubConnectCommand(ctx context.Context, svc *hublink.Service, logger *audit.
 				return fail(fmt.Errorf("this server is already connected to Just Hub %q at %s; run hub disconnect first", st.Owner, st.URL))
 			}
 		case errors.Is(err, hublink.ErrLinkPending):
-			if pending, ok, _ := svc.Pending(ctx); ok {
+			if pending, ok, _ := svc.Pending(ctx); ok && pending.FromTerminal() {
+				return fail(fmt.Errorf("another hub connect is already waiting for approval of its request to %s (code %s); approve it in the hub, or stop that command first", pending.URL, pending.UserCode))
+			} else if ok {
 				return fail(fmt.Errorf("a request to connect to %s is already waiting for approval (code %s); approve it in the hub or cancel it in Settings", pending.URL, pending.UserCode))
 			}
 		}
@@ -213,7 +215,7 @@ func hubConnectCommand(ctx context.Context, svc *hublink.Service, logger *audit.
 	if opts.token != "" {
 		fmt.Fprintf(out, "  The hub's token approves it. Waiting for the hub to confirm (%s scope)...\n\n", req.Scope)
 	} else {
-		fmt.Fprintf(out, "  Approve it in the hub at    %s\n", approvalPage(req.ApproveURL))
+		fmt.Fprintf(out, "  Approve it in the hub at    %s\n", hubApprovalAddress(req.ApproveURL))
 		fmt.Fprintf(out, "  It will be connected at the %s scope. The code is good for %d minutes. Waiting for approval...\n\n",
 			req.Scope, int((time.Until(req.ExpiresAt)+30*time.Second)/time.Minute))
 	}
@@ -253,6 +255,21 @@ func hubConnectCommand(ctx context.Context, svc *hublink.Service, logger *audit.
 	}
 	cliRecord(rec, logger, "hub.link", string(opts.scope), false, map[string]any{"outcome": res.Message, "hub": req.URL})
 	return fmt.Errorf("the request ended without a link: %s", res.Message)
+}
+
+// hubApprovalAddress is the hub's approval screen for this request, as the hub
+// gave it (/servers/add/?request=<id>), where the code is typed. Unlike the
+// account link's code, the request id in it is no secret. Its origin was held
+// to the hub's when the request was made; one that is not plain printable
+// ASCII is printed without its query, escaped, so the terminal is handed no
+// control sequence from the hub (protocol 8.10).
+func hubApprovalAddress(raw string) string {
+	for _, r := range raw {
+		if r <= ' ' || r > '~' {
+			return approvalPage(raw)
+		}
+	}
+	return raw
 }
 
 // machineLine is the hub's machine and its owner as step 8 of the URL rule
@@ -328,7 +345,12 @@ func hubStatusCommand(ctx context.Context, svc *hublink.Service, env hubEnvironm
 	}
 	msg := "Not connected to a hub."
 	if es, err := svc.Engine().Status(ctx); err == nil && es.LastOutcome != nil {
-		msg += " The last request was " + es.LastOutcome.Result + "."
+		if es.LastOutcome.Result == accountlink.OutcomeRemoved {
+			// Not a request: the link this server had, which the hub ended.
+			msg += " It was removed in the hub."
+		} else {
+			msg += " The last request was " + es.LastOutcome.Result + "."
+		}
 	}
 	fmt.Fprintln(out, msg+off)
 	return nil

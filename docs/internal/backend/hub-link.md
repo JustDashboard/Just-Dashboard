@@ -228,9 +228,15 @@ RFC 3339 in UTC. With `JD_HUB_LINK=false` it is exactly `{"enabled":false,"state
 - `system.admin` also gets `admin`: `fingerprint` (once the identity exists), `testOrigin`, `request` (pending:
   `hubUrl`, `userCode`, `approveUrl`, `expiresAt`, `scope`, and `hubMachine` when step 8 found one), `link` (linked:
   `serverId`, `linkedAt`, `linkedBy`, `hubMachine` once one is pinned, `lastError` (an idle link's reason, whatever
-  the last exchange left), `lastCommand`, `hubKeys` of `{kid, fingerprint, notAfter?}`, `updatePolicy`, and
-  `lastSnapshot`, the exact body of the last heartbeat sent), `lastOutcome` (unlinked after a request that ended without a
-  link). `admin.grants` belongs to hub sign-in and is never sent yet.
+  the last exchange left; otherwise the last heartbeat's failure, else the last command poll's, which
+  `clearPollErrorOnceHeld` clears once a poll has gone two seconds unanswered: the hub answers a failure at once and
+  holds only a poll it took, so a poll error from before a hub restart does not sit beside good heartbeats for the
+  25 s the next poll is held), `lastCommand`, `hubKeys` of `{kid, fingerprint, notAfter?}`, `updatePolicy`, and
+  `lastSnapshot`, the exact body of the last heartbeat sent), `lastOutcome` (unlinked after a request that ended
+  without a link — `denied`, `expired`, `failed` — or after the hub removed the link: `removed`, with "the server
+  was removed in the hub", written in the transaction that clears it because the profile sets `RemovalOutcome`; the
+  account link does not, so Settings → Connect never reads one). `admin.grants` belongs to hub sign-in and is never
+  sent yet.
 
 `GET /auth/session` carries `hub: {linked: true, name, url, reachable}` only for a fully signed-in session (not one
 owing a second factor or a password change, and never to nobody), with `JD_HUB_LINK` on and a hub link stored.
@@ -245,8 +251,9 @@ The fleet and notices come from `GET /dashboard/hub`, so this stays small.
 `disconnect` need the master key, `status` does not.
 
 `hub connect` applies the rule, prints the hub URL, the hub's machine and owner (`hublink.DescribeMachine`: "<name>,
-a machine of <owner>", "<name>, tagged <tags>", or "not checked" with why), the code and this server's fingerprint,
-and waits (default 15 minutes, at most an hour). The default scope is `maintain`. **A token is only ever read from
+a machine of <owner>", "<name>, tagged <tags>", or "not checked" with why), the code, this server's fingerprint and
+the hub's approval screen for the request (its `approveUrl` as the hub gave it, `/servers/add/?request=<id>`; one
+with a character that is not printable ASCII is printed escaped and without its query), and waits (default 15 minutes, at most an hour). The default scope is `maintain`. **A token is only ever read from
 standard input** (protocol 8.4): `--token TOKEN` and `--token=` exit 1 with "pass the token on standard input with
 --token-stdin", in `manage.sh` and in `admin/hub.go` both. With `--token-stdin`, `manage.sh` prompts `Link token: `
 and reads with `read -rs` at a terminal, or one line from a pipe (the hub's installer), and passes it to the admin
@@ -255,7 +262,12 @@ is not `jht_` and 43 base64url characters is refused before anything is sent, an
 (`bad_token`) is a failure, never a fallback to a code. Exit **0** connected (`Connected to Just Hub "<name>" at
 <url> as "<server>" (<scope>).`, then the pinned hub key's fingerprint to compare with the hub's Settings page),
 **2** declined, not approved within `--wait`, or interrupted (the request is forgotten), **1** anything else.
-`hub status` says when the link is idle, with the reason, instead of the last error. A request begun in Settings is never taken over from the terminal. Audited as `hub.link` (by
+`hub status` says when the link is idle, with the reason, instead of the last error, and "It was removed in the
+hub." after a removal. A request begun in Settings is never taken over from the terminal, nor is one a `hub
+connect` still waits on: the waiting command stamps `waitingAt` on `hub.link.request` every 5 seconds, a second
+`hub connect` exits 1 naming the first one's code, and only a request whose command has been silent for 20 seconds
+(killed outright; an interrupt forgets its request) is replaced. The waiting command polls and cancels only its own
+request, and stops if another replaced it. Audited as `hub.link` (by
 `root` / `cli`; failures as failed with the outcome) and `hub.unlink`.
 
 ## Failure modes
@@ -268,7 +280,10 @@ The account link's table applies, with these for the hub:
 | A reply with an unknown top-level field, or without `ok`, `heartbeatSeconds`, `pendingCommands`, `fleet` or `notices` | A failed heartbeat; the cached view is left as it was and nothing in the reply is used |
 | A bad element in `fleet`, `notices` or `signIn.users` | That element is dropped; the heartbeat succeeds with the rest |
 | A reply that arrives after a disconnect | Nothing is written: no view, no interval, no status |
-| `410` on any signed request | The hub removed this server: link, policy, status and cached view cleared in one transaction, identity and sequence kept, `hub.unlink` by `system` with the reason "the server was removed in the hub" |
+| `410` on any signed request | The hub removed this server: link, policy, status and cached view cleared in one transaction, which also keeps the outcome `removed` for Settings → Hub to say once (and `hub status` to say "It was removed in the hub."), identity and sequence kept, `hub.unlink` by `system` with the reason "the server was removed in the hub" |
+| A disconnect while requests are in flight on the link (the terminal's, with the dashboard running) | The link is cleared before the hub is told, and `clearLink` re-reads it inside its transaction, so the `410` those requests then get clears nothing: one `hub.unlink`, by whoever disconnected |
+| The hub restarts while the dashboard runs | Heartbeat and poll fail and back off; the poll error clears two seconds after the hub holds a poll again, not when that 25 s poll returns |
+| A Docker command (`container.*`, `stack.restart`) while Docker cannot be reached | `failed` with "The Docker daemon is not reachable from this dashboard. Docker said: …"; a daemon that does not answer a ping within 10 s fails it at once with that, rather than holding the command for its 10 minutes |
 | The server moved to another tailnet, or the test origin was removed | The link is set idle in the store at the next start and says why; it stays idle until a person disconnects |
 | Another machine answers at the hub's name | Nothing is sent; the link is set idle ("the hub's machine changed") and `hub.link.node_changed` audited; a pending request ends as failed with nothing stored |
 | No machine holds the hub's address | Nothing is sent; the exchange fails and backs off; the link stays as it is. A manual sync answers `200` with the reason on the status |
@@ -313,8 +328,8 @@ succeeding, endpoints and links removed, the text rule), strict top-level replie
 writing nothing, `siteKeys` in a reply changing no pinned key, the clock-based sequence surviving a restored
 database, the hub's words quoted as the hub's, every kind at every scope run as `hub:hub` or refused, replay,
 expiry, a forged key, an unpinned `kid`, a command for another server and an unknown kind (refused, reported and
-audited, and only commands past the signature recorded in `hub_link_commands`), disconnect, removal in the hub, a
-stored link that no longer passes the rule, and both links side by side. `node_test.go` reaches the same fake hub at
+audited, and only commands past the signature recorded in `hub_link_commands`), disconnect, removal in the hub (and
+the outcome it leaves for the page), a stored link that no longer passes the rule, and both links side by side. `node_test.go` reaches the same fake hub at
 `https://hub.tailed39ba.ts.net` through a test transport, so the URL rule and the hub node check run: the node
 pinned at connect, another `StableID` idling the link and surviving a restart, `ErrNotAPeer` backing off and
 `ErrUnavailable` sending, the five-minute cadence, a node recorded later, a pending request ended by another machine
@@ -330,4 +345,9 @@ role rules through the HTTP stack, `check` with tailscaled answering and not, `s
 when no machine holds the hub's address and `409 hub_url_refused` once another machine holds its name (the stand-in
 hub answers at a tailnet name through `hubstub.At`), the begin audit's node, the session field and the probe; the
 `admin` and `test_manage.py` tests cover the terminal path, a token refused as an argument and read with echo off at
-a terminal included.
+a terminal included, a second `hub connect` refused while the first waits, the approval screen printed as the hub
+gave it, and `hub status` after a removal in the hub. The engine's own tests cover a disconnect whose `410` reaches
+the running dashboard before the terminal command has its answer (no second unlink, no removal outcome), a waiting
+terminal command's request kept from the next and one replaced once its command stopped, and a poll error clearing
+while a poll is held; the `api` tests cover a Docker command against a socket that is missing, one this process may
+not open, a daemon that never answers and one that refuses.

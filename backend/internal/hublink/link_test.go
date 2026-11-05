@@ -688,6 +688,19 @@ func TestAServerRemovedInTheHubForgetsItsLink(t *testing.T) {
 	if _, ok, _ := e.st.Setting(t.Context(), "hub.link.view"); ok {
 		t.Fatal("the cached view outlived the link")
 	}
+	// Settings → Hub says so once (protocol 8.9): the removal is the outcome
+	// an administrator's status carries, written with the clearing.
+	s, err := e.svc.Status(t.Context(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := s.Admin.LastOutcome
+	if s.State != StateUnlinked || o == nil || o.Result != "removed" || o.Message != "the server was removed in the hub" || o.At.IsZero() {
+		t.Fatalf("status = %+v, outcome = %+v", s, o)
+	}
+	if r, _ := e.svc.Status(t.Context(), false); r.Admin != nil {
+		t.Fatalf("a reader was sent the outcome: %+v", r.Admin)
+	}
 }
 
 func TestSwitchedOffNothingIsSentAndConnectIsRefused(t *testing.T) {

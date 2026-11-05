@@ -98,10 +98,12 @@ func (s *Service) Begin(ctx context.Context, lr LinkRequest) (Request, error) {
 		switch {
 		case !s.now().Before(req.ExpiresAt):
 			s.endRequest(ctx, outcomeExpired, "the request was not approved in time")
-		case driver == driverCLI && req.Driver == driverCLI:
+		case driver == driverCLI && req.Driver == driverCLI && !s.waitedOn(req):
 			// A terminal command that was killed outright leaves its request
 			// behind, with nobody polling it. The next terminal command is
-			// the only thing that could be, so it starts over.
+			// the only thing that could be, so it starts over. One still
+			// waiting keeps its request: two commands polling for one
+			// approval would both collect it.
 			if err := s.CancelLink(ctx); err != nil {
 				return Request{}, err
 			}
@@ -156,6 +158,9 @@ func (s *Service) Begin(ctx context.Context, lr LinkRequest) (Request, error) {
 		req.URL = origin
 	}
 	req.HubNode = lr.HubNode
+	if driver == driverCLI {
+		req.WaitingAt = s.now()
+	}
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
 		if err := s.kv.putTx(ctx, tx, keyRequest, req); err != nil {
 			return err
@@ -222,7 +227,11 @@ type PollResult struct {
 // PollLink asks the site whether the pending request has been decided. An error
 // means the site could not be asked this time and the request stands; a result
 // other than PollPending means the request is over.
-func (s *Service) PollLink(ctx context.Context) (PollResult, error) {
+func (s *Service) PollLink(ctx context.Context) (PollResult, error) { return s.poll(ctx, "") }
+
+// poll is PollLink for the request id, or for whichever is pending when id is
+// empty.
+func (s *Service) poll(ctx context.Context, id string) (PollResult, error) {
 	s.pollMu.Lock()
 	defer s.pollMu.Unlock()
 	if st, linked, err := s.kv.state(ctx); err != nil {
@@ -237,12 +246,15 @@ func (s *Service) PollLink(ctx context.Context) (PollResult, error) {
 	if !ok {
 		return PollResult{State: PollFailed, Message: "there is no link request"}, nil
 	}
+	if id != "" && req.ID != id {
+		return PollResult{State: PollFailed, Message: "another link request replaced this one"}, nil
+	}
 	if !s.now().Before(req.ExpiresAt) {
 		s.endRequest(ctx, outcomeExpired, "the request was not approved in time")
 		return PollResult{State: PollExpired, Message: "the request was not approved in time"}, nil
 	}
-	id, _, err := loadIdentity(ctx, s.kv, s.sealer)
-	if err != nil || id == nil {
+	ident, _, err := loadIdentity(ctx, s.kv, s.sealer)
+	if err != nil || ident == nil {
 		return PollResult{}, fmt.Errorf("link identity: %w", firstErr(err, ErrIdentityUnreadable))
 	}
 	// The instance's own check, before anything is sent: an approval is
@@ -252,7 +264,7 @@ func (s *Service) PollLink(ctx context.Context) (PollResult, error) {
 			return s.pollRefused(ctx, err)
 		}
 	}
-	resp, err := s.newClientAt(s.originFor(req.URL), id).pollRequest(ctx, req.ID)
+	resp, err := s.newClientAt(s.originFor(req.URL), ident).pollRequest(ctx, req.ID)
 	declined := "the request was declined " + s.p.PeerAt
 	var ended *RequestEndedError
 	switch {
@@ -411,25 +423,34 @@ func (s *Service) CancelLink(ctx context.Context) error {
 
 // AwaitLink polls the pending request until it is decided or ctx ends, which is
 // the terminal command's whole job. If ctx ends first the request is cancelled.
+// While it waits it says so (Request.WaitingAt), so another terminal command
+// is refused rather than replacing the request; and it polls only the request
+// it began with, and cancels only that one.
 func (s *Service) AwaitLink(ctx context.Context) (PollResult, error) {
+	req, ok, err := s.kv.request(ctx)
+	if err != nil {
+		return PollResult{}, err
+	}
+	if !ok {
+		return s.PollLink(ctx)
+	}
+	stop := s.keepWaiting(ctx, req.ID)
+	defer stop()
 	var lastErr error
 	for {
-		res, err := s.PollLink(ctx)
+		res, err := s.poll(ctx, req.ID)
 		if err == nil && res.State != PollPending {
 			return res, nil
 		}
 		if err != nil {
 			lastErr = err
 		}
-		wait := 5 * time.Second
-		if req, ok, e := s.kv.request(ctx); e == nil && ok {
-			wait = time.Duration(clampInt(req.PollSeconds, 2, 30)) * time.Second
-		}
+		wait := time.Duration(clampInt(req.PollSeconds, 2, 30)) * time.Second
 		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			t.Stop()
-			_ = s.CancelLink(ctx)
+			s.cancelRequest(ctx, req.ID)
 			msg := "no decision was made in time"
 			if lastErr != nil {
 				msg += "; the last attempt to ask the " + s.p.Peer + " failed: " + lastErr.Error()
@@ -437,6 +458,64 @@ func (s *Service) AwaitLink(ctx context.Context) (PollResult, error) {
 			return PollResult{State: PollExpired, Message: msg}, nil
 		case <-t.C:
 		}
+	}
+}
+
+// waitedOn reports whether the terminal command that began req still says it
+// is waiting on it.
+func (s *Service) waitedOn(req Request) bool {
+	return !req.WaitingAt.IsZero() && s.now().Sub(req.WaitingAt) < waitLease
+}
+
+// keepWaiting says, every waitRenew until stop is called, that the terminal
+// command is still waiting on request id.
+func (s *Service) keepWaiting(ctx context.Context, id string) (stop func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTicker(s.waitRenew)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.changeRequest(ctx, id, func(r *Request) { r.WaitingAt = s.now() })
+			}
+		}
+	}()
+	return func() { cancel(); <-done }
+}
+
+// changeRequest changes the stored request if it is still id, in one
+// transaction.
+func (s *Service) changeRequest(ctx context.Context, id string, change func(*Request)) {
+	err := s.kv.tx(ctx, func(tx *sql.Tx) error {
+		req, ok, err := s.kv.requestTx(ctx, tx)
+		if err != nil || !ok || req.ID != id {
+			return err
+		}
+		change(&req)
+		return s.kv.putTx(ctx, tx, keyRequest, req)
+	})
+	if err != nil && ctx.Err() == nil {
+		s.log.Debug("could not update the "+s.p.Name+" request", "err", err)
+	}
+}
+
+// cancelRequest forgets request id, and not one that has replaced it.
+func (s *Service) cancelRequest(ctx context.Context, id string) {
+	ctx = context.WithoutCancel(ctx)
+	err := s.kv.tx(ctx, func(tx *sql.Tx) error {
+		req, ok, err := s.kv.requestTx(ctx, tx)
+		if err != nil || !ok || req.ID != id {
+			return err
+		}
+		return s.kv.delTx(ctx, tx, keyRequest)
+	})
+	if err != nil {
+		s.log.Warn("could not cancel the "+s.p.Name+" request", "err", err)
 	}
 }
 
@@ -472,10 +551,16 @@ func (s *Service) SetScope(ctx context.Context, scope Scope) error {
 	return nil
 }
 
-// Unlink tells the site and forgets the link. A site that cannot be reached
+// Unlink forgets the link and tells the site. A site that cannot be reached
 // does not keep the link alive: the dashboard's own state is what matters, and
 // the owner can remove the server on the site. The result says whether the
 // site was told.
+//
+// The link is forgotten first. Once the site has heard, it answers 410 to
+// every signed request still in flight on the link, from this process or,
+// when this is the terminal command, from the running dashboard's. A loop that
+// hears that while the link is still stored takes it for the site removing
+// the server, and records a second unlink, by system and with that reason.
 func (s *Service) Unlink(ctx context.Context) (siteNotified bool, err error) {
 	st, linked, err := s.kv.state(ctx)
 	if err != nil {
@@ -485,12 +570,12 @@ func (s *Service) Unlink(ctx context.Context) (siteNotified bool, err error) {
 		return false, ErrNotLinked
 	}
 	// Only the site the link was made with is told: a URL that has changed
-	// since names somebody who never heard of this server.
+	// since names somebody who never heard of this server. Whether it may be
+	// told is decided while the link is still stored, as for any request on
+	// it.
+	var tell *Client
 	if id, _, e := loadIdentity(ctx, s.kv, s.sealer); e == nil && id != nil && s.enabled && s.admit(ctx, st) == nil {
-		ctx2, cancel := context.WithTimeout(ctx, requestTimeout)
-		e = s.linkClient(st, id).unlink(ctx2, st.ServerID)
-		cancel()
-		siteNotified = e == nil || isCode(e, http.StatusGone, "")
+		tell = s.linkClient(st, id)
 	}
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
 		if err := s.kv.delTx(ctx, tx, keyState, keyRequest, keyStatus, keyPolicy, keyAttempt, keyOutcome); err != nil {
@@ -498,10 +583,16 @@ func (s *Service) Unlink(ctx context.Context) (siteNotified bool, err error) {
 		}
 		return s.onClear(ctx, tx)
 	}); err != nil {
-		return siteNotified, err
+		return false, err
 	}
 	s.cancelLinked()
 	s.nudge()
+	if tell != nil {
+		ctx2, cancel := context.WithTimeout(ctx, requestTimeout)
+		e := tell.unlink(ctx2, st.ServerID)
+		cancel()
+		siteNotified = e == nil || isCode(e, http.StatusGone, "")
+	}
 	return siteNotified, nil
 }
 

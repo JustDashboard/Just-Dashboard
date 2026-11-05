@@ -68,6 +68,8 @@ var profile = accountlink.Profile{
 	// The sequence continues above a database restored from an older copy
 	// (protocol 3.1).
 	ClockSequence: true,
+	// A removal in the hub is said once on Settings → Hub (protocol 8.9).
+	RemovalOutcome: true,
 }
 
 var (

@@ -287,6 +287,12 @@ type fakeSite struct {
 	failNext   map[string]int // path prefix -> remaining 500s
 	rotate     []wireSiteKey
 	unlinked   bool
+	// onUnlink runs while the site answers an unlink, after it has marked
+	// the server removed and before the answer is sent.
+	onUnlink func()
+	// hold is how long a command poll with nothing to deliver is held; 150 ms
+	// when unset.
+	hold time.Duration
 }
 
 func newFakeSite(t *testing.T, now time.Time) *fakeSite {
@@ -499,9 +505,13 @@ func (f *fakeSite) signed(w http.ResponseWriter, r *http.Request, body []byte, p
 		}
 		writeJSON(w, 200, reply)
 	case r.Method == http.MethodGet && path == "/commands":
+		hold := f.hold
+		if hold == 0 {
+			hold = 150 * time.Millisecond
+		}
 		f.mu.Unlock()
-		deadline := time.Now().Add(150 * time.Millisecond)
-		for time.Now().Before(deadline) {
+		deadline := time.Now().Add(hold)
+		for time.Now().Before(deadline) && r.Context().Err() == nil {
 			f.mu.Lock()
 			n := len(f.queue)
 			f.mu.Unlock()
@@ -531,6 +541,11 @@ func (f *fakeSite) signed(w http.ResponseWriter, r *http.Request, body []byte, p
 	case r.Method == http.MethodPost && path == "/unlink":
 		server.removed = true
 		f.unlinked = true
+		if hook := f.onUnlink; hook != nil {
+			f.mu.Unlock()
+			hook()
+			f.mu.Lock()
+		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		apiError(w, 404, "not_found", path)

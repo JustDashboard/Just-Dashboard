@@ -98,6 +98,13 @@ type Service struct {
 	// pollEvery overrides the interval the site asked a pending request be
 	// polled at; zero means use the site's.
 	pollEvery time.Duration
+	// waitRenew is how often a terminal command waiting on its request says
+	// it still is (Request.WaitingAt).
+	waitRenew time.Duration
+	// pollHeld is how long a command poll may go unanswered before it counts
+	// as working: a peer answers an error at once, and holds only a poll it
+	// took.
+	pollHeld time.Duration
 	// The bounds of the wait after a failed exchange.
 	backoffMin, backoffMax time.Duration
 	// First and later evaluations of the update policy. Once a minute, because
@@ -139,7 +146,7 @@ func New(o Options) *Service {
 		st: o.Store, sealer: o.Sealer, audit: o.Audit, log: o.Log, kv: kv{st: o.Store, prefix: p.KeyPrefix},
 		siteURL: o.SiteURL, enabled: o.Enabled, host: o.Host, version: o.Version,
 		desc: o.Describe, http: o.HTTP, now: o.Now, loc: o.Location,
-		idle: 15 * time.Second, watch: 5 * time.Second,
+		idle: 15 * time.Second, watch: 5 * time.Second, waitRenew: waitRenewEvery, pollHeld: 2 * time.Second,
 		backoffMin: time.Second, backoffMax: 5 * time.Minute,
 		policyFirst: time.Minute, policyEvery: time.Minute,
 		wake: make(chan struct{}, 1), kick: make(chan struct{}, 1),
@@ -500,7 +507,9 @@ func (s *Service) commandLoop(ctx context.Context, st State) {
 			return
 		}
 		began := time.Now()
+		answered := s.clearPollErrorOnceHeld(ctx, cur.ServerID)
 		resp, err := s.pollCommands(ctx, cur)
+		answered()
 		if err != nil {
 			if ctx.Err() != nil || s.linkEnded(ctx, cur, err) {
 				return
@@ -528,6 +537,36 @@ func (s *Service) commandLoop(ctx context.Context, st State) {
 		if len(resp.Commands) == 0 && time.Since(began) < time.Second {
 			sleep(ctx, time.Second)
 		}
+	}
+}
+
+// clearPollErrorOnceHeld clears the poll error the status still shows once the
+// poll about to be sent has gone pollHeld without an answer. A peer answers a
+// failure at once and holds only a poll it took, which then returns only when
+// a command comes or the long-poll's wait ends; until then a failure from
+// before the peer came back would sit beside heartbeats that succeed, and say
+// so across a restart. The func it returns is called once the poll is
+// answered, and returns once no clearing can follow, so a clear never lands
+// after the poll's own outcome.
+func (s *Service) clearPollErrorOnceHeld(ctx context.Context, serverID string) (answered func()) {
+	if s.kv.status(ctx).PollError == "" {
+		return func() {}
+	}
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTimer(s.pollHeld)
+		defer t.Stop()
+		select {
+		case <-stop:
+		case <-ctx.Done():
+		case <-t.C:
+			s.setPollError(ctx, serverID, "")
+		}
+	}()
+	return func() {
+		close(stop)
+		<-done
 	}
 }
 
@@ -874,22 +913,35 @@ func (s *Service) linkEnded(ctx context.Context, st State, err error) bool {
 
 // clearLink forgets a link that is over. It forgets the link and what the site
 // set (the update policy), and keeps the identity, so linking again shows the
-// same fingerprint.
+// same fingerprint. A profile with RemovalOutcome also keeps why, as the
+// outcome the Settings page says once, in the same transaction.
 func (s *Service) clearLink(ctx context.Context, st State, why string) {
 	ctx = context.WithoutCancel(ctx)
-	// Two loops can hear the same 410 together; only the first has a link to
-	// clear, and only that link, not a newer one.
-	cur, ok, err := s.kv.state(ctx)
-	if err != nil || !ok || cur.ServerID != st.ServerID {
-		return
-	}
+	// Two loops can hear the same 410 together, and an unlink in another
+	// process can end the link while this one hears it. The transaction that
+	// still finds this link stored, and not a newer one, is the only one that
+	// clears it and says so.
+	cleared := false
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
+		cur, ok, err := s.kv.stateTx(ctx, tx)
+		if err != nil || !ok || cur.ServerID != st.ServerID {
+			return err
+		}
 		if err := s.kv.delTx(ctx, tx, keyState, keyRequest, keyStatus, keyPolicy, keyAttempt); err != nil {
 			return err
 		}
+		if s.p.RemovalOutcome {
+			if err := s.kv.putTx(ctx, tx, keyOutcome, Outcome{Result: OutcomeRemoved, At: s.now(), Message: why}); err != nil {
+				return err
+			}
+		}
+		cleared = true
 		return s.onClear(ctx, tx)
 	}); err != nil {
 		s.log.Warn("could not clear the "+s.p.Name, "err", err)
+		return
+	}
+	if !cleared {
 		return
 	}
 	s.cancelLinked()

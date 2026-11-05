@@ -111,7 +111,9 @@ func TestTheSiteRemovingTheServerClearsTheLinkAndStopsEverything(t *testing.T) {
 	e.site.remove(st.ServerID)
 	waitFor(t, "the link to be cleared", func() bool { _, ok := e.linkedState(); return !ok })
 	after, _ := e.svc.Status(t.Context())
-	if after.State != StateUnlinked || after.Link != nil || after.Fingerprint != before.Fingerprint {
+	// The account link has no RemovalOutcome: Settings → Connect knows only
+	// the outcomes of a request, so a removal leaves none for it to read.
+	if after.State != StateUnlinked || after.Link != nil || after.Fingerprint != before.Fingerprint || after.LastOutcome != nil {
 		t.Fatalf("status = %+v", after)
 	}
 	waitFor(t, "the unlink to be audited", func() bool { return len(e.auditRows("account.unlink")) == 1 })
@@ -148,6 +150,35 @@ func TestFailedExchangesBackOffShowAsAnErrorAndRecover(t *testing.T) {
 		s, _ := e.svc.Status(t.Context())
 		return s.Link != nil && s.Link.LastError == "" && s.Link.LastHeartbeatAt != nil && len(e.site.heartbeatBodies()) > 0
 	})
+}
+
+// A poll error stays only while polls fail. Once the site takes a poll and
+// holds it, the error goes, before the held poll returns: the status could
+// otherwise show a poll that failed before the site came back for the whole
+// long-poll, beside heartbeats that succeed (e2e: about 29 s after a hub
+// restart).
+func TestAPollErrorGoesOnceTheSiteHoldsAPollAgain(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.svc.pollHeld = 50 * time.Millisecond
+	e.site.fail("/commands", 1000)
+	e.svc.Start(t.Context())
+	e.link(ScopeObserve)
+	e.svc.nudge()
+	waitFor(t, "the poll error", func() bool { return e.svc.Health(t.Context()).PollError != "" })
+	e.site.mu.Lock()
+	e.site.hold = 20 * time.Second
+	e.site.mu.Unlock()
+	e.site.fail("/commands", 0)
+	polls := e.site.hitCount("GET /commands")
+	began := time.Now()
+	waitFor(t, "the poll error to go", func() bool { return e.svc.Health(t.Context()).PollError == "" })
+	if took := time.Since(began); took > 3*time.Second {
+		t.Fatalf("the poll error stayed %s", took)
+	}
+	if n := e.site.hitCount("GET /commands"); n > polls+1 {
+		t.Fatalf("the error went after %d more polls, not while the first was held", n-polls)
+	}
 }
 
 func TestTheBackoffGrowsFromOneSecondToFiveMinutes(t *testing.T) {

@@ -65,6 +65,9 @@ func TestHubConnectPrintsTheCodeWaitsAndReportsTheLink(t *testing.T) {
 		t.Fatalf("hub-connect = %v\n%s", err, out)
 	}
 	for _, want := range []string{"Connecting to Just Hub at   " + f.hub.URL, "The hub's machine           not checked (the test origin)",
+		// The hub's screen for this request, as the hub gave it: the request
+		// id is what opens it, and it is no secret.
+		"Approve it in the hub at    " + f.hub.URL + "/servers/add/?request=2c9e41d7-0000-4000-8000-000000000001\n",
 		"K7QM-29XD", "fingerprint", "maintain scope", `Connected to Just Hub "hub" at ` + f.hub.URL + ` as "`,
 		"(maintain).\nThe hub's key fingerprint is " + f.hub.KeyFingerprint() + "; compare it with the key fingerprint on the hub's Settings page.\n"} {
 		if !strings.Contains(out, want) {
@@ -194,6 +197,40 @@ func TestAnInterruptedHubConnectForgetsItsRequest(t *testing.T) {
 	}
 }
 
+// A second hub connect while the first still waits for approval is refused
+// and names the first's code: two commands polling for one approval would
+// both collect it, and the hub would hold a request for each.
+func TestASecondHubConnectIsRefusedWhileTheFirstWaits(t *testing.T) {
+	f := newHubFixture(t)
+	done := make(chan error, 1)
+	var first bytes.Buffer
+	go func() {
+		done <- run(t.Context(), f.dir, []string{"hub-connect", f.hub.URL, "--wait", "30s"}, strings.NewReader(""), &first, io.Discard)
+	}()
+	f.hub.WaitForRequest()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if status, _ := f.run("hub-status"); strings.HasPrefix(status, "Connection requested") {
+			break
+		}
+	}
+	_, err := f.run("hub-connect", f.hub.URL, "--scope", "observe", "--wait", "5s")
+	if exitCode(err) != 1 || !strings.Contains(err.Error(), "another hub connect is already waiting") ||
+		!strings.Contains(err.Error(), "(code K7QM-29XD)") {
+		t.Fatalf("second hub-connect = %v", err)
+	}
+	if r, _, _, _ := f.hub.Count(); r != 1 {
+		t.Fatalf("the hub was asked for %d requests", r)
+	}
+	// The first is still waiting on its own request, and connects.
+	f.hub.Approve()
+	if err := <-done; err != nil {
+		t.Fatalf("first hub-connect = %v\n%s", err, first.String())
+	}
+	if status, _ := f.run("hub-status"); !strings.Contains(status, "(maintain)") {
+		t.Fatalf("hub-status = %q", status)
+	}
+}
+
 func TestHubConnectIsRefusedWhenSwitchedOffOrTheAddressIsRefused(t *testing.T) {
 	f := newHubFixture(t)
 	t.Setenv("JD_HUB_LINK", "false")
@@ -295,6 +332,21 @@ func TestHubConnectNamesTheHubsMachine(t *testing.T) {
 	}
 }
 
+// hub connect prints the hub's approval screen for the request as the hub gave
+// it, unless the hub put something in it a terminal could take for a control
+// sequence (protocol 8.10).
+func TestTheHubsApprovalAddressIsPrintedAsGiven(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://hub.tailed39ba.ts.net/servers/add/?request=2c9e41d7-0000-4000-8000-000000000001": "https://hub.tailed39ba.ts.net/servers/add/?request=2c9e41d7-0000-4000-8000-000000000001",
+		"https://hub.tailed39ba.ts.net/servers/add/?request=\u009b31m":                            "https://hub.tailed39ba.ts.net/servers/add/",
+		"https://hub.tailed39ba.ts.net/servers/\u009b/?request=1":                                 "https://hub.tailed39ba.ts.net/servers/%C2%9B/",
+	} {
+		if got := hubApprovalAddress(raw); got != want {
+			t.Errorf("hubApprovalAddress(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
 // hub status says when the link is idle, and why, rather than the last error.
 func TestHubStatusSaysWhenTheLinkIsIdle(t *testing.T) {
 	f := newHubFixture(t)
@@ -317,6 +369,24 @@ func TestHubStatusSaysWhenTheLinkIsIdle(t *testing.T) {
 	st.Close()
 	out, err := f.run("hub-status")
 	if err != nil || !strings.Contains(out, "The link is idle, and nothing is sent: the hub's machine changed. Run hub disconnect") {
+		t.Fatalf("hub-status = %q, %v", out, err)
+	}
+}
+
+// hub status says a link the hub removed was removed there, not that a request
+// "was removed" (protocol 8.9).
+func TestHubStatusSaysALinkWasRemovedInTheHub(t *testing.T) {
+	f := newHubFixture(t)
+	st, err := store.Open(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSetting(t.Context(), "hub.link.outcome",
+		`{"result":"removed","at":"2026-11-05T10:00:00Z","message":"the server was removed in the hub"}`); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	if out, err := f.run("hub-status"); err != nil || out != "Not connected to a hub. It was removed in the hub.\n" {
 		t.Fatalf("hub-status = %q, %v", out, err)
 	}
 }

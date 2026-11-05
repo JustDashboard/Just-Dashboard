@@ -163,7 +163,13 @@ func TestATerminalCommandReplacesTheRequestAKilledOneLeftButNotOneFromSettings(t
 	if _, err := e.svc.BeginLink(t.Context(), ScopeObserve, "cli"); err != nil {
 		t.Fatal(err)
 	}
-	// The command was killed; another is run.
+	// While the command that began it may still be waiting on it, another
+	// is refused.
+	if _, err := e.svc.BeginLink(t.Context(), ScopeOperate, "cli"); err != ErrLinkPending {
+		t.Fatalf("a second command beside a waiting one = %v", err)
+	}
+	// The command was killed, and has said nothing since; another is run.
+	e.advance(waitLease)
 	second, err := e.svc.BeginLink(t.Context(), ScopeOperate, "cli")
 	if err != nil {
 		t.Fatalf("a killed command's request blocked the next one: %v", err)
@@ -178,6 +184,78 @@ func TestATerminalCommandReplacesTheRequestAKilledOneLeftButNotOneFromSettings(t
 	}
 	if _, err := e2.svc.BeginLink(t.Context(), ScopeObserve, "cli"); err != ErrLinkPending {
 		t.Fatalf("terminal over Settings = %v", err)
+	}
+}
+
+// A terminal command waiting on its request keeps saying so, and another
+// terminal command is refused for as long as it does, however long it has
+// waited: two commands polling for one approval would both collect it, and
+// the peer would hold a request for each.
+func TestATerminalCommandStillWaitingKeepsItsRequestFromTheNext(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.svc.waitRenew = 10 * time.Millisecond
+	first, err := e.svc.BeginLink(t.Context(), ScopeObserve, "cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan PollResult, 1)
+	go func() {
+		res, _ := e.svc.AwaitLink(ctx)
+		done <- res
+	}()
+	e.advance(waitLease + time.Minute)
+	waitFor(t, "the command to say it still waits", func() bool {
+		req, ok, _ := e.svc.kv.request(t.Context())
+		return ok && req.WaitingAt.Equal(e.clock())
+	})
+	// Another terminal command is another process over the same store.
+	other := New(Options{Store: e.st, Sealer: e.svc.sealer, SiteURL: e.site.srv.URL, Enabled: true, Now: e.clock, Describe: e.svc.desc})
+	if _, err := other.BeginLink(t.Context(), ScopeOperate, "cli"); err != ErrLinkPending {
+		t.Fatalf("a second command = %v", err)
+	}
+	if n := e.site.hitCount("POST /requests"); n != 1 {
+		t.Fatalf("the site was asked for %d requests", n)
+	}
+	e.site.approve(first.ID, "ion@example.com")
+	if res := <-done; res.State != PollLinked || res.Link.Scope != ScopeObserve {
+		t.Fatalf("the waiting command = %+v", res)
+	}
+}
+
+// A command whose request another replaced (it had stopped saying it waits:
+// suspended, say) stops polling rather than taking up the new one, and does
+// not cancel it.
+func TestAWaitingCommandWhoseRequestWasReplacedLeavesTheNewOneAlone(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.svc.waitRenew = time.Hour
+	first, err := e.svc.BeginLink(t.Context(), ScopeObserve, "cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan PollResult, 1)
+	go func() {
+		res, _ := e.svc.AwaitLink(ctx)
+		done <- res
+	}()
+	waitFor(t, "the first poll", func() bool { return e.site.hitCount("GET /requests/") > 0 })
+	e.advance(waitLease)
+	other := New(Options{Store: e.st, Sealer: e.svc.sealer, SiteURL: e.site.srv.URL, Enabled: true, Now: e.clock, Describe: e.svc.desc})
+	second, err := other.BeginLink(t.Context(), ScopeOperate, "cli")
+	if err != nil {
+		t.Fatalf("replacing a silent command's request = %v", err)
+	}
+	if res := <-done; res.State != PollFailed || res.Message != "another link request replaced this one" {
+		t.Fatalf("the replaced command = %+v", res)
+	}
+	e.svc.cancelRequest(t.Context(), first.ID)
+	if req, ok, _ := e.svc.Pending(t.Context()); !ok || req.ID != second.ID {
+		t.Fatalf("pending = %+v, %v", req, ok)
 	}
 }
 
@@ -459,6 +537,41 @@ func TestUnlinkTellsTheSiteForgetsTheLinkAndKeepsTheIdentity(t *testing.T) {
 	e.site.mu.Unlock()
 	if Fingerprint(pub) != before.Fingerprint {
 		t.Fatalf("fingerprint changed across an unlink")
+	}
+}
+
+// An unlink at the terminal while the dashboard runs is one unlink. The site
+// answers 410 to every request on the link once it has heard of the unlink;
+// the running dashboard's poll that gets one in the moment before the terminal
+// command has its answer finds the link already forgotten, and does not clear
+// it again as removed on the site: no second audit row by system, and no
+// outcome saying so for the Settings page.
+func TestAnUnlinkIsNotAlsoTakenForTheSiteRemovingTheServer(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, func(o *Options) {
+		p := AccountProfile
+		p.RemovalOutcome = true
+		o.Profile = &p
+	})
+	st := e.link(ScopeObserve)
+	cli := New(Options{Store: e.st, Sealer: e.svc.sealer, SiteURL: e.site.srv.URL, Enabled: true, Now: e.clock, Audit: e.audit})
+	var heard error
+	e.site.onUnlink = func() {
+		_, heard = e.svc.pollCommands(context.WithoutCancel(t.Context()), st)
+		e.svc.linkEnded(t.Context(), st, heard)
+	}
+	notified, err := cli.Unlink(t.Context())
+	if err != nil || !notified {
+		t.Fatalf("unlink = %v, %v", notified, err)
+	}
+	if !isCode(heard, http.StatusGone, "") {
+		t.Fatalf("the running dashboard's poll was answered %v, not 410", heard)
+	}
+	if rows := e.auditRows("account.unlink"); len(rows) != 0 {
+		t.Fatalf("the unlink was also recorded as the site removing the server: %+v", rows)
+	}
+	if s, _ := e.svc.Status(t.Context()); s.State != StateUnlinked || s.LastOutcome != nil {
+		t.Fatalf("status = %+v, outcome %+v", s, s.LastOutcome)
 	}
 }
 

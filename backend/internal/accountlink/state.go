@@ -126,14 +126,31 @@ type Request struct {
 	// the first check after it; the link pins the one its approval was polled
 	// from.
 	HubNode *PeerNode `json:"hubNode,omitempty"`
+	// WaitingAt is when the terminal command polling a request it began last
+	// said it is still waiting on it, which it does every waitRenewEvery. A
+	// command killed outright stops; once it has been silent for waitLease,
+	// the next terminal command may replace its request.
+	WaitingAt time.Time `json:"waitingAt,omitzero"`
 }
+
+// FromTerminal reports whether the request was begun by the terminal command,
+// which polls it itself.
+func (r Request) FromTerminal() bool { return r.Driver == driverCLI }
 
 const (
 	driverDashboard = "dashboard"
 	driverCLI       = "cli"
 )
 
-// Outcome is why the last request ended without a link.
+// A terminal command waiting on its request says so every waitRenewEvery, and
+// a request whose command has not for waitLease has nobody waiting on it.
+const (
+	waitRenewEvery = 5 * time.Second
+	waitLease      = 20 * time.Second
+)
+
+// Outcome is why the last request ended without a link, or, for a profile
+// with RemovalOutcome, why the last link ended.
 type Outcome struct {
 	Result  string    `json:"result"`
 	At      time.Time `json:"at"`
@@ -145,6 +162,11 @@ const (
 	outcomeExpired = "expired"
 	outcomeFailed  = "failed"
 )
+
+// OutcomeRemoved is a link the peer removed, for a profile with
+// RemovalOutcome: not a request that ended, but the same "why is this server
+// not linked" the Settings page says once.
+const OutcomeRemoved = "removed"
 
 // runtimeStatus is what the last exchanges with the site left behind, kept so
 // a terminal command can say it too.
@@ -282,6 +304,23 @@ func (k kv) stateTx(ctx context.Context, tx *sql.Tx) (State, bool, error) {
 		return State{}, false, fmt.Errorf("%s is unreadable: %w", k.key(keyState), err)
 	}
 	return st, st.ServerID != "", nil
+}
+
+// requestTx reads the pending request inside a transaction.
+func (k kv) requestTx(ctx context.Context, tx *sql.Tx) (Request, bool, error) {
+	var raw string
+	err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, k.key(keyRequest)).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Request{}, false, nil
+	}
+	if err != nil {
+		return Request{}, false, err
+	}
+	var r Request
+	if err := json.Unmarshal([]byte(raw), &r); err != nil {
+		return Request{}, false, fmt.Errorf("%s is unreadable: %w", k.key(keyRequest), err)
+	}
+	return r, r.ID != "", nil
 }
 
 // statusTx reads the status inside a transaction; one that cannot be read is

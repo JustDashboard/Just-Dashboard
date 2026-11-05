@@ -100,9 +100,10 @@ standard input with --token-stdin", in `manage.sh` and in the admin command alik
 `manage.sh` asks `Link token: ` with echo off (`read -rs`) when standard input is a terminal and reads one line
 otherwise, then hands the token to the admin command on that command's standard input (a here-string), never in
 its argv. `hub connect` applies the tailnet rule, prints the hub URL, the hub's machine and owner ("not checked"
-when tailscaled could not be asked, or at the test origin), the code and this server's fingerprint, waits, prints
-the pinned hub key's fingerprint on success, and exits 0 connected, 2 declined, not approved in time or
-interrupted, 1 otherwise ([hub-link.md](../backend/hub-link.md#terminal)). Audit: `hub.link` and `hub.unlink`,
+when tailscaled could not be asked, or at the test origin), the code, this server's fingerprint and the hub's
+approval screen for the request (its `approveUrl`), waits, prints the pinned hub key's fingerprint on success, and
+exits 0 connected, 2 declined, not approved in time or interrupted, 1 otherwise, a second `hub connect` while one
+still waits included ([hub-link.md](../backend/hub-link.md#terminal)). Audit: `hub.link` and `hub.unlink`,
 actor `cli`, username `root`.
 
 ## Stack commands

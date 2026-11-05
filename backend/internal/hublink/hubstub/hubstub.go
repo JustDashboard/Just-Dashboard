@@ -164,9 +164,12 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 			h.status = "pending"
 		}
 		h.requests++
+		id := fmt.Sprintf("2c9e41d7-0000-4000-8000-%012d", h.requests)
+		// The hub's approval screen for this request, where the code is
+		// typed; the code itself is never in it (protocol 4.1).
 		reply(w, 200, map[string]any{
-			"requestId": fmt.Sprintf("2c9e41d7-0000-4000-8000-%012d", h.requests), "userCode": "K7QM-29XD",
-			"approveUrl": h.originLocked() + "/servers/pair?code=K7QM-29XD", "expiresAt": time.Now().Add(15 * time.Minute).Unix(), "pollSeconds": 2,
+			"requestId": id, "userCode": "K7QM-29XD",
+			"approveUrl": h.originLocked() + "/servers/add/?request=" + id, "expiresAt": time.Now().Add(15 * time.Minute).Unix(), "pollSeconds": 2,
 		})
 	case strings.HasPrefix(path, "/requests/"):
 		h.polls++

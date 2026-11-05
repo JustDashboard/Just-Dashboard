@@ -17,8 +17,8 @@ leaves to the dashboard.
 **The same engine runs a second link.** `accountlink` is an engine that runs as more than one instance: a
 `Profile` (`profile.go`) gives each instance its settings prefix, command table, base path, peer wording, audit
 names, pacing and URL admission, and switches the account link leaves off (`IgnoreAnnouncedKeys`, `ClockSequence`,
-`Speaker`), and `Hooks` let an instance add its own (`Admit`, `OnReply`, `OnClear`, `HeartbeatExtra`,
-`BeforePoll`). The account link is
+`Speaker`, `RemovalOutcome`), and `Hooks` let an instance add its own (`Admit`, `OnReply`, `OnClear`,
+`HeartbeatExtra`, `BeforePoll`). The account link is
 `AccountProfile`; the [hub link](hub-link.md) (`backend/internal/hublink`) is a second instance with the hub's
 profile, and the two share no state. Everything on this page is the account link's instance; the hub link's
 differences are tabled in [hub-link.md](hub-link.md#one-engine-two-instances).
@@ -65,20 +65,25 @@ running dashboard (every `pollSeconds`). A request begun by `--admin link` is po
 the approval, which the site delivers once, is never collected by two processes; if the other process did
 collect it (`request_consumed`) the poller looks at the stored state and reports it as linked. Within one
 process `PollLink` holds `pollMu`, so two polls that overlap never race for the approval: the one that collects
-it has stored the link before the other asks, and the other finds it stored. A terminal
-command that was killed outright leaves its request behind with nobody polling it; the next terminal command
-replaces it, whereas a request from Settings is never taken over from the terminal.
+it has stored the link before the other asks, and the other finds it stored. A terminal command waiting on its
+request says so every 5 seconds (`AwaitLink` stamps `Request.WaitingAt`), and while it does a second terminal
+command is refused with `ErrLinkPending`, as one beside a request from Settings always is: two commands polling
+for one approval would both collect it. One that was killed outright stops saying so and leaves its request
+behind with nobody polling it; once it has been silent for 20 seconds the next terminal command replaces it. A
+waiting command polls and cancels only its own request, and stops if another replaced it.
 
 **A link made at the terminal reaches a running dashboard without a restart.** While nothing is linked the
 connector looks at the stored state every 15 seconds, and a running link checks every 5 seconds that it still
 is the stored one. An unlink at the terminal therefore stops the heartbeat and the poll, and a re-link starts
 them.
 
-Unlinking tells the site (`POST /unlink`, signed), forgets the link state and everything the site set (the
-update policy), and keeps the identity so a later link shows the same fingerprint. If the site cannot be
-reached the link is cleared anyway; the result says the site was not told. A `410` on any signed request
-means the owner removed the server on the site, and clears the link the same way (audited as
-`account.unlink` by `system`).
+Unlinking forgets the link state and everything the site set (the update policy), keeps the identity so a later
+link shows the same fingerprint, and then tells the site (`POST /unlink`, signed). If the site cannot be reached
+the link is cleared anyway; the result says the site was not told. A `410` on any signed request means the owner
+removed the server on the site, and clears the link the same way (audited as `account.unlink` by `system`). The
+order matters: once the site has heard of an unlink it answers `410` to everything still in flight on the link,
+the running dashboard's included when the unlink is the terminal's, and `clearLink`, which reads the link inside
+its own transaction, finds nothing left to clear, so an unlink is recorded once, by whoever unlinked.
 
 ## Files
 
@@ -308,8 +313,8 @@ commands, and root-only. They read `JD_ACCOUNT_LINK`, `JD_ACCOUNT_URL` and `JD_M
 environment (the account commands never decrypt anything; these have to, so they build a sealer, with a clear
 error when the key is absent; `link-status` needs no key). `link` prints the approval address and the code,
 waits, and exits **0** when linked, **2** when the request was declined or not approved before `--wait` (or
-the command was interrupted), **1** for anything else (switched off, already linked, key missing, site
-unreachable). Interrupted or timed out, it forgets its request. Audited as `account.link` by `root` /
+the command was interrupted), **1** for anything else (switched off, already linked, a request already waiting,
+another `link` still waiting on its own included, key missing, site unreachable). Interrupted or timed out, it forgets its request. Audited as `account.link` by `root` /
 `cli`; failures are audited as failed; `unlink` as `account.unlink`.
 
 `install.sh` asks in the Behaviour step, after the two-factor question and only when linking is not switched

@@ -51,9 +51,10 @@ sudo ./scripts/manage.sh hub status
 sudo ./scripts/manage.sh hub disconnect
 ```
 
-`hub connect` prints the hub's machine and its owner (or "not checked" when Tailscale could not be asked), a code
-and this server's key fingerprint, and waits (15 minutes by default, `--wait` up to an hour) while the hub's owner
-types that code into the hub. Once connected it prints the hub's key fingerprint; compare it with the one on the
+`hub connect` prints the hub's machine and its owner (or "not checked" when Tailscale could not be asked), a code,
+this server's key fingerprint and the address of the hub's screen for this request, and waits (15 minutes by
+default, `--wait` up to an hour) while the hub's owner types that code into the hub. While it waits, another `hub
+connect` is refused and names the code already waiting. Once connected it prints the hub's key fingerprint; compare it with the one on the
 hub's Settings page. The hub's own installer and its "Add by command" screen give a one-time token instead, which
 approves the request in advance. A token is only ever given on standard input, with `--token-stdin`: at a terminal
 the command asks `Link token:` and does not echo what you paste, and from a pipe it reads one line, so the token
@@ -78,7 +79,8 @@ exception before you connect: it may ask `GET /api/v1/hub/hello` to find dashboa
 behind your network allowlist and answers only whether this server can be connected, never its version or
 name.
 
-Disconnect from Settings, with `sudo ./scripts/manage.sh hub disconnect`, or by removing the server in the hub.
+Disconnect from Settings, with `sudo ./scripts/manage.sh hub disconnect`, or by removing the server in the hub,
+after which `hub status` says it was removed there.
 `JD_HUB_LINK=false` switches the feature off entirely: no discovery answer, no page controls, no command, and a
 connection that exists goes quiet. The Settings page shows the exact body of the last report the hub was sent.
 

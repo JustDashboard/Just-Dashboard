@@ -77,6 +77,12 @@ type Profile struct {
 	// "…"`, with the link's owner label, or the peer's host before there is
 	// one (hub-link-protocol.md 8.10).
 	Speaker string
+	// RemovalOutcome means a removal at the peer (410 on a signed request) is
+	// remembered as the outcome "removed", written in the transaction that
+	// clears the link, so the Settings page can say so once
+	// (hub-link-protocol.md 8.9). Without it the link is cleared and only the
+	// audit log says why.
+	RemovalOutcome bool
 	// ClockSequence raises the request counter to max(stored + 1, unix
 	// milliseconds) instead of stored + 1, so a database restored from an
 	// older copy carries on above every number it used before

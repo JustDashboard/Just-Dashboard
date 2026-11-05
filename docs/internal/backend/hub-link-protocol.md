@@ -1204,8 +1204,8 @@ only the ones its state allows, as the table after it says.
 | `admin.fingerprint` | | The hub link identity's fingerprint, once it exists |
 | `admin.testOrigin` | | Only when `JD_HUB_LINK_TEST_ORIGIN` is set |
 | `admin.request` | | When pending. `hubMachine` is the hub node 2.2 step 8 found, left out when it was not checked |
-| `admin.link` | | When linked. `lastSnapshot` is the exact body of the last heartbeat sent, so the page shows what is shared and not a description of it. `linkedBy` is the account that connected, or `cli`. `hubMachine` is the pinned hub node (2.4), left out until one is recorded. The page shows each `hubKeys[].fingerprint` with "compare with the key fingerprint on the hub's Settings page" |
-| `admin.lastOutcome` | | When unlinked and the last request ended without a link: `denied`, `expired` or `failed` |
+| `admin.link` | | When linked. `lastSnapshot` is the exact body of the last heartbeat sent, so the page shows what is shared and not a description of it. `linkedBy` is the account that connected, or `cli`. `hubMachine` is the pinned hub node (2.4), left out until one is recorded. The page shows each `hubKeys[].fingerprint` with "compare with the key fingerprint on the hub's Settings page". `lastError` is the last heartbeat's failure, else the last command poll's; a poll's failure is cleared once a poll has been held 2 seconds, since the hub answers a failure at once and holds only a poll it took (4.4) |
+| `admin.lastOutcome` | | When unlinked and the last request ended without a link: `denied`, `expired` or `failed`; or the last link was removed in the hub (8.9): `removed`, with the message "the server was removed in the hub" |
 | `admin.grants` | | Every account's sign-in grant (section 9) |
 
 ### 8.3 The `hub` field on `GET /auth/session`
@@ -1259,16 +1259,19 @@ sudo ./scripts/manage.sh hub status
 
 | Command | Does | Exit status |
 | --- | --- | --- |
-| `hub connect URL` | Applies the URL rule, starts a request at `--scope` (default `maintain`), prints the hub URL, the hub's machine and owner (2.2 step 8; "not checked" when tailscaled could not be asked), the code and the fingerprint, and waits up to `--wait` (default 15 minutes, at most 1 hour) for approval. With a token the approval usually arrives on the first poll. On success it prints `Connected to Just Hub "<name>" at <url> as "<server name>" (<scope>).` and the pinned hub key's fingerprint | `0` linked. `2` declined, expired, not approved within `--wait`, or interrupted; the request is forgotten. `1` anything else: switched off, already linked to a hub, a request already pending from Settings, the URL refused, the hub unreachable, `bad_token`, `JD_MASTER_KEY` missing |
-| `hub disconnect` | Tells the hub (`POST /unlink`) and clears the link. Prints whether the hub was told | `0` disconnected. `1` not linked, or the store could not be written |
-| `hub status` | One line: not connected (and how the last request ended), the pending code, or connected to whom, at which scope, the last heartbeat and the last error. Says so when `JD_HUB_LINK=false` | `0` printed. `1` the store could not be read |
+| `hub connect URL` | Applies the URL rule, starts a request at `--scope` (default `maintain`), prints the hub URL, the hub's machine and owner (2.2 step 8; "not checked" when tailscaled could not be asked), the code, the fingerprint and the hub's approval screen for the request (`approveUrl` as the hub gave it), and waits up to `--wait` (default 15 minutes, at most 1 hour) for approval. With a token the approval usually arrives on the first poll. On success it prints `Connected to Just Hub "<name>" at <url> as "<server name>" (<scope>).` and the pinned hub key's fingerprint | `0` linked. `2` declined, expired, not approved within `--wait`, or interrupted; the request is forgotten. `1` anything else: switched off, already linked to a hub, a request already pending from Settings or from another `hub connect` still waiting, the URL refused, the hub unreachable, `bad_token`, `JD_MASTER_KEY` missing |
+| `hub disconnect` | Clears the link and tells the hub (`POST /unlink`). Prints whether the hub was told | `0` disconnected. `1` not linked, or the store could not be written |
+| `hub status` | One line: not connected (and how the last request ended, or that the hub removed the link), the pending code, or connected to whom, at which scope, the last heartbeat and the last error. Says so when `JD_HUB_LINK=false` | `0` printed. `1` the store could not be read |
 
 `--token-stdin` is the only way to give a token. When standard input is a terminal, `manage.sh` prompts
 `Link token: ` and reads it with echo off (`read -rs`); otherwise it reads one line, which is how the hub
 installer pipes its token in. `manage.sh` hands the token to the admin command on that command's standard input,
 never as an argument, so it is in no process list (`/proc/*/cmdline`) and no shell history. There is no option
 that takes the token as an argument. A request started at the terminal is polled only by that command; one
-started in Settings is never taken over from the terminal, as with the account link. Audited as `hub.link`
+started in Settings is never taken over from the terminal, as with the account link. Nor is one whose command
+still waits: that command says so every 5 seconds, and a second `hub connect` is refused with the first one's
+code. Only a request whose command has been silent for 20 seconds (killed outright) is replaced by the next
+`hub connect`; a command whose request was replaced stops. Audited as `hub.link`
 (or `hub.link` failed, with the outcome) and `hub.unlink`, by `root` / `cli`.
 
 ### 8.5 Storage
@@ -1373,13 +1376,17 @@ The account link's loops, run as a second instance with the hub's prefix, table,
   `updateState(serverId)`. A status write (`hub.link.status`: last heartbeat, last error) is skipped when the
   link it describes is gone. A reply that arrives after a disconnect therefore cannot bring back the old hub's
   users, notices or fleet.
-- **Disconnect** (Settings or terminal): `POST /unlink`, signed, one attempt. Then, in one transaction, the link
-  state, request, status, policy, policy attempt, outcome and `hub.link.view` are deleted, and so are every
-  sign-in grant and ticket record (section 9), and every hub session is revoked. `clearLink` and `Unlink` both
-  do this in their own transaction. The identity and the sequence stay, so a later link shows the same
-  fingerprint.
+- **Disconnect** (Settings or terminal): in one transaction, the link state, request, status, policy, policy
+  attempt, outcome and `hub.link.view` are deleted, and so are every sign-in grant and ticket record (section 9),
+  and every hub session is revoked. Then, when the link may still send (switched on, not idle, the hub's machine
+  checked), `POST /unlink`, signed, one attempt. The link is gone before the hub hears: the hub answers `410` to
+  every request still in flight on it, the running dashboard's included when the terminal disconnects, and one
+  that finds no link stored clears and records nothing, so a disconnect is one `hub.unlink`. `clearLink` and
+  `Unlink` both clear in their own transaction, and `clearLink` reads the link inside it. The identity and the
+  sequence stay, so a later link shows the same fingerprint.
 - **Removed in the hub** (`410` on any signed request): the same clearing, audited as `hub.unlink` by `system`
-  with the reason "the server was removed in the hub". The Settings page says so once.
+  with the reason "the server was removed in the hub". The same transaction keeps the outcome `removed` with that
+  reason (8.2 `admin.lastOutcome`), so the Settings page says so once; a new request or link clears it.
 - **Identity unreadable** (`JD_MASTER_KEY` changed): an unlinked install makes a new identity; a linked one
   reports the error and needs a disconnect and a new link ("re-link needed").
 

@@ -179,7 +179,9 @@ func linkCommand(ctx context.Context, svc *accountlink.Service, logger *audit.Lo
 				return fmt.Errorf("this server is already linked to %s; run unlink first to link it to another account", st.Owner)
 			}
 		case errors.Is(err, accountlink.ErrLinkPending):
-			if pending, ok, _ := svc.Pending(ctx); ok {
+			if pending, ok, _ := svc.Pending(ctx); ok && pending.FromTerminal() {
+				return fmt.Errorf("another link command is already waiting for approval (code %s); approve it on %s, or stop that command first", pending.UserCode, svc.SiteURL())
+			} else if ok {
 				return fmt.Errorf("a link request is already waiting for approval (code %s); approve it on %s or cancel it in Settings", pending.UserCode, svc.SiteURL())
 			}
 		}
