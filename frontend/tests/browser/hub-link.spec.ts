@@ -28,6 +28,9 @@ const MACHINE = {
   tags: [],
 }
 const MACHINE_LINE = "The hub's machine: hub.tailed39ba.ts.net, a machine of wayy01@github"
+// Another machine at the hub's name, as the backend says it (§2.4).
+const CHANGED =
+  "the hub's machine changed: hub.tailed39ba.ts.net is now held by hub-2.tailed39ba.ts.net (nB2c0000CNTRL), not by hub.tailed39ba.ts.net (nK7f2QbPaa21CNTRL)"
 
 const admin = {
   authenticated: true,
@@ -61,13 +64,14 @@ const reader = { ...admin, capabilities: ["read"], user: { ...admin.user, role: 
 type Scope = "observe" | "operate" | "maintain"
 type Status = Record<string, unknown> & { state: string; reachable?: boolean }
 
+// The hub sends a version for this server only; every other entry's is "" (§6.1).
 const fleet = [
   {
     serverId: "5b1f9a20-0000-4000-8000-000000000001",
     name: "vmi3690758",
     endpoint: OTHER,
     state: "late",
-    version: "0.8.5",
+    version: "",
     self: false,
     lastSeenAt: iso(now - 60_000),
   },
@@ -84,7 +88,7 @@ const fleet = [
     serverId: "3c2e0f11-0000-4000-8000-000000000003",
     name: "atlas",
     state: "offline",
-    version: "0.8.4",
+    version: "",
     self: false,
   },
 ]
@@ -110,19 +114,22 @@ const notices = [
 
 const unlinked: Status = { enabled: true, state: "unlinked", admin: { fingerprint: FINGERPRINT } }
 
-const pending = (scope: Scope, url = HUB): Status => ({
+const pending = (scope: Scope, url = HUB, testOrigin?: string): Status => ({
   enabled: true,
   state: "pending",
   hubUrl: url,
   admin: {
     fingerprint: FINGERPRINT,
+    ...(testOrigin ? { testOrigin } : {}),
     request: {
       hubUrl: url,
       userCode: "K7QM-29XD",
-      approveUrl: `${url}/servers/pair?code=K7QM-29XD`,
+      // The approval page names the request, never the code: the owner types that (§4.1).
+      approveUrl: `${url}/servers/add/?request=2c9e41d7-0000-4000-8000-000000000001`,
       expiresAt: iso(Date.now() + 14 * 60_000 + 30_000),
       scope,
-      hubMachine: MACHINE,
+      // No machine is asked about at the test origin (§2.4).
+      ...(url === testOrigin ? {} : { hubMachine: MACHINE }),
     },
   },
 })
@@ -184,6 +191,25 @@ const linked = (scope: Scope, extra: Record<string, unknown> = {}): Status => ({
   },
   ...extra,
 })
+
+/**
+ * A link this server stopped using (§2.2, §2.4). The status has no field for it: an idle link's
+ * reason is its last error, in the backend's words (hublink/status_test.go), and it is not reached.
+ */
+const idleLink = (reason: string): Status => {
+  const base = linked("maintain")
+  return {
+    ...base,
+    reachable: false,
+    admin: {
+      ...(base.admin as object),
+      link: {
+        ...(base.admin as { link: object }).link,
+        lastError: `this server no longer accepts the hub's address: ${reason}; disconnect, then connect again`,
+      },
+    },
+  }
+}
 
 /** What a non-administrator is sent: no `admin` part (§8.2). */
 const forReader = (status: Status): Status =>
@@ -277,7 +303,8 @@ async function mock(page: Page, initial: Status, auth = admin) {
         return respond(route, world.connectRefusal.body, world.connectRefusal.status)
       }
       const { url, scope } = request.postDataJSON()
-      world.hub = pending(scope, url)
+      const testOrigin = (world.hub.admin as { testOrigin?: string } | undefined)?.testOrigin
+      world.hub = pending(scope, url, testOrigin)
       return respond(route, world.hub)
     }
     if (path === "/dashboard/hub/request" && method === "DELETE") {
@@ -296,14 +323,24 @@ async function mock(page: Page, initial: Status, auth = admin) {
     return respond(route, { error: { code: "not_found", message: "no such route" } }, 404)
   })
 
-  // Another server and the hub are other origins; answering them here is what lets a test see
-  // the browser arrive there without anything leaving the machine.
+  // Another server and the hub are other origins, opened in tabs of their own; answering them
+  // for the whole context is what lets a test see a tab arrive there without anything leaving
+  // the machine.
   for (const origin of [OTHER, HUB]) {
-    await page.route(`${origin}/**`, (route) =>
-      route.fulfill({ status: 200, contentType: "text/html", body: "<title>elsewhere</title>" }),
-    )
+    await page
+      .context()
+      .route(`${origin}/**`, (route) =>
+        route.fulfill({ status: 200, contentType: "text/html", body: "<title>elsewhere</title>" }),
+      )
   }
   return world
+}
+
+/** The tab a click opens, and the click. */
+async function newTab(page: Page, click: () => Promise<void>) {
+  const [tab] = await Promise.all([page.context().waitForEvent("page"), click()])
+  await tab.waitForLoadState()
+  return tab
 }
 
 const rail = (page: Page) => page.locator("[data-slot=sidebar]")
@@ -456,7 +493,10 @@ test("?connect= fills in the hub, says so, shows its machine, chooses no scope, 
   await expect(page.getByText(/Type this code into the hub when it asks for it/)).toBeVisible()
   await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(MACHINE_LINE)
   const approve = page.getByRole("link", { name: "Approve in Just Hub" })
-  await expect(approve).toHaveAttribute("href", `${HUB}/servers/pair?code=K7QM-29XD`)
+  await expect(approve).toHaveAttribute(
+    "href",
+    `${HUB}/servers/add/?request=2c9e41d7-0000-4000-8000-000000000001`,
+  )
   await expect(approve).toHaveAttribute("target", "_blank")
   await expect(approve).toHaveAttribute("rel", "noopener noreferrer")
   await expect(page.getByRole("meter", { name: "Time left to approve" })).toBeVisible()
@@ -467,7 +507,7 @@ test("?connect= fills in the hub, says so, shows its machine, chooses no scope, 
 
   // The hub owner approves in the other tab; the page flips and the shell becomes hub-aware.
   world.hub = linked("maintain")
-  await expect(page.getByText("Connected to hub")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText("Connected to Just Hub (hub)")).toBeVisible({ timeout: 15_000 })
   await expect(switcher(page)).toContainText("vps-07749119-vps-ovh-net")
   await expect(page).toHaveTitle("Hub · vps-07749119-vps-ovh-net · Just Dashboard")
   await expect(rail(page).locator("a[href='/dashboard/hub']")).toHaveText("Hub")
@@ -507,6 +547,28 @@ test("a link someone else wrote fills nothing in, and a refused hub says why", a
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled()
 })
 
+test("a request another machine answered for ends as failed and says why", async ({ page }) => {
+  // The approval is where the hub key is pinned, so a different machine before it ends the
+  // request with nothing stored (§2.4 "While a request is pending").
+  await mock(page, {
+    ...unlinked,
+    admin: {
+      fingerprint: FINGERPRINT,
+      lastOutcome: { result: "failed", at: iso(now - 60_000), message: CHANGED },
+    },
+  })
+  await page.goto("/dashboard/hub")
+  await expect(page.getByText("Connecting failed")).toBeVisible()
+  await expect(
+    page.getByText(
+      "The hub's machine changed: hub.tailed39ba.ts.net is now held by hub-2.tailed39ba.ts.net",
+    ),
+  ).toBeVisible()
+  await expect(page.getByText(/^Ended 1m/)).toBeVisible()
+  // Nothing was linked: the form is there to try again.
+  await expect(page.getByLabel("Hub address")).toBeVisible()
+})
+
 test("a waiting request survives a reload and can be cancelled", async ({ page }) => {
   const world = await mock(page, pending("operate"))
   await page.goto("/dashboard/hub")
@@ -536,7 +598,7 @@ test("the outcome of the last request is said once", async ({ page }) => {
   await expect(page.getByText("The request was declined")).toHaveCount(0)
 })
 
-test("linked: the switcher lists the fleet, this one first, and another opens in this tab", async ({
+test("linked: the switcher lists the fleet as the hub's, this one first, and another opens in a new tab", async ({
   page,
 }) => {
   await mock(page, linked("maintain"))
@@ -547,27 +609,39 @@ test("linked: the switcher lists the fleet, this one first, and another opens in
   await switcher(page).click()
   const menu = servers(page)
   await expect(menu).toBeVisible()
+  // The names are the hub's words, and the menu says whose (§8.10).
+  await expect(menu.locator("[data-slot=hub-attribution]")).toHaveText("Listed by Just Hub (hub)")
   const items = menu.getByRole("menuitem")
+  // The hub sends no version for another server (§6.1), so none is shown for one.
   await expect(items).toHaveText([
     /^vps-07749119-vps-ovh-net, Online\s*[\d.]+\s*this one$/,
     /^atlas, Offline\s*no address$/,
-    /^vmi3690758, Late\s*0\.8\.5$/,
-    /^Open Just Hub$/,
+    /^vmi3690758, Late, opens in a new tab$/,
+    /^Open Just Hub, opens in a new tab$/,
   ])
   await expect(items.nth(0)).toHaveAttribute("href", "/")
   await expect(items.nth(1)).toHaveAttribute("aria-disabled", "true")
-  await expect(items.nth(2)).toHaveAttribute("href", OTHER)
-  await expect(items.nth(2)).not.toHaveAttribute("target", /.+/)
-  await expect(items.nth(3)).toHaveAttribute("href", `${HUB}/`)
+  // An address the hub handed over opens in a tab of its own, with no opener and no referrer.
+  for (const [n, href] of [
+    [2, OTHER],
+    [3, `${HUB}/`],
+  ] as const) {
+    await expect(items.nth(n)).toHaveAttribute("href", href)
+    await expect(items.nth(n)).toHaveAttribute("target", "_blank")
+    await expect(items.nth(n)).toHaveAttribute("rel", "noopener noreferrer")
+  }
   // A state is a dot and a word (§4), never a filled pill.
   expect(await filledPills(page)).toEqual([])
 
-  await items.nth(2).click()
-  await expect(page).toHaveURL(`${OTHER}/`)
-  await expect(page).toHaveTitle("elsewhere")
+  const tab = await newTab(page, () => items.nth(2).click())
+  await expect(tab).toHaveURL(`${OTHER}/`)
+  await expect(tab).toHaveTitle("elsewhere")
+  expect(await tab.evaluate(() => window.opener)).toBeNull()
+  // This tab stays on this server.
+  await expect(page).toHaveURL(/\/account$/)
 })
 
-test("linked: the palette's Servers open another server with location.assign", async ({ page }) => {
+test("linked: the palette's Servers open another server in a new tab", async ({ page }) => {
   await mock(page, linked("maintain"))
   await page.goto("/account")
   await expect(switcher(page)).toContainText("vps-07749119-vps-ovh-net")
@@ -585,8 +659,14 @@ test("linked: the palette's Servers open another server with location.assign", a
   await dialog.getByRole("combobox").fill("server: vmi")
   await expect(results.getByRole("option")).toHaveCount(1)
   await expect(results.getByRole("option")).toContainText("Late")
-  await page.keyboard.press("Enter")
-  await expect(page).toHaveURL(`${OTHER}/`)
+  // Who listed it, and where it opens, beside the list.
+  const selected = dialog.locator("aside[aria-label='Selected result']")
+  await expect(selected).toContainText("Just Hub (hub)")
+  await expect(selected).toContainText("In a new tab")
+  const tab = await newTab(page, () => page.keyboard.press("Enter"))
+  await expect(tab).toHaveURL(`${OTHER}/`)
+  expect(await tab.evaluate(() => window.opener)).toBeNull()
+  await expect(page).toHaveURL(/\/account$/)
 })
 
 test("linked: the hub's notices, newest first, as text, dismissed per browser", async ({
@@ -699,6 +779,51 @@ test("linked, hub unreachable: the switcher says so and the others read unknown"
   await expect(menu.getByRole("menuitem").nth(2)).toContainText("Unknown")
 })
 
+test("an idle link says why, offers no sync, and a disconnect tells no one", async ({ page }) => {
+  // Another machine took the hub's name (§2.4), in the words hublink/node.go gives it.
+  const world = await mock(page, idleLink(CHANGED))
+  await page.goto("/dashboard/hub")
+
+  await expect(page.getByText("Idle", { exact: true })).toBeVisible()
+  const notice = page.locator("[data-slot=hub-link-idle]")
+  await expect(notice).toContainText("The link is idle")
+  await expect(notice).toContainText(
+    "The hub's machine changed: hub.tailed39ba.ts.net is now held by hub-2.tailed39ba.ts.net (nB2c0000CNTRL), not by hub.tailed39ba.ts.net (nK7f2QbPaa21CNTRL).",
+  )
+  await expect(notice).toContainText(
+    "Nothing is sent to hub.tailed39ba.ts.net and nothing it asks is run until you disconnect and connect again.",
+  )
+  // Said once, at the top: not again as a failed exchange.
+  await expect(page.getByText("The last exchange with hub.tailed39ba.ts.net failed")).toHaveCount(0)
+  const activity = page.locator("section", { hasText: "Activity" }).first()
+  await expect(activity.getByText("Not sent", { exact: true })).toBeVisible()
+  await expect(page.getByText("Idle, nothing is sent")).toBeVisible()
+  // A sync would be refused (409 hub_url_refused), so none is offered.
+  await expect(page.getByRole("button", { name: "Sync now" })).toHaveCount(0)
+  expect(await unnamedControls(page)).toEqual([])
+  expect(await scrollsSideways(page)).toBe(false)
+
+  await page.getByRole("button", { name: "Disconnect", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Disconnect from Just Hub" })
+  await expect(dialog).toContainText("forgets its idle link to hub.tailed39ba.ts.net")
+  await expect(dialog).toContainText("the hub is not told")
+  await dialog.getByRole("button", { name: "Disconnect", exact: true }).click()
+  await expect(page.getByLabel("Hub address")).toBeVisible()
+  expect(world.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+    "DELETE /dashboard/hub",
+  ])
+})
+
+test("to anyone but an administrator an idle link is one that cannot reach its hub", async ({
+  page,
+}) => {
+  await mock(page, idleLink("the hub's machine changed"), reader)
+  await page.goto("/dashboard/hub")
+  await expect(page.getByText("Connected, hub unreachable")).toBeVisible()
+  await expect(page.getByText("The link is idle")).toHaveCount(0)
+  await expect(page.getByText(/hub's machine changed/)).toHaveCount(0)
+})
+
 test("linked: the page reads the link, changes its scope and disconnects after asking", async ({
   page,
 }) => {
@@ -710,6 +835,8 @@ test("linked: the page reads the link, changes its scope and disconnects after a
     `${HUB}/`,
   )
   await expect(page.getByText("Connected", { exact: true })).toBeVisible()
+  // The hub's name is its own word, said as the hub's (§8.10).
+  await expect(page.locator("[data-slot=host-identity]").getByText("Just Hub (hub)")).toBeVisible()
   await expect(page.getByText("Maintain scope")).toBeVisible()
   await expect(page.getByText("3 servers", { exact: true })).toBeVisible()
   await expect(page.getByText(/connected 1d .*by operator/)).toBeVisible()
@@ -818,10 +945,18 @@ test("a test origin is said out loud", async ({ page }) => {
     "The test origin: no machine is checked.",
   )
   // A development hub names its own origin in the link; that exact origin fills in too.
-  await page.goto("/dashboard/hub?connect=http://127.0.0.1:43180")
-  await expect(page.getByLabel("Hub address")).toHaveValue("http://127.0.0.1:43180")
   await page.goto("/dashboard/hub?connect=http://127.0.0.1:43181")
   await expect(page.getByLabel("Hub address")).toHaveValue("")
+  await page.goto("/dashboard/hub?connect=http://127.0.0.1:43180")
+  await expect(page.getByLabel("Hub address")).toHaveValue("http://127.0.0.1:43180")
+
+  // Its request has no machine, and says why rather than "not checked".
+  await scopeCard(page, "Observe").click()
+  await page.getByRole("button", { name: "Connect", exact: true }).click()
+  await expect(page.locator("[data-slot=hub-link-code]")).toHaveText("K7QM-29XD")
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(
+    "The test origin: no machine is checked.",
+  )
 })
 
 test("on a phone the strip names the server and opens the same menu", async ({ page }) => {
@@ -845,6 +980,7 @@ test("on a phone the strip names the server and opens the same menu", async ({ p
     ["unlinked", unlinked],
     ["pending", pending("maintain")],
     ["linked", linked("maintain", { notices })],
+    ["idle", idleLink("the hub's machine changed")],
   ] as const) {
     for (const width of [390, 1280, 1720]) {
       await page.setViewportSize({ width, height: 1600 })

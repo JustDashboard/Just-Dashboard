@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import {
+  atTestOrigin,
   connectTarget,
   describeMachine,
   hubHost,
+  hubLabel,
   hubSays,
+  idleReason,
   keptDismissals,
   linkReading,
   linkedByWords,
@@ -30,12 +33,13 @@ const self = {
   self: true,
   lastSeenAt: "2026-11-05T10:00:00Z",
 }
+// Another server's version is always "" (§6.1): only this server learns its own.
 const other = {
   serverId: "5b1f9a20-0000-4000-8000-000000000001",
   name: "vmi3690758",
   endpoint: "https://vmi3690758.tailed39ba.ts.net:8443",
   state: "late",
-  version: "0.8.5",
+  version: "",
   self: false,
   lastSeenAt: "2026-11-05T09:59:00Z",
 }
@@ -133,6 +137,16 @@ describe("whose machine the hub is, and who is speaking", () => {
   test("the hub's words are the hub's, by name when it has one", () => {
     expect(hubSays("hub")).toBe("Just Hub (hub) says")
     expect(hubSays(undefined)).toBe("Just Hub says")
+    expect(hubLabel("hub")).toBe("Just Hub (hub)")
+    expect(hubLabel(undefined)).toBe("Just Hub")
+  })
+
+  test("the test origin is told apart by origin, not by spelling", () => {
+    expect(atTestOrigin("http://127.0.0.1:9443", "http://127.0.0.1:9443/")).toBe(true)
+    expect(atTestOrigin("http://127.0.0.1:9443", "http://127.0.0.1:9444")).toBe(false)
+    expect(atTestOrigin("https://hub.tailed39ba.ts.net", undefined)).toBe(false)
+    expect(atTestOrigin(undefined, "http://127.0.0.1:9443")).toBe(false)
+    expect(atTestOrigin("not a url", "http://127.0.0.1:9443")).toBe(false)
   })
 })
 
@@ -235,30 +249,41 @@ describe("the fleet", () => {
 describe("the palette's Servers", () => {
   const entries = serverEntries(shellHub(session, { ...linked, fleet: [other, tunnelled, self] }))
 
-  test("every server, this one first and opening here, then the hub", () => {
+  test("every server, this one first and opening here, then the hub by its name", () => {
     expect(entries.map((entry) => entry.title)).toEqual([
       "vps-07749119-vps-ovh-net",
       "Atlas",
       "vmi3690758",
-      "Just Hub",
+      "Just Hub (hub)",
     ])
     expect(entries.every((entry) => entry.kind === "server")).toBe(true)
     expect(entries[0]).toMatchObject({ href: "/", self: true, detail: "This server" })
+    expect(entries[0].facts).toContainEqual({ label: "Version", value: "0.8.5" })
+    // Another server reads as where it opens: the hub sends no version for it (§6.1).
     expect(entries[2]).toMatchObject({
       href: "https://vmi3690758.tailed39ba.ts.net:8443",
-      detail: "0.8.5",
+      detail: "vmi3690758.tailed39ba.ts.net:8443",
       reading: { tone: "warning", label: "Late" },
     })
+    expect(entries[2].facts).toContainEqual({ label: "Opens", value: "In a new tab" })
+    expect(entries[2].facts.map((fact) => fact.label)).not.toContain("Version")
     expect(entries[3]).toMatchObject({
       id: "server:hub",
       href: "https://hub.tailed39ba.ts.net/",
       hub: true,
     })
+    expect(entries[3].facts).toContainEqual({ label: "Opens", value: "In a new tab" })
+  })
+
+  test("every name says it is the hub's (§8.10)", () => {
+    for (const entry of entries.slice(0, 3)) {
+      expect(entry.facts).toContainEqual({ label: "Listed by", value: "Just Hub (hub)" })
+    }
   })
 
   test("a server with no address is listed and says it cannot be opened", () => {
     expect(entries[1].href).toBeUndefined()
-    expect(entries[1].detail).toBe("no report yet · no address")
+    expect(entries[1].detail).toBe("no address · no report yet")
     expect(entries[1].facts).toContainEqual({ label: "Opens", value: "No address reported" })
   })
 
@@ -292,6 +317,47 @@ describe("notices", () => {
   })
 })
 
+// An idle link as an administrator reads it: its reason as its last error (hublink/status_test.go).
+const idle = (reason) => ({
+  ...linked,
+  reachable: false,
+  admin: {
+    link: {
+      serverId: "7a0d3c1e-0000-4000-8000-000000000002",
+      linkedAt: "2026-11-05T09:00:00Z",
+      linkedBy: "ion",
+      lastError: `this server no longer accepts the hub's address: ${reason}; disconnect, then connect again`,
+      hubKeys: [],
+    },
+  },
+})
+
+describe("an idle link", () => {
+  test("its reason, as a sentence", () => {
+    expect(idleReason(idle("the hub's machine changed"))).toBe("The hub's machine changed")
+    // A reason with a colon and a semicolon of its own keeps them.
+    expect(
+      idleReason(
+        idle(
+          "the hub's address no longer passes this server's tailnet rule: it is an address; not a name",
+        ),
+      ),
+    ).toBe(
+      "The hub's address no longer passes this server's tailnet rule: it is an address; not a name",
+    )
+  })
+
+  test("any other last error is not idleness", () => {
+    const failed = idle("x")
+    failed.admin.link.lastError = "the heartbeat failed: the hub answered HTTP 503"
+    expect(idleReason(failed)).toBeUndefined()
+    expect(linkReading(failed).label).toBe("Connected, hub unreachable")
+    expect(idleReason(linked)).toBeUndefined()
+    // Only a stored link can be idle.
+    expect(idleReason({ ...idle("x"), state: "pending" })).toBeUndefined()
+  })
+})
+
 describe("the link in words", () => {
   test("each state", () => {
     expect(linkReading({ enabled: false, state: "unlinked" })).toEqual({
@@ -308,6 +374,10 @@ describe("the link in words", () => {
     expect(linkReading({ ...linked, lastHeartbeatAt: undefined }).label).toBe(
       "Connected, first report due",
     )
+    expect(linkReading(idle("the hub's machine changed"))).toEqual({
+      tone: "danger",
+      label: "Idle",
+    })
   })
 
   test("who connected it, and the terminal's way to", () => {

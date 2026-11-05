@@ -48,6 +48,19 @@ export function openable(url: string | undefined): string | undefined {
   }
 }
 
+/**
+ * Whether a hub URL is the test origin (§2.3), where no machine is asked about or pinned: the
+ * Settings page says so in place of the machine.
+ */
+export function atTestOrigin(url: string | undefined, testOrigin: string | undefined): boolean {
+  if (!url || !testOrigin) return false
+  try {
+    return new URL(url).origin === new URL(testOrigin).origin
+  } catch {
+    return false
+  }
+}
+
 /** A notice's link, kept only when it is on the hub's own origin (§6.2). */
 export function noticeHref(href: string | undefined, hubUrl: string | undefined) {
   const target = openable(href)
@@ -93,11 +106,43 @@ export function describeMachine(machine: HubLinkMachine): string {
 }
 
 /**
+ * The hub by the name it gave itself, "Just Hub (hub)". That name is `owner.label`, which the hub
+ * chose and so is the hub's text too (§8.10): it is said inside the product's name, never alone
+ * where the dashboard's own words go.
+ */
+export function hubLabel(name: string | undefined): string {
+  return name ? `Just Hub (${name})` : "Just Hub"
+}
+
+/**
  * Who is speaking, for text the hub wrote (§8.10): "Just Hub (hub) says". Every notice, and every
  * message of the hub's, is drawn under this, never as the dashboard's own words.
  */
 export function hubSays(name: string | undefined): string {
-  return name ? `Just Hub (${name}) says` : "Just Hub says"
+  return `${hubLabel(name)} says`
+}
+
+/**
+ * The words an idle link's last error is given in by the backend (`hublink.refused`, around
+ * `ErrURLRefused`). The status has no field of its own for it: an idle link is a stored link whose
+ * `admin.link.lastError` is its reason, whatever the last exchange left behind, so the reason is
+ * read back out of these words, which `hublink/status_test.go` holds the backend to.
+ */
+const IDLE =
+  /^this server no longer accepts the hub's address: ([\s\S]+); disconnect, then connect again$/
+
+/**
+ * Why this server stopped using its link, when it has (§2.2 "When the rule runs", §2.4): the
+ * hub's address fails the URL rule now — the server moved to another tailnet, the test origin was
+ * removed — or another machine answers at the hub's name. An idle link stays stored and sends
+ * nothing, commands and reports alike, until a person disconnects; a sync is refused. Only an
+ * administrator is sent the reason, so for anyone else an idle link reads as one that cannot reach
+ * its hub.
+ */
+export function idleReason(status: HubLinkStatus): string | undefined {
+  if (status.state !== "linked") return undefined
+  const reason = IDLE.exec(status.admin?.link?.lastError ?? "")?.[1]?.trim()
+  return reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : undefined
 }
 
 /** What the shell knows about its hub, or nothing: the gate every hub feature is drawn behind. */
@@ -197,8 +242,12 @@ export type ServerEntry = {
  * The palette's Servers: every server the hub lists, this one first, then the hub itself (the
  * design report's "Open vps-07749119"). A server with no address is still listed, so a search
  * for it says it is there and cannot be opened from here, rather than that it does not exist.
+ *
+ * The names are the hub's words, so each says who listed it (§8.10); and the hub sends another
+ * server's version as "" (§6.1), so a row says where a server opens rather than what it runs.
  */
 export function serverEntries(hub: ShellHub): ServerEntry[] {
+  const listedBy = { label: "Listed by", value: hubLabel(hub.name) }
   const servers = orderFleet(hub.fleet).map((server): ServerEntry => {
     const address = serverAddress(server)
     const reading = serverReading(server, hub.reachable)
@@ -209,7 +258,7 @@ export function serverEntries(hub: ShellHub): ServerEntry[] {
       // The state is the row's `Status` at its far end; the line beside the name says the rest.
       detail: server.self
         ? "This server"
-        : [server.version || "no report yet", address ? undefined : "no address"]
+        : [address ? hubHost(address) : "no address", server.lastSeenAt ? "" : "no report yet"]
             .filter(Boolean)
             .join(" · "),
       keywords: [hubHost(address), server.version].filter(Boolean),
@@ -219,7 +268,10 @@ export function serverEntries(hub: ShellHub): ServerEntry[] {
       facts: [
         ...(address ? [{ label: "Address", value: hubHost(address), mono: true }] : []),
         ...(server.version ? [{ label: "Version", value: server.version }] : []),
-        ...(!address && !server.self ? [{ label: "Opens", value: "No address reported" }] : []),
+        ...(server.self
+          ? []
+          : [{ label: "Opens", value: address ? "In a new tab" : "No address reported" }]),
+        listedBy,
       ],
     }
   })
@@ -229,7 +281,7 @@ export function serverEntries(hub: ShellHub): ServerEntry[] {
     {
       id: "server:hub",
       kind: "server",
-      title: "Just Hub",
+      title: hubLabel(hub.name),
       detail: hubHost(hub.url),
       keywords: ["hub", hub.name, hubHost(hub.url)],
       href: url,
@@ -240,6 +292,7 @@ export function serverEntries(hub: ShellHub): ServerEntry[] {
       facts: [
         { label: "Address", value: hubHost(hub.url), mono: true },
         { label: "Servers", value: String(hub.fleet.length) },
+        ...(url ? [{ label: "Opens", value: "In a new tab" }] : []),
       ],
     },
   ]
@@ -277,6 +330,7 @@ export function linkReading(status: HubLinkStatus): Reading {
   if (!status.enabled) return { tone: "stopped", label: "Turned off" }
   if (status.state === "pending") return { tone: "warning", label: "Waiting for approval" }
   if (status.state === "linked") {
+    if (idleReason(status)) return { tone: "danger", label: "Idle" }
     if (status.reachable === false) return { tone: "warning", label: "Connected, hub unreachable" }
     if (!status.lastHeartbeatAt) return { tone: "notice", label: "Connected, first report due" }
     return { tone: "running", label: "Connected" }

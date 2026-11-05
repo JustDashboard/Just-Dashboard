@@ -414,7 +414,8 @@ A change that weakens any of these has to say so explicitly.
     API key is refused) and root-only at the terminal, where the hub's one-time
     token is read only from standard input. Everything the hub sends for display (notices, fleet names, its
     name, its error messages) is shown as plain text attributed to the hub, never as this dashboard's own
-    prompt. See [hub link](../backend/hub-link.md) and its
+    prompt, and an address it hands over (another server's endpoint, a notice's link) opens only in a new tab
+    with `noopener noreferrer`, never in this dashboard's own. See [hub link](../backend/hub-link.md) and its
     [protocol](../backend/hub-link-protocol.md).
 
 ## Invariant 2: what two-factor still guarantees

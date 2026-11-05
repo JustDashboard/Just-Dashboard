@@ -102,8 +102,13 @@ when it cannot. A refusal **sets the link idle in the store** (`State.Idle`, `{c
 at}` in `hub.link.state`, written by `Engine.SetIdle`), revokes every hub session in that same write transaction
 (`revokeHubSessionsTx`, which has nothing to revoke until hub sign-in exists), and audits `hub.link.idle` by `system`
 with the reason and `sessionsRevoked`. An idle link stays idle across restarts, whatever the rule or WhoIs says
-later: nothing is sent on it, the page shows the reason as the last error and `reachable: false`, a manual sync
-answers `409 hub_url_refused`, and only a disconnect clears it (without telling anyone). A link made at the test
+later: nothing is sent on it, the status gives the reason as the last error (`refused`: "this server no longer
+accepts the hub's address: <reason>; disconnect, then connect again") with `reachable: false`, a manual sync
+answers `409 hub_url_refused`, and only a disconnect clears it (without telling anyone). The status has no field
+of its own for idleness: Settings → Hub reads the reason back out of that shape (`idleReason` in
+`lib/hub-link.ts`) and draws the link as **Idle**, with the reason at the top, no Sync now, and a Disconnect that
+says the hub is not told. `status_test.go` holds the backend to the shape; anyone without `system.admin` gets no
+`admin` part and sees a link that cannot reach its hub. A link made at the test
 origin therefore stops at the first start after the variable is removed, and putting the variable back does not
 revive it.
 
@@ -196,10 +201,14 @@ spaces (`plainText`), so it cannot reorder the sentence around it. So `admin.lin
 errors never carry the hub's words unattributed; the account link's messages are unchanged. Notices, fleet names
 and `owner.label` are structured fields and stay raw in the API; the pages render them as text under the hub's
 name: every notice, in the rail's card and on Settings → Hub, is headed "Just Hub (<name>) says" before its words,
-and its link names the host it opens (`hubSays`, `hub-notice.tsx`, `HubNotices`). The Settings page calls `check`
-as an address is typed or filled and shows the machine under it, shows `hubMachine` on the request and the link
-with the hub key's fingerprint to compare with the hub's Settings page, and leaves the scope unchosen after a
-`?connect=` link ([feature map](../frontend/feature-map.md)).
+and its link names the host it opens (`hubSays`, `hub-notice.tsx`, `HubNotices`); the hub's name is said as
+"Just Hub (<name>)" (`hubLabel`) on the Settings page, in its picture, in the palette and in the toast that
+announces a link; the switcher's menu says "Listed by Just Hub (<name>)" under its label and each palette server
+says who listed it. Another server's endpoint, and the hub, open from the switcher and the palette in a new tab
+with `noopener noreferrer`, never in the dashboard's own tab. The Settings page calls `check` as an address is
+typed or filled and shows the machine under it, shows `hubMachine` on the request and the link (or that the test
+origin checks none) with the hub key's fingerprint to compare with the hub's Settings page, and leaves the scope
+unchosen after a `?connect=` link ([feature map](../frontend/feature-map.md)).
 
 ## Local API
 
@@ -337,17 +346,17 @@ pinned at connect, another `StableID` idling the link and surviving a restart, `
 `Check` (and that a `Check` of the linked hub's address while another machine holds the name still lets the next
 heartbeat find it, idle the link and send nothing), the dialer's gate (with nothing pinned, another machine's name
 refused), a name with no address sending no poll and no heartbeat, a sync that finds no machine succeeding with the
-reason on the status, and a `429` on Connect saying to try again later. The vectors test reads
-`hub-link-vectors.json` and runs every key, canonical-JSON, rejected-args, request and command case and the hello
-bodies against the dashboard's own code, the hub-link command cases through the real connector. The URL rule, the
-test origin, `tailscale status` parsing and the dialer have table tests. The `api` tests cover the routes and their
-role rules through the HTTP stack, `check` with tailscaled answering and not, `sync` answering `200` with the reason
-when no machine holds the hub's address and `409 hub_url_refused` once another machine holds its name (the stand-in
-hub answers at a tailnet name through `hubstub.At`), the begin audit's node, the session field and the probe; the
-`admin` and `test_manage.py` tests cover the terminal path, a token refused as an argument and read with echo off at
-a terminal included, a second `hub connect` refused while the first waits, the approval screen printed as the hub
-gave it, and `hub status` after a removal in the hub. The engine's own tests cover a disconnect whose `410` reaches
-the running dashboard before the terminal command has its answer (no second unlink, no removal outcome), a waiting
-terminal command's request kept from the next and one replaced once its command stopped, and a poll error clearing
-while a poll is held; the `api` tests cover a Docker command against a socket that is missing, one this process may
-not open, a daemon that never answers and one that refuses.
+reason on the status, and a `429` on Connect saying to try again later. `status_test.go` pins the words an idle link's
+status carries, which the Settings page reads. The vectors test reads `hub-link-vectors.json` and runs every key,
+canonical-JSON, rejected-args, request and command case and the hello bodies against the dashboard's own code, the
+hub-link command cases through the real connector. The URL rule, the test origin, `tailscale status` parsing and the
+dialer have table tests. The `api` tests cover the routes and their role rules through the HTTP stack, `check` with
+tailscaled answering and not, `sync` answering `200` with the reason when no machine holds the hub's address and `409
+hub_url_refused` once another machine holds its name (the stand-in hub answers at a tailnet name through `hubstub.At`),
+the begin audit's node, the session field and the probe; the `admin` and `test_manage.py` tests cover the terminal path,
+a token refused as an argument and read with echo off at a terminal included, a second `hub connect` refused while the
+first waits, the approval screen printed as the hub gave it, and `hub status` after a removal in the hub. The engine's
+own tests cover a disconnect whose `410` reaches the running dashboard before the terminal command has its answer (no
+second unlink, no removal outcome), a waiting terminal command's request kept from the next and one replaced once its
+command stopped, and a poll error clearing while a poll is held; the `api` tests cover a Docker command against a
+socket that is missing, one this process may not open, a daemon that never answers and one that refuses.

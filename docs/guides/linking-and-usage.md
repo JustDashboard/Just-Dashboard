@@ -76,9 +76,10 @@ and the dashboard reaches it only over the tailnet: it never dials a hub at an a
 range. If tailscaled can be asked, the dashboard also checks that the address belongs to the machine of that
 name, shows that machine and its owner before you connect, and remembers it: from then on it sends nothing to
 another machine that takes the hub's name (a hub machine deleted and its name reused), and the connection goes
-quiet until you disconnect and connect again. If the server later moves to another tailnet, the connection
-likewise stays stored but goes quiet, and Settings says why; disconnect and connect to a hub on the new
-tailnet.
+idle until you disconnect and connect again. If the server later moves to another tailnet, the connection
+likewise stays stored but goes idle; disconnect and connect to a hub on the new tailnet. **Settings → Hub** then
+reads *Idle* and says why at the top of the page ("The hub's machine changed: …"); it offers no **Sync now**,
+and **Disconnect** clears the link here without telling the hub, which this server no longer contacts.
 
 The scope works as for just-dashboard.com, with the table above ("the hub" for "the site"), except that the
 default is `maintain`: a hub is yours and on your own network, and keeping servers updated is what it is for.
@@ -91,9 +92,9 @@ only whether this server can be connected, never its version or name.
 Once connected, the dashboard knows it is one of several:
 
 - the logo at the top of the sidebar becomes this server's name, and opens a list of every server on the hub
-  with its state (online, late, offline, updating) — pick one to open it in the same tab — and **Open Just
-  Hub**;
-- **Ctrl K** gets a **Servers** scope (`server:`) that finds and opens them the same way;
+  with its state (online, late, offline, updating), under "Listed by Just Hub (name)" — pick one to open it in
+  a new tab — and **Open Just Hub**;
+- **Ctrl K** gets a **Servers** scope (`server:`) that finds them and opens them the same way, in a new tab;
 - the browser tab's title carries this server's name, so several dashboard tabs can be told apart;
 - the hub's notices appear above your account in the sidebar, as the hub's, and can be dismissed in this
   browser.

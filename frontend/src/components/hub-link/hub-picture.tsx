@@ -1,6 +1,6 @@
 "use client"
 
-import { hubHost, serverCount } from "@/lib/hub-link"
+import { hubHost, hubLabel, idleReason, serverCount } from "@/lib/hub-link"
 import { relativeTime } from "@/lib/format"
 import type { HubLinkScope, HubLinkStatus } from "@/lib/types"
 import { LinkPicture } from "@/components/account-link/connect-picture"
@@ -13,8 +13,9 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  * servers it holds — instead of the site and an account.
  *
  * The lines are the link's state, as there: every line pulses while reports reach the hub, the
- * hub's line holds still in amber while it cannot be reached, only the server's line pulses while
- * a request waits for approval in the hub, and every line is dashed while nothing is connected.
+ * hub's line holds still in amber while it cannot be reached or the link is idle, only the
+ * server's line pulses while a request waits for approval in the hub, and every line is dashed
+ * while nothing is connected. The hub's name is its own word, so it is said as "Just Hub (hub)".
  */
 export function HubPicture({
   status,
@@ -31,6 +32,7 @@ export function HubPicture({
   const pending = status.state === "pending"
   const link = status.admin?.link
   const quiet = linked && (status.reachable === false || Boolean(link?.lastError))
+  const idle = Boolean(idleReason(status))
   const url = status.hubUrl ?? status.admin?.request?.hubUrl ?? address
   const host = hubHost(url) || "Just Hub"
   const servers = status.fleet?.length ?? 0
@@ -47,14 +49,16 @@ export function HubPicture({
       peer={{
         eyebrow: linked || pending || address ? host : "Just Hub",
         title: linked ? (
-          <span className="block truncate">{status.hubName ?? host}</span>
+          <span className="block truncate">{status.hubName ? hubLabel(status.hubName) : host}</span>
         ) : pending ? (
           <TextShimmer>Waiting for approval</TextShimmer>
         ) : (
           <span className="text-muted-foreground">Not connected</span>
         ),
         hint: linked ? (
-          status.reachable === false ? (
+          idle ? (
+            <span className="text-destructive">Idle, nothing is sent</span>
+          ) : status.reachable === false ? (
             <span className="text-warning">Not reaching the hub</span>
           ) : status.lastHeartbeatAt ? (
             `${serverCount(servers)} · report ${relativeTime(status.lastHeartbeatAt)}`

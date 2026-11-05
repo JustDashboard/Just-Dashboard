@@ -6,8 +6,11 @@ import { External, Slash, Warning } from "@/components/icons"
 import { scopeName } from "@/lib/account-link"
 import { relativeTime } from "@/lib/format"
 import {
+  atTestOrigin,
   connectTarget,
   hubHost,
+  hubLabel,
+  idleReason,
   linkedByWords,
   linkReading,
   openable,
@@ -54,6 +57,12 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  * protocol's default scope, `maintain`. Unlinked servers do not draw this page in the rail (`hubLink` in
  * `nav.ts`), so the hub's button, the palette and the address bar are the ways in.
  *
+ * A link this server has stopped using — its address fails the URL rule now, or another machine
+ * answers at the hub's name (§2.2, §2.4) — is still stored, and reads as **Idle** with the reason
+ * at the top of the page: nothing is sent and no sync is offered until it is disconnected, which
+ * then tells no one. The hub's name, its notices and the servers it lists are its own words, so
+ * each is said as the hub's, "Just Hub (hub)" (§8.10).
+ *
  * Without `system.admin` the status has no `admin` part, and the page says what it can: whether
  * and to which hub this server is connected, and what the hub is saying.
  */
@@ -80,8 +89,7 @@ export default function HubLinkPage() {
     const was = previous.current
     previous.current = state
     if (was === undefined || was === state) return
-    if (was === "pending" && state === "linked")
-      notify.success(`Connected to ${name ?? "Just Hub"}`)
+    if (was === "pending" && state === "linked") notify.success(`Connected to ${hubLabel(name)}`)
     if ((was === "linked") !== (state === "linked")) {
       void refreshAuth().catch(() => undefined)
       shell?.refresh()
@@ -106,6 +114,8 @@ export default function HubLinkPage() {
   const notices = status.notices ?? []
   const reading = linkReading(status)
   const hubLink = openable(url)
+  const idle = idleReason(status)
+  const testOrigin = atTestOrigin(url, admin?.testOrigin)
 
   return (
     <Page className="animate-rise">
@@ -147,7 +157,8 @@ export default function HubLinkPage() {
             {linked && admin && (
               <HubLinkActions
                 host={host}
-                name={status.hubName ?? host}
+                name={status.hubName ? hubLabel(status.hubName) : host}
+                idle={Boolean(idle)}
                 onSync={hub.sync}
                 onDisconnect={hub.disconnect}
               />
@@ -172,6 +183,17 @@ export default function HubLinkPage() {
               be used in production.
             </Notice>
           )}
+          {idle && (
+            <div data-slot="hub-link-idle">
+              <Notice tone="danger" icon={Warning} title="The link is idle">
+                <p className="break-words">{sentence(idle)}</p>
+                <p className="mt-1">
+                  Nothing is sent to {host} and nothing it asks is run until you disconnect and
+                  connect again.
+                </p>
+              </Notice>
+            </div>
+          )}
           {invited && linked && invited !== host && (
             <Notice title={`Already connected to ${host}`}>
               A server reports to one hub. To connect it to {invited}, disconnect it from {host}{" "}
@@ -192,7 +214,15 @@ export default function HubLinkPage() {
           <div className="flex min-w-0 flex-col divide-y divide-hairline">
             {linked ? (
               <>
-                {link && <HubActivity status={status} link={link} host={host} className={BLOCK} />}
+                {link && (
+                  <HubActivity
+                    status={status}
+                    link={link}
+                    host={host}
+                    idle={Boolean(idle)}
+                    className={BLOCK}
+                  />
+                )}
                 {notices.length > 0 && (
                   <HubNotices
                     notices={notices}
@@ -229,7 +259,7 @@ export default function HubLinkPage() {
                           Compare the hub key&apos;s fingerprint with the key fingerprint on the
                           hub&apos;s Settings page.
                         </p>
-                        <MachineFact machine={link.hubMachine} />
+                        <MachineFact machine={link.hubMachine} testOrigin={testOrigin} />
                       </div>
                     </div>
                   </>
@@ -241,6 +271,7 @@ export default function HubLinkPage() {
                   <WaitingPanel
                     request={request}
                     fingerprint={admin.fingerprint}
+                    testOrigin={testOrigin}
                     onCancel={hub.cancel}
                     className={BLOCK}
                   />
@@ -266,6 +297,11 @@ export default function HubLinkPage() {
   )
 }
 
+/** A reason as a sentence of its own: the backend's reasons end bare. */
+function sentence(text: string) {
+  return /[.!?]$/.test(text) ? text : `${text}.`
+}
+
 /** Each section stands alone under a hairline, at the deploy settings pages' rhythm. */
 const BLOCK = "py-8 first:pt-4 last:pb-2"
 
@@ -275,7 +311,7 @@ function Facts({ status }: { status: HubLinkStatus }) {
   if (status.state === "linked") {
     return (
       <>
-        {status.hubName && <span className="truncate">{status.hubName}</span>}
+        {status.hubName && <span className="truncate">{hubLabel(status.hubName)}</span>}
         {status.scope && (
           <>
             <FactDot />
@@ -322,12 +358,16 @@ const OUTCOME = {
     title: "The request expired",
     body: "Nobody approved it in the hub in time.",
   },
-  failed: { tone: "danger", title: "Connecting failed", body: "" },
+  failed: { tone: "danger", title: "Connecting failed", body: "It ended without a link." },
 } as const
 
 /**
  * Why the last request ended without a link, said once: dismissing it remembers which request it
- * was for this tab, so the next one that ends the same way is news again.
+ * was for this tab, so the next one that ends the same way is news again. A declined or expired
+ * request says so in the page's own words, which are all the backend's message adds; a failed one
+ * says why in the backend's — "the hub's machine changed" when another machine answered at the
+ * hub's name before the approval was collected (§2.4), with any of the hub's own words in it
+ * already quoted as the hub's (§8.10) — as plain text.
  */
 function Outcome({
   outcome,
@@ -337,11 +377,14 @@ function Outcome({
   const [dismissed, setDismissed] = useSessionState("hub-link.outcome", "")
   if (dismissed === outcome.at) return null
   const words = OUTCOME[outcome.result]
+  const why =
+    outcome.result === "failed" && outcome.message
+      ? sentence(outcome.message.charAt(0).toUpperCase() + outcome.message.slice(1))
+      : words.body
   return (
     <Notice tone={words.tone} title={words.title}>
-      <p>
-        {[words.body, outcome.message].filter(Boolean).join(" ")} {relativeTime(outcome.at)}.
-      </p>
+      <p className="break-words">{why}</p>
+      <p className="mt-1">Ended {relativeTime(outcome.at)}.</p>
       <Button size="xs" variant="outline" className="mt-2" onClick={() => setDismissed(outcome.at)}>
         Dismiss
       </Button>

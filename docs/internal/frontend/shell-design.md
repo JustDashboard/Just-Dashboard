@@ -299,22 +299,26 @@ again. The browser never talks to the hub: everything is this server's cached co
 reply, so the CSP is unchanged. `lib/hub-link.ts` holds the pure half and its Bun tests.
 
 - **The server switcher** (`components/hub-link/server-switcher.tsx`) takes the logo row's place: the J,
-  this server's name where the wordmark was, and a chevron. Its menu lists every server the hub holds,
-  this one first with the installed version the wordmark carried and marked *this one* (a link to
-  the Overview), the rest by name with a `StatusDot` in the hub's state (online green, late amber,
-  offline red, updating grey; the word is in the row's accessible name), their version and an
-  arrow, then **Open Just Hub**. Another server is a real link to
-  its origin and opens **in this tab** — the hub's own Open button is the way to a new one — and a
-  server with no reported address is listed, disabled, as *no address*. While the hub cannot be reached
-  the trigger carries an amber dot, the menu says *Hub unreachable*, and the others' dots go grey
+  this server's name where the wordmark was, and a chevron. Its menu says under its label who named the
+  servers, *Listed by Just Hub (hub)*, since every name in it is the hub's text
+  ([protocol](../backend/hub-link-protocol.md) §8.10), then lists every server the hub holds, this one
+  first with the installed version the wordmark carried and marked *this one* (a link to the Overview),
+  the rest by name with a `StatusDot` in the hub's state (online green, late amber, offline red,
+  updating grey; the word is in the row's accessible name) and an arrow (the hub sends no version for
+  another server, §6.1), then **Open Just Hub**. Another server is a real link to its origin, and it and
+  the hub open **in a new tab** with `noopener noreferrer` (§8.10): the address is one the hub handed
+  over, so it never takes this dashboard's tab and nothing of this dashboard's goes with it. A server
+  with no reported address is listed, disabled, as *no address*. While the hub cannot be reached the
+  trigger carries an amber dot, the menu says *Hub unreachable*, and the others' dots go grey
   (*Unknown*), since what the hub said last may be minutes old. Every address is checked again in the
   browser (`openable`: `https`, or loopback `http` for the test origin) before it becomes a link. On a
   phone the strip's wordmark is the same trigger and menu.
 - **Servers in the palette** — a scope after Recent, offered only on a linked server
   (`searchScopes(hubLinked)`; unlinked, `server:` is plain text again). Each server is a result with its
-  state and version, found by name or address; this one opens the Overview, another assigns
-  `window.location` (the palette's own navigation refuses another origin, `localDestination`), and
-  **Just Hub** is the last entry.
+  state and where it opens, found by name or address, its preview saying who listed it (*Just Hub
+  (hub)*) and that it opens in a new tab; this one opens the Overview, another is opened with
+  `window.open(…, "_blank", "noopener,noreferrer")` (the palette's own navigation refuses another
+  origin, `localDestination`), and **Just Hub (hub)** is the last entry.
 - **The host in the tab's title**, above.
 - **The hub notice** (`components/hub-link/hub-notice.tsx`), between the update notice and the account
   card, built the way the update notice is and rendering nothing when there is nothing to say: the newest

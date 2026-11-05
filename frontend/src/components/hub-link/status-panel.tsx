@@ -53,17 +53,22 @@ function askedBy(issuedBy: string) {
 /**
  * What the link has been doing: the report this server sends, and the last thing the hub ran
  * here, each with its state at the far end. Every command is in the audit log under
- * `hub.command.*` with the hub as its actor, so the section leads there for the rest.
+ * `hub.command.*` with the hub as its actor, so the section leads there for the rest. An idle
+ * link's last error is its reason, which the page already says above everything, so here the
+ * report only reads as not sent.
  */
 export function HubActivity({
   status,
   link,
   host,
+  idle,
   className,
 }: {
   status: HubLinkStatus
   link: LinkState
   host: string
+  /** This server has stopped using the link (`idleReason`). */
+  idle?: boolean
   className?: string
 }) {
   const command = link.lastCommand
@@ -82,7 +87,7 @@ export function HubActivity({
         </Button>
       }
     >
-      {link.lastError && (
+      {link.lastError && !idle && (
         <Notice tone="warning" icon={Warning} title={`The last exchange with ${host} failed`}>
           {link.lastError}
         </Notice>
@@ -98,7 +103,9 @@ export function HubActivity({
               : "Sent every 15 seconds"
           }
           trailing={
-            unreachable ? (
+            idle ? (
+              <Status tone="danger" label="Not sent" />
+            ) : unreachable ? (
               <Status tone="warning" label="Not reaching the hub" />
             ) : status.lastHeartbeatAt ? (
               <Status tone="running" label="Sending" live />
@@ -195,15 +202,22 @@ export function HubNotices({
   )
 }
 
-/** Sync now and Disconnect, for the identity line: the two things done to a link that exists. */
+/**
+ * Sync now and Disconnect, for the identity line: the two things done to a link that exists. An
+ * idle link offers only Disconnect: a sync would be refused (`409 hub_url_refused`), and the hub
+ * is not told of the disconnect, since this server no longer sends it anything.
+ */
 export function HubLinkActions({
   host,
   name,
+  idle,
   onSync,
   onDisconnect,
 }: {
   host: string
+  /** "Just Hub (hub)", or the host before the hub has a name. */
   name: string
+  idle?: boolean
   onSync: () => Promise<HubLinkStatus>
   onDisconnect: () => Promise<void>
 }) {
@@ -231,10 +245,17 @@ export function HubLinkActions({
       workingLabel: "Disconnecting…",
       description: (
         <>
-          <p>
-            This server stops reporting to {host} and ignores every command from it. The hub is
-            told, and if it cannot be reached the link is cleared here anyway.
-          </p>
+          {idle ? (
+            <p>
+              This server forgets its idle link to {host}. It sends nothing there now, so the hub is
+              not told, and lists this server until it is removed there.
+            </p>
+          ) : (
+            <p>
+              This server stops reporting to {host} and ignores every command from it. The hub is
+              told, and if it cannot be reached the link is cleared here anyway.
+            </p>
+          )}
           <p className="text-muted-foreground">
             Connected to {name}. This server keeps its key, so connecting again shows the same
             fingerprint.
@@ -252,10 +273,12 @@ export function HubLinkActions({
     <>
       {dialog}
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" onClick={sync} pending={syncing}>
-          <RefreshClockwise />
-          Sync now
-        </Button>
+        {!idle && (
+          <Button variant="outline" size="sm" onClick={sync} pending={syncing}>
+            <RefreshClockwise />
+            Sync now
+          </Button>
+        )}
         <Button variant="outline" size="sm" className="text-destructive" onClick={askDisconnect}>
           Disconnect
         </Button>

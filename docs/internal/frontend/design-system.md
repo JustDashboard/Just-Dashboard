@@ -2926,7 +2926,10 @@ The passes, in order. Each one is a diff you can review on its own.
    what the owner types into the hub and the fingerprint is what its approval screen shows. The picture is Connect's (`LinkPicture`, which both pages now draw through)
    with the hub's J and address at its end. Hub notices on the page are `Notice`s in the notice's
    own tone, because each is a sentence the hub chose to say, not a reading, and each is headed
-   *Just Hub (hub) says* so it never reads as the dashboard's own.
+   *Just Hub (hub) says* so it never reads as the dashboard's own. A link this server has stopped
+   using is the one state that is a verdict rather than a reading: *Idle* in red at the identity
+   line's far end, and the reason once, as a danger `Notice` above the picture, not again as the
+   Activity section's failed exchange; Sync now leaves the identity line, since it would be refused.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed

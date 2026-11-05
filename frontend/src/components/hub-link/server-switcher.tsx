@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { ArrowUpRight, ChevronDown } from "@/components/icons"
-import { openable, orderFleet, serverAddress, serverReading } from "@/lib/hub-link"
+import { hubLabel, openable, orderFleet, serverAddress, serverReading } from "@/lib/hub-link"
 import { cn } from "@/lib/utils"
 import { VERSION } from "@/lib/version"
 import type { ShellHubValue } from "@/hooks/use-hub-link"
@@ -27,12 +27,15 @@ import { useSidebar } from "@/components/ui/sidebar"
  * product's name says nothing a tab of the same product does not — the server's does, so the J
  * stays and the name takes the wordmark's place, with the chevron that says it opens.
  *
- * The menu is the hub's last word on each server, cached by this server's backend: a dot in the
- * server's state and its name, this one first with the installed version the wordmark used to
- * carry, then the rest by name with their version and an arrow, since pressing one leaves for
- * another origin. They open in this tab, which is the point — the hub's own Open button is the
- * way to a new one — and they are real links, so a middle click still makes a tab. While the hub cannot be reached the others' dots go
- * grey, because what it said last may be minutes old, and the menu says why.
+ * The menu is the hub's last word on each server, cached by this server's backend, and says so
+ * under its label ("Listed by Just Hub (hub)"): every name in it is the hub's text
+ * (hub-link-protocol §8.10). A dot in the server's state and its name, this one first with the
+ * installed version the wordmark used to carry, then the rest by name with an arrow, since pressing
+ * one leaves for another origin. The hub sends no version for them (§6.1). Another server, and the
+ * hub, open in a new tab with no opener and no referrer: the address is one the hub handed over,
+ * so it never takes this tab, and nothing of this dashboard's goes with it (§8.10). While the hub
+ * cannot be reached the others' dots go grey, because what it said last may be minutes old, and
+ * the menu says why.
  *
  * `strip` is the phone's top strip, where the rail is a closed sheet: the same trigger and menu,
  * so which server a phone is on is never a swipe away.
@@ -104,6 +107,12 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
             />
           )}
         </DropdownMenuLabel>
+        <p
+          data-slot="hub-attribution"
+          className="truncate px-2 pb-1.5 text-hint text-muted-foreground"
+        >
+          Listed by {hubLabel(hub.name)}
+        </p>
         {servers.length === 0 && (
           <p className="px-2 py-1.5 text-hint text-muted-foreground">
             The hub lists its servers after the first report.
@@ -145,7 +154,7 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
           }
           return (
             <DropdownMenuItem key={server.serverId} asChild className="gap-2.5">
-              <a href={address} rel="noreferrer">
+              <a href={address} target="_blank" rel="noopener noreferrer">
                 {dot}
                 {label}
                 {server.version && (
@@ -153,6 +162,7 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
                     {server.version}
                   </span>
                 )}
+                <span className="sr-only">, opens in a new tab</span>
                 <ArrowUpRight aria-hidden />
               </a>
             </DropdownMenuItem>
@@ -162,9 +172,10 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
           <>
             <DropdownMenuSeparator className="mx-1 bg-hairline" />
             <DropdownMenuItem asChild className="gap-2.5">
-              <a href={hubUrl} rel="noreferrer">
+              <a href={hubUrl} target="_blank" rel="noopener noreferrer">
                 <LogoGlyph small className="h-3.5 w-auto shrink-0 text-brand" />
                 <span className="min-w-0 flex-1 truncate">Open Just Hub</span>
+                <span className="sr-only">, opens in a new tab</span>
                 <ArrowUpRight aria-hidden />
               </a>
             </DropdownMenuItem>

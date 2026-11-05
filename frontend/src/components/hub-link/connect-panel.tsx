@@ -218,14 +218,30 @@ function MachineLine({ check }: { check: MachineCheck }) {
   )
 }
 
-/** The pinned machine, as the Settings page shows it beside the link (§2.4). */
-export function MachineFact({ machine }: { machine?: HubLinkMachine }) {
+/**
+ * The machine kept with the request, or pinned with the link (§2.4), as the Settings page shows it
+ * beside them. Without one, Tailscale on this server could not be asked when it was looked for,
+ * and the next check that can records it; at the test origin none is ever asked about.
+ */
+export function MachineFact({
+  machine,
+  testOrigin,
+}: {
+  machine?: HubLinkMachine
+  testOrigin?: boolean
+}) {
   return (
     <p data-slot="hub-link-machine" className="text-xs break-words text-muted-foreground">
-      The hub&apos;s machine:{" "}
-      <span className="font-medium text-foreground">
-        {machine ? describeMachine(machine) : "not checked"}
-      </span>
+      {!machine && testOrigin ? (
+        "The test origin: no machine is checked."
+      ) : (
+        <>
+          The hub&apos;s machine:{" "}
+          <span className="font-medium text-foreground">
+            {machine ? describeMachine(machine) : "not checked yet"}
+          </span>
+        </>
+      )}
     </p>
   )
 }
@@ -239,11 +255,14 @@ export function MachineFact({ machine }: { machine?: HubLinkMachine }) {
 export function WaitingPanel({
   request,
   fingerprint,
+  testOrigin,
   onCancel,
   className,
 }: {
   request: NonNullable<NonNullable<HubLinkStatus["admin"]>["request"]>
   fingerprint?: string
+  /** The request is to the test origin, where no machine is checked. */
+  testOrigin?: boolean
   onCancel: () => Promise<void>
   className?: string
 }) {
@@ -316,7 +335,7 @@ export function WaitingPanel({
         </div>
       </div>
 
-      <MachineFact machine={request.hubMachine} />
+      <MachineFact machine={request.hubMachine} testOrigin={testOrigin} />
       <p className="text-xs text-muted-foreground">
         Type this code into the hub when it asks for it; the hub never shows it. Its approval screen
         shows this server&apos;s fingerprint: approve only if it is the one above.

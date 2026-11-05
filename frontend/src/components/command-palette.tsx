@@ -440,8 +440,9 @@ function Palette({
     run: () => void logout(),
   })
   // The other dashboards the hub holds. Another server is another origin,
-  // which `open` refuses by design, so choosing one assigns the location —
-  // in this tab, as the rail's switcher does.
+  // which `open` refuses by design, and an address the hub handed over, so
+  // choosing one opens it in a new tab with no opener and no referrer, as
+  // the rail's switcher does (hub-link-protocol §8.10).
   const servers: PaletteItem[] = hub
     ? serverEntries(hub).map(({ reading, self, hub: isHub, facts, ...entry }) => ({
         ...entry,
@@ -450,7 +451,10 @@ function Palette({
         state: self ? undefined : reading?.label,
         tone: reading?.tone,
         facts,
-        run: !self && entry.href ? () => window.location.assign(entry.href!) : undefined,
+        run:
+          !self && entry.href
+            ? () => void window.open(entry.href, "_blank", "noopener,noreferrer")
+            : undefined,
       }))
     : []
   const resources = reads.flatMap((read) => read.items)
