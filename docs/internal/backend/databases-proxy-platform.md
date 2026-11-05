@@ -6163,7 +6163,10 @@ requests from overwriting the configuration needed for rollback.
 - Routes: `GET/PUT /api/v1/dashboard/config`, `POST /api/v1/dashboard/restart`,
   `DELETE /api/v1/dashboard/config/run` and `GET /api/v1/dashboard/config/log` (the whole restart
   transcript as `text/plain`, the same two reads the update transcript has), all `system.admin`, the two
-  mutations inside `s.destructive`.
+  mutations inside `s.destructive`. Applying settings also takes a session, and not one a Just Hub sign-in
+  ticket opened (`RequireSession`, `RefuseHubSession`): the allowlist, the address, `JD_REQUIRE_2FA`, the
+  session lifetimes and the terminal outlive whoever changed them (hub-link-protocol.md section 9.9).
+  Restarting is left to the role: it comes back on the configuration already on disk.
 
 Database provisioning uses the shared `internal/portalloc` range selection instead of a 64-port window.
 It returns and audits Docker's actual host binding if a competing process claims the initial choice.

@@ -1186,11 +1186,7 @@ func emitResult(out jobs.Emitter, res transferResult) {
 // auditBaseOf captures who is asking, for an entry written after the request
 // that asked has been answered.
 func auditBaseOf(r *http.Request) audit.Entry {
-	p := httpx.MustPrincipal(r)
-	return audit.Entry{
-		UserID: p.UserID(), Username: p.Username(), Role: string(p.Role),
-		IP: httpx.ClientIP(r), Actor: p.Kind, Method: r.Method, Path: r.URL.Path,
-	}
+	return httpx.AuditEntry(r)
 }
 
 // recordTransfer writes how a transfer ended. The request that started a job

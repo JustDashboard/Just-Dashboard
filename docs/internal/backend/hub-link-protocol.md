@@ -1433,6 +1433,9 @@ This is a deliberate, documented weakening, and it is allowed only when all of t
    Before a release turns the code on anywhere, a written security review of this section against
    [invariant 2](../security/invariants.md#invariant-2-what-two-factor-still-guarantees) must be done and
    recorded, and invariants.md must name this exception in its invariant 2 section, with the limits of 9.9.
+   The review of JD 0.8.5 is recorded in
+   [docs/audits/2026-11-05-hub-signin/security-review.md](../../audits/2026-11-05-hub-signin/security-review.md),
+   with the line the owner signs.
 2. **The account holder opted in**, while fully signed in on this server, by entering their password again and,
    if the account has an authenticator, a current code (section 9.3). Each account decides for itself. A grant
    made while the account had no authenticator ends when it enrols one, so a grant never stands in for a code
@@ -1454,7 +1457,8 @@ session. 9.9 refuses the dashboard's own forms that create, change, rotate, impo
 account's authenticator, Linux users and their keys and passwords, database users and their passwords, basic-auth
 users, deployment hook secrets and secret variables, saved Git, registry, DNS and remote-computer credentials,
 secret stores, notification channels, VPN peers' keys, GitHub sign-in, TLS keys, the backup key), connecting or
-re-scoping a link, and opting in to hub sign-in, because each of those would outlive the grant. A hub session
+re-scoping a link, opting in to hub sign-in, and changing the dashboard's own settings (its allowlist, address,
+second-factor requirement, session lifetimes and terminal), because each of those would outlive the grant. A hub session
 lasts at most 2 hours and ends at once when its grant ends, when hub sign-in is switched off and when the link
 ends or goes idle, and every socket it opened (a terminal, a container's shell, a log tail, a remote desktop)
 closes with it. What none of this stops: the dashboard's general tools are not restricted. The Files page reads
@@ -1463,7 +1467,8 @@ every credential on disk, this dashboard's own master key and database included;
 administrator and `limited` roles) it can write any file, an SSH key or a sudoers rule included; and an
 administrator's hub session has the terminal. So for those two roles a hub session is as good as root, and for
 every role it reads what root can read. Ending hub sign-in ends the hub's sessions; it does not undo what was done
-in them. Without hub sign-in, a taken-over hub is limited to the scope's commands. That is why it is off by
+in them; what was done is in the audit log, every entry marked as a hub session's with its hub user and session
+(9.10). Without hub sign-in, a taken-over hub is limited to the scope's commands. That is why it is off by
 default and needs both the operator and the account holder, and why the opt-in screen says all of this.
 
 ### 9.2 The three switches
@@ -1728,8 +1733,8 @@ and within 15 seconds when the session ends any other way, by a check that does 
 session.
 
 **What a hub session cannot do.** The rule decides; the table applies it to today's routes. A route that
-creates, changes, rotates, imports or exports a credential, or creates or changes a link, refuses a session whose
-`auth_method` is `hub` with `403 hub_session_not_allowed`. Exporting includes a read: a `GET` whose purpose is to
+creates, changes, rotates, imports or exports a credential, creates or changes a link, or changes the dashboard's
+own settings, refuses a session whose `auth_method` is `hub` with `403 hub_session_not_allowed`. Exporting includes a read: a `GET` whose purpose is to
 show a stored secret is refused as an export is. A credential is anything that lets someone act on this
 server, or on a system it holds access to, after the hub session has ended: a dashboard account, its password,
 authenticator, recovery codes and passkeys; an API, MCP or deploy key; a Linux user, its password, its SSH keys and
@@ -1739,7 +1744,11 @@ trigger's or hook's secret, a deployment's secret variables; a saved Git, regist
 server's API credential, a Cloudflare tunnel token, an AI provider's key, a backup destination, a remote computer's
 saved sign-in and a stream pairing with it, a secret-store connection, a notification channel or a log drain (each
 holds credentials of its own); a WireGuard peer's key; the enrolment token of a machine that runs external checks;
-the dashboard's GitHub sign-in and its GitHub App; a TLS private key; the backup key. The rule covers the
+the dashboard's GitHub sign-in and its GitHub App; a TLS private key; the backup key. The dashboard's own settings
+are who may reach it (`JD_ALLOWED_CIDRS`), where it listens, whether an unenrolled account may sign in
+(`JD_REQUIRE_2FA`), how long a session lasts and whether it has a terminal: they are not a credential, but they
+outlive the session as one would, and turning `JD_REQUIRE_2FA` off would loosen condition 5 of 9.1, under which
+the session was opened. The rule covers the
 dashboard's own forms for these; it does not reach a file read or written through the Files page or the terminal,
 which 9.1 says plainly. One middleware does it,
 `httpx.RefuseHubSession`, found by function identity as `httpx.RequireSession` is, so a route-walk test lists every
@@ -1765,6 +1774,7 @@ route that carries it and fails when one in the table does not.
 | The account link | `POST /dashboard/link/`, `DELETE /dashboard/link/request`, `PUT /dashboard/link/scope` |
 | The hub link | `POST /dashboard/hub`, `DELETE /dashboard/hub/request`, `PUT /dashboard/hub/scope` |
 | Hub sign-in | `PUT /account/hub-signin` |
+| The dashboard's own settings | `PUT /dashboard/config` |
 
 Where the table and the rule differ, the rule wins. The change that added the middleware (JD-SIGNIN, M7) walked
 every write route of the router, applied the middleware to each one the rule covers, listed them all in
@@ -1781,7 +1791,12 @@ basic-auth users imported, and a remote computer's saved sign-in and stream pair
 The end-to-end run of sign-in found one more: `POST /auth/2fa/verify`, the one second-factor route a hub session
 still reached. A hub session is made complete and never owes a code, and a code given from one would turn it into an
 ordinary session that none of this section's limits reach, so it is refused there as on every other second-factor
-route, before a guess is spent from the account's budget or a right code is audited as a wrong one. A route added
+route, before a guess is spent from the account's budget or a right code is audited as a wrong one. The final
+review found one more: `PUT /dashboard/config`, which reached the handler from a hub session and could widen the
+allowlist, bind a public address, turn `JD_REQUIRE_2FA` off, lengthen sessions and turn the terminal on, each of
+which outlives the session; the rule now names the dashboard's own settings, and the route also takes a session
+(`RequireSession`), so an API key cannot change them either. Restarting the dashboard
+(`POST /dashboard/restart`) stays open: it comes back on the configuration already on disk. A route added
 later that the rule covers joins the set, the test and the list in the same change; the route-walk
 test reads this table and `invariants.md`'s and fails when either differs from the router. Disconnecting either link,
 `POST /dashboard/hub/sync`, removing a grant, revoking sessions, deleting a key, user, credential or channel, and
@@ -1796,9 +1811,16 @@ signing GitHub out stay open to a hub session: they only take power away.
 | `hub.signin.allow` | An account made or replaced its grant | The account | `hubUser` |
 | `hub.signin.revoke` | A grant ended, for any reason in 9.3 | The account, an administrator, or `system` | `hubUser`, `reason`, `sessionsRevoked` |
 | `hub.session.revoke` | Hub sessions were revoked by a link or switch event (9.3) with no single grant behind it | `system` | `reason`, `sessionsRevoked` |
+| Every entry a hub session's request writes | A hub session made a write (any status, refusals included), opened a socket, or made a read that is audited | The account / `hub-session`, or `assistant` for the assistant acting in one | The route's own entry, plus `hubUser` and `sessionId` (`audit_log.hub_user`, `session_id`); `sessionId` is the one the `hub.signin` entry that made the session records |
 
 Refusals at steps 1 and 2 are audited too, with only the code, so probing a server that has sign-in off is
 visible. Every entry's status is the one the redeem answered: `200`, or the refusal's status in 9.7.
+
+The last row is what the operator reads after a hub is lost: the same account's work in a session of the server's
+own is actor `session` with no hub user or session, and the device check makes the hub session's address the
+same device the person uses, so the address alone cannot tell them apart. One builder writes the principal's part
+of every entry (`httpx.principalEntry`, and `httpx.AuditEntry` for a handler that writes its own: a socket at open,
+a read before it runs, an outcome after the response), so no writer can leave the hub out.
 
 ### 9.11 Failure modes
 
@@ -1815,7 +1837,7 @@ visible. Every entry's status is the one the redeem answered: `200`, or the refu
 | The account is disabled, locked or must change its password | `account_unavailable`. Its own sign-in page is the way in |
 | The operator never turned it on, or turned it off | `hub_signin_disabled`; all grants were deleted and all hub sessions revoked at the start after it went off |
 | The hub is reinstalled with a new key | Every ticket fails at step 4 until the server is linked again; the grants were cleared with the old link |
-| A hub session tries to make an API key, an account, a password or a link | `403 hub_session_not_allowed`. The page says to sign in on the server itself for that |
+| A hub session tries to make an API key, an account, a password or a link, or to change the dashboard's settings | `403 hub_session_not_allowed`. The page says to sign in on the server itself for that |
 | The browser is signed in as another account, and the page could not ask or was not answered | The page asks without a name; a redeem without `"replace": true` over another account's complete session is `409 other_account_signed_in`, and both sessions stay |
 | A hub session is two hours old | It ends. Opening the server from the hub again makes a new one |
 | A browser extension or proxy reads the fragment | It can use the ticket once, within 120 seconds, from the same device and tailnet login that asked the hub (step 10), or from the server itself over loopback. This is the residual risk of the fragment transport |
@@ -1830,13 +1852,16 @@ sessions in its own transaction, with a test per event; that going idle and revo
 switch-off clean-up commits before the first request is served; that a hub session whose grant row is gone, or
 whose link is idle or gone, or whose switch is off, is refused on its next request even when no revocation ran
 (9.3); that a hub session is refused on every route of 9.9, by the route-walk test, and ends after 2 hours; that
+everything a hub session does is audited as a hub session's, with its hub user and session (9.10); that
 every socket a hub session opened closes when the session ends, at its expiry included; that
 the redeem route is rate limited and audited; that `/hub/enter`'s first script removes the fragment before any
 other script runs, that no request leaves the page before that, that the ticket goes only in the redeem call's
 body and that the page loads nothing from another origin; that the page asks before replacing another account's
 session; that `JD_HUB_SIGNIN` with a test origin refuses to start in a release build; and that the user-facing
 text on the opt-in screen says what the hub can then do, what a hub session cannot do, and that turning sign-in
-off ends the hub's sessions but does not undo what was done in them.
+off ends the hub's sessions but does not undo what was done in them. The review of JD 0.8.5 goes through these in
+order, with the code and the test for each, in
+[docs/audits/2026-11-05-hub-signin/security-review.md](../../audits/2026-11-05-hub-signin/security-review.md).
 
 ## 10. What the hub must do
 

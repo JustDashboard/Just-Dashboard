@@ -388,6 +388,7 @@ the seventeen routes JD's walk of every write route added to it, and the sevente
 that show a stored secret too, added after);
 [invariants.md](../security/invariants.md#the-exception-hub-sign-in) repeats the list, and
 `api/hub_session_routes_test.go` holds the router to exactly that list, and both documents' tables to it. The
+final review added the dashboard's own settings (`PUT /dashboard/config`, which also takes a session now). The
 assistant is offered none of the grant routes (`agentExcludedAreas`, `agentExcludedRoutes`): letting the hub
 sign an account in is the person's own choice.
 
@@ -397,7 +398,15 @@ has one, an authenticator code, and lists every account's grant as rows with Rem
 opt-in and its undoing are outline buttons: Connect stays the page's one brand command. While the link is idle
 (`isIdle`, the status's `idle`, which every reader is sent) it offers no account a form, says sign-in is paused
 until a disconnect, and keeps the account's own "Stop letting Just Hub sign me in". A `403 hub_session_not_allowed` anywhere in the app reads "Sign in on this
-server itself to do this" (`HUB_SESSION_REFUSED` in `lib/api.ts`).
+server itself to do this" (`HUB_SESSION_REFUSED` in `lib/api.ts`). The audit page says a hub session's rows
+are "through Just Hub as <hub user>", with the session's id in the tooltip (`keyWords`, `keyTitle` in
+`components/audit/marks.tsx`).
+
+**Audit.** `Principal.HubUser` is the session's hub user, and every audit entry for a principal is built by
+`httpx.principalEntry`, which records a hub session as actor `hub-session` (the assistant in one stays
+`assistant`) with `hubUser` and `sessionId` (`audit_log.hub_user`, `session_id`); the session id is the
+`hub.signin` entry's `sessionId`. Handlers that write their own entry start from `httpx.AuditEntry` (protocol
+9.10).
 
 **`/hub/enter`** is a document written by hand (`lib/hub-enter.ts`) and served by a route handler
 (`app/hub/enter/route.ts`) rather than a page of the app: Next puts its own chunks ahead of anything a layout
@@ -476,7 +485,10 @@ two-hour expiry, a disconnect that starts after the session row is written and w
 grant-ending event of section 9.3 (at the next check for the two nothing announces), at the session's expiry,
 and for a proxied stream, and leaves a password session's socket open. `hub_session_routes_test.go` walks the
 router for `RefuseHubSession` and reads both route tables. `auth/hub_signin_test.go` holds a hub session to an
-hour idle under a 12-hour install limit, and `admin/cli_test.go` the terminal's audit of a grant it ends. The `hublink` tests (`signin_test.go`) cover the link going idle and another machine at the
+hour idle under a 12-hour install limit, and `admin/cli_test.go` the terminal's audit of a grant it ends.
+`TestWhatAHubSessionDoesIsAuditedApartFromALocalSession` and `httpx`'s
+`TestAHubSessionIsAuditedApartFromTheSameAccountsOwnSession` hold the trail to 9.10's last row, and
+`TestOnlyASessionChangesTheDashboardsOwnSettings` keeps an API key off the settings route. The `hublink` tests (`signin_test.go`) cover the link going idle and another machine at the
 hub's name (every hub session revoked with the flag), an idle link refusing hub sessions, redeems and grants after
 every restart until a disconnect, removal in the hub, a disconnect, a late reply, the heartbeat's `signIn`, a
 key a reply announces never signing a ticket, a grant refused when the link went idle or the offer changed

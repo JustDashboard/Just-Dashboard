@@ -28,8 +28,9 @@ type Grant = NonNullable<NonNullable<HubLinkStatus["admin"]>["grants"]>[number]
  * hub's own setting must both be on as well. The screen says plainly what turning it on costs:
  * whoever takes over the hub can then open a session as this account, the Files page (and an
  * administrator's terminal) is not contained, so such a session reads every file and, where it may
- * change files, is as good as root (§9.1); the dashboard's own forms refuse it credentials and
- * links; and ending sign-in ends those sessions without undoing what was done in them (§9.12).
+ * change files, is as good as root (§9.1); the dashboard's own forms refuse it credentials, links
+ * and the dashboard's own settings, and the audit log marks what it does (§9.10); and ending
+ * sign-in ends those sessions without undoing what was done in them (§9.12).
  *
  * Everything here is this account's own, except the list of every account's choice, which only
  * an administrator is sent (`admin.grants`) and may end.
@@ -125,8 +126,9 @@ function Costs({ hubName, me }: { hubName: string; me: string }) {
       <p>
         A session opened this way lasts at most two hours. This dashboard&apos;s own forms refuse it
         API keys, accounts, passwords, authenticators, passkeys, Linux users, database users, VPN
-        peers, saved credentials, revealed secrets and links: for those, sign in on this server
-        itself.
+        peers, saved credentials, revealed secrets, links and this dashboard&apos;s own settings:
+        for those, sign in on this server itself. The audit log marks what it does as done through
+        Just Hub.
       </p>
       <p>
         This server tells the hub your username and the hub user you choose, and nothing else about

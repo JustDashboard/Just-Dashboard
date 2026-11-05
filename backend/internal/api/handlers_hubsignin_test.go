@@ -814,6 +814,117 @@ func TestEveryRefusedRouteAnswersAHubSessionWith403(t *testing.T) {
 	}
 }
 
+// What a hub session does reads apart in the audit trail from what the same
+// account does in a session of this server's own (section 9.10): actor
+// hub-session rather than session, with the hub user and the session's id,
+// which is the sessionId of the hub.signin entry that opened it. After a hub
+// is taken over, that is how the operator finds what was done through it.
+func TestWhatAHubSessionDoesIsAuditedApartFromALocalSession(t *testing.T) {
+	e := newSignInEnv(t)
+	hubSession := e.enter()
+	const sync = "/api/v1/dashboard/hub/sync"
+	if w := hubSession.do(http.MethodPost, sync, "", nil); w.Code != 200 {
+		t.Fatalf("sync with a hub session = %d %s", w.Code, w.Body)
+	}
+	if w := e.admin.do(http.MethodPost, sync, "", nil); w.Code != 200 {
+		t.Fatalf("sync with a password session = %d %s", w.Code, w.Body)
+	}
+	// A refusal is a hub session's too.
+	if w := hubSession.do(http.MethodPut, "/api/v1/dashboard/config", `{}`, nil); codeOf(t, w) != "hub_session_not_allowed" {
+		t.Fatalf("settings from a hub session = %d %s", w.Code, w.Body)
+	}
+	signIn := e.audits("hub.signin")
+	if len(signIn) != 1 {
+		t.Fatalf("hub.signin entries = %+v", signIn)
+	}
+	opened, _ := decodeMap(t, signIn[0].Detail)["sessionId"].(string)
+	if opened == "" {
+		t.Fatalf("hub.signin records no session: %s", signIn[0].Detail)
+	}
+	rows, _, err := e.s.Audit.List(t.Context(), audit.Filter{Limit: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fromHub, fromHere []audit.Entry
+	for _, r := range rows {
+		switch {
+		case r.Path == sync && r.Actor == "hub-session":
+			fromHub = append(fromHub, r)
+		case r.Path == sync:
+			fromHere = append(fromHere, r)
+		case r.Path == "/api/v1/dashboard/config":
+			if r.Actor != "hub-session" || r.HubUser != "owner" || r.SessionID != opened || r.Success {
+				t.Errorf("the refused settings change = %+v", r)
+			}
+		}
+	}
+	if len(fromHub) != 1 || len(fromHere) != 1 {
+		t.Fatalf("sync entries: %d from the hub session, %d from the password session: %+v", len(fromHub), len(fromHere), rows)
+	}
+	hub, here := fromHub[0], fromHere[0]
+	if hub.Username != "ion" || hub.HubUser != "owner" || hub.SessionID != opened {
+		t.Errorf("the hub session's entry = %+v, want hub user owner and session %s", hub, opened)
+	}
+	if here.Actor != "session" || here.Username != "ion" || here.HubUser != "" || here.SessionID != "" {
+		t.Errorf("the password session's entry = %+v", here)
+	}
+	// Removing the grant is open to a hub session and is written by hublink
+	// rather than the middleware, as the only entry of its request: it says
+	// whose session it was too.
+	if w := hubSession.do(http.MethodDelete, "/api/v1/account/hub-signin", "", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("removing the grant from a hub session = %d %s", w.Code, w.Body)
+	}
+	revoked := e.audits("hub.signin.revoke")
+	if len(revoked) != 1 || revoked[0].Actor != "hub-session" || revoked[0].HubUser != "owner" ||
+		revoked[0].SessionID != opened || revoked[0].Username != "ion" {
+		t.Fatalf("hub.signin.revoke from a hub session = %+v", revoked)
+	}
+}
+
+// The redeem spends the password form's budget per address (section 9.12:
+// "the redeem route is rate limited and audited"): every redeem the budget
+// lets through is a hub.signin entry, the next one is refused before a ticket
+// is read, and so is the password form from that address; another address
+// still has its own.
+func TestTheRedeemSharesThePasswordFormsBudgetPerAddress(t *testing.T) {
+	e := newSignInEnv(t)
+	const addr = "127.0.77.1"
+	before := len(e.audits("hub.signin"))
+	limited := 0
+	for range 12 {
+		w := e.redeem("v1.hub-2026-11.not-a-ticket", addr, "")
+		if w.Code == http.StatusTooManyRequests {
+			if codeOf(t, w) != "rate_limited" {
+				t.Fatalf("a spent budget = %d %s", w.Code, w.Body)
+			}
+			limited++
+			continue
+		}
+		if limited > 0 || codeOf(t, w) != "bad_ticket" {
+			t.Fatalf("redeem = %d %s after %d refusals", w.Code, w.Body, limited)
+		}
+	}
+	allowed := 12 - limited
+	if limited == 0 || allowed > 6 {
+		t.Fatalf("%d redeems from one address were let through, %d limited", allowed, limited)
+	}
+	if got := len(e.audits("hub.signin")) - before; got != allowed {
+		t.Fatalf("%d hub.signin entries for %d redeems let through", got, allowed)
+	}
+	login := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"ion","password":"x"}`))
+	login.RemoteAddr = addr + ":5555"
+	login.Header.Set("Content-Type", "application/json")
+	login.Header.Set(httpx.CSRFHeader, "1")
+	w := httptest.NewRecorder()
+	e.h.ServeHTTP(w, login)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("the password form after the redeems spent the budget = %d %s", w.Code, w.Body)
+	}
+	if w := e.redeem("v1.hub-2026-11.not-a-ticket", "127.0.77.2", ""); codeOf(t, w) != "bad_ticket" {
+		t.Fatalf("another address = %d %s", w.Code, w.Body)
+	}
+}
+
 func TestAHubSessionEndsAfterTwoHours(t *testing.T) {
 	e := newSignInEnv(t)
 	hubSession := e.enter()

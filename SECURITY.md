@@ -66,13 +66,16 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   server's. Anyone who takes over the hub can then sign in as those accounts, so a session opened this
   way lasts at most two hours, is refused by the dashboard's own forms that make, change or reveal keys,
   accounts, passwords, authenticators, passkeys, Linux or database users, database passwords, secret
-  variables, VPN peers, saved credentials or links, and ends as soon as its grant, the link or the
-  switch does, or the link goes quiet, with every terminal or other live connection it opened. What it
-  does not stop: the Files page reads every file on the server as root for every role, so a hub
-  session can read every credential on disk; with permission to change files it writes any file, and an
-  administrator's hub session has the terminal, so for those accounts it is as good as root. The full
-  list and its limits are in
-  [the invariants](docs/internal/security/invariants.md#the-exception-hub-sign-in).
+  variables, VPN peers, saved credentials or links, or change the dashboard's own settings, and ends as
+  soon as its grant, the link or the switch does, or the link goes quiet, with every terminal or other
+  live connection it opened. Everything it does is in the audit log as done through Just Hub, with the
+  hub user and the session. What it does not stop: the Files page reads every file on the server as
+  root for every role, so a hub session can read every credential on disk; with permission to change
+  files it writes any file, and an administrator's hub session has the terminal, so for those accounts
+  it is as good as root. The full list and its limits are in
+  [the invariants](docs/internal/security/invariants.md#the-exception-hub-sign-in), and the security
+  review the owner signs before turning it on is
+  [docs/audits/2026-11-05-hub-signin/security-review.md](docs/audits/2026-11-05-hub-signin/security-review.md).
 - [The usage count](docs/guides/linking-and-usage.md#the-usage-count) is off until an administrator says yes, and is three fields with no ID.
 
 ### Roles

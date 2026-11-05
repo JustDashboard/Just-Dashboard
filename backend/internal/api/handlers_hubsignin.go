@@ -158,7 +158,8 @@ func (s *Server) handleHubSignInAllow(w http.ResponseWriter, r *http.Request) er
 }
 
 func (s *Server) handleHubSignInRevoke(w http.ResponseWriter, r *http.Request) error {
-	err := s.modules.hubLink.Revoke(r.Context(), httpx.MustPrincipal(r).UserID(), "")
+	p := httpx.MustPrincipal(r)
+	err := s.modules.hubLink.Revoke(r.Context(), p.UserID(), httpx.AuditWho(p), false)
 	if err != nil && !errors.Is(err, hublink.ErrNoGrant) {
 		return httpx.Internal(err)
 	}
@@ -173,7 +174,7 @@ func (s *Server) handleHubSignInRemove(w http.ResponseWriter, r *http.Request) e
 	if err != nil || id < 1 {
 		return httpx.BadRequest("userId must be an account id")
 	}
-	err = s.modules.hubLink.Revoke(r.Context(), id, httpx.MustPrincipal(r).Username())
+	err = s.modules.hubLink.Revoke(r.Context(), id, httpx.AuditWho(httpx.MustPrincipal(r)), true)
 	if errors.Is(err, hublink.ErrNoGrant) {
 		return httpx.Err(http.StatusNotFound, "not_found", "that account has not let Just Hub sign it in")
 	}

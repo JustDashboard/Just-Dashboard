@@ -91,7 +91,11 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   variable at a credential, database or secret store is refused with `session_required` (see
   [invariant 4](../security/invariants.md)).
 - **`httpx.AuditMutations`** records every state-changing request, with the API key's id and name
-  (`audit_log.key_id`, `key_name`) when the request carried one. WebSocket routes are GET and
+  (`audit_log.key_id`, `key_name`) when the request carried one, and, for a session a Just Hub sign-in
+  ticket opened, actor `hub-session` with its hub user and session id (`audit_log.hub_user`,
+  `session_id`). Who acted is filled in by one builder (`httpx.principalEntry`; `httpx.AuditEntry` for a
+  handler writing an entry of its own), so `AuditRead`, `s.recordAudit` and the handlers' own entries
+  record the same. WebSocket routes are GET and
   long-lived, so they call `s.recordAudit(...)` at open time — the event is "a terminal was opened".
 - **`httpx.RequireCSRF`** requires `X-JD-CSRF: 1` on every browser-session mutation, including login
   and partial 2FA sessions. The header makes a same-site sibling origin preflight, and this application

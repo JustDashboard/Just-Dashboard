@@ -6864,6 +6864,13 @@ export type AuditEntry = {
    */
   keyId?: number
   keyName?: string
+  /**
+   * A session a Just Hub sign-in ticket opened, and the hub user whose grant opened it, on every
+   * row that session wrote (actor `hub-session`, or `assistant` for the assistant acting in one).
+   * The id is the one the `hub.signin` row that opened it records. Absent for every other row.
+   */
+  sessionId?: string
+  hubUser?: string
 }
 
 export type ApiToken = {

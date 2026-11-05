@@ -381,7 +381,7 @@ func (s *Service) onReply(ctx context.Context, st accountlink.State, r accountli
 		}
 		return func() {
 			for _, end := range ends {
-				s.auditGrantEnd(ctx, end, "system", "system")
+				s.auditGrantEnd(ctx, end, system)
 			}
 			if len(ends) > 0 {
 				s.engine.HeartbeatSoon()

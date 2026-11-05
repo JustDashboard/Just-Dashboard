@@ -17,8 +17,9 @@ import (
 
 // hubSessionRefused is every route a session made by a Just Hub sign-in ticket
 // is refused on (hub-link-protocol.md section 9.9): each one creates, changes,
-// rotates, imports or exports a credential, or creates or changes a link, and
-// what it made would outlive the two-hour hub session and the grant behind it.
+// rotates, imports or exports a credential, creates or changes a link, or
+// changes the dashboard's own settings, and what it made would outlive the
+// two-hour hub session and the grant behind it.
 // The first block is the protocol's table as it was first written; the second
 // is what the walk of every write route found that the rule covers, which the
 // protocol's table now lists too (docs/internal/security/invariants.md names
@@ -149,6 +150,13 @@ var hubSessionRefused = []string{
 	// code given from it would have spent a guess and been audited as a
 	// wrong one; refusing it first keeps every 2FA route closed to it.
 	"POST /api/v1/auth/2fa/verify",
+
+	// Found by the final review: the dashboard's own settings. They are not a
+	// credential or a link, but the allowlist, the address, the second-factor
+	// requirement, session lifetimes and the terminal outlive the session as
+	// a credential would, and turning JD_REQUIRE_2FA off would widen the very
+	// exception the hub session was opened under.
+	"PUT /api/v1/dashboard/config",
 }
 
 // hubSessionCarriers is every route of the router that carries

@@ -133,9 +133,10 @@ session as every account that opted in, from a device on your tailnet, with ever
 That includes the Files page, which reads every file on the server as root (`JD_FILE_ROOTS`, the whole server
 unless you narrowed it), passwords and keys included, for every role; an account that may change files can
 write any file, and an administrator has the terminal, so for those accounts such a session is as good as
-root. A session opened this way says so in your session list, lasts at most two hours, and the dashboard's own
-forms refuse it API keys, accounts, passwords, authenticators, passkeys, Linux or database users, database
-passwords, secret variables, VPN peers, saved credentials and links; sign in on the server itself for those.
+root. A session opened this way says so in your session list and in the audit log (*through Just Hub as* the
+hub user), lasts at most two hours, and the dashboard's own forms refuse it API keys, accounts, passwords,
+authenticators, passkeys, Linux or database users, database passwords, secret variables, VPN peers, saved
+credentials, links and this dashboard's own settings; sign in on the server itself for those.
 It ends at once, with any terminal or other live connection it opened, when you turn the choice off, change your password or authenticator, when the hub stops offering your hub user, when the server is
 disconnected, when the connection goes quiet (another machine took the hub's name, or its address no longer
 passes), and when `JD_HUB_SIGNIN` is found off at a start. While the connection is quiet nobody can be signed

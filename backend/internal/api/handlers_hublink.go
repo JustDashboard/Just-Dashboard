@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hublink"
@@ -49,11 +50,11 @@ func (s *Server) initHubLink() {
 	// auth's own transaction; the audit entry is written here once it has
 	// committed, naming whoever made the change.
 	s.Auth.SetHubGrantEnded(func(ctx context.Context, end auth.HubGrantEnd) {
-		username, actor := "", ""
+		var by audit.Entry
 		if p, ok := httpx.PrincipalFrom(ctx); ok && p.User != nil {
-			username, actor = p.Username(), "session"
+			by = httpx.AuditWho(p)
 		}
-		s.modules.hubLink.AuditAccountEnd(ctx, end, username, actor)
+		s.modules.hubLink.AuditAccountEnd(ctx, end, by)
 	})
 }
 

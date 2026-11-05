@@ -115,7 +115,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
   -- acted is the question a leaked key raises, and the account alone cannot
   -- answer it. The name is copied, so a key deleted later still reads.
   key_id    INTEGER NOT NULL DEFAULT 0,
-  key_name  TEXT NOT NULL DEFAULT ''
+  key_name  TEXT NOT NULL DEFAULT '',
+  -- A session a Just Hub sign-in ticket opened, and the hub user whose grant
+  -- opened it, on every row that session wrote: the id is the one its
+  -- hub.signin row records. Empty for every other row.
+  session_id TEXT NOT NULL DEFAULT '',
+  hub_user   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
@@ -1929,6 +1934,11 @@ var addedColumns = []struct{ table, column, spec string }{
 	// before it name only the account, as they always did.
 	{"audit_log", "key_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"audit_log", "key_name", "TEXT NOT NULL DEFAULT ''"},
+	// What a session Just Hub's sign-in opened did reads apart from what one
+	// opened on this server did (hub-link-protocol.md section 9.10). Rows
+	// written before were never a hub session's.
+	{"audit_log", "session_id", "TEXT NOT NULL DEFAULT ''"},
+	{"audit_log", "hub_user", "TEXT NOT NULL DEFAULT ''"},
 	// Skew protection keeps a window's warm release running rather than
 	// paused, and the watcher reads how many requests it still answers. A
 	// window opened before either is a paused one that served nobody.

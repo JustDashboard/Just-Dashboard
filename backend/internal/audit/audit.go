@@ -32,6 +32,14 @@ type Entry struct {
 	// which of them acted.
 	KeyID   int64  `json:"keyId,omitempty"`
 	KeyName string `json:"keyName,omitempty"`
+	// SessionID and HubUser are the session a Just Hub sign-in ticket opened
+	// and the hub user whose grant opened it, on every entry such a session
+	// writes (actor "hub-session", or "assistant" for the assistant acting in
+	// one): the session id is the one the hub.signin entry that made it
+	// records, so what was done in it can be found after the hub is lost.
+	// Empty for every other entry.
+	SessionID string `json:"sessionId,omitempty"`
+	HubUser   string `json:"hubUser,omitempty"`
 }
 
 // The longest a field is kept, in bytes. A username or a path can be whatever
@@ -43,6 +51,8 @@ const (
 	maxPathLen     = 2048
 	maxDetailLen   = 4000
 	maxKeyNameLen  = 200
+	maxSessionLen  = 64
+	maxHubUserLen  = 128
 )
 
 type Logger struct {
@@ -68,6 +78,8 @@ func (l *Logger) Record(ctx context.Context, e Entry) {
 	e.Path = truncate(e.Path, maxPathLen)
 	e.Detail = truncate(e.Detail, maxDetailLen)
 	e.KeyName = truncate(e.KeyName, maxKeyNameLen)
+	e.SessionID = truncate(e.SessionID, maxSessionLen)
+	e.HubUser = truncate(e.HubUser, maxHubUserLen)
 	success := 1
 	if !e.Success {
 		success = 0
@@ -78,16 +90,19 @@ func (l *Logger) Record(ctx context.Context, e Entry) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if _, err := l.st.DB.ExecContext(ctx,
-		`INSERT INTO audit_log(ts, user_id, username, role, ip, actor, action, target, method, path, status, success, detail, key_id, key_name)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO audit_log(ts, user_id, username, role, ip, actor, action, target, method, path, status, success, detail, key_id, key_name, session_id, hub_user)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		e.TS.Unix(), e.UserID, e.Username, e.Role, e.IP, e.Actor, e.Action, e.Target,
-		e.Method, e.Path, e.Status, success, e.Detail, e.KeyID, e.KeyName); err != nil {
+		e.Method, e.Path, e.Status, success, e.Detail, e.KeyID, e.KeyName, e.SessionID, e.HubUser); err != nil {
 		l.log.Error("audit write failed", "err", err, "action", e.Action)
 	}
 	attrs := []any{"user", e.Username, "role", e.Role, "ip", e.IP, "actor", e.Actor,
 		"action", e.Action, "target", e.Target, "status", e.Status, "success", e.Success}
 	if e.KeyID != 0 {
 		attrs = append(attrs, "key", e.KeyID, "keyName", e.KeyName)
+	}
+	if e.HubUser != "" || e.SessionID != "" {
+		attrs = append(attrs, "hubUser", e.HubUser, "session", e.SessionID)
 	}
 	l.log.Info("audit", attrs...)
 }
@@ -146,7 +161,7 @@ func (l *Logger) List(ctx context.Context, f Filter) ([]Entry, int, error) {
 		f.Limit = 100
 	}
 	rows, err := l.st.DB.QueryContext(ctx,
-		`SELECT id, ts, user_id, username, role, ip, actor, action, target, method, path, status, success, detail, key_id, key_name
+		`SELECT id, ts, user_id, username, role, ip, actor, action, target, method, path, status, success, detail, key_id, key_name, session_id, hub_user
 		 FROM audit_log WHERE `+clause+` ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`,
 		append(args, f.Limit, f.Offset)...)
 	if err != nil {
@@ -159,7 +174,8 @@ func (l *Logger) List(ctx context.Context, f Filter) ([]Entry, int, error) {
 		var ts int64
 		var success int
 		if err := rows.Scan(&e.ID, &ts, &e.UserID, &e.Username, &e.Role, &e.IP, &e.Actor,
-			&e.Action, &e.Target, &e.Method, &e.Path, &e.Status, &success, &e.Detail, &e.KeyID, &e.KeyName); err != nil {
+			&e.Action, &e.Target, &e.Method, &e.Path, &e.Status, &success, &e.Detail, &e.KeyID, &e.KeyName,
+			&e.SessionID, &e.HubUser); err != nil {
 			return nil, 0, err
 		}
 		e.TS = time.Unix(ts, 0).UTC()

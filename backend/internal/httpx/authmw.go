@@ -229,7 +229,7 @@ func (a *Authenticator) AuthenticatePartial(next http.Handler) http.Handler {
 		p := &Principal{
 			User: user, Role: user.Role, SessionID: sess.ID, Kind: "session",
 			IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: sess.TwoFAPassed,
-			HubSession: sess.AuthMethod == auth.MethodHub,
+			HubSession: sess.AuthMethod == auth.MethodHub, HubUser: sess.HubUser,
 		}
 		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
 	})
@@ -278,7 +278,7 @@ func (a *Authenticator) resolveWithPasswordChange(w http.ResponseWriter, r *http
 	return &Principal{
 		User: user, Role: user.Role, SessionID: sess.ID, Kind: "session",
 		IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: true,
-		HubSession: sess.AuthMethod == auth.MethodHub,
+		HubSession: sess.AuthMethod == auth.MethodHub, HubUser: sess.HubUser,
 	}, nil
 }
 
@@ -433,16 +433,17 @@ func RequireSession(next http.Handler) http.Handler {
 }
 
 // RefuseHubSession refuses a session a Just Hub sign-in ticket made, on a
-// route that creates, changes, rotates, imports or exports a credential, or
-// creates or changes a link (hub-link-protocol.md section 9.9). A hub session
-// is short and ends with its grant; a credential made from one would outlive
-// both, so these are done from a session signed in on this server itself.
-// Tests find it by function identity, as they find RequireSession.
+// route that creates, changes, rotates, imports or exports a credential,
+// creates or changes a link, or changes the dashboard's own settings
+// (hub-link-protocol.md section 9.9). A hub session is short and ends with its
+// grant; a credential or a setting made from one would outlive both, so these
+// are done from a session signed in on this server itself. Tests find it by
+// function identity, as they find RequireSession.
 func RefuseHubSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if p, ok := PrincipalFrom(r.Context()); ok && p.HubSession {
 			WriteError(w, r, Err(http.StatusForbidden, "hub_session_not_allowed",
-				"sign in on this server itself to do this: a session opened through Just Hub cannot create or change credentials or links"))
+				"sign in on this server itself to do this: a session opened through Just Hub cannot create or change credentials, links or this dashboard's own settings"))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -458,10 +459,8 @@ func recordKeyRefusal(log *audit.Logger, r *http.Request, p *Principal, err erro
 	if errors.As(err, &apiErr) {
 		status, detail = apiErr.Status, apiErr.Code+": "+apiErr.Message
 	}
-	log.Record(r.Context(), audit.Entry{
-		UserID: p.UserID(), Username: p.Username(), Role: string(p.Role), IP: ClientIP(r),
-		Actor: principalKind(p), Action: "auth.deploy_key.refused", Target: r.Method + " " + r.URL.Path,
-		Method: r.Method, Path: r.URL.Path, Status: status, Success: false, Detail: detail,
-		KeyID: p.KeyID(), KeyName: p.KeyName(),
-	})
+	e := principalEntry(r, p)
+	e.Action, e.Target = "auth.deploy_key.refused", r.Method+" "+r.URL.Path
+	e.Status, e.Success, e.Detail = status, false, detail
+	log.Record(r.Context(), e)
 }

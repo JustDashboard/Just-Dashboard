@@ -216,7 +216,9 @@ func (s *Service) Allow(ctx context.Context, r AllowRequest) error {
 		return err
 	}
 	if old.HubUser != "" || old.SessionsRevoked > 0 {
-		s.auditGrantEnd(ctx, old, "", "session")
+		// Opting in is refused to a hub session, so the account replaced its
+		// own grant from a session of this server's.
+		s.auditGrantEnd(ctx, old, audit.Entry{Actor: "session"})
 	}
 	s.recordSignIn(ctx, audit.Entry{
 		UserID: r.UserID, Username: s.username(ctx, r.UserID), Action: "hub.signin.allow", Target: r.HubUser,
@@ -252,11 +254,13 @@ func (s *Service) allowable(ctx context.Context, hubUser string) (accountlink.St
 	return st, nil
 }
 
-// Revoke removes one account's grant and revokes its hub sessions. byAdmin is
-// the administrator who removed it; empty, the account removed its own.
-func (s *Service) Revoke(ctx context.Context, userID int64, byAdmin string) error {
+// Revoke removes one account's grant and revokes its hub sessions. by is who
+// asked, as the audit trail names them (httpx.AuditWho): the account itself,
+// or, with byAdmin, an administrator; either may be in a session Just Hub
+// opened, which removing a grant is open to, and the entry says so.
+func (s *Service) Revoke(ctx context.Context, userID int64, by audit.Entry, byAdmin bool) error {
 	reason := endRevoked
-	if byAdmin != "" {
+	if byAdmin {
 		reason = endRemovedByAdmin
 	}
 	var end auth.HubGrantEnd
@@ -270,7 +274,7 @@ func (s *Service) Revoke(ctx context.Context, userID int64, byAdmin string) erro
 	if end.HubUser == "" && end.SessionsRevoked == 0 {
 		return ErrNoGrant
 	}
-	s.auditGrantEnd(ctx, end, byAdmin, "session")
+	s.auditGrantEnd(ctx, end, by)
 	s.engine.HeartbeatSoon()
 	return nil
 }
@@ -521,34 +525,38 @@ func (s *Service) recordSignIn(ctx context.Context, e audit.Entry) {
 }
 
 // auditGrantEnd writes hub.signin.revoke for one grant that ended, by whoever
-// ended it: the account itself, an administrator, or "system" for an event
-// nobody asked for (section 9.10).
-func (s *Service) auditGrantEnd(ctx context.Context, end auth.HubGrantEnd, username, actor string) {
+// ended it (by: its Username, Actor, and a hub session's SessionID and
+// HubUser): the account itself, an administrator, or "system" for an event
+// nobody asked for (section 9.10). An empty Username is the account's own.
+func (s *Service) auditGrantEnd(ctx context.Context, end auth.HubGrantEnd, by audit.Entry) {
 	s.revoked(end.SessionsRevoked)
 	account := s.username(ctx, end.UserID)
-	if username == "" {
-		username = account
+	if by.Username == "" {
+		by.Username = account
 	}
 	s.recordSignIn(ctx, audit.Entry{
-		UserID: end.UserID, Username: username, Actor: actor, Action: "hub.signin.revoke", Target: end.HubUser,
-		Success: true, Detail: audit.Detail(map[string]any{
+		UserID: end.UserID, Username: by.Username, Actor: by.Actor, SessionID: by.SessionID, HubUser: by.HubUser,
+		Action: "hub.signin.revoke", Target: end.HubUser, Success: true, Detail: audit.Detail(map[string]any{
 			"account": account, "hubUser": end.HubUser, "reason": end.Reason, "sessionsRevoked": end.SessionsRevoked,
 		}),
 	})
 }
 
+// system is the audit trail's name for an event nobody asked for.
+var system = audit.Entry{Username: "system", Actor: "system"}
+
 // AuditAccountEnd writes hub.signin.revoke for a grant a change to its account
 // ended (auth's events: a password, an authenticator, a disable, a delete, all
-// sessions revoked). username and actor are who made the change; empty, the
-// system did.
-func (s *Service) AuditAccountEnd(ctx context.Context, end auth.HubGrantEnd, username, actor string) {
+// sessions revoked). by is who made the change (httpx.AuditWho); with no
+// username, the system did.
+func (s *Service) AuditAccountEnd(ctx context.Context, end auth.HubGrantEnd, by audit.Entry) {
 	if s == nil {
 		return
 	}
-	if username == "" {
-		username, actor = "system", "system"
+	if by.Username == "" {
+		by = system
 	}
-	s.auditGrantEnd(ctx, end, username, actor)
+	s.auditGrantEnd(ctx, end, by)
 }
 
 // auditLinkEvent writes hub.signin.revoke for each grant a link or switch event
@@ -556,7 +564,7 @@ func (s *Service) AuditAccountEnd(ctx context.Context, end auth.HubGrantEnd, use
 // behind them.
 func (s *Service) auditLinkEvent(ctx context.Context, ends []auth.HubGrantEnd, rest int64, reason string) {
 	for _, end := range ends {
-		s.auditGrantEnd(ctx, end, "system", "system")
+		s.auditGrantEnd(ctx, end, system)
 	}
 	s.revoked(rest)
 	if rest > 0 {

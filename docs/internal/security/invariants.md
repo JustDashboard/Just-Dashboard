@@ -206,7 +206,10 @@ A change that weakens any of these has to say so explicitly.
 5. Every state-changing request lands in the audit log. A request made with an API key carries the
    key's id and name (`audit_log.key_id`, `key_name`) as well as its account, and a deploy key refused
    by the gate is written as `auth.deploy_key.refused`, reads included, since it is answered before the
-   group's audit middleware runs.
+   group's audit middleware runs. Every request a hub session makes is audited as actor `hub-session`
+   (the assistant acting in one, `assistant`) with its hub user and session id (`audit_log.hub_user`,
+   `session_id`), so it reads apart from the same account's own session
+   ([below](#the-exception-hub-sign-in)).
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
    operations (bind-mount source, build context, a new stack's directory). Host commands go through
    `hostexec` with an argv, never a shell string. Request-defined shell source is confined to `deploy.Deployer.shell`, deliberately:
@@ -511,8 +514,8 @@ most. The grant, the account and the new session are one write transaction.
 
 **What a hub session cannot do.** It lasts at most two hours (one hour idle), and
 `httpx.RefuseHubSession` refuses it with `403 hub_session_not_allowed` on every route that creates,
-changes, rotates, imports or exports a credential, or creates or changes a link, because what it made
-would outlive the session and the grant. Exporting includes a read: a `GET` that shows a stored secret
+changes, rotates, imports or exports a credential, creates or changes a link, or changes the
+dashboard's own settings, because what it made would outlive the session and the grant. Exporting includes a read: a `GET` that shows a stored secret
 is refused as an export is. `TestEveryCredentialAndLinkRouteRefusesAHubSession`
 (`api/hub_session_routes_test.go`) walks the router and fails unless exactly these carry it, and
 `TestTheDocumentedRouteTablesAreHubSessionRefused` reads this table and the protocol's and fails when
@@ -538,6 +541,7 @@ either names a route the router does not refuse, or leaves one out:
 | The account link | `POST /dashboard/link/`, `DELETE /dashboard/link/request`, `PUT /dashboard/link/scope` |
 | The hub link | `POST /dashboard/hub`, `DELETE /dashboard/hub/request`, `PUT /dashboard/hub/scope` |
 | Hub sign-in | `PUT /account/hub-signin` |
+| The dashboard's own settings | `PUT /dashboard/config` |
 
 This is the protocol's table (section 9.9), which its first version did not hold whole: the walk of every
 write route found seventeen more that its rule covers, and the protocol lists them since (errata HL-3,
@@ -569,11 +573,30 @@ code given from one would turn it into an ordinary session that none of these li
 middleware refuses it before the handler spends a guess from the account's budget, so a right code from a
 hub session is neither counted nor audited as a wrong one
 (`TestAHubSessionIsRefusedTheCodeRouteBeforeAGuessIsSpent`); `auth.elevateTx` still leaves a hub session
-as it is, should another caller ever reach it.
+as it is, should another caller ever reach it. The final review found the dashboard's own settings open
+too: `PUT /dashboard/config` writes `JD_ALLOWED_CIDRS`, the address it binds, `JD_REQUIRE_2FA`, the
+session lifetimes and `JD_TERMINAL_ENABLED`, all of which outlive the session, and turning
+`JD_REQUIRE_2FA` off would loosen condition 5 above, under which the session was opened. It is refused
+since, and takes a session (`RequireSession`), so an API key cannot change them either
+(`TestOnlyASessionChangesTheDashboardsOwnSettings`). Restarting on the configuration already on disk
+stays open.
 
 What stays open to a hub session, because it only takes power away: disconnecting either link,
 `POST /dashboard/hub/sync`, removing a sign-in grant, revoking sessions, deleting a key, user, credential
 or channel, and signing GitHub out.
+
+**What it leaves in the audit log.** Every request a hub session makes is audited as actor
+`hub-session` (the assistant acting in one stays `assistant`) with its hub user and the session's id
+(`audit_log.hub_user`, `session_id`), and that id is the `sessionId` of the `hub.signin` entry that
+opened it. The same account in a session of this server's own is `session`, with neither. One builder
+writes who acted on every entry for a principal (`httpx.principalEntry`; `httpx.AuditEntry` for a
+handler that writes its own: a socket at open, a read before it runs, an outcome after the response),
+so the mutation middleware, `AuditRead`, `recordAudit` (a terminal, a container's shell, a Remote
+Desktop session) and the rest cannot leave the hub out
+(`TestAHubSessionIsAuditedApartFromTheSameAccountsOwnSession`,
+`TestWhatAHubSessionDoesIsAuditedApartFromALocalSession`). The device check makes a hub session's
+address the device the person uses here, so without this the trail could not tell what a taken-over
+hub did from what the person did.
 
 **When it ends.** A hub session lives only while what made it still holds. Every one of these is a write
 transaction that also revokes the hub sessions it ends, so a redeem either commits first and is revoked,
@@ -620,9 +643,15 @@ its database). With `file.write` (the `admin` and `limited` roles) it writes any
 (`files.WriteChecked` has no deny-list), so it can plant an SSH key in `authorized_keys` or a sudoers
 rule; and an administrator's session has the terminal. For those roles a hub session is as good as root,
 and for every role it reads what root reads. Ending hub sign-in ends the hub's sessions; it does not undo
-what was done in them. Without it, a taken-over hub is limited to its scope's commands. That is why it is
-off by default and needs the operator, the hub's owner and each account holder, and why the opt-in
-screen says so.
+what was done in them; the audit log says what was. Without it, a taken-over hub is limited to its
+scope's commands. That is why it is off by default and needs the operator, the hub's owner and each
+account holder, and why the opt-in screen says so.
+
+**The review.** Condition 1 of protocol 9.1 asks for a written security review before a release turns
+this on. The review of JD 0.8.5, item by item against protocol 9.12 with the code and test for each and
+the residual risks above, is
+[docs/audits/2026-11-05-hub-signin/security-review.md](../../audits/2026-11-05-hub-signin/security-review.md);
+the owner signs it there before `JD_HUB_SIGNIN=true` is set on any server.
 
 ## Invariant 3: which routes take a typed phrase
 

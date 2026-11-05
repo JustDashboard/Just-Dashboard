@@ -58,23 +58,9 @@ func clampDuration(d, lo, hi time.Duration) time.Duration {
 // interesting event is "a terminal was opened", recorded the moment it
 // happens — not a status code written when the socket eventually closes.
 func (s *Server) recordAudit(r *http.Request, action, target string, detail any) {
-	p := httpx.MustPrincipal(r)
-	s.Audit.Record(r.Context(), audit.Entry{
-		UserID:   p.UserID(),
-		Username: p.Username(),
-		Role:     string(p.Role),
-		IP:       httpx.ClientIP(r),
-		Actor:    p.Kind,
-		Action:   action,
-		Target:   target,
-		Method:   r.Method,
-		Path:     r.URL.Path,
-		Status:   http.StatusOK,
-		Success:  true,
-		Detail:   audit.Detail(detail),
-		KeyID:    p.KeyID(),
-		KeyName:  p.KeyName(),
-	})
+	e := httpx.AuditEntry(r)
+	e.Action, e.Target, e.Status, e.Success, e.Detail = action, target, http.StatusOK, true, audit.Detail(detail)
+	s.Audit.Record(r.Context(), e)
 }
 
 // detachedContext is for work that must outlive the request that started it —

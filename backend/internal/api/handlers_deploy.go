@@ -1509,14 +1509,10 @@ func (s *Server) handleDeployEnvReveal(w http.ResponseWriter, r *http.Request) e
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	p := httpx.MustPrincipal(r)
-	s.Audit.Record(r.Context(), audit.Entry{
-		UserID: p.UserID(), Username: p.Username(), Role: string(p.Role),
-		IP: httpx.ClientIP(r), Actor: p.Kind, KeyID: p.KeyID(), KeyName: p.KeyName(),
-		Action: "deploy.env.reveal", Target: project.Name,
-		Method: r.Method, Path: r.URL.Path, Status: http.StatusOK, Success: true,
-		Detail: audit.Detail(map[string]any{"count": len(vars)}),
-	})
+	e := httpx.AuditEntry(r)
+	e.Action, e.Target, e.Status, e.Success = "deploy.env.reveal", project.Name, http.StatusOK, true
+	e.Detail = audit.Detail(map[string]any{"count": len(vars)})
+	s.Audit.Record(r.Context(), e)
 	httpx.JSON(w, http.StatusOK, vars)
 	return nil
 }

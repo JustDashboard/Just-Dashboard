@@ -468,20 +468,8 @@ func dsnSecrets(dsn string) []string {
 // that must not go unrecorded. A failure is recorded as one: failed is what
 // went wrong after the read had begun, nil when it is beginning or ended well.
 func (s *Server) recordRead(r *http.Request, action, target string, detail map[string]any, failed error) {
-	p := httpx.MustPrincipal(r)
-	entry := audit.Entry{
-		UserID:   p.UserID(),
-		Username: p.Username(),
-		Role:     string(p.Role),
-		IP:       httpx.ClientIP(r),
-		Actor:    p.Kind,
-		Action:   action,
-		Target:   target,
-		Method:   r.Method,
-		Path:     r.URL.Path,
-		Status:   http.StatusOK,
-		Success:  true,
-	}
+	entry := httpx.AuditEntry(r)
+	entry.Action, entry.Target, entry.Status, entry.Success = action, target, http.StatusOK, true
 	if failed != nil {
 		// What the handler would have answered had the response not already
 		// been under way.
