@@ -130,11 +130,22 @@ roots, and the request's `Host` is the name. Redirects are refused.
 
 **The test origin.** `JD_HUB_LINK_TEST_ORIGIN` names one loopback origin (`http` or `https`, `localhost`,
 `127.0.0.0/8` or `[::1]`); anything else refuses to start. A hub URL equal to it skips the rule and is dialled as
-written; every other URL still goes through the whole rule, and signing, scopes and commands are unchanged. Fleet
-endpoints and notice links from a hub at the test origin follow the relaxed rules of protocol section 6. When it
-is set the backend logs a warning at start and `GET /dashboard/hub` reports it as `admin.testOrigin`. It is read
-by `config.go` and the terminal commands only, and on purpose appears in no `.env.example`, no Compose
-`environment:` map and no operator guide.
+written, and no WhoIs is asked about it; every other URL still goes through the whole rule, and signing, scopes and
+commands are unchanged. With the stored hub URL at the test origin exactly two rules relax (protocol 2.3): a notice
+`href` must be on that origin, whatever its scheme, and a fleet `endpoint` may be a loopback `http` or `https`
+origin, or one under this server's own MagicDNS suffix; any other `https` origin is still removed. When it is set
+the backend logs a warning at start and `GET /dashboard/hub` reports it as `admin.testOrigin` (the Settings page
+uses it to accept `?connect=` naming that origin, or its host, exactly). It is read by `config.go` and the terminal
+commands only, and on purpose appears in no `.env.example`, no Compose `environment:` map and no operator guide.
+
+**A loopback dashboard's own address**, as the local end-to-end harness runs it, is reported by the rules that
+apply everywhere, with nothing special for tests: `access.kind` is `tunnel` when `JD_SITE` is empty, `localhost`
+or `127.0.0.1` (protocol 5.1, `accountHost.access`), and `access.endpoint` is the address a browser opens it at,
+for example `http://127.0.0.1:18443`. A hub in dev mode keeps a loopback endpoint (5.3's endpoint rule, its dev
+clause) and relays it in `fleet`; a dashboard linked at the test origin keeps it (6.1). Protocol 6.1's "left out
+when that server is reached by an SSH tunnel" is what 5.3's rule does to such an endpoint in production (it is not
+an `https` origin on the hub's WhoIs node), not a separate rule on `access.kind`. The side that was wrong was this
+dashboard: at the test origin it used to keep any `https` endpoint as well.
 
 ## What the dashboard keeps from each reply
 
@@ -245,7 +256,9 @@ The account link's table applies, with these for the hub:
 | What happens | What the dashboard does |
 | --- | --- |
 | The hub is down or unreachable | Heartbeat and poll back off from 1 s to 5 minutes; `reachable` goes false; nothing else on the dashboard depends on the hub |
-| A reply with an unknown field, or without `fleet` or `notices` | A failed heartbeat; the cached view is left as it was and nothing in the reply is used |
+| A reply with an unknown top-level field, or without `ok`, `heartbeatSeconds`, `pendingCommands`, `fleet` or `notices` | A failed heartbeat; the cached view is left as it was and nothing in the reply is used |
+| A bad element in `fleet`, `notices` or `signIn.users` | That element is dropped; the heartbeat succeeds with the rest |
+| A reply that arrives after a disconnect | Nothing is written: no view, no interval, no status |
 | `410` on any signed request | The hub removed this server: link, policy, status and cached view cleared in one transaction, identity and sequence kept, `hub.unlink` by `system` with the reason "the server was removed in the hub" |
 | The server moved to another tailnet, or the test origin was removed | The link is set idle in the store at the next start and says why; it stays idle until a person disconnects |
 | Another machine answers at the hub's name | Nothing is sent; the link is set idle ("the hub's machine changed") and `hub.link.node_changed` audited; a pending request ends as failed with nothing stored |
@@ -257,12 +270,19 @@ The account link's table applies, with these for the hub:
 
 Hub sign-in (protocol section 9) arrives on a later branch. What is in place for it: the reply's `signIn` is
 decoded and cached, and `GET /dashboard/hub` reports it as `signIn.offered` and `signIn.users`; the engine's
-`HeartbeatExtra` hook carries extra heartbeat keys whole within the 64 KiB budget; and `OnClear` is the
-transaction in which grants and ticket records will be deleted with a link. Still to come with it: `JD_HUB_SIGNIN`,
+`HeartbeatExtra` hook carries extra heartbeat keys whole within the 64 KiB budget; `OnClear` is the transaction in
+which grants and ticket records will be deleted with a link, and `OnReply`'s write runs in the heartbeat's own
+serverId-guarded transaction, where ending the grants a reply no longer offers belongs; `revokeHubSessionsTx` is
+called inside the one write transaction that sets a link idle (an address the rule refuses at start, or another
+machine at the hub's name) and is where the hub sessions are revoked. Still to come with it: `JD_HUB_SIGNIN`,
 `hub_signin_grants` and `hub_signin_tickets`, `PUT`/`DELETE /account/hub-signin`,
 `DELETE /dashboard/hub/signin/{userId}`, `admin.grants` and `signIn.mine`, `POST /auth/hub/enter`, the
-`/hub/enter` page, and the ticket vectors. The written security review of the exception to invariant 2 must be
-done before that code is switched on anywhere.
+`/hub/enter` page, `403 hub_session_not_allowed`, and the ticket vectors. The written security review of the
+exception to invariant 2 must be done before that code is switched on anywhere.
+
+The pages' half of protocol 8.10 and 8.2 (the Settings page calling `check` and showing the machine before Connect,
+`hubMachine` and the key fingerprint to compare, `?connect=` leaving the scope unchosen, and notices, fleet names
+and the hub's name drawn under "Just Hub (<name>) says") is the hub UI branch's.
 
 ## Verification
 
@@ -274,14 +294,24 @@ python3 scripts/test_manage.py
 ```
 
 `hublink` tests run against a fake hub that checks the protocol header, the signature, the time window and the
-sequence of every signed request in section 3.1's order with its own reading of the signed string: connecting with
-a code and with a token, a refused token creating nothing, declines, one hub per server, the heartbeat body and the
-cached view (bad entries dropped, endpoints and links removed), strict replies, every kind at every scope run as
-`hub:hub` or refused, replay, expiry, a forged key, an unpinned `kid`, a command for another server and an unknown
-kind (refused, reported and audited, and only commands past the signature recorded in `hub_link_commands`),
-disconnect, removal in the hub, a stored link that no longer passes the rule, and both links side by side. The
-vectors test reads `hub-link-vectors.json` and runs every key, canonical-JSON, rejected-args, request and command
-case and the hello bodies against the dashboard's own code, the hub-link command cases through the real
-connector. The URL rule, the test origin, `tailscale status` parsing and the dialer have table tests. The `api`
-tests cover the routes and their role rules through the HTTP stack, the session field and the probe; the `admin`
-and `test_manage.py` tests cover the terminal path.
+sequence of every signed request in section 3.1's order with its own reading of the signed string, and answers an
+approved poll on every poll until it is collected and after (4.2): connecting with a code and with a token, a
+refused token creating nothing, declines, a lost approved answer healing and a repeated one ignored, one hub per
+server, the heartbeat body and the cached view (bad elements of each list dropped with the heartbeat still
+succeeding, endpoints and links removed, the text rule), strict top-level replies, a reply after a disconnect
+writing nothing, `siteKeys` in a reply changing no pinned key, the clock-based sequence surviving a restored
+database, the hub's words quoted as the hub's, every kind at every scope run as `hub:hub` or refused, replay,
+expiry, a forged key, an unpinned `kid`, a command for another server and an unknown kind (refused, reported and
+audited, and only commands past the signature recorded in `hub_link_commands`), disconnect, removal in the hub,
+a stored link that no longer passes the rule, and both links side by side. `node_test.go` reaches the same fake hub
+at `https://hub.tailed39ba.ts.net` through a test transport, so the URL rule and the hub node check run: the node
+pinned at connect, another `StableID` idling the link and surviving a restart, `ErrNotAPeer` backing off and
+`ErrUnavailable` sending, the five-minute cadence, a node recorded later, a pending request ended by another
+machine (from the running dashboard and from the terminal command), a test-origin link idled once the variable is
+gone, `Check`, and the dialer's gate. The vectors test reads `hub-link-vectors.json` and runs every key,
+canonical-JSON, rejected-args, request and command case and the hello bodies against the dashboard's own code, the
+hub-link command cases through the real connector. The URL rule, the test origin, `tailscale status` parsing and
+the dialer have table tests. The `api` tests cover the routes and their role rules through the HTTP stack, `check`
+with tailscaled answering and not, the begin audit's node, the session field and the probe; the `admin` and
+`test_manage.py` tests cover the terminal path, a token refused as an argument and read with echo off at a
+terminal included.

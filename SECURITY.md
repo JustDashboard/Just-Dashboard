@@ -49,8 +49,13 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Connecting to a Just Hub is optional and outbound only, to one machine on the server's own tailnet,
   reached only over the tailnet. It has its own key, pinned hub key, counter and audit name, separate
   from the just-dashboard.com link, and a hub's command runs only under the same checks and the scope
-  you chose. The hub's discovery probe is behind the network allowlist and answers nothing but whether
-  the server can be connected. `JD_HUB_LINK=false` switches all of it off.
+  you chose. The hub's key is pinned when you approve and nothing the hub sends later can change it; the
+  hub's tailnet machine is pinned too, so if another machine takes the hub's name the server sends it
+  nothing and the connection goes quiet until you reconnect. What the hub sends to show (notices, server
+  names, its messages) is shown as the hub's, never as the dashboard's own prompt. The one-time token the
+  hub gives for the terminal is read only from standard input, never from the command line. The hub's
+  discovery probe is behind the network allowlist and answers nothing but whether the server can be
+  connected. `JD_HUB_LINK=false` switches all of it off.
 - [The usage count](docs/guides/linking-and-usage.md#the-usage-count) is off until an administrator says yes, and is three fields with no ID.
 
 ### Roles

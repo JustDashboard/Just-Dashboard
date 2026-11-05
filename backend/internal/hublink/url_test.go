@@ -34,6 +34,10 @@ func TestTheHubURLRule(t *testing.T) {
 	for _, tc := range []struct{ in, origin, code string }{
 		{"hub.tailed39ba.ts.net", "https://hub.tailed39ba.ts.net", ""},
 		{" https://HUB.tailed39ba.ts.net./ ", "https://hub.tailed39ba.ts.net", ""},
+		// The trailing dot goes before accountlink's spelling would keep it
+		// (protocol 2.2 step 3, HL-24c).
+		{"https://HUB.tailed39ba.ts.net.:443", "https://hub.tailed39ba.ts.net", ""},
+		{"https://HUB.tailed39ba.ts.net.:8443", "https://hub.tailed39ba.ts.net:8443", ""},
 		{"https://hub.tailed39ba.ts.net:443", "https://hub.tailed39ba.ts.net", ""},
 		{"https://hub.tailed39ba.ts.net:8443", "https://hub.tailed39ba.ts.net:8443", ""},
 		{"hub-1.tailed39ba.ts.net", "https://hub-1.tailed39ba.ts.net", ""},
