@@ -126,8 +126,9 @@ never shown for the new one, and it is cleared with the link.
 first, under the API rate limit per address, `Cache-Control: no-store`, and nothing in it but
 `{"product":"just-dashboard","protocol":1,"hub":"available|pending|linked"}` (written by hand, byte for byte the
 vectors' bodies). It is not mounted with `JD_HUB_LINK=false` or in agent mode, so those answer `404` as an older
-dashboard does. It is the one route under `/api/v1` that answers without a session; `routes_test.go` lists it as
-the deliberate exception and checks its body.
+dashboard does. It is the one route under `/api/v1` that answers without a credential: `publicAPIRoutes` in
+`routes_test.go` lists it with its exact body, `TestNoAPIRouteAnswersWithoutAuthentication` checks that body, and
+the walks of what an API, deploy or MCP key may open read the same list.
 
 | Route | Guards | Does |
 | --- | --- | --- |
