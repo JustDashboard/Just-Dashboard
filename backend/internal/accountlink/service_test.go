@@ -1,6 +1,8 @@
 package accountlink
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -502,5 +504,60 @@ func TestNothingIsSentToASiteThatIsNotTheOneTheLinkWasMadeWith(t *testing.T) {
 	}
 	if s, _ := moved.Status(t.Context()); s.State != StateUnlinked {
 		t.Fatalf("status = %+v", s)
+	}
+}
+
+// SetIdle stores the idle flag in the link state with whatever must end with
+// the link's use, in one transaction; an idle link sends nothing until it is
+// unlinked, and setting it idle again changes nothing.
+func TestAnIdleLinkSendsNothingUntilItIsUnlinked(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	st := e.link(ScopeObserve)
+	idle := Idle{Code: "test_idle", Reason: "the peer's machine changed", At: e.svc.now()}
+
+	// What runs with it failing rolls the flag back.
+	boom := errors.New("boom")
+	if set, err := e.svc.SetIdle(t.Context(), st.ServerID, idle, func(context.Context, *sql.Tx) error { return boom }); set || !errors.Is(err, boom) {
+		t.Fatalf("a failing companion write = %v %v", set, err)
+	}
+	if cur, _, _ := e.svc.Linked(t.Context()); cur.Idle != nil {
+		t.Fatal("the idle flag outlived its failed transaction")
+	}
+
+	ran := 0
+	also := func(ctx context.Context, tx *sql.Tx) error {
+		ran++
+		_, err := tx.ExecContext(ctx, `INSERT INTO settings(key, value) VALUES('test.idle.companion', 'x')`)
+		return err
+	}
+	if set, err := e.svc.SetIdle(t.Context(), st.ServerID, idle, also); !set || err != nil {
+		t.Fatalf("SetIdle = %v %v", set, err)
+	}
+	if set, err := e.svc.SetIdle(t.Context(), st.ServerID, idle, also); set || err != nil || ran != 1 {
+		t.Fatalf("a second SetIdle = %v %v, companion ran %d times", set, err, ran)
+	}
+	if _, ok, _ := e.st.Setting(t.Context(), "test.idle.companion"); !ok {
+		t.Fatal("the companion write is missing")
+	}
+	if set, _ := e.svc.SetIdle(t.Context(), "another-server", idle, nil); set {
+		t.Fatal("another link was set idle")
+	}
+	cur, _, _ := e.svc.Linked(t.Context())
+	if cur.Idle == nil || cur.Idle.Reason != idle.Reason {
+		t.Fatalf("idle = %+v", cur.Idle)
+	}
+	before := len(e.site.heartbeatBodies())
+	if err := e.svc.SyncNow(t.Context()); !errors.Is(err, ErrIdle) {
+		t.Fatalf("sync on an idle link = %v", err)
+	}
+	if len(e.site.heartbeatBodies()) != before {
+		t.Fatal("an idle link sent a heartbeat")
+	}
+	if _, err := e.svc.Unlink(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, linked, _ := e.svc.Linked(t.Context()); linked {
+		t.Fatal("unlink kept the idle link")
 	}
 }

@@ -68,7 +68,7 @@ type hubRequest struct {
 	pub      ed25519.PublicKey
 	scope    string
 	body     map[string]any
-	status   string // pending, approved, denied, expired, consumed
+	status   string // pending, approved, collected, denied, expired, consumed
 	seq      int64
 }
 
@@ -112,6 +112,9 @@ type fakeHub struct {
 	origin string
 	// polls counts the request polls that reached the hub.
 	polls int
+	// dropApproved loses that many approved answers in transit: the hub
+	// collected the approval, the dashboard never heard.
+	dropApproved int
 }
 
 func newFakeHub(t *testing.T, now time.Time) *fakeHub {
@@ -263,9 +266,22 @@ func (h *fakeHub) pollRequest(w http.ResponseWriter, r *http.Request, body []byt
 	switch req.status {
 	case "pending":
 		writeJSON(w, 200, map[string]any{"status": "pending"})
-	case "approved":
-		req.status = "consumed"
-		h.servers[h.serverID] = &hubServer{id: h.serverID, pub: req.pub, seq: req.seq}
+	case "approved", "collected":
+		// The first approved poll collects the approval (protocol 4.2):
+		// the server row starts with the request's sequence. Later polls
+		// get the same answer until the window ends, so one lost in transit
+		// heals on the next.
+		if req.status == "approved" {
+			req.status = "collected"
+			h.servers[h.serverID] = &hubServer{id: h.serverID, pub: req.pub, seq: req.seq}
+		} else if s := h.servers[h.serverID]; s != nil && s.seq < req.seq {
+			s.seq = req.seq
+		}
+		if h.dropApproved > 0 {
+			h.dropApproved--
+			hubError(w, 503, "unavailable")
+			return
+		}
 		writeJSON(w, 200, map[string]any{
 			"status": "approved", "serverId": h.serverID,
 			"siteKey":          map[string]string{"kid": h.kid, "publicKey": pubB64(h.key)},

@@ -206,19 +206,23 @@ The fleet and notices come from `GET /dashboard/hub`, so this stays small.
 
 ## Terminal
 
-`scripts/manage.sh hub connect URL [--scope observe|operate|maintain] [--token-stdin | --token TOKEN] [--wait 15m]`,
+`scripts/manage.sh hub connect URL [--scope observe|operate|maintain] [--token-stdin] [--wait 15m]`,
 `hub disconnect` and `hub status` check their arguments and run `docker compose run --rm --no-deps -T backend
 --admin hub-connect|hub-disconnect|hub-status …` (`admin/hub.go`), keeping the exit status with `exec`. They read
 `JD_HUB_LINK`, `JD_HUB_LINK_TEST_ORIGIN` and `JD_MASTER_KEY` from the Compose environment; `connect` and
 `disconnect` need the master key, `status` does not.
 
-`hub connect` applies the rule, prints the hub URL, the code and this server's fingerprint, and waits (default 15
-minutes, at most an hour). The default scope is `maintain`. `--token-stdin` reads one line from standard input,
-which is how the hub's installer passes its token so it never appears in a process list; a token that is not
-`jht_` and 43 base64url characters is refused before anything is sent, and one the hub refuses (`bad_token`) is a
-failure, never a fallback to a code. Exit **0** connected (`Connected to Just Hub "<name>" at <url> as "<server>"
-(<scope>).`), **2** declined, not approved within `--wait`, or interrupted (the request is forgotten), **1**
-anything else. A request begun in Settings is never taken over from the terminal. Audited as `hub.link` (by
+`hub connect` applies the rule, prints the hub URL, the hub's machine and owner (`hublink.DescribeMachine`: "<name>,
+a machine of <owner>", "<name>, tagged <tags>", or "not checked" with why), the code and this server's fingerprint,
+and waits (default 15 minutes, at most an hour). The default scope is `maintain`. **A token is only ever read from
+standard input** (protocol 8.4): `--token TOKEN` and `--token=` exit 1 with "pass the token on standard input with
+--token-stdin", in `manage.sh` and in `admin/hub.go` both. With `--token-stdin`, `manage.sh` prompts `Link token: `
+and reads with `read -rs` at a terminal, or one line from a pipe (the hub's installer), and passes it to the admin
+command on its standard input, so it is in no process list (`/proc/*/cmdline`) and no shell history. A token that
+is not `jht_` and 43 base64url characters is refused before anything is sent, and one the hub refuses
+(`bad_token`) is a failure, never a fallback to a code. Exit **0** connected (`Connected to Just Hub "<name>" at
+<url> as "<server>" (<scope>).`, then the pinned hub key's fingerprint to compare with the hub's Settings page),
+**2** declined, not approved within `--wait`, or interrupted (the request is forgotten), **1** anything else. A request begun in Settings is never taken over from the terminal. Audited as `hub.link` (by
 `root` / `cli`; failures as failed with the outcome) and `hub.unlink`.
 
 ## Failure modes

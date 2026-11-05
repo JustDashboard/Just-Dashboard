@@ -51,18 +51,24 @@ sudo ./scripts/manage.sh hub status
 sudo ./scripts/manage.sh hub disconnect
 ```
 
-`hub connect` prints a code and this server's key fingerprint and waits (15 minutes by default, `--wait` up to
-an hour) while the hub's owner approves the same code in the hub. The hub's own installer and its "Add by
-command" screen give a one-time token instead, which approves the request in advance; pass it with
-`--token-stdin` so it never appears in a process list. The command exits 0 once connected, 2 if the request was
-declined, not approved in time or interrupted, and 1 for anything else.
+`hub connect` prints the hub's machine and its owner (or "not checked" when Tailscale could not be asked), a code
+and this server's key fingerprint, and waits (15 minutes by default, `--wait` up to an hour) while the hub's owner
+types that code into the hub. Once connected it prints the hub's key fingerprint; compare it with the one on the
+hub's Settings page. The hub's own installer and its "Add by command" screen give a one-time token instead, which
+approves the request in advance. A token is only ever given on standard input, with `--token-stdin`: at a terminal
+the command asks `Link token:` and does not echo what you paste, and from a pipe it reads one line, so the token
+is in no process list and no shell history. There is no option that takes it as an argument. The command exits 0
+once connected, 2 if the request was declined, not approved in time or interrupted, and 1 for anything else.
 
 **The hub must be on this server's tailnet.** The address you give must be one machine directly under this
 server's own MagicDNS name (`hub.example.ts.net` beside `server.example.ts.net`), never this server's own name,
 and the dashboard reaches it only over the tailnet: it never dials a hub at an address outside Tailscale's
 range. If tailscaled can be asked, the dashboard also checks that the address belongs to the machine of that
-name. If the server later moves to another tailnet, the connection stays stored but goes quiet and Settings
-says why; disconnect and connect to a hub on the new tailnet.
+name, shows that machine and its owner before you connect, and remembers it: from then on it sends nothing to
+another machine that takes the hub's name (a hub machine deleted and its name reused), and the connection goes
+quiet until you disconnect and connect again. If the server later moves to another tailnet, the connection
+likewise stays stored but goes quiet, and Settings says why; disconnect and connect to a hub on the new
+tailnet.
 
 The scope works as for just-dashboard.com, with the table above, except that the default is `maintain`: a hub
 is yours and on your own network, and keeping servers updated is what it is for. Change it any time in

@@ -391,8 +391,6 @@ JD_FRONTEND_PORT=42002
                 (("hub", "connect", "hub.example.ts.net"), ["--admin", "hub-connect", "hub.example.ts.net"]),
                 (("hub", "connect", "https://hub.example.ts.net", "--scope", "observe", "--wait=10m"),
                  ["--admin", "hub-connect", "https://hub.example.ts.net", "--scope", "observe", "--wait=10m"]),
-                (("hub", "connect", "hub.example.ts.net", "--token", "jht_x", "--scope=operate"),
-                 ["--admin", "hub-connect", "hub.example.ts.net", "--token", "jht_x", "--scope=operate"]),
                 (("hub", "disconnect"), ["--admin", "hub-disconnect"]),
                 (("hub", "status"), ["--admin", "hub-status"])):
             result = self.run_tool("manage.sh", *args)
@@ -409,6 +407,54 @@ JD_FRONTEND_PORT=42002
         self.assertEqual(call["args"][-3:], ["hub-connect", "hub.example.ts.net", "--token-stdin"])
         self.assertEqual(call["stdin"], token + "\n")
         self.assertNotIn(token, " ".join(call["args"]) + result.stdout + result.stderr)
+
+    def test_hub_connect_refuses_a_token_on_the_command_line(self):
+        token = "jht_" + "A" * 43
+        for args in (("--token", token), ("--token=" + token,), ("--token-stdin", "--token", token)):
+            result = self.run_tool("manage.sh", "hub", "connect", "hub.example.ts.net", *args, input=token + "\n")
+            self.assertEqual(result.returncode, 1, args)
+            self.assertIn("pass the token on standard input with --token-stdin", result.stderr)
+        self.assertEqual(self.read_calls(), [])
+
+    def test_hub_connect_needs_a_token_on_stdin_when_asked_for_one(self):
+        result = self.run_tool("manage.sh", "hub", "connect", "hub.example.ts.net", "--token-stdin", input="")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no token", result.stderr)
+        self.assertEqual(self.read_calls(), [])
+
+    def test_hub_connect_asks_for_the_token_with_echo_off_at_a_terminal(self):
+        token = "jht_" + "B" * 43
+        master, slave = pty.openpty()
+        process = subprocess.Popen([str(self.scripts / "manage.sh"), "hub", "connect", "hub.example.ts.net", "--token-stdin"],
+                                   stdin=slave, stdout=slave, stderr=slave, env=self.env, cwd=self.temp.name)
+        os.close(slave)
+        output = b""
+        answered = False
+        deadline = time.monotonic() + 5
+        try:
+            while time.monotonic() < deadline:
+                ready, _, _ = select.select([master], [], [], 0.1)
+                if ready:
+                    try:
+                        output += os.read(master, 4096)
+                    except OSError:
+                        break
+                if not answered and b"Link token: " in output:
+                    os.write(master, token.encode() + b"\n")
+                    answered = True
+                if process.poll() is not None:
+                    break
+            self.assertEqual(process.wait(timeout=1), 0, output.decode())
+            self.assertTrue(answered, output.decode())
+            self.assertNotIn(token.encode(), output)
+            call = self.read_calls()[-1]
+            self.assertEqual(call["args"][-3:], ["hub-connect", "hub.example.ts.net", "--token-stdin"])
+            self.assertEqual(call["stdin"], token + "\n")
+            self.assertNotIn(token, " ".join(call["args"]))
+        finally:
+            os.close(master)
+            if process.poll() is None:
+                process.kill()
 
     def test_hub_connect_keeps_the_commands_exit_status(self):
         for code in (2, 1):

@@ -17,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
 )
 
 // ServerID is the id the stub gives the server it approves.
@@ -76,6 +78,9 @@ func (h *Hub) Count() (requests, polls, heartbeats, unlinks int) {
 	defer h.mu.Unlock()
 	return h.requests, h.polls, h.beats, h.unlinks
 }
+
+// KeyFingerprint is the fingerprint of the key the hub's approvals pin.
+func (h *Hub) KeyFingerprint() string { return accountlink.Fingerprint(h.key) }
 
 // LastRequest is the body of the last link request.
 func (h *Hub) LastRequest() map[string]any {
@@ -137,7 +142,8 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 		h.polls++
 		switch h.status {
 		case "approved":
-			h.status = "consumed"
+			// Approved answers repeat until the collection window ends
+			// (protocol 4.2), so one lost in transit heals on the next poll.
 			reply(w, 200, map[string]any{
 				"status": "approved", "serverId": ServerID,
 				"siteKey":          map[string]string{"kid": "hub-2026-11", "publicKey": base64.StdEncoding.EncodeToString(h.key)},

@@ -31,8 +31,9 @@ Connecting to Just Hub on your tailnet (optional)
                                      code and this server's fingerprint, then waits for the
                                      hub's owner to approve it there. Options:
                                        --scope observe|operate|maintain (default maintain)
-                                       --token-stdin  read a one-time token from the hub
-                                       --token TOKEN  the same, typed
+                                       --token-stdin  a one-time token from the hub: asked
+                                                      for with echo off at a terminal, or
+                                                      read as one line from a pipe
                                        --wait 15m     how long to wait, at most 1h
                                      Exits 0 once connected, 2 if it was declined, not
                                      approved in time or interrupted
@@ -78,6 +79,7 @@ shift "$(( $# > 0 ? 1 : 0 ))"
 case "$command" in --help|-h|help) usage; exit 0 ;; esac
 
 password_stdin=0
+token_stdin=0
 case "$command" in
 	create-user|reset-password)
 		if [ "${!#:-}" = "--password-stdin" ]; then
@@ -106,9 +108,12 @@ case "$command" in
 				while [ "$i" -le "$#" ]; do
 					arg="${!i}"
 					case "$arg" in
-						--token-stdin) ;;
-						--scope=*|--wait=*|--token=*) value="${arg#*=}" ;;
-						--scope|--wait|--token)
+						--token-stdin) token_stdin=1 ;;
+						# A token on the command line is in the process list and the
+						# shell history; it only ever travels on standard input.
+						--token|--token=*) die "pass the token on standard input with --token-stdin" ;;
+						--scope=*|--wait=*) value="${arg#*=}" ;;
+						--scope|--wait)
 							i=$((i + 1))
 							[ "$i" -le "$#" ] || die "$arg needs a value. See --help."
 							value="${!i}"
@@ -180,9 +185,22 @@ case "$command" in
 		sub="$1"
 		shift
 		# exec keeps the command's own exit status: 2 means declined, not approved in
-		# time or interrupted. Standard input passes through for --token-stdin, so a
-		# token never appears in a process list.
-		exec "${compose[@]}" run --rm --no-deps -T backend --admin "hub-$sub" "$@"
+		# time or interrupted.
+		if [ "$token_stdin" -eq 0 ]; then
+			exec "${compose[@]}" run --rm --no-deps -T backend --admin "hub-$sub" "$@"
+		fi
+		# The token is read here and handed to the admin command on its standard
+		# input, never as an argument, so it is in no process list and no shell
+		# history: asked for with echo off at a terminal, one line from a pipe
+		# (how the hub's installer passes it).
+		if [ -t 0 ]; then
+			IFS= read -r -s -p 'Link token: ' token || die "Token input cancelled."
+			printf '\n' >&2
+		else
+			IFS= read -r token || [ -n "$token" ] || die "--token-stdin read no token; pipe the line the hub printed."
+		fi
+		[ -n "$token" ] || die "--token-stdin read no token; paste the token the hub showed."
+		exec "${compose[@]}" run --rm --no-deps -T backend --admin "hub-$sub" "$@" <<<"$token"
 		;;
 	create-user|reset-password)
 		if [ "$password_stdin" -eq 1 ]; then

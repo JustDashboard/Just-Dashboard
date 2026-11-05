@@ -64,13 +64,12 @@ func TestHubConnectPrintsTheCodeWaitsAndReportsTheLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hub-connect = %v\n%s", err, out)
 	}
-	for _, want := range []string{"Connecting to Just Hub at   " + f.hub.URL, "K7QM-29XD", "fingerprint", "maintain scope", `Connected to Just Hub "hub" at ` + f.hub.URL + ` as "`} {
+	for _, want := range []string{"Connecting to Just Hub at   " + f.hub.URL, "The hub's machine           not checked (the test origin)",
+		"K7QM-29XD", "fingerprint", "maintain scope", `Connected to Just Hub "hub" at ` + f.hub.URL + ` as "`,
+		"(maintain).\nThe hub's key fingerprint is " + f.hub.KeyFingerprint() + "; compare it with the key fingerprint on the hub's Settings page.\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
-	}
-	if !strings.HasSuffix(out, "(maintain).\n") {
-		t.Errorf("output = %q", out)
 	}
 	if rows := f.audit("hub.link"); len(rows) != 1 || !strings.HasPrefix(rows[0], "root/cli/CLI/1/hub") {
 		t.Fatalf("audit = %v", rows)
@@ -107,7 +106,7 @@ func TestATokenOnStandardInputApprovesWithoutAPerson(t *testing.T) {
 	f := newHubFixture(t)
 	token := f.hub.Token()
 	out, err := f.runIn(token+"\n", "hub-connect", f.hub.URL, "--token-stdin", "--scope", "observe", "--wait", "10s")
-	if err != nil || !strings.Contains(out, "token approves it") || !strings.HasSuffix(out, "(observe).\n") {
+	if err != nil || !strings.Contains(out, "token approves it") || !strings.Contains(out, "(observe).\n") || strings.Contains(out, token) {
 		t.Fatalf("hub-connect = %q, %v", out, err)
 	}
 	if f.hub.LastRequest()["token"] != token {
@@ -118,7 +117,7 @@ func TestATokenOnStandardInputApprovesWithoutAPerson(t *testing.T) {
 	if _, err := f.run("hub-disconnect"); err != nil {
 		t.Fatal(err)
 	}
-	out, err = f.run("hub-connect", f.hub.URL, "--token", token, "--wait", "5s")
+	out, err = f.runIn(token+"\n", "hub-connect", f.hub.URL, "--token-stdin", "--wait", "5s")
 	if exitCode(err) != 1 || !strings.Contains(err.Error(), "bad_token") {
 		t.Fatalf("spent token = %q, %v", out, err)
 	}
@@ -128,8 +127,20 @@ func TestATokenOnStandardInputApprovesWithoutAPerson(t *testing.T) {
 	if _, err := f.runIn("", "hub-connect", f.hub.URL, "--token-stdin"); err == nil || !strings.Contains(err.Error(), "no token") {
 		t.Fatalf("empty stdin = %v", err)
 	}
-	if _, err := f.run("hub-connect", f.hub.URL, "--token", "not-a-token"); exitCode(err) != 1 {
+	if _, err := f.runIn("not-a-token\n", "hub-connect", f.hub.URL, "--token-stdin"); exitCode(err) != 1 {
 		t.Fatalf("malformed token = %v", err)
+	}
+	// A token is never an argument (protocol 8.4, HL-10): refused before
+	// anything is opened, with the way to give it.
+	requests, _, _, _ := f.hub.Count()
+	for _, args := range [][]string{{"--token", token}, {"--token=" + token}} {
+		_, err := f.run(append([]string{"hub-connect", f.hub.URL}, args...)...)
+		if exitCode(err) != 1 || err.Error() != "pass the token on standard input with --token-stdin" {
+			t.Fatalf("%v = %v", args, err)
+		}
+	}
+	if r, _, _, _ := f.hub.Count(); r != requests {
+		t.Fatal("a token given as an argument reached the hub")
 	}
 }
 
@@ -231,6 +242,7 @@ func TestHubArgumentsAreValidatedBeforeAnythingIsOpened(t *testing.T) {
 		{"hub-connect"}, {"hub-connect", "--scope", "observe"}, {"hub-connect", "hub.x.ts.net", "--scope", "root"},
 		{"hub-connect", "hub.x.ts.net", "--wait", "2h"}, {"hub-connect", "hub.x.ts.net", "--token"},
 		{"hub-connect", "hub.x.ts.net", "--token-stdin", "--token", "jht_x"}, {"hub-connect", "hub.x.ts.net", "--token-stdin=x"},
+		{"hub-connect", "hub.x.ts.net", "--token", "jht_x", "--scope", "observe"}, {"hub-connect", "hub.x.ts.net", "--token=jht_x"},
 		{"hub-connect", "hub.x.ts.net", "--force"}, {"hub-connect", "hub.x.ts.net", "--scope", "observe", "--scope", "operate"},
 		{"hub-disconnect", "now"}, {"hub-status", "-v"},
 	} {
@@ -240,7 +252,7 @@ func TestHubArgumentsAreValidatedBeforeAnythingIsOpened(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"hub-connect", "hub.x.ts.net"}, {"hub-connect", "https://hub.x.ts.net", "--scope=operate", "--wait=10m"},
-		{"hub-connect", "hub.x.ts.net", "--token-stdin"}, {"hub-connect", "hub.x.ts.net", "--token", "jht_x", "--scope", "observe"},
+		{"hub-connect", "hub.x.ts.net", "--token-stdin"}, {"hub-connect", "hub.x.ts.net", "--token-stdin", "--scope", "observe"},
 		{"hub-disconnect"}, {"hub-status"},
 	} {
 		if err := validateArgs(args); err != nil {
@@ -253,5 +265,26 @@ func TestHubArgumentsAreValidatedBeforeAnythingIsOpened(t *testing.T) {
 	}
 	if !LongRunning([]string{"hub-connect", "hub.x.ts.net"}) || LongRunning([]string{"hub-status"}) || LongRunning([]string{"hub-disconnect"}) {
 		t.Fatal("LongRunning picks the wrong hub commands")
+	}
+}
+
+// hub connect prints the hub's machine and its owner, as step 8 of the rule
+// found them (protocol 8.4, HL-11).
+func TestHubConnectNamesTheHubsMachine(t *testing.T) {
+	svc := hublink.New(hublink.Options{TestOrigin: "http://127.0.0.1:43180"})
+	for _, tc := range []struct {
+		req  accountlink.Request
+		want string
+	}{
+		{accountlink.Request{URL: "https://hub.tailed39ba.ts.net", HubNode: &accountlink.PeerNode{ID: "n1", Name: "hub.tailed39ba.ts.net", Owner: "wayy01@github", Tags: []string{}}},
+			"hub.tailed39ba.ts.net, a machine of wayy01@github"},
+		{accountlink.Request{URL: "https://hub.tailed39ba.ts.net", HubNode: &accountlink.PeerNode{ID: "n1", Name: "hub.tailed39ba.ts.net", Tags: []string{"tag:server"}}},
+			"hub.tailed39ba.ts.net, tagged tag:server"},
+		{accountlink.Request{URL: "https://hub.tailed39ba.ts.net"}, "not checked (tailscaled could not be asked)"},
+		{accountlink.Request{URL: "http://127.0.0.1:43180"}, "not checked (the test origin)"},
+	} {
+		if got := machineLine(svc, tc.req); got != tc.want {
+			t.Errorf("machineLine(%+v) = %q, want %q", tc.req, got, tc.want)
+		}
 	}
 }

@@ -111,6 +111,52 @@ func TestATokenApprovesInAdvanceAndABadOneCreatesNothing(t *testing.T) {
 	}
 }
 
+// The hub answers "approved" on every poll until the collection window ends
+// (protocol 4.2, HL-6). An answer after the link is stored is never asked for
+// and changes nothing; one after a lost first answer stores the link.
+func TestARepeatedApprovalIsIgnoredAndALostOneHeals(t *testing.T) {
+	e := newEnv(t)
+	req, err := e.svc.Connect(t.Context(), ConnectRequest{URL: e.hub.URL(), Scope: accountlink.ScopeObserve, By: "ion"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.hub.approve(req.ID)
+	e.hub.mu.Lock()
+	e.hub.dropApproved = 1
+	e.hub.mu.Unlock()
+	// The hub collected the approval; its answer was lost in transit.
+	if res, err := e.svc.Poll(t.Context()); err == nil || res.State != accountlink.PollPending {
+		t.Fatalf("the lost answer = %+v %v", res, err)
+	}
+	if _, linked, _ := e.svc.Linked(t.Context()); linked {
+		t.Fatal("linked from a lost answer")
+	}
+	res, err := e.svc.Poll(t.Context())
+	if err != nil || res.State != accountlink.PollLinked || res.Link.ServerID != vectorServerID {
+		t.Fatalf("the repeated answer = %+v %v", res, err)
+	}
+	if err := e.svc.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := e.svc.Status(t.Context(), true); !*s.Reachable {
+		t.Fatalf("the healed link does not heartbeat: %s", s.Admin.Link.LastError)
+	}
+
+	// Linked: a later poll does not ask the hub, and the stored link stands.
+	before, _, _ := e.svc.Linked(t.Context())
+	polls := e.hub.pollCount()
+	if res, err := e.svc.Poll(t.Context()); err != nil || res.State != accountlink.PollLinked {
+		t.Fatalf("poll after the link = %+v %v", res, err)
+	}
+	after, _, _ := e.svc.Linked(t.Context())
+	if e.hub.pollCount() != polls || mustJSON(t, after) != mustJSON(t, before) {
+		t.Fatal("a repeated approval was asked for or changed the stored link")
+	}
+	if rows := e.auditRows("hub.link"); len(rows) != 1 {
+		t.Fatalf("the link was recorded %d times", len(rows))
+	}
+}
+
 func TestOneHubPerServerAndOneRequestAtATime(t *testing.T) {
 	e := newEnv(t)
 	if _, err := e.svc.Connect(t.Context(), ConnectRequest{URL: e.hub.URL(), Scope: accountlink.ScopeObserve, By: "ion"}); err != nil {

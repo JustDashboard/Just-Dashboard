@@ -3,6 +3,8 @@ package admin
 import (
 	"bufio"
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +30,9 @@ func isHubCommand(name string) bool {
 	return name == "hub-connect" || name == "hub-disconnect" || name == "hub-status"
 }
 
-// hubConnectOptions are the arguments of hub-connect.
+// hubConnectOptions are the arguments of hub-connect. The token is never one
+// of them: it is read from standard input (--token-stdin), so it appears in no
+// process list and no shell history (hub-link-protocol.md 8.4).
 type hubConnectOptions struct {
 	url        string
 	scope      accountlink.Scope
@@ -36,6 +40,9 @@ type hubConnectOptions struct {
 	token      string
 	tokenStdin bool
 }
+
+// errTokenArgument is a token given as an argument, which is refused.
+var errTokenArgument = errors.New("pass the token on standard input with --token-stdin")
 
 func parseHubConnectArgs(args []string) (hubConnectOptions, error) {
 	o := hubConnectOptions{scope: accountlink.ScopeMaintain, wait: defaultLinkWait}
@@ -47,9 +54,11 @@ func parseHubConnectArgs(args []string) (hubConnectOptions, error) {
 	for i := 0; i < len(args); i++ {
 		name, value, hasValue := strings.Cut(args[i], "=")
 		switch name {
-		case "--scope", "--wait", "--token", "--token-stdin":
+		case "--scope", "--wait", "--token-stdin":
+		case "--token":
+			return o, errTokenArgument
 		default:
-			return o, fmt.Errorf("unknown option %q; hub connect takes --scope observe|operate|maintain, --token-stdin or --token TOKEN, and --wait 15m", args[i])
+			return o, fmt.Errorf("unknown option %q; hub connect takes --scope observe|operate|maintain, --token-stdin and --wait 15m", args[i])
 		}
 		if seen[name] {
 			return o, fmt.Errorf("%s was given twice", name)
@@ -82,12 +91,7 @@ func parseHubConnectArgs(args []string) (hubConnectOptions, error) {
 				return o, fmt.Errorf("--wait must be a duration between 1s and 1h, for example 15m, not %q", value)
 			}
 			o.wait = d
-		case "--token":
-			o.token = strings.TrimSpace(value)
 		}
-	}
-	if o.tokenStdin && seen["--token"] {
-		return o, errors.New("give the token once: --token-stdin or --token, not both")
 	}
 	return o, nil
 }
@@ -203,6 +207,7 @@ func hubConnectCommand(ctx context.Context, svc *hublink.Service, logger *audit.
 	}
 
 	fmt.Fprintf(out, "\n  Connecting to Just Hub at   %s\n", req.URL)
+	fmt.Fprintf(out, "  The hub's machine           %s\n", machineLine(svc, req))
 	fmt.Fprintf(out, "  Code                        %s\n", req.UserCode)
 	fmt.Fprintf(out, "  This server's fingerprint   %s\n", svc.Engine().Fingerprint(ctx))
 	if opts.token != "" {
@@ -227,6 +232,12 @@ func hubConnectCommand(ctx context.Context, svc *hublink.Service, logger *audit.
 			name = "this server"
 		}
 		fmt.Fprintf(out, "Connected to Just Hub %q at %s as %q (%s).\n", res.Link.Owner, res.Link.URL, name, res.Link.Scope)
+		for _, k := range res.Link.SiteKeys {
+			if pub, err := base64.StdEncoding.DecodeString(k.PublicKey); err == nil && len(pub) == ed25519.PublicKeySize {
+				fmt.Fprintf(out, "The hub's key fingerprint is %s; compare it with the key fingerprint on the hub's Settings page.\n",
+					accountlink.Fingerprint(ed25519.PublicKey(pub)))
+			}
+		}
 		return nil
 	case accountlink.PollDenied:
 		cliRecord(rec, logger, "hub.link", string(opts.scope), false, map[string]any{"outcome": "denied", "hub": req.URL})
@@ -242,6 +253,18 @@ func hubConnectCommand(ctx context.Context, svc *hublink.Service, logger *audit.
 	}
 	cliRecord(rec, logger, "hub.link", string(opts.scope), false, map[string]any{"outcome": res.Message, "hub": req.URL})
 	return fmt.Errorf("the request ended without a link: %s", res.Message)
+}
+
+// machineLine is the hub's machine and its owner as step 8 of the URL rule
+// found them, or why it was not checked.
+func machineLine(svc *hublink.Service, req accountlink.Request) string {
+	if req.HubNode != nil {
+		return hublink.DescribeMachine(*req.HubNode)
+	}
+	if svc.TestOrigin() != "" && req.URL == svc.TestOrigin() {
+		return "not checked (the test origin)"
+	}
+	return "not checked (tailscaled could not be asked)"
 }
 
 func hubDisconnectCommand(ctx context.Context, svc *hublink.Service, logger *audit.Logger, out io.Writer) error {
