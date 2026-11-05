@@ -309,9 +309,15 @@ function Palette({
         ).sections.filter((page) => page.id !== "assistant" || can("service.control"))
       : []
 
-  const shown = (entries: NavEntry[]) =>
+  // A page's neighbours, as the rail draws them: a hub-only page only on a linked server, or as
+  // the page being previewed, so an unlinked server's Settings reads as it did before hubs.
+  const shown = (entries: NavEntry[], here?: string) =>
     entries
       .filter((entry) => !entry.capability || can(entry.capability))
+      .filter(
+        (entry) =>
+          entry.href === undefined || !entry.hubLink || Boolean(hub) || entry.href === here,
+      )
       .map(({ href, title, icon }) => ({ href, title, icon }))
   const pages: PaletteItem[] = [
     ...NAV.flatMap((group) =>
@@ -329,8 +335,8 @@ function Palette({
           // and is found by name: the way to connect one from this side.
           explicit: isHidden(page.href) || (Boolean(page.hubLink) && !hub),
           neighbours: parent
-            ? { label: parent.title, pages: shown(parent.children ?? []) }
-            : { label: group.label, pages: shown(group.items) },
+            ? { label: parent.title, pages: shown(parent.children ?? [], page.href) }
+            : { label: group.label, pages: shown(group.items, page.href) },
         })),
       ),
     ),

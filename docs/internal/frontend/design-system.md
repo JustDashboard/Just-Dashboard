@@ -2929,7 +2929,9 @@ The passes, in order. Each one is a diff you can review on its own.
    *Just Hub (hub) says* so it never reads as the dashboard's own. A link this server has stopped
    using is the one state that is a verdict rather than a reading: *Idle* in red at the identity
    line's far end, and the reason once, as a danger `Notice` above the picture, not again as the
-   Activity section's failed exchange; Sync now leaves the identity line, since it would be refused.
+   Activity section's failed exchange; Sync now leaves the identity line, since it would be refused,
+   and the hub's address stops being a link anywhere, the title included, since it may now answer on
+   the machine this server refused.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed

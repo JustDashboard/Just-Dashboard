@@ -56,9 +56,12 @@ is a full load rather than a router link back into what threw.
 
 The dashboard's layout renders a React `<title>` from `tabTitle(pathname, host)` in `components/nav.ts`:
 "Files · Just Dashboard", the section's name for a detail page, the product's alone for an address under no
-section. On a server linked to a Just Hub, `host` is this server's name as the hub lists it and goes after
-the page — "Docker · atlas · Just Dashboard" — so five dashboard tabs can be told apart; unlinked, or before
-the hub has named it, the title is exactly what it was. The root layout declares no title, and `login/` and
+section. On a server linked to a Just Hub, `host` is this server's own host name (`useHostName` in
+`hooks/use-metrics.ts`, the Overview's title from `/system/host`) and goes after the page — "Docker · atlas · Just
+Dashboard" — so five dashboard tabs can be told apart; unlinked, or before the name is read, the title is exactly
+what it was. It is never the name the hub lists the server under: that is the hub's text, which a hub that is taken
+over could make read "Session expired - sign in", and a title has no room to say whose
+([protocol](../backend/hub-link-protocol.md) §8.10). The root layout declares no title, and `login/` and
 `welcome/` have small layouts that do. Next's metadata writes over `document.title` when it resolves, and
 beside a second `<title>` it would come first.
 
@@ -293,13 +296,20 @@ the dashboard layout puts above the tab's title and the shell, and **only while 
 `hub` field** (§8.3) — present only for a fully signed-in session on a server with a stored hub link. With
 no field the provider asks nothing and `useShellHub()` is `null`, so an unlinked server's rail, strip,
 palette and title are what they were, request for request. Linked, it reads `GET /dashboard/hub` every
-fifteen seconds (the hub's heartbeat) for the fleet, the notices and the freshest reachability, and a
+fifteen seconds (the hub's default heartbeat) for the fleet, the notices and the freshest reachability, and a
 status that says the link is gone (a disconnect from the terminal, a removal in the hub) takes the hub away
 again. The browser never talks to the hub: everything is this server's cached copy of the hub's last
 reply, so the CSP is unchanged. `lib/hub-link.ts` holds the pure half and its Bun tests.
 
+An **idle** link (the session's or the status's `idle`, §8.2, §8.3) keeps the hub's name, fleet and notices, but
+`shellHub` drops the hub's address and every notice's link: after "the hub's machine changed" that address answers
+on a machine this server refused, and a look-alike there could ask for the hub's password. So the switcher has no
+**Open Just Hub** and says *Link idle* with a red dot, the palette's hub opens nothing and says why, and no notice
+offers *Open in Just Hub*.
+
 - **The server switcher** (`components/hub-link/server-switcher.tsx`) takes the logo row's place: the J,
-  this server's name where the wordmark was, and a chevron. Its menu says under its label who named the
+  this server's own host name where the wordmark was (as in the tab's title, never the hub's name for it,
+  which the menu shows under its attribution), and a chevron. Its menu says under its label who named the
   servers, *Listed by Just Hub (hub)*, since every name in it is the hub's text
   ([protocol](../backend/hub-link-protocol.md) §8.10), then lists every server the hub holds, this one
   first with the installed version the wordmark carried and marked *this one* (a link to the Overview),
@@ -331,7 +341,9 @@ reply, so the CSP is unchanged. `lib/hub-link.ts` holds the pure half and its Bu
   and forgotten once the hub stops carrying the notice.
 
 Settings → Hub (`/dashboard/hub`) is a `hubLink` entry in `nav.ts`: `shownFor` draws it only while the
-server is linked, or while you are on it, and the palette lists it once a word is typed either way.
+server is linked, or while you are on it, and the palette lists it once a word is typed either way. A page's
+preview in the palette lists its neighbours as the rail does, so an unlinked server's Settings pages do not name
+Hub beside Connect, except in Hub's own preview.
 
 `PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys, Workspace
 and, for `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a

@@ -3,7 +3,7 @@
 import { useEffect } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
-import { MetricsStream } from "@/hooks/use-metrics"
+import { MetricsStream, useHostName } from "@/hooks/use-metrics"
 import { SelfUpdateProvider } from "@/hooks/use-self-update"
 import { AppSidebar } from "@/components/app-sidebar"
 import { Logo, LogoStacked } from "@/components/logo"
@@ -33,6 +33,11 @@ import { ServerSwitcher } from "@/components/hub-link/server-switcher"
  * itself in the tab, and above the shell because the rail, the phone's strip
  * and the palette all draw the hub from it. Unlinked it asks nothing and gives
  * nothing, and every one of them is what it was.
+ *
+ * The name in the tab is this server's own host name, the Overview's title,
+ * never the name the hub lists it under: that one is the hub's text, and a hub
+ * that is taken over could make it read "Session expired - sign in"
+ * (hub-link-protocol §8.10). The hub only decides whether a name is shown.
  */
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -46,7 +51,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 function TabTitle() {
   const pathname = usePathname()
   const hub = useShellHub()
-  return <title>{tabTitle(pathname, hub?.self?.name)}</title>
+  const host = useHostName()
+  return <title>{tabTitle(pathname, hub ? (host ?? undefined) : undefined)}</title>
 }
 
 function DashboardShell({ children }: { children: React.ReactNode }) {

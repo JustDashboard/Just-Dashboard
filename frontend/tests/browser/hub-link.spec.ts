@@ -14,10 +14,14 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  * one that keeps an unlinked server's shell what it was.
  */
 
-const now = Date.now()
 const iso = (ms: number) => new Date(ms).toISOString()
+// A time this long before now, taken when a fixture is built rather than when the file loads: a
+// worker that has run other tests for a minute must not see "1m" read as "2m".
+const ago = (ms: number) => iso(Date.now() - ms)
 
 const HUB = "https://hub.tailed39ba.ts.net"
+// This server's own host name, as `/system/host` reads it: the name the shell gives the server.
+const HOSTNAME = "vps-07749119-vps-ovh-net"
 const OTHER = "https://vmi3690758.tailed39ba.ts.net:8443"
 const FINGERPRINT = "21fe:31df:a154:a261"
 // The hub's machine, as WhoIs names it (§2.4).
@@ -53,8 +57,8 @@ const admin = {
     totpEnabled: true,
     disabled: false,
     mustChangePassword: false,
-    lastLoginAt: iso(now),
-    createdAt: iso(now),
+    lastLoginAt: ago(0),
+    createdAt: ago(0),
     hiddenSections: [],
   },
 }
@@ -65,7 +69,7 @@ type Scope = "observe" | "operate" | "maintain"
 type Status = Record<string, unknown> & { state: string; reachable?: boolean }
 
 // The hub sends a version for this server only; every other entry's is "" (§6.1).
-const fleet = [
+const fleet = () => [
   {
     serverId: "5b1f9a20-0000-4000-8000-000000000001",
     name: "vmi3690758",
@@ -73,7 +77,7 @@ const fleet = [
     state: "late",
     version: "",
     self: false,
-    lastSeenAt: iso(now - 60_000),
+    lastSeenAt: ago(60_000),
   },
   {
     serverId: "7a0d3c1e-0000-4000-8000-000000000002",
@@ -82,7 +86,7 @@ const fleet = [
     state: "online",
     version: "0.8.5",
     self: true,
-    lastSeenAt: iso(now),
+    lastSeenAt: ago(0),
   },
   {
     serverId: "3c2e0f11-0000-4000-8000-000000000003",
@@ -93,14 +97,14 @@ const fleet = [
   },
 ]
 
-const notices = [
+const notices = () => [
   {
     id: "update-0.8.6",
     level: "info",
     title: "Update ready on 1 server",
     body: "0.8.6 is out. <b>vmi3690758</b> can install it from Just Hub.",
     href: `${HUB}/updates`,
-    at: iso(now - 120_000),
+    at: ago(120_000),
   },
   {
     id: "offline:atlas",
@@ -108,7 +112,7 @@ const notices = [
     title: "atlas is offline",
     body: "No report for 4 minutes.",
     href: "https://evil.example.com/phish",
-    at: iso(now - 240_000),
+    at: ago(240_000),
   },
 ]
 
@@ -135,9 +139,9 @@ const pending = (scope: Scope, url = HUB, testOrigin?: string): Status => ({
 })
 
 // What the dashboard last sent (§5), at maintain.
-const lastSnapshot = {
+const lastSnapshot = () => ({
   protocol: 1,
-  sentAt: Math.floor((now - 10_000) / 1000),
+  sentAt: Math.floor((Date.now() - 10_000) / 1000),
   server: {
     name: "vps-07749119-vps-ovh-net",
     version: "0.8.5",
@@ -156,7 +160,7 @@ const lastSnapshot = {
   metrics: { cpuPercent: 12.5, memPercent: 40, diskPercent: 55, diskMount: "/" },
   containers: { running: 3, stopped: 0, unhealthy: 0 },
   alerts: [],
-}
+})
 
 const linked = (scope: Scope, extra: Record<string, unknown> = {}): Status => ({
   enabled: true,
@@ -165,15 +169,16 @@ const linked = (scope: Scope, extra: Record<string, unknown> = {}): Status => ({
   hubName: "hub",
   scope,
   reachable: true,
-  lastHeartbeatAt: iso(now - 10_000),
-  fleet,
+  heartbeatSeconds: 15,
+  lastHeartbeatAt: ago(10_000),
+  fleet: fleet(),
   notices: [],
   signIn: { enabled: false, offered: false, users: [] },
   admin: {
     fingerprint: FINGERPRINT,
     link: {
       serverId: "7a0d3c1e-0000-4000-8000-000000000002",
-      linkedAt: iso(now - 86_400_000),
+      linkedAt: ago(86_400_000),
       linkedBy: "operator",
       hubMachine: MACHINE,
       lastCommand: {
@@ -181,11 +186,11 @@ const linked = (scope: Scope, extra: Record<string, unknown> = {}): Status => ({
         kind: "container.restart",
         status: "succeeded",
         issuedBy: "owner",
-        at: iso(now - 60_000),
+        at: ago(60_000),
       },
       hubKeys: [{ kid: "hub-2026-11", fingerprint: "39f7:13d0:a644:253f" }],
       updatePolicy: { auto: "patch", window: { start: "03:00", end: "05:00" } },
-      lastSnapshot,
+      lastSnapshot: lastSnapshot(),
     },
     grants: [],
   },
@@ -193,14 +198,15 @@ const linked = (scope: Scope, extra: Record<string, unknown> = {}): Status => ({
 })
 
 /**
- * A link this server stopped using (§2.2, §2.4). The status has no field for it: an idle link's
- * reason is its last error, in the backend's words (hublink/status_test.go), and it is not reached.
+ * A link this server stopped using (§2.2, §2.4): `idle` for everyone, and for an administrator the
+ * reason as its last error, in the backend's words (hublink/status_test.go). It is not reached.
  */
-const idleLink = (reason: string): Status => {
-  const base = linked("maintain")
+const idleLink = (reason: string, extra: Record<string, unknown> = {}): Status => {
+  const base = linked("maintain", extra)
   return {
     ...base,
     reachable: false,
+    idle: true,
     admin: {
       ...(base.admin as object),
       link: {
@@ -222,7 +228,10 @@ async function mock(page: Page, initial: Status, auth = admin) {
     hub: initial,
     calls: [] as Call[],
     reads: [] as string[],
-    connectRefusal: undefined as undefined | { status: number; body: object },
+    // Connect's refusal, and the state it leaves behind (the terminal connected first).
+    connectRefusal: undefined as undefined | { status: number; body: object; leaves?: Status },
+    // What `check` answers in place of the hub's machine.
+    check: undefined as undefined | object,
   }
   const respond = (route: Route, body: unknown, status = 200) =>
     route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
@@ -244,12 +253,30 @@ async function mock(page: Page, initial: Status, auth = admin) {
                 name: world.hub.hubName,
                 url: world.hub.hubUrl,
                 reachable: world.hub.reachable,
+                ...(world.hub.idle ? { idle: true } : {}),
               },
             }
           : {}),
       })
     }
     if (path === "/account/profile") return respond(route, auth.user)
+    if (path === "/system/host") {
+      return respond(route, {
+        hostname: HOSTNAME,
+        os: "linux",
+        platform: "ubuntu",
+        platformVersion: "24.04",
+        kernelVersion: "6.8.0",
+        kernelArch: "x86_64",
+        virtualization: "kvm",
+        bootTime: ago(864_000_000),
+        uptimeSeconds: 864_000,
+        processes: 212,
+        cpuModel: "AMD EPYC",
+        cpuCores: 4,
+        cpuMhz: 2400,
+      })
+    }
     if (path === "/dashboard/update") {
       return respond(route, {
         version: "0.8.5",
@@ -258,7 +285,7 @@ async function mock(page: Page, initial: Status, auth = admin) {
         releases: [],
         history: [],
         breaking: false,
-        check: { enabled: true, checkedAt: iso(now), repo: "wayy/just-dashboard", ref: "main" },
+        check: { enabled: true, checkedAt: ago(0), repo: "wayy/just-dashboard", ref: "main" },
         install: { supported: true, dir: "/opt/just-dashboard", dirty: [] },
       })
     }
@@ -296,10 +323,11 @@ async function mock(page: Page, initial: Status, auth = admin) {
       if (testOrigin && asked === testOrigin) {
         return respond(route, { hubUrl: testOrigin, testOrigin: true })
       }
-      return respond(route, { hubUrl: HUB, machine: MACHINE, testOrigin: false })
+      return respond(route, world.check ?? { hubUrl: HUB, machine: MACHINE, testOrigin: false })
     }
     if (path === "/dashboard/hub" && method === "POST") {
       if (world.connectRefusal) {
+        if (world.connectRefusal.leaves) world.hub = world.connectRefusal.leaves
         return respond(route, world.connectRefusal.body, world.connectRefusal.status)
       }
       const { url, scope } = request.postDataJSON()
@@ -418,6 +446,12 @@ test("unlinked: the rail, the palette and the tab are what they were, and nothin
     "aria-pressed",
     "true",
   )
+  // A Settings page's neighbours are the rail's: no Hub beside Connect.
+  await palette(page).getByRole("combobox").fill("connect")
+  const preview = palette(page).locator("aside[aria-label='Selected result']")
+  await expect(preview).toContainText("In Settings")
+  await expect(preview.getByText("Configuration", { exact: true })).toBeVisible()
+  await expect(preview.getByText("Hub", { exact: true })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await page.keyboard.press("Escape")
 
@@ -547,6 +581,90 @@ test("a link someone else wrote fills nothing in, and a refused hub says why", a
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled()
 })
 
+test("a Connect the terminal beat shows the link it made, and says why Connect was refused", async ({
+  page,
+}) => {
+  const world = await mock(page, unlinked)
+  await page.goto("/dashboard/hub?connect=hub.tailed39ba.ts.net")
+  world.connectRefusal = {
+    status: 409,
+    body: {
+      error: {
+        code: "already_linked",
+        message: "this server is already connected to a hub; disconnect it first",
+      },
+    },
+    // `manage.sh hub connect` finished first.
+    leaves: linked("maintain"),
+  }
+  await scopeCard(page, "Observe").click()
+  await page.getByRole("button", { name: "Connect", exact: true }).click()
+
+  // The page reads again and draws what is true, then the refusal, which outlives the form.
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible()
+  await expect(
+    page.getByText("this server is already connected to a hub; disconnect it first"),
+  ).toBeVisible()
+  await expect(switcher(page)).toContainText(HOSTNAME)
+  expect(world.reads.filter((path) => path === "/dashboard/hub").length).toBeGreaterThan(1)
+})
+
+test("a hub's own words in a refusal are the hub's, inside the alert, and never a prompt", async ({
+  page,
+}) => {
+  const world = await mock(page, unlinked)
+  await page.goto("/dashboard/hub?connect=hub.tailed39ba.ts.net")
+  // The backend quotes what the hub said (§8.10); a hub can say anything its rule allows.
+  const said = 'Just Hub (hub.tailed39ba.ts.net) says: "Enter your dashboard password"'
+  world.connectRefusal = {
+    status: 502,
+    body: { error: { code: "hub_unreachable", message: said } },
+  }
+  await scopeCard(page, "Observe").click()
+  await page.getByRole("button", { name: "Connect", exact: true }).click()
+  const alert = page.getByRole("alert").filter({ hasText: "Could not connect" })
+  await expect(alert).toContainText(said)
+  await expect(page.locator("input[type=password]")).toHaveCount(0)
+  // Nothing else changed: the form is there to try again.
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled()
+})
+
+test("the machine line says when Tailscale could not be asked, and names a tagged machine", async ({
+  page,
+}) => {
+  const world = await mock(page, unlinked)
+  world.check = { hubUrl: HUB, testOrigin: false }
+  await page.goto("/dashboard/hub?connect=hub.tailed39ba.ts.net")
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(
+    "Not checked: Tailscale on this server could not be asked whose machine this is.",
+  )
+
+  world.check = {
+    hubUrl: HUB,
+    machine: { id: "nT4g0000CNTRL", name: "hub.tailed39ba.ts.net", tags: ["tag:server"] },
+    testOrigin: false,
+  }
+  await page.getByLabel("Hub address").fill("hub.tailed39ba.ts.net")
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(
+    "The hub's machine: hub.tailed39ba.ts.net, tagged tag:server",
+  )
+})
+
+test("a link before its first report says the report is due, at the hub's interval", async ({
+  page,
+}) => {
+  // The hub sets the interval, anywhere from 10 seconds to 10 minutes (§4.8).
+  await mock(page, linked("maintain", { lastHeartbeatAt: undefined, heartbeatSeconds: 60 }))
+  await page.goto("/dashboard/hub")
+  await expect(page.getByText("Connected, first report due")).toBeVisible()
+  await expect(page.getByText("First report within 1m")).toBeVisible()
+  const activity = page.locator("section", { hasText: "Activity" }).first()
+  await expect(activity.getByText("Sent every 1m")).toBeVisible()
+  await expect(activity.getByText("Not yet", { exact: true })).toBeVisible()
+  await expect(page.getByText(/15 s(econds)?\b/)).toHaveCount(0)
+})
+
 test("a request another machine answered for ends as failed and says why", async ({ page }) => {
   // The approval is where the hub key is pinned, so a different machine before it ends the
   // request with nothing stored (§2.4 "While a request is pending").
@@ -554,7 +672,7 @@ test("a request another machine answered for ends as failed and says why", async
     ...unlinked,
     admin: {
       fingerprint: FINGERPRINT,
-      lastOutcome: { result: "failed", at: iso(now - 60_000), message: CHANGED },
+      lastOutcome: { result: "failed", at: ago(60_000), message: CHANGED },
     },
   })
   await page.goto("/dashboard/hub")
@@ -584,12 +702,62 @@ test("a waiting request survives a reload and can be cancelled", async ({ page }
   ])
 })
 
+test("a server removed in the hub is told so once, and can connect again", async ({ page }) => {
+  // A 410 on any signed request clears the link (§8.9); the backend keeps why as the outcome.
+  await mock(page, {
+    ...unlinked,
+    admin: {
+      fingerprint: FINGERPRINT,
+      lastOutcome: {
+        result: "removed",
+        at: ago(60_000),
+        message: "the server was removed in the hub",
+      },
+    },
+  })
+  await page.goto("/dashboard/hub")
+  await expect(page.getByText("Removed in Just Hub")).toBeVisible()
+  await expect(
+    page.getByText(
+      "The hub no longer lists this server, so this server forgot its link and sends the hub nothing.",
+    ),
+  ).toBeVisible()
+  await expect(page.getByText(/^Removed 1m/)).toBeVisible()
+  await expect(page.getByLabel("Hub address")).toBeVisible()
+  // The shell is an unlinked server's.
+  await expect(page.locator("[data-slot=server-switcher]")).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Dismiss" }).click()
+  await expect(page.getByText("Removed in Just Hub")).toHaveCount(0)
+  // Once: this tab remembers it was said.
+  await page.reload()
+  await expect(page.getByLabel("Hub address")).toBeVisible()
+  await expect(page.getByText("Removed in Just Hub")).toHaveCount(0)
+})
+
+test("a request nobody approved in time says it expired", async ({ page }) => {
+  await mock(page, {
+    ...unlinked,
+    admin: {
+      fingerprint: FINGERPRINT,
+      lastOutcome: {
+        result: "expired",
+        at: ago(60_000),
+        message: "the request was not approved in time",
+      },
+    },
+  })
+  await page.goto("/dashboard/hub")
+  await expect(page.getByText("The request expired")).toBeVisible()
+  await expect(page.getByText("Nobody approved it in the hub in time.")).toBeVisible()
+})
+
 test("the outcome of the last request is said once", async ({ page }) => {
   await mock(page, {
     ...unlinked,
     admin: {
       fingerprint: FINGERPRINT,
-      lastOutcome: { result: "denied", at: iso(now - 60_000) },
+      lastOutcome: { result: "denied", at: ago(60_000) },
     },
   })
   await page.goto("/dashboard/hub")
@@ -667,12 +835,50 @@ test("linked: the palette's Servers open another server in a new tab", async ({ 
   await expect(tab).toHaveURL(`${OTHER}/`)
   expect(await tab.evaluate(() => window.opener)).toBeNull()
   await expect(page).toHaveURL(/\/account$/)
+
+  // Linked, Hub is a Settings page like the others, beside Connect.
+  await page.keyboard.press("Control+k")
+  await dialog.getByRole("combobox").fill("connect")
+  await expect(selected).toContainText("In Settings")
+  await expect(selected.getByText("Hub", { exact: true })).toBeVisible()
+})
+
+test("the server is named by its own host name; the hub's name for it is said as the hub's", async ({
+  page,
+}) => {
+  // A hub that is taken over can name this server anything its text rule allows (§6.1, §8.10).
+  const lure = "Session expired - sign in"
+  await mock(
+    page,
+    linked("maintain", {
+      fleet: fleet().map((server) => (server.self ? { ...server, name: lure } : server)),
+    }),
+  )
+  await page.goto("/account")
+
+  // The tab and the wordmark's place are the dashboard's own words.
+  await expect(page).toHaveTitle(`Profile · ${HOSTNAME} · Just Dashboard`)
+  await expect(switcher(page)).toContainText(HOSTNAME)
+  await expect(switcher(page)).not.toContainText("Session expired")
+  expect(await page.title()).not.toContain("Session expired")
+
+  // The hub's name for it is in the menu, under whose list it is.
+  await switcher(page).click()
+  const menu = servers(page)
+  await expect(menu.locator("[data-slot=hub-attribution]")).toHaveText("Listed by Just Hub (hub)")
+  await expect(menu.getByRole("menuitem").first()).toContainText(lure)
+  await page.keyboard.press("Escape")
+
+  // As on a phone's strip.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(switcher(page)).toContainText(HOSTNAME)
+  await expect(switcher(page)).not.toContainText("Session expired")
 })
 
 test("linked: the hub's notices, newest first, as text, dismissed per browser", async ({
   page,
 }) => {
-  await mock(page, linked("maintain", { notices }))
+  await mock(page, linked("maintain", { notices: notices() }))
   await page.goto("/account")
 
   const card = page.locator("[data-slot=hub-notice]")
@@ -727,7 +933,7 @@ test("a notice that reads like the dashboard's own prompt is drawn as the hub's"
           level: "critical",
           title: "Your session expired",
           body: "Sign in again to keep working.",
-          at: iso(now - 30_000),
+          at: ago(30_000),
         },
       ],
     }),
@@ -781,7 +987,7 @@ test("linked, hub unreachable: the switcher says so and the others read unknown"
 
 test("an idle link says why, offers no sync, and a disconnect tells no one", async ({ page }) => {
   // Another machine took the hub's name (§2.4), in the words hublink/node.go gives it.
-  const world = await mock(page, idleLink(CHANGED))
+  const world = await mock(page, idleLink(CHANGED, { notices: notices() }))
   await page.goto("/dashboard/hub")
 
   await expect(page.getByText("Idle", { exact: true })).toBeVisible()
@@ -803,6 +1009,37 @@ test("an idle link says why, offers no sync, and a disconnect tells no one", asy
   expect(await unnamedControls(page)).toEqual([])
   expect(await scrollsSideways(page)).toBe(false)
 
+  // The hub's address now answers on a machine this server refused: nothing leads there — not
+  // the title, not a notice here or in the rail, not the switcher's menu.
+  const toHub = page.locator(`a[href^="${HUB}"]`)
+  await expect(
+    page.locator("[data-slot=host-identity]").getByText("hub.tailed39ba.ts.net", { exact: true }),
+  ).toBeVisible()
+  await expect(page.locator("#notices")).toContainText("Update ready on 1 server")
+  await expect(page.locator("[data-slot=hub-notice]")).toContainText("Update ready on 1 server")
+  await expect(page.getByRole("link", { name: /Open in Just Hub/ })).toHaveCount(0)
+  await expect(switcher(page)).toContainText("Link idle")
+  await switcher(page).click()
+  await expect(servers(page).getByText("Link idle")).toBeVisible()
+  await expect(servers(page).getByRole("menuitem", { name: /Open Just Hub/ })).toHaveCount(0)
+  await expect(toHub).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  // Nor does the palette's hub open anything; it says why.
+  await page.keyboard.press("Control+k")
+  await palette(page).getByRole("combobox").fill("server: just hub")
+  const hubEntry = palette(page).getByRole("option", { name: /Just Hub \(hub\)/ })
+  await expect(hubEntry).toContainText("link idle")
+  await expect(palette(page).locator("aside[aria-label='Selected result']")).toContainText(
+    "Not while the link is idle",
+  )
+  await page.keyboard.press("Enter")
+  await expect(page).toHaveURL(/\/dashboard\/hub$/)
+  expect(page.context().pages()).toHaveLength(1)
+  await page.keyboard.press("Escape")
+  await page.keyboard.press("Escape")
+  await expect(toHub).toHaveCount(0)
+
   await page.getByRole("button", { name: "Disconnect", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Disconnect from Just Hub" })
   await expect(dialog).toContainText("forgets its idle link to hub.tailed39ba.ts.net")
@@ -814,14 +1051,19 @@ test("an idle link says why, offers no sync, and a disconnect tells no one", asy
   ])
 })
 
-test("to anyone but an administrator an idle link is one that cannot reach its hub", async ({
+test("anyone else is told the link is idle, not why, and is offered no way to the hub", async ({
   page,
 }) => {
   await mock(page, idleLink("the hub's machine changed"), reader)
   await page.goto("/dashboard/hub")
-  await expect(page.getByText("Connected, hub unreachable")).toBeVisible()
-  await expect(page.getByText("The link is idle")).toHaveCount(0)
+  await expect(page.getByText("Idle", { exact: true })).toBeVisible()
+  await expect(page.locator("[data-slot=hub-link-idle]")).toContainText(
+    "Nothing is sent to hub.tailed39ba.ts.net and nothing it asks is run until an administrator disconnects it and connects again.",
+  )
   await expect(page.getByText(/hub's machine changed/)).toHaveCount(0)
+  await switcher(page).click()
+  await expect(servers(page).getByText("Link idle")).toBeVisible()
+  await expect(page.locator(`a[href^="${HUB}"]`)).toHaveCount(0)
 })
 
 test("linked: the page reads the link, changes its scope and disconnects after asking", async ({
@@ -913,7 +1155,7 @@ test("linked: the page reads the link, changes its scope and disconnects after a
 })
 
 test("a reader sees which hub and what it says, and none of the controls", async ({ page }) => {
-  await mock(page, linked("operate", { notices }), reader)
+  await mock(page, linked("operate", { notices: notices() }), reader)
   await page.goto("/dashboard/hub")
   await expect(page.getByText("Operate scope")).toBeVisible()
   await expect(page.locator("#notices")).toContainText("Update ready on 1 server")
@@ -961,7 +1203,7 @@ test("a test origin is said out loud", async ({ page }) => {
 
 test("on a phone the strip names the server and opens the same menu", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await mock(page, linked("maintain", { notices }))
+  await mock(page, linked("maintain", { notices: notices() }))
   await page.goto("/dashboard/hub")
 
   const strip = switcher(page)
@@ -979,7 +1221,7 @@ test("on a phone the strip names the server and opens the same menu", async ({ p
   for (const [name, state] of [
     ["unlinked", unlinked],
     ["pending", pending("maintain")],
-    ["linked", linked("maintain", { notices })],
+    ["linked", linked("maintain", { notices: notices() })],
     ["idle", idleLink("the hub's machine changed")],
   ] as const) {
     for (const width of [390, 1280, 1720]) {

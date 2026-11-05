@@ -11,6 +11,7 @@ import {
   hubHost,
   hubLabel,
   idleReason,
+  isIdle,
   linkedByWords,
   linkReading,
   openable,
@@ -58,10 +59,13 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  * `nav.ts`), so the hub's button, the palette and the address bar are the ways in.
  *
  * A link this server has stopped using — its address fails the URL rule now, or another machine
- * answers at the hub's name (§2.2, §2.4) — is still stored, and reads as **Idle** with the reason
- * at the top of the page: nothing is sent and no sync is offered until it is disconnected, which
- * then tells no one. The hub's name, its notices and the servers it lists are its own words, so
- * each is said as the hub's, "Just Hub (hub)" (§8.10).
+ * answers at the hub's name (§2.2, §2.4) — is still stored, and reads as **Idle** at the top of
+ * the page, with the reason for an administrator: nothing is sent and no sync is offered until it
+ * is disconnected, which then tells no one. Nor is the hub's address a link any more, in the title
+ * or under a notice: after "the hub's machine changed" it answers on a machine this server
+ * refused. The hub's name, its notices and the servers it lists are its own words, so each is said
+ * as the hub's, "Just Hub (hub)" (§8.10). A link the hub removed is gone from here at once, and
+ * the page says so once (§8.9).
  *
  * Without `system.admin` the status has no `admin` part, and the page says what it can: whether
  * and to which hub this server is connected, and what the hub is saying.
@@ -114,6 +118,8 @@ export default function HubLinkPage() {
   const notices = status.notices ?? []
   const reading = linkReading(status)
   const hubLink = openable(url)
+  // Every reader learns the link is idle; only an administrator why.
+  const stopped = isIdle(status)
   const idle = idleReason(status)
   const testOrigin = atTestOrigin(url, admin?.testOrigin)
 
@@ -131,8 +137,9 @@ export default function HubLinkPage() {
           </span>
         }
         title={
-          // Only a hub this server is connected to, or asking to be, is a destination.
-          hubLink && (linked || pending) ? (
+          // Only a hub this server is connected to, or asking to be, is a destination; an idle
+          // link's address may now answer on a machine this server refused.
+          hubLink && (pending || (linked && !stopped)) ? (
             <a
               href={hubLink}
               target="_blank"
@@ -143,6 +150,9 @@ export default function HubLinkPage() {
               <span className="truncate">{host}</span>
               <External aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
             </a>
+          ) : linked && host ? (
+            // Still the hub this server is linked to, said as text.
+            host
           ) : (
             "Just Hub"
           )
@@ -158,7 +168,7 @@ export default function HubLinkPage() {
               <HubLinkActions
                 host={host}
                 name={status.hubName ? hubLabel(status.hubName) : host}
-                idle={Boolean(idle)}
+                idle={stopped}
                 onSync={hub.sync}
                 onDisconnect={hub.disconnect}
               />
@@ -183,13 +193,15 @@ export default function HubLinkPage() {
               be used in production.
             </Notice>
           )}
-          {idle && (
+          {stopped && (
             <div data-slot="hub-link-idle">
               <Notice tone="danger" icon={Warning} title="The link is idle">
-                <p className="break-words">{sentence(idle)}</p>
-                <p className="mt-1">
-                  Nothing is sent to {host} and nothing it asks is run until you disconnect and
-                  connect again.
+                {idle && <p className="break-words">{sentence(idle)}</p>}
+                <p className={cn(idle && "mt-1")}>
+                  Nothing is sent to {host} and nothing it asks is run until{" "}
+                  {admin
+                    ? "you disconnect and connect again."
+                    : "an administrator disconnects it and connects again."}
                 </p>
               </Notice>
             </div>
@@ -219,14 +231,14 @@ export default function HubLinkPage() {
                     status={status}
                     link={link}
                     host={host}
-                    idle={Boolean(idle)}
+                    idle={stopped}
                     className={BLOCK}
                   />
                 )}
                 {notices.length > 0 && (
                   <HubNotices
                     notices={notices}
-                    hubUrl={url}
+                    hubUrl={stopped ? undefined : url}
                     hubName={status.hubName}
                     className={BLOCK}
                   />
@@ -359,15 +371,21 @@ const OUTCOME = {
     body: "Nobody approved it in the hub in time.",
   },
   failed: { tone: "danger", title: "Connecting failed", body: "It ended without a link." },
+  removed: {
+    tone: "warning",
+    title: "Removed in Just Hub",
+    body: "The hub no longer lists this server, so this server forgot its link and sends the hub nothing.",
+  },
 } as const
 
 /**
- * Why the last request ended without a link, said once: dismissing it remembers which request it
- * was for this tab, so the next one that ends the same way is news again. A declined or expired
- * request says so in the page's own words, which are all the backend's message adds; a failed one
- * says why in the backend's — "the hub's machine changed" when another machine answered at the
- * hub's name before the approval was collected (§2.4), with any of the hub's own words in it
- * already quoted as the hub's (§8.10) — as plain text.
+ * Why this server is not linked, said once: dismissing it remembers which outcome it was for this
+ * tab, so the next one is news again. A declined or expired request says so in the page's own
+ * words, which are all the backend's message adds; a failed one says why in the backend's — "the
+ * hub's machine changed" when another machine answered at the hub's name before the approval was
+ * collected (§2.4), with any of the hub's own words in it already quoted as the hub's (§8.10) — as
+ * plain text. A link the hub removed (`410`, §8.9) is not a request that ended: the page says the
+ * link is gone, in its own words, and when.
  */
 function Outcome({
   outcome,
@@ -384,7 +402,9 @@ function Outcome({
   return (
     <Notice tone={words.tone} title={words.title}>
       <p className="break-words">{why}</p>
-      <p className="mt-1">Ended {relativeTime(outcome.at)}.</p>
+      <p className="mt-1">
+        {outcome.result === "removed" ? "Removed" : "Ended"} {relativeTime(outcome.at)}.
+      </p>
       <Button size="xs" variant="outline" className="mt-2" onClick={() => setDismissed(outcome.at)}>
         Dismiss
       </Button>

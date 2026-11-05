@@ -655,10 +655,11 @@ export const APP_NAME = "Just Dashboard"
  *
  * A server linked to a Just Hub is one of several, and five tabs that all say
  * "Docker · Just Dashboard" cannot be told apart — so `host`, this server's
- * name as the hub lists it, goes after the page: "Docker · atlas · Just
- * Dashboard". After it rather than before, so the page still leads and a
- * narrow tab cuts the product's name first. Unlinked, the title is exactly
- * what it was.
+ * own host name, goes after the page: "Docker · atlas · Just Dashboard". It is
+ * never the name the hub lists the server under, which is the hub's text and
+ * the title has no room to say whose (hub-link-protocol §8.10). After the page
+ * rather than before, so the page still leads and a narrow tab cuts the
+ * product's name first. Unlinked, the title is exactly what it was.
  */
 export function tabTitle(pathname: string, host?: string): string {
   const page = navLocation(pathname)?.title ?? sectionsFor(pathname)[0]?.title

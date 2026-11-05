@@ -1,7 +1,7 @@
 "use client"
 
-import { hubHost, hubLabel, idleReason, serverCount } from "@/lib/hub-link"
-import { relativeTime } from "@/lib/format"
+import { hubHost, hubLabel, isIdle, reportCadence, serverCount } from "@/lib/hub-link"
+import { duration, relativeTime } from "@/lib/format"
 import type { HubLinkScope, HubLinkStatus } from "@/lib/types"
 import { LinkPicture } from "@/components/account-link/connect-picture"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -16,6 +16,8 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  * hub's line holds still in amber while it cannot be reached or the link is idle, only the
  * server's line pulses while a request waits for approval in the hub, and every line is dashed
  * while nothing is connected. The hub's name is its own word, so it is said as "Just Hub (hub)".
+ * How often the server reports is the hub's interval (§4.8), anywhere from 10 seconds to 10
+ * minutes, so it is read from the status rather than assumed.
  */
 export function HubPicture({
   status,
@@ -32,7 +34,8 @@ export function HubPicture({
   const pending = status.state === "pending"
   const link = status.admin?.link
   const quiet = linked && (status.reachable === false || Boolean(link?.lastError))
-  const idle = Boolean(idleReason(status))
+  const idle = isIdle(status)
+  const every = status.heartbeatSeconds
   const url = status.hubUrl ?? status.admin?.request?.hubUrl ?? address
   const host = hubHost(url) || "Just Hub"
   const servers = status.fleet?.length ?? 0
@@ -45,7 +48,7 @@ export function HubPicture({
       quiet={quiet}
       scope={scope}
       snapshot={link?.lastSnapshot}
-      cadence="Reports every 15 s"
+      cadence={`Reports ${reportCadence(every)}`}
       peer={{
         eyebrow: linked || pending || address ? host : "Just Hub",
         title: linked ? (
@@ -62,8 +65,10 @@ export function HubPicture({
             <span className="text-warning">Not reaching the hub</span>
           ) : status.lastHeartbeatAt ? (
             `${serverCount(servers)} · report ${relativeTime(status.lastHeartbeatAt)}`
+          ) : every ? (
+            `First report within ${duration(every)}`
           ) : (
-            "First report within 15 seconds"
+            "First report soon"
           )
         ) : pending ? (
           "Type the code below into the hub"

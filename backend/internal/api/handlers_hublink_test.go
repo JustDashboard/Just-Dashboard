@@ -131,8 +131,8 @@ func TestTheHubRoutesFollowTheContractTheFrontendBuildsAgainst(t *testing.T) {
 	w = admin.do(http.MethodGet, "/api/v1/dashboard/hub", "", nil)
 	m = decodeMap(t, w.Body.String())
 	link, _ := m["admin"].(map[string]any)["link"].(map[string]any)
-	if m["state"] != "linked" || keysOf(m) != "admin,enabled,fleet,hubName,hubUrl,notices,reachable,scope,signIn,state" ||
-		m["hubName"] != "hub" || m["scope"] != "maintain" || m["reachable"] != false ||
+	if m["state"] != "linked" || keysOf(m) != "admin,enabled,fleet,heartbeatSeconds,hubName,hubUrl,notices,reachable,scope,signIn,state" ||
+		m["hubName"] != "hub" || m["scope"] != "maintain" || m["reachable"] != false || m["heartbeatSeconds"] != float64(15) ||
 		len(m["fleet"].([]any)) != 0 || len(m["notices"].([]any)) != 0 ||
 		keysOf(link) != "hubKeys,linkedAt,linkedBy,serverId" || link["linkedBy"] != "hub-admin" || link["serverId"] != hubstub.ServerID {
 		t.Fatalf("linked status = %s", w.Body)

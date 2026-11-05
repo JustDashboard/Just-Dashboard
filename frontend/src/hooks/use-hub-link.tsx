@@ -2,8 +2,8 @@
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react"
 import { ApiError, del, get, post, put } from "@/lib/api"
-import { selfServer, shellHub, type ShellHub } from "@/lib/hub-link"
-import type { HubLinkCheck, HubLinkScope, HubLinkServer, HubLinkStatus } from "@/lib/types"
+import { shellHub, type ShellHub } from "@/lib/hub-link"
+import type { HubLinkCheck, HubLinkScope, HubLinkStatus } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 
@@ -11,26 +11,22 @@ import { usePoll } from "@/hooks/use-poll"
  * This server's link to a Just Hub, in the two shapes its readers need.
  *
  * The shell's: `HubLinkProvider` reads `GET /dashboard/hub` for the server switcher, the palette's
- * Servers, the tab's host name and the rail's notice card — and only while the session says a hub
- * link is stored (`auth.hub?.linked`, hub-link-protocol §8.3). An unlinked server makes no request
- * at all, so its shell is the shell it was. Every reader asks `useShellHub()`, which is `null`
- * until there is something to draw.
+ * Servers and the rail's notice card — and only while the session says a hub link is stored
+ * (`auth.hub?.linked`, hub-link-protocol §8.3); the tab names the server once there is one. An
+ * unlinked server makes no request at all, so its shell is the shell it was. Every reader asks
+ * `useShellHub()`, which is `null` until there is something to draw.
  *
  * The Settings page's: `useHubLink()`, the account link's hook (`use-account-link.ts`) pointed at
  * the hub's routes — it reads whatever the state, asks every few seconds while a request waits so
  * approving in the hub flips the page to linked, and draws each mutation's answer at once.
  */
 
-/** The fleet's states move on the hub's heartbeat, which is fifteen seconds. */
+/** The fleet's states move on the hub's heartbeat: fifteen seconds, unless the hub sets another. */
 const SHELL_POLL = 15_000
 
 export type ShellHubValue = ShellHub & {
-  /** This server's own entry, once the hub has replied to a heartbeat. */
-  self?: HubLinkServer
   /** `/dashboard/hub` has answered; before it, an empty fleet means "not read yet". */
   answered: boolean
-  /** The last read failed; what was drawn before it stays. */
-  failed: boolean
   refresh: () => void
 }
 
@@ -40,20 +36,18 @@ export function HubLinkProvider({ children }: { children: React.ReactNode }) {
   const { status: auth } = useAuth()
   const session = auth?.authenticated ? auth.hub : undefined
   const linked = Boolean(session?.linked)
-  const poll = usePoll(
+  const { data, refresh } = usePoll(
     (signal) => get<HubLinkStatus>("/dashboard/hub", undefined, signal),
     SHELL_POLL,
     [],
     { enabled: linked },
   )
-  const { data, refresh } = poll
   const answered = linked && data !== undefined
-  const failed = Boolean(poll.error)
 
   const value = useMemo<ShellHubValue | null>(() => {
     const hub = shellHub(session, answered ? data : undefined)
-    return hub ? { ...hub, self: selfServer(hub.fleet), answered, failed, refresh } : null
-  }, [session, answered, data, failed, refresh])
+    return hub ? { ...hub, answered, refresh } : null
+  }, [session, answered, data, refresh])
 
   return <ShellHubContext.Provider value={value}>{children}</ShellHubContext.Provider>
 }
@@ -61,6 +55,16 @@ export function HubLinkProvider({ children }: { children: React.ReactNode }) {
 /** The hub the shell draws, or `null`: with no hub link nothing hub-shaped renders. */
 export function useShellHub() {
   return useContext(ShellHubContext)
+}
+
+/**
+ * A refusal that says the page is out of date — the terminal connected first (`409
+ * already_linked`), a request is already waiting (`link_pending`), the link was switched off
+ * (`hub_link_disabled`). Such a refusal is followed by a read, which redraws the page into what is
+ * true, and whatever form was pressed goes with it, so what it said must outlive the form.
+ */
+export function outdated(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 409 || err.code === "hub_link_disabled")
 }
 
 /** A request waits on a person in the hub; three seconds is how long the page lags their click. */
@@ -85,19 +89,13 @@ export function useHubLink() {
     setAdopted({ status, at: Date.now() })
   }, [])
 
-  /**
-   * A refusal that says the page is out of date — the terminal connected first, a request is
-   * already waiting, the link was switched off — is followed by a read, so the page shows what is
-   * true before the error is.
-   */
+  /** An `outdated` refusal is followed by a read: the page shows what is true, then the error. */
   const guarded = useCallback(
     async <T,>(run: () => Promise<T>) => {
       try {
         return await run()
       } catch (err) {
-        if (err instanceof ApiError && (err.status === 409 || err.code === "hub_link_disabled")) {
-          adopt(await read())
-        }
+        if (outdated(err)) adopt(await read())
         throw err
       }
     },

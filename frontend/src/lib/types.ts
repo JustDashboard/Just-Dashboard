@@ -8628,6 +8628,11 @@ export type HubLinkSession = {
   /** The stored hub URL, for "Open Just Hub". */
   url: string
   reachable: boolean
+  /**
+   * Present, as true, only while the link is idle (§2.2, §2.4): the hub's address may now answer
+   * on a machine this server refused, so the shell offers no link to it.
+   */
+  idle?: true
 }
 
 /** A server the hub lists, as its last heartbeat reply named it (hub-link-protocol §6.1). */
@@ -8693,6 +8698,13 @@ export type HubLinkStatus = {
   /** The last heartbeat succeeded, none has failed since, and it is younger than three intervals. */
   reachable?: boolean
   lastHeartbeatAt?: string
+  /** While linked: how often this server reports, the hub's interval clamped to 10–600 (§4.8). */
+  heartbeatSeconds?: number
+  /**
+   * Present, as true, only while a stored link is idle, and to every reader; why is
+   * `admin.link.lastError`. No page offers the hub's address as a link while it is set.
+   */
+  idle?: true
   fleet?: HubLinkServer[]
   notices?: HubLinkNotice[]
   /** Hub sign-in (§9); typed so a strict reader keeps it, and drawn by nothing yet. */
@@ -8738,7 +8750,12 @@ export type HubLinkStatus = {
       /** The exact body of the last heartbeat sent, so the page shows what is shared. */
       lastSnapshot?: Record<string, unknown>
     }
-    lastOutcome?: { result: "denied" | "expired" | "failed"; at: string; message?: string }
+    /** Why this server is not linked: the last request's end, or `removed` in the hub (§8.9). */
+    lastOutcome?: {
+      result: "denied" | "expired" | "failed" | "removed"
+      at: string
+      message?: string
+    }
     grants?: { userId: number; username: string; hubUser: string; since: string }[]
   }
 }

@@ -27,6 +27,15 @@ type Status struct {
 	// Reachable is sent only while linked.
 	Reachable       *bool      `json:"reachable,omitempty"`
 	LastHeartbeatAt *time.Time `json:"lastHeartbeatAt,omitempty"`
+	// HeartbeatSeconds is the interval the hub set, as this server clamps it
+	// (protocol 4.8), sent only while linked: the page says how often it
+	// reports in it rather than in the default.
+	HeartbeatSeconds int `json:"heartbeatSeconds,omitempty"`
+	// Idle is sent, as true, only while the stored link is idle (protocol 2.2
+	// "When the rule runs", 2.4), and to every reader: the hub URL may now
+	// answer on a machine this server refused, so no page offers it as a
+	// link. The reason is the administrator's, in admin.link.lastError.
+	Idle bool `json:"idle,omitempty"`
 	// Fleet and Notices are [] while linked before the first reply, and left
 	// out otherwise.
 	Fleet   []FleetEntry  `json:"fleet,omitzero"`
@@ -117,6 +126,7 @@ func (s *Service) Status(ctx context.Context, admin bool) (Status, error) {
 		reachable := s.reachable(st, h)
 		out.HubURL, out.HubName, out.Scope = st.URL, st.Owner, string(st.Scope)
 		out.Reachable, out.LastHeartbeatAt = &reachable, h.LastHeartbeatAt
+		out.HeartbeatSeconds, out.Idle = heartbeatSeconds(st), st.Idle != nil
 		out.Fleet, out.Notices = []FleetEntry{}, []Notice{}
 		if v, ok := s.readStoredView(ctx, st); ok {
 			out.Fleet, out.Notices, offer = v.Fleet, v.Notices, v.SignIn
@@ -166,8 +176,14 @@ func (s *Service) reachable(st accountlink.State, h accountlink.Health) bool {
 	if !s.enabled || st.Idle != nil || h.LastHeartbeatAt == nil || h.HeartbeatError != "" {
 		return false
 	}
-	every := time.Duration(max(st.HeartbeatSeconds, 10)) * time.Second
+	every := time.Duration(heartbeatSeconds(st)) * time.Second
 	return s.now().Sub(*h.LastHeartbeatAt) < 3*every
+}
+
+// heartbeatSeconds is the interval the link reports at: the hub's, clamped to
+// 10 to 600 seconds as the heartbeat loop clamps it.
+func heartbeatSeconds(st accountlink.State) int {
+	return min(max(st.HeartbeatSeconds, 10), 600)
 }
 
 // SessionHub is the hub field of GET /auth/session: just enough for the shell
@@ -177,6 +193,9 @@ type SessionHub struct {
 	Name      string `json:"name"`
 	URL       string `json:"url"`
 	Reachable bool   `json:"reachable"`
+	// Idle is sent, as true, only while the link is idle: the shell then
+	// offers no link to the hub URL (protocol 8.3).
+	Idle bool `json:"idle,omitempty"`
 }
 
 // Session is the hub field for a fully signed-in session, or nil when hub
@@ -189,7 +208,9 @@ func (s *Service) Session(ctx context.Context) *SessionHub {
 	if err != nil || !linked {
 		return nil
 	}
-	return &SessionHub{Linked: true, Name: st.Owner, URL: st.URL, Reachable: s.reachable(st, s.engine.Health(ctx))}
+	return &SessionHub{
+		Linked: true, Name: st.Owner, URL: st.URL, Reachable: s.reachable(st, s.engine.Health(ctx)), Idle: st.Idle != nil,
+	}
 }
 
 // The hello states (protocol section 8.1).

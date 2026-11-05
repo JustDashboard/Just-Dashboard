@@ -49,8 +49,8 @@ function writeDismissed(ids: string[]) {
  * dismissed: who says it ("Just Hub (hub) says", hub-link-protocol §8.10) and when, then its
  * title and body as plain text (it came from another machine, so it is never markup and never
  * reads as this dashboard's own words), and the hub's own page for it in a new tab, named by its
- * host. The rest are one
- * line under it that leads to Settings → Hub, where every notice is listed. Dismissing one is
+ * host — never while the link is idle, when `shellHub` has dropped every such link. The rest are
+ * one line under it that leads to Settings → Hub, where every notice is listed. Dismissing one is
  * remembered in this browser until the hub stops carrying it.
  */
 export function HubNotice({ collapsed }: { collapsed: boolean }) {

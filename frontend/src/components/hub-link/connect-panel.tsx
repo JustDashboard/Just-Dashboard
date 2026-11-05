@@ -7,6 +7,7 @@ import { errorMessage } from "@/lib/api"
 import { describeMachine, hubHost, openable, terminalCommand } from "@/lib/hub-link"
 import { notify } from "@/lib/toast"
 import type { HubLinkCheck, HubLinkMachine, HubLinkScope, HubLinkStatus } from "@/lib/types"
+import { outdated } from "@/hooks/use-hub-link"
 import { useNow } from "@/hooks/use-now"
 import { CopyButton } from "@/components/account-link/link-panel"
 import { ScopeCards } from "@/components/account-link/scope-cards"
@@ -70,7 +71,10 @@ export function ConnectPanel({
     try {
       await onBegin(url, scope)
     } catch (err) {
-      setRefusal(errorMessage(err))
+      // The terminal connected first, or a request already waits: the page has been redrawn into
+      // that, without this form, so the refusal is said where it outlives the form.
+      if (outdated(err)) notify.error("Could not connect", errorMessage(err))
+      else setRefusal(errorMessage(err))
     } finally {
       setBusy(false)
     }

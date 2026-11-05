@@ -13,7 +13,7 @@ import {
 import { commandWords } from "@/lib/account-link"
 import { errorMessage } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
-import { hubHost, hubSays, noticeHref, noticeTone } from "@/lib/hub-link"
+import { hubHost, hubSays, noticeHref, noticeTone, reportCadence } from "@/lib/hub-link"
 import { notify } from "@/lib/toast"
 import type { HubLinkNotice, HubLinkStatus } from "@/lib/types"
 import { MarkTile, type Mark } from "@/components/account-link/marks"
@@ -100,7 +100,7 @@ export function HubActivity({
           subtitle={
             status.lastHeartbeatAt
               ? `Last sent ${relativeTime(status.lastHeartbeatAt)} · ${timestamp(status.lastHeartbeatAt)}`
-              : "Sent every 15 seconds"
+              : `Sent ${reportCadence(status.heartbeatSeconds)}`
           }
           trailing={
             idle ? (
@@ -144,7 +144,7 @@ export function HubActivity({
  * Everything the hub is saying, newest first: the rail's card holds only the newest one this
  * browser has not dismissed, and its "more" leads here. Each one is plain text from another
  * machine, drawn as text under who says it (hub-link-protocol §8.10), with its link naming the
- * host it opens.
+ * host it opens. Without `hubUrl` — an idle link — no notice links anywhere.
  */
 export function HubNotices({
   notices,

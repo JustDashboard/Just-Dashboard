@@ -1,3 +1,4 @@
+import { duration } from "@/lib/format"
 import type {
   HubLinkMachine,
   HubLinkNotice,
@@ -136,8 +137,7 @@ const IDLE =
  * hub's address fails the URL rule now — the server moved to another tailnet, the test origin was
  * removed — or another machine answers at the hub's name. An idle link stays stored and sends
  * nothing, commands and reports alike, until a person disconnects; a sync is refused. Only an
- * administrator is sent the reason, so for anyone else an idle link reads as one that cannot reach
- * its hub.
+ * administrator is sent the reason; everyone is sent `idle` (`isIdle`).
  */
 export function idleReason(status: HubLinkStatus): string | undefined {
   if (status.state !== "linked") return undefined
@@ -145,12 +145,34 @@ export function idleReason(status: HubLinkStatus): string | undefined {
   return reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : undefined
 }
 
+/**
+ * Whether this server has stopped using its link, for every reader. While it has, the stored hub
+ * address may answer on a machine this server refused — after "the hub's machine changed" it is
+ * exactly that — so nothing offers it as a link: not the page's title, not a notice, not the
+ * switcher or the palette.
+ */
+export function isIdle(status: HubLinkStatus): boolean {
+  return status.state === "linked" && (status.idle === true || Boolean(idleReason(status)))
+}
+
+/**
+ * How often the link reports (§4.8): the hub's interval, "every 15s", or before the status names
+ * one, the hub's schedule. The hub sets it anywhere from 10 seconds to 10 minutes.
+ */
+export function reportCadence(seconds: number | undefined): string {
+  return seconds && seconds > 0 ? `every ${duration(seconds)}` : "on the hub's schedule"
+}
+
 /** What the shell knows about its hub, or nothing: the gate every hub feature is drawn behind. */
 export type ShellHub = {
   name: string
+  /** The hub's address to open, or "" while the link is idle: then nothing links to it. */
   url: string
   reachable: boolean
+  /** This server has stopped using the link (`isIdle`). */
+  idle: boolean
   fleet: HubLinkServer[]
+  /** The hub's notices; while the link is idle, without their links. */
   notices: HubLinkNotice[]
 }
 
@@ -159,6 +181,10 @@ export type ShellHub = {
  * `/dashboard/hub` has answered, it can only take that away — a disconnect from the terminal or a
  * removal in the hub — and it brings the freshest reachability, since the session was read once
  * when the page loaded.
+ *
+ * An idle link keeps its name, its fleet and what it last said, but not one way to the hub: the
+ * address is dropped here, once, so the switcher's "Open Just Hub", the palette's hub and every
+ * notice's "Open in Just Hub" have nothing to link to.
  */
 export function shellHub(
   session: HubLinkSession | undefined,
@@ -166,12 +192,15 @@ export function shellHub(
 ): ShellHub | undefined {
   if (!session?.linked) return undefined
   if (status && (!status.enabled || status.state !== "linked")) return undefined
+  const idle = status ? isIdle(status) : session.idle === true
+  const notices = status?.notices ?? []
   return {
     name: status?.hubName ?? session.name,
-    url: status?.hubUrl ?? session.url,
-    reachable: status?.reachable ?? session.reachable,
+    url: idle ? "" : (status?.hubUrl ?? session.url),
+    reachable: !idle && (status?.reachable ?? session.reachable),
+    idle,
     fleet: status?.fleet ?? [],
-    notices: status?.notices ?? [],
+    notices: idle ? notices.map((notice) => ({ ...notice, href: undefined })) : notices,
   }
 }
 
@@ -209,11 +238,6 @@ export function orderFleet(fleet: readonly HubLinkServer[]): HubLinkServer[] {
   return [...fleet].sort(
     (a, b) => Number(b.self) - Number(a.self) || byName.compare(a.name, b.name),
   )
-}
-
-/** The fleet's entry for this server: its name is the one the hub shows, and the tab's. */
-export function selfServer(fleet: readonly HubLinkServer[]): HubLinkServer | undefined {
-  return fleet.find((server) => server.self)
 }
 
 /** The address another server opens at: its own origin, never a path from the hub. */
@@ -276,23 +300,31 @@ export function serverEntries(hub: ShellHub): ServerEntry[] {
     }
   })
   const url = openable(hub.url)
+  const host = hubHost(hub.url)
   return [
     ...servers,
     {
       id: "server:hub",
       kind: "server",
       title: hubLabel(hub.name),
-      detail: hubHost(hub.url),
-      keywords: ["hub", hub.name, hubHost(hub.url)],
+      // An idle link has no address to open, and says why rather than a blank.
+      detail: hub.idle ? "link idle" : host,
+      keywords: ["hub", hub.name, host].filter(Boolean),
       href: url,
       hub: true,
-      reading: hub.reachable
-        ? { tone: "running", label: "Reachable" }
-        : { tone: "warning", label: "Unreachable" },
+      reading: hub.idle
+        ? { tone: "danger", label: "Idle" }
+        : hub.reachable
+          ? { tone: "running", label: "Reachable" }
+          : { tone: "warning", label: "Unreachable" },
       facts: [
-        { label: "Address", value: hubHost(hub.url), mono: true },
+        ...(host ? [{ label: "Address", value: host, mono: true }] : []),
         { label: "Servers", value: String(hub.fleet.length) },
-        ...(url ? [{ label: "Opens", value: "In a new tab" }] : []),
+        ...(url
+          ? [{ label: "Opens", value: "In a new tab" }]
+          : hub.idle
+            ? [{ label: "Opens", value: "Not while the link is idle" }]
+            : []),
       ],
     },
   ]
@@ -330,7 +362,7 @@ export function linkReading(status: HubLinkStatus): Reading {
   if (!status.enabled) return { tone: "stopped", label: "Turned off" }
   if (status.state === "pending") return { tone: "warning", label: "Waiting for approval" }
   if (status.state === "linked") {
-    if (idleReason(status)) return { tone: "danger", label: "Idle" }
+    if (isIdle(status)) return { tone: "danger", label: "Idle" }
     if (status.reachable === false) return { tone: "warning", label: "Connected, hub unreachable" }
     if (!status.lastHeartbeatAt) return { tone: "notice", label: "Connected, first report due" }
     return { tone: "running", label: "Connected" }

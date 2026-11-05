@@ -7,6 +7,7 @@ import {
   hubLabel,
   hubSays,
   idleReason,
+  isIdle,
   keptDismissals,
   linkReading,
   linkedByWords,
@@ -15,7 +16,7 @@ import {
   openable,
   orderFleet,
   owedNotices,
-  selfServer,
+  reportCadence,
   serverAddress,
   serverEntries,
   serverReading,
@@ -204,6 +205,7 @@ describe("whether the shell is hub-aware", () => {
       name: "hub",
       url: "https://hub.tailed39ba.ts.net",
       reachable: true,
+      idle: false,
       fleet: [],
       notices: [],
     })
@@ -226,8 +228,6 @@ describe("the fleet", () => {
   test("this server first, then the rest by name", () => {
     const names = orderFleet([other, tunnelled, self]).map((server) => server.name)
     expect(names).toEqual(["vps-07749119-vps-ovh-net", "Atlas", "vmi3690758"])
-    expect(selfServer([other, self])?.name).toBe("vps-07749119-vps-ovh-net")
-    expect(selfServer([])).toBeUndefined()
   })
 
   test("each state reads as a dot and a word", () => {
@@ -358,7 +358,59 @@ describe("an idle link", () => {
   })
 })
 
+describe("an idle link leads nowhere near the hub's address", () => {
+  // After "the hub's machine changed" that address answers on a machine this server refused.
+  const notice = {
+    id: "update-0.8.6",
+    level: "info",
+    title: "Update ready",
+    body: "",
+    href: "https://hub.tailed39ba.ts.net/updates",
+    at: "x",
+  }
+
+  test("every reader is told, the reason only an administrator", () => {
+    const reader = { ...linked, reachable: false, idle: true }
+    expect(isIdle(reader)).toBe(true)
+    expect(idleReason(reader)).toBeUndefined()
+    expect(linkReading(reader)).toEqual({ tone: "danger", label: "Idle" })
+    expect(isIdle(idle("the hub's machine changed"))).toBe(true)
+    expect(isIdle(linked)).toBe(false)
+    expect(isIdle({ ...linked, state: "pending", idle: true })).toBe(false)
+  })
+
+  test("the shell keeps the hub's name and words, and drops its address and links", () => {
+    const hub = shellHub(session, { ...linked, reachable: false, idle: true, notices: [notice] })
+    expect(hub).toMatchObject({ name: "hub", url: "", reachable: false, idle: true })
+    expect(hub.notices).toEqual([{ ...notice, href: undefined }])
+    expect(noticeHref(hub.notices[0].href, hub.url)).toBeUndefined()
+    // Before the status is read, the session says so.
+    expect(shellHub({ ...session, reachable: false, idle: true }, undefined)).toMatchObject({
+      url: "",
+      idle: true,
+    })
+    // An administrator's status, read from its reason, idles the shell the same way.
+    expect(shellHub(session, idle("the hub's machine changed"))?.url).toBe("")
+  })
+
+  test("the palette's hub opens nothing and says why", () => {
+    const hub = shellHub(session, { ...linked, reachable: false, idle: true })
+    const entry = serverEntries(hub).at(-1)
+    expect(entry).toMatchObject({ id: "server:hub", href: undefined, detail: "link idle" })
+    expect(entry.reading).toEqual({ tone: "danger", label: "Idle" })
+    expect(entry.facts).toContainEqual({ label: "Opens", value: "Not while the link is idle" })
+    expect(entry.facts.map((fact) => fact.label)).not.toContain("Address")
+  })
+})
+
 describe("the link in words", () => {
+  test("how often it reports is the hub's interval, never an assumed one", () => {
+    expect(reportCadence(15)).toBe("every 15s")
+    expect(reportCadence(60)).toBe("every 1m")
+    expect(reportCadence(600)).toBe("every 10m")
+    expect(reportCadence(undefined)).toBe("on the hub's schedule")
+  })
+
   test("each state", () => {
     expect(linkReading({ enabled: false, state: "unlinked" })).toEqual({
       tone: "stopped",

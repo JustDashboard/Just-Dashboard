@@ -79,7 +79,10 @@ another machine that takes the hub's name (a hub machine deleted and its name re
 idle until you disconnect and connect again. If the server later moves to another tailnet, the connection
 likewise stays stored but goes idle; disconnect and connect to a hub on the new tailnet. **Settings → Hub** then
 reads *Idle* and says why at the top of the page ("The hub's machine changed: …"); it offers no **Sync now**,
-and **Disconnect** clears the link here without telling the hub, which this server no longer contacts.
+and **Disconnect** clears the link here without telling the hub, which this server no longer contacts. While the
+link is idle the dashboard offers no link to the hub's address anywhere (not **Open Just Hub**, not a notice's
+**Open in Just Hub**): that address may now answer on a machine you did not connect to, so open the hub you trust
+by typing its address yourself.
 
 The scope works as for just-dashboard.com, with the table above ("the hub" for "the site"), except that the
 default is `maintain`: a hub is yours and on your own network, and keeping servers updated is what it is for.
@@ -91,23 +94,27 @@ only whether this server can be connected, never its version or name.
 
 Once connected, the dashboard knows it is one of several:
 
-- the logo at the top of the sidebar becomes this server's name, and opens a list of every server on the hub
+- the logo at the top of the sidebar becomes this server's own host name, and opens a list of every server on the hub
   with its state (online, late, offline, updating), under "Listed by Just Hub (name)" — pick one to open it in
   a new tab — and **Open Just Hub**;
 - **Ctrl K** gets a **Servers** scope (`server:`) that finds them and opens them the same way, in a new tab;
-- the browser tab's title carries this server's name, so several dashboard tabs can be told apart;
+- the browser tab's title carries this server's host name, so several dashboard tabs can be told apart (the
+  name the hub gives the server appears only in that list, as the hub's);
 - the hub's notices appear above your account in the sidebar, as the hub's, and can be dismissed in this
   browser.
 
 All of it comes from this server's own copy of the hub's last reply, so the browser never contacts the hub,
 and when the hub is down every dashboard feature keeps working and the list says *Hub unreachable*.
-**Settings → Hub** shows the scope, the last report exactly as it was sent, the last command the hub ran here,
-and **Disconnect**. A server that has never been connected looks exactly as it always did.
+**Settings → Hub** shows the scope, how often the server reports (the hub sets it, 15 seconds unless changed
+there), the last report exactly as it was sent, the last command the hub ran here, and **Disconnect**. A server
+that has never been connected looks exactly as it always did.
 
-Disconnect from Settings, with `sudo ./scripts/manage.sh hub disconnect`, or by removing the server in the hub,
-after which `hub status` says it was removed there. Disconnecting clears the link here and tells the hub; the
-server keeps its key, so connecting again shows the same fingerprint. `JD_HUB_LINK=false` switches the feature off
-entirely: no discovery answer, no page controls, no command, and a connection that exists goes quiet.
+Disconnect from Settings, with `sudo ./scripts/manage.sh hub disconnect`, or by removing the server in the hub.
+Disconnecting clears the link here and tells the hub; the server keeps its key, so connecting again shows the
+same fingerprint. A server removed in the hub forgets its link at its next exchange with the hub, and
+**Settings → Hub** says *Removed in Just Hub* once (as does `hub status`), with the form to connect again.
+`JD_HUB_LINK=false` switches the feature off entirely: no discovery answer, no page controls, no command, and a
+connection that exists goes quiet.
 
 ## The usage count
 

@@ -6,6 +6,7 @@ import { hubLabel, openable, orderFleet, serverAddress, serverReading } from "@/
 import { cn } from "@/lib/utils"
 import { VERSION } from "@/lib/version"
 import type { ShellHubValue } from "@/hooks/use-hub-link"
+import { useHostName } from "@/hooks/use-metrics"
 import { LogoGlyph } from "@/components/logo"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -25,7 +26,11 @@ import { useSidebar } from "@/components/ui/sidebar"
  *
  * Unlinked, the row is the wordmark it always was and this is never mounted. Linked, the
  * product's name says nothing a tab of the same product does not — the server's does, so the J
- * stays and the name takes the wordmark's place, with the chevron that says it opens.
+ * stays and the name takes the wordmark's place, with the chevron that says it opens. The name is
+ * this server's own host name, the Overview's title: the one the hub lists it under is the hub's
+ * text, which a hub that is taken over could make read like this dashboard's own prompt, and the
+ * wordmark's place is the dashboard's to speak in, so that name is said only in the menu, under
+ * whose list it is (hub-link-protocol §8.10).
  *
  * The menu is the hub's last word on each server, cached by this server's backend, and says so
  * under its label ("Listed by Just Hub (hub)"): every name in it is the hub's text
@@ -35,7 +40,9 @@ import { useSidebar } from "@/components/ui/sidebar"
  * hub, open in a new tab with no opener and no referrer: the address is one the hub handed over,
  * so it never takes this tab, and nothing of this dashboard's goes with it (§8.10). While the hub
  * cannot be reached the others' dots go grey, because what it said last may be minutes old, and
- * the menu says why.
+ * the menu says why. An idle link offers no way to the hub at all: its address may now answer on
+ * a machine this server refused (§2.4), so `shellHub` has already dropped it and "Open Just Hub"
+ * has nothing to open.
  *
  * `strip` is the phone's top strip, where the rail is a closed sheet: the same trigger and menu,
  * so which server a phone is on is never a swipe away.
@@ -43,9 +50,10 @@ import { useSidebar } from "@/components/ui/sidebar"
 export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boolean }) {
   const { state, isMobile } = useSidebar()
   const collapsed = !strip && !isMobile && state === "collapsed"
-  const name = hub.self?.name
+  const name = useHostName()
   const servers = orderFleet(hub.fleet)
   const hubUrl = openable(hub.url)
+  const trouble = hub.idle ? "Link idle" : "Hub unreachable"
 
   return (
     <DropdownMenu>
@@ -66,7 +74,7 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
             <span className="min-w-0 flex-1 truncate text-body font-semibold group-data-[collapsible=icon]:hidden">
               {name}
             </span>
-          ) : !hub.answered && !hub.failed ? (
+          ) : name === undefined ? (
             <Skeleton className="h-3 flex-1 group-data-[collapsible=icon]:hidden" />
           ) : (
             <span className="min-w-0 flex-1 truncate text-body font-semibold group-data-[collapsible=icon]:hidden">
@@ -75,8 +83,8 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
           )}
           {!hub.reachable && (
             <span className="flex shrink-0 group-data-[collapsible=icon]:hidden">
-              <StatusDot tone="warning" />
-              <span className="sr-only">. Hub unreachable</span>
+              <StatusDot tone={hub.idle ? "danger" : "warning"} />
+              <span className="sr-only">. {trouble}</span>
             </span>
           )}
           <ChevronDown
@@ -101,8 +109,8 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
           <span className="truncate">Servers</span>
           {!hub.reachable && (
             <Status
-              tone="warning"
-              label="Hub unreachable"
+              tone={hub.idle ? "danger" : "warning"}
+              label={trouble}
               className="text-hint tracking-normal normal-case"
             />
           )}
