@@ -226,14 +226,14 @@ func parseArgsOrRefuse(kind string, decoded map[string]any) (Args, error) {
 // made.
 func (s *Service) known(ctx context.Context, id string) bool {
 	var one int
-	return s.st.DB.QueryRowContext(ctx, `SELECT 1 FROM account_link_commands WHERE id = ?`, id).Scan(&one) == nil
+	return s.st.DB.QueryRowContext(ctx, `SELECT 1 FROM `+s.p.CommandsTable+` WHERE id = ?`, id).Scan(&one) == nil
 }
 
 // remember records a command that passed its signature. False means the id was
 // there already.
 func (s *Service) remember(ctx context.Context, cmd Command, now time.Time) (bool, error) {
 	res, err := s.st.DB.ExecContext(ctx,
-		`INSERT INTO account_link_commands(id, kind, received_at, status, issued_by) VALUES(?, ?, ?, 'running', ?)
+		`INSERT INTO `+s.p.CommandsTable+`(id, kind, received_at, status, issued_by) VALUES(?, ?, ?, 'running', ?)
 		 ON CONFLICT(id) DO NOTHING`, cmd.ID, cmd.Kind, now.Unix(), clip(cmd.IssuedBy, 254))
 	if err != nil {
 		return false, err
@@ -244,7 +244,7 @@ func (s *Service) remember(ctx context.Context, cmd Command, now time.Time) (boo
 	}
 	// The record only has to outlive the time a command can still be offered,
 	// which its own expiry bounds; a week is far past that.
-	_, _ = s.st.DB.ExecContext(ctx, `DELETE FROM account_link_commands WHERE received_at < ?`, now.Add(-7*24*time.Hour).Unix())
+	_, _ = s.st.DB.ExecContext(ctx, `DELETE FROM `+s.p.CommandsTable+` WHERE received_at < ?`, now.Add(-7*24*time.Hour).Unix())
 	return n == 1, nil
 }
 
@@ -252,7 +252,7 @@ func (s *Service) finishRecord(ctx context.Context, id, status, errText string, 
 	// A row that was never written (a signature that did not verify) simply
 	// matches nothing.
 	if _, err := s.st.DB.ExecContext(ctx,
-		`UPDATE account_link_commands SET status = ?, finished_at = ?, error = ? WHERE id = ? AND status = 'running'`,
+		`UPDATE `+s.p.CommandsTable+` SET status = ?, finished_at = ?, error = ? WHERE id = ? AND status = 'running'`,
 		status, at.Unix(), clip(errText, 1000), id); err != nil {
 		s.log.Warn("could not record a command's outcome", "command", id, "err", err)
 	}
@@ -279,7 +279,7 @@ func (s *Service) process(ctx context.Context, st State, cmd Command) {
 	}
 	if err == nil {
 		execCtx, cancel := context.WithTimeout(ctx, commandTimeout)
-		output, err = s.execute(execCtx, cmd, args, "account:"+st.Owner)
+		output, err = s.execute(execCtx, cmd, args, s.p.ActorPrefix+st.Owner)
 		cancel()
 	}
 	if err != nil {
@@ -318,11 +318,11 @@ func (s *Service) process(ctx context.Context, st State, cmd Command) {
 // report tells the site how a command ended. It tries a few times, because the
 // command already ran and the site is waiting to hear.
 func (s *Service) report(ctx context.Context, st State, commandID string, res CommandResult) {
-	id, _, err := loadIdentity(ctx, s.st, s.sealer)
+	id, _, err := loadIdentity(ctx, s.kv, s.sealer)
 	if err != nil || id == nil {
 		return
 	}
-	c := s.newClient(id)
+	c := s.newClientAt(s.originFor(st.URL), id)
 	delay := time.Second
 	for attempt := 0; attempt < 3; attempt++ {
 		err = c.result(ctx, st.ServerID, commandID, res)
@@ -340,7 +340,7 @@ func (s *Service) report(ctx context.Context, st State, commandID string, res Co
 		}
 	}
 	if err != nil {
-		s.log.Warn("the site was not told how a command ended", "command", commandID, "err", err)
+		s.log.Warn("the "+s.p.Peer+" was not told how a command ended", "command", commandID, "err", err)
 	}
 }
 
@@ -350,9 +350,9 @@ func (s *Service) auditCommand(ctx context.Context, st State, cmd Command, statu
 	if s.audit == nil {
 		return
 	}
-	action := "account.command.invalid"
+	action := s.p.AuditPrefix + ".command.invalid"
 	if _, known := RequiredScope(cmd.Kind); known {
-		action = "account.command." + cmd.Kind
+		action = s.p.AuditPrefix + ".command." + cmd.Kind
 	}
 	detail := map[string]any{"command": cmd.ID, "kind": clip(cmd.Kind, 64), "status": status, "issuedBy": clip(cmd.IssuedBy, 254)}
 	// What was asked, as sent: names and numbers, which is what a refusal needs
@@ -371,9 +371,9 @@ func (s *Service) auditCommand(ctx context.Context, st State, cmd Command, statu
 		httpStatus = 500
 	}
 	s.audit.Record(ctx, audit.Entry{
-		Username: "account:" + st.Owner, Actor: "account:" + st.Owner,
+		Username: s.p.ActorPrefix + st.Owner, Actor: s.p.ActorPrefix + st.Owner,
 		Action: action, Target: commandTarget(cmd.Kind, args),
-		Method: "LINK", Path: basePath + "/commands",
+		Method: "LINK", Path: s.p.BasePath + "/commands",
 		Status: httpStatus, Success: status == resultSucceeded,
 		Detail: audit.Detail(detail),
 	})

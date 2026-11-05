@@ -542,8 +542,8 @@ func TestTheIdentityIsSealedAndAnUnreadableOneIsReplacedOnlyWhileUnlinked(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _, _ := e.st.Setting(t.Context(), keyIdentity)
-	id, _, _ := loadIdentity(t.Context(), e.st, e.svc.sealer)
+	raw, _, _ := e.st.Setting(t.Context(), e.svc.kv.key(keyIdentity))
+	id, _, _ := loadIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if strings.Contains(raw, id.PublicKey()) || raw == "" {
 		t.Fatalf("identity stored in the clear: %q", raw)
 	}
@@ -551,10 +551,10 @@ func TestTheIdentityIsSealedAndAnUnreadableOneIsReplacedOnlyWhileUnlinked(t *tes
 	_ = req
 
 	// A master key that cannot open the stored identity.
-	if err := e.st.SetSetting(t.Context(), keyIdentity, "not-sealed-by-this-key"); err != nil {
+	if err := e.st.SetSetting(t.Context(), e.svc.kv.key(keyIdentity), "not-sealed-by-this-key"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := loadIdentity(t.Context(), e.st, e.svc.sealer); err != ErrIdentityUnreadable {
+	if _, _, err := loadIdentity(t.Context(), e.svc.kv, e.svc.sealer); err != ErrIdentityUnreadable {
 		t.Fatalf("load = %v", err)
 	}
 	if status, _ := e.svc.Status(t.Context()); status.Fingerprint != "" {

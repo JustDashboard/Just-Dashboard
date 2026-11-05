@@ -14,17 +14,19 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
 
-// Everything this package keeps lives in the dashboard's settings table, under
-// these keys. Nothing but the identity is secret, and the identity is sealed.
+// Everything an instance keeps lives in the dashboard's settings table, under
+// its profile's prefix and these names: account.link.identity for the account
+// link, hub.link.identity for the hub link. Nothing but the identity is
+// secret, and the identity is sealed.
 const (
-	keyIdentity = "account.link.identity"
-	keyState    = "account.link.state"
-	keyRequest  = "account.link.request"
-	keySequence = "account.link.sequence"
-	keyPolicy   = "account.link.update-policy"
-	keyOutcome  = "account.link.outcome"
-	keyStatus   = "account.link.status"
-	keyAttempt  = "account.link.update-attempt"
+	keyIdentity = "identity"
+	keyState    = "state"
+	keyRequest  = "request"
+	keySequence = "sequence"
+	keyPolicy   = "update-policy"
+	keyOutcome  = "outcome"
+	keyStatus   = "status"
+	keyAttempt  = "update-attempt"
 )
 
 // SiteKey is a key the site signs commands with, pinned when the link was made
@@ -75,6 +77,9 @@ func (s State) siteKey(kid string, now time.Time) (SiteKey, bool) {
 
 // Request is a link request waiting for a person to approve it on the site.
 type Request struct {
+	// URL is the origin the request was made to, for a profile that chooses
+	// it per link; empty for one whose origin is configured.
+	URL         string    `json:"url,omitempty"`
 	ID          string    `json:"id"`
 	UserCode    string    `json:"userCode"`
 	ApproveURL  string    `json:"approveUrl"`
@@ -126,10 +131,17 @@ func (r runtimeStatus) lastError() string {
 	return r.PollError
 }
 
-// kv is the settings table with the few operations this package needs.
-type kv struct{ st *store.Store }
+// kv is the settings table with the few operations this package needs, under
+// one instance's prefix. Every key it is given is a name under that prefix.
+type kv struct {
+	st     *store.Store
+	prefix string
+}
 
-func (k kv) get(ctx context.Context, key string, out any) (bool, error) {
+func (k kv) key(name string) string { return k.prefix + "." + name }
+
+func (k kv) get(ctx context.Context, name string, out any) (bool, error) {
+	key := k.key(name)
 	raw, ok, err := k.st.Setting(ctx, key)
 	if err != nil || !ok {
 		return false, err
@@ -140,17 +152,17 @@ func (k kv) get(ctx context.Context, key string, out any) (bool, error) {
 	return true, nil
 }
 
-func (k kv) put(ctx context.Context, key string, v any) error {
+func (k kv) put(ctx context.Context, name string, v any) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	return k.st.SetSetting(ctx, key, string(raw))
+	return k.st.SetSetting(ctx, k.key(name), string(raw))
 }
 
-func (k kv) del(ctx context.Context, keys ...string) error {
-	for _, key := range keys {
-		if _, err := k.st.DB.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, key); err != nil {
+func (k kv) del(ctx context.Context, names ...string) error {
+	for _, name := range names {
+		if _, err := k.st.DB.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, k.key(name)); err != nil {
 			return err
 		}
 	}
@@ -170,19 +182,19 @@ func (k kv) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	return tx.Commit()
 }
 
-func putTx(ctx context.Context, tx *sql.Tx, key string, v any) error {
+func (k kv) putTx(ctx context.Context, tx *sql.Tx, name string, v any) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, string(raw))
+		`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, k.key(name), string(raw))
 	return err
 }
 
-func delTx(ctx context.Context, tx *sql.Tx, keys ...string) error {
-	for _, key := range keys {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, key); err != nil {
+func (k kv) delTx(ctx context.Context, tx *sql.Tx, names ...string) error {
+	for _, name := range names {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, k.key(name)); err != nil {
 			return err
 		}
 	}
@@ -199,7 +211,7 @@ func (k kv) updateState(ctx context.Context, serverID string, change func(*State
 	found := false
 	err := k.tx(ctx, func(tx *sql.Tx) error {
 		var raw string
-		err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, keyState).Scan(&raw)
+		err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, k.key(keyState)).Scan(&raw)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -208,7 +220,7 @@ func (k kv) updateState(ctx context.Context, serverID string, change func(*State
 		}
 		var st State
 		if err := json.Unmarshal([]byte(raw), &st); err != nil {
-			return fmt.Errorf("%s is unreadable: %w", keyState, err)
+			return fmt.Errorf("%s is unreadable: %w", k.key(keyState), err)
 		}
 		if st.ServerID != serverID {
 			return nil
@@ -218,7 +230,7 @@ func (k kv) updateState(ctx context.Context, serverID string, change func(*State
 			return nil
 		}
 		out = st
-		return putTx(ctx, tx, keyState, st)
+		return k.putTx(ctx, tx, keyState, st)
 	})
 	return out, found && err == nil, err
 }
@@ -264,7 +276,7 @@ func (k kv) nextSequence(ctx context.Context) (int64, error) {
 	err := k.st.DB.QueryRowContext(ctx,
 		`INSERT INTO settings(key, value) VALUES(?, '1')
 		 ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
-		 RETURNING value`, keySequence).Scan(&raw)
+		 RETURNING value`, k.key(keySequence)).Scan(&raw)
 	if err != nil {
 		return 0, fmt.Errorf("persist request sequence: %w", err)
 	}

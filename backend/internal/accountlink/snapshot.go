@@ -2,6 +2,7 @@ package accountlink
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 )
 
@@ -208,7 +209,45 @@ const (
 // encode renders the snapshot, keeping the lists inside the site's limits and
 // the body inside the protocol's. If it is still too large the lists are cut
 // back until it fits: the counts carry the information, the lists are detail.
-func (s Snapshot) encode() ([]byte, error) {
+func (s Snapshot) encode() ([]byte, error) { return s.encodeWith(nil) }
+
+// encodeWith is encode with more top-level keys in the body. They are never
+// cut: the snapshot's lists make room for them, and the whole body stays
+// inside the same budget.
+func (s Snapshot) encodeWith(extra map[string]json.RawMessage) ([]byte, error) {
+	var members []byte
+	if len(extra) > 0 {
+		raw, err := json.Marshal(extra)
+		if err != nil {
+			return nil, err
+		}
+		// {"a":…,"b":…} without its braces, to go after the snapshot's own
+		// members. A key the snapshot already has is never sent twice.
+		for k := range extra {
+			if snapshotKeys[k] {
+				return nil, fmt.Errorf("the heartbeat already carries %q", k)
+			}
+		}
+		members = raw[1 : len(raw)-1]
+	}
+	body, err := s.encodeWithin(maxRequestBody - 1024 - len(members) - 1)
+	if err != nil || len(members) == 0 {
+		return body, err
+	}
+	out := make([]byte, 0, len(body)+len(members)+1)
+	out = append(out, body[:len(body)-1]...)
+	out = append(out, ',')
+	out = append(out, members...)
+	return append(out, '}'), nil
+}
+
+// snapshotKeys are the snapshot's own top-level keys.
+var snapshotKeys = map[string]bool{
+	"protocol": true, "sentAt": true, "server": true, "access": true, "metrics": true, "containers": true,
+	"stacks": true, "alerts": true, "backups": true, "deployments": true,
+}
+
+func (s Snapshot) encodeWithin(budget int) ([]byte, error) {
 	if s.Containers != nil && len(s.Containers.List) > maxContainers {
 		c := *s.Containers
 		c.List = c.List[:maxContainers]
@@ -225,7 +264,6 @@ func (s Snapshot) encode() ([]byte, error) {
 	if len(s.Alerts) > maxAlerts {
 		s.Alerts = s.Alerts[:maxAlerts]
 	}
-	const budget = maxRequestBody - 1024
 	for {
 		body, err := json.Marshal(s)
 		if err != nil || len(body) <= budget {

@@ -14,7 +14,7 @@ func TestSignedRequestsRoundTripAgainstTheSite(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	st := e.link(ScopeObserve)
-	id, _, err := loadIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _, err := loadIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if err != nil || id == nil {
 		t.Fatalf("identity: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestRequestsCarryTheProtocolHeaderAndAnIdentifyingAgentButNoSecret(t *testi
 	}))
 	defer srv.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = srv.URL })
-	id, err := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, err := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestASequenceTheSiteRefusesIsRetriedWithANewOne(t *testing.T) {
 	e.site.mu.Lock()
 	e.site.servers[st.ServerID].seq += 2
 	e.site.mu.Unlock()
-	id, _, _ := loadIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _, _ := loadIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if _, err := e.svc.newClient(id).heartbeat(t.Context(), st.ServerID, []byte(`{}`)); err != nil {
 		t.Fatalf("the refused sequence was not retried: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestResponsesAreDecodedStrictly(t *testing.T) {
 	}))
 	defer srv.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = srv.URL })
-	id, _ := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _ := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	c := e.svc.newClient(id)
 	if _, err := c.site(t.Context()); err == nil || !strings.Contains(err.Error(), "protocol 1") {
 		t.Fatalf("unknown field accepted: %v", err)
@@ -123,7 +123,7 @@ func TestRedirectsAreNeverFollowed(t *testing.T) {
 	}))
 	defer srv.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = srv.URL })
-	id, _ := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _ := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if _, err := e.svc.newClient(id).site(t.Context()); err == nil {
 		t.Fatal("a redirect was treated as an answer")
 	}
@@ -139,7 +139,7 @@ func TestResponsesAboveTheLimitAreRefused(t *testing.T) {
 	}))
 	defer srv.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = srv.URL })
-	id, _ := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _ := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if _, err := e.svc.newClient(id).site(t.Context()); err == nil || !strings.Contains(err.Error(), "larger") {
 		t.Fatalf("oversize response accepted: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestANoContentAnswerNeedsNoBody(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	st := e.link(ScopeObserve)
-	id, _, _ := loadIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _, _ := loadIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	c := e.svc.newClient(id)
 	if err := c.result(t.Context(), st.ServerID, ulid(1), CommandResult{Status: resultSucceeded}); err != nil {
 		t.Fatalf("204 treated as an error: %v", err)
@@ -166,7 +166,7 @@ func TestErrorsKeepTheSitesCodeAndAreBounded(t *testing.T) {
 	}))
 	defer srv.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = srv.URL })
-	id, _ := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _ := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	_, err := e.svc.newClient(id).site(t.Context())
 	if !isCode(err, 429, "rate_limited") {
 		t.Fatalf("code lost: %v", err)
@@ -192,7 +192,7 @@ func TestALongPollAsksForItsWaitAndIsAllowedToHoldForIt(t *testing.T) {
 	}))
 	defer slow.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = slow.URL })
-	id, _ := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _ := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if _, err := e.svc.newClient(id).commands(t.Context(), "server-1", 25); err != nil {
 		t.Fatal(err)
 	}
