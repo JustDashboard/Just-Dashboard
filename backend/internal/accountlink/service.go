@@ -116,10 +116,13 @@ type Service struct {
 
 	mu           sync.Mutex
 	lastSnapshot []byte
-	linkedCancel context.CancelFunc
-	cancel       context.CancelFunc
-	done         chan struct{}
-	interrupted  sync.Once
+	// keysIgnoredFor is the link whose announced keys were last logged as
+	// ignored, so the warning is said once per link.
+	keysIgnoredFor string
+	linkedCancel   context.CancelFunc
+	cancel         context.CancelFunc
+	done           chan struct{}
+	interrupted    sync.Once
 }
 
 func New(o Options) *Service {
@@ -707,11 +710,24 @@ func (s *Service) noteHeartbeat(ctx context.Context, st State, resp heartbeatRes
 		if hb := clampInt(resp.HeartbeatSeconds, 10, 600); resp.HeartbeatSeconds != 0 && hb != cur.HeartbeatSeconds {
 			cur.HeartbeatSeconds, changed = hb, true
 		}
+		if s.p.IgnoreAnnouncedKeys {
+			return changed
+		}
 		if keys, rotated := mergeSiteKeysMatching(cur.SiteKeys, resp.SiteKeys, now, s.p.RotationKidPattern); rotated {
 			cur.SiteKeys, changed = keys, true
 		}
 		return changed
 	})
+	if s.p.IgnoreAnnouncedKeys && len(resp.SiteKeys) > 0 {
+		s.mu.Lock()
+		first := s.keysIgnoredFor != st.ServerID
+		s.keysIgnoredFor = st.ServerID
+		s.mu.Unlock()
+		if first {
+			s.log.Warn("the "+s.p.Peer+" announced signing keys in a heartbeat; they are ignored, and a new key needs a new link",
+				"server", st.ServerID)
+		}
+	}
 	if err != nil {
 		s.log.Warn("could not store what the "+s.p.Peer+" announced in a heartbeat", "err", err)
 	}

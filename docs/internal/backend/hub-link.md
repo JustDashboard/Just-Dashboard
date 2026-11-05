@@ -35,7 +35,8 @@ two run side by side in one process and share nothing:
 | Approval | A code approved on the site | A code approved in the hub, or a one-time token |
 | Heartbeat reply | `ok`, `heartbeatSeconds`, `pendingCommands`, `siteKeys` | The same, plus `fleet` and `notices` (required) and `signIn` (optional), strictly decoded (`ReplyView`) |
 | Pacing, default interval | 4 a minute, 30 s | 12 a minute, 15 s |
-| Key id and owner label | `kid` may hold a dot; any non-empty label | `kid` has no dot, at approval and in a rotation; the label is the hub's name, `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` |
+| Key id and owner label | `kid` may hold a dot; any non-empty label | `kid` has no dot; the label is the hub's name, `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` |
+| Key rotation | `siteKeys` in a reply adds a successor and retires old keys | None: `siteKeys` is decoded and ignored (`IgnoreAnnouncedKeys`) |
 | Audit actor, destructive-budget key | `account:<owner>` | `hub:<hub name>` |
 | Audit actions | `account.link`, `account.unlink`, `account.command.*`, `account.update.auto` | `hub.link`, `hub.unlink`, `hub.command.*`, `hub.update.auto` |
 | A `backup.run`'s trigger | `account_link` | `hub_link` |
@@ -115,7 +116,10 @@ characters or has control characters, an unknown `state`, a missing required fie
 `self`; a notice with a bad `id` or `level`, a title outside 1 to 120 characters or a body over 1000. A fleet
 `endpoint` must be an `https` origin, one label under the hub's own MagicDNS suffix, or it is removed and the
 entry kept without a link. A notice's `href` must be on the hub's own origin or it is removed. Nothing in a reply
-changes anything on the dashboard except the heartbeat interval and the pinned keys.
+changes anything on the dashboard except the heartbeat interval and the cached view. `siteKeys` is decoded so
+strict decoding passes, and never applied (`IgnoreAnnouncedKeys` in the profile): no key is added, no pinned key's
+end changes, and a warning is logged once per link. A reply is authenticated by TLS alone, and a key pinned from
+one could sign commands; a new hub key needs a new link.
 
 The cache (`hub.link.view`) names the `serverId` it came from, so a reply that lands after the link changed is
 never shown for the new one, and it is cleared with the link.

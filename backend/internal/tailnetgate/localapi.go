@@ -42,6 +42,9 @@ type Peer struct {
 	Name string
 	// Node is the machine's MagicDNS name without the trailing dot.
 	Node string
+	// StableID is the machine's StableNodeID, which stays the machine's when
+	// its name or address changes. Hub sign-in binds a ticket to it.
+	StableID string
 	// Tags are the machine's ACL tags, tag:ci.
 	Tags []string
 }
@@ -126,6 +129,7 @@ func newLocalAPI(client *http.Client, base string) *LocalAPI {
 // that holds the address, and 404 when no node does.
 type whoIsResponse struct {
 	Node *struct {
+		StableID  string   `json:"StableID"`
 		Name      string   `json:"Name"`
 		Tags      []string `json:"Tags"`
 		Addresses []string `json:"Addresses"`
@@ -173,7 +177,7 @@ func (c *LocalAPI) WhoIs(ctx context.Context, address netip.Addr) (Peer, error) 
 	if err := json.Unmarshal(body, &who); err != nil || who.Node == nil || who.UserProfile == nil {
 		return Peer{}, fmt.Errorf("%w: the local API's answer could not be read", ErrUnavailable)
 	}
-	peer := Peer{Address: address, Node: strings.TrimSuffix(who.Node.Name, ".")}
+	peer := Peer{Address: address, Node: strings.TrimSuffix(who.Node.Name, "."), StableID: strings.TrimSpace(who.Node.StableID)}
 	for _, tag := range who.Node.Tags {
 		if tag = strings.TrimSpace(tag); tag != "" {
 			peer.Tags = append(peer.Tags, tag)

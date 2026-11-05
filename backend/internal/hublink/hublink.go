@@ -62,6 +62,9 @@ var profile = accountlink.Profile{
 	HeartbeatsPerMinute: 12, DefaultHeartbeatSeconds: 15,
 	KidPattern: kidPattern, RotationKidPattern: kidPattern, OwnerPattern: hubNamePattern,
 	OriginPerLink: true, ReplyView: true,
+	// Version 1 never rotates the hub key: a key that signs commands and
+	// sign-in tickets is pinned at approval and a new one needs a new link.
+	IgnoreAnnouncedKeys: true,
 }
 
 var (

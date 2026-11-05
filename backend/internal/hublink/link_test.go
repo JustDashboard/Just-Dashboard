@@ -372,6 +372,43 @@ func TestReplayedExpiredForgedAndUnknownCommandsAreRefusedAndAudited(t *testing.
 	}
 }
 
+// A heartbeat reply is authenticated by TLS alone, so the siteKeys it may
+// carry are decoded and ignored (protocol 4.3, HL-1): a key it announces is
+// never pinned, and the pinned key is never ended by one. A command signed by
+// the announced key is refused at 7.2 step 3; the pinned key keeps working.
+func TestAReplyNeverChangesThePinnedHubKeys(t *testing.T) {
+	e := newEnv(t)
+	before := e.link(accountlink.ScopeMaintain)
+	other := seedKey(t, vectorOtherSeed)
+	e.hub.setReply("siteKeys", []map[string]any{
+		{"kid": "hub-2027-01", "publicKey": pubB64(other)},
+		{"kid": vectorKid, "publicKey": before.SiteKeys[0].PublicKey, "notAfter": vectorNow - 60},
+	})
+	if err := e.svc.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	after, _, _ := e.svc.Linked(t.Context())
+	if mustJSON(t, after.SiteKeys) != mustJSON(t, before.SiteKeys) {
+		t.Fatalf("pinned keys changed: %s -> %s", mustJSON(t, before.SiteKeys), mustJSON(t, after.SiteKeys))
+	}
+	if s, _ := e.svc.Status(t.Context(), true); !*s.Reachable {
+		t.Fatalf("a reply carrying siteKeys failed the heartbeat: %s", s.Admin.Link.LastError)
+	}
+
+	e.svc.Start(t.Context())
+	announced := signCommand(t, other, "hub-2027-01", vectorServerID, ulid(1), "container.restart", `{"container":"shop-web"}`, e.clock().Add(10*time.Minute).Unix())
+	e.hub.queueCommands(announced)
+	waitFor(t, "the announced key's command", func() bool { _, ok := e.hub.result(ulid(1)); return ok })
+	if res, _ := e.hub.result(ulid(1)); res.Status != "refused" {
+		t.Fatalf("a command signed by an announced key = %s %s", res.Status, res.Error)
+	}
+	e.hub.command(ulid(2), "container.restart", `{"container":"shop-web"}`, e.clock().Add(10*time.Minute))
+	waitFor(t, "the pinned key's command", func() bool { _, ok := e.hub.result(ulid(2)); return ok })
+	if res, _ := e.hub.result(ulid(2)); res.Status != "succeeded" {
+		t.Fatalf("a command signed by the pinned key = %s %s", res.Status, res.Error)
+	}
+}
+
 func TestDisconnectTellsTheHubAndKeepsTheIdentity(t *testing.T) {
 	e := newEnv(t)
 	e.link(accountlink.ScopeObserve)

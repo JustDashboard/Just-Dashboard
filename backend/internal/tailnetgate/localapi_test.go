@@ -76,7 +76,7 @@ func TestLocalAPIWhoIsReadsTailscaledsAnswer(t *testing.T) {
 
 	alice, err := client.WhoIs(ctx, netip.MustParseAddr("100.101.102.103"))
 	if err != nil || alice.Login != "Alice@Example.com" || alice.Name != "Alice Example" ||
-		alice.Node != "alice-laptop.tail1234.ts.net" || alice.Tagged() {
+		alice.Node != "alice-laptop.tail1234.ts.net" || alice.StableID != "nLaptop" || alice.Tagged() {
 		t.Fatalf("a person's laptop = %+v, %v", alice, err)
 	}
 	ci, err := client.WhoIs(ctx, netip.MustParseAddr("::ffff:100.64.0.9"))

@@ -66,6 +66,12 @@ type Profile struct {
 	// ReplyView means the heartbeat reply carries fleet and notices, always,
 	// and signIn, optionally. They are handed to Options.OnReply.
 	ReplyView bool
+	// IgnoreAnnouncedKeys means a heartbeat reply's siteKeys are decoded, so
+	// strict decoding still passes, and never applied: no key is added, no
+	// pinned key's end changes and none is dropped. A reply is authenticated
+	// by TLS alone, and on a tailnet a machine name is a weak anchor for a key
+	// that signs commands and sign-in tickets (hub-link-protocol.md 4.3).
+	IgnoreAnnouncedKeys bool
 }
 
 // AccountProfile is the link to a just-dashboard.com account.
