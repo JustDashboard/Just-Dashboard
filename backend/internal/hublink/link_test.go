@@ -3,6 +3,7 @@ package hublink
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -406,6 +407,36 @@ func TestAReplyNeverChangesThePinnedHubKeys(t *testing.T) {
 	waitFor(t, "the pinned key's command", func() bool { _, ok := e.hub.result(ulid(2)); return ok })
 	if res, _ := e.hub.result(ulid(2)); res.Status != "succeeded" {
 		t.Fatalf("a command signed by the pinned key = %s %s", res.Status, res.Error)
+	}
+}
+
+// A database restored from a copy taken before the last thousand requests (a
+// VPS snapshot rolled back) keeps working: the sequence is max(stored + 1,
+// unix milliseconds), so it carries on above every number the hub has seen
+// (protocol 3.1, HL-16).
+func TestARestoredDatabaseKeepsLinking(t *testing.T) {
+	e := newEnv(t)
+	e.link(accountlink.ScopeObserve)
+	for i := 0; i < 3; i++ {
+		if err := e.svc.Sync(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, _, _ := e.st.Setting(t.Context(), "hub.link.sequence")
+	seq, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || seq < e.clock().UnixMilli() {
+		t.Fatalf("sequence %q is not above the clock's milliseconds", raw)
+	}
+	if err := e.st.SetSetting(t.Context(), "hub.link.sequence", strconv.FormatInt(seq-1000, 10)); err != nil {
+		t.Fatal(err)
+	}
+	e.advance(time.Second)
+	beats := len(e.hub.heartbeatBodies())
+	if err := e.svc.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := e.svc.Status(t.Context(), true); len(e.hub.heartbeatBodies()) != beats+1 || s.Admin.Link.LastError != "" {
+		t.Fatalf("after the restore: %d heartbeats, last error %q", len(e.hub.heartbeatBodies())-beats, s.Admin.Link.LastError)
 	}
 }
 

@@ -72,6 +72,11 @@ type Profile struct {
 	// by TLS alone, and on a tailnet a machine name is a weak anchor for a key
 	// that signs commands and sign-in tickets (hub-link-protocol.md 4.3).
 	IgnoreAnnouncedKeys bool
+	// ClockSequence raises the request counter to max(stored + 1, unix
+	// milliseconds) instead of stored + 1, so a database restored from an
+	// older copy carries on above every number it used before
+	// (hub-link-protocol.md 3.1). The peer only checks "greater than".
+	ClockSequence bool
 }
 
 // AccountProfile is the link to a just-dashboard.com account.

@@ -136,6 +136,9 @@ func (r runtimeStatus) lastError() string {
 type kv struct {
 	st     *store.Store
 	prefix string
+	// clock, when set, puts a floor under the request counter: the current
+	// unix milliseconds (Profile.ClockSequence).
+	clock func() time.Time
 }
 
 func (k kv) key(name string) string { return k.prefix + "." + name }
@@ -271,12 +274,26 @@ func (k kv) status(ctx context.Context) runtimeStatus {
 // durable before this returns, so the number is on disk before it is on the
 // wire and two processes can never be handed the same one. The counter spans
 // the life of the identity: it is not reset by an unlink.
+//
+// With a clock the new number is max(stored + 1, unix milliseconds), computed
+// in that same statement: a database restored from a copy taken before the
+// last thousand requests (a VPS snapshot rolled back) would otherwise send
+// numbers the peer has already seen until it caught up.
 func (k kv) nextSequence(ctx context.Context) (int64, error) {
 	var raw string
-	err := k.st.DB.QueryRowContext(ctx,
-		`INSERT INTO settings(key, value) VALUES(?, '1')
-		 ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
-		 RETURNING value`, k.key(keySequence)).Scan(&raw)
+	var err error
+	if k.clock != nil {
+		ms := k.clock().UnixMilli()
+		err = k.st.DB.QueryRowContext(ctx,
+			`INSERT INTO settings(key, value) VALUES(?, CAST(? AS TEXT))
+			 ON CONFLICT(key) DO UPDATE SET value = CAST(MAX(CAST(value AS INTEGER) + 1, ?) AS TEXT)
+			 RETURNING value`, k.key(keySequence), ms, ms).Scan(&raw)
+	} else {
+		err = k.st.DB.QueryRowContext(ctx,
+			`INSERT INTO settings(key, value) VALUES(?, '1')
+			 ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
+			 RETURNING value`, k.key(keySequence)).Scan(&raw)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("persist request sequence: %w", err)
 	}

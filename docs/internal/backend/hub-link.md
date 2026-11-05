@@ -30,6 +30,7 @@ two run side by side in one process and share nothing:
 | Replay table | `account_link_commands` | `hub_link_commands` (`store/hub_link_schema.go`, additive) |
 | Base path, part of every signed string | `/api/link/v1` | `/api/hub/v1` |
 | Identity and sequence | `account.link.identity`, `.sequence` | `hub.link.identity`, `.sequence` |
+| Sequence rule | `stored + 1` | `max(stored + 1, unix milliseconds)` in the same statement (`ClockSequence`), so a database restored from an older copy carries on above every number it sent |
 | Where it points | `JD_ACCOUNT_URL`, fixed by configuration | Chosen at connect time, stored with the request and the link (`OriginPerLink`); must pass the tailnet rule |
 | Discovery | `GET /site` before a request | None: the protocol header on `POST /requests` is the version check |
 | Approval | A code approved on the site | A code approved in the hub, or a one-time token |

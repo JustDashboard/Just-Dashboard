@@ -65,6 +65,9 @@ var profile = accountlink.Profile{
 	// Version 1 never rotates the hub key: a key that signs commands and
 	// sign-in tickets is pinned at approval and a new one needs a new link.
 	IgnoreAnnouncedKeys: true,
+	// The sequence continues above a database restored from an older copy
+	// (protocol 3.1).
+	ClockSequence: true,
 }
 
 var (

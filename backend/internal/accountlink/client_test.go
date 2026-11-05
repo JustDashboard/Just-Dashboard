@@ -75,6 +75,51 @@ func TestSequenceNumbersOnlyGoUpAndSurviveARestart(t *testing.T) {
 	}
 }
 
+// A profile with ClockSequence takes max(stored + 1, unix milliseconds), so a
+// database restored from an older copy carries on above every number it sent
+// (hub-link-protocol.md 3.1, HL-16).
+func TestAClockSequenceContinuesAboveARestoredDatabase(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	clock := time.UnixMilli(1761350400000).UTC()
+	p := AccountProfile
+	p.ClockSequence = true
+	svc := New(Options{Store: e.st, Sealer: e.svc.sealer, Enabled: true, Profile: &p, Now: func() time.Time { return clock }})
+	key := svc.kv.key(keySequence)
+	for _, tc := range []struct {
+		name   string
+		stored string
+		want   int64
+	}{
+		{"nothing stored", "", 1761350400000},
+		{"stored below the clock", "5", 1761350400000},
+		{"stored above the clock", "1761350400999", 1761350401000},
+		{"stored equal to the clock", "1761350400000", 1761350400001},
+	} {
+		if tc.stored == "" {
+			if _, err := e.st.DB.Exec(`DELETE FROM settings WHERE key = ?`, key); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := e.st.SetSetting(t.Context(), key, tc.stored); err != nil {
+			t.Fatal(err)
+		}
+		n, err := svc.kv.nextSequence(t.Context())
+		if err != nil || n != tc.want {
+			t.Fatalf("%s: got %d (%v), want %d", tc.name, n, err, tc.want)
+		}
+		if raw, _, _ := e.st.Setting(t.Context(), key); raw != strconv.FormatInt(tc.want, 10) {
+			t.Fatalf("%s: stored %q", tc.name, raw)
+		}
+	}
+	// The account link's own counter is untouched by the switch: stored + 1.
+	if err := e.st.SetSetting(t.Context(), e.svc.kv.key(keySequence), "5"); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := e.svc.kv.nextSequence(t.Context()); err != nil || n != 6 {
+		t.Fatalf("account link sequence = %d, %v", n, err)
+	}
+}
+
 func TestASequenceTheSiteRefusesIsRetriedWithANewOne(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)

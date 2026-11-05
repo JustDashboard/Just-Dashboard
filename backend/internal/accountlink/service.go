@@ -132,7 +132,7 @@ func New(o Options) *Service {
 	}
 	s := &Service{
 		p: p, hooks: o.Hooks,
-		st: o.Store, sealer: o.Sealer, audit: o.Audit, log: o.Log, kv: kv{o.Store, p.KeyPrefix},
+		st: o.Store, sealer: o.Sealer, audit: o.Audit, log: o.Log, kv: kv{st: o.Store, prefix: p.KeyPrefix},
 		siteURL: o.SiteURL, enabled: o.Enabled, host: o.Host, version: o.Version,
 		desc: o.Describe, http: o.HTTP, now: o.Now, loc: o.Location,
 		idle: 15 * time.Second, watch: 5 * time.Second,
@@ -155,6 +155,9 @@ func New(o Options) *Service {
 	}
 	if s.now == nil {
 		s.now = func() time.Time { return time.Now().UTC() }
+	}
+	if p.ClockSequence {
+		s.kv.clock = s.now
 	}
 	if s.loc == nil {
 		s.loc = time.Local
