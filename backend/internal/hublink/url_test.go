@@ -59,8 +59,11 @@ func TestTheHubURLRule(t *testing.T) {
 		{"https://box.tailed39ba.ts.net:9443", "", CodeSameHost},
 	} {
 		t.Run(tc.in, func(t *testing.T) {
-			s, _, who := ruleService(t, "")
+			s, tn, who := ruleService(t, "")
 			who.node = hostOf(tc.origin) + "."
+			if tc.origin != "" {
+				tn.set(func(s *TailnetStatus) { s.Peers[hostOf(tc.origin)] = netip.MustParseAddr("100.101.102.103") })
+			}
 			origin, _, err := s.checkURL(t.Context(), tc.in)
 			if codeOf(err) != tc.code || origin != tc.origin {
 				t.Fatalf("checkURL(%q) = %q, %v; want %q, %s", tc.in, origin, err, tc.origin, tc.code)
@@ -107,6 +110,15 @@ func TestWhoIsConfirmsTheHubsNodeWhenItCanBeAsked(t *testing.T) {
 	who.err = tailnetgate.ErrUnavailable
 	if _, _, err := s.checkURL(t.Context(), "hub.tailed39ba.ts.net"); err != nil {
 		t.Fatalf("tailscaled unavailable should skip the check: %v", err)
+	}
+	// A name with no address on the tailnet: nothing to ask about and
+	// nothing to dial. The origin comes back with an unreachable error.
+	who.err = nil
+	asked := len(who.asks)
+	var unreachable *UnreachableError
+	origin, node, err := s.checkURL(t.Context(), "hub-2.tailed39ba.ts.net")
+	if origin != "https://hub-2.tailed39ba.ts.net" || node != nil || !errors.As(err, &unreachable) || len(who.asks) != asked {
+		t.Fatalf("no address = %q %+v %v, asked %d more", origin, node, err, len(who.asks)-asked)
 	}
 }
 

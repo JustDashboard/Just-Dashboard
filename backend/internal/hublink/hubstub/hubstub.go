@@ -2,8 +2,9 @@
 // packages that drive a hub link: the terminal command and the HTTP handlers.
 // It speaks just enough of hub link protocol 1 to be connected to, heartbeated
 // to and disconnected from, at a loopback address the tests name as
-// JD_HUB_LINK_TEST_ORIGIN. It does not verify signatures; the hublink
-// package's own tests do that against a hub that does.
+// JD_HUB_LINK_TEST_ORIGIN, or through At as a hub at a tailnet name. It does
+// not verify signatures; the hublink package's own tests do that against a hub
+// that does.
 package hubstub
 
 import (
@@ -38,6 +39,8 @@ type Hub struct {
 	unlinks  int
 	key      ed25519.PublicKey
 	lastBody map[string]any
+	// origin is where the dashboard thinks the hub is, when At set it.
+	origin string
 }
 
 // New starts a hub that has one request to give out at a time.
@@ -50,6 +53,33 @@ func New(t testing.TB) *Hub {
 	h.Server = httptest.NewServer(http.HandlerFunc(h.serve))
 	t.Cleanup(h.Close)
 	return h
+}
+
+// At has the stub answer as the hub at origin, a tailnet name a test cannot
+// dial, so the URL rule and the hub node check run: the addresses it hands
+// out are on origin, and the client it returns carries every request to the
+// stub with its path and headers unchanged.
+func (h *Hub) At(origin string) *http.Client {
+	h.mu.Lock()
+	h.origin = origin
+	h.mu.Unlock()
+	return &http.Client{Transport: toStub{h}}
+}
+
+type toStub struct{ h *Hub }
+
+func (t toStub) RoundTrip(r *http.Request) (*http.Response, error) {
+	to := r.Clone(r.Context())
+	to.URL.Scheme, to.URL.Host = "http", strings.TrimPrefix(t.h.URL, "http://")
+	to.Host = to.URL.Host
+	return http.DefaultTransport.RoundTrip(to)
+}
+
+func (h *Hub) originLocked() string {
+	if h.origin != "" {
+		return h.origin
+	}
+	return h.URL
 }
 
 func (h *Hub) set(status string) {
@@ -136,7 +166,7 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 		h.requests++
 		reply(w, 200, map[string]any{
 			"requestId": fmt.Sprintf("2c9e41d7-0000-4000-8000-%012d", h.requests), "userCode": "K7QM-29XD",
-			"approveUrl": h.URL + "/servers/pair?code=K7QM-29XD", "expiresAt": time.Now().Add(15 * time.Minute).Unix(), "pollSeconds": 2,
+			"approveUrl": h.originLocked() + "/servers/pair?code=K7QM-29XD", "expiresAt": time.Now().Add(15 * time.Minute).Unix(), "pollSeconds": 2,
 		})
 	case strings.HasPrefix(path, "/requests/"):
 		h.polls++
@@ -168,7 +198,7 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 			}},
 			"notices": []map[string]any{{
 				"id": "update-0.8.6", "level": "info", "title": "Update ready on 1 server", "body": "0.8.6 is out.",
-				"href": h.URL + "/updates", "at": time.Now().Unix(),
+				"href": h.originLocked() + "/updates", "at": time.Now().Unix(),
 			}},
 		})
 	case path == "/commands":

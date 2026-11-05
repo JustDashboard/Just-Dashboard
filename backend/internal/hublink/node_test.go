@@ -163,8 +163,11 @@ func TestANodeNotRecordedAtConnectIsRecordedLater(t *testing.T) {
 	// is sent to it.
 	e.whois.set(func(w *fakeWhoIs) { w.err, w.node, w.id = nil, "elsewhere.tailed39ba.ts.net.", "nElsewhere" })
 	e.svc.gate.forget()
-	if err := e.svc.Sync(t.Context()); err == nil || !strings.Contains(err.Error(), "elsewhere") {
+	if err := e.svc.Sync(t.Context()); err != nil {
 		t.Fatalf("a machine of another name = %v", err)
+	}
+	if s, _ := e.svc.Status(t.Context(), true); !strings.Contains(s.Admin.Link.LastError, "elsewhere") {
+		t.Fatalf("a machine of another name: last error %q", s.Admin.Link.LastError)
 	}
 	if st, _, _ := e.svc.Linked(t.Context()); st.HubNode != nil || st.Idle != nil {
 		t.Fatalf("a machine of another name was pinned or idled the link: %+v %+v", st.HubNode, st.Idle)
@@ -339,6 +342,139 @@ func TestCheckShowsTheMachineBeforeConnect(t *testing.T) {
 	test := newEnv(t)
 	if res, err := test.svc.Check(t.Context(), test.hub.URL()); err != nil || !res.TestOrigin || res.Machine != nil || res.HubURL != test.hub.URL() {
 		t.Fatalf("check of the test origin = %+v %v", res, err)
+	}
+}
+
+// Check compares the name only, never the pinned node, so it must not stand in
+// for the connector's check: a Check of the linked hub's address while another
+// machine holds the name leaves the next heartbeat to find that machine,
+// idle the link and send nothing (protocol 2.4).
+func TestACheckOfTheLinkedHubDoesNotPassTheConnectorsCheck(t *testing.T) {
+	e := newTailnetEnv(t)
+	e.link(accountlink.ScopeMaintain)
+	e.advance(nodeCheckEvery + time.Minute)
+	e.whois.set(func(w *fakeWhoIs) { w.id = "nImpostorCNTRL" })
+	for i := 0; i < 2; i++ {
+		res, err := e.svc.Check(t.Context(), tailnetOrigin)
+		if err != nil || res.Machine == nil || res.Machine.ID != "nImpostorCNTRL" {
+			t.Fatalf("check = %+v %v", res, err)
+		}
+	}
+	if err := e.svc.Sync(t.Context()); !errors.Is(err, ErrURLRefused) {
+		t.Fatalf("sync after a check = %v", err)
+	}
+	if n := len(e.hub.heartbeatBodies()); n != 0 {
+		t.Fatalf("%d heartbeats reached another machine", n)
+	}
+	if st, _, _ := e.svc.Linked(t.Context()); st.Idle == nil || !strings.Contains(st.Idle.Reason, "the hub's machine changed") {
+		t.Fatalf("idle = %+v", st.Idle)
+	}
+	if rows := e.auditRows("hub.link.node_changed"); len(rows) != 1 || !strings.Contains(rows[0].Detail, "nImpostorCNTRL") {
+		t.Fatalf("audit = %+v", rows)
+	}
+}
+
+// With nothing pinned (Connect's own request, which may carry the one-time
+// token) the dialer's check is step 8's: another machine's name at the address
+// is refused with hub_not_on_tailnet and the address is not marked checked.
+func TestTheDialersCheckWithNothingPinnedNeedsTheHostsName(t *testing.T) {
+	e := newTailnetEnv(t)
+	addr := netip.MustParseAddr("100.101.102.104")
+	e.whois.set(func(w *fakeWhoIs) { w.id, w.node = "nOtherCNTRL", "other.tailed39ba.ts.net." })
+	if err := e.svc.dialGate(t.Context(), "hub.tailed39ba.ts.net", addr); codeOf(err) != CodeNotOnTailnet || !strings.Contains(err.Error(), "other.tailed39ba.ts.net") {
+		t.Fatalf("another machine's address = %v", err)
+	}
+	if e.svc.gate.fresh("hub.tailed39ba.ts.net", addr, e.clock()) {
+		t.Fatal("a refused address was marked checked")
+	}
+	e.whois.set(func(w *fakeWhoIs) { w.node = "hub.tailed39ba.ts.net." })
+	if err := e.svc.dialGate(t.Context(), "hub.tailed39ba.ts.net", addr); err != nil {
+		t.Fatalf("the hub's own address = %v", err)
+	}
+}
+
+// A hub name with no tailnet address leaves nothing to ask WhoIs about. A
+// poll of a pending request and a request on a stored link are then not sent
+// at all, rather than on a connection the transport keeps open without the
+// dialer's check, and each counts as failed without ending or idling
+// anything. Connect stops before its request; Check shows the machine as not
+// checked.
+func TestNoAddressForTheHubSendsNothing(t *testing.T) {
+	e := newTailnetEnv(t)
+	req, err := e.svc.Connect(t.Context(), ConnectRequest{URL: tailnetOrigin, Scope: accountlink.ScopeObserve, By: "ion"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.hub.approve(req.ID)
+	e.tailnet.set(func(s *TailnetStatus) { s.Peers = map[string]netip.Addr{} })
+	e.svc.dial.forget("hub.tailed39ba.ts.net")
+	polls := e.hub.pollCount()
+	res, err := e.svc.Poll(t.Context())
+	if err == nil || res.State != accountlink.PollPending || !strings.Contains(err.Error(), "no address on this server's tailnet") {
+		t.Fatalf("poll = %+v %v", res, err)
+	}
+	if e.hub.pollCount() != polls {
+		t.Fatal("a poll was sent with its check not run")
+	}
+	if _, pending, _ := e.svc.Pending(t.Context()); !pending {
+		t.Fatal("the request ended")
+	}
+
+	// The same name with an address again: the approval is collected.
+	e.tailnet.set(func(s *TailnetStatus) {
+		s.Peers = map[string]netip.Addr{"hub.tailed39ba.ts.net": netip.MustParseAddr("100.101.102.103")}
+	})
+	if res, err := e.svc.Poll(t.Context()); err != nil || res.State != accountlink.PollLinked {
+		t.Fatalf("poll = %+v %v", res, err)
+	}
+
+	// A stored link whose check is due.
+	e.advance(nodeCheckEvery)
+	e.tailnet.set(func(s *TailnetStatus) { s.Peers = map[string]netip.Addr{} })
+	e.svc.dial.forget("hub.tailed39ba.ts.net")
+	asked := e.whois.asked()
+	if err := e.svc.Sync(t.Context()); err != nil {
+		t.Fatalf("sync = %v", err)
+	}
+	if n := len(e.hub.heartbeatBodies()); n != 0 || e.whois.asked() != asked {
+		t.Fatalf("%d heartbeats, WhoIs asked %d times", n, e.whois.asked()-asked)
+	}
+	s, _ := e.svc.Status(t.Context(), true)
+	if st, _, _ := e.svc.Linked(t.Context()); st.Idle != nil || !strings.Contains(s.Admin.Link.LastError, "the hub cannot be reached") {
+		t.Fatalf("idle = %+v, last error = %q", st.Idle, s.Admin.Link.LastError)
+	}
+
+	// Connect stops at the rule, and Check says not checked.
+	fresh := newTailnetEnv(t)
+	fresh.tailnet.set(func(s *TailnetStatus) { s.Peers = map[string]netip.Addr{} })
+	var unreachable *UnreachableError
+	if _, err := fresh.svc.Connect(t.Context(), ConnectRequest{URL: tailnetOrigin, Scope: accountlink.ScopeObserve, By: "ion"}); !errors.As(err, &unreachable) {
+		t.Fatalf("connect with no address = %v", err)
+	}
+	if fresh.hub.requestCount() != 0 || fresh.whois.asked() != 0 {
+		t.Fatal("connect sent a request or asked WhoIs with no address")
+	}
+	if res, err := fresh.svc.Check(t.Context(), "hub.tailed39ba.ts.net"); err != nil || res.HubURL != tailnetOrigin || res.Machine != nil {
+		t.Fatalf("check with no address = %+v %v", res, err)
+	}
+}
+
+// ErrNotAPeer at a manual sync is a failed heartbeat on the status, not an
+// error: only an idle link is refused (protocol 2.4, 8.2).
+func TestASyncThatFindsNoMachineIsAFailedHeartbeat(t *testing.T) {
+	e := newTailnetEnv(t)
+	e.link(accountlink.ScopeObserve)
+	e.advance(nodeCheckEvery)
+	e.whois.set(func(w *fakeWhoIs) { w.err = tailnetgate.ErrNotAPeer })
+	if err := e.svc.Sync(t.Context()); err != nil {
+		t.Fatalf("sync = %v", err)
+	}
+	s, _ := e.svc.Status(t.Context(), true)
+	if n := len(e.hub.heartbeatBodies()); n != 0 || !strings.Contains(s.Admin.Link.LastError, "the hub's machine is not on this tailnet") {
+		t.Fatalf("%d heartbeats, last error %q", n, s.Admin.Link.LastError)
+	}
+	if st, _, _ := e.svc.Linked(t.Context()); st.Idle != nil {
+		t.Fatalf("idle = %+v", st.Idle)
 	}
 }
 

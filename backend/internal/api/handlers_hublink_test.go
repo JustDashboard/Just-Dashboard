@@ -372,14 +372,22 @@ func (peerTailnet) Status(context.Context) (hublink.TailnetStatus, error) {
 		Peers: map[string]netip.Addr{"hub.tailed39ba.ts.net": netip.MustParseAddr("100.101.102.103")}}, nil
 }
 
-// hubWhoIs is tailscaled naming the hub's machine, or failing with err.
-type hubWhoIs struct{ err error }
+// hubWhoIs is tailscaled naming the hub's machine (or the machine id, when
+// set, holding the hub's name), or failing with err.
+type hubWhoIs struct {
+	err error
+	id  string
+}
 
 func (w hubWhoIs) WhoIs(_ context.Context, a netip.Addr) (tailnetgate.Peer, error) {
 	if w.err != nil {
 		return tailnetgate.Peer{}, w.err
 	}
-	return tailnetgate.Peer{Address: a, Node: "hub.tailed39ba.ts.net.", StableID: "nK7f2QbPaa21CNTRL", Login: "wayy01@github"}, nil
+	id := w.id
+	if id == "" {
+		id = "nK7f2QbPaa21CNTRL"
+	}
+	return tailnetgate.Peer{Address: a, Node: "hub.tailed39ba.ts.net.", StableID: id, Login: "wayy01@github"}, nil
 }
 
 // GET /dashboard/hub/check applies the URL rule without starting anything and
@@ -451,6 +459,55 @@ func TestTheHubCheckShowsTheMachineBeforeConnect(t *testing.T) {
 	admin = &client{t: t, h: s.Routes(), cookie: admin.cookie}
 	if code, body := check(admin, "hub.tailed39ba.ts.net", nil); code != 403 || linkErrorCode(t, body) != "hub_link_disabled" {
 		t.Fatalf("switched off = %d %s", code, body)
+	}
+}
+
+// A sync whose check of the hub's machine fails this time, with no machine at
+// the hub's address (ErrNotAPeer), is a heartbeat that failed: 200 and the
+// status saying why. Only an idle link, here one whose hub name another
+// machine holds now, is refused, with 409 hub_url_refused (protocol 2.4, 8.2).
+func TestASyncThatCannotCheckTheHubsMachineAnswersTheStatus(t *testing.T) {
+	s := testServer(t)
+	hub := hubstub.New(t)
+	toHub := hub.At("https://hub.tailed39ba.ts.net")
+	cookie := signInAs(t, s, "hub-sync", auth.RoleAdmin)
+	// Each start of the dashboard checks the hub's machine before it sends.
+	start := func(who hubWhoIs) *client {
+		s.modules.hubLink = hublink.New(hublink.Options{
+			Store: s.Store, Sealer: s.Sealer, Audit: s.Audit, Enabled: true, Host: newAccountHost(s), Version: "test",
+			Tailnet: peerTailnet{}, WhoIs: who, HTTP: toHub,
+		})
+		return &client{t: t, h: s.Routes(), cookie: cookie}
+	}
+	admin := start(hubWhoIs{})
+	if w := admin.do(http.MethodPost, "/api/v1/dashboard/hub", `{"url":"hub.tailed39ba.ts.net","scope":"observe"}`, nil); w.Code != 200 {
+		t.Fatalf("connect = %d %s", w.Code, w.Body)
+	}
+	hub.Approve()
+	if res, err := s.modules.hubLink.Poll(t.Context()); err != nil || res.State != accountlink.PollLinked {
+		t.Fatalf("poll = %+v, %v", res, err)
+	}
+
+	admin = start(hubWhoIs{err: tailnetgate.ErrNotAPeer})
+	w := admin.do(http.MethodPost, "/api/v1/dashboard/hub/sync", "", nil)
+	if w.Code != 200 {
+		t.Fatalf("sync with no machine at the address = %d %s", w.Code, w.Body)
+	}
+	link, _ := decodeMap(t, w.Body.String())["admin"].(map[string]any)["link"].(map[string]any)
+	if last, _ := link["lastError"].(string); !strings.Contains(last, "the hub's machine is not on this tailnet") {
+		t.Fatalf("status after sync = %s", w.Body)
+	}
+	if _, _, beats, _ := hub.Count(); beats != 0 {
+		t.Fatalf("%d heartbeats with no machine at the address", beats)
+	}
+
+	admin = start(hubWhoIs{id: "nImpostorCNTRL"})
+	if w := admin.do(http.MethodPost, "/api/v1/dashboard/hub/sync", "", nil); w.Code != 409 || linkErrorCode(t, w.Body.String()) != "hub_url_refused" ||
+		!strings.Contains(w.Body.String(), "the hub's machine changed") {
+		t.Fatalf("sync with another machine at the name = %d %s", w.Code, w.Body)
+	}
+	if _, _, beats, _ := hub.Count(); beats != 0 {
+		t.Fatalf("%d heartbeats reached another machine", beats)
 	}
 }
 

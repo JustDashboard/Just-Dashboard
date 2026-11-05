@@ -122,7 +122,7 @@ func DescribeMachine(m Machine) string {
 
 // pin is what a check compares against: the stored link's hub node, or the
 // pending request's. Neither is set before anything is stored (Connect's own
-// request, which step 8 of the rule has just checked).
+// request), and then the check is step 8's: the machine must be the host.
 type pin struct {
 	link *accountlink.State
 	req  *accountlink.Request
@@ -178,6 +178,12 @@ func (s *Service) checkNode(ctx context.Context, host string, addr netip.Addr, p
 	case p.req != nil:
 		want = p.req.HubNode
 	default:
+		// Nothing pinned: Connect's own request, which may carry the
+		// one-time token. Step 8 of the rule holds whenever tailscaled
+		// answers, here as in confirmNode: the machine must be the host.
+		if got.Name != host {
+			return urlError(CodeNotOnTailnet, "%s is held by %s on this tailnet, not by %s", addr, clip(got.Name, 100), host)
+		}
 		s.gate.pass(host, addr, s.now())
 		return nil
 	}
@@ -241,11 +247,17 @@ func (s *Service) admitNode(ctx context.Context, st accountlink.State) error {
 	}
 	addr, err := s.dial.resolve(ctx, host)
 	if err != nil {
-		// Nothing to ask about, and nothing will be dialled either: the
-		// request fails as the hub being unreachable.
-		return nil
+		return noAddress(err)
 	}
 	return s.checkNode(ctx, host, addr, pin{link: &st})
+}
+
+// noAddress is a check that could not run because the hub's name has no
+// tailnet address now. Nothing is sent: the transport could still carry the
+// request on a connection it keeps open, without dialling, so without the
+// dialer's check. It counts as a failed exchange and does not idle the link.
+func noAddress(err error) error {
+	return fmt.Errorf("the hub cannot be reached, and its machine was not checked: %w", err)
 }
 
 // beforePoll is the engine's hook before every poll of a pending request
@@ -258,7 +270,9 @@ func (s *Service) beforePoll(ctx context.Context, req accountlink.Request) (acco
 	host := hostOf(req.URL)
 	addr, err := s.dial.resolve(ctx, host)
 	if err != nil {
-		return req, nil
+		// A failed poll: an approval is stored only from a poll whose check
+		// passed or found tailscaled unavailable.
+		return req, noAddress(err)
 	}
 	if err := s.checkNode(ctx, host, addr, pin{req: &req}); err != nil {
 		return req, err

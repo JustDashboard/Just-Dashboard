@@ -55,7 +55,7 @@ The hooks the hub link uses:
 
 | Hook | What the hub link does with it |
 | --- | --- |
-| `Admit` | Before anything is sent on a stored link: an idle link sends nothing, the URL rule as it applies to a stored link, and the hub node check (both below). It replaces the account link's "still `JD_ACCOUNT_URL`" check everywhere that check ran (the top loop, the heartbeat, a manual sync, whether an unlink tells anyone) and also runs before every command poll and every result |
+| `Admit` | Before anything is sent on a stored link: an idle link sends nothing, the URL rule as it applies to a stored link, and the hub node check (both below). It replaces the account link's "still `JD_ACCOUNT_URL`" check everywhere that check ran (the top loop, the heartbeat, a manual sync, whether an unlink tells anyone) and also runs before every command poll and every result. Its refusals (an idle link) wrap `accountlink.ErrIdle` as well as `hublink.ErrURLRefused`; any other error is a check that failed this time, which the engine counts as a failed exchange. A manual sync (`SyncNow`) answers with a refusal and puts any other error on the status as a failed heartbeat |
 | `BeforePoll` | The hub node check before every poll of a pending request, in whichever process polls it. A `*RequestEndedError` ends the request as failed and nothing is sent |
 | `OnReply` | Decodes and checks `fleet`, `notices` and `signIn`, and returns the write that caches them in `hub.link.view`, which the engine runs inside the heartbeat's own transaction only while the link is still the one it was sent for. A reply that does not decode strictly fails the heartbeat and nothing in it is used |
 | `OnClear` | Deletes `hub.link.view` in the same transaction that ends a link (disconnect, removal in the hub) or stores a new one |
@@ -87,8 +87,12 @@ the top-level field, else the self name without its first label); exactly one la
 every port of its host (`hub_url_same_host`). Then, when tailscaled's LocalAPI can be asked
 (`tailnetgate.NewLocalAPI`), `whois` on the address the dashboard would dial must name that same machine
 (`hub_not_on_tailnet`); when it cannot be asked the check is skipped and logged, since the certificate and the
-steps before already bind the name. "One hub per server" is checked before any of this, so a refused second
-connect never asks the tailnet.
+steps before already bind the name. A name with no tailnet address (see "Reaching the hub") leaves nothing to ask
+about: the skip is logged, `Check` shows the machine as not checked, and `Connect` stops there with
+`502 hub_unreachable`, so no request goes out whose step 8 never ran. Step 8 here (`confirmNode`) changes nothing:
+it compares the name only, never a pinned node, so it never marks an address as checked for the connector, and
+a `check` of a linked hub's address cannot stand in for the connector's own check. "One hub per server" is checked
+before any of this, so a refused second connect never asks the tailnet.
 
 **A stored link is checked again when the connector starts with it** (`admit`, once per link per process, before
 anything is sent): steps 1 to 4 need no tailnet and always run, so an address that is not `https`, is an IP literal
@@ -111,7 +115,11 @@ as the **hub node** (`{id: StableID, name, owner (the login) or tags}`, `account
 Before anything is sent on a stored link, WhoIs is asked about the address about to be dialled: at each connector
 start, at least every five minutes (`admitNode` from `Admit`), and whenever the dialer is about to dial an address
 it has not checked (`dialGate`, `dialer.gate`, so a DNS or peer change between checks is caught before a byte goes
-out). Another `StableID` sends nothing and sets the link idle with "the hub's machine changed", in the same way as
+out). With nothing pinned yet, which is `Connect`'s own request (the one that may carry the one-time token), the
+dialer's check is step 8's: a machine of another name at the address is refused with `hub_not_on_tailnet`. A check
+that is due when the hub's name has no tailnet address sends nothing and counts as a failed exchange or poll, since
+the transport could otherwise carry the request on a connection it keeps open, with no dial and so no check.
+Another `StableID` sends nothing and sets the link idle with "the hub's machine changed", in the same way as
 above, audited `hub.link.node_changed` with the old and new node. No machine at the address (`ErrNotAPeer`) sends
 nothing and counts as a failed exchange with "the hub's machine is not on this tailnet", backing off without going
 idle. tailscaled not answering (`ErrUnavailable`, or an answer with no `StableID`) sends, and is logged at most once
@@ -202,12 +210,12 @@ the walks of what an API, deploy or MCP key may open read the same list.
 | Route | Guards | Does |
 | --- | --- | --- |
 | `GET /dashboard/hub` | any signed-in principal; the `admin` part only for `system.admin` | The status (shape below) |
-| `GET /dashboard/hub/check?url=` | `system.admin`, session; not audited | The URL rule, steps 1 to 8, without starting anything: `{hubUrl, machine?, testOrigin}`, `machine` left out when tailscaled could not be asked. Connect's rule errors and `403 hub_link_disabled`. Settings calls it before Connect to show whose machine the address is |
-| `POST /dashboard/hub` `{url, scope}` | `system.admin`, session; audited `hub.link.begin` with `hubNode` | Connect. `400` with the rule's code, `409 already_linked`, `409 link_pending`, `403 hub_link_disabled`, `502 hub_unreachable` (the message says what failed, `bad_token` and `unsupported_protocol` included) |
+| `GET /dashboard/hub/check?url=` | `system.admin`, session; not audited | The URL rule, steps 1 to 8, without starting anything or changing anything: `{hubUrl, machine?, testOrigin}`, `machine` left out when tailscaled could not be asked or the name has no tailnet address. Connect's rule errors and `403 hub_link_disabled`. Settings calls it before Connect to show whose machine the address is |
+| `POST /dashboard/hub` `{url, scope}` | `system.admin`, session; audited `hub.link.begin` with `hubNode` | Connect. `400` with the rule's code, `409 already_linked`, `409 link_pending`, `403 hub_link_disabled`, `502 hub_unreachable` (the message says what failed, `bad_token` and `unsupported_protocol` included; a `429` says the hub is not taking new requests now and to try again later, before the hub's own words, protocol 4.7) |
 | `DELETE /dashboard/hub/request` | `system.admin`, session; `hub.link.cancel` | Forget the pending request (`204`); the hub is not told |
 | `PUT /dashboard/hub/scope` `{scope}` | `system.admin`, session; `hub.link.scope` | Change the scope; the next heartbeat tells the hub. `409 not_linked` |
 | `DELETE /dashboard/hub` | `system.admin`, session, `s.destructive`; `hub.unlink` with `hubNotified` | Disconnect (`204`). `409 not_linked` |
-| `POST /dashboard/hub/sync` | `system.admin` (an API key may) | A heartbeat now, then the status. `409 not_linked`, `409 hub_url_refused`. Held to twelve a minute: a press that would break the pace is skipped |
+| `POST /dashboard/hub/sync` | `system.admin` (an API key may) | A heartbeat now, then the status. `409 not_linked`, `409 hub_url_refused` (an idle link only). A check of the hub's machine that fails this time (no machine at the address, or no address) sends nothing and answers `200` with the reason as `admin.link.lastError`. Held to twelve a minute: a press that would break the pace is skipped |
 
 The `GET`s sit with the every-role reads of the `/dashboard` group (`handlers_selfupdate.go`; `check` with
 `system.admin` and `RequireSession` added); the rest sit in its `system.admin` part. The status is `hublink.Status`: optional fields are left out, never `null`; times are
@@ -263,7 +271,9 @@ The account link's table applies, with these for the hub:
 | `410` on any signed request | The hub removed this server: link, policy, status and cached view cleared in one transaction, identity and sequence kept, `hub.unlink` by `system` with the reason "the server was removed in the hub" |
 | The server moved to another tailnet, or the test origin was removed | The link is set idle in the store at the next start and says why; it stays idle until a person disconnects |
 | Another machine answers at the hub's name | Nothing is sent; the link is set idle ("the hub's machine changed") and `hub.link.node_changed` audited; a pending request ends as failed with nothing stored |
-| No machine holds the hub's address | Nothing is sent; the exchange fails and backs off; the link stays as it is |
+| No machine holds the hub's address | Nothing is sent; the exchange fails and backs off; the link stays as it is. A manual sync answers `200` with the reason on the status |
+| The hub's name has no tailnet address | Connect fails with `502 hub_unreachable` before its request. A check that is due sends nothing (not even on a connection kept open) and the exchange or poll fails and backs off |
+| The hub holds too many waiting requests (`429` on Connect) | Connect fails with `502 hub_unreachable`, saying to try again later |
 | The hub is reinstalled with a new key | Its commands fail the key check (refused, audited); disconnect and connect again |
 | `JD_HUB_LINK=false` while linked | The link stays stored and idle; nothing is sent; a disconnect clears it and tells no one |
 
@@ -303,16 +313,21 @@ succeeding, endpoints and links removed, the text rule), strict top-level replie
 writing nothing, `siteKeys` in a reply changing no pinned key, the clock-based sequence surviving a restored
 database, the hub's words quoted as the hub's, every kind at every scope run as `hub:hub` or refused, replay,
 expiry, a forged key, an unpinned `kid`, a command for another server and an unknown kind (refused, reported and
-audited, and only commands past the signature recorded in `hub_link_commands`), disconnect, removal in the hub,
-a stored link that no longer passes the rule, and both links side by side. `node_test.go` reaches the same fake hub
-at `https://hub.tailed39ba.ts.net` through a test transport, so the URL rule and the hub node check run: the node
+audited, and only commands past the signature recorded in `hub_link_commands`), disconnect, removal in the hub, a
+stored link that no longer passes the rule, and both links side by side. `node_test.go` reaches the same fake hub at
+`https://hub.tailed39ba.ts.net` through a test transport, so the URL rule and the hub node check run: the node
 pinned at connect, another `StableID` idling the link and surviving a restart, `ErrNotAPeer` backing off and
-`ErrUnavailable` sending, the five-minute cadence, a node recorded later, a pending request ended by another
-machine (from the running dashboard and from the terminal command), a test-origin link idled once the variable is
-gone, `Check`, and the dialer's gate. The vectors test reads `hub-link-vectors.json` and runs every key,
-canonical-JSON, rejected-args, request and command case and the hello bodies against the dashboard's own code, the
-hub-link command cases through the real connector. The URL rule, the test origin, `tailscale status` parsing and
-the dialer have table tests. The `api` tests cover the routes and their role rules through the HTTP stack, `check`
-with tailscaled answering and not, the begin audit's node, the session field and the probe; the `admin` and
-`test_manage.py` tests cover the terminal path, a token refused as an argument and read with echo off at a
-terminal included.
+`ErrUnavailable` sending, the five-minute cadence, a node recorded later, a pending request ended by another machine
+(from the running dashboard and from the terminal command), a test-origin link idled once the variable is gone,
+`Check` (and that a `Check` of the linked hub's address while another machine holds the name still lets the next
+heartbeat find it, idle the link and send nothing), the dialer's gate (with nothing pinned, another machine's name
+refused), a name with no address sending no poll and no heartbeat, a sync that finds no machine succeeding with the
+reason on the status, and a `429` on Connect saying to try again later. The vectors test reads
+`hub-link-vectors.json` and runs every key, canonical-JSON, rejected-args, request and command case and the hello
+bodies against the dashboard's own code, the hub-link command cases through the real connector. The URL rule, the
+test origin, `tailscale status` parsing and the dialer have table tests. The `api` tests cover the routes and their
+role rules through the HTTP stack, `check` with tailscaled answering and not, `sync` answering `200` with the reason
+when no machine holds the hub's address and `409 hub_url_refused` once another machine holds its name (the stand-in
+hub answers at a tailnet name through `hubstub.At`), the begin audit's node, the session field and the probe; the
+`admin` and `test_manage.py` tests cover the terminal path, a token refused as an argument and read with echo off at
+a terminal included.

@@ -562,6 +562,49 @@ func TestAnIdleLinkSendsNothingUntilItIsUnlinked(t *testing.T) {
 	}
 }
 
+// A manual sync answers with the instance's Admit error only when it is the
+// link refused (it wraps ErrIdle). A check that failed this time sends nothing
+// and is a failed heartbeat on the status, and the sync itself succeeds, so
+// the page shows the status rather than a server error.
+func TestSyncNowRefusesOnlyARefusedLink(t *testing.T) {
+	var mu sync.Mutex
+	var admitErr error
+	e := newEnv(t, func(o *Options) {
+		o.Hooks.Admit = func(context.Context, State) error {
+			mu.Lock()
+			defer mu.Unlock()
+			return admitErr
+		}
+	})
+	e.link(ScopeObserve)
+	set := func(err error) {
+		mu.Lock()
+		admitErr = err
+		mu.Unlock()
+	}
+
+	set(errors.New("the peer's machine is not on this tailnet"))
+	if err := e.svc.SyncNow(t.Context()); err != nil {
+		t.Fatalf("sync with a failed check = %v", err)
+	}
+	if st, _ := e.svc.Status(t.Context()); st.Link == nil || st.Link.LastError != "the peer's machine is not on this tailnet" {
+		t.Fatalf("link status = %+v", st.Link)
+	}
+	if n := len(e.site.heartbeatBodies()); n != 0 {
+		t.Fatalf("%d heartbeats with the check failed", n)
+	}
+
+	set(fmt.Errorf("%w: another machine holds the name", ErrIdle))
+	if err := e.svc.SyncNow(t.Context()); !errors.Is(err, ErrIdle) {
+		t.Fatalf("sync on a refused link = %v", err)
+	}
+
+	set(nil)
+	if err := e.svc.SyncNow(t.Context()); err != nil || len(e.site.heartbeatBodies()) != 1 {
+		t.Fatalf("sync = %v, %d heartbeats", err, len(e.site.heartbeatBodies()))
+	}
+}
+
 // Stopping right after starting, again and again, waits for the loop that
 // started and never closes a channel twice or a nil one.
 func TestStopRightAfterStartIsSafe(t *testing.T) {

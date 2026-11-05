@@ -112,9 +112,12 @@ type ReplyWrite func(ctx context.Context, tx *sql.Tx) (after func(), err error)
 // Hooks are the points where an instance adds behaviour of its own. Each is
 // optional.
 type Hooks struct {
-	// Admit says whether a stored link may run now. An error idles the link
-	// (it is not cleared) and its text is shown as the last error. Without
-	// it, a link runs only while its URL is Options.SiteURL.
+	// Admit says whether a stored link may run now. An error sends nothing
+	// this time and its text is shown as the last error; the link is not
+	// cleared. One that wraps ErrIdle is the link refused until a person
+	// acts, and a manual sync answers with it; any other counts as a failed
+	// exchange. Without it, a link runs only while its URL is
+	// Options.SiteURL.
 	Admit func(ctx context.Context, st State) error
 	// OnReply receives the view part of every successful heartbeat reply of a
 	// ReplyView profile, before anything in the reply is used. An error fails

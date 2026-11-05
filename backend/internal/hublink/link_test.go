@@ -615,6 +615,32 @@ func TestTheHubsWordsAreQuotedAsTheHubs(t *testing.T) {
 	}
 }
 
+// 429 on a request for a link can mean the hub holds its 50 waiting requests:
+// Connect fails and says, in this dashboard's words, to try again later, with
+// the hub's own words quoted after (protocol 4.7). Nothing is stored.
+func TestARateLimitedConnectSaysToTryAgainLater(t *testing.T) {
+	e := newEnv(t)
+	e.hub.mu.Lock()
+	e.hub.failWith = &hubFailure{429, "rate_limited", "50 requests are waiting"}
+	e.hub.mu.Unlock()
+	_, err := e.svc.Connect(t.Context(), ConnectRequest{URL: e.hub.URL(), Scope: accountlink.ScopeObserve, By: "ion"})
+	var unreachable *UnreachableError
+	if !errors.As(err, &unreachable) || !strings.Contains(err.Error(), "not taking new requests now; try again later") ||
+		!strings.Contains(err.Error(), `429 rate_limited. Just Hub (`) || !strings.Contains(err.Error(), `says: "50 requests are waiting"`) {
+		t.Fatalf("connect = %v", err)
+	}
+	if _, pending, _ := e.svc.Pending(t.Context()); pending {
+		t.Fatal("a refused request was kept")
+	}
+	// Any other refusal keeps the hub's answer as it is.
+	e.hub.mu.Lock()
+	e.hub.failWith = &hubFailure{503, "maintenance", "back soon"}
+	e.hub.mu.Unlock()
+	if _, err := e.svc.Connect(t.Context(), ConnectRequest{URL: e.hub.URL(), Scope: accountlink.ScopeObserve, By: "ion"}); err == nil || strings.Contains(err.Error(), "try again later") {
+		t.Fatalf("connect = %v", err)
+	}
+}
+
 func TestDisconnectTellsTheHubAndKeepsTheIdentity(t *testing.T) {
 	e := newEnv(t)
 	e.link(accountlink.ScopeObserve)

@@ -142,6 +142,12 @@ func TestATokenOnStandardInputApprovesWithoutAPerson(t *testing.T) {
 	if r, _, _, _ := f.hub.Count(); r != requests {
 		t.Fatal("a token given as an argument reached the hub")
 	}
+	// Nor does the help offer one: it would put the secret in the process
+	// list and shell history before the refusal.
+	if strings.Contains(Usage, "--token TOKEN") || strings.Contains(Usage, "--token=") ||
+		!strings.Contains(Usage, "hub-connect URL [--scope observe|operate|maintain] [--token-stdin] [--wait 15m]") {
+		t.Fatalf("the usage offers a token argument:\n%s", Usage)
+	}
 }
 
 func TestADeclinedOrUnapprovedHubRequestExitsTwoAndLeavesNothing(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 )
 
@@ -187,7 +188,10 @@ func oneMachine(host, suffix, self string) error {
 
 // checkURL is the whole rule, applied when a person or the terminal names a
 // hub. Step 8 runs only here, and finds the hub node, which is nil when
-// tailscaled could not be asked or the origin is the test origin.
+// tailscaled could not be asked or the origin is the test origin. A name with
+// no address on the tailnet passes steps 1 to 7 and returns its origin with an
+// *UnreachableError: Check shows it as not checked, and Connect stops there,
+// since the request could not be sent either.
 func (s *Service) checkURL(ctx context.Context, raw string) (string, *Machine, error) {
 	origin, u, err := readOrigin(raw)
 	if err != nil {
@@ -211,7 +215,11 @@ func (s *Service) checkURL(ctx context.Context, raw string) (string, *Machine, e
 	if err := oneMachine(host, suffix, st.Self); err != nil {
 		return "", nil, err
 	}
-	node, err := s.confirmNode(ctx, host)
+	node, err := s.confirmNode(ctx, origin, host)
+	var unreachable *UnreachableError
+	if errors.As(err, &unreachable) {
+		return origin, nil, err
+	}
 	if err != nil {
 		return "", nil, err
 	}
@@ -222,16 +230,22 @@ func (s *Service) checkURL(ctx context.Context, raw string) (string, *Machine, e
 // tailscaled's own account, to the machine of that name, and that machine is
 // the hub node. When tailscaled cannot be asked the check is skipped and
 // logged, and the node is recorded by a later check (2.4); the certificate and
-// the steps before already bind the name.
-func (s *Service) confirmNode(ctx context.Context, host string) (*Machine, error) {
+// the steps before already bind the name. A name with no tailnet address
+// leaves nothing to ask about and nothing to dial: an *UnreachableError, which
+// checkURL returns with the origin.
+//
+// It changes nothing. In particular it does not mark the address as checked
+// for the connector: it compares the name only, never a pinned node, so a
+// check of a linked hub's address must not stand in for the connector's own
+// (2.4). The request Connect sends next is checked again by the dialer.
+func (s *Service) confirmNode(ctx context.Context, origin, host string) (*Machine, error) {
 	if s.whois == nil {
 		return nil, nil
 	}
 	addr, err := s.dial.resolve(ctx, host)
 	if err != nil {
-		// Nothing to ask about; the request itself will say the hub cannot
-		// be reached.
-		return nil, nil
+		s.log.Info("the hub's tailnet node was not confirmed; its address could not be found", "hub", host, "err", err)
+		return nil, &UnreachableError{URL: origin, Err: err}
 	}
 	peer, err := s.whois.WhoIs(ctx, addr)
 	switch {
@@ -247,9 +261,6 @@ func (s *Service) confirmNode(ctx context.Context, host string) (*Machine, error
 		return nil, urlError(CodeNotOnTailnet, "%s is held by %s on this tailnet, not by %s", addr, clip(peer.Node, 100), host)
 	}
 	m := machineOf(peer)
-	// The address was checked just now; the request Connect sends next goes
-	// to it without asking again.
-	s.gate.pass(host, addr, s.now())
 	return &m, nil
 }
 
@@ -296,8 +307,16 @@ func (s *Service) admitStored(ctx context.Context, stored string) error {
 // kept but idle until a person disconnects.
 var ErrURLRefused = errors.New("this server no longer accepts the hub's address")
 
+// refusal is a stored link this server stopped using: ErrURLRefused here, and
+// accountlink.ErrIdle to the engine, which answers a manual sync with it
+// instead of counting a failed heartbeat. Every refusal is an idle link.
+type refusal struct{ msg string }
+
+func (r *refusal) Error() string   { return r.msg }
+func (r *refusal) Unwrap() []error { return []error{ErrURLRefused, accountlink.ErrIdle} }
+
 func refused(why error) error {
-	return fmt.Errorf("%w: %v; disconnect, then connect again", ErrURLRefused, why)
+	return &refusal{msg: fmt.Sprintf("%v: %v; disconnect, then connect again", ErrURLRefused, why)}
 }
 
 // sameOriginAs reports whether raw is an absolute URL on origin, spelt as the

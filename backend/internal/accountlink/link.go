@@ -506,7 +506,8 @@ func (s *Service) Unlink(ctx context.Context) (siteNotified bool, err error) {
 }
 
 // SyncNow sends a heartbeat now and returns once it has been tried; the result
-// is on the status either way.
+// is on the status either way. Of the link's own state, only a link refused
+// (idle, or made with another site) is an error.
 func (s *Service) SyncNow(ctx context.Context) error {
 	if !s.enabled {
 		return ErrDisabled
@@ -519,7 +520,13 @@ func (s *Service) SyncNow(ctx context.Context) error {
 		return ErrNotLinked
 	}
 	if err := s.admit(ctx, st); err != nil {
-		return err
+		if refusedLink(err) {
+			return err
+		}
+		// The instance's check of the peer failed this time: nothing is
+		// sent, and the status says why, as for a heartbeat that failed.
+		s.setHeartbeatError(ctx, st.ServerID, s.describeError(err))
+		return nil
 	}
 	if err := s.sendHeartbeat(ctx, st, false); err != nil && !errors.Is(err, ErrTooSoon) {
 		// The failure is already on the status as lastError.

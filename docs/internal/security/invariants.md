@@ -407,8 +407,11 @@ A change that weakens any of these has to say so explicitly.
     anything is sent (at each connector start, whenever the dialled address changes, at least every five
     minutes, and before every poll of a pending request); another machine at that name is sent nothing and
     the link goes idle, as does a stored address the tailnet rule refuses at start, and an idle link stays idle
-    in the store until a person disconnects. Connecting, cancelling, changing the scope and disconnecting are
-    session-only in the browser (an API key is refused) and root-only at the terminal, where the hub's one-time
+    in the store until a person disconnects. Only that check, against the pinned node, lets a request through:
+    the URL check before Connect compares the name alone and changes nothing, before anything is pinned the
+    machine WhoIs names must bear the hub's name, and a check that cannot run for want of an address sends
+    nothing. Connecting, cancelling, changing the scope and disconnecting are session-only in the browser (an
+    API key is refused) and root-only at the terminal, where the hub's one-time
     token is read only from standard input. Everything the hub sends for display (notices, fleet names, its
     name, its error messages) is shown as plain text attributed to the hub, never as this dashboard's own
     prompt. See [hub link](../backend/hub-link.md) and its

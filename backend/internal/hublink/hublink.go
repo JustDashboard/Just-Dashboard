@@ -258,8 +258,13 @@ func translate(err error) error {
 		return ErrNotLinked
 	case errors.As(err, &site):
 		var api *accountlink.APIError
-		if errors.As(site.Err, &api) && api.Status == http.StatusBadRequest && api.Code == "unsupported_protocol" {
+		switch {
+		case errors.As(site.Err, &api) && api.Status == http.StatusBadRequest && api.Code == "unsupported_protocol":
 			return &UnreachableError{URL: site.URL, Err: fmt.Errorf("it does not speak hub link protocol %d; update this dashboard or the hub so they speak the same one", ProtocolVersion)}
+		case errors.As(site.Err, &api) && api.Status == http.StatusTooManyRequests:
+			// Only Connect's request is a SiteError. The hub may be holding
+			// its 50 waiting requests (protocol 4.7), which pass in time.
+			return &UnreachableError{URL: site.URL, Err: fmt.Errorf("it is not taking new requests now; try again later (%w)", api)}
 		}
 		return &UnreachableError{URL: site.URL, Err: site.Err}
 	}
@@ -297,6 +302,8 @@ func (s *Service) Connect(ctx context.Context, r ConnectRequest) (accountlink.Re
 	} else if linked {
 		return accountlink.Request{}, ErrAlreadyLinked
 	}
+	// A name with no tailnet address is unreachable here, before the request,
+	// so no request goes out whose step 8 never ran.
 	origin, node, err := s.checkURL(ctx, r.URL)
 	if err != nil {
 		return accountlink.Request{}, err
@@ -324,12 +331,18 @@ type CheckResult struct {
 
 // Check applies the URL rule, steps 1 to 8, without starting anything, so the
 // Settings page can show whose machine an address is before Connect (protocol
-// 8.2). It sends nothing to the hub.
+// 8.2). It sends nothing to the hub and changes nothing: what it learns is not
+// the connector's check, which compares the pinned node (2.4). A name with no
+// tailnet address is shown as not checked; Connect says it cannot be reached.
 func (s *Service) Check(ctx context.Context, raw string) (CheckResult, error) {
 	if !s.enabled {
 		return CheckResult{}, ErrDisabled
 	}
 	origin, node, err := s.checkURL(ctx, raw)
+	var unreachable *UnreachableError
+	if errors.As(err, &unreachable) {
+		err = nil
+	}
 	if err != nil {
 		return CheckResult{}, err
 	}

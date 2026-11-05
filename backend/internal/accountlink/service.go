@@ -226,6 +226,12 @@ func (s *Service) originFor(stored string) string {
 	return s.siteURL
 }
 
+// refusedLink reports whether an admit error is the link itself refused (idle,
+// or made with another site) rather than a check that failed this time.
+func refusedLink(err error) bool {
+	return errors.Is(err, ErrIdle) || errors.Is(err, ErrSiteChanged)
+}
+
 // admit says whether a stored link may run now. Without a hook, a link runs
 // only while it is to the configured site: its keys and its server id mean
 // something only to the site it was made with.
