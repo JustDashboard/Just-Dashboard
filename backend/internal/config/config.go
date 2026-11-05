@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hublink"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/remotedesk"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
@@ -116,6 +117,16 @@ type Config struct {
 	// to AccountURL. On, an administrator is still asked first and nothing goes
 	// until they say yes; off, nobody is asked and nothing is ever sent.
 	UsagePing bool
+
+	// HubLink is whether this server may be connected to a Just Hub on its
+	// tailnet. Off, there is no discovery answer, no connect and no terminal
+	// command, and a link already made stays stored but idle. Independent of
+	// AccountLink.
+	HubLink bool
+	// HubLinkTestOrigin is JD_HUB_LINK_TEST_ORIGIN: one loopback origin a test
+	// harness runs a hub at, which is accepted without the tailnet rule. It is
+	// for tests only and is documented nowhere an operator would copy it from.
+	HubLinkTestOrigin string
 }
 
 func Load() (*Config, error) {
@@ -162,8 +173,10 @@ func Load() (*Config, error) {
 		UpdateDir:        env("JD_UPDATE_DIR", ""),
 		AccountLink:      l.boolean("JD_ACCOUNT_LINK", true),
 		UsagePing:        l.boolean("JD_USAGE_PING", true),
+		HubLink:          l.boolean("JD_HUB_LINK", true),
 	}
 	c.AccountURL = l.accountURL()
+	c.HubLinkTestOrigin = l.hubLinkTestOrigin()
 
 	// The dashboard is root-equivalent. It must never be reachable from the
 	// open internet, so an explicit network allowlist is mandatory. Binding
@@ -246,6 +259,18 @@ func (l *loader) accountURL() string {
 		return accountlink.DefaultSiteURL
 	}
 	return url
+}
+
+// hubLinkTestOrigin reads JD_HUB_LINK_TEST_ORIGIN. Anything but one loopback
+// origin refuses to start, like a bad JD_ACCOUNT_URL: a value that is quietly
+// ignored is one an operator believes is in force.
+func (l *loader) hubLinkTestOrigin() string {
+	origin, err := hublink.ParseTestOrigin(Env("JD_HUB_LINK_TEST_ORIGIN"))
+	if err != nil {
+		l.errs = append(l.errs, fmt.Sprintf("JD_HUB_LINK_TEST_ORIGIN=%q: %v", Env("JD_HUB_LINK_TEST_ORIGIN"), err))
+		return ""
+	}
+	return origin
 }
 
 func (l *loader) duration(k string, def time.Duration) time.Duration {

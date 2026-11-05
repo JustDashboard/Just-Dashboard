@@ -364,6 +364,8 @@ func (s *Server) Start(ctx context.Context) error {
 	// Last, because a link's first heartbeat reads nearly everything above. A
 	// no-op until the dashboard is linked, and always when linking is off.
 	s.modules.accountLink.Start(ctx)
+	// The hub link beside it, sharing nothing with it.
+	s.modules.hubLink.Start(ctx)
 	// Runs and sends nothing until an administrator has said yes.
 	s.modules.usagePing.Start(ctx)
 	return nil
@@ -411,6 +413,7 @@ func (s *Server) startDeployEngine(ctx context.Context) error {
 func (s *Server) Shutdown() {
 	s.modules.usagePing.Stop()
 	s.modules.accountLink.Stop()
+	s.modules.hubLink.Stop()
 	s.modules.deployPreviews.Stop()
 	s.modules.deployGit.Stop()
 	s.modules.previewReconciler.Stop()
