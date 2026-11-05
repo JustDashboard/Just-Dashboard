@@ -318,9 +318,11 @@ reply, so the CSP is unchanged. `lib/hub-link.ts` holds the pure half and its Bu
 - **The host in the tab's title**, above.
 - **The hub notice** (`components/hub-link/hub-notice.tsx`), between the update notice and the account
   card, built the way the update notice is and rendering nothing when there is nothing to say: the newest
-  notice this browser has not dismissed, its title, *From Just Hub* and when, its body as plain text (it
-  came from another machine), *Open in Just Hub* in a new tab when its link is on the hub's own origin,
-  and *N more from Just Hub* leading to Settings → Hub's `#notices`. The account card's container, tinted
+  notice this browser has not dismissed: who says it, *Just Hub (hub) says*, and when, then its title and
+  its body as plain text (it came from another machine, so it is never markup and never reads as the
+  dashboard's own words, [protocol](../backend/hub-link-protocol.md) §8.10), *Open in Just Hub* with the
+  host it opens, in a new tab with `noopener noreferrer`, when its link is on the hub's own origin, and
+  *N more from Just Hub* leading to Settings → Hub's `#notices`. The account card's container, tinted
   amber or red only for a warning or critical notice. Dismissals are kept in `localStorage` per browser
   and forgotten once the hub stops carrying the notice.
 

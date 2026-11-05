@@ -4,7 +4,14 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { ArrowRight, ArrowUpRight, Cross } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
-import { keptDismissals, noticeHref, noticeTone, owedNotices } from "@/lib/hub-link"
+import {
+  hubHost,
+  hubSays,
+  keptDismissals,
+  noticeHref,
+  noticeTone,
+  owedNotices,
+} from "@/lib/hub-link"
 import { cn } from "@/lib/utils"
 import { useShellHub } from "@/hooks/use-hub-link"
 import { LogoGlyph } from "@/components/logo"
@@ -39,8 +46,10 @@ function writeDismissed(ids: string[]) {
  * It renders **nothing at all** with no hub link, and nothing with a hub that has nothing to say.
  * When it does speak it is the account card's container — tinted amber or red only for a notice
  * the hub marked as a warning or critical — holding the newest notice this browser has not
- * dismissed: its title, "From Just Hub" and when, the body as plain text (it came from another
- * machine, so it is never markup), and the hub's own page for it in a new tab. The rest are one
+ * dismissed: who says it ("Just Hub (hub) says", hub-link-protocol §8.10) and when, then its
+ * title and body as plain text (it came from another machine, so it is never markup and never
+ * reads as this dashboard's own words), and the hub's own page for it in a new tab, named by its
+ * host. The rest are one
  * line under it that leads to Settings → Hub, where every notice is listed. Dismissing one is
  * remembered in this browser until the hub stops carrying it.
  */
@@ -76,7 +85,7 @@ export function HubNotice({ collapsed }: { collapsed: boolean }) {
         <TooltipTrigger asChild>
           <Link
             href="/dashboard/hub"
-            aria-label={`From Just Hub: ${notice.title}`}
+            aria-label={`${hubSays(hub.name)}: ${notice.title}`}
             className={cn(
               "flex size-8 items-center justify-center rounded-lg focus-ring transition-colors",
               tone === "default" && "bg-plot-brand text-brand hover:bg-plot-brand-hover",
@@ -87,7 +96,9 @@ export function HubNotice({ collapsed }: { collapsed: boolean }) {
             <LogoGlyph small className="h-4 w-auto" />
           </Link>
         </TooltipTrigger>
-        <TooltipContent side="right">{notice.title}</TooltipContent>
+        <TooltipContent side="right">
+          {hubSays(hub.name)}: {notice.title}
+        </TooltipContent>
       </Tooltip>
     )
   }
@@ -108,11 +119,11 @@ export function HubNotice({ collapsed }: { collapsed: boolean }) {
         <div className="flex min-w-0 items-start gap-2.5">
           <Mark tone={tone} />
           <div className="min-w-0 flex-1 space-y-1">
+            <p className="truncate text-hint leading-tight text-muted-foreground">
+              {hubSays(hub.name)} · {relativeTime(notice.at)}
+            </p>
             <p className="line-clamp-2 text-xs leading-snug font-semibold break-words">
               {notice.title}
-            </p>
-            <p className="truncate text-hint leading-tight text-muted-foreground">
-              From Just Hub · {relativeTime(notice.at)}
             </p>
           </div>
           <button
@@ -134,7 +145,10 @@ export function HubNotice({ collapsed }: { collapsed: boolean }) {
             {href && (
               <Button asChild size="sm" variant="ghost" className="w-full justify-between">
                 <a href={href} target="_blank" rel="noopener noreferrer">
-                  Open in Just Hub
+                  <span className="min-w-0 truncate">
+                    Open in Just Hub{" "}
+                    <span className="font-normal text-muted-foreground">{hubHost(href)}</span>
+                  </span>
                   <ArrowUpRight />
                 </a>
               </Button>

@@ -62,7 +62,7 @@ export function HubPicture({
             "First report within 15 seconds"
           )
         ) : pending ? (
-          "Approve the code below in the hub"
+          "Type the code below into the hub"
         ) : (
           "Name the hub, pick a scope, connect"
         ),

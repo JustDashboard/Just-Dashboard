@@ -8658,6 +8658,27 @@ export type HubLinkNotice = {
 }
 
 /**
+ * The hub's tailnet machine, as tailscaled's WhoIs named it (hub-link-protocol §2.4): its
+ * StableNodeID, MagicDNS name, and the login it belongs to, or its tags for a tagged machine.
+ */
+export type HubLinkMachine = {
+  id: string
+  name: string
+  /** Absent for a tagged machine, which has `tags` instead. */
+  owner?: string
+  tags: string[]
+}
+
+/** `GET /dashboard/hub/check?url=` (hub-link-protocol §8.2): the URL rule, nothing started. */
+export type HubLinkCheck = {
+  /** The hub URL as Connect would store it. */
+  hubUrl: string
+  /** Absent when tailscaled could not be asked, and at the test origin. */
+  machine?: HubLinkMachine
+  testOrigin: boolean
+}
+
+/**
  * This server's link to a Just Hub. Mirrors `GET /dashboard/hub` and the 200 answers of the
  * routes beside it (hub-link-protocol §8.2). Optional fields are left out, never `null`; `admin`
  * is sent only to `system.admin`, and with the link switched off only `enabled` and `state`.
@@ -8692,12 +8713,16 @@ export type HubLinkStatus = {
       approveUrl: string
       expiresAt: string
       scope: HubLinkScope
+      /** The hub's machine as Connect found it; absent when it was not checked. */
+      hubMachine?: HubLinkMachine
     }
     link?: {
       serverId: string
       linkedAt: string
       /** Dashboard username, or "cli". */
       linkedBy: string
+      /** The pinned hub machine (§2.4); absent until one is recorded. */
+      hubMachine?: HubLinkMachine
       /** The last failed exchange with the hub; cleared by the next success. */
       lastError?: string
       lastCommand?: {

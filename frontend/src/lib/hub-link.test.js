@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import {
   connectTarget,
+  describeMachine,
   hubHost,
+  hubSays,
   keptDismissals,
   linkReading,
   linkedByWords,
@@ -95,6 +97,42 @@ describe("the address ?connect= fills in", () => {
       "http://127.0.0.1:43180",
     )
     expect(connectTarget("127.0.0.1:43180")).toBe("https://127.0.0.1:43180")
+  })
+
+  test("the test origin written out is filled in exactly, and no other http origin is", () => {
+    // A development hub's Connect button names its own origin (docs/e2e.md 3.3).
+    const origin = "http://127.0.0.1:9443"
+    expect(connectTarget("http://127.0.0.1:9443", origin)).toBe(origin)
+    expect(connectTarget(" HTTP://127.0.0.1:9443/ ", origin)).toBe(origin)
+    expect(connectTarget("http://127.0.0.1:9443")).toBe("")
+    expect(connectTarget("http://127.0.0.1:9444", origin)).toBe("")
+    expect(connectTarget("http://127.0.0.1:9443/servers", origin)).toBe("")
+    // Its host under https:// is still its host, so it is the test origin too.
+    expect(connectTarget("https://127.0.0.1:9443", origin)).toBe(origin)
+  })
+})
+
+describe("whose machine the hub is, and who is speaking", () => {
+  test("a person's machine, a tagged one, and one with neither", () => {
+    expect(
+      describeMachine({
+        id: "nK7f2QbPaa21CNTRL",
+        name: "hub.tailed39ba.ts.net",
+        owner: "wayy01@github",
+        tags: [],
+      }),
+    ).toBe("hub.tailed39ba.ts.net, a machine of wayy01@github")
+    expect(
+      describeMachine({ id: "n1", name: "hub.tailed39ba.ts.net", tags: ["tag:server", "tag:hub"] }),
+    ).toBe("hub.tailed39ba.ts.net, tagged tag:server, tag:hub")
+    expect(describeMachine({ id: "n1", name: "hub.tailed39ba.ts.net", tags: [] })).toBe(
+      "hub.tailed39ba.ts.net",
+    )
+  })
+
+  test("the hub's words are the hub's, by name when it has one", () => {
+    expect(hubSays("hub")).toBe("Just Hub (hub) says")
+    expect(hubSays(undefined)).toBe("Just Hub says")
   })
 })
 

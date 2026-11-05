@@ -195,7 +195,11 @@ cut to 300 characters with its control, format (bidirectional), line and paragra
 spaces (`plainText`), so it cannot reorder the sentence around it. So `admin.link.lastError` and the Connect
 errors never carry the hub's words unattributed; the account link's messages are unchanged. Notices, fleet names
 and `owner.label` are structured fields and stay raw in the API; the pages render them as text under the hub's
-name.
+name: every notice, in the rail's card and on Settings → Hub, is headed "Just Hub (<name>) says" before its words,
+and its link names the host it opens (`hubSays`, `hub-notice.tsx`, `HubNotices`). The Settings page calls `check`
+as an address is typed or filled and shows the machine under it, shows `hubMachine` on the request and the link
+with the hub key's fingerprint to compare with the hub's Settings page, and leaves the scope unchosen after a
+`?connect=` link ([feature map](../frontend/feature-map.md)).
 
 ## Local API
 
@@ -305,10 +309,6 @@ machine at the hub's name) and is where the hub sessions are revoked. Still to c
 `DELETE /dashboard/hub/signin/{userId}`, `admin.grants` and `signIn.mine`, `POST /auth/hub/enter`, the
 `/hub/enter` page, `403 hub_session_not_allowed`, and the ticket vectors. The written security review of the
 exception to invariant 2 must be done before that code is switched on anywhere.
-
-The pages' half of protocol 8.10 and 8.2 (the Settings page calling `check` and showing the machine before Connect,
-`hubMachine` and the key fingerprint to compare, `?connect=` leaving the scope unchosen, and notices, fleet names
-and the hub's name drawn under "Just Hub (<name>) says") is the hub UI branch's.
 
 ## Verification
 

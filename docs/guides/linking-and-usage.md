@@ -44,10 +44,14 @@ server can be linked to both, and the two never share a key, a counter, a settin
 the hub the same way: outbound only, signed, at a scope you choose on this server.
 
 In the hub, press **Connect** on a server it found; the server's **Settings → Hub** opens in a new tab with the
-hub's address filled in, and shows exactly what the hub will see and be able to do. Check that the address is
-the hub you meant: anyone on the tailnet can send you such a link. You can also type the address there
-yourself. After you press **Connect**, the page shows a code and this server's key fingerprint; type that code
-into the hub's approval screen, where the fingerprint is shown too. Over SSH:
+hub's address filled in, says that it came from a link, and shows whose machine that address is ("hub.example.ts.net,
+a machine of you@github") and exactly what the hub will see and be able to do at each scope. Check that the
+address and the machine are the hub you meant: anyone on the tailnet can send you such a link, which is also why
+no scope is chosen for you; pick one before **Connect**. You can also type the address there yourself. After
+you press **Connect**, the page shows a code and this server's key fingerprint; type that code into the hub's
+approval screen, where the fingerprint is shown too. Once connected, the page shows the hub key's fingerprint
+to compare with the one on the hub's Settings page. Notices and messages from the hub are always shown under
+"Just Hub (name) says", never as the dashboard's own words. Over SSH:
 
 ```bash
 sudo ./scripts/manage.sh hub connect hub.example.ts.net            # prints a code to type into the hub

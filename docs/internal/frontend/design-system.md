@@ -2920,11 +2920,13 @@ The passes, in order. Each one is a diff you can review on its own.
    reading register because the sequence is one section of a page that reads the link before and
    after it — exactly Connect's shape — and a page that flips register when the link changes state
    would be half in each. So the connect form is a section under a hairline, not a `FlowPanel`;
-   **Connect** is its one brand face; the scopes are Connect's lit cards; the code and this server's
-   fingerprint sit side by side because the hub's approval screen shows both and matching them is
-   the whole check. The picture is Connect's (`LinkPicture`, which both pages now draw through)
+   **Connect** is its one brand face; the scopes are Connect's lit cards, none of them chosen when
+   a link from the hub filled the address in; the hub's machine and owner read under the address
+   before Connect; the code and this server's fingerprint sit side by side because the code is
+   what the owner types into the hub and the fingerprint is what its approval screen shows. The picture is Connect's (`LinkPicture`, which both pages now draw through)
    with the hub's J and address at its end. Hub notices on the page are `Notice`s in the notice's
-   own tone, because each is a sentence the hub chose to say, not a reading.
+   own tone, because each is a sentence the hub chose to say, not a reading, and each is headed
+   *Just Hub (hub) says* so it never reads as the dashboard's own.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed

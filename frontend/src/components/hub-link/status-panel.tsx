@@ -13,7 +13,7 @@ import {
 import { commandWords } from "@/lib/account-link"
 import { errorMessage } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
-import { noticeHref, noticeTone } from "@/lib/hub-link"
+import { hubHost, hubSays, noticeHref, noticeTone } from "@/lib/hub-link"
 import { notify } from "@/lib/toast"
 import type { HubLinkNotice, HubLinkStatus } from "@/lib/types"
 import { MarkTile, type Mark } from "@/components/account-link/marks"
@@ -135,16 +135,20 @@ export function HubActivity({
 
 /**
  * Everything the hub is saying, newest first: the rail's card holds only the newest one this
- * browser has not dismissed, and its "more" leads here. Each body is plain text from another
- * machine, drawn as text.
+ * browser has not dismissed, and its "more" leads here. Each one is plain text from another
+ * machine, drawn as text under who says it (hub-link-protocol §8.10), with its link naming the
+ * host it opens.
  */
 export function HubNotices({
   notices,
   hubUrl,
+  hubName,
   className,
 }: {
   notices: HubLinkNotice[]
   hubUrl?: string
+  /** The hub's name, its `owner.label`, which every notice is attributed to. */
+  hubName?: string
   className?: string
 }) {
   return (
@@ -154,7 +158,18 @@ export function HubNotices({
           {notices.map((notice) => {
             const href = noticeHref(notice.href, hubUrl)
             return (
-              <Notice key={notice.id} tone={noticeTone(notice.level)} title={notice.title}>
+              <Notice
+                key={notice.id}
+                tone={noticeTone(notice.level)}
+                title={
+                  <>
+                    <span className="block text-hint font-normal text-muted-foreground">
+                      {hubSays(hubName)}
+                    </span>
+                    {notice.title}
+                  </>
+                }
+              >
                 {notice.body && <p className="break-words">{notice.body}</p>}
                 <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span>{relativeTime(notice.at)}</span>
@@ -166,6 +181,7 @@ export function HubNotices({
                       className="inline-flex items-center gap-1 rounded-sm font-medium text-foreground focus-ring hover:underline"
                     >
                       Open in Just Hub
+                      <span className="font-normal text-muted-foreground">{hubHost(href)}</span>
                       <ArrowUpRight aria-hidden className="size-3" />
                     </a>
                   )}

@@ -22,7 +22,7 @@ import { useHubLink, useShellHub } from "@/hooks/use-hub-link"
 import { Policy } from "@/components/account-link/policy"
 import { SharedFields } from "@/components/account-link/shared-fields"
 import { Keys, ScopeSection } from "@/components/account-link/status-panel"
-import { ConnectPanel, WaitingPanel } from "@/components/hub-link/connect-panel"
+import { ConnectPanel, MachineFact, WaitingPanel } from "@/components/hub-link/connect-panel"
 import { HubPicture } from "@/components/hub-link/hub-picture"
 import { HubActivity, HubLinkActions, HubNotices } from "@/components/hub-link/status-panel"
 import { LogoGlyph } from "@/components/logo"
@@ -34,9 +34,10 @@ import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 
 /**
- * Settings → Hub: this server's link to a Just Hub — connect it, check the code and fingerprint
- * the hub shows, and from then on read what it reports, what the hub has run here, change the
- * scope or disconnect. The contract is docs/internal/backend/hub-link-protocol.md §8.
+ * Settings → Hub: this server's link to a Just Hub — connect it, see whose machine the hub is,
+ * give the hub the code to type in, and from then on read what it reports, what the hub has run
+ * here, change the scope or disconnect. The contract is docs/internal/backend/hub-link-protocol.md
+ * §8.
  *
  * It is Settings → Connect's page pointed at another peer, and in the same register (§16): it
  * reports a link's state and offers one decision about it. The hub's Connect button lands here
@@ -47,9 +48,10 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  * that exists; the link drawn as what it is (`hub-picture.tsx`, Connect's picture with the hub at
  * its end); then one section at a time under hairlines. §15 pass 2 is dropped as Connect drops it.
  *
- * Nothing connects by itself. `?connect=` only fills the address in, the scope it shows is the
- * protocol's default (`maintain`, with what each scope sees and can do beside it), and a server
- * administrator presses Connect. Unlinked servers do not draw this page in the rail (`hubLink` in
+ * Nothing connects by itself. `?connect=` only fills the address in and says so, no scope is
+ * chosen for the person (what each scope sees and can do is beside it), and a server
+ * administrator picks one and presses Connect (§8.1). Typed in, the address starts at the
+ * protocol's default scope, `maintain`. Unlinked servers do not draw this page in the rail (`hubLink` in
  * `nav.ts`), so the hub's button, the palette and the address bar are the ways in.
  *
  * Without `system.admin` the status has no `admin` part, and the page says what it can: whether
@@ -63,7 +65,10 @@ export default function HubLinkPage() {
   const params = useSearchParams()
   // Null follows the link the person arrived by; typing takes over from it.
   const [typed, setTyped] = useState<string | null>(null)
-  const [choice, setChoice] = useState<HubLinkScope>("maintain")
+  // A link someone else wrote leaves the scope for the person to choose (§8.1).
+  const [choice, setChoice] = useState<HubLinkScope | undefined>(() =>
+    params.get("connect") ? undefined : "maintain",
+  )
 
   // Approval happens in the hub's tab, so arriving at "linked" is news this one announces — and
   // the rail, the palette and the tab's title follow the session's `hub` field, which was read
@@ -182,13 +187,19 @@ export default function HubLinkPage() {
               administrator role on this server.
             </Notice>
           )}
-          <HubPicture status={status} scope={scope} address={address} />
+          {/* Before a scope is chosen the drawing reads as the least the hub could see. */}
+          <HubPicture status={status} scope={scope ?? "observe"} address={address} />
           <div className="flex min-w-0 flex-col divide-y divide-hairline">
             {linked ? (
               <>
                 {link && <HubActivity status={status} link={link} host={host} className={BLOCK} />}
                 {notices.length > 0 && (
-                  <HubNotices notices={notices} hubUrl={url} className={BLOCK} />
+                  <HubNotices
+                    notices={notices}
+                    hubUrl={url}
+                    hubName={status.hubName}
+                    className={BLOCK}
+                  />
                 )}
                 {admin && status.scope && (
                   <ScopeSection scope={status.scope} onChange={hub.changeScope} className={BLOCK} />
@@ -196,7 +207,7 @@ export default function HubLinkPage() {
                 {link && (
                   <>
                     <SharedFields
-                      scope={status.scope ?? scope}
+                      scope={status.scope ?? scope ?? "observe"}
                       snapshot={link.lastSnapshot}
                       sentAt={status.lastHeartbeatAt}
                       className={BLOCK}
@@ -204,15 +215,22 @@ export default function HubLinkPage() {
                     <div className={cn("grid min-w-0 gap-x-12 gap-y-8 xl:grid-cols-2", BLOCK)}>
                       <Policy
                         policy={link.updatePolicy}
-                        scope={status.scope ?? scope}
+                        scope={status.scope ?? scope ?? "observe"}
                         site={host}
                         peer="hub"
                       />
-                      <Keys
-                        fingerprint={admin?.fingerprint}
-                        siteKeys={link.hubKeys}
-                        keyLabel="Hub key"
-                      />
+                      <div className="flex min-w-0 flex-col gap-3">
+                        <Keys
+                          fingerprint={admin?.fingerprint}
+                          siteKeys={link.hubKeys}
+                          keyLabel="Hub key"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Compare the hub key&apos;s fingerprint with the key fingerprint on the
+                          hub&apos;s Settings page.
+                        </p>
+                        <MachineFact machine={link.hubMachine} />
+                      </div>
                     </div>
                   </>
                 )}
@@ -234,10 +252,11 @@ export default function HubLinkPage() {
                     scope={choice}
                     onScope={setChoice}
                     onBegin={hub.begin}
+                    onCheck={hub.check}
                     className={BLOCK}
                   />
                 )}
-                <SharedFields scope={scope} className={BLOCK} />
+                {scope && <SharedFields scope={scope} className={BLOCK} />}
               </>
             ) : null}
           </div>

@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react"
 import { ApiError, del, get, post, put } from "@/lib/api"
 import { selfServer, shellHub, type ShellHub } from "@/lib/hub-link"
-import type { HubLinkScope, HubLinkServer, HubLinkStatus } from "@/lib/types"
+import type { HubLinkCheck, HubLinkScope, HubLinkServer, HubLinkStatus } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 
@@ -145,6 +145,16 @@ export function useHubLink() {
     [adopt, guarded, read],
   )
 
+  /**
+   * The URL rule without starting anything (§8.2): the address as Connect would store it, and
+   * whose machine answers there. It contacts nothing but this server's own tailscaled.
+   */
+  const check = useCallback(
+    (url: string, signal?: AbortSignal) =>
+      get<HubLinkCheck>("/dashboard/hub/check", { url }, signal),
+    [],
+  )
+
   const status = adopted && (poll.lastSuccess ?? 0) < adopted.at ? adopted.status : poll.data
 
   return useMemo(
@@ -156,7 +166,8 @@ export function useHubLink() {
       changeScope,
       sync,
       disconnect,
+      check,
     }),
-    [status, poll.error, begin, cancel, changeScope, sync, disconnect],
+    [status, poll.error, begin, cancel, changeScope, sync, disconnect, check],
   )
 }

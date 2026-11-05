@@ -20,6 +20,14 @@ const iso = (ms: number) => new Date(ms).toISOString()
 const HUB = "https://hub.tailed39ba.ts.net"
 const OTHER = "https://vmi3690758.tailed39ba.ts.net:8443"
 const FINGERPRINT = "21fe:31df:a154:a261"
+// The hub's machine, as WhoIs names it (§2.4).
+const MACHINE = {
+  id: "nK7f2QbPaa21CNTRL",
+  name: "hub.tailed39ba.ts.net",
+  owner: "wayy01@github",
+  tags: [],
+}
+const MACHINE_LINE = "The hub's machine: hub.tailed39ba.ts.net, a machine of wayy01@github"
 
 const admin = {
   authenticated: true,
@@ -114,6 +122,7 @@ const pending = (scope: Scope, url = HUB): Status => ({
       approveUrl: `${url}/servers/pair?code=K7QM-29XD`,
       expiresAt: iso(Date.now() + 14 * 60_000 + 30_000),
       scope,
+      hubMachine: MACHINE,
     },
   },
 })
@@ -159,6 +168,7 @@ const linked = (scope: Scope, extra: Record<string, unknown> = {}): Status => ({
       serverId: "7a0d3c1e-0000-4000-8000-000000000002",
       linkedAt: iso(now - 86_400_000),
       linkedBy: "operator",
+      hubMachine: MACHINE,
       lastCommand: {
         id: "01JB0000000000000000000011",
         kind: "container.restart",
@@ -239,6 +249,29 @@ async function mock(page: Page, initial: Status, auth = admin) {
     }
 
     if (path === "/dashboard/hub" && method === "GET") return respond(route, shown())
+    if (path === "/dashboard/hub/check" && method === "GET") {
+      // The URL rule, nothing started (§8.2): a name off the tailnet is refused, the test
+      // origin has no machine, and the hub's name is its machine.
+      const asked = new URL(request.url()).searchParams.get("url") ?? ""
+      const testOrigin = (world.hub.admin as { testOrigin?: string } | undefined)?.testOrigin
+      if (asked.includes("example.com")) {
+        return respond(
+          route,
+          {
+            error: {
+              code: "hub_url_not_tailnet",
+              message:
+                "the hub must be a machine on this server's tailnet, named like hub.tailed39ba.ts.net",
+            },
+          },
+          400,
+        )
+      }
+      if (testOrigin && asked === testOrigin) {
+        return respond(route, { hubUrl: testOrigin, testOrigin: true })
+      }
+      return respond(route, { hubUrl: HUB, machine: MACHINE, testOrigin: false })
+    }
     if (path === "/dashboard/hub" && method === "POST") {
       if (world.connectRefusal) {
         return respond(route, world.connectRefusal.body, world.connectRefusal.status)
@@ -360,7 +393,7 @@ test("unlinked: the rail, the palette and the tab are what they were, and nothin
   expect(world.reads).toEqual([])
 })
 
-test("?connect= fills in the hub, shows maintain and what the hub sees, and waits for Connect", async ({
+test("?connect= fills in the hub, says so, shows its machine, chooses no scope, and waits for Connect", async ({
   page,
 }) => {
   const world = await mock(page, unlinked)
@@ -373,17 +406,28 @@ test("?connect= fills in the hub, shows maintain and what the hub sees, and wait
   ).toBeVisible()
   await expect(page.getByLabel("Hub address")).toHaveValue(HUB)
   await expect(page.getByText(`this server ${FINGERPRINT}`)).toBeVisible()
+  // The address came from a link anyone on the tailnet could send (§8.1), and whose machine it
+  // is shows before anything is sent to it (§8.2).
+  await expect(page.getByText("This address came from a link")).toBeVisible()
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(MACHINE_LINE)
+  expect(world.reads).toContain("/dashboard/hub/check")
 
-  // The protocol's default scope, and each card says what the hub may then do.
-  await expect(scopeCard(page, "Maintain")).toHaveAttribute("aria-pressed", "true")
-  await expect(scopeCard(page, "Observe")).toHaveAttribute("aria-pressed", "false")
+  // No scope is chosen for the person, and Connect waits for one; each card says what the hub
+  // may then do.
+  for (const scope of ["Observe", "Operate", "Maintain"]) {
+    await expect(scopeCard(page, scope)).toHaveAttribute("aria-pressed", "false")
+  }
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeDisabled()
   const scopes = page.getByRole("group", { name: "Scope" })
   await expect(scopes.getByText("Refresh the snapshot.")).toBeVisible()
   await expect(scopes.getByText(/install a dashboard update/)).toBeVisible()
   await expect(page.getByText(/No scope gives the hub a shell, files or accounts/)).toBeVisible()
+  const sends = page.locator("section", { hasText: "What this server will send" })
+  await expect(sends).toHaveCount(0)
 
   // What would leave, at the chosen scope, and what never does.
-  const sends = page.locator("section", { hasText: "What this server will send" })
+  await scopeCard(page, "Maintain").click()
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled()
   await expect(sends.getByText("At Maintain")).toBeVisible()
   await expect(sends.getByText(/project names/)).toBeVisible()
   await scopeCard(page, "Observe").click()
@@ -406,10 +450,11 @@ test("?connect= fills in the hub, shows maintain and what the hub sees, and wait
     { method: "POST", path: "/dashboard/hub", body: { url: HUB, scope: "maintain" }, csrf: "1" },
   ])
 
-  // Both tabs show the same code and fingerprint.
+  // The code to type into the hub, which never shows it, and the fingerprint its screen shows.
   await expect(page.locator("[data-slot=hub-link-code]")).toHaveText("K7QM-29XD")
   await expect(page.locator("[data-slot=hub-link-fingerprint]")).toHaveText(FINGERPRINT)
-  await expect(page.getByText(/shows the same code and fingerprint/)).toBeVisible()
+  await expect(page.getByText(/Type this code into the hub when it asks for it/)).toBeVisible()
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(MACHINE_LINE)
   const approve = page.getByRole("link", { name: "Approve in Just Hub" })
   await expect(approve).toHaveAttribute("href", `${HUB}/servers/pair?code=K7QM-29XD`)
   await expect(approve).toHaveAttribute("target", "_blank")
@@ -449,6 +494,13 @@ test("a link someone else wrote fills nothing in, and a refused hub says why", a
   await expect(
     page.getByText("sudo ./scripts/manage.sh hub connect https://hub.example.com"),
   ).toBeVisible()
+  // The rule's refusal shows as it is typed, before Connect.
+  await expect(page.locator("[data-slot=hub-link-machine]")).toContainText(
+    "the hub must be a machine on this server's tailnet",
+  )
+  // Arrived by a link, so the scope is the person's to choose before Connect is offered.
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeDisabled()
+  await scopeCard(page, "Observe").click()
   await page.getByRole("button", { name: "Connect", exact: true }).click()
   const alert = page.getByRole("alert").filter({ hasText: "Could not connect" })
   await expect(alert).toContainText("is not one machine on this server's tailnet")
@@ -545,13 +597,17 @@ test("linked: the hub's notices, newest first, as text, dismissed per browser", 
 
   const card = page.locator("[data-slot=hub-notice]")
   await expect(card).toContainText("Update ready on 1 server")
-  await expect(card).toContainText(/From Just Hub · 2m/)
+  // Who says it comes first: the hub's words are the hub's (§8.10).
+  await expect(card).toContainText(/Just Hub \(hub\) says · 2m/)
   // The body came from another machine: it is text, never markup.
   await expect(card).toContainText("0.8.6 is out. <b>vmi3690758</b> can install it")
   await expect(card.locator("b")).toHaveCount(0)
   const open = card.getByRole("link", { name: "Open in Just Hub" })
   await expect(open).toHaveAttribute("href", `${HUB}/updates`)
   await expect(open).toHaveAttribute("target", "_blank")
+  await expect(open).toHaveAttribute("rel", "noopener noreferrer")
+  // A notice's link names the host it opens.
+  await expect(open).toContainText("hub.tailed39ba.ts.net")
   await expect(card.getByRole("link", { name: "1 more from Just Hub" })).toHaveAttribute(
     "href",
     "/dashboard/hub#notices",
@@ -577,6 +633,39 @@ test("linked: the hub's notices, newest first, as text, dismissed per browser", 
   await expect(listed.getByText("Update ready on 1 server")).toBeVisible()
   await expect(listed.getByText("atlas is offline")).toBeVisible()
   await expect(listed.getByRole("link", { name: "Open in Just Hub" })).toHaveCount(1)
+})
+
+test("a notice that reads like the dashboard's own prompt is drawn as the hub's", async ({
+  page,
+}) => {
+  await mock(
+    page,
+    linked("maintain", {
+      notices: [
+        {
+          id: "session",
+          level: "critical",
+          title: "Your session expired",
+          body: "Sign in again to keep working.",
+          at: iso(now - 30_000),
+        },
+      ],
+    }),
+  )
+  await page.goto("/account")
+  const card = page.locator("[data-slot=hub-notice]")
+  await expect(card).toContainText("Your session expired")
+  // Inside the hub's card, under its name, before its words (§8.10).
+  const said = await card.innerText()
+  expect(said.indexOf("Just Hub (hub) says")).toBeGreaterThanOrEqual(0)
+  expect(said.indexOf("Just Hub (hub) says")).toBeLessThan(said.indexOf("Your session expired"))
+  // Nothing of the dashboard's own sign-in is drawn for it.
+  await expect(page.locator("input[type=password]")).toHaveCount(0)
+
+  await page.goto("/dashboard/hub#notices")
+  const listed = await page.locator("#notices").innerText()
+  expect(listed.indexOf("Just Hub (hub) says")).toBeGreaterThanOrEqual(0)
+  expect(listed.indexOf("Just Hub (hub) says")).toBeLessThan(listed.indexOf("Your session expired"))
 })
 
 test("linked, hub unreachable: the switcher says so and the others read unknown", async ({
@@ -645,6 +734,13 @@ test("linked: the page reads the link, changes its scope and disconnects after a
   await expect(keys.getByText("Hub key")).toBeVisible()
   await expect(keys.getByText("39f7:13d0:a644:253f")).toBeVisible()
   await expect(keys.getByText(FINGERPRINT)).toBeVisible()
+  // The pinned key and machine, to compare with the hub's own Settings page (§8.2).
+  await expect(
+    page.getByText(
+      "Compare the hub key's fingerprint with the key fingerprint on the hub's Settings page.",
+    ),
+  ).toBeVisible()
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(MACHINE_LINE)
 
   // A scope change is a choice and then a command.
   await scopeCard(page, "Observe").click()
@@ -718,6 +814,14 @@ test("a test origin is said out loud", async ({ page }) => {
   await page.goto("/dashboard/hub?connect=127.0.0.1:43180")
   await expect(page.getByText("A test hub address is allowed")).toBeVisible()
   await expect(page.getByLabel("Hub address")).toHaveValue("http://127.0.0.1:43180")
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(
+    "The test origin: no machine is checked.",
+  )
+  // A development hub names its own origin in the link; that exact origin fills in too.
+  await page.goto("/dashboard/hub?connect=http://127.0.0.1:43180")
+  await expect(page.getByLabel("Hub address")).toHaveValue("http://127.0.0.1:43180")
+  await page.goto("/dashboard/hub?connect=http://127.0.0.1:43181")
+  await expect(page.getByLabel("Hub address")).toHaveValue("")
 })
 
 test("on a phone the strip names the server and opens the same menu", async ({ page }) => {

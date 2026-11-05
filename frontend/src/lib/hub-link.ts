@@ -1,4 +1,10 @@
-import type { HubLinkNotice, HubLinkServer, HubLinkSession, HubLinkStatus } from "@/lib/types"
+import type {
+  HubLinkMachine,
+  HubLinkNotice,
+  HubLinkServer,
+  HubLinkSession,
+  HubLinkStatus,
+} from "@/lib/types"
 
 /**
  * The pure half of everything a linked dashboard draws about its hub: the address the Settings
@@ -58,9 +64,12 @@ const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:
  * scheme — fills nothing, because a link that someone else wrote is not allowed to put an address
  * in front of the person deciding. The backend applies the URL rule to whatever is submitted.
  *
- * The test origin is the one `http` hub, so a host that matches it fills it in as it is.
+ * The test origin is the one `http` hub (§2.3): a host that matches it, or that exact origin
+ * written out, fills it in as it is, which is what a development hub's Connect button sends.
  */
 export function connectTarget(param: string | null | undefined, testOrigin?: string): string {
+  const exact = (param ?? "").trim().toLowerCase().replace(/\/$/, "")
+  if (testOrigin && exact === testOrigin.toLowerCase()) return testOrigin
   const raw = (param ?? "")
     .trim()
     .toLowerCase()
@@ -71,6 +80,24 @@ export function connectTarget(param: string | null | undefined, testOrigin?: str
   if (!raw || !HOST.test(raw)) return ""
   if (testOrigin && hubHost(testOrigin) === raw) return testOrigin
   return `https://${raw.replace(/:443$/, "")}`
+}
+
+/**
+ * Whose machine an address is, the way the protocol words it (§8.2): "hub.tailed39ba.ts.net, a
+ * machine of wayy01@github", or "…, tagged tag:server" for a machine with no person of its own.
+ */
+export function describeMachine(machine: HubLinkMachine): string {
+  if (machine.tags.length > 0) return `${machine.name}, tagged ${machine.tags.join(", ")}`
+  if (machine.owner) return `${machine.name}, a machine of ${machine.owner}`
+  return machine.name
+}
+
+/**
+ * Who is speaking, for text the hub wrote (§8.10): "Just Hub (hub) says". Every notice, and every
+ * message of the hub's, is drawn under this, never as the dashboard's own words.
+ */
+export function hubSays(name: string | undefined): string {
+  return name ? `Just Hub (${name}) says` : "Just Hub says"
 }
 
 /** What the shell knows about its hub, or nothing: the gate every hub feature is drawn behind. */
