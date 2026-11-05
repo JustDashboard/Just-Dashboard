@@ -39,10 +39,33 @@ type accountHost struct {
 	metrics *sysinfo.Collector
 	mu      sync.Mutex
 	primed  bool
+
+	// answerWithin bounds how long a Docker command waits for the daemon to
+	// say anything at all before it fails.
+	answerWithin time.Duration
 }
 
 func newAccountHost(s *Server) *accountHost {
-	return &accountHost{s: s, metrics: sysinfo.NewCollector()}
+	return &accountHost{s: s, metrics: sysinfo.NewCollector(), answerWithin: 10 * time.Second}
+}
+
+// dockerAnswers is the first step of a Docker command: the daemon must answer
+// a ping within answerWithin. One that cannot be reached fails at once anyway,
+// but one that takes the connection and then says nothing would hold the
+// command, and the peer waiting on its result, for the whole ten minutes a
+// command may run.
+func (h *accountHost) dockerAnswers(ctx context.Context) error {
+	pctx, cancel := context.WithTimeout(ctx, h.answerWithin)
+	defer cancel()
+	err := h.s.modules.docker.Answers(pctx)
+	switch {
+	case err == nil:
+		return nil
+	case ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("The Docker daemon at %s did not answer within %s; the command was not run.",
+			h.s.modules.docker.Host(), h.answerWithin)
+	}
+	return dockerFailure(h.s.dockerErr(err))
 }
 
 // allowDestructive spends one of the destructive budget for the actor, the way
@@ -69,8 +92,11 @@ func (h *accountHost) Container(ctx context.Context, actor, name, action string)
 	default:
 		return "", fmt.Errorf("container action %q is not one a linked account may take", action)
 	}
-	if err := h.refuseOwnContainer(ctx, name); err != nil {
+	if err := h.dockerAnswers(ctx); err != nil {
 		return "", err
+	}
+	if err := h.refuseOwnContainer(ctx, name); err != nil {
+		return "", dockerFailure(err)
 	}
 	// Stop and restart interrupt a service and are behind the destructive
 	// budget on the container page; start is not.
@@ -80,9 +106,26 @@ func (h *accountHost) Container(ctx context.Context, actor, name, action string)
 		}
 	}
 	if _, err := h.s.runContainerAction(ctx, name, act, nil); err != nil {
-		return "", err
+		return "", dockerFailure(err)
 	}
 	return name + " " + done, nil
+}
+
+// dockerFailure is a Docker error as a command's result says it. A page shows
+// dockerErr's sentence and keeps what Docker said under Details; a result is
+// one line, which carries both, so the peer can tell a daemon this dashboard
+// cannot reach from one that refused (a stack's compose output is another
+// matter, and stays here).
+func dockerFailure(err error) error {
+	var api *httpx.APIError
+	if !errors.As(err, &api) {
+		return err
+	}
+	said := strings.Join(strings.Fields(api.Raw), " ")
+	if said == "" || said == api.Message {
+		return err
+	}
+	return fmt.Errorf("%s Docker said: %s", api.Message, said)
 }
 
 // RestartStack restarts a compose stack. Restarting does not take the typed
@@ -90,15 +133,18 @@ func (h *accountHost) Container(ctx context.Context, actor, name, action string)
 // `down` alone), and the site, which can only ever restart, is held to the same
 // rule as the stack page rather than a stricter or a looser one.
 func (h *accountHost) RestartStack(ctx context.Context, actor, name string) (string, error) {
-	if err := h.refuseOwnStack(ctx, name); err != nil {
+	if err := h.dockerAnswers(ctx); err != nil {
 		return "", err
+	}
+	if err := h.refuseOwnStack(ctx, name); err != nil {
+		return "", dockerFailure(err)
 	}
 	if err := h.s.allowDestructive(actor); err != nil {
 		return "", err
 	}
 	_, res, err := h.s.runStackAction(ctx, actor, name, dockerx.ComposeRestart, "", nil)
 	if err != nil {
-		return "", err
+		return "", dockerFailure(err)
 	}
 	// Compose's own output can carry values from the stack's environment, so
 	// it stays on this machine.

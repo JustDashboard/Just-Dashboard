@@ -258,7 +258,11 @@ terminal), `account.link.begin`, `.cancel`, `.scope` and `account.unlink`.
 
 Results sent back carry the service's message, never a command's output: output is cut at 8 KiB and errors at
 1000 characters, and compose's own output stays on the machine because it can carry values from a stack's
-environment.
+environment. A Docker failure carries the sentence a page shows and what Docker said (`dockerFailure`: "The
+Docker daemon is not reachable from this dashboard. Docker said: Cannot connect to the Docker daemon at …"), so
+a daemon that cannot be reached never reads as one that refused. A container or stack command first needs the
+daemon to answer a ping within 10 seconds, so a daemon that takes the connection and says nothing fails the
+command then rather than holding it for its 10 minutes.
 
 ## Automatic updates
 

@@ -13,6 +13,13 @@ the latest pair and cannot block collection. The final unsubscribe cancels the s
 snapshot. Direct reads and mutation checks remain fresh. Read-only database discovery can separately
 opt into a request-scoped inventory/inspection snapshot; it never survives that request.
 
+`dockerErr` (`api/handlers_docker.go`) turns a daemon error into a sentence, with the daemon's own text kept as
+`raw`. A daemon that is not reached at all is told apart by type before any text is read
+(`dockerx.Unreachable`: no client, or the SDK's failed connection, whether the socket is missing, refuses, may not
+be opened or times out) and answers `503 docker_unavailable`, "The Docker daemon is not reachable from this
+dashboard.": the SDK's words for a socket this process may not open say "permission denied", which the text
+cases read as Docker refusing.
+
 ### Network creation
 
 `POST /docker/networks/` requires `service.control` and is audited. `NetworkSpec` accepts the legacy
