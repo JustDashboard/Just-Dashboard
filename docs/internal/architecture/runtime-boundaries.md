@@ -395,6 +395,12 @@ elevation retains its recorded provenance, including unknown legacy provenance. 
 legacy/unknown authentication honestly. Migration and authentication tests cover existing rows and
 password/code/recovery completion; route authorization and per-account enforcement are unchanged.
 
+A session a Just Hub sign-in ticket made records `hub`, with the hub user whose grant made it in
+`sessions.hub_user` (additive, default `''`), and the account's session list says it was signed in through
+Just Hub. It is the one provenance that changes what a session may do: `ResolveSession` checks its grant,
+the link and both switches on every use, and `httpx.RefuseHubSession` refuses it on the routes
+[the exception](../security/invariants.md#the-exception-hub-sign-in) lists.
+
 ## Container limits in `docker-compose.yml`
 
 Every service rotates its logs through the shared `x-logging` block (`json-file`, five files of 10 MB).
