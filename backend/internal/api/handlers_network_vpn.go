@@ -30,9 +30,11 @@ func (s *Server) mountNetworkVPNRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleVPN))
 		r.Method(http.MethodPost, "/tailscale", s.handle(s.handleTailscaleSet))
 		// Archived tunnels live outside /wireguard so an interface may be
-		// called anything wg-quick allows, "archive" included.
+		// called anything wg-quick allows, "archive" included. Restoring one
+		// lets its peers' keys back onto this server's network, so a session
+		// opened through Just Hub may not, as it may not add a peer.
 		r.Method(http.MethodGet, "/archive", s.handle(s.handleWireGuardArchive))
-		r.Method(http.MethodPost, "/archive/{file}/restore", s.handle(s.handleWireGuardRestore))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/archive/{file}/restore", s.handle(s.handleWireGuardRestore))
 
 		r.Route("/wireguard", func(r chi.Router) {
 			r.Method(http.MethodPost, "/", s.handle(s.handleWireGuardCreate))

@@ -25,7 +25,10 @@ func (s *Server) mountNetworkVantageRoutes(r chi.Router) {
 		r.Method("POST", "/checks/{id}/cancel", s.handle(s.handleNetworkExternalCancel))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireSession)
-			r.Method("POST", "/enrollments", s.handle(s.handleNetworkVantageEnrollment))
+			// An enrolment token lets a machine elsewhere keep calling this
+			// server's probe-agent routes after the session that made it has
+			// gone, so a session opened through Just Hub may not make one.
+			r.With(httpx.RefuseHubSession).Method("POST", "/enrollments", s.handle(s.handleNetworkVantageEnrollment))
 			s.destructive(r, func(r chi.Router) { r.Method("DELETE", "/vantages/{id}", s.handle(s.handleNetworkVantageRevoke)) })
 		})
 	})

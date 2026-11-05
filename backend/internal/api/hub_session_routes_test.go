@@ -16,10 +16,11 @@ import (
 // is refused on (hub-link-protocol.md section 9.9): each one creates, changes,
 // rotates, imports or exports a credential, or creates or changes a link, and
 // what it made would outlive the two-hour hub session and the grant behind it.
-// The first block is the protocol's table for JD 0.8.5; the second is what the
-// walk of every write route found that the rule covers and the table does not
-// list yet (docs/internal/security/invariants.md names both). A route added
-// later that the rule covers joins this list in the same change.
+// The first block is the protocol's table as it was first written; the second
+// is what the walk of every write route found that the rule covers, which the
+// protocol's table now lists too (docs/internal/security/invariants.md names
+// both). A route added later that the rule covers joins this list in the same
+// change.
 var hubSessionRefused = []string{
 	// API, MCP and deploy keys.
 	"POST /api/v1/tokens/",
@@ -99,8 +100,8 @@ var hubSessionRefused = []string{
 	// Hub sign-in.
 	"PUT /api/v1/account/hub-signin",
 
-	// Found by the walk of every write route: the rule covers them, the
-	// protocol's table does not list them yet.
+	// Found by the walk of every write route: the rule covers them, and the
+	// protocol's table lists them since.
 	"POST /api/v1/git/forge/account",                             // a saved Git host token
 	"POST /api/v1/databases/host/grant",                          // makes or resets a database login and its password
 	"POST /api/v1/databases/{id}/server/roles/{name}/privileges", // widens a database role
@@ -108,9 +109,11 @@ var hubSessionRefused = []string{
 	"PATCH /api/v1/system-accounts/groups/{group}",               // group membership, sudo and docker included
 	"POST /api/v1/network/vpn/wireguard/{iface}/peers",           // a peer key that lets a device onto this server's network
 	"PATCH /api/v1/network/vpn/wireguard/{iface}/peers/{id}",
-	"PUT /api/v1/proxy/tunnel/",          // saves a Cloudflare tunnel token
-	"POST /api/v1/proxy/tunnel/create",   // spends the saved Cloudflare token on a new tunnel token
-	"POST /api/v1/network/dns/services/", // a DNS server's saved API credential
+	"POST /api/v1/network/vpn/archive/{file}/restore", // brings an archived tunnel's peer keys back
+	"POST /api/v1/network/external/enrollments",       // a token a probe machine enrols with, then keeps calling this server
+	"PUT /api/v1/proxy/tunnel/",                       // saves a Cloudflare tunnel token
+	"POST /api/v1/proxy/tunnel/create",                // spends the saved Cloudflare token on a new tunnel token
+	"POST /api/v1/network/dns/services/",              // a DNS server's saved API credential
 	"PUT /api/v1/network/dns/services/{id}",
 	"POST /api/v1/backups/", // a backup destination holds credentials of its own
 	"PUT /api/v1/backups/{id}",

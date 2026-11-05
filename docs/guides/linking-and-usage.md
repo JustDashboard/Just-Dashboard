@@ -130,10 +130,13 @@ and the link it opens works once, for about a minute, from the device that asked
 What it costs: the hub's code stands in for this server's, so anyone who takes over the hub could open a
 session as every account that opted in, from a device on your tailnet — with the terminal, for an
 administrator. A session opened this way says so in your session list, lasts at most two hours, and cannot
-create or change API keys, accounts, passwords, authenticators, passkeys, Linux or database users, saved
-credentials or links; sign in on the server itself for those. It ends at once when you turn the choice off,
-change your password or authenticator, when the hub stops offering your hub user, when the server is
-disconnected, and when `JD_HUB_SIGNIN` is found off at a start. Ending it does not undo what was done in it.
+create or change API keys, accounts, passwords, authenticators, passkeys, Linux or database users, VPN peers,
+saved credentials or links; sign in on the server itself for those. It ends at once when you turn the choice
+off, change your password or authenticator, when the hub stops offering your hub user, when the server is
+disconnected, when the connection goes quiet (another machine took the hub's name, or its address no longer
+passes), and when `JD_HUB_SIGNIN` is found off at a start. While the connection is quiet nobody can be signed
+in from the hub, after a restart too, until it is disconnected and connected again. Ending it does not undo
+what was done in it.
 The only account detail the hub is told is your username and the hub user you chose.
 
 ## The usage count

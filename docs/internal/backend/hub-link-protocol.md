@@ -1713,36 +1713,43 @@ one alive.
 creates, changes, rotates, imports or exports a credential, or creates or changes a link, refuses a session whose
 `auth_method` is `hub` with `403 hub_session_not_allowed`. A credential is anything that lets someone act on this
 server, or on a system it holds access to, after the hub session has ended: a dashboard account, its password,
-authenticator, recovery codes and passkeys; an API, MCP or deploy key; a Linux user, its password and its SSH
-keys; a database user, role or ACL; a proxy basic-auth user; a deployment trigger's or hook's secret; a saved Git,
-registry or DNS credential, a secret-store connection, a notification channel or a log drain (each holds
-credentials of its own); the dashboard's GitHub sign-in and its GitHub App; a TLS private key; the backup key. One
-middleware does it, `httpx.RefuseHubSession`, found by function identity as `httpx.RequireSession` is, so a
-route-walk test lists every route that carries it and fails when one in the table does not.
+authenticator, recovery codes and passkeys; an API, MCP or deploy key; a Linux user, its password, its SSH keys and
+its groups; a database user, role, privilege or ACL; a proxy basic-auth user; a deployment trigger's or hook's
+secret; a saved Git, registry or DNS credential, a DNS server's API credential, a Cloudflare tunnel token, an AI
+provider's key, a backup destination, a secret-store connection, a notification channel or a log drain (each holds
+credentials of its own); a WireGuard peer's key; the enrolment token of a machine that runs external checks; the
+dashboard's GitHub sign-in and its GitHub App; a TLS private key; the backup key. One middleware does it,
+`httpx.RefuseHubSession`, found by function identity as `httpx.RequireSession` is, so a route-walk test lists every
+route that carries it and fails when one in the table does not.
 
 | What | Routes (JD 0.8.5) |
 | --- | --- |
 | API, MCP and deploy keys | `POST /tokens/`, `POST /tokens/mcp`, `POST /tokens/deploy`, `PUT /tokens/{id}/connections` |
 | Dashboard accounts | `POST /dashboard-users/`, `PATCH /dashboard-users/{id}`, `POST /dashboard-users/{id}/reset-totp`, `DELETE /dashboard-users/{id}` |
 | The caller's own credentials | `POST /account/password`, `POST /account/recovery-codes`, `POST /account/2fa/disable`, `POST /auth/2fa/setup`, `POST /auth/2fa/enable`, `POST /account/passkeys/register/begin`, `POST /account/passkeys/register/finish`, `PATCH /account/passkeys/{id}`, `DELETE /account/passkeys/{id}` |
-| Linux accounts and their keys | `POST /system-users/`, `PATCH /system-users/{name}/`, `PUT /system-users/{name}/sudo`, `POST /system-users/{name}/password`, `POST /system-users/{name}/keys/generate`, `POST /system-users/{name}/keys`, `PATCH /system-users/{name}/keys`, `POST /system-users/{name}/keys/import`, `POST /system-users/{name}/keys/copy` |
-| Database users | `POST /databases/{id}/server/roles`, `PUT /databases/{id}/server/roles/{name}`, `POST /databases/{id}/server/roles/{name}/grant`, `POST /databases/{id}/mongo/users`, `PUT /databases/{id}/mongo/users`, `POST /databases/{id}/mongo/users/grant`, `PUT /databases/{id}/redis/acl/{name}` |
+| Linux accounts and their keys | `POST /system-users/`, `PATCH /system-users/{name}/`, `PUT /system-users/{name}/sudo`, `POST /system-users/{name}/password`, `POST /system-users/{name}/keys/generate`, `POST /system-users/{name}/keys`, `PATCH /system-users/{name}/keys`, `POST /system-users/{name}/keys/import`, `POST /system-users/{name}/keys/copy`, `POST /system-accounts/bulk`, `PATCH /system-accounts/groups/{group}` |
+| Database users and roles | `POST /databases/{id}/server/roles`, `PUT /databases/{id}/server/roles/{name}`, `POST /databases/{id}/server/roles/{name}/grant`, `POST /databases/{id}/server/roles/{name}/privileges`, `POST /databases/{id}/mongo/users`, `PUT /databases/{id}/mongo/users`, `POST /databases/{id}/mongo/users/grant`, `PUT /databases/{id}/redis/acl/{name}`, `POST /databases/host/grant` |
 | Proxy basic-auth users | `POST /proxy/auth-files/` |
 | Deployment secrets and saved credentials | `POST /deploy/{id}/environments/{env}/triggers`, `PUT /deploy/{id}/environments/{env}/triggers/{trigger}`, `POST /deploy/{id}/environments/{env}/triggers/{trigger}/rotate-secret`, `POST /deploy/{id}/rotate-secret`, `POST /deploy/credentials`, `PUT /deploy/credentials/{id}`, `POST /deploy/secret-stores`, `PUT /deploy/secret-stores/{store}`, `POST /deploy/notifications`, `PUT /deploy/notifications/{channel}`, `POST /deploy/log-drains`, `PUT /deploy/log-drains/{drain}` |
-| GitHub | `POST /git/github/auth/device`, `POST /git/github/auth/device/{id}`, `POST /git/github/auth/token`, `POST /git/github/auth/configure`, `POST /deploy/github-app/manifest`, `POST /deploy/github-app/callback` |
-| DNS credentials and TLS keys | `POST /certificates/dns-credentials`, `POST /certificates/import`, `POST /certificates/export` |
-| The backup key | `POST /backups/key/import`, `POST /backups/key/export` |
-| The account link | `POST /dashboard/link`, `DELETE /dashboard/link/request`, `PUT /dashboard/link/scope` |
+| Git and GitHub | `POST /git/github/auth/device`, `POST /git/github/auth/device/{id}`, `POST /git/github/auth/token`, `POST /git/github/auth/configure`, `POST /deploy/github-app/manifest`, `POST /deploy/github-app/callback`, `POST /git/forge/account` |
+| DNS credentials, tunnels and TLS keys | `POST /certificates/dns-credentials`, `POST /certificates/import`, `POST /certificates/export`, `POST /network/dns/services/`, `PUT /network/dns/services/{id}`, `PUT /proxy/tunnel/`, `POST /proxy/tunnel/create` |
+| Network peers and check machines | `POST /network/vpn/wireguard/{iface}/peers`, `PATCH /network/vpn/wireguard/{iface}/peers/{id}`, `POST /network/vpn/archive/{file}/restore`, `POST /network/external/enrollments` |
+| Backups | `POST /backups/key/import`, `POST /backups/key/export`, `POST /backups/`, `PUT /backups/{id}`, `POST /backups/import` |
+| The assistant's provider keys | `PUT /assistant/providers/{preset}` |
+| The account link | `POST /dashboard/link/`, `DELETE /dashboard/link/request`, `PUT /dashboard/link/scope` |
 | The hub link | `POST /dashboard/hub`, `DELETE /dashboard/hub/request`, `PUT /dashboard/hub/scope` |
 | Hub sign-in | `PUT /account/hub-signin` |
 
-Where the table and the rule differ, the rule wins. The change that adds the middleware (JD-SIGNIN, M7) walks every
-write route of the router, applies the middleware to each one the rule covers, lists them all in
-`docs/internal/security/invariants.md`, and makes the route-walk test check that list; a route it finds that the
-table misses is added here in the protocol's next change. A route added later that the rule covers joins the set
-in the same change. Disconnecting either link, `POST /dashboard/hub/sync`, removing a grant, revoking sessions,
-deleting a key, user, credential or channel, and signing GitHub out stay open to a hub session: they only take
-power away.
+Where the table and the rule differ, the rule wins. The change that added the middleware (JD-SIGNIN, M7) walked
+every write route of the router, applied the middleware to each one the rule covers, listed them all in
+`docs/internal/security/invariants.md`, and made the route-walk test check that list. The walk found seventeen
+routes the rule covers that the table first missed (errata HL-3, route walk); they are in the table above: Linux
+accounts made in bulk and group membership, a database login and a role's privileges, a saved Git host token, the
+DNS servers' API credentials, Cloudflare tunnel tokens, WireGuard peers and the restore of an archived tunnel, a
+machine's enrolment for external checks, backup destinations, and AI provider keys. A route added later that the
+rule covers joins the set, the test and the list in the same change. Disconnecting either link,
+`POST /dashboard/hub/sync`, removing a grant, revoking sessions, deleting a key, user, credential or channel, and
+signing GitHub out stay open to a hub session: they only take power away.
 
 ### 9.10 Audit
 

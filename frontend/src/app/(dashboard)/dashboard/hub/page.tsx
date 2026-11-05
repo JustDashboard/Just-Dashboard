@@ -254,7 +254,8 @@ export default function HubLinkPage() {
                 )}
                 <SignInPanel
                   status={status}
-                  hubName={status.hubName ?? host}
+                  hubName={status.hubName ? hubLabel(status.hubName) : host}
+                  idle={Boolean(idle)}
                   onAllow={hub.allowSignIn}
                   onRevoke={hub.revokeSignIn}
                   onRemove={hub.removeGrant}

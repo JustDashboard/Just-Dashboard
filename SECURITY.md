@@ -65,9 +65,10 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   redeemed at `POST /api/v1/auth/hub/enter`. The hub's own authenticator code stands in for this
   server's. Anyone who takes over the hub can then sign in as those accounts, so a session opened this
   way lasts at most two hours, cannot make or change keys, accounts, passwords, authenticators,
-  passkeys, Linux or database users, saved credentials or links, and ends as soon as its grant, the
-  link or the switch does. An administrator's hub session still has the terminal. The full list and its
-  limits are in [the invariants](docs/internal/security/invariants.md#the-exception-hub-sign-in).
+  passkeys, Linux or database users, VPN peers, saved credentials or links, and ends as soon as its
+  grant, the link or the switch does, or the link goes quiet. An administrator's hub session still has
+  the terminal. The full list and its limits are in
+  [the invariants](docs/internal/security/invariants.md#the-exception-hub-sign-in).
 - [The usage count](docs/guides/linking-and-usage.md#the-usage-count) is off until an administrator says yes, and is three fields with no ID.
 
 ### Roles

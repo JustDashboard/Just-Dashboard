@@ -31,10 +31,16 @@ type Grant = NonNullable<NonNullable<HubLinkStatus["admin"]>["grants"]>[number]
  *
  * Everything here is this account's own, except the list of every account's choice, which only
  * an administrator is sent (`admin.grants`) and may end.
+ *
+ * `hubName` is the hub's name as the page attributes it, "Just Hub (hub)" (§8.10). `idle` is the
+ * page's reading of an idle link (`idleReason`, administrators only): the server revoked every hub
+ * session when the link went idle and refuses new ones and new choices until a disconnect, so the
+ * form is not offered; a choice already made can still be ended.
  */
 export function SignInPanel({
   status,
   hubName,
+  idle = false,
   onAllow,
   onRevoke,
   onRemove,
@@ -42,6 +48,7 @@ export function SignInPanel({
 }: {
   status: HubLinkStatus
   hubName: string
+  idle?: boolean
   onAllow: (hubUser: string, password: string, code: string) => Promise<void>
   onRevoke: () => Promise<void>
   onRemove: (userId: number) => Promise<void>
@@ -61,6 +68,17 @@ export function SignInPanel({
           user open it already signed in. Until then the hub reaches this server only through the
           commands its scope allows.
         </p>
+      ) : idle ? (
+        <div data-slot="hub-signin-idle" className="flex min-w-0 flex-col gap-6">
+          <p className="max-w-prose text-body text-muted-foreground">
+            Paused while the link is idle. Every session {hubName} opened on this server ended when
+            the link went idle, and none opens until it is disconnected and connected again, which
+            also ends every account&apos;s choice to let the hub sign it in.
+          </p>
+          {signIn.mine && (
+            <Mine grant={signIn.mine} hubName={hubName} me={me} onRevoke={onRevoke} />
+          )}
+        </div>
       ) : !signIn.offered ? (
         <p className="max-w-prose text-body text-muted-foreground">
           This server allows it, but {hubName} does not offer it. Its owner turns sign-in on in the
@@ -96,8 +114,8 @@ function Costs({ hubName, me }: { hubName: string; me: string }) {
         open a session as {me} from a device on your tailnet, with everything {me} can do here
         {" — "}for an administrator that includes the terminal. A session opened this way lasts at
         most two hours, and it cannot create or change API keys, accounts, passwords,
-        authenticators, passkeys, Linux users, database users, saved credentials or links: for
-        those, sign in on this server itself.
+        authenticators, passkeys, Linux users, database users, VPN peers, saved credentials or
+        links: for those, sign in on this server itself.
       </p>
       <p>
         This server tells the hub your username and the hub user you choose, and nothing else about

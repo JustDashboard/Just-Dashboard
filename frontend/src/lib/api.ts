@@ -212,6 +212,14 @@ export async function responseError(res: Response, path: string): Promise<ApiErr
   return errorFromResponse(res.status, await res.text(), path, res.statusText)
 }
 
+/**
+ * What a session opened through Just Hub is told on a route that makes or changes a credential or
+ * a link (hub-link-protocol §9.9, `403 hub_session_not_allowed`): the way to do it, first, rather
+ * than the server's lower-case explanation.
+ */
+export const HUB_SESSION_REFUSED =
+  "Sign in on this server itself to do this. A session opened through Just Hub cannot create or change credentials or links."
+
 /** XHR upload readers share the same error and recovery contract as fetch. */
 export function errorFromResponse(
   status: number,
@@ -242,7 +250,9 @@ export function errorFromResponse(
   return new ApiError(
     status,
     body?.code ?? "unknown",
-    body?.message ?? (text.slice(0, 300) || statusText || `HTTP ${status}`),
+    body?.code === "hub_session_not_allowed"
+      ? HUB_SESSION_REFUSED
+      : (body?.message ?? (text.slice(0, 300) || statusText || `HTTP ${status}`)),
     body?.phrase,
     {
       resource: body?.resource,

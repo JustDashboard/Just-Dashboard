@@ -3,6 +3,7 @@ package hublink
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -234,5 +235,96 @@ func TestKeysAnnouncedInAReplyAreNeverPinned(t *testing.T) {
 		Keys: after.SiteKeys, Hub: after.URL, ServerID: after.ServerID, Now: e.clock(),
 	}); err == nil || err.Code != codeBadTicket {
 		t.Fatalf("a ticket under the announced key = %v", err)
+	}
+}
+
+// An idle link stays idle across restarts (protocol 2.2 "When the rule runs",
+// 2.4), and so does what it does to hub sign-in: the start that decides it
+// revokes every hub session in the write that stores the flag, and every
+// start after it refuses hub sessions, redeems and new grants even once the
+// address passes the rule again, until a person disconnects (section 9.3).
+func TestAnIdleLinkRefusesHubSignInAfterEveryRestart(t *testing.T) {
+	e, svc, userID, token := newSignInLink(t)
+	e.tailnet.err = errors.New("tailscale is not installed")
+	s := e.restart(func(o *Options) { o.TestOrigin = "" })
+	s.Start(t.Context())
+	// hub.session.revoke is the last thing the idle decision writes.
+	waitFor(t, "the link to go idle", func() bool { return len(e.auditRows("hub.session.revoke")) > 0 })
+	if n := hubSessions(t, e); n != 0 {
+		t.Fatalf("%d hub sessions survived the link going idle at start", n)
+	}
+	if _, _, err := svc.ResolveSession(t.Context(), token); err == nil {
+		t.Fatal("a hub session resolved once the link went idle")
+	}
+	if rows := e.auditRows("hub.link.idle"); len(rows) != 1 || !strings.Contains(rows[0].Detail, `"sessionsRevoked":1`) {
+		t.Fatalf("idle audit = %+v", rows)
+	}
+	if rows := e.auditRows("hub.session.revoke"); len(rows) != 1 || !strings.Contains(rows[0].Detail, `"reason":"link_idle"`) {
+		t.Fatalf("session revoke audit = %+v", rows)
+	}
+
+	// The test origin back: the address passes the rule again, and the link
+	// is still idle, so nothing of hub sign-in works.
+	s = e.restart()
+	s.Start(t.Context())
+	var late string
+	if err := s.writeTx(t.Context(), func(tx *sql.Tx) error {
+		start, err := svc.StartHubSessionTx(t.Context(), tx, userID, "owner", "127.0.0.1", "test", "")
+		if start != nil {
+			late = start.Token
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.ResolveSession(t.Context(), late); err == nil {
+		t.Fatal("a hub session resolved on a link that is idle in the store")
+	}
+	if _, err := s.Redeem(t.Context(), RedeemRequest{Ticket: "v1.k.e30.c2ln", Client: "127.0.0.1"}); err == nil || err.Code != codeNotLinked {
+		t.Fatalf("redeem on an idle link = %v", err)
+	}
+	if err := s.Allow(t.Context(), AllowRequest{UserID: userID, HubUser: "owner"}); !errors.Is(err, ErrNotLinked) {
+		t.Fatalf("a grant on an idle link = %v", err)
+	}
+	var grants int
+	e.st.DB.QueryRow(`SELECT COUNT(*) FROM hub_signin_grants`).Scan(&grants)
+	if grants != 1 {
+		t.Fatalf("grants = %d; they stay, unusable, until a person disconnects", grants)
+	}
+	if len(e.auditRows("hub.link.idle")) != 1 {
+		t.Fatal("a restart decided the idle link again")
+	}
+	// The disconnect that clears it ends the grants and every session left.
+	if _, err := s.Disconnect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	e.st.DB.QueryRow(`SELECT COUNT(*) FROM hub_signin_grants`).Scan(&grants)
+	if grants != 0 || hubSessions(t, e) != 0 {
+		t.Fatalf("after disconnect: %d grants, %d hub sessions", grants, hubSessions(t, e))
+	}
+}
+
+// The hub removing this server (410 server_removed) ends the link, and with it
+// every grant and hub session, in the engine's clearing transaction
+// (sections 8.9 and 9.3).
+func TestRemovalInTheHubEndsGrantsAndHubSessions(t *testing.T) {
+	e, svc, _, token := newSignInLink(t)
+	e.hub.remove()
+	e.svc.Start(t.Context())
+	waitFor(t, "the removal to be audited", func() bool { return len(e.auditRows("hub.unlink")) > 0 })
+	if _, linked, _ := e.svc.Linked(t.Context()); linked {
+		t.Fatal("the link survived its removal in the hub")
+	}
+	var grants int
+	e.st.DB.QueryRow(`SELECT COUNT(*) FROM hub_signin_grants`).Scan(&grants)
+	if grants != 0 || hubSessions(t, e) != 0 {
+		t.Fatalf("after removal: %d grants, %d hub sessions", grants, hubSessions(t, e))
+	}
+	if _, _, err := svc.ResolveSession(t.Context(), token); err == nil {
+		t.Fatal("a hub session resolved after the hub removed this server")
+	}
+	rows := e.auditRows("hub.signin.revoke")
+	if len(rows) != 1 || !strings.Contains(rows[0].Detail, `"reason":"link_ended"`) {
+		t.Fatalf("revoke audit = %+v", rows)
 	}
 }

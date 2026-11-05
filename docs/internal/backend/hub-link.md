@@ -107,7 +107,7 @@ or a loopback name, and is not the current test origin, is refused; steps 5 to 7
 (no longer one machine under this server's suffix, or this server's own name, is refused) and are skipped this time
 when it cannot. A refusal **sets the link idle in the store** (`State.Idle`, `{code: "hub_url_refused", reason,
 at}` in `hub.link.state`, written by `Engine.SetIdle`), revokes every hub session in that same write transaction
-(`revokeHubSessionsTx`, which has nothing to revoke until hub sign-in exists), and audits `hub.link.idle` by `system`
+(`revokeHubSessionsTx`; see [Hub sign-in](#hub-sign-in)), and audits `hub.link.idle` by `system`
 with the reason and `sessionsRevoked`. An idle link stays idle across restarts, whatever the rule or WhoIs says
 later: nothing is sent on it, the status says `idle: true` to every reader and gives an administrator the reason as
 the last error (`refused`: "this server no longer accepts the hub's address: <reason>; disconnect, then connect
@@ -360,6 +360,25 @@ hub session):
 | The link goes idle: its address fails the URL rule at start, or another machine answers at the hub's name | `goIdle` → `revokeHubSessionsTx`, in the one write transaction that stores the idle flag; grants stay, unusable; audited `hub.link.idle` or `hub.link.node_changed` with `sessionsRevoked`, and `hub.session.revoke` |
 | `JD_HUB_SIGNIN` or `JD_HUB_LINK` off at start | `PrepareSignIn`, first thing in `api.Server.Start`; an error stops the backend starting |
 
+The idle flag is part of the stored link, so a restart does not decide an idle link again and does not revive it:
+`checkHubSession`, the redeem (`403 hub_not_linked`) and `PUT /account/hub-signin` (`409 not_linked`) all read the
+link through `usableLink`, which refuses one that is idle in the store whatever the URL rule or WhoIs would say
+by then. A redeem also re-reads the link inside its session transaction (`idleOrUndecided`), so one that races
+the link going idle either commits first and is revoked by it, or finds the flag. Only a disconnect clears the
+flag, and it ends the grants with it.
+
+**Refused routes.** `httpx.RefuseHubSession` sits on every route protocol 9.9's table lists (the table now holds
+the seventeen routes JD's walk of every write route added to it);
+[invariants.md](../security/invariants.md#the-exception-hub-sign-in) repeats the list, and
+`api/hub_session_routes_test.go` holds the router to exactly that list.
+
+**On the page.** Settings → Hub's "Sign in from Just Hub" (`components/hub-link/sign-in-panel.tsx`) names the hub
+as `hubLabel` does everywhere else ("Just Hub (hub)"), offers the opt-in with the password and, where the account
+has one, an authenticator code, and lists every account's grant with Remove for an administrator. While the page
+reads the link as idle it offers no form, says sign-in is paused until a disconnect, and keeps the account's own
+"Stop letting Just Hub sign me in". A `403 hub_session_not_allowed` anywhere in the app reads "Sign in on this
+server itself to do this" (`HUB_SESSION_REFUSED` in `lib/api.ts`).
+
 **`/hub/enter`** is a document written by hand (`lib/hub-enter.ts`) and served by a route handler
 (`app/hub/enter/route.ts`) rather than a page of the app: Next puts its own chunks ahead of anything a layout
 renders in `<head>`, and section 9.5 needs the page's first script to take the ticket out of the address before
@@ -421,10 +440,14 @@ Hub sign-in: `TestSignInTicketVectors` redeems all 37 ticket vectors through ste
 an account with an authenticator, two hours long, audited), a refusal at each step (expired, another key, another
 server or hub, a stale second factor, another device, not on the tailnet, another account, another hub user,
 garbage), a replay, a wrong device that does not spend the ticket, the switch off, no link, no grant, a locked
-account, a disconnect between the nonce and the session, every grant-ending event of section 9.3 with the hub
-session refused after it (a grant row deleted with no revocation included), enrolling an authenticator ending a
-password-only grant, the opt-in's checks, a hub session refused on credential and link routes, two-hour expiry,
-and a browser's earlier session replaced. `hub_session_routes_test.go` walks the router for
-`RefuseHubSession`. The `hublink` tests (`signin_test.go`) cover the link going idle, a disconnect, a late reply
-and the heartbeat's `signIn`. `hub-signin.spec.ts` holds `/hub/enter` to section 9.5 in a browser and covers the
-opt-in on Settings → Hub.
+account, a disconnect or the link going idle between the nonce and the session, every grant-ending event of section
+9.3 with the hub session refused after it (a grant row deleted, or the idle flag written, with no revocation
+included), an idle link refusing the redeem and the opt-in, enrolling an authenticator ending a password-only
+grant, the opt-in's checks, a hub session refused with `403 hub_session_not_allowed` on every route of the refused
+list, two-hour expiry, and a browser's earlier session replaced. `hub_session_routes_test.go` walks the router for
+`RefuseHubSession`. The `hublink` tests (`signin_test.go`) cover the link going idle and another machine at the
+hub's name (every hub session revoked with the flag), an idle link refusing hub sessions, redeems and grants after
+every restart until a disconnect, removal in the hub, a disconnect, a late reply, the heartbeat's `signIn`, and a
+key a reply announces never signing a ticket. `hub-signin.spec.ts` holds `/hub/enter` to section 9.5 in a browser
+and covers Settings → Hub's opt-in, the hub's name, an administrator removing another account's grant, and the
+panel paused on an idle link.

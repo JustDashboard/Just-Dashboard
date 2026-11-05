@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -378,6 +379,23 @@ func TestSignInNeedsTheSwitchTheLinkAndTheGrant(t *testing.T) {
 			t.Fatalf("no link = %d %s", w.Code, w.Body)
 		}
 	})
+	t.Run("idle link", func(t *testing.T) {
+		e := newSignInEnv(t)
+		ticket := e.ticket(e.hub.PrivateKey(), nil)
+		if _, err := e.s.Store.DB.Exec(`UPDATE settings SET value = json_set(value, '$.idle',
+			json_object('code', 'hub_url_refused', 'reason', 'the hub''s machine changed', 'at', '2026-11-05T00:00:00Z'))
+			WHERE key = 'hub.link.state'`); err != nil {
+			t.Fatal(err)
+		}
+		if w := e.redeem(ticket, "", ""); w.Code != 403 || codeOf(t, w) != "hub_not_linked" {
+			t.Fatalf("idle link = %d %s", w.Code, w.Body)
+		}
+		// Nor can an account opt in while it is idle.
+		if w := e.admin.do(http.MethodPut, "/api/v1/account/hub-signin",
+			`{"hubUser":"owner","password":"`+hubPassword+`","code":"000000"}`, nil); w.Code != http.StatusConflict {
+			t.Fatalf("opting in on an idle link = %d %s", w.Code, w.Body)
+		}
+	})
 	t.Run("not opted in", func(t *testing.T) {
 		e := newSignInEnv(t)
 		if w := e.admin.do(http.MethodDelete, "/api/v1/account/hub-signin", "", nil); w.Code != 204 {
@@ -404,6 +422,26 @@ func TestADisconnectBetweenTheNonceAndTheSessionLeavesNoSession(t *testing.T) {
 	e := newSignInEnv(t)
 	hublink.SetAfterNonce(e.s.modules.hubLink, func() {
 		if _, err := e.s.modules.hubLink.Disconnect(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	if w := e.redeem(e.ticket(e.hub.PrivateKey(), nil), "", ""); w.Code != 403 || codeOf(t, w) != "hub_not_linked" {
+		t.Fatalf("redeem = %d %s", w.Code, w.Body)
+	}
+	var n int
+	if err := e.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM sessions WHERE auth_method = 'hub'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("hub sessions = %d, %v", n, err)
+	}
+}
+
+// The link going idle between the nonce and the session leaves no session
+// either: the session's transaction reads the idle flag (sections 2.4, 9.7).
+func TestTheLinkGoingIdleBetweenTheNonceAndTheSessionLeavesNoSession(t *testing.T) {
+	e := newSignInEnv(t)
+	hublink.SetAfterNonce(e.s.modules.hubLink, func() {
+		if _, err := e.s.Store.DB.Exec(`UPDATE settings SET value = json_set(value, '$.idle',
+			json_object('code', 'hub_url_refused', 'reason', 'the hub''s machine changed', 'at', '2026-11-05T00:00:00Z'))
+			WHERE key = 'hub.link.state'`); err != nil {
 			t.Error(err)
 		}
 	})
@@ -505,6 +543,16 @@ func TestEveryEndOfAGrantEndsItsHubSessions(t *testing.T) {
 		// refused on its next use (section 9.3).
 		{"the grant row disappears without a revocation", func(e *signInEnv) {
 			if _, err := e.s.Store.DB.Exec(`DELETE FROM hub_signin_grants`); err != nil {
+				e.t.Fatal(err)
+			}
+		}},
+		// Nor here: the idle flag is written into the stored link with no
+		// session revoked beside it, as a restart finds a link that went idle
+		// before (sections 2.4 and 9.3).
+		{"the link is idle in the store without a revocation", func(e *signInEnv) {
+			if _, err := e.s.Store.DB.Exec(`UPDATE settings SET value = json_set(value, '$.idle',
+				json_object('code', 'hub_url_refused', 'reason', 'the hub''s machine changed', 'at', '2026-11-05T00:00:00Z'))
+				WHERE key = 'hub.link.state'`); err != nil {
 				e.t.Fatal(err)
 			}
 		}},
@@ -650,6 +698,26 @@ func TestAHubSessionCannotMakeCredentialsOrLinks(t *testing.T) {
 	}
 	if w := hubSession.do(http.MethodPost, "/api/v1/tokens/", `{"name":"k","role":"admin"}`, nil); codeOf(t, w) != "hub_session_not_allowed" {
 		t.Fatalf("after a code the hub session made a key: %d %s", w.Code, w.Body)
+	}
+}
+
+// Every route of the refused list answers a hub session with 403
+// hub_session_not_allowed, whatever it would have done with the body: the
+// walk proves the middleware is there, this that nothing before it answers
+// first (section 9.9).
+func TestEveryRefusedRouteAnswersAHubSessionWith403(t *testing.T) {
+	e := newSignInEnv(t)
+	hubSession := e.enter()
+	params := regexp.MustCompile(`\{[^}]+\}`)
+	for _, rt := range hubSessionRefused {
+		method, pattern, _ := strings.Cut(rt, " ")
+		w := hubSession.do(method, params.ReplaceAllString(pattern, "x1"), `{}`, nil)
+		if w.Code != http.StatusForbidden || codeOf(t, w) != "hub_session_not_allowed" {
+			t.Errorf("%s with a hub session = %d %s", rt, w.Code, w.Body)
+		}
+	}
+	if !alive(hubSession) {
+		t.Fatal("being refused ended the hub session")
 	}
 }
 

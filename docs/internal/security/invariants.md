@@ -518,24 +518,28 @@ would outlive the session and the grant. `TestEveryCredentialAndLinkRouteRefuses
 | Deployment secrets and saved credentials | `POST /deploy/{id}/environments/{env}/triggers`, `PUT /deploy/{id}/environments/{env}/triggers/{trigger}`, `POST /deploy/{id}/environments/{env}/triggers/{trigger}/rotate-secret`, `POST /deploy/{id}/rotate-secret`, `POST /deploy/credentials`, `PUT /deploy/credentials/{id}`, `POST /deploy/secret-stores`, `PUT /deploy/secret-stores/{store}`, `POST /deploy/notifications`, `PUT /deploy/notifications/{channel}`, `POST /deploy/log-drains`, `PUT /deploy/log-drains/{drain}` |
 | Git and GitHub | `POST /git/github/auth/device`, `POST /git/github/auth/device/{id}`, `POST /git/github/auth/token`, `POST /git/github/auth/configure`, `POST /deploy/github-app/manifest`, `POST /deploy/github-app/callback`, `POST /git/forge/account` |
 | DNS credentials, tunnels and TLS keys | `POST /certificates/dns-credentials`, `POST /certificates/import`, `POST /certificates/export`, `POST /network/dns/services/`, `PUT /network/dns/services/{id}`, `PUT /proxy/tunnel/`, `POST /proxy/tunnel/create` |
-| Network peers | `POST /network/vpn/wireguard/{iface}/peers`, `PATCH /network/vpn/wireguard/{iface}/peers/{id}` |
+| Network peers and check machines | `POST /network/vpn/wireguard/{iface}/peers`, `PATCH /network/vpn/wireguard/{iface}/peers/{id}`, `POST /network/vpn/archive/{file}/restore`, `POST /network/external/enrollments` |
 | Backups | `POST /backups/key/import`, `POST /backups/key/export`, `POST /backups/`, `PUT /backups/{id}`, `POST /backups/import` |
 | The assistant's provider keys | `PUT /assistant/providers/{preset}` |
 | The account link | `POST /dashboard/link/`, `DELETE /dashboard/link/request`, `PUT /dashboard/link/scope` |
 | The hub link | `POST /dashboard/hub`, `DELETE /dashboard/hub/request`, `PUT /dashboard/hub/scope` |
 | Hub sign-in | `PUT /account/hub-signin` |
 
-The protocol's table for JD 0.8.5 is the floor. The walk of every write route found these that its rule
-covers and the table does not list yet, and they carry the middleware too: `POST /git/forge/account` (a
-saved Git host token), `POST /databases/host/grant` and `POST /databases/{id}/server/roles/{name}/privileges`
-(a database login and its rights), `POST /system-accounts/bulk` and `PATCH /system-accounts/groups/{group}`
-(Linux accounts, and group membership such as `sudo` or `docker`), the two WireGuard peer routes (a peer's
-key lets a device onto this server's network), `PUT /proxy/tunnel/` and `POST /proxy/tunnel/create`
-(Cloudflare tunnel tokens), the two DNS service routes (a DNS server's saved API credential), the backup
-job routes (a destination holds credentials of its own) and `PUT /assistant/providers/{preset}` (a
-provider's API key). The two `DELETE` rows the protocol's table lists are refused as well, although the
-rule leaves deletions open, because the table names them. A route added later that the rule covers joins
-the list, the test and this table in the same change.
+This is the protocol's table (section 9.9), which its first version did not hold whole: the walk of every
+write route found seventeen more that its rule covers, and the protocol lists them since (errata HL-3,
+route walk): `POST /git/forge/account` (a saved Git host token), `POST /databases/host/grant` and
+`POST /databases/{id}/server/roles/{name}/privileges` (a database login and its rights),
+`POST /system-accounts/bulk` and `PATCH /system-accounts/groups/{group}` (Linux accounts, and group
+membership such as `sudo` or `docker`), the two WireGuard peer routes and the restore of an archived tunnel
+(a peer's key lets a device onto this server's network), `POST /network/external/enrollments` (the token a
+machine that runs external checks enrols with, after which it keeps calling this server's probe-agent
+routes), `PUT /proxy/tunnel/` and `POST /proxy/tunnel/create` (Cloudflare tunnel tokens), the two DNS
+service routes (a DNS server's saved API credential), the backup job routes (a destination holds
+credentials of its own) and `PUT /assistant/providers/{preset}` (a provider's API key). The two `DELETE`
+rows the table lists are refused as well, although the rule leaves deletions open, because the table names
+them. `TestEveryRefusedRouteAnswersAHubSessionWith403` sends a hub session to each of them. A route added
+later that the rule covers joins the list, the test, the protocol's table and this table in the same
+change.
 
 What stays open to a hub session, because it only takes power away: disconnecting either link,
 `POST /dashboard/hub/sync`, removing a sign-in grant, revoking sessions, deleting a key, user, credential
@@ -555,7 +559,9 @@ or finds nothing to stand on:
   hub session go with it (`hublink.onClear`, in the engine's clearing transaction);
 - the link goes idle, because its address fails the URL rule at start or another machine answers at the
   hub's name: every hub session is revoked in the write transaction that stores the idle flag, and the
-  grants stay unusable (`hublink.goIdle`, `revokeHubSessionsTx`);
+  grants stay unusable (`hublink.goIdle`, `revokeHubSessionsTx`). The flag is kept in the stored link,
+  so every later start finds the link idle without deciding again, and refuses hub sessions, redeems and
+  new grants until a person disconnects, even once the address passes the rule again;
 - `JD_HUB_SIGNIN` or `JD_HUB_LINK` is found off at start: every grant, ticket record and hub session is
   deleted before the API serves its first request, and if that cannot be written the backend does not
   start (`hublink.PrepareSignIn` from `api.Server.Start`).

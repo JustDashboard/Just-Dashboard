@@ -221,7 +221,7 @@ test.describe("/hub/enter", () => {
 
 type SignIn = { enabled: boolean; offered: boolean; users: string[]; mine?: object }
 
-const status = (signIn: SignIn, grants: object[] = []) => ({
+const status = (signIn: SignIn, grants: object[] = [], lastError?: string) => ({
   enabled: true,
   state: "linked",
   hubUrl: HUB,
@@ -239,15 +239,24 @@ const status = (signIn: SignIn, grants: object[] = []) => ({
       linkedAt: iso(now - 86_400_000),
       linkedBy: "ion",
       hubKeys: [{ kid: "hub-2026-11", fingerprint: "39f7:13d0:a644:253f" }],
+      lastError,
     },
     grants,
   },
 })
 
-async function mockSettings(page: Page, first: SignIn) {
+/** What the status says about a link the server has set idle (hub-link.md, `idleReason`). */
+const IDLE_ERROR =
+  "this server no longer accepts the hub's address: the hub's machine changed: nHub1CNTRL is now nImpostor; disconnect, then connect again"
+
+async function mockSettings(
+  page: Page,
+  first: SignIn,
+  options: { grants?: object[]; lastError?: string } = {},
+) {
   const world = {
     signIn: first,
-    grants: [] as object[],
+    grants: options.grants ?? ([] as object[]),
     calls: [] as { method: string; path: string; body?: unknown }[],
   }
   const me = signedIn(user(1, "ion"))
@@ -277,7 +286,15 @@ async function mockSettings(page: Page, first: SignIn) {
       })
     }
     if (path === "/dashboard/hub" && method === "GET")
-      return respond(route, status(world.signIn, world.grants))
+      return respond(route, status(world.signIn, world.grants, options.lastError))
+    const removal = /^\/dashboard\/hub\/signin\/(\d+)$/.exec(path)
+    if (removal && method === "DELETE") {
+      world.calls.push({ method, path })
+      world.grants = world.grants.filter(
+        (grant) => (grant as { userId: number }).userId !== Number(removal[1]),
+      )
+      return route.fulfill({ status: 204 })
+    }
     if (path === "/account/hub-signin") {
       world.calls.push({ method, path, body: request.postDataJSON() ?? undefined })
       if (method === "PUT") {
@@ -351,5 +368,63 @@ test.describe("Settings → Hub: Sign in from Just Hub", () => {
     await section.getByRole("button", { name: "Stop letting Just Hub sign me in" }).click()
     await expect(allow).toBeVisible()
     expect(world.calls[world.calls.length - 1].method).toBe("DELETE")
+  })
+
+  test("the hub's name is the hub's own, as everywhere else on the page", async ({ page }) => {
+    await mockSettings(page, { enabled: true, offered: false, users: [] })
+    await page.goto("/dashboard/hub")
+    await expect(
+      page.getByText("This server allows it, but Just Hub (hub) does not offer it"),
+    ).toBeVisible()
+  })
+
+  test("an administrator sees every account's choice and can end one", async ({ page }) => {
+    const world = await mockSettings(
+      page,
+      { enabled: true, offered: true, users: ["owner", "maria"] },
+      { grants: [{ userId: 2, username: "maria", hubUser: "maria", since: iso(now - 3_600_000) }] },
+    )
+    await page.goto("/dashboard/hub")
+    const section = page.locator("section", {
+      has: page.getByRole("heading", { name: "Sign in from Just Hub" }),
+    })
+    const row = section.getByRole("listitem").filter({ hasText: "maria" })
+    await expect(row).toContainText("by hub user maria")
+    await row.getByRole("button", { name: "Remove" }).click()
+    const dialog = page.getByRole("alertdialog").or(page.getByRole("dialog"))
+    await expect(dialog).toContainText("Every session the hub opened for that account ends now")
+    await dialog.getByRole("button", { name: "Remove" }).click()
+    await expect(row).toHaveCount(0)
+    expect(world.calls[world.calls.length - 1]).toEqual({
+      method: "DELETE",
+      path: "/dashboard/hub/signin/2",
+    })
+  })
+
+  test("an idle link pauses it: no form, and a choice already made can still be ended", async ({
+    page,
+  }) => {
+    await mockSettings(
+      page,
+      {
+        enabled: true,
+        offered: true,
+        users: ["owner"],
+        mine: { hubUser: "owner", since: iso(now - 86_400_000) },
+      },
+      { lastError: IDLE_ERROR },
+    )
+    await page.goto("/dashboard/hub")
+    const section = page.locator("section", {
+      has: page.getByRole("heading", { name: "Sign in from Just Hub" }),
+    })
+    await expect(section.locator('[data-slot="hub-signin-idle"]')).toContainText(
+      "Paused while the link is idle",
+    )
+    await expect(section.getByRole("button", { name: "Let Just Hub sign me in" })).toHaveCount(0)
+    await expect(section.getByLabel("Your password on this server")).toHaveCount(0)
+    await expect(
+      section.getByRole("button", { name: "Stop letting Just Hub sign me in" }),
+    ).toBeVisible()
   })
 })
