@@ -37,7 +37,7 @@ if args == ["--version"]:
     print("Docker version 29.8.1")
     sys.exit(0)
 entry = {"args": args, "cwd": os.getcwd()}
-admin_link = "--admin" in args and any(x in args for x in ["link", "unlink", "link-status"])
+admin_link = "--admin" in args and any(x in args for x in ["link", "unlink", "link-status", "hub-connect", "hub-disconnect", "hub-status"])
 if "--admin" in args and any(x in args for x in ["create-user", "reset-password"]) or admin_link:
     entry["stdin"] = sys.stdin.read()
 with pathlib.Path(os.environ["TEST_CALLS"]).open("a") as calls:
@@ -382,6 +382,56 @@ JD_FRONTEND_PORT=42002
         result = self.run_tool("manage.sh", "--help", env={"TEST_UID": "1000"})
         self.assertEqual(result.returncode, 0, result.stderr)
         for text in ("link [SCOPE]", "unlink", "link-status", "observe (default), operate or", "JD_ACCOUNT_LINK=false"):
+            self.assertIn(text, result.stdout)
+
+    # ---- connecting to a Just Hub ----------------------------------------------
+
+    def test_hub_commands_forward_to_the_admin_cli(self):
+        for args, expected in (
+                (("hub", "connect", "hub.example.ts.net"), ["--admin", "hub-connect", "hub.example.ts.net"]),
+                (("hub", "connect", "https://hub.example.ts.net", "--scope", "observe", "--wait=10m"),
+                 ["--admin", "hub-connect", "https://hub.example.ts.net", "--scope", "observe", "--wait=10m"]),
+                (("hub", "connect", "hub.example.ts.net", "--token", "jht_x", "--scope=operate"),
+                 ["--admin", "hub-connect", "hub.example.ts.net", "--token", "jht_x", "--scope=operate"]),
+                (("hub", "disconnect"), ["--admin", "hub-disconnect"]),
+                (("hub", "status"), ["--admin", "hub-status"])):
+            result = self.run_tool("manage.sh", *args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            call = self.read_calls()[-1]
+            self.assertEqual(call["args"], ["compose", "run", "--rm", "--no-deps", "-T", "backend", *expected])
+            self.assertEqual(call["cwd"], str(self.root))
+
+    def test_hub_connect_passes_a_token_on_stdin_and_never_in_argv(self):
+        token = "jht_" + "A" * 43
+        result = self.run_tool("manage.sh", "hub", "connect", "hub.example.ts.net", "--token-stdin", input=token + "\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        call = self.read_calls()[-1]
+        self.assertEqual(call["args"][-3:], ["hub-connect", "hub.example.ts.net", "--token-stdin"])
+        self.assertEqual(call["stdin"], token + "\n")
+        self.assertNotIn(token, " ".join(call["args"]) + result.stdout + result.stderr)
+
+    def test_hub_connect_keeps_the_commands_exit_status(self):
+        for code in (2, 1):
+            result = self.run_tool("manage.sh", "hub", "connect", "hub.example.ts.net", env={"TEST_ADMIN_EXIT": str(code)})
+            self.assertEqual(result.returncode, code, result.stderr)
+
+    def test_hub_arguments_are_validated_before_docker_and_root_is_needed(self):
+        for args in (("hub",), ("hub", "join"), ("hub", "connect"), ("hub", "connect", "--scope", "observe"),
+                     ("hub", "connect", "hub.example.ts.net", "--scope", "root"),
+                     ("hub", "connect", "hub.example.ts.net", "--scope"),
+                     ("hub", "connect", "hub.example.ts.net", "--force"), ("hub", "disconnect", "now"),
+                     ("hub", "status", "-v")):
+            result = self.run_tool("manage.sh", *args)
+            self.assertNotEqual(result.returncode, 0, args)
+        result = self.run_tool("manage.sh", "hub", "status", env={"TEST_UID": "1000"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sudo", result.stderr)
+        self.assertEqual(self.read_calls(), [])
+
+    def test_help_lists_the_hub_commands(self):
+        result = self.run_tool("manage.sh", "--help", env={"TEST_UID": "1000"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for text in ("hub connect URL", "hub disconnect", "hub status", "--token-stdin", "default maintain", "JD_HUB_LINK=false"):
             self.assertIn(text, result.stdout)
 
     # The installer's own prompts are read from a pipe, where bash does not

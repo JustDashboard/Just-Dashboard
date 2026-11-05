@@ -39,7 +39,9 @@ func isLinkCommand(name string) bool {
 
 // LongRunning says whether a command waits on a person, so the caller does not
 // give it the half minute the account commands get.
-func LongRunning(args []string) bool { return len(args) > 0 && args[0] == "link" }
+func LongRunning(args []string) bool {
+	return len(args) > 0 && (args[0] == "link" || args[0] == "hub-connect")
+}
 
 // linkOptions are the flags of `link`.
 type linkOptions struct {

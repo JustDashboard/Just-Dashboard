@@ -25,6 +25,20 @@ Linking to just-dashboard.com (optional)
   unlink                             Unlink it
   link-status                        Say whether it is linked
 
+Connecting to Just Hub on your tailnet (optional)
+  hub connect URL [OPTIONS]          Connect this server to a Just Hub. URL is the hub's
+                                     tailnet name, for example hub.example.ts.net. Prints a
+                                     code and this server's fingerprint, then waits for the
+                                     hub's owner to approve it there. Options:
+                                       --scope observe|operate|maintain (default maintain)
+                                       --token-stdin  read a one-time token from the hub
+                                       --token TOKEN  the same, typed
+                                       --wait 15m     how long to wait, at most 1h
+                                     Exits 0 once connected, 2 if it was declined, not
+                                     approved in time or interrupted
+  hub disconnect                     Disconnect it
+  hub status                         Say whether it is connected
+
 Stack
   status                             Show containers and their health
   logs [backend|frontend|proxy]       Follow logs (default: backend; Ctrl+C exits)
@@ -43,6 +57,9 @@ audited as local root.
 Linking is optional and refused when JD_ACCOUNT_LINK=false. The code link prints
 is only a pointer to the request; the key it is signed with never leaves the
 dashboard. See docs/guides/linking-and-usage.md.
+
+Connecting to a hub is optional and refused when JD_HUB_LINK=false. The hub must
+be another machine on this server's own tailnet, and is only reached over it.
 
 Examples:
   sudo ./scripts/create-user.sh alice limited
@@ -81,6 +98,35 @@ case "$command" in
 		case "${1:-observe}" in observe|operate|maintain) ;; *) die "Scope must be observe, operate or maintain." ;; esac
 		;;
 	revoke-sessions) [ "$#" -eq 1 ] && [ -n "$1" ] || die "revoke-sessions needs one username. See --help." ;;
+	hub)
+		case "${1:-}" in
+			connect)
+				[ "$#" -ge 2 ] && [ -n "$2" ] && [ "${2#-}" = "$2" ] || die "hub connect needs the hub's address, for example hub.example.ts.net. See --help."
+				i=3
+				while [ "$i" -le "$#" ]; do
+					arg="${!i}"
+					case "$arg" in
+						--token-stdin) ;;
+						--scope=*|--wait=*|--token=*) value="${arg#*=}" ;;
+						--scope|--wait|--token)
+							i=$((i + 1))
+							[ "$i" -le "$#" ] || die "$arg needs a value. See --help."
+							value="${!i}"
+							;;
+						*) die "hub connect does not take $arg. See --help." ;;
+					esac
+					case "$arg" in
+						--scope|--scope=*)
+							case "$value" in observe|operate|maintain) ;; *) die "Scope must be observe, operate or maintain." ;; esac
+							;;
+					esac
+					i=$((i + 1))
+				done
+				;;
+			disconnect|status) [ "$#" -eq 1 ] || die "hub $1 does not accept arguments. See --help." ;;
+			*) die "hub takes connect, disconnect or status. See --help." ;;
+		esac
+		;;
 	logs)
 		[ "$#" -le 1 ] || die "logs accepts one service. See --help."
 		case "${1:-backend}" in backend|frontend|proxy) ;; *) die "Service must be backend, frontend or proxy." ;; esac
@@ -129,6 +175,14 @@ case "$command" in
 	link)
 		# exec keeps the command's own exit status: 2 means declined or not approved in time.
 		exec "${compose[@]}" run --rm --no-deps -T backend --admin link --scope "${1:-observe}"
+		;;
+	hub)
+		sub="$1"
+		shift
+		# exec keeps the command's own exit status: 2 means declined, not approved in
+		# time or interrupted. Standard input passes through for --token-stdin, so a
+		# token never appears in a process list.
+		exec "${compose[@]}" run --rm --no-deps -T backend --admin "hub-$sub" "$@"
 		;;
 	create-user|reset-password)
 		if [ "$password_stdin" -eq 1 ]; then
