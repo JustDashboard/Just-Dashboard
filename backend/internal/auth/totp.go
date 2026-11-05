@@ -165,7 +165,9 @@ func (s *Service) verifySecondFactor(ctx context.Context, sessionID string, user
 // after a passkey is not the password-and-code pair "totp" has always meant.
 // A hub session is never touched: it is complete already, and rewriting its
 // method would turn it into an ordinary session that none of hub sign-in's
-// limits reach (hub_signin.go).
+// limits reach (hub_signin.go). The code route refuses a hub session before
+// a guess is spent (httpx.RefuseHubSession); this keeps it so for any other
+// caller.
 func elevateTx(ctx context.Context, tx *sql.Tx, sessionID string, userID int64, method string) error {
 	res, err := tx.ExecContext(ctx, `UPDATE sessions SET twofa_passed = 1,
 		auth_method = CASE WHEN auth_method = 'passkey' THEN 'passkey+' || ? ELSE ? END

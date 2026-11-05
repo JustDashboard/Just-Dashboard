@@ -340,7 +340,8 @@ the session (`auth.Service.StartHubSessionTx`: `403 account_unavailable`). The s
 any, is revoked in that transaction; when it is another account's complete session, only if the body says
 `"replace": true`, which `/hub/enter` sends after the person pressed Continue, and otherwise nothing is made and
 the answer is `409 other_account_signed_in`. A hub session has `auth_method = 'hub'`, `twofa_passed = 1`, the grant's hub
-user in `sessions.hub_user`, and lasts two hours at most and one hour idle. Every outcome writes `hub.signin`:
+user in `sessions.hub_user`, and lasts two hours at most and one hour idle. It never owes a code, so every
+second-factor route refuses it, `POST /auth/2fa/verify` included, before a guess is spent. Every outcome writes `hub.signin`:
 the account (or `anonymous`) as username, `hub:<name>` as actor once the signature held, the status the redeem
 answered (`200`, or the refusal's own: `401`, `403`, `409` or `500`), and the ticket's
 `hubUser`, `userId`, `nonce`, `tsLogin`, `tsNode`, `deviceCheck`, and `sessionId` or the refusal's `code`.
@@ -468,7 +469,8 @@ account, a disconnect or the link going idle between the nonce and the session, 
 9.3 with the hub session refused after it (a grant row deleted, or the idle flag written, with no revocation
 included), an idle link refusing the redeem and the opt-in, enrolling an authenticator ending a password-only
 grant, the opt-in's checks, a hub session refused with `403 hub_session_not_allowed` on every route of the refused
-list, two-hour expiry, a disconnect that starts after the session row is written and waits for the commit
+list (a right code to `POST /auth/2fa/verify` among them, with no guess spent and no `auth.2fa.verify` entry),
+two-hour expiry, a disconnect that starts after the session row is written and waits for the commit
 (`SetBeforeSessionCommit`), and a browser's earlier session replaced (another account's only with `replace`).
 `hub_session_sockets_test.go` opens a real socket from a hub session and closes it at once after every
 grant-ending event of section 9.3 (at the next check for the two nothing announces), at the session's expiry,

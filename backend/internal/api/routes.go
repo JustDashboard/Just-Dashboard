@@ -104,7 +104,11 @@ func (s *Server) Routes() http.Handler {
 				r.Method(http.MethodGet, "/auth/session", s.handle(s.handleSession))
 				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/2fa/setup", s.handle(s.handleTOTPSetup))
 				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/2fa/enable", s.handle(s.handleTOTPEnable))
-				r.Method(http.MethodPost, "/auth/2fa/verify", s.handle(s.handleTOTPVerify))
+				// A hub session never owes a code (it is made complete), and a code
+				// given from one would turn it into an ordinary session; refused
+				// here, before the handler spends a guess from the account's
+				// budget or audits a right code as a wrong one.
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/2fa/verify", s.handle(s.handleTOTPVerify))
 				r.Method(http.MethodPost, "/auth/logout", s.handle(s.handleLogout))
 			})
 			r.Group(func(r chi.Router) {

@@ -522,7 +522,7 @@ either names a route the router does not refuse, or leaves one out:
 | --- | --- |
 | API, MCP and deploy keys | `POST /tokens/`, `POST /tokens/mcp`, `POST /tokens/deploy`, `PUT /tokens/{id}/connections` |
 | Dashboard accounts | `POST /dashboard-users/`, `PATCH /dashboard-users/{id}`, `POST /dashboard-users/{id}/reset-totp`, `DELETE /dashboard-users/{id}` |
-| The caller's own credentials | `POST /account/password`, `POST /account/recovery-codes`, `POST /account/2fa/disable`, `POST /auth/2fa/setup`, `POST /auth/2fa/enable`, `POST /account/passkeys/register/begin`, `POST /account/passkeys/register/finish`, `PATCH /account/passkeys/{id}`, `DELETE /account/passkeys/{id}` |
+| The caller's own credentials | `POST /account/password`, `POST /account/recovery-codes`, `POST /account/2fa/disable`, `POST /auth/2fa/setup`, `POST /auth/2fa/enable`, `POST /auth/2fa/verify`, `POST /account/passkeys/register/begin`, `POST /account/passkeys/register/finish`, `PATCH /account/passkeys/{id}`, `DELETE /account/passkeys/{id}` |
 | Linux accounts and their keys | `POST /system-users/`, `PATCH /system-users/{name}/`, `PUT /system-users/{name}/sudo`, `POST /system-users/{name}/password`, `POST /system-users/{name}/keys/generate`, `POST /system-users/{name}/keys`, `PATCH /system-users/{name}/keys`, `POST /system-users/{name}/keys/import`, `POST /system-users/{name}/keys/copy`, `POST /system-accounts/bulk`, `PATCH /system-accounts/groups/{group}` |
 | Database users and roles | `POST /databases/{id}/server/roles`, `PUT /databases/{id}/server/roles/{name}`, `POST /databases/{id}/server/roles/{name}/grant`, `POST /databases/{id}/server/roles/{name}/privileges`, `POST /databases/{id}/mongo/users`, `PUT /databases/{id}/mongo/users`, `POST /databases/{id}/mongo/users/grant`, `PUT /databases/{id}/redis/acl/{name}`, `PUT /databases/{id}/redis/config`, `POST /databases/host/grant` |
 | Database passwords and data copies | `GET /databases/{id}/url`, `POST /deploy/{id}/environments/{env}/releases/{release}/data-copies`, `GET /deploy/{id}/environments/{env}/data-copies/{copy}/url` |
@@ -563,7 +563,13 @@ database's access-list users and passwords, written as basic-auth password files
 computer routes and stream pairing (a remote machine's saved sign-in, and a client certificate that
 machine trusts). `TestEveryRefusedRouteAnswersAHubSessionWith403` sends a hub session to each of them. A
 route added later that the rule covers joins the list, the test, the protocol's table and this table in
-the same change.
+the same change. Every second-factor route is refused, `POST /auth/2fa/verify` with the rest, which the
+end-to-end run of hub sign-in found still open: a hub session is made complete and never owes a code, and a
+code given from one would turn it into an ordinary session that none of these limits reach. The
+middleware refuses it before the handler spends a guess from the account's budget, so a right code from a
+hub session is neither counted nor audited as a wrong one
+(`TestAHubSessionIsRefusedTheCodeRouteBeforeAGuessIsSpent`); `auth.elevateTx` still leaves a hub session
+as it is, should another caller ever reach it.
 
 What stays open to a hub session, because it only takes power away: disconnecting either link,
 `POST /dashboard/hub/sync`, removing a sign-in grant, revoking sessions, deleting a key, user, credential

@@ -744,20 +744,54 @@ func TestAHubSessionCannotMakeCredentialsOrLinks(t *testing.T) {
 	if w := hubSession.do(http.MethodPost, "/api/v1/dashboard/hub/sync", "", nil); w.Code != 200 {
 		t.Errorf("sync with a hub session = %d %s", w.Code, w.Body)
 	}
-	// A code given from a hub session does not turn it into an ordinary one.
+}
+
+// A hub session is complete already and never owes a code, so the code route
+// refuses it as it is, before a guess is counted: a right, unused code is
+// answered 403 hub_session_not_allowed, not 401 invalid_code; it is not used
+// up, no failed attempt is counted, it is not audited as a wrong code, and the
+// session stays a hub session. More tries than the account's burst are all
+// refused the same way, never rate_limited, and the account keeps its guesses.
+func TestAHubSessionIsRefusedTheCodeRouteBeforeAGuessIsSpent(t *testing.T) {
+	e := newSignInEnv(t)
+	hubSession := e.enter()
 	var sealed string
 	e.s.Store.DB.QueryRow(`SELECT totp_secret FROM users WHERE id = ?`, e.adminID).Scan(&sealed)
 	secret, _ := e.s.Sealer.Open(sealed)
+	// Enrolling used the current step and opting in the next one; forget both,
+	// so the current step's code is right and unused.
 	e.s.Store.DB.Exec(`UPDATE users SET totp_last_step = 0 WHERE id = ?`, e.adminID)
-	hubSession.do(http.MethodPost, "/api/v1/auth/2fa/verify", `{"code":"`+nextCode(t, secret, 0)+`"}`, nil)
+	const stepBefore = 0
+	code := nextCode(t, secret, 0)
+	for try := 1; try <= 7; try++ {
+		w := hubSession.do(http.MethodPost, "/api/v1/auth/2fa/verify", `{"code":"`+code+`"}`, nil)
+		if w.Code != http.StatusForbidden || codeOf(t, w) != "hub_session_not_allowed" {
+			t.Fatalf("try %d: a right code from a hub session = %d %s", try, w.Code, w.Body)
+		}
+	}
+	var step, failed int64
+	e.s.Store.DB.QueryRow(`SELECT totp_last_step, totp_failed_count FROM users WHERE id = ?`, e.adminID).Scan(&step, &failed)
+	if step != stepBefore || failed != 0 {
+		t.Fatalf("the refused code moved the account: last step %d (was %d), failed count %d", step, stepBefore, failed)
+	}
+	if got := e.audits("auth.2fa.verify"); len(got) != 0 {
+		t.Fatalf("a refused hub session was audited as a code: %+v", got)
+	}
+	refused := e.audits("post:auth.2fa.verify")
+	if len(refused) != 7 || refused[0].Status != http.StatusForbidden || refused[0].Success {
+		t.Fatalf("the refusals' audit = %+v", refused)
+	}
 	var method string
 	e.s.Store.DB.QueryRow(`SELECT auth_method FROM sessions WHERE user_id = ? AND hub_user = 'owner'`, e.adminID).Scan(&method)
-	if method != auth.MethodHub {
-		t.Fatalf("a code turned the hub session into %q", method)
+	if method != auth.MethodHub || !alive(hubSession) {
+		t.Fatalf("the hub session is now %q, alive %v", method, alive(hubSession))
 	}
 	if w := hubSession.do(http.MethodPost, "/api/v1/tokens/", `{"name":"k","role":"admin"}`, nil); codeOf(t, w) != "hub_session_not_allowed" {
 		t.Fatalf("after a code the hub session made a key: %d %s", w.Code, w.Body)
 	}
+	// The account's own budget is whole: its password session's next guess is
+	// checked, not rate_limited, and the code is still unused.
+	e.allow(e.admin, "owner", hubPassword, code, http.StatusNoContent)
 }
 
 // Every route of the refused list answers a hub session with 403

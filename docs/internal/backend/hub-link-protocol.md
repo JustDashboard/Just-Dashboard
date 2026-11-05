@@ -1749,7 +1749,7 @@ route that carries it and fails when one in the table does not.
 | --- | --- |
 | API, MCP and deploy keys | `POST /tokens/`, `POST /tokens/mcp`, `POST /tokens/deploy`, `PUT /tokens/{id}/connections` |
 | Dashboard accounts | `POST /dashboard-users/`, `PATCH /dashboard-users/{id}`, `POST /dashboard-users/{id}/reset-totp`, `DELETE /dashboard-users/{id}` |
-| The caller's own credentials | `POST /account/password`, `POST /account/recovery-codes`, `POST /account/2fa/disable`, `POST /auth/2fa/setup`, `POST /auth/2fa/enable`, `POST /account/passkeys/register/begin`, `POST /account/passkeys/register/finish`, `PATCH /account/passkeys/{id}`, `DELETE /account/passkeys/{id}` |
+| The caller's own credentials | `POST /account/password`, `POST /account/recovery-codes`, `POST /account/2fa/disable`, `POST /auth/2fa/setup`, `POST /auth/2fa/enable`, `POST /auth/2fa/verify`, `POST /account/passkeys/register/begin`, `POST /account/passkeys/register/finish`, `PATCH /account/passkeys/{id}`, `DELETE /account/passkeys/{id}` |
 | Linux accounts and their keys | `POST /system-users/`, `PATCH /system-users/{name}/`, `PUT /system-users/{name}/sudo`, `POST /system-users/{name}/password`, `POST /system-users/{name}/keys/generate`, `POST /system-users/{name}/keys`, `PATCH /system-users/{name}/keys`, `POST /system-users/{name}/keys/import`, `POST /system-users/{name}/keys/copy`, `POST /system-accounts/bulk`, `PATCH /system-accounts/groups/{group}` |
 | Database users and roles | `POST /databases/{id}/server/roles`, `PUT /databases/{id}/server/roles/{name}`, `POST /databases/{id}/server/roles/{name}/grant`, `POST /databases/{id}/server/roles/{name}/privileges`, `POST /databases/{id}/mongo/users`, `PUT /databases/{id}/mongo/users`, `POST /databases/{id}/mongo/users/grant`, `PUT /databases/{id}/redis/acl/{name}`, `PUT /databases/{id}/redis/config`, `POST /databases/host/grant` |
 | Database passwords and data copies | `GET /databases/{id}/url`, `POST /deploy/{id}/environments/{env}/releases/{release}/data-copies`, `GET /deploy/{id}/environments/{env}/data-copies/{copy}/url` |
@@ -1778,7 +1778,11 @@ a WireGuard peer's configuration (its private key), a database's connection stri
 configuration (its password and ACL file), a production data copy and its address (a database login and its
 password), a deployment's secret variables revealed, generated or rotated, a project's webhook secret, NPM's
 basic-auth users imported, and a remote computer's saved sign-in and stream pairing; they are in the table above.
-A route added later that the rule covers joins the set, the test and the list in the same change; the route-walk
+The end-to-end run of sign-in found one more: `POST /auth/2fa/verify`, the one second-factor route a hub session
+still reached. A hub session is made complete and never owes a code, and a code given from one would turn it into an
+ordinary session that none of this section's limits reach, so it is refused there as on every other second-factor
+route, before a guess is spent from the account's budget or a right code is audited as a wrong one. A route added
+later that the rule covers joins the set, the test and the list in the same change; the route-walk
 test reads this table and `invariants.md`'s and fails when either differs from the router. Disconnecting either link,
 `POST /dashboard/hub/sync`, removing a grant, revoking sessions, deleting a key, user, credential or channel, and
 signing GitHub out stay open to a hub session: they only take power away.

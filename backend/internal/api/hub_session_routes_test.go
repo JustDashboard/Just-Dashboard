@@ -143,6 +143,12 @@ var hubSessionRefused = []string{
 	"POST /api/v1/remote-desktop/computers",                  // a computer's saved sign-in
 	"PUT /api/v1/remote-desktop/computers/{id}",              // changes it, or where it is sent
 	"POST /api/v1/remote-desktop/computers/{id}/stream/pair", // a client certificate the computer trusts
+
+	// Found by the hub sign-in end-to-end run: the one second-factor route a
+	// hub session still reached. A hub session is complete already, and a
+	// code given from it would have spent a guess and been audited as a
+	// wrong one; refusing it first keeps every 2FA route closed to it.
+	"POST /api/v1/auth/2fa/verify",
 }
 
 // hubSessionCarriers is every route of the router that carries
