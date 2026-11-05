@@ -1072,7 +1072,7 @@ and be able to do at the chosen scope, and does nothing until a server administr
 | `POST /dashboard/hub` `{"url", "scope"}` | `system.admin`, session only | Connect. Audited `hub.link.begin`, with the hub node in the detail |
 | `DELETE /dashboard/hub/request` | `system.admin`, session only | Forget the pending request (`204`). Audited `hub.link.cancel`. The hub is not told; the request expires there |
 | `PUT /dashboard/hub/scope` `{"scope"}` | `system.admin`, session only | Change the scope. Audited `hub.link.scope`. The next heartbeat tells the hub |
-| `DELETE /dashboard/hub` | `system.admin`, session only, `s.destructive` | Disconnect (`204`). Audited `hub.unlink` with `hubNotified` |
+| `DELETE /dashboard/hub` | `system.admin`, session only, `s.destructive` | Disconnect. `200 {"hubNotified": bool}`: whether the hub was told, since the link is cleared either way and a hub that was not still lists the server until it is removed there. Audited `hub.unlink` with `hubNotified` |
 | `POST /dashboard/hub/sync` | `system.admin` (an API key may) | A heartbeat now, then the status |
 | `DELETE /dashboard/hub/signin/{userId}` | `system.admin`, session only | Remove one account's sign-in grant (`204`). Audited `hub.signin.revoke` (section 9) |
 

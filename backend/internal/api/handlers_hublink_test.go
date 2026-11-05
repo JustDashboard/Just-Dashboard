@@ -184,8 +184,8 @@ func TestTheHubRoutesFollowTheContractTheFrontendBuildsAgainst(t *testing.T) {
 		t.Fatalf("bad scope = %d", w.Code)
 	}
 
-	// Disconnect: 204, the hub is told, then not linked.
-	if w := admin.do(http.MethodDelete, "/api/v1/dashboard/hub", "", nil); w.Code != 204 {
+	// Disconnect: the hub is told and the answer says so, then not linked.
+	if w := admin.do(http.MethodDelete, "/api/v1/dashboard/hub", "", nil); w.Code != 200 || strings.TrimSpace(w.Body.String()) != `{"hubNotified":true}` {
 		t.Fatalf("disconnect = %d %s", w.Code, w.Body)
 	}
 	if _, _, _, unlinks := hub.Count(); unlinks != 1 {
@@ -361,6 +361,29 @@ func TestAnUnreachableHubIsABadGatewayThatSaysWhatFailed(t *testing.T) {
 	}
 	if rows := linkAudit(t, s, "hub.link.begin"); len(rows) != 1 || rows[0].Success {
 		t.Fatalf("the failed attempt must be audited as failed: %+v", rows)
+	}
+}
+
+// A disconnect while the hub cannot be reached still clears the link, and its
+// answer says the hub was not told, so the page can say the hub still lists
+// this server (protocol 8.2).
+func TestADisconnectSaysWhenTheHubWasNotTold(t *testing.T) {
+	s, hub, admin := hubServer(t, true)
+	admin.do(http.MethodPost, "/api/v1/dashboard/hub", `{"url":"`+hub.URL+`","scope":"observe"}`, nil)
+	hub.Approve()
+	if _, err := s.modules.hubLink.Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	hub.Close()
+	w := admin.do(http.MethodDelete, "/api/v1/dashboard/hub", "", nil)
+	if w.Code != 200 || strings.TrimSpace(w.Body.String()) != `{"hubNotified":false}` {
+		t.Fatalf("disconnect = %d %s", w.Code, w.Body)
+	}
+	if m := decodeMap(t, admin.do(http.MethodGet, "/api/v1/dashboard/hub", "", nil).Body.String()); m["state"] != "unlinked" {
+		t.Fatalf("after the disconnect = %v", m)
+	}
+	if rows := linkAudit(t, s, "hub.unlink"); len(rows) != 1 || !strings.Contains(rows[0].Detail, `"hubNotified":false`) {
+		t.Fatalf("hub.unlink audit = %+v", rows)
 	}
 }
 

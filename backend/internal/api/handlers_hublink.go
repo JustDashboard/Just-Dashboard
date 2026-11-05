@@ -225,7 +225,9 @@ func (s *Server) handleHubLinkDisconnect(w http.ResponseWriter, r *http.Request)
 		return mapHubLinkError(err)
 	}
 	httpx.SetAudit(r, "hub.unlink", name, map[string]any{"hubNotified": notified})
-	httpx.NoContent(w)
+	// The link is gone either way; the page says whether the hub heard, since
+	// a hub that did not still lists this server until it is removed there.
+	httpx.JSON(w, http.StatusOK, map[string]bool{"hubNotified": notified})
 	return nil
 }
 

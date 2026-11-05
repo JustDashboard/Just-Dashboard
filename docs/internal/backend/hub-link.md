@@ -214,7 +214,7 @@ the walks of what an API, deploy or MCP key may open read the same list.
 | `POST /dashboard/hub` `{url, scope}` | `system.admin`, session; audited `hub.link.begin` with `hubNode` | Connect. `400` with the rule's code, `409 already_linked`, `409 link_pending`, `403 hub_link_disabled`, `502 hub_unreachable` (the message says what failed, `bad_token` and `unsupported_protocol` included; a `429` says the hub is not taking new requests now and to try again later, before the hub's own words, protocol 4.7) |
 | `DELETE /dashboard/hub/request` | `system.admin`, session; `hub.link.cancel` | Forget the pending request (`204`); the hub is not told |
 | `PUT /dashboard/hub/scope` `{scope}` | `system.admin`, session; `hub.link.scope` | Change the scope; the next heartbeat tells the hub. `409 not_linked` |
-| `DELETE /dashboard/hub` | `system.admin`, session, `s.destructive`; `hub.unlink` with `hubNotified` | Disconnect (`204`). `409 not_linked` |
+| `DELETE /dashboard/hub` | `system.admin`, session, `s.destructive`; `hub.unlink` with `hubNotified` | Disconnect: `200 {"hubNotified": bool}`, whether the hub was told; the link is cleared either way. `409 not_linked` |
 | `POST /dashboard/hub/sync` | `system.admin` (an API key may) | A heartbeat now, then the status. `409 not_linked`, `409 hub_url_refused` (an idle link only). A check of the hub's machine that fails this time (no machine at the address, or no address) sends nothing and answers `200` with the reason as `admin.link.lastError`. Held to twelve a minute: a press that would break the pace is skipped |
 
 The `GET`s sit with the every-role reads of the `/dashboard` group (`handlers_selfupdate.go`; `check` with
