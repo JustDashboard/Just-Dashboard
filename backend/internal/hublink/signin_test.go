@@ -211,3 +211,28 @@ func TestAnotherMachineAtTheHubsNameRevokesEveryHubSession(t *testing.T) {
 		t.Fatalf("session revoke audit = %+v", rows)
 	}
 }
+
+// A key announced in a heartbeat reply is never pinned, and a pinned key is
+// never ended by one (hub-link-protocol.md 4.3): a machine that answers at the
+// hub's name could otherwise sign commands and sign-in tickets of its own.
+func TestKeysAnnouncedInAReplyAreNeverPinned(t *testing.T) {
+	e, _, _, _ := newSignInLink(t)
+	before, _, _ := e.svc.Linked(t.Context())
+	other := seedKey(t, vectorOtherSeed)
+	e.hub.setReply("siteKeys", []map[string]any{
+		{"kid": "hub-2027-01", "publicKey": pubB64(other)},
+		{"kid": vectorKid, "publicKey": before.SiteKeys[0].PublicKey, "notAfter": vectorNow - 60},
+	})
+	if err := e.svc.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	after, _, _ := e.svc.Linked(t.Context())
+	if mustJSON(t, after.SiteKeys) != mustJSON(t, before.SiteKeys) {
+		t.Fatalf("pinned keys changed: %s -> %s", mustJSON(t, before.SiteKeys), mustJSON(t, after.SiteKeys))
+	}
+	if _, _, _, err := checkTicket("v1.hub-2027-01.e30.c2ln", ticketCheck{
+		Keys: after.SiteKeys, Hub: after.URL, ServerID: after.ServerID, Now: e.clock(),
+	}); err == nil || err.Code != codeBadTicket {
+		t.Fatalf("a ticket under the announced key = %v", err)
+	}
+}
