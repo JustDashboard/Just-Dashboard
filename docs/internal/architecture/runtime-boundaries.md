@@ -170,7 +170,9 @@ CSRF header and `SameSite=Strict` are unchanged. The WebSocket upgrader uses the
 scheme for its same-origin check, so HTTP tunnel installs can open live streams. A
 session that still owes a second factor is accepted only by
 the 2FA routes (`AuthenticatePartial`); everything else answers `totp_required` /
-`totp_enrollment_required`. Who owes one is decided per account: an enrolled account is always challenged,
+`totp_enrollment_required`. Who owes one is decided per account: an enrolled account is always challenged
+(except by a Just Hub sign-in ticket, which starts a complete session only where the operator turned hub
+sign-in on and the account opted in: [the exception](../security/invariants.md#the-exception-hub-sign-in)),
 and `JD_REQUIRE_2FA` (default false, reported as the `require2fa` status field) decides only whether an
 *unenrolled* account may sign in at all — see
 [invariant 2](../security/invariants.md#invariant-2-what-two-factor-still-guarantees). With the policy off,

@@ -29,7 +29,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `JD_REQUIRE_2FA` | `false` | Whether an account with no authenticator may sign in. An account that *has* enrolled is always asked for its code, whatever this says. |
+| `JD_REQUIRE_2FA` | `false` | Whether an account with no authenticator may sign in. An account that *has* enrolled is always asked for its code, whatever this says; the one exception is [hub sign-in](linking-and-usage.md#signing-in-from-just-hub), where `JD_HUB_SIGNIN` is on and the account opted in. |
 | `JD_TERMINAL_ENABLED` | `true` | The web terminal. |
 | `JD_TERMINAL_SHELL` | account's shell | The shell the web terminal opens. Empty honours `chsh`. `install.sh` sets it to the host's zsh, which the bundled startup gives inline history suggestions and command colouring; ssh is unaffected. The account's own login shell still reads its profile first, so a window finds the commands ssh finds. |
 | `JD_TERMINAL_USER` | lowest regular account | Host account a terminal session logs in as. |
