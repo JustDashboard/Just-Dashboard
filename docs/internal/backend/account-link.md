@@ -16,7 +16,9 @@ leaves to the dashboard.
 
 **The same engine runs a second link.** `accountlink` is an engine that runs as more than one instance: a
 `Profile` (`profile.go`) gives each instance its settings prefix, command table, base path, peer wording, audit
-names, pacing and URL admission, and `Hooks` let an instance add its own. The account link is
+names, pacing and URL admission, and switches the account link leaves off (`IgnoreAnnouncedKeys`, `ClockSequence`,
+`Speaker`), and `Hooks` let an instance add its own (`Admit`, `OnReply`, `OnClear`, `HeartbeatExtra`,
+`BeforePoll`). The account link is
 `AccountProfile`; the [hub link](hub-link.md) (`backend/internal/hublink`) is a second instance with the hub's
 profile, and the two share no state. Everything on this page is the account link's instance; the hub link's
 differences are tabled in [hub-link.md](hub-link.md#one-engine-two-instances).
@@ -84,7 +86,7 @@ means the owner removed the server on the site, and clears the link the same way
 | --- | --- |
 | `protocol.go` | Scopes and kinds, the key fingerprint, the signed request and command strings, canonical JSON, strict response decoding |
 | `identity.go` | The sealed Ed25519 identity; an identity the master key cannot open is replaced only while nothing is linked |
-| `state.go` | Settings keys, `State`, `Request`, the persisted sequence (`UPDATE ... RETURNING`, committed before the request is sent) |
+| `state.go` | Settings keys, `State` (with the hub link's `HubNode` and `Idle`, which the account link leaves empty), `Request`, the persisted sequence (`UPDATE ... RETURNING`, committed before the request is sent), and `updateStateTx`, the serverId-guarded transaction a heartbeat's writes run in |
 | `client.go` | The signed HTTP client: TLS 1.2 at least, 15 s per request plus the long poll's wait, no redirects, a 64 KiB request and 256 KiB response bound, one retry path for `replayed_sequence` |
 | `link.go` | `BeginLink`, `PollLink`, `AwaitLink` (the terminal's wait), `CancelLink`, `SetScope`, `Unlink`, `SyncNow` |
 | `service.go` | Options, the loops (top, heartbeat, command, policy, watch), backoff, rate pacing, key rotation, `410` handling |
@@ -93,7 +95,7 @@ means the owner removed the server on the site, and clears the link the same way
 | `snapshot.go` | The heartbeat body and `Redact(scope)` |
 | `policy.go` | The automatic-update policy and when it is due |
 | `profile.go` | `Profile`, what makes one instance of the engine one link rather than another, `AccountProfile`, and the `Hooks` another instance uses |
-| `engine.go` | What another instance reads and sets: `Health`, `Fingerprint`, test timings, and the signed strings and canonical arguments for another implementation's vector tests |
+| `engine.go` | What another instance reads and sets: `Health`, `Fingerprint`, `SetIdle`, `RecordNode`, `RecordRequestNode`, test timings, and the signed strings and canonical arguments for another implementation's vector tests |
 | `status.go` | `Status`, the JSON `GET /dashboard/link` returns |
 | `siteurl.go` | `ParseSiteURL`, used by `config` and the terminal command |
 | `linkstub/` | A signature-less stand-in site for the tests of the packages that drive a link |
@@ -119,6 +121,9 @@ link); only the identity is secret.
 The link state is read and written back inside one transaction wherever more than one writer can reach it
 (`kv.updateState`): a heartbeat storing a rotated key or a new interval and the page changing the scope
 cannot read the same copy and each put their own back. Transactions here take the write lock when they begin.
+What a heartbeat reply changes, and the status record of the last exchanges, are written only while the stored
+link is still the one the exchange was for (`updateStateTx`, `setStatus(serverID)`), so an answer that lands after
+an unlink leaves nothing behind.
 
 The sequence is taken with one statement that raises and returns it and is committed before the request is
 built, so a number is on disk before it is on the wire and the dashboard and a terminal command can never be
