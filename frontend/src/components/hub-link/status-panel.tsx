@@ -15,6 +15,7 @@ import { errorMessage } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
 import {
   exchangeFailure,
+  firstReportDue,
   hubHost,
   hubSays,
   noticeHref,
@@ -64,6 +65,7 @@ function askedBy(issuedBy: string) {
  * link's last error is its reason, which the page already says above everything, so here the
  * report only reads as not sent. Any other last error is said as what happened
  * (`exchangeFailure`), with Go's own words for a request that got no answer behind a disclosure.
+ * Before the first report the report is not yet sent, which is not the hub being out of reach.
  */
 export function HubActivity({
   status,
@@ -80,7 +82,7 @@ export function HubActivity({
   className?: string
 }) {
   const command = link.lastCommand
-  const unreachable = status.reachable === false
+  const unreachable = status.reachable === false && !firstReportDue(status)
 
   return (
     <Section
@@ -97,7 +99,7 @@ export function HubActivity({
     >
       {link.lastError && !idle && (
         <Notice tone="warning" icon={Warning} title={`The last exchange with ${host} failed`}>
-          <ExchangeFailure error={link.lastError} host={host} />
+          <FailureWords {...exchangeFailure(link.lastError, host)} />
         </Notice>
       )}
       <RowList>
@@ -148,16 +150,26 @@ export function HubActivity({
   )
 }
 
-function ExchangeFailure({ error, host }: { error: string; host: string }) {
-  const { message, raw } = exchangeFailure(error, host)
+/**
+ * A failure as `exchangeFailure` says it: the sentence, and Go's own words, when there are any,
+ * behind a disclosure — "What this server recorded" for the last exchange's, or what Connect's
+ * refusal names it.
+ */
+export function FailureWords({
+  message,
+  raw,
+  summary = "What this server recorded",
+}: {
+  message: string
+  raw?: string
+  summary?: string
+}) {
   return (
     <>
       <p className="break-words">{message}</p>
       {raw && (
         <details data-slot="hub-link-raw-error" className="mt-1 min-w-0">
-          <summary className="cursor-pointer hover:text-foreground">
-            What this server recorded
-          </summary>
+          <summary className="cursor-pointer hover:text-foreground">{summary}</summary>
           <pre className="mt-1 overflow-x-auto rounded-sm border border-hairline bg-surface-header/40 p-2 font-mono text-micro break-words whitespace-pre-wrap">
             {raw}
           </pre>

@@ -313,8 +313,16 @@ export default function HubLinkPage() {
 /** Each section stands alone under a hairline, at the deploy settings pages' rhythm. */
 const BLOCK = "py-8 first:pt-4 last:pb-2"
 
+/**
+ * The identity line's facts: what the link is, never its state, which the line's far end says
+ * (`linkReading`) — said in both, an unlinked or waiting server read its state twice on one line,
+ * and on a phone on two lines one under the other. Switched off, the notice under the line says
+ * why, so the line has nothing to add. How many servers the hub holds is said once it has answered
+ * a report: before that the fleet is empty because nothing is known yet, not because the hub holds
+ * none.
+ */
 function Facts({ status }: { status: HubLinkStatus }) {
-  if (!status.enabled) return <span>Turned off by JD_HUB_LINK</span>
+  if (!status.enabled) return null
   const link = status.state === "linked" ? status.admin?.link : undefined
   if (status.state === "linked") {
     return (
@@ -326,8 +334,12 @@ function Facts({ status }: { status: HubLinkStatus }) {
             <span>{scopeName(status.scope)} scope</span>
           </>
         )}
-        <FactDot />
-        <span>{serverCount(status.fleet?.length ?? 0)}</span>
+        {status.lastHeartbeatAt && (
+          <>
+            <FactDot />
+            <span>{serverCount(status.fleet?.length ?? 0)}</span>
+          </>
+        )}
         {link && (
           <>
             <FactDot />
@@ -340,18 +352,11 @@ function Facts({ status }: { status: HubLinkStatus }) {
     )
   }
   const fingerprint = status.admin?.fingerprint
+  if (!fingerprint) return null
   return (
-    <>
-      <span>{status.state === "pending" ? "Waiting for approval" : "Not connected"}</span>
-      {fingerprint && (
-        <>
-          <FactDot />
-          <span>
-            this server <span className="font-mono text-foreground">{fingerprint}</span>
-          </span>
-        </>
-      )}
-    </>
+    <span>
+      this server <span className="font-mono text-foreground">{fingerprint}</span>
+    </span>
   )
 }
 

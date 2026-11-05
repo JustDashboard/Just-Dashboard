@@ -40,9 +40,9 @@ import { useSidebar } from "@/components/ui/sidebar"
  * hub, open in a new tab with no opener and no referrer: the address is one the hub handed over,
  * so it never takes this tab, and nothing of this dashboard's goes with it (§8.10). While the hub
  * cannot be reached the others' dots go grey, because what it said last may be minutes old, and
- * the menu says why. An idle link offers no way to the hub at all: its address may now answer on
- * a machine this server refused (§2.4), so `shellHub` has already dropped it and "Open Just Hub"
- * has nothing to open.
+ * the menu says why; before the first report nothing has failed, so nothing says so. An idle
+ * link offers no way to the hub at all: its address may now answer on a machine this server
+ * refused (§2.4), so `shellHub` has already dropped it and "Open Just Hub" has nothing to open.
  *
  * `strip` is the phone's top strip, where the rail is a closed sheet: the same trigger and menu,
  * so which server a phone is on is never a swipe away.
@@ -54,6 +54,8 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
   const servers = orderFleet(hub.fleet)
   const hubUrl = openable(hub.url)
   const trouble = hub.idle ? "Link idle" : "Hub unreachable"
+  // A link whose first report is still due is not in trouble: nothing has failed yet.
+  const troubled = !hub.reachable && !hub.due
 
   return (
     <DropdownMenu>
@@ -81,7 +83,7 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
               This server
             </span>
           )}
-          {!hub.reachable && (
+          {troubled && (
             <span className="flex shrink-0 group-data-[collapsible=icon]:hidden">
               <StatusDot tone={hub.idle ? "danger" : "warning"} />
               <span className="sr-only">. {trouble}</span>
@@ -107,7 +109,7 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
       >
         <DropdownMenuLabel className="flex min-w-0 items-center justify-between gap-3">
           <span className="truncate">Servers</span>
-          {!hub.reachable && (
+          {troubled && (
             <Status
               tone={hub.idle ? "danger" : "warning"}
               label={trouble}
@@ -127,7 +129,7 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
           </p>
         )}
         {servers.map((server) => {
-          const reading = serverReading(server, hub.reachable)
+          const reading = serverReading(server, hub.reachable, hub.due)
           const address = serverAddress(server)
           const dot = <StatusDot tone={reading.tone} className="mx-0.5" />
           const label = (

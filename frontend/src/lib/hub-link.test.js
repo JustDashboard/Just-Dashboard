@@ -4,6 +4,7 @@ import {
   connectTarget,
   describeMachine,
   exchangeFailure,
+  firstReportDue,
   hubHost,
   hubLabel,
   hubSays,
@@ -209,6 +210,7 @@ describe("whether the shell is hub-aware", () => {
       name: "hub",
       url: "https://hub.tailed39ba.ts.net",
       reachable: true,
+      due: false,
       idle: false,
       fleet: [],
       notices: [],
@@ -247,6 +249,11 @@ describe("the fleet", () => {
   test("with the hub unreachable the others are unknown, and this one says why", () => {
     expect(serverReading(other, false)).toEqual({ tone: "unknown", label: "Unknown" })
     expect(serverReading(self, false)).toEqual({ tone: "warning", label: "Not reaching the hub" })
+  })
+
+  test("before the first report this one says the report is due, not that it fails", () => {
+    expect(serverReading(self, false, true)).toEqual({ tone: "notice", label: "First report due" })
+    expect(serverReading(other, false, true)).toEqual({ tone: "unknown", label: "Unknown" })
   })
 })
 
@@ -415,6 +422,59 @@ describe("the link in words", () => {
     expect(reportCadence(undefined)).toBe("on the hub's schedule")
   })
 
+  // What the backend sends from the approval until the first report has gone (hublink/status.go
+  // reachable): not reachable, no report time, and for an administrator no failure either.
+  const justLinked = {
+    ...linked,
+    reachable: false,
+    lastHeartbeatAt: undefined,
+    fleet: [],
+    admin: {
+      fingerprint: "21fe:31df:a154:a261",
+      link: { serverId: "s", linkedAt: "2026-11-05T10:00:00Z", linkedBy: "ion", hubKeys: [] },
+    },
+  }
+
+  test("a link just made says its first report is due, not that the hub is unreachable", () => {
+    expect(firstReportDue(justLinked)).toBe(true)
+    expect(linkReading(justLinked)).toEqual({
+      tone: "notice",
+      label: "Connected, first report due",
+    })
+    const hub = shellHub(session, justLinked)
+    expect(hub).toMatchObject({ reachable: false, due: true })
+    expect(serverEntries(hub).at(-1).reading).toEqual({
+      tone: "notice",
+      label: "First report due",
+    })
+    // Once the report went, the link reads as any other.
+    const reported = { ...justLinked, reachable: true, lastHeartbeatAt: "2026-11-05T10:00:05Z" }
+    expect(firstReportDue(reported)).toBe(false)
+    expect(linkReading(reported)).toEqual({ tone: "running", label: "Connected" })
+  })
+
+  test("a first report that failed, or that nobody can tell from failing, is unreachable", () => {
+    const failed = {
+      ...justLinked,
+      admin: {
+        ...justLinked.admin,
+        link: { ...justLinked.admin.link, lastError: 'Post "http://h/x": EOF' },
+      },
+    }
+    expect(firstReportDue(failed)).toBe(false)
+    expect(linkReading(failed).label).toBe("Connected, hub unreachable")
+    expect(shellHub(session, failed)?.due).toBe(false)
+    // A reader's status has no `admin` part, so no way to tell a report due from one failing.
+    const forReader = { ...justLinked, admin: undefined }
+    expect(firstReportDue(forReader)).toBe(false)
+    expect(linkReading(forReader).label).toBe("Connected, hub unreachable")
+    // Before the status is read, the session cannot tell either.
+    expect(shellHub({ ...session, reachable: false }, undefined)?.due).toBe(false)
+    expect(firstReportDue({ ...justLinked, state: "pending" })).toBe(false)
+    expect(firstReportDue({ ...justLinked, idle: true })).toBe(false)
+    expect(firstReportDue({ ...justLinked, enabled: false })).toBe(false)
+  })
+
   test("each state", () => {
     expect(linkReading({ enabled: false, state: "unlinked" })).toEqual({
       tone: "stopped",
@@ -427,9 +487,7 @@ describe("the link in words", () => {
       tone: "warning",
       label: "Connected, hub unreachable",
     })
-    expect(linkReading({ ...linked, lastHeartbeatAt: undefined }).label).toBe(
-      "Connected, first report due",
-    )
+    expect(linkReading(justLinked).label).toBe("Connected, first report due")
     expect(linkReading(idle("the hub's machine changed"))).toEqual({
       tone: "danger",
       label: "Idle",
@@ -533,6 +591,20 @@ describe("the backend's reasons, said as sentences", () => {
       message: `Could not reach ${host}.`,
       raw: `${at}something new`,
     })
+  })
+
+  test("Connect's hub_unreachable names the hub first, and the host it tried is the one said", () => {
+    const raw =
+      'the hub at http://127.0.0.1:9641: Post "http://127.0.0.1:9641/api/hub/v1/requests": dial tcp 127.0.0.1:9641: connect: connection refused'
+    expect(exchangeFailure(raw, "typed.example")).toEqual({
+      message: "Could not reach 127.0.0.1:9641: the connection was refused.",
+      raw,
+    })
+    // A hub that answered with something else is the backend's sentence, said as it is.
+    const answered =
+      "the hub at https://hub.tailed39ba.ts.net: it does not speak hub link protocol 1; update this dashboard or the hub so they speak the same one"
+    expect(exchangeFailure(answered, "hub")).toEqual({ message: sentence(answered) })
+    expect(exchangeFailure(answered, "hub").message).toStartWith("The hub at https://")
   })
 
   test("the backend's own sentences and the hub's quoted answers are said as they are", () => {

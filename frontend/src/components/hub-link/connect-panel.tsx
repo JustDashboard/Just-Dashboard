@@ -3,8 +3,15 @@
 import { useEffect, useId, useState } from "react"
 import { External, Warning } from "@/components/icons"
 import { countdown, REQUEST_LIFETIME, scopeName } from "@/lib/account-link"
-import { errorMessage } from "@/lib/api"
-import { describeMachine, hubHost, openable, sentence, terminalCommand } from "@/lib/hub-link"
+import { ApiError, errorMessage } from "@/lib/api"
+import {
+  describeMachine,
+  exchangeFailure,
+  hubHost,
+  openable,
+  sentence,
+  terminalCommand,
+} from "@/lib/hub-link"
 import { notify } from "@/lib/toast"
 import type { HubLinkCheck, HubLinkMachine, HubLinkScope, HubLinkStatus } from "@/lib/types"
 import { outdated } from "@/hooks/use-hub-link"
@@ -12,6 +19,7 @@ import { useNow } from "@/hooks/use-now"
 import { CopyButton } from "@/components/account-link/link-panel"
 import { ScopeCards } from "@/components/account-link/scope-cards"
 import { ShellWords } from "@/components/deploy/run-evidence"
+import { FailureWords } from "@/components/hub-link/status-panel"
 import { Field } from "@/components/form"
 import { Meter } from "@/components/meter"
 import { Section } from "@/components/page"
@@ -34,7 +42,15 @@ const CHECK_AFTER = 400
  * tailnet can send such a link with a look-alike name (hub-link-protocol §8.1). A server
  * administrator still presses Connect, and the backend still refuses any hub that is not one
  * machine on this server's own tailnet (§2.2). As the address is typed or filled, `check` asks
- * this server's tailscaled whose machine it is, so the person reads that before connecting.
+ * this server's tailscaled whose machine it is, so the person reads that before connecting. An
+ * address the check refuses — a look-alike name off this tailnet — is refused there once: Connect
+ * stays off and the terminal's command is not offered for it, since both would only be refused
+ * again in the same words.
+ *
+ * A Connect the hub gave nothing to (`502 hub_unreachable`, "the hub at <origin>: Post …:
+ * connection refused") is said in the dashboard's words, as the Activity section says a failed
+ * exchange (`exchangeFailure`): "Could not reach <host>: the connection was refused.", with Go's
+ * words behind a disclosure.
  */
 export function ConnectPanel({
   address,
@@ -59,13 +75,15 @@ export function ConnectPanel({
 }) {
   const field = useId()
   const [busy, setBusy] = useState(false)
-  const [refusal, setRefusal] = useState<string>()
+  const [refusal, setRefusal] = useState<{ message: string; raw?: string }>()
   const url = address.trim()
   const checked = useMachineCheck(url, onCheck)
+  // The check refused this very address: pressing Connect, or the command, is refused the same.
+  const refused = Boolean(url) && checked.state === "refused" && checked.rule
 
   const connect = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!url || !scope || busy) return
+    if (!url || !scope || refused || busy) return
     setBusy(true)
     setRefusal(undefined)
     try {
@@ -74,7 +92,9 @@ export function ConnectPanel({
       // The terminal connected first, or a request already waits: the page has been redrawn into
       // that, without this form, so the refusal is said where it outlives the form.
       if (outdated(err)) notify.error("Could not connect", sentence(errorMessage(err)))
-      else setRefusal(sentence(errorMessage(err)))
+      else if (err instanceof ApiError && err.code === "hub_unreachable")
+        setRefusal(exchangeFailure(err.message, hubHost(url)))
+      else setRefusal({ message: sentence(errorMessage(err)) })
     } finally {
       setBusy(false)
     }
@@ -129,27 +149,29 @@ export function ConnectPanel({
         </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-4">
-          <Button size="lg" type="submit" pending={busy} disabled={!url || !scope}>
+          <Button size="lg" type="submit" pending={busy} disabled={!url || !scope || refused}>
             Connect
           </Button>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-            <span className="text-xs text-muted-foreground">or from a terminal</span>
-            <Well className="flex min-w-0 items-center gap-3 py-1.5 pr-1.5 pl-3">
-              <span className="min-w-0 truncate">
-                <span aria-hidden className="text-muted-foreground/60 select-none">
-                  ${" "}
+          {!refused && (
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+              <span className="text-xs text-muted-foreground">or from a terminal</span>
+              <Well className="flex min-w-0 items-center gap-3 py-1.5 pr-1.5 pl-3">
+                <span className="min-w-0 truncate">
+                  <span aria-hidden className="text-muted-foreground/60 select-none">
+                    ${" "}
+                  </span>
+                  <ShellWords command={command} />
                 </span>
-                <ShellWords command={command} />
-              </span>
-              <CopyButton label="Copy command" text={command} />
-            </Well>
-          </div>
+                <CopyButton label="Copy command" text={command} />
+              </Well>
+            </div>
+          )}
         </div>
       </form>
       {refusal && (
         <div role="alert">
           <Notice tone="danger" icon={Warning} title="Could not connect">
-            {refusal}
+            <FailureWords {...refusal} summary="What this server said" />
           </Notice>
         </div>
       )}
@@ -160,7 +182,11 @@ export function ConnectPanel({
 type MachineCheck =
   | { state: "checking" }
   | { state: "done"; result: HubLinkCheck }
-  | { state: "refused"; message: string }
+  /**
+   * `rule` is the URL rule's own refusal (`400`, §2.2), which Connect would meet again; a failure
+   * of the check itself is said but blocks nothing, since Connect checks again.
+   */
+  | { state: "refused"; message: string; rule: boolean }
 
 /**
  * `check` for the address as it stands, once it has stopped changing; an answer for an address
@@ -182,7 +208,12 @@ function useMachineCheck(
         (result) => setAnswer({ url, state: "done", result }),
         (err) => {
           if (!controller.signal.aborted)
-            setAnswer({ url, state: "refused", message: sentence(errorMessage(err)) })
+            setAnswer({
+              url,
+              state: "refused",
+              message: sentence(errorMessage(err)),
+              rule: err instanceof ApiError && err.status === 400,
+            })
         },
       )
     }, CHECK_AFTER)

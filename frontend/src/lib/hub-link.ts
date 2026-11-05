@@ -142,6 +142,13 @@ export function sentence(text: string): string {
 /** A request that got no answer at all, in Go's words: `Post "<url>": <why>`. */
 const NO_ANSWER = /^(?:Get|Head|Post|Put|Patch|Delete) "[^"]*": ([\s\S]+)$/
 
+/**
+ * Connect's `502 hub_unreachable` (§8.2) names the hub it tried before what happened: `the hub at
+ * <origin>: <why>`, where the why is Go's words for a request that got no answer, or the
+ * backend's own sentence for a hub that answered with something else.
+ */
+const AT_HUB = /^the hub at (\S+): ([\s\S]+)$/
+
 /** What Go's reason for no answer means to a person, checked in order. */
 const NO_ANSWER_WHY: [RegExp, string][] = [
   [/connection refused/i, "the connection was refused"],
@@ -156,18 +163,22 @@ const NO_ANSWER_WHY: [RegExp, string][] = [
 ]
 
 /**
- * The last exchange's failure (`admin.link.lastError`) as a person reads it. A request that got
- * no answer is in Go's own words — `Post "http://…/heartbeat": dial tcp …: connect: connection
- * refused` — so it is said as what happened, "Could not reach hub.…: the connection was refused.",
- * and Go's words are kept as `raw` for a disclosure. Anything else is already the backend's
- * sentence, or the hub's answer quoted and attributed by it (§8.10), and is said as it is.
+ * The last exchange's failure (`admin.link.lastError`), or Connect's refusal when the hub gave it
+ * nothing (`hub_unreachable`), as a person reads it. A request that got no answer is in Go's own
+ * words — `Post "http://…/heartbeat": dial tcp …: connect: connection refused`, after "the hub at
+ * <origin>: " in Connect's — so it is said as what happened, "Could not reach hub.…: the
+ * connection was refused.", and Go's words are kept as `raw` for a disclosure. Connect's names
+ * the host it tried, which is the one said. Anything else is already the backend's sentence, or
+ * the hub's answer quoted and attributed by it (§8.10), and is said as it is.
  */
 export function exchangeFailure(error: string, host: string): { message: string; raw?: string } {
   const raw = error.trim()
-  const noAnswer = NO_ANSWER.exec(raw)
+  const atHub = AT_HUB.exec(raw)
+  const noAnswer = NO_ANSWER.exec(atHub ? atHub[2] : raw)
   if (!noAnswer) return { message: sentence(raw) }
+  const where = atHub ? hubHost(atHub[1]) : host
   const why = NO_ANSWER_WHY.find(([pattern]) => pattern.test(noAnswer[1]))?.[1]
-  return { message: why ? `Could not reach ${host}: ${why}.` : `Could not reach ${host}.`, raw }
+  return { message: why ? `Could not reach ${where}: ${why}.` : `Could not reach ${where}.`, raw }
 }
 
 /**
@@ -230,6 +241,26 @@ export function isIdle(status: HubLinkStatus): boolean {
 }
 
 /**
+ * Whether the link is made and its first report is still on its way (§4.8). The backend calls a
+ * link reachable only once a report has gone through, so from the approval until the first one it
+ * answers `reachable: false` with no `lastHeartbeatAt` — a report due, not a hub that cannot be
+ * reached. Only an administrator's status can tell the two apart, by the failure an attempt that
+ * failed leaves in `admin.link.lastError`; without it, a link with no report reads as not reaching
+ * the hub, as it did before, rather than as one about to.
+ */
+export function firstReportDue(status: HubLinkStatus): boolean {
+  const link = status.admin?.link
+  return (
+    status.enabled &&
+    status.state === "linked" &&
+    !isIdle(status) &&
+    !status.lastHeartbeatAt &&
+    link !== undefined &&
+    !link.lastError
+  )
+}
+
+/**
  * How often the link reports (§4.8): the hub's interval, "every 15s", or before the status names
  * one, the hub's schedule. The hub sets it anywhere from 10 seconds to 10 minutes.
  */
@@ -243,6 +274,11 @@ export type ShellHub = {
   /** The hub's address to open, or "" while the link is idle: then nothing links to it. */
   url: string
   reachable: boolean
+  /**
+   * Linked, and the first report not sent yet (`firstReportDue`): not reachable, and not trouble
+   * either, so nothing says the hub cannot be reached.
+   */
+  due: boolean
   /** This server has stopped using the link (`isIdle`). */
   idle: boolean
   fleet: HubLinkServer[]
@@ -272,6 +308,7 @@ export function shellHub(
     name: status?.hubName ?? session.name,
     url: idle ? "" : (status?.hubUrl ?? session.url),
     reachable: !idle && (status?.reachable ?? session.reachable),
+    due: status ? firstReportDue(status) : false,
     idle,
     fleet: status?.fleet ?? [],
     notices: idle ? notices.map((notice) => ({ ...notice, href: undefined })) : notices,
@@ -294,13 +331,14 @@ const SERVER_READING: Record<HubLinkServer["state"], Reading> = {
  * How a server in the fleet reads. The states are the hub's (§6.1). While the hub cannot be
  * reached they are only what it said last, so the others read as unknown rather than as a green
  * that may be minutes old, and this server — which is plainly up, since it drew the page — says
- * it is not reaching the hub.
+ * it is not reaching the hub, or, before its first report (`due`), that the report is due.
  */
-export function serverReading(server: HubLinkServer, reachable: boolean): Reading {
+export function serverReading(server: HubLinkServer, reachable: boolean, due = false): Reading {
   if (!reachable) {
-    return server.self
-      ? { tone: "warning", label: "Not reaching the hub" }
-      : { tone: "unknown", label: "Unknown" }
+    if (!server.self) return { tone: "unknown", label: "Unknown" }
+    return due
+      ? { tone: "notice", label: "First report due" }
+      : { tone: "warning", label: "Not reaching the hub" }
   }
   return SERVER_READING[server.state] ?? { tone: "unknown", label: "Unknown" }
 }
@@ -348,7 +386,7 @@ export function serverEntries(hub: ShellHub): ServerEntry[] {
   const listedBy = { label: "Listed by", value: hubLabel(hub.name) }
   const servers = orderFleet(hub.fleet).map((server): ServerEntry => {
     const address = serverAddress(server)
-    const reading = serverReading(server, hub.reachable)
+    const reading = serverReading(server, hub.reachable, hub.due)
     return {
       id: `server:${server.serverId}`,
       kind: "server",
@@ -390,7 +428,9 @@ export function serverEntries(hub: ShellHub): ServerEntry[] {
         ? { tone: "danger", label: "Idle" }
         : hub.reachable
           ? { tone: "running", label: "Reachable" }
-          : { tone: "warning", label: "Unreachable" },
+          : hub.due
+            ? { tone: "notice", label: "First report due" }
+            : { tone: "warning", label: "Unreachable" },
       facts: [
         ...(host ? [{ label: "Address", value: host, mono: true }] : []),
         { label: "Servers", value: String(hub.fleet.length) },
@@ -431,12 +471,17 @@ export function keptDismissals(
   return dismissed.filter((id) => live.has(id))
 }
 
-/** The link's state in a word and a tone, for the identity line's far end. */
+/**
+ * The link's state in a word and a tone, for the identity line's far end: the one place the header
+ * says it. A link whose first report is still due says so, not that the hub is unreachable, which
+ * the backend's `reachable: false` would otherwise read as (`firstReportDue`).
+ */
 export function linkReading(status: HubLinkStatus): Reading {
   if (!status.enabled) return { tone: "stopped", label: "Turned off" }
   if (status.state === "pending") return { tone: "warning", label: "Waiting for approval" }
   if (status.state === "linked") {
     if (isIdle(status)) return { tone: "danger", label: "Idle" }
+    if (firstReportDue(status)) return { tone: "notice", label: "Connected, first report due" }
     if (status.reachable === false) return { tone: "warning", label: "Connected, hub unreachable" }
     if (!status.lastHeartbeatAt) return { tone: "notice", label: "Connected, first report due" }
     return { tone: "running", label: "Connected" }

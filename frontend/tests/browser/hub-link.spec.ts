@@ -480,6 +480,9 @@ test("?connect= fills in the hub, says so, shows its machine, chooses no scope, 
   ).toBeVisible()
   await expect(page.getByLabel("Hub address")).toHaveValue(HUB)
   await expect(page.getByText(`this server ${FINGERPRINT}`)).toBeVisible()
+  // The identity line says the state once, at its far end, as a linked one does.
+  const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity.getByText("Not connected")).toHaveCount(1)
   // The address came from a link anyone on the tailnet could send (§8.1), and whose machine it
   // is shows before anything is sent to it (§8.2).
   await expect(page.getByText("This address came from a link")).toBeVisible()
@@ -609,31 +612,85 @@ test("a link someone else wrote fills nothing in, and a refused hub says why", a
   await expect(page.getByLabel("Hub address")).toHaveValue("")
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeDisabled()
 
+  await page.getByLabel("Hub address").fill("https://hub.example.com")
+  // The rule's refusal shows as it is typed, before Connect, as a sentence of its own.
+  const refusal =
+    "The hub must be a machine on this server's tailnet, named like hub.tailed39ba.ts.net."
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(refusal)
+  // Arrived by a link, so the scope is the person's to choose before Connect is offered — and a
+  // refused address is refused once: Connect stays off with a scope chosen, and the terminal's
+  // command for it is not offered, since either would only be refused again in the same words.
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeDisabled()
+  await scopeCard(page, "Observe").click()
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeDisabled()
+  await expect(page.getByText(/manage\.sh hub connect/)).toHaveCount(0)
+  await expect(page.getByText(refusal)).toHaveCount(1)
+  expect(world.calls).toEqual([])
+
+  // An address the check accepts is offered both ways again.
+  await page.getByLabel("Hub address").fill("hub.tailed39ba.ts.net")
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(MACHINE_LINE)
+  await expect(
+    page.getByText("sudo ./scripts/manage.sh hub connect hub.tailed39ba.ts.net"),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled()
+
+  // Connect checks again, and its own refusal is said once, under the form.
   world.connectRefusal = {
     status: 400,
     body: {
       error: {
         code: "hub_url_not_tailnet",
-        message: "hub.example.com is not one machine on this server's tailnet (tailed39ba.ts.net)",
+        message:
+          "hub.tailed39ba.ts.net is not one machine on this server's tailnet (tailed39ba.ts.net)",
       },
     },
   }
-  await page.getByLabel("Hub address").fill("https://hub.example.com")
-  await expect(
-    page.getByText("sudo ./scripts/manage.sh hub connect https://hub.example.com"),
-  ).toBeVisible()
-  // The rule's refusal shows as it is typed, before Connect, as a sentence of its own.
-  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(
-    "The hub must be a machine on this server's tailnet, named like hub.tailed39ba.ts.net.",
-  )
-  // Arrived by a link, so the scope is the person's to choose before Connect is offered.
-  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeDisabled()
-  await scopeCard(page, "Observe").click()
   await page.getByRole("button", { name: "Connect", exact: true }).click()
   const alert = page.getByRole("alert").filter({ hasText: "Could not connect" })
   await expect(alert).toContainText(
-    "Hub.example.com is not one machine on this server's tailnet (tailed39ba.ts.net).",
+    "Hub.tailed39ba.ts.net is not one machine on this server's tailnet (tailed39ba.ts.net).",
   )
+  await expect(alert.locator("[data-slot=hub-link-raw-error]")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled()
+})
+
+test("a look-alike from the hub's door that the check refused leaves Connect off", async ({
+  page,
+}) => {
+  const world = await mock(page, unlinked)
+  await page.goto("/dashboard/hub?connect=hub-evil.example.com")
+  await expect(page.getByLabel("Hub address")).toHaveValue("https://hub-evil.example.com")
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(
+    "The hub must be a machine on this server's tailnet, named like hub.tailed39ba.ts.net.",
+  )
+  await scopeCard(page, "Observe").click()
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeDisabled()
+  await expect(page.getByText(/manage\.sh hub connect/)).toHaveCount(0)
+  // Submitting the form another way sends nothing either.
+  await page.getByLabel("Hub address").press("Enter")
+  await expect(page.getByRole("alert").filter({ hasText: "Could not connect" })).toHaveCount(0)
+  expect(world.calls).toEqual([])
+})
+
+test("a Connect the hub gave no answer to says so in the dashboard's words, Go's behind Details", async ({
+  page,
+}) => {
+  const world = await mock(page, unlinked)
+  await page.goto("/dashboard/hub?connect=hub.tailed39ba.ts.net")
+  // The backend's 502 for a hub that is down: the hub it tried, then Go's words (§8.2).
+  const raw = `the hub at ${HUB}: Post "${HUB}/api/hub/v1/requests": dial tcp 100.101.102.103:443: connect: connection refused`
+  world.connectRefusal = { status: 502, body: { error: { code: "hub_unreachable", message: raw } } }
+  await scopeCard(page, "Observe").click()
+  await page.getByRole("button", { name: "Connect", exact: true }).click()
+  const alert = page.getByRole("alert").filter({ hasText: "Could not connect" })
+  await expect(
+    alert.getByText("Could not reach hub.tailed39ba.ts.net: the connection was refused."),
+  ).toBeVisible()
+  const details = alert.locator("[data-slot=hub-link-raw-error]")
+  await expect(details.getByText(raw)).toBeHidden()
+  await details.getByText("What this server said").click()
+  await expect(details.getByText(raw)).toBeVisible()
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled()
 })
 
@@ -707,18 +764,69 @@ test("the machine line says when Tailscale could not be asked, and names a tagge
   )
 })
 
+/**
+ * A link the hub has just approved, before its first report: what the backend answers then
+ * (hublink/status.go `reachable`) — not reachable, no report time, nothing failed, and the hub
+ * has listed nothing yet.
+ */
+const justLinked = (extra: Record<string, unknown> = {}): Status => {
+  const base = linked("maintain", extra)
+  return {
+    ...base,
+    reachable: false,
+    lastHeartbeatAt: undefined,
+    fleet: [],
+    admin: {
+      ...(base.admin as object),
+      link: { ...(base.admin as { link: object }).link, lastCommand: undefined },
+    },
+    ...extra,
+  }
+}
+
 test("a link before its first report says the report is due, at the hub's interval", async ({
   page,
 }) => {
   // The hub sets the interval, anywhere from 10 seconds to 10 minutes (§4.8).
-  await mock(page, linked("maintain", { lastHeartbeatAt: undefined, heartbeatSeconds: 60 }))
+  await mock(page, justLinked({ heartbeatSeconds: 60 }))
   await page.goto("/dashboard/hub")
-  await expect(page.getByText("Connected, first report due")).toBeVisible()
+  const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity.getByText("Connected, first report due")).toBeVisible()
+  await expect(page.getByText(/hub unreachable|Not reaching the hub/i)).toHaveCount(0)
+  // The hub has listed nothing yet, which is not "0 servers".
+  await expect(identity).not.toContainText("0 servers")
   await expect(page.getByText("First report within 1m")).toBeVisible()
   const activity = page.locator("section", { hasText: "Activity" }).first()
   await expect(activity.getByText("Sent every 1m")).toBeVisible()
   await expect(activity.getByText("Not yet", { exact: true })).toBeVisible()
   await expect(page.getByText(/15 s(econds)?\b/)).toHaveCount(0)
+  // Nothing has failed, so the switcher says nothing is wrong.
+  await expect(switcher(page)).toContainText(HOSTNAME)
+  await expect(switcher(page)).not.toContainText("Hub unreachable")
+})
+
+test("the first link's toast is followed by its first report, not by an unreachable hub", async ({
+  page,
+}) => {
+  const world = await mock(page, pending("maintain"))
+  await page.goto("/dashboard/hub")
+  await expect(page.locator("[data-slot=hub-link-code]")).toHaveText("K7QM-29XD")
+
+  // Approved in the hub; the server has not reported yet.
+  world.hub = justLinked()
+  await expect(page.getByText("Connected to Just Hub (hub)")).toBeVisible({ timeout: 10_000 })
+  const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity.getByText("Connected, first report due")).toBeVisible()
+  await expect(page.getByText(/hub unreachable|Not reaching the hub/i)).toHaveCount(0)
+  await expect(switcher(page)).toContainText(HOSTNAME)
+  await expect(switcher(page)).not.toContainText("Hub unreachable")
+
+  // The first report goes; the page says so within seconds, not a heartbeat later.
+  world.hub = linked("maintain")
+  await expect(identity.getByText("Connected", { exact: true })).toBeVisible({ timeout: 6_000 })
+  await expect(identity).toContainText("3 servers")
+  await switcher(page).click()
+  await expect(servers(page).getByRole("menuitem")).toHaveCount(4, { timeout: 6_000 })
 })
 
 test("a request another machine answered for ends as failed and says why", async ({ page }) => {
@@ -748,6 +856,10 @@ test("a waiting request survives a reload and can be cancelled", async ({ page }
   await page.goto("/dashboard/hub")
   await expect(page.locator("[data-slot=hub-link-code]")).toHaveText("K7QM-29XD")
   await expect(page.getByText("Waiting for approval").first()).toBeVisible()
+  // Said once in the identity line, at its far end; the facts are this server's fingerprint.
+  const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity.getByText("Waiting for approval")).toHaveCount(1)
+  await expect(identity).toContainText(`this server ${FINGERPRINT}`)
   await expect(page.locator("section", { hasText: "What this server will send" })).toContainText(
     "At Operate",
   )

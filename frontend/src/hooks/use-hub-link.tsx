@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react"
 import { ApiError, del, get, post, put } from "@/lib/api"
-import { shellHub, type ShellHub } from "@/lib/hub-link"
+import { firstReportDue, shellHub, type ShellHub } from "@/lib/hub-link"
 import type { HubLinkCheck, HubLinkScope, HubLinkStatus } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -23,6 +23,11 @@ import { usePoll } from "@/hooks/use-poll"
 
 /** The fleet's states move on the hub's heartbeat: fifteen seconds, unless the hub sets another. */
 const SHELL_POLL = 15_000
+/**
+ * Until the first report, the hub has listed nothing yet and the report is seconds away, so the
+ * shell and the page read again at the waiting request's pace rather than a heartbeat later.
+ */
+const FIRST_REPORT_POLL = 3000
 
 export type ShellHubValue = ShellHub & {
   /** `/dashboard/hub` has answered; before it, an empty fleet means "not read yet". */
@@ -36,9 +41,14 @@ export function HubLinkProvider({ children }: { children: React.ReactNode }) {
   const { status: auth } = useAuth()
   const session = auth?.authenticated ? auth.hub : undefined
   const linked = Boolean(session?.linked)
+  const [due, setDue] = useState(false)
   const { data, refresh } = usePoll(
-    (signal) => get<HubLinkStatus>("/dashboard/hub", undefined, signal),
-    SHELL_POLL,
+    async (signal) => {
+      const next = await get<HubLinkStatus>("/dashboard/hub", undefined, signal)
+      setDue(firstReportDue(next))
+      return next
+    },
+    due ? FIRST_REPORT_POLL : SHELL_POLL,
     [],
     { enabled: linked },
   )
@@ -67,25 +77,32 @@ export function outdated(err: unknown): boolean {
   return err instanceof ApiError && (err.status === 409 || err.code === "hub_link_disabled")
 }
 
-/** A request waits on a person in the hub; three seconds is how long the page lags their click. */
+/**
+ * A request waits on a person in the hub; three seconds is how long the page lags their click. A
+ * link just made reads at the same pace until its first report has gone (`firstReportDue`), so the
+ * page says the report went a moment after it did, not a heartbeat later.
+ */
 const PENDING_POLL = 3000
 const STEADY_POLL = 15_000
 
 export function useHubLink() {
   const [state, setState] = useState<HubLinkStatus["state"]>()
+  const [due, setDue] = useState(false)
   // The answer to the last mutation, until a read newer than it replaces it.
   const [adopted, setAdopted] = useState<{ status: HubLinkStatus; at: number }>()
 
   const read = useCallback(async (signal?: AbortSignal) => {
     const next = await get<HubLinkStatus>("/dashboard/hub", undefined, signal)
     setState(next.state)
+    setDue(firstReportDue(next))
     return next
   }, [])
 
-  const poll = usePoll(read, state === "pending" ? PENDING_POLL : STEADY_POLL)
+  const poll = usePoll(read, state === "pending" || due ? PENDING_POLL : STEADY_POLL)
 
   const adopt = useCallback((status: HubLinkStatus) => {
     setState(status.state)
+    setDue(firstReportDue(status))
     setAdopted({ status, at: Date.now() })
   }, [])
 

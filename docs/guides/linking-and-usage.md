@@ -47,10 +47,12 @@ In the hub, press **Connect** on a server it found; the server's **Settings → 
 sign in there, if that browser is signed out) with the hub's address filled in, says that it came from a link, and shows whose machine that address is ("hub.example.ts.net,
 a machine of you@github") and exactly what the hub will see and be able to do at each scope. Check that the
 address and the machine are the hub you meant: anyone on the tailnet can send you such a link, which is also why
-no scope is chosen for you; pick one before **Connect**. You can also type the address there yourself. After
-you press **Connect**, the page shows a code and this server's key fingerprint; type that code into the hub's
-approval screen, where the fingerprint is shown too. Once connected, the page shows the hub key's fingerprint
-to compare with the one on the hub's Settings page. Notices and messages from the hub are always shown under
+no scope is chosen for you; pick one before **Connect**. An address the dashboard refuses (one that is not a
+machine on this server's tailnet) is refused under the field, and **Connect** stays off until you correct it. You
+can also type the address there yourself. After you press **Connect**, the page shows a code and this server's
+key fingerprint; type that code into the hub's approval screen, where the fingerprint is shown too. Once
+connected, the page shows the hub key's fingerprint to compare with the one on the hub's Settings page, and
+reads *Connected, first report due* until this server's first report reaches the hub, usually within seconds. Notices and messages from the hub are always shown under
 "Just Hub (name) says", never as the dashboard's own words. Over SSH:
 
 ```bash

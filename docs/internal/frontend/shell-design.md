@@ -320,7 +320,11 @@ offers *Open in Just Hub*.
   over, so it never takes this dashboard's tab and nothing of this dashboard's goes with it. A server
   with no reported address is listed, disabled, as *no address*. While the hub cannot be reached the
   trigger carries an amber dot, the menu says *Hub unreachable*, and the others' dots go grey
-  (*Unknown*), since what the hub said last may be minutes old. Every address is checked again in the
+  (*Unknown*), since what the hub said last may be minutes old. A link just approved whose first report
+  has not gone yet is not unreachable, though the backend's `reachable` is `false` until one has: for an
+  administrator with nothing failed (`firstReportDue`, `ShellHub.due`) there is no amber dot, this
+  server's row reads *First report due*, and the shell reads the status every three seconds until the
+  report has gone rather than every fifteen. Every address is checked again in the
   browser (`openable`: `https`, or loopback `http` for the test origin) before it becomes a link. On a
   phone the strip's wordmark is the same trigger and menu.
 - **Servers in the palette** — a scope after Recent, offered only on a linked server

@@ -1,6 +1,13 @@
 "use client"
 
-import { hubHost, hubLabel, isIdle, reportCadence, serverCount } from "@/lib/hub-link"
+import {
+  firstReportDue,
+  hubHost,
+  hubLabel,
+  isIdle,
+  reportCadence,
+  serverCount,
+} from "@/lib/hub-link"
 import { duration, relativeTime } from "@/lib/format"
 import type { HubLinkScope, HubLinkStatus } from "@/lib/types"
 import { LinkPicture } from "@/components/account-link/connect-picture"
@@ -13,9 +20,10 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  * servers it holds — instead of the site and an account.
  *
  * The lines are the link's state, as there: every line pulses while reports reach the hub, the
- * hub's line holds still in amber while it cannot be reached or the link is idle, only the
- * server's line pulses while a request waits for approval in the hub, and every line is dashed
- * while nothing is connected. The hub's name is its own word, so it is said as "Just Hub (hub)".
+ * hub's line holds still in amber while it cannot be reached or the link is idle — but not before
+ * the first report, which is due rather than failed (`firstReportDue`) — only the server's line
+ * pulses while a request waits for approval in the hub, and every line is dashed while nothing is
+ * connected. The hub's name is its own word, so it is said as "Just Hub (hub)".
  * How often the server reports is the hub's interval (§4.8), anywhere from 10 seconds to 10
  * minutes, so it is read from the status rather than assumed.
  */
@@ -33,7 +41,8 @@ export function HubPicture({
   const linked = status.state === "linked"
   const pending = status.state === "pending"
   const link = status.admin?.link
-  const quiet = linked && (status.reachable === false || Boolean(link?.lastError))
+  const due = firstReportDue(status)
+  const quiet = linked && !due && (status.reachable === false || Boolean(link?.lastError))
   const idle = isIdle(status)
   const every = status.heartbeatSeconds
   const url = status.hubUrl ?? status.admin?.request?.hubUrl ?? address
@@ -61,7 +70,7 @@ export function HubPicture({
         hint: linked ? (
           idle ? (
             <span className="text-destructive">Idle, nothing is sent</span>
-          ) : status.reachable === false ? (
+          ) : !due && status.reachable === false ? (
             <span className="text-warning">Not reaching the hub</span>
           ) : status.lastHeartbeatAt ? (
             `${serverCount(servers)} · report ${relativeTime(status.lastHeartbeatAt)}`
