@@ -38,6 +38,7 @@ two run side by side in one process and share nothing:
 | Key id and owner label | `kid` may hold a dot; any non-empty label | `kid` has no dot, at approval and in a rotation; the label is the hub's name, `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` |
 | Audit actor, destructive-budget key | `account:<owner>` | `hub:<hub name>` |
 | Audit actions | `account.link`, `account.unlink`, `account.command.*`, `account.update.auto` | `hub.link`, `hub.unlink`, `hub.command.*`, `hub.update.auto` |
+| A `backup.run`'s trigger | `account_link` | `hub_link` |
 | Messages | "the site", "on the site" | "the hub", "in the hub" |
 | Switch | `JD_ACCOUNT_LINK` | `JD_HUB_LINK` |
 
