@@ -19,7 +19,7 @@ The host itself and the people on it: packages, system users, roles, keys and th
 - Search and replace API keys, with explicit revocation and inactive-record cleanup
 - A first-run question that keeps the sections you don't use out of your sidebar
 - Optionally linked to your just-dashboard.com account, at a scope you choose, to see this server from the site ([what it sends](../guides/linking-and-usage.md))
-- Optionally connected to a Just Hub on your own tailnet, at a scope you choose, beside or instead of that link: the sidebar then switches between your servers, Ctrl K finds them, and the tab names the server ([how](../guides/linking-and-usage.md#connecting-to-just-hub))
+- Optionally connected to a Just Hub on your own tailnet, at a scope you choose, beside or instead of that link: the sidebar then switches between your servers, Ctrl K finds them, and the tab names the server ([how](../guides/linking-and-usage.md#connecting-to-just-hub)); where the operator turns it on, each account can choose to be signed in from the hub ([what that costs](../guides/linking-and-usage.md#signing-in-from-just-hub))
 
 <table>
 <tr>

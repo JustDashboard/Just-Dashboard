@@ -88,7 +88,8 @@ These invariants must not regress:
 1. The network allowlist runs before authentication, and nothing but Caddy binds a routable address.
 2. Two-factor is enforced per account, not per install: an enrolled account is always asked for a code,
    and a session owing a second factor reaches only the 2FA routes. `JD_REQUIRE_2FA` (default false)
-   decides only whether an *unenrolled* account may sign in at all.
+   decides only whether an *unenrolled* account may sign in at all. The one documented exception is hub
+   sign-in (`JD_HUB_SIGNIN`, default false), with the limits in the invariants file.
 3. Capability checks are enforced by backend routes. Every mutation is audited, and every destructive
    action uses `s.destructive`; only the documented rare, unrecoverable subset requires a server-side
    typed phrase.

@@ -13,8 +13,10 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 
 - The backend refuses to start on a non-loopback address without a `JD_ALLOWED_CIDRS` allowlist,
   and the allowlist is checked **before** authentication.
-- Two-factor is enforced for every account that has enrolled; `JD_REQUIRE_2FA` decides whether an
-  account *must* enrol. A passkey replaces the password at sign-in, never the code.
+- Two-factor is enforced for every account that has enrolled, except accounts that opted in to hub
+  sign-in on a server whose operator turned it on (`JD_HUB_SIGNIN=true`, off by default; see below);
+  `JD_REQUIRE_2FA` decides whether an account *must* enrol. A passkey replaces the password at
+  sign-in, never the code.
 - Repeated wrong passwords and repeated wrong two-factor codes each lock that part of an account's
   sign-in for fifteen minutes. Regenerating recovery codes and turning two-factor off take the current
   password.
@@ -56,6 +58,16 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   hub gives for the terminal is read only from standard input, never from the command line. The hub's
   discovery probe is behind the network allowlist and answers nothing but whether the server can be
   connected. `JD_HUB_LINK=false` switches all of it off.
+- Hub sign-in is the one thing that comes in the other way, and it is off unless the operator sets
+  `JD_HUB_SIGNIN=true`. Then the hub may open this server for an account that chose "Let Just Hub sign
+  me in" (with its password and code), through one credential: a single-use ticket the hub signs with
+  its pinned key, valid for about a minute, for one account, one hub user and the device that asked,
+  redeemed at `POST /api/v1/auth/hub/enter`. The hub's own authenticator code stands in for this
+  server's. Anyone who takes over the hub can then sign in as those accounts, so a session opened this
+  way lasts at most two hours, cannot make or change keys, accounts, passwords, authenticators,
+  passkeys, Linux or database users, saved credentials or links, and ends as soon as its grant, the
+  link or the switch does. An administrator's hub session still has the terminal. The full list and its
+  limits are in [the invariants](docs/internal/security/invariants.md#the-exception-hub-sign-in).
 - [The usage count](docs/guides/linking-and-usage.md#the-usage-count) is off until an administrator says yes, and is three fields with no ID.
 
 ### Roles

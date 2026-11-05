@@ -13,8 +13,9 @@ the dashboard implements it. It is the account link's protocol pointed at a diff
 scopes, command verification, the replay table, budgets, automatic updates and the dashboard's own containers
 applies here unchanged, with the names below.
 
-Hub sign-in (protocol section 9) is **not** in this release. The heartbeat never carries `signIn`, there is no
-`JD_HUB_SIGNIN`, no grant table and no `/hub/enter`; see [Not yet built](#not-yet-built).
+Hub sign-in (protocol section 9) is built and **off by default** (`JD_HUB_SIGNIN=false`): see
+[Hub sign-in](#hub-sign-in). It is the documented exception to invariant 2, with its limits in
+[invariants.md](../security/invariants.md#the-exception-hub-sign-in).
 
 ## One engine, two instances
 
@@ -55,11 +56,11 @@ The hooks the hub link uses:
 
 | Hook | What the hub link does with it |
 | --- | --- |
-| `Admit` | Before anything is sent on a stored link: an idle link sends nothing, the URL rule as it applies to a stored link, and the hub node check (both below). It replaces the account link's "still `JD_ACCOUNT_URL`" check everywhere that check ran (the top loop, the heartbeat, a manual sync, whether an unlink tells anyone) and also runs before every command poll and every result. Its refusals (an idle link) wrap `accountlink.ErrIdle` as well as `hublink.ErrURLRefused`; any other error is a check that failed this time, which the engine counts as a failed exchange. A manual sync (`SyncNow`) answers with a refusal and puts any other error on the status as a failed heartbeat |
+| `Admit` | Before anything is sent on a stored link: an idle link sends nothing, the URL rule as it applies to a stored link, and the hub node check (both below). It replaces the account link's "still `JD_ACCOUNT_URL`" check everywhere that check ran (the top loop, the heartbeat, a manual sync, whether an unlink tells anyone) and also runs before every command poll and every result. Its refusals (an idle link) wrap `accountlink.ErrIdle` as well as `hublink.ErrURLRefused`; any other error is a check that failed this time, which the engine counts as a failed exchange. A manual sync (`SyncNow`) answers with a refusal and puts any other error on the status as a failed heartbeat. Hub sign-in asks `admitRule`, the same without the node check, on every use of a hub session |
 | `BeforePoll` | The hub node check before every poll of a pending request, in whichever process polls it. A `*RequestEndedError` ends the request as failed and nothing is sent |
-| `OnReply` | Decodes and checks `fleet`, `notices` and `signIn`, and returns the write that caches them in `hub.link.view`, which the engine runs inside the heartbeat's own transaction only while the link is still the one it was sent for. A reply that does not decode strictly fails the heartbeat and nothing in it is used |
-| `OnClear` | Deletes `hub.link.view` in the same transaction that ends a link (disconnect, removal in the hub) or stores a new one |
-| `HeartbeatExtra` | Unused. Hub sign-in adds `signIn` to the body here; the engine keeps such keys whole and cuts the snapshot's lists to make room |
+| `OnReply` | Decodes and checks `fleet`, `notices` and `signIn`, and returns the write the engine runs inside the heartbeat's own transaction, only while the link is still the one it was sent for: it caches them in `hub.link.view` and ends every sign-in grant whose hub user the reply no longer offers, and audits those ends once that transaction commits. A reply that does not decode strictly fails the heartbeat and nothing in it is used |
+| `OnClear` | In the same transaction that ends a link (disconnect, removal in the hub) or stores a new one: deletes `hub.link.view`, every sign-in grant and ticket record, and every hub session. What it returns runs after the commit (the audit entries) |
+| `HeartbeatExtra` | With `JD_HUB_SIGNIN=true`, adds `signIn: {grants: [...]}` to every heartbeat; the engine keeps such keys whole and cuts the snapshot's lists to make room. Off, the body is the snapshot alone |
 
 ## Files
 
@@ -71,10 +72,16 @@ The hooks the hub link uses:
 | `dial.go` | `tailscale status --json` on the host, and the dialer that only reaches a hub over `100.64.0.0/10` |
 | `view.go` | The fleet, notices and sign-in offer: strict decoding, per-entry rules, the cache |
 | `status.go` | `Status` (`GET /dashboard/hub`), `Session` (the `hub` field of `/auth/session`), `Hello` and its exact bodies |
+| `ticket.go` | Hub sign-in tickets: the shape, the pinned key, the signature, the payload scanned token by token, the server, time and second-factor checks, and the device check (protocol 9.4, 9.7 steps 3 to 10) |
+| `redeem.go` | `Redeem`: section 9.7 from the switches to the session, and its `hub.signin` audit entry |
+| `signin.go` | Grants (`Allow`, `Revoke`, `Grants`), the heartbeat's `signIn`, the hub-session check auth asks on every use, and every link and switch event that ends grants or hub sessions |
 | `hubstub/` | A signature-less stand-in hub for the `api` and `admin` tests |
 
-Outside the package: `api/handlers_hublink.go` (routes, construction), the `hub` field in `api/handlers_auth.go`,
-`admin/hub.go` (terminal commands), `store/hub_link_schema.go`, and `JD_HUB_LINK*` in `config`.
+Outside the package: `api/handlers_hublink.go` (routes, construction), `api/handlers_hubsignin.go` (the redeem
+and grant routes), the `hub` field in `api/handlers_auth.go`, `admin/hub.go` (terminal commands),
+`store/hub_link_schema.go` and `store/hub_signin_schema.go`, `auth/hub_signin.go` (hub sessions, and the end of a
+grant inside auth's own transactions), `httpx.RefuseHubSession`, `JD_HUB_LINK*` and `JD_HUB_SIGNIN` in `config`,
+and on the frontend `app/hub/enter/route.ts` with `lib/hub-enter.ts`, and `components/hub-link/sign-in-panel.tsx`.
 
 ## The URL rule and how a hub is reached
 
@@ -240,8 +247,8 @@ RFC 3339 in UTC. With `JD_HUB_LINK=false` it is exactly `{"enabled":false,"state
   `hubName`, `scope`, `reachable` (the last heartbeat succeeded, none failed since, younger than three
   intervals), `lastHeartbeatAt` once one succeeded, `heartbeatSeconds` (the hub's interval, clamped to 10–600 as
   the heartbeat loop clamps it; the page says how often it reports in it), `idle: true` while the link is idle, and
-  `fleet` and `notices` (`[]` before the first reply); `signIn` is `{enabled: false, offered, users}`, `offered`
-  and `users` from the last reply.
+  `fleet` and `notices` (`[]` before the first reply); `signIn` is `{enabled, offered, users, mine?}`: `enabled` is
+  `JD_HUB_SIGNIN`, `offered` and `users` the last reply's, `mine` the caller's own grant for this link.
 - `system.admin` also gets `admin`: `fingerprint` (once the identity exists), `testOrigin`, `request` (pending:
   `hubUrl`, `userCode`, `approveUrl`, `expiresAt`, `scope`, and `hubMachine` when step 8 found one), `link` (linked:
   `serverId`, `linkedAt`, `linkedBy`, `hubMachine` once one is pinned, `lastError` (an idle link's reason, whatever
@@ -251,9 +258,9 @@ RFC 3339 in UTC. With `JD_HUB_LINK=false` it is exactly `{"enabled":false,"state
   25 s the next poll is held), `lastCommand`, `hubKeys` of `{kid, fingerprint, notAfter?}`, `updatePolicy`, and
   `lastSnapshot`, the exact body of the last heartbeat sent), `lastOutcome` (unlinked after a request that ended
   without a link — `denied`, `expired`, `failed` — or after the hub removed the link: `removed`, with "the server
-  was removed in the hub", written in the transaction that clears it because the profile sets `RemovalOutcome`; the
-  account link does not, so Settings → Connect never reads one). `admin.grants` belongs to hub sign-in and is never
-  sent yet.
+  was removed in the hub", written in the transaction that clears it because the profile sets `RemovalOutcome`;
+  the account link does not, so Settings → Connect never reads one), and `grants` (linked with `JD_HUB_SIGNIN` on:
+  every account's grant, `{userId, username, hubUser, since}`).
 
 `GET /auth/session` carries `hub: {linked: true, name, url, reachable}`, and `idle: true` while the link is idle,
 only for a fully signed-in session (not one owing a second factor or a password change, and never to nobody), with
@@ -309,27 +316,69 @@ The account link's table applies, with these for the hub:
 | The hub is reinstalled with a new key | Its commands fail the key check (refused, audited); disconnect and connect again |
 | `JD_HUB_LINK=false` while linked | The link stays stored and idle; nothing is sent; a disconnect clears it and tells no one |
 
-## Not yet built
+## Hub sign-in
 
-Hub sign-in (protocol section 9) arrives on a later branch. What is in place for it: the reply's `signIn` is
-decoded and cached, and `GET /dashboard/hub` reports it as `signIn.offered` and `signIn.users`; the engine's
-`HeartbeatExtra` hook carries extra heartbeat keys whole within the 64 KiB budget; `OnClear` is the transaction in
-which grants and ticket records will be deleted with a link, and `OnReply`'s write runs in the heartbeat's own
-serverId-guarded transaction, where ending the grants a reply no longer offers belongs; `revokeHubSessionsTx` is
-called inside the one write transaction that sets a link idle (an address the rule refuses at start, or another
-machine at the hub's name) and is where the hub sessions are revoked. Still to come with it: `JD_HUB_SIGNIN`,
-`hub_signin_grants` and `hub_signin_tickets`, `PUT`/`DELETE /account/hub-signin`,
-`DELETE /dashboard/hub/signin/{userId}`, `admin.grants` and `signIn.mine`, `POST /auth/hub/enter`, the
-`/hub/enter` page, `403 hub_session_not_allowed`, and the ticket vectors. The written security review of the
-exception to invariant 2 must be done before that code is switched on anywhere.
+Off unless the operator sets `JD_HUB_SIGNIN=true`, and only for accounts that opt in. Protocol section 9 is the
+contract; [invariants.md](../security/invariants.md#the-exception-hub-sign-in) says what it weakens and every
+limit on it.
+
+| Route | Guards | Does |
+| --- | --- | --- |
+| `POST /auth/hub/enter` `{ticket}` | none (the ticket is the credential); with `/auth/login`: `loginLim` per address, `RequireCSRF`, at most 4 KiB; audited `hub.signin` by the handler | Section 9.7. `200` is `/auth/login`'s complete answer plus `next`, and sets the session cookie |
+| `PUT /account/hub-signin` `{hubUser, password, code}` | the caller's session, `RefuseHubSession` | Make or replace the caller's grant. `403 hub_signin_disabled`, `409 not_linked`, `409 hub_signin_not_offered`, `400 bad_request`, `401 invalid_credentials`, `401 invalid_code`, `409 hub_user_taken`, `403 hub_session_not_allowed`. Audited `hub.signin.allow` |
+| `DELETE /account/hub-signin` | the caller's session (a hub session may) | Remove the caller's grant (`204`). Audited `hub.signin.revoke` |
+| `DELETE /dashboard/hub/signin/{userId}` | `system.admin`, session (a hub session may) | Remove any account's grant (`204`, `404` without one). Audited `hub.signin.revoke` |
+
+**The redeem**, in `hublink.Service.Redeem`, stops at the first failure: both switches (`403
+hub_signin_disabled`); a stored link the connector has not set idle (`403 hub_not_linked`); then `checkTicket`
+(steps 3 to 9: `bad_ticket`, `wrong_server`, `ticket_expired`, `mfa_stale`), `checkDevice` (step 10:
+`wrong_device`, skipped for a loopback client or an unreachable tailscaled), the nonce (`INSERT … ON
+CONFLICT(nonce) DO NOTHING` in `hub_signin_tickets`, committed on its own: `ticket_used`), and one write
+transaction that re-reads `hub.link.state`, finds the grant (`403 not_permitted`), checks the account and makes
+the session (`auth.Service.StartHubSessionTx`: `403 account_unavailable`). The session cookie the browser sent, if
+any, is revoked in that transaction. A hub session has `auth_method = 'hub'`, `twofa_passed = 1`, the grant's hub
+user in `sessions.hub_user`, and lasts two hours at most and one hour idle. Every outcome writes `hub.signin`:
+the account (or `anonymous`) as username, `hub:<name>` as actor once the signature held, and the ticket's
+`hubUser`, `userId`, `nonce`, `tsLogin`, `tsNode`, `deviceCheck`, and `sessionId` or the refusal's `code`.
+
+**Grants** (`hub_signin_grants`, one row per account, one account per hub user) name the link's `serverId`; a
+grant for another link is void. `PUT` checks what it can without a guess first (switch, link, offer, hub user),
+then spends the account's guess budget and checks the password and code with
+`auth.Service.VerifyReauthentication`, which uses the code's step up. Making a grant replaces the old one in one
+transaction that also revokes the old grant's hub sessions. Every change sends a heartbeat at once.
+
+**Ending.** A hub session ends in the same write transaction as whatever ends what made it, and is checked again
+on every use (`auth.Service.ResolveSession` calls `checkHubSession`, which auth requires before it accepts any
+hub session):
+
+| Event | Where |
+| --- | --- |
+| The account removes or replaces its grant, or an administrator removes it | `Revoke`, `Allow` |
+| Its password changes or is reset; its authenticator is enrolled, reset or turned off; it is disabled or deleted; all its sessions are revoked | `auth.endHubGrantTx`, inside each of those changes' transaction in `auth`; the API audits `hub.signin.revoke` afterwards through `auth.Service.SetHubGrantEnded` |
+| A heartbeat reply no longer offers its hub user, or carries no `signIn` | `onReply` (`endUnofferedTx`) |
+| The link ends or is replaced | `onClear` (`endEveryGrantTx`), also from the terminal's `hub disconnect` |
+| The link goes idle: its address fails the URL rule at start, or another machine answers at the hub's name | `goIdle` → `revokeHubSessionsTx`, in the one write transaction that stores the idle flag; grants stay, unusable; audited `hub.link.idle` or `hub.link.node_changed` with `sessionsRevoked`, and `hub.session.revoke` |
+| `JD_HUB_SIGNIN` or `JD_HUB_LINK` off at start | `PrepareSignIn`, first thing in `api.Server.Start`; an error stops the backend starting |
+
+**`/hub/enter`** is a document written by hand (`lib/hub-enter.ts`) and served by a route handler
+(`app/hub/enter/route.ts`) rather than a page of the app: Next puts its own chunks ahead of anything a layout
+renders in `<head>`, and section 9.5 needs the page's first script to take the ticket out of the address before
+any other runs. Its one script, with the response's CSP nonce, reads `ticket=` from the fragment into a variable
+of its own closure and calls `history.replaceState(null, "", "/hub/enter")` before anything else; it then asks
+`GET /api/v1/auth/session`, asks "Continue through Just Hub?" when the browser is signed in as another account
+(the ticket's `userId` read for display only), posts the redeem with `X-JD-CSRF: 1`, and `location.replace`s to
+`next`. A refusal shows the server's message and a link to `/login`, and the ticket is never sent twice. The page
+loads nothing: its style and mark are inline.
 
 ## Verification
 
 ```bash
 scripts/test-changed.sh origin/patch/0.8.5
 cd backend && go test ./internal/hublink/... ./internal/accountlink/... ./internal/admin ./internal/config
-cd backend && go test ./internal/api -run 'Hub|Link|NoAPIRoute|EveryAPIRoute'
+cd backend && go test ./internal/api -run 'Hub|Link|NoAPIRoute|EveryAPIRoute|Ticket|SignIn|Grant'
+cd backend && go test -tags hublinktest ./internal/config
 python3 scripts/test_manage.py
+cd frontend && bun test src/lib/hub-enter.test.js && bunx playwright test tests/browser/hub-signin.spec.ts
 ```
 
 `hublink` tests run against a fake hub that checks the protocol header, the signature, the time window and the sequence
@@ -365,3 +414,17 @@ running dashboard before the terminal command has its answer (no second unlink, 
 command's request kept from the next and one replaced once its command stopped, and a poll error clearing while a poll
 is held; the `api` tests cover a Docker command against a socket that is missing, one this process may not open, a
 daemon that never answers and one that refuses.
+
+Hub sign-in: `TestSignInTicketVectors` redeems all 37 ticket vectors through steps 3 to 11 with the real
+`checkTicket`, `checkDevice` and nonce store, `deviceCheck` and `secondRedeem` included. The `api` tests
+(`handlers_hubsignin_test.go`) redeem real signed tickets through the router: a valid one (a complete session for
+an account with an authenticator, two hours long, audited), a refusal at each step (expired, another key, another
+server or hub, a stale second factor, another device, not on the tailnet, another account, another hub user,
+garbage), a replay, a wrong device that does not spend the ticket, the switch off, no link, no grant, a locked
+account, a disconnect between the nonce and the session, every grant-ending event of section 9.3 with the hub
+session refused after it (a grant row deleted with no revocation included), enrolling an authenticator ending a
+password-only grant, the opt-in's checks, a hub session refused on credential and link routes, two-hour expiry,
+and a browser's earlier session replaced. `hub_session_routes_test.go` walks the router for
+`RefuseHubSession`. The `hublink` tests (`signin_test.go`) cover the link going idle, a disconnect, a late reply
+and the heartbeat's `signIn`. `hub-signin.spec.ts` holds `/hub/enter` to section 9.5 in a browser and covers the
+opt-in on Settings → Hub.

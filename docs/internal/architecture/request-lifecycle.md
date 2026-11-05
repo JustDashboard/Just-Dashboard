@@ -107,6 +107,14 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   through `UpgradeProtocol`, which answers with it only when it was offered — Remote Desktop's
   Guacamole tunnel asks for `guacamole`, and a browser drops a handshake that does not name it.
 
+A session made by a Just Hub sign-in ticket (`auth_method = 'hub'`, only with `JD_HUB_SIGNIN=true`) is
+complete from the start and resolves like any other, with two differences: `ResolveSession` checks again on
+every use that the switches, the link and the account's grant still hold, deleting the session if not, and
+`httpx.RefuseHubSession` refuses it (`403 hub_session_not_allowed`) on every route that makes or changes a
+credential or a link. Its redeem, `POST /api/v1/auth/hub/enter`, sits with `POST /auth/login`: no session, the
+sign-in budget per address, the CSRF header and its own audit entry; the ticket is the credential
+([invariants.md](../security/invariants.md#the-exception-hub-sign-in)).
+
 After completing any required second factor, an account marked `must_change_pw` may use only
 the session-only `POST /account/password` mutation and authentication status/logout routes. Feature
 routes and API tokens return `password_change_required`. Changing the password requires the current

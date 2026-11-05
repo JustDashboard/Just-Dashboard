@@ -119,6 +119,23 @@ key, so connecting again shows the same fingerprint. A server removed in the hub
 `JD_HUB_LINK=false` switches the feature off entirely: no discovery answer, no page controls, no command, and a
 connection that exists goes quiet.
 
+### Signing in from Just Hub
+
+Off by default. With `JD_HUB_SIGNIN=true` in this server's `.env`, and sign-in turned on in the hub, opening
+this server from the hub can land you here already signed in. Each account decides for itself: in
+**Settings → Hub**, **Let Just Hub sign me in** asks for your password (and your authenticator code, if you
+have one) and the hub user who may sign you in. The hub asks for that hub user's own authenticator code first,
+and the link it opens works once, for about a minute, from the device that asked.
+
+What it costs: the hub's code stands in for this server's, so anyone who takes over the hub could open a
+session as every account that opted in, from a device on your tailnet — with the terminal, for an
+administrator. A session opened this way says so in your session list, lasts at most two hours, and cannot
+create or change API keys, accounts, passwords, authenticators, passkeys, Linux or database users, saved
+credentials or links; sign in on the server itself for those. It ends at once when you turn the choice off,
+change your password or authenticator, when the hub stops offering your hub user, when the server is
+disconnected, and when `JD_HUB_SIGNIN` is found off at a start. Ending it does not undo what was done in it.
+The only account detail the hub is told is your username and the hub user you chose.
+
 ## The usage count
 
 An administrator is asked once, on the Overview, whether this server may be counted in the public install

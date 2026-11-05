@@ -7,7 +7,10 @@ A change that weakens any of these has to say so explicitly.
    than a constant — see [Invariant 2](#invariant-2-what-two-factor-still-guarantees) below. An account
    with an authenticator is **always** asked for a code, and a session that owes one reaches nothing but
    the 2FA routes. What `JD_REQUIRE_2FA` decides is whether an account that has *not* enrolled may sign
-   in at all. It defaults to false.
+   in at all. It defaults to false. **One documented exception:** with `JD_HUB_SIGNIN=true` (off by
+   default), an account that opted in may be opened by a sign-in ticket from the Just Hub this server is
+   linked to, without this server's own code. Its limits are in
+   [the exception to invariant 2](#the-exception-hub-sign-in).
 3. Every destructive action is behind `s.destructive` — capability, `destrLim`, audit entry. Actions
    with a meaningful accidental-click risk pause the operator with a confirmation dialog. A **subset**
    also requires the typed `X-Confirm` phrase,
@@ -461,6 +464,113 @@ The one deliberate loosening: with the policy off, an account that has never enr
 password alone. `auth.Service.Login` elevates that session at creation, and `ResolveSession` completes a
 session that was left half-authenticated when the policy changed under it — without that, turning the
 setting off would strand everyone who was mid-flow with a session that can never be elevated.
+
+### The exception: hub sign-in
+
+Hub sign-in ([hub-link-protocol.md section 9](../backend/hub-link-protocol.md#9-hub-sign-in-version-1-off-by-default),
+implemented as [hub-link.md "Hub sign-in"](../backend/hub-link.md#hub-sign-in)) lets a person open this
+server from the Just Hub it is linked to and land on it signed in. A ticket the hub signs starts a
+**complete** session (`twofa_passed = 1`, `auth_method = 'hub'`) for an account with an authenticator
+without asking it for this server's code. That is a weakening of this invariant, made on purpose, and it
+is allowed only while all six of these hold:
+
+1. **The operator turned it on.** `JD_HUB_SIGNIN=true`, set by root in `.env`. It defaults to `false`,
+   counts as off while `JD_HUB_LINK=false`, and with `JD_HUB_LINK_TEST_ORIGIN` set the backend refuses to
+   start unless it was built with `-tags hublinktest`, which release builds never are (`config.go`).
+2. **The account holder opted in**, from a complete session on this server that a ticket did not make,
+   with the password and, where the account has an authenticator, a current code
+   (`PUT /api/v1/account/hub-signin`, checked by `auth.Service.VerifyReauthentication` on the account's
+   shared guess budget, the code's step used up). Each account decides for itself.
+3. **One hub user.** The grant (`hub_signin_grants`) names one hub user, and only that hub user's tickets
+   open the account. A hub user name names one person for the hub's whole life.
+4. **The hub's own second factor is fresh.** The ticket's `mfaAt`, under the pinned hub key, is the hub
+   user's last TOTP code in the hub session that asked, at most 600 seconds before the ticket was made. A
+   recovery code on the hub does not count.
+5. **Nothing on this server says no.** The account is not disabled, not locked (`locked_until`,
+   `totp_locked_until`), does not owe a password change, and is not unenrolled while
+   `JD_REQUIRE_2FA=true` (`auth.Service.StartHubSessionTx`).
+6. **The device that asked uses it.** The ticket names the hub session's tailnet login and the
+   `StableNodeID` of the device that asked; WhoIs of the browser's address must name both, unless the
+   browser is on loopback (an SSH tunnel) or tailscaled cannot be asked, which the audit entry records.
+
+The ticket itself is checked in the order of protocol 9.7 (`hublink.checkTicket`, `checkDevice`,
+`Service.redeem`): the shape, a pinned hub key not past its end, the Ed25519 signature over the exact
+payload segment before any JSON is read, the payload's JSON rules (scanned token by token, so a key in
+another case, a repeated key or a `null` is refused), this hub and this `serverId`, its time with 30
+seconds of grace (accepted for at most 120 seconds), the hub's second factor, the device, and then its
+nonce, spent in a statement that commits on its own (`hub_signin_tickets`), so it opens one session at
+most. The grant, the account and the new session are one write transaction.
+
+**What a hub session cannot do.** It lasts at most two hours (one hour idle), and
+`httpx.RefuseHubSession` refuses it with `403 hub_session_not_allowed` on every route that creates,
+changes, rotates, imports or exports a credential, or creates or changes a link, because what it made
+would outlive the session and the grant. `TestEveryCredentialAndLinkRouteRefusesAHubSession`
+(`api/hub_session_routes_test.go`) walks the router and fails unless exactly these carry it:
+
+| What | Routes, under `/api/v1` |
+| --- | --- |
+| API, MCP and deploy keys | `POST /tokens/`, `POST /tokens/mcp`, `POST /tokens/deploy`, `PUT /tokens/{id}/connections` |
+| Dashboard accounts | `POST /dashboard-users/`, `PATCH /dashboard-users/{id}`, `POST /dashboard-users/{id}/reset-totp`, `DELETE /dashboard-users/{id}` |
+| The caller's own credentials | `POST /account/password`, `POST /account/recovery-codes`, `POST /account/2fa/disable`, `POST /auth/2fa/setup`, `POST /auth/2fa/enable`, `POST /account/passkeys/register/begin`, `POST /account/passkeys/register/finish`, `PATCH /account/passkeys/{id}`, `DELETE /account/passkeys/{id}` |
+| Linux accounts and their keys | `POST /system-users/`, `PATCH /system-users/{name}/`, `PUT /system-users/{name}/sudo`, `POST /system-users/{name}/password`, `POST /system-users/{name}/keys/generate`, `POST /system-users/{name}/keys`, `PATCH /system-users/{name}/keys`, `POST /system-users/{name}/keys/import`, `POST /system-users/{name}/keys/copy`, `POST /system-accounts/bulk`, `PATCH /system-accounts/groups/{group}` |
+| Database users and roles | `POST /databases/{id}/server/roles`, `PUT /databases/{id}/server/roles/{name}`, `POST /databases/{id}/server/roles/{name}/grant`, `POST /databases/{id}/server/roles/{name}/privileges`, `POST /databases/{id}/mongo/users`, `PUT /databases/{id}/mongo/users`, `POST /databases/{id}/mongo/users/grant`, `PUT /databases/{id}/redis/acl/{name}`, `POST /databases/host/grant` |
+| Proxy basic-auth users | `POST /proxy/auth-files/` |
+| Deployment secrets and saved credentials | `POST /deploy/{id}/environments/{env}/triggers`, `PUT /deploy/{id}/environments/{env}/triggers/{trigger}`, `POST /deploy/{id}/environments/{env}/triggers/{trigger}/rotate-secret`, `POST /deploy/{id}/rotate-secret`, `POST /deploy/credentials`, `PUT /deploy/credentials/{id}`, `POST /deploy/secret-stores`, `PUT /deploy/secret-stores/{store}`, `POST /deploy/notifications`, `PUT /deploy/notifications/{channel}`, `POST /deploy/log-drains`, `PUT /deploy/log-drains/{drain}` |
+| Git and GitHub | `POST /git/github/auth/device`, `POST /git/github/auth/device/{id}`, `POST /git/github/auth/token`, `POST /git/github/auth/configure`, `POST /deploy/github-app/manifest`, `POST /deploy/github-app/callback`, `POST /git/forge/account` |
+| DNS credentials, tunnels and TLS keys | `POST /certificates/dns-credentials`, `POST /certificates/import`, `POST /certificates/export`, `POST /network/dns/services/`, `PUT /network/dns/services/{id}`, `PUT /proxy/tunnel/`, `POST /proxy/tunnel/create` |
+| Network peers | `POST /network/vpn/wireguard/{iface}/peers`, `PATCH /network/vpn/wireguard/{iface}/peers/{id}` |
+| Backups | `POST /backups/key/import`, `POST /backups/key/export`, `POST /backups/`, `PUT /backups/{id}`, `POST /backups/import` |
+| The assistant's provider keys | `PUT /assistant/providers/{preset}` |
+| The account link | `POST /dashboard/link/`, `DELETE /dashboard/link/request`, `PUT /dashboard/link/scope` |
+| The hub link | `POST /dashboard/hub`, `DELETE /dashboard/hub/request`, `PUT /dashboard/hub/scope` |
+| Hub sign-in | `PUT /account/hub-signin` |
+
+The protocol's table for JD 0.8.5 is the floor. The walk of every write route found these that its rule
+covers and the table does not list yet, and they carry the middleware too: `POST /git/forge/account` (a
+saved Git host token), `POST /databases/host/grant` and `POST /databases/{id}/server/roles/{name}/privileges`
+(a database login and its rights), `POST /system-accounts/bulk` and `PATCH /system-accounts/groups/{group}`
+(Linux accounts, and group membership such as `sudo` or `docker`), the two WireGuard peer routes (a peer's
+key lets a device onto this server's network), `PUT /proxy/tunnel/` and `POST /proxy/tunnel/create`
+(Cloudflare tunnel tokens), the two DNS service routes (a DNS server's saved API credential), the backup
+job routes (a destination holds credentials of its own) and `PUT /assistant/providers/{preset}` (a
+provider's API key). The two `DELETE` rows the protocol's table lists are refused as well, although the
+rule leaves deletions open, because the table names them. A route added later that the rule covers joins
+the list, the test and this table in the same change.
+
+What stays open to a hub session, because it only takes power away: disconnecting either link,
+`POST /dashboard/hub/sync`, removing a sign-in grant, revoking sessions, deleting a key, user, credential
+or channel, and signing GitHub out.
+
+**When it ends.** A hub session lives only while what made it still holds. Every one of these is a write
+transaction that also revokes the hub sessions it ends, so a redeem either commits first and is revoked,
+or finds nothing to stand on:
+
+- the account's grant ends: the account or an administrator removes it, the account replaces it, its
+  password changes or is reset, its authenticator is enrolled, replaced, reset or turned off, it is
+  disabled or deleted, or all its sessions are revoked (`auth.endHubGrantTx`, inside each of those
+  changes' own transaction);
+- the hub's heartbeat reply no longer offers its hub user, or offers no sign-in at all (`hublink.onReply`,
+  in the transaction that keeps the reply, and only for the link the reply came from);
+- the link ends (disconnect, removal in the hub, a new link): every grant, every ticket record and every
+  hub session go with it (`hublink.onClear`, in the engine's clearing transaction);
+- the link goes idle, because its address fails the URL rule at start or another machine answers at the
+  hub's name: every hub session is revoked in the write transaction that stores the idle flag, and the
+  grants stay unusable (`hublink.goIdle`, `revokeHubSessionsTx`);
+- `JD_HUB_SIGNIN` or `JD_HUB_LINK` is found off at start: every grant, ticket record and hub session is
+  deleted before the API serves its first request, and if that cannot be written the backend does not
+  start (`hublink.PrepareSignIn` from `api.Server.Start`).
+
+And every time a hub session is resolved, `auth.Service.ResolveSession` asks `hublink.checkHubSession`
+again: both switches on, the link stored and not idle, and a grant for this account and this link whose
+hub user is the session's and that is not newer than the session. A revocation that was missed cannot
+keep one working; without the check installed, no hub session resolves at all.
+
+**What it costs, plainly.** With hub sign-in on, whoever takes over the hub can open a session as every
+account that opted in, from a device on the tailnet. For an administrator that is the terminal, and
+root can change anything from there; the route list above stops the dashboard's own forms from minting
+lasting credentials, it does not contain a shell. Ending hub sign-in ends the hub's sessions; it does not
+undo what was done in them. Without it, a taken-over hub is limited to its scope's commands. That is why
+it is off by default and needs the operator, the hub's owner and each account holder.
 
 ## Invariant 3: which routes take a typed phrase
 
