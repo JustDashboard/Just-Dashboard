@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -26,6 +27,10 @@ type APIError struct {
 	Message string
 	// Peer is what the other end is called in the message; "site" when unset.
 	Peer string
+	// Speaker, when set, attributes Message to the peer by name, "Just Hub
+	// (hub)", and quotes it: the peer's words are shown as its own and never
+	// read as this dashboard's (hub-link-protocol.md 8.10).
+	Speaker string
 }
 
 func (e *APIError) Error() string {
@@ -34,6 +39,8 @@ func (e *APIError) Error() string {
 		peer = "site"
 	}
 	switch {
+	case e.Code != "" && e.Message != "" && e.Speaker != "":
+		return fmt.Sprintf("the %s answered %d %s. %s says: \"%s\"", peer, e.Status, e.Code, e.Speaker, e.Message)
 	case e.Code != "" && e.Message != "":
 		return fmt.Sprintf("the %s answered %d %s: %s", peer, e.Status, e.Code, e.Message)
 	case e.Code != "":
@@ -59,6 +66,9 @@ type Client struct {
 	version string
 	// base, agent and peer come from the instance's profile.
 	base, agent, peer string
+	// speaker names the peer when its own words are quoted, for a profile
+	// with a Speaker.
+	speaker string
 }
 
 // NewHTTPClient is the transport every exchange uses: TLS 1.2 at least, the
@@ -268,7 +278,7 @@ func (c *Client) once(ctx context.Context, method, pathWithQuery string, raw []b
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		api := decodeAPIError(resp.StatusCode, data)
-		api.Peer = c.peer
+		api.Peer, api.Speaker = c.peer, c.speaker
 		return resp.StatusCode, api
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
@@ -289,7 +299,20 @@ func decodeAPIError(status int, data []byte) *APIError {
 	}
 	// An error that does not parse is still an error; only its detail is lost.
 	_ = json.Unmarshal(data, &body)
-	return &APIError{Status: status, Code: clip(body.Error.Code, 64), Message: clip(body.Error.Message, 300)}
+	return &APIError{Status: status, Code: clip(plainText(body.Error.Code), 64), Message: clip(plainText(body.Error.Message), 300)}
+}
+
+// plainText is the peer's text with every character that could make it read
+// as something it is not (Unicode Cf, Zl and Zp: the bidirectional controls,
+// line and paragraph separators) made a space; clip does the same for
+// controls. It is shown inside this dashboard's own messages.
+func plainText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 func clip(s string, n int) string {

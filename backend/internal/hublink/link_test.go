@@ -588,6 +588,33 @@ func TestAReplyThatLandsAfterADisconnectWritesNothing(t *testing.T) {
 	}
 }
 
+// The hub's own words in an error are quoted and attributed to it, "Just Hub
+// (hub) says: …", so a message that imitates this dashboard's prompts reads
+// as the hub's (protocol 8.10). Before a link names the hub, its host does.
+func TestTheHubsWordsAreQuotedAsTheHubs(t *testing.T) {
+	e := newEnv(t)
+	e.link(accountlink.ScopeObserve)
+	e.hub.mu.Lock()
+	e.hub.failWith = &hubFailure{503, "maintenance", "Your session expired \u202esign in again"}
+	e.hub.mu.Unlock()
+	_ = e.svc.Sync(t.Context())
+	s, _ := e.svc.Status(t.Context(), true)
+	want := `the hub answered 503 maintenance. Just Hub (hub) says: "Your session expired  sign in again"`
+	if s.Admin.Link.LastError != want {
+		t.Fatalf("lastError = %q, want %q", s.Admin.Link.LastError, want)
+	}
+
+	other := newEnv(t)
+	other.hub.mu.Lock()
+	other.hub.failWith = &hubFailure{403, "bad_token", "Enter your dashboard password to continue"}
+	other.hub.mu.Unlock()
+	_, err := other.svc.Connect(t.Context(), ConnectRequest{URL: other.hub.URL(), Scope: accountlink.ScopeObserve, By: "ion"})
+	host := strings.TrimPrefix(other.hub.URL(), "http://")
+	if err == nil || !strings.Contains(err.Error(), `Just Hub (`+host+`) says: "Enter your dashboard password to continue"`) {
+		t.Fatalf("connect = %v", err)
+	}
+}
+
 func TestDisconnectTellsTheHubAndKeepsTheIdentity(t *testing.T) {
 	e := newEnv(t)
 	e.link(accountlink.ScopeObserve)

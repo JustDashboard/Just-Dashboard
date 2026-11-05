@@ -72,6 +72,11 @@ type Profile struct {
 	// by TLS alone, and on a tailnet a machine name is a weak anchor for a key
 	// that signs commands and sign-in tickets (hub-link-protocol.md 4.3).
 	IgnoreAnnouncedKeys bool
+	// Speaker, when set, is how the peer's own words are attributed inside
+	// this dashboard's messages: "Just Hub" makes `Just Hub (hub) says:
+	// "…"`, with the link's owner label, or the peer's host before there is
+	// one (hub-link-protocol.md 8.10).
+	Speaker string
 	// ClockSequence raises the request counter to max(stored + 1, unix
 	// milliseconds) instead of stored + 1, so a database restored from an
 	// older copy carries on above every number it used before

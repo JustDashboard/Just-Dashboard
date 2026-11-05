@@ -326,7 +326,7 @@ func (s *Service) report(ctx context.Context, st State, commandID string, res Co
 	if err != nil || id == nil {
 		return
 	}
-	c := s.newClientAt(s.originFor(st.URL), id)
+	c := s.linkClient(st, id)
 	delay := time.Second
 	for attempt := 0; attempt < 3; attempt++ {
 		err = c.result(ctx, st.ServerID, commandID, res)

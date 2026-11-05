@@ -115,6 +115,14 @@ type fakeHub struct {
 	// dropApproved loses that many approved answers in transit: the hub
 	// collected the approval, the dashboard never heard.
 	dropApproved int
+	// failWith, when set, is the error every heartbeat and link request is
+	// answered with, message and all.
+	failWith *hubFailure
+}
+
+type hubFailure struct {
+	status        int
+	code, message string
 }
 
 func newFakeHub(t *testing.T, now time.Time) *fakeHub {
@@ -176,6 +184,10 @@ func (h *fakeHub) serve(w http.ResponseWriter, r *http.Request) {
 	path, ok := strings.CutPrefix(r.URL.Path, "/api/hub/v1")
 	if !ok {
 		hubError(w, 404, "not_found")
+		return
+	}
+	if f := h.failWith; f != nil && (path == "/heartbeat" || path == "/requests") {
+		writeJSON(w, f.status, map[string]any{"error": map[string]string{"code": f.code, "message": f.message}})
 		return
 	}
 	switch {

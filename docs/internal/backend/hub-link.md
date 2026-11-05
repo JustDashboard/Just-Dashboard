@@ -165,6 +165,19 @@ does the same check in its own transaction. A reply that lands after a disconnec
 and no status behind, and cannot bring an old hub's fleet, notices or sign-in users back under a new link. The
 cache also names the `serverId` it came from, and is cleared with the link.
 
+## The hub's words are shown as the hub's
+
+A hub that is taken over can put any text in what it sends, and within the rules some of it could read like this
+dashboard's own prompt ("your session expired, sign in again"). Protocol 8.10 says every piece of it is shown as
+plain text attributed to the hub. In the backend that is the hub's `message` in an error: the profile's `Speaker`
+("Just Hub") makes `APIError` quote it as `the hub answered 503 maintenance. Just Hub (hub) says: "…"`, named by the
+link's `owner.label`, or by the hub's host before a link names it (`Connect`'s `hub_unreachable`). The message is
+cut to 300 characters with its control, format (bidirectional), line and paragraph separator characters made
+spaces (`plainText`), so it cannot reorder the sentence around it. So `admin.link.lastError` and the Connect
+errors never carry the hub's words unattributed; the account link's messages are unchanged. Notices, fleet names
+and `owner.label` are structured fields and stay raw in the API; the pages render them as text under the hub's
+name.
+
 ## Local API
 
 `GET /api/v1/hub/hello` is the hub's discovery probe: no sign-in, but inside `/api/v1`, so the allowlist runs

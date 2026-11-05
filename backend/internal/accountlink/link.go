@@ -488,7 +488,7 @@ func (s *Service) Unlink(ctx context.Context) (siteNotified bool, err error) {
 	// since names somebody who never heard of this server.
 	if id, _, e := loadIdentity(ctx, s.kv, s.sealer); e == nil && id != nil && s.enabled && s.admit(ctx, st) == nil {
 		ctx2, cancel := context.WithTimeout(ctx, requestTimeout)
-		e = s.newClientAt(s.originFor(st.URL), id).unlink(ctx2, st.ServerID)
+		e = s.linkClient(st, id).unlink(ctx2, st.ServerID)
 		cancel()
 		siteNotified = e == nil || isCode(e, http.StatusGone, "")
 	}

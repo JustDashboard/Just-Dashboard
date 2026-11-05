@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sync"
 	"time"
@@ -187,7 +188,33 @@ func (s *Service) newClientAt(origin string, id *Identity) *Client {
 	return &Client{
 		origin: origin, http: s.http, id: id, next: s.kv.nextSequence,
 		now: s.now, version: s.version, base: s.p.BasePath, agent: s.p.Agent, peer: s.p.Peer,
+		speaker: s.speaker(origin, ""),
 	}
+}
+
+// linkClient talks to the peer of the stored link st, which quotes the peer
+// under its own name.
+func (s *Service) linkClient(st State, id *Identity) *Client {
+	c := s.newClientAt(s.originFor(st.URL), id)
+	c.speaker = s.speaker(st.URL, st.Owner)
+	return c
+}
+
+// speaker is how the peer's words are attributed: by the owner label once
+// the link names one, else by the host it was asked at.
+func (s *Service) speaker(origin, owner string) string {
+	if s.p.Speaker == "" {
+		return ""
+	}
+	name := owner
+	if name == "" {
+		if u, err := url.Parse(origin); err == nil && u.Host != "" {
+			name = u.Host
+		} else {
+			name = s.p.Peer
+		}
+	}
+	return s.p.Speaker + " (" + clip(plainText(name), 64) + ")"
 }
 
 // originFor is where a stored request or link is reached: where it was made,
@@ -505,7 +532,7 @@ func (s *Service) pollCommands(ctx context.Context, st State) (commandsResponse,
 	if err != nil || id == nil {
 		return commandsResponse{}, fmt.Errorf("link identity: %w", firstErr(err, ErrIdentityUnreadable))
 	}
-	return s.newClientAt(s.originFor(st.URL), id).commands(ctx, st.ServerID, clampInt(st.PollWaitSeconds, 1, 25))
+	return s.linkClient(st, id).commands(ctx, st.ServerID, clampInt(st.PollWaitSeconds, 1, 25))
 }
 
 func firstErr(errs ...error) error {
@@ -674,7 +701,7 @@ func (s *Service) sendHeartbeat(ctx context.Context, st State, patient bool) err
 		return err
 	}
 	s.hbTimes = append(s.hbTimes, time.Now())
-	c := s.newClientAt(s.originFor(st.URL), id)
+	c := s.linkClient(st, id)
 	var resp heartbeatResponse
 	var write ReplyWrite
 	if s.p.ReplyView {

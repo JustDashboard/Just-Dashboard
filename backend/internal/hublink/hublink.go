@@ -54,7 +54,7 @@ var (
 // from the account link's, so the two never share a key, a table row, a
 // counter, a budget or an audit name.
 var profile = accountlink.Profile{
-	Name: "hub link", Title: "Just Hub",
+	Name: "hub link", Title: "Just Hub", Speaker: "Just Hub",
 	Peer: "hub", PeerAt: "in the hub",
 	KeyPrefix: "hub.link", CommandsTable: "hub_link_commands",
 	BasePath: BasePath, Agent: "hub-link",
