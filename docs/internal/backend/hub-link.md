@@ -324,7 +324,7 @@ limit on it.
 
 | Route | Guards | Does |
 | --- | --- | --- |
-| `POST /auth/hub/enter` `{ticket}` | none (the ticket is the credential); with `/auth/login`: `loginLim` per address, `RequireCSRF`, at most 4 KiB; audited `hub.signin` by the handler | Section 9.7. `200` is `/auth/login`'s complete answer plus `next`, and sets the session cookie |
+| `POST /auth/hub/enter` `{ticket, replace?}` | none (the ticket is the credential); with `/auth/login`: `loginLim` per address, `RequireCSRF`, at most 4 KiB; audited `hub.signin` by the handler | Section 9.7. `200` is `/auth/login`'s complete answer plus `next`, and sets the session cookie. `409 other_account_signed_in` when the browser's cookie is another account's complete session and `replace` is not `true` |
 | `PUT /account/hub-signin` `{hubUser, password, code}` | the caller's session, `RefuseHubSession` | Make or replace the caller's grant. `403 hub_signin_disabled`, `409 not_linked`, `409 hub_signin_not_offered`, `400 bad_request`, `401 invalid_credentials`, `401 invalid_code`, `409 hub_user_taken`, `403 hub_session_not_allowed`. Audited `hub.signin.allow` |
 | `DELETE /account/hub-signin` | the caller's session (a hub session may) | Remove the caller's grant (`204`). Audited `hub.signin.revoke` |
 | `DELETE /dashboard/hub/signin/{userId}` | `system.admin`, session (a hub session may) | Remove any account's grant (`204`, `404` without one). Audited `hub.signin.revoke` |
@@ -332,11 +332,14 @@ limit on it.
 **The redeem**, in `hublink.Service.Redeem`, stops at the first failure: both switches (`403
 hub_signin_disabled`); a stored link the connector has not set idle (`403 hub_not_linked`); then `checkTicket`
 (steps 3 to 9: `bad_ticket`, `wrong_server`, `ticket_expired`, `mfa_stale`), `checkDevice` (step 10:
-`wrong_device`, skipped for a loopback client or an unreachable tailscaled), the nonce (`INSERT … ON
+`wrong_device`, skipped for a loopback client or a tailscaled that cannot be asked, `tailnetgate.ErrUnavailable`;
+an answer naming no node or login, `ErrNoIdentity`, is refused), the nonce (`INSERT … ON
 CONFLICT(nonce) DO NOTHING` in `hub_signin_tickets`, committed on its own: `ticket_used`), and one write
 transaction that re-reads `hub.link.state`, finds the grant (`403 not_permitted`), checks the account and makes
 the session (`auth.Service.StartHubSessionTx`: `403 account_unavailable`). The session cookie the browser sent, if
-any, is revoked in that transaction. A hub session has `auth_method = 'hub'`, `twofa_passed = 1`, the grant's hub
+any, is revoked in that transaction; when it is another account's complete session, only if the body says
+`"replace": true`, which `/hub/enter` sends after the person pressed Continue, and otherwise nothing is made and
+the answer is `409 other_account_signed_in`. A hub session has `auth_method = 'hub'`, `twofa_passed = 1`, the grant's hub
 user in `sessions.hub_user`, and lasts two hours at most and one hour idle. Every outcome writes `hub.signin`:
 the account (or `anonymous`) as username, `hub:<name>` as actor once the signature held, and the ticket's
 `hubUser`, `userId`, `nonce`, `tsLogin`, `tsNode`, `deviceCheck`, and `sessionId` or the refusal's `code`.
@@ -345,7 +348,9 @@ the account (or `anonymous`) as username, `hub:<name>` as actor once the signatu
 grant for another link is void. `PUT` checks what it can without a guess first (switch, link, offer, hub user),
 then spends the account's guess budget and checks the password and code with
 `auth.Service.VerifyReauthentication`, which uses the code's step up. Making a grant replaces the old one in one
-transaction that also revokes the old grant's hub sessions. Every change sends a heartbeat at once.
+transaction that also revokes the old grant's hub sessions, and that transaction checks the link and the offer
+again (`Allow`: not idle, and the stored reply still offers the hub user), so a change committed while the
+password was being checked makes no grant. Every change sends a heartbeat at once.
 
 **Ending.** A hub session ends in the same write transaction as whatever ends what made it, and is checked again
 on every use (`auth.Service.ResolveSession` calls `checkHubSession`, which auth requires before it accepts any
@@ -354,7 +359,7 @@ hub session):
 | Event | Where |
 | --- | --- |
 | The account removes or replaces its grant, or an administrator removes it | `Revoke`, `Allow` |
-| Its password changes or is reset; its authenticator is enrolled, reset or turned off; it is disabled or deleted; all its sessions are revoked | `auth.endHubGrantTx`, inside each of those changes' transaction in `auth`; the API audits `hub.signin.revoke` afterwards through `auth.Service.SetHubGrantEnded` |
+| Its password changes or is reset; its authenticator is enrolled, reset or turned off; it is disabled or deleted; all its sessions are revoked | `auth.endHubGrantTx`, inside each of those changes' transaction in `auth`; the API audits `hub.signin.revoke` afterwards through `auth.Service.SetHubGrantEnded`, and so does the terminal's `--admin reset-password` and `revoke-sessions` (as `root`, actor `cli`) |
 | A heartbeat reply no longer offers its hub user, or carries no `signIn` | `onReply` (`endUnofferedTx`) |
 | The link ends or is replaced | `onClear` (`endEveryGrantTx`), also from the terminal's `hub disconnect` |
 | The link goes idle: its address fails the URL rule at start, or another machine answers at the hub's name | `goIdle` → `revokeHubSessionsTx`, in the one write transaction that stores the idle flag; grants stay, unusable; audited `hub.link.idle` or `hub.link.node_changed` with `sessionsRevoked`, and `hub.session.revoke` |
@@ -367,16 +372,29 @@ by then. A redeem also re-reads the link inside its session transaction (`idleOr
 the link going idle either commits first and is revoked by it, or finds the flag. Only a disconnect clears the
 flag, and it ends the grants with it.
 
+**Sockets.** A socket is authenticated once, at the upgrade, so the revocations above would not reach a terminal
+a hub session already holds. `wsx.Upgrader` hands every socket it opens to a `wsx.Guard`; the API's
+(`api/hub_session_sockets.go`) watches the ones a hub session opened, and `guardHubStream` does the same for the
+Remote Desktop stream bridge's proxied sockets by cancelling the proxied request. Each closes at the session's
+`expires_at`, at once when hublink reports hub sessions revoked (`Options.SessionsEnded`, called after each
+event's transaction has committed, from `auditGrantEnd` and `auditLinkEvent`), and otherwise at its next check
+every 15 seconds: `httpx.Authenticator.SessionStands`, through `auth.Service.CheckSession`, which runs every
+check `ResolveSession` does without sliding the idle window, so an open socket is not use of the session.
+
 **Refused routes.** `httpx.RefuseHubSession` sits on every route protocol 9.9's table lists (the table now holds
-the seventeen routes JD's walk of every write route added to it);
+the seventeen routes JD's walk of every write route added to it, and the seventeen its second walk, of the routes
+that show a stored secret too, added after);
 [invariants.md](../security/invariants.md#the-exception-hub-sign-in) repeats the list, and
-`api/hub_session_routes_test.go` holds the router to exactly that list.
+`api/hub_session_routes_test.go` holds the router to exactly that list, and both documents' tables to it. The
+assistant is offered none of the grant routes (`agentExcludedAreas`, `agentExcludedRoutes`): letting the hub
+sign an account in is the person's own choice.
 
 **On the page.** Settings → Hub's "Sign in from Just Hub" (`components/hub-link/sign-in-panel.tsx`) names the hub
 as `hubLabel` does everywhere else ("Just Hub (hub)"), offers the opt-in with the password and, where the account
-has one, an authenticator code, and lists every account's grant with Remove for an administrator. While the page
-reads the link as idle it offers no form, says sign-in is paused until a disconnect, and keeps the account's own
-"Stop letting Just Hub sign me in". A `403 hub_session_not_allowed` anywhere in the app reads "Sign in on this
+has one, an authenticator code, and lists every account's grant as rows with Remove for an administrator. The
+opt-in and its undoing are outline buttons: Connect stays the page's one brand command. While the link is idle
+(`isIdle`, the status's `idle`, which every reader is sent) it offers no account a form, says sign-in is paused
+until a disconnect, and keeps the account's own "Stop letting Just Hub sign me in". A `403 hub_session_not_allowed` anywhere in the app reads "Sign in on this
 server itself to do this" (`HUB_SESSION_REFUSED` in `lib/api.ts`).
 
 **`/hub/enter`** is a document written by hand (`lib/hub-enter.ts`) and served by a route handler
@@ -385,8 +403,10 @@ renders in `<head>`, and section 9.5 needs the page's first script to take the t
 any other runs. Its one script, with the response's CSP nonce, reads `ticket=` from the fragment into a variable
 of its own closure and calls `history.replaceState(null, "", "/hub/enter")` before anything else; it then asks
 `GET /api/v1/auth/session`, asks "Continue through Just Hub?" when the browser is signed in as another account
-(the ticket's `userId` read for display only), posts the redeem with `X-JD-CSRF: 1`, and `location.replace`s to
-`next`. A refusal shows the server's message and a link to `/login`, and the ticket is never sent twice. The page
+(the ticket's `userId` read for display only), and asks the same without a name when the read answers anything
+but `200` or `401`, or nothing; it redeems unasked only for nobody (`401`), the same account, or a session still
+owing its second factor. It posts the redeem with `X-JD-CSRF: 1`, with `"replace": true` after Continue, and
+`location.replace`s to `next`. A refusal shows the server's message and a link to `/login`, and the ticket is never sent twice. The page
 loads nothing: its style and mark are inline.
 
 ## Verification
@@ -444,10 +464,18 @@ account, a disconnect or the link going idle between the nonce and the session, 
 9.3 with the hub session refused after it (a grant row deleted, or the idle flag written, with no revocation
 included), an idle link refusing the redeem and the opt-in, enrolling an authenticator ending a password-only
 grant, the opt-in's checks, a hub session refused with `403 hub_session_not_allowed` on every route of the refused
-list, two-hour expiry, and a browser's earlier session replaced. `hub_session_routes_test.go` walks the router for
-`RefuseHubSession`. The `hublink` tests (`signin_test.go`) cover the link going idle and another machine at the
+list, two-hour expiry, a disconnect that starts after the session row is written and waits for the commit
+(`SetBeforeSessionCommit`), and a browser's earlier session replaced (another account's only with `replace`).
+`hub_session_sockets_test.go` opens a real socket from a hub session and closes it at once after every
+grant-ending event of section 9.3 (at the next check for the two nothing announces), at the session's expiry,
+and for a proxied stream, and leaves a password session's socket open. `hub_session_routes_test.go` walks the
+router for `RefuseHubSession` and reads both route tables. `auth/hub_signin_test.go` holds a hub session to an
+hour idle under a 12-hour install limit, and `admin/cli_test.go` the terminal's audit of a grant it ends. The `hublink` tests (`signin_test.go`) cover the link going idle and another machine at the
 hub's name (every hub session revoked with the flag), an idle link refusing hub sessions, redeems and grants after
-every restart until a disconnect, removal in the hub, a disconnect, a late reply, the heartbeat's `signIn`, and a
-key a reply announces never signing a ticket. `hub-signin.spec.ts` holds `/hub/enter` to section 9.5 in a browser
-and covers Settings → Hub's opt-in, the hub's name, an administrator removing another account's grant, and the
-panel paused on an idle link.
+every restart until a disconnect, removal in the hub, a disconnect, a late reply, the heartbeat's `signIn`, a
+key a reply announces never signing a ticket, a grant refused when the link went idle or the offer changed
+while `Allow` waited, and, through the real local API client, a tailscaled answer that names no login or node
+refused at step 10 while an error status skips it. `hub-signin.spec.ts` holds `/hub/enter` to section 9.5 in a browser
+(asking without a name when the session read fails, and `replace` only after Continue; `hub-enter.test.js` runs
+the page's script against each answer) and covers Settings → Hub's opt-in, the hub's name, an administrator
+removing another account's grant, and the panel paused on an idle link for an administrator and for a reader.

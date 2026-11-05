@@ -138,6 +138,9 @@ type Server struct {
 	assistant *assistantState
 	// The drawings' shared-library downloads and live rooms (boards_live.go).
 	boards *boardsState
+	// The sockets hub sessions have open, each closed when its session ends
+	// (hub_session_sockets.go).
+	hubSockets hubSockets
 	// The tool calls each MCP key has in flight (handlers_mcp.go).
 	mcp mcpState
 
@@ -175,6 +178,9 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, svc *auth.Servic
 		assistant: newAssistantState(),
 		boards:    newBoardsState(),
 	}
+	// Every socket is tied to the session that opened it where that session
+	// is one a hub sign-in made.
+	s.WS.SetGuard(s.guardHubSocket)
 	s.initModules()
 	return s
 }

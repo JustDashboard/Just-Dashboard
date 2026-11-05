@@ -50,6 +50,20 @@ const (
 // while two-factor is required (section 9.7 step 13).
 var ErrHubAccountUnavailable = errors.New("this account cannot be signed in through Just Hub now; sign in on this server itself")
 
+// ErrHubOtherAccount is a browser fully signed in as another account, whose
+// session a redeem would end without the person having said so (section 9.5
+// step 2: the page asks first, and says so with "replace").
+var ErrHubOtherAccount = errors.New("this browser is signed in to another account on this server")
+
+// HubReplace is the session the browser that redeems holds, if any: one
+// browser holds one session, so it is revoked when the new one is made. A
+// complete session of another account is revoked only when OtherAccount says
+// the person was asked and chose to continue.
+type HubReplace struct {
+	Token        string
+	OtherAccount bool
+}
+
 // HubGrantEnd is a grant ended, or hub sessions revoked, by a change to one
 // account. HubUser is empty when the account had no grant.
 type HubGrantEnd struct {
@@ -118,6 +132,32 @@ func (s *Service) hubEndedAfterCommit(ctx context.Context, end HubGrantEnd) {
 	s.hubEnded(context.WithoutCancel(ctx), end)
 }
 
+// otherAccountsSessionTx says whether token is a session another account is
+// fully signed in with: complete, and neither expired nor idle, as
+// ResolveSession would find it.
+func (s *Service) otherAccountsSessionTx(ctx context.Context, tx *sql.Tx, token string, userID int64, now time.Time) (bool, error) {
+	var (
+		owner         int64
+		passed        int
+		method        string
+		seen, expires int64
+	)
+	err := tx.QueryRowContext(ctx, `SELECT user_id, twofa_passed, auth_method, last_seen_at, expires_at
+		FROM sessions WHERE token_hash = ?`, HashToken(token)).Scan(&owner, &passed, &method, &seen, &expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	idle := s.idleTTL
+	if method == MethodHub {
+		idle = min(idle, HubSessionIdle)
+	}
+	live := now.Unix() <= expires && now.Sub(time.Unix(seen, 0)) <= idle
+	return owner != userID && passed == 1 && live, nil
+}
+
 // HubSessionStart is the session a redeemed ticket made.
 type HubSessionStart struct {
 	User      *User
@@ -129,9 +169,11 @@ type HubSessionStart struct {
 // StartHubSessionTx is steps 13 and 14 of section 9.7, inside the redeem's
 // write transaction: the account must be one this server would sign in now,
 // and the session is complete from the start, made for the grant's hub user,
-// two hours long at most. replaceToken is the session cookie the browser sent,
-// if any: that session is revoked first, so one browser does not hold two.
-func (s *Service) StartHubSessionTx(ctx context.Context, tx *sql.Tx, userID int64, hubUser, ip, userAgent, replaceToken string) (*HubSessionStart, error) {
+// two hours long at most. replace is the session cookie the browser sent, if
+// any: that session is revoked first, so one browser does not hold two. When
+// it is another account's complete session and the person was not asked
+// (replace.OtherAccount), nothing is made or revoked: ErrHubOtherAccount.
+func (s *Service) StartHubSessionTx(ctx context.Context, tx *sql.Tx, userID int64, hubUser, ip, userAgent string, replace HubReplace) (*HubSessionStart, error) {
 	u, _, _, _, lockedUntil, err := scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = ?`, userID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrHubAccountUnavailable
@@ -150,8 +192,15 @@ func (s *Service) StartHubSessionTx(ctx context.Context, tx *sql.Tx, userID int6
 		!u.TOTPEnabled && s.require2FA:
 		return nil, ErrHubAccountUnavailable
 	}
-	if replaceToken != "" {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, HashToken(replaceToken)); err != nil {
+	if replace.Token != "" {
+		other, err := s.otherAccountsSessionTx(ctx, tx, replace.Token, u.ID, now)
+		if err != nil {
+			return nil, err
+		}
+		if other && !replace.OtherAccount {
+			return nil, ErrHubOtherAccount
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, HashToken(replace.Token)); err != nil {
 			return nil, err
 		}
 	}

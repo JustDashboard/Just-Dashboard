@@ -20,6 +20,11 @@ type RedeemRequest struct {
 	// Cookie is the session cookie this browser sent, if any: that session is
 	// revoked when the new one is made, so one browser holds one session.
 	Cookie string
+	// Replace is the page saying the person was asked whether to end another
+	// account's session in this browser and chose to continue (section 9.5
+	// step 2). Without it, such a session is left alone and the redeem is
+	// refused.
+	Replace bool
 	// Path is the route, for the audit entry.
 	Path string
 }
@@ -39,6 +44,8 @@ var (
 		"this account does not let that Just Hub user sign it in; sign in here, and turn it on in Settings → Hub")
 	errAccountUnavailable = refuse(http.StatusForbidden, codeAccountUnavailable,
 		"this account cannot be signed in through Just Hub now; sign in on this server itself")
+	errOtherAccount = refuse(http.StatusConflict, codeOtherAccount,
+		"this browser is signed in to another account on this server, and nothing said to sign it out; open the server again from Just Hub to choose")
 )
 
 // Redeem is section 9.7: a ticket the hub signed, checked in order and
@@ -140,9 +147,16 @@ func (s *Service) redeem(ctx context.Context, r RedeemRequest, a *signInAudit) (
 		if s.auth == nil {
 			return errors.New("no account service")
 		}
-		start, err = s.auth.StartHubSessionTx(ctx, tx, p.UserID, p.HubUser, r.Client, r.UserAgent, r.Cookie)
-		if errors.Is(err, auth.ErrHubAccountUnavailable) {
+		start, err = s.auth.StartHubSessionTx(ctx, tx, p.UserID, p.HubUser, r.Client, r.UserAgent,
+			auth.HubReplace{Token: r.Cookie, OtherAccount: r.Replace})
+		switch {
+		case errors.Is(err, auth.ErrHubAccountUnavailable):
 			return errAccountUnavailable
+		case errors.Is(err, auth.ErrHubOtherAccount):
+			return errOtherAccount
+		}
+		if err == nil && s.beforeSessionCommit != nil {
+			s.beforeSessionCommit()
 		}
 		return err
 	})
@@ -230,3 +244,8 @@ func (s *Service) recordRedeem(ctx context.Context, a signInAudit, ok bool) {
 // nonce has committed and before the transaction that makes the session. The
 // tests use it to end the link exactly there; nothing else may.
 func SetAfterNonce(s *Service, fn func()) { s.afterNonce = fn }
+
+// SetBeforeSessionCommit runs fn inside the transaction of steps 12 to 14,
+// after the session row is written and before the commit. The tests use it to
+// start an event that ends the link exactly there; nothing else may.
+func SetBeforeSessionCommit(s *Service, fn func()) { s.beforeSessionCommit = fn }

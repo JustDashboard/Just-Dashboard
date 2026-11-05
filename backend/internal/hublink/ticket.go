@@ -60,6 +60,7 @@ const (
 	codeTicketUsed         = "ticket_used"
 	codeNotPermitted       = "not_permitted"
 	codeAccountUnavailable = "account_unavailable"
+	codeOtherAccount       = "other_account_signed_in"
 )
 
 // SignInError is a ticket refused at one step of section 9.7. Its message is
@@ -317,8 +318,10 @@ type DeviceCheck struct {
 
 // checkDevice is step 10: the ticket is used by the device that asked the hub
 // for it. A loopback client (an SSH tunnel to this server) or a tailscaled that
-// cannot be asked skips the check, and the audit entry says so; anything else
-// must be the tailnet login and node the ticket names.
+// cannot be asked (ErrUnavailable: no answer, or an error status) skips the
+// check, and the audit entry says so; anything else must be the tailnet login
+// and node the ticket names. A tailscaled that answered but named no login or
+// node was asked, so its answer is a refusal, never a skip.
 func checkDevice(ctx context.Context, whois tailnetgate.WhoIs, client string, p *TicketPayload) (DeviceCheck, *SignInError) {
 	addr, err := netip.ParseAddr(strings.TrimSpace(client))
 	if err != nil {
@@ -335,8 +338,10 @@ func checkDevice(ctx context.Context, whois tailnetgate.WhoIs, client string, p 
 	switch {
 	case errors.Is(err, tailnetgate.ErrNotAPeer):
 		return DeviceCheck{Result: "refused", Reason: "not on the tailnet"}, errWrongDevice
-	case err != nil:
+	case errors.Is(err, tailnetgate.ErrUnavailable):
 		return DeviceCheck{Result: "skipped", Reason: "tailscaled unavailable"}, nil
+	case err != nil:
+		return DeviceCheck{Result: "refused", Reason: "tailscaled named no login or node"}, errWrongDevice
 	}
 	got := DeviceCheck{Login: strings.ToLower(peer.Login), Node: peer.StableID}
 	if peer.Login == "" || got.Login != p.TSLogin || peer.StableID == "" || peer.StableID != p.TSNode {

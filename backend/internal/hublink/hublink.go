@@ -124,6 +124,10 @@ type Options struct {
 	// check each one again every time it is used. The terminal commands leave
 	// it out.
 	Auth *auth.Service
+	// SessionsEnded is told, once the transaction has committed, that hub
+	// sessions were revoked, so the API can close the sockets they opened at
+	// once rather than at their next check.
+	SessionsEnded func()
 	// HTTP and Now are for tests.
 	HTTP     *http.Client
 	Now      func() time.Time
@@ -146,9 +150,16 @@ type Service struct {
 	audit      *audit.Logger
 	signIn     bool
 	auth       *auth.Service
-	// afterNonce runs between steps 11 and 12 of a redeem, for tests that
-	// change the link there.
-	afterNonce func()
+	// sessionsEnded is Options.SessionsEnded.
+	sessionsEnded func()
+	// afterNonce runs between steps 11 and 12 of a redeem, and
+	// beforeSessionCommit between the session row and the commit, for tests
+	// that change the link there.
+	afterNonce          func()
+	beforeSessionCommit func()
+	// beforeAllowTx runs between Allow's checks and its transaction, for
+	// tests that change the link or the hub's offer there.
+	beforeAllowTx func()
 	// gate remembers which address was last checked to be the hub node's.
 	gate nodeGate
 
@@ -163,7 +174,7 @@ func New(o Options) *Service {
 	s := &Service{
 		st: o.Store, log: o.Log, enabled: o.Enabled, testOrigin: o.TestOrigin,
 		tailnet: o.Tailnet, whois: o.WhoIs, endpoint: o.Endpoint, now: o.Now,
-		signIn: o.SignIn, auth: o.Auth, audit: o.Audit,
+		signIn: o.SignIn, auth: o.Auth, audit: o.Audit, sessionsEnded: o.SessionsEnded,
 		admitted: map[string]error{},
 	}
 	if s.log == nil {

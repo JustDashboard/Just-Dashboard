@@ -133,6 +133,24 @@ func stateInTx(ctx context.Context, tx *sql.Tx) (accountlink.State, bool, error)
 	return st, st.ServerID != "", nil
 }
 
+// viewInTx is readStoredView inside a transaction: the last reply's view for
+// the link st, if there is one.
+func viewInTx(ctx context.Context, tx *sql.Tx, st accountlink.State) (view, bool, error) {
+	var raw string
+	err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, keyView).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return view{}, false, nil
+	}
+	if err != nil {
+		return view{}, false, err
+	}
+	var v view
+	if err := json.Unmarshal([]byte(raw), &v); err != nil || v.ServerID != st.ServerID {
+		return view{}, false, nil
+	}
+	return v, true, nil
+}
+
 // --------------------------------------------------------------- grants --
 
 // AllowRequest is an account letting a hub user sign it in.
@@ -146,10 +164,18 @@ type AllowRequest struct {
 // authenticator. A grant that existed ends here, with its hub sessions, in
 // the transaction that makes the new one, whether or not the hub user is the
 // same, so a session made from the old grant never outlives it.
+//
+// Everything allowable checked before is checked again inside that
+// transaction: a link set idle, or a heartbeat reply that stopped offering the
+// hub user, committed in between would otherwise leave a grant made for a
+// link or a hub user that can no longer have one.
 func (s *Service) Allow(ctx context.Context, r AllowRequest) error {
 	st, err := s.allowable(ctx, r.HubUser)
 	if err != nil {
 		return err
+	}
+	if s.beforeAllowTx != nil {
+		s.beforeAllowTx()
 	}
 	var old auth.HubGrantEnd
 	err = s.writeTx(ctx, func(tx *sql.Tx) error {
@@ -157,8 +183,18 @@ func (s *Service) Allow(ctx context.Context, r AllowRequest) error {
 		if err != nil {
 			return err
 		}
-		if !linked || cur.ServerID != st.ServerID {
+		if !linked || cur.ServerID != st.ServerID || s.idleOrUndecided(cur) {
 			return ErrNotLinked
+		}
+		v, ok, err := viewInTx(ctx, tx, cur)
+		if err != nil {
+			return err
+		}
+		if !ok || v.SignIn == nil {
+			return ErrSignInNotOffered
+		}
+		if !slices.Contains(v.SignIn.Users, r.HubUser) {
+			return ErrHubUserNotOffered
 		}
 		var other int64
 		err = tx.QueryRowContext(ctx, `SELECT user_id FROM hub_signin_grants WHERE hub_user = ? AND user_id <> ?`,
@@ -454,6 +490,15 @@ func endUnofferedTx(ctx context.Context, tx *sql.Tx, offer *signInOffer) ([]auth
 
 // ---------------------------------------------------------------- audit --
 
+// revoked tells the API that n hub sessions were revoked by a transaction
+// that has committed, so the sockets they opened close now (section 9.9: a
+// hub session ends at once).
+func (s *Service) revoked(n int64) {
+	if n > 0 && s.sessionsEnded != nil {
+		s.sessionsEnded()
+	}
+}
+
 func (s *Service) username(ctx context.Context, userID int64) string {
 	var name string
 	if err := s.st.DB.QueryRowContext(ctx, `SELECT username FROM users WHERE id = ?`, userID).Scan(&name); err != nil {
@@ -479,6 +524,7 @@ func (s *Service) recordSignIn(ctx context.Context, e audit.Entry) {
 // ended it: the account itself, an administrator, or "system" for an event
 // nobody asked for (section 9.10).
 func (s *Service) auditGrantEnd(ctx context.Context, end auth.HubGrantEnd, username, actor string) {
+	s.revoked(end.SessionsRevoked)
 	account := s.username(ctx, end.UserID)
 	if username == "" {
 		username = account
@@ -512,6 +558,7 @@ func (s *Service) auditLinkEvent(ctx context.Context, ends []auth.HubGrantEnd, r
 	for _, end := range ends {
 		s.auditGrantEnd(ctx, end, "system", "system")
 	}
+	s.revoked(rest)
 	if rest > 0 {
 		s.recordSignIn(ctx, audit.Entry{
 			Username: "system", Actor: "system", Action: "hub.session.revoke", Success: true,

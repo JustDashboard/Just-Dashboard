@@ -397,7 +397,10 @@ A change that weakens any of these has to say so explicitly.
     key cannot give it. The report is the three fields of `usageping.Report` with no identifier, at most once per
     UTC day, and a redirect is never followed. `JD_USAGE_PING=false` or `JD_ACCOUNT_LINK=false` stops it, and an
     agent has none. See [the usage count](../backend/usage-ping.md).
-17. Connecting to a Just Hub adds no inbound path and no second authority, as invariant 12's link does not. It is
+17. Connecting to a Just Hub adds no inbound path and no second authority, as invariant 12's link does not,
+    except hub sign-in: with `JD_HUB_SIGNIN=true` (off by default) the hub signs single-use tickets that this
+    server redeems at `POST /api/v1/auth/hub/enter` for accounts that opted in, within the limits of
+    [the exception to invariant 2](#the-exception-hub-sign-in). Otherwise it is
     outbound only: every exchange is a request from this server to one machine on its own tailnet, dialled only
     inside `100.64.0.0/10`, over TLS verified for the hub's MagicDNS name, never following a redirect; the hub's
     one call the other way is the discovery probe `GET /api/v1/hub/hello`, behind the allowlist, which names
@@ -433,8 +436,9 @@ install into a chore that could not be skipped.
 
 What did **not** change, and must not:
 
-- An account with `totp_enabled` is asked for a code at every sign-in, whatever `JD_REQUIRE_2FA` says.
-  `Service.Login` decides on the account, not on the policy.
+- An account with `totp_enabled` is asked for a code at every sign-in on this server, whatever
+  `JD_REQUIRE_2FA` says, the one documented exception being a hub sign-in ticket
+  ([below](#the-exception-hub-sign-in)). `Service.Login` decides on the account, not on the policy.
 - A session that owes a second factor is never elevated. `httpx.Authenticator.resolve` refuses it
   everywhere but the 2FA routes, exactly as before.
 - Where `JD_REQUIRE_2FA` is true, an account with no authenticator gets a password-only session that
@@ -460,10 +464,11 @@ What did **not** change, and must not:
   status/logout and the session-only password change are available until `must_change_pw` is
   cleared. API tokens cannot bypass this restriction.
 
-The one deliberate loosening: with the policy off, an account that has never enrolled signs in on a
-password alone. `auth.Service.Login` elevates that session at creation, and `ResolveSession` completes a
-session that was left half-authenticated when the policy changed under it — without that, turning the
-setting off would strand everyone who was mid-flow with a session that can never be elevated.
+Two deliberate loosenings. The first: with the policy off, an account that has never enrolled signs in
+on a password alone. `auth.Service.Login` elevates that session at creation, and `ResolveSession`
+completes a session that was left half-authenticated when the policy changed under it — without that,
+turning the setting off would strand everyone who was mid-flow with a session that can never be
+elevated. The second is hub sign-in, [below](#the-exception-hub-sign-in), within its own limits.
 
 ### The exception: hub sign-in
 
@@ -491,7 +496,9 @@ is allowed only while all six of these hold:
    `JD_REQUIRE_2FA=true` (`auth.Service.StartHubSessionTx`).
 6. **The device that asked uses it.** The ticket names the hub session's tailnet login and the
    `StableNodeID` of the device that asked; WhoIs of the browser's address must name both, unless the
-   browser is on loopback (an SSH tunnel) or tailscaled cannot be asked, which the audit entry records.
+   browser is on loopback (an SSH tunnel) or tailscaled cannot be asked (`tailnetgate.ErrUnavailable`: no
+   answer, or an error status), which the audit entry records. A tailscaled that answered but named no
+   node or no login (`ErrNoIdentity`) was asked, and the device is refused.
 
 The ticket itself is checked in the order of protocol 9.7 (`hublink.checkTicket`, `checkDevice`,
 `Service.redeem`): the shape, a pinned hub key not past its end, the Ed25519 signature over the exact
@@ -504,8 +511,11 @@ most. The grant, the account and the new session are one write transaction.
 **What a hub session cannot do.** It lasts at most two hours (one hour idle), and
 `httpx.RefuseHubSession` refuses it with `403 hub_session_not_allowed` on every route that creates,
 changes, rotates, imports or exports a credential, or creates or changes a link, because what it made
-would outlive the session and the grant. `TestEveryCredentialAndLinkRouteRefusesAHubSession`
-(`api/hub_session_routes_test.go`) walks the router and fails unless exactly these carry it:
+would outlive the session and the grant. Exporting includes a read: a `GET` that shows a stored secret
+is refused as an export is. `TestEveryCredentialAndLinkRouteRefusesAHubSession`
+(`api/hub_session_routes_test.go`) walks the router and fails unless exactly these carry it, and
+`TestTheDocumentedRouteTablesAreHubSessionRefused` reads this table and the protocol's and fails when
+either names a route the router does not refuse, or leaves one out:
 
 | What | Routes, under `/api/v1` |
 | --- | --- |
@@ -513,12 +523,15 @@ would outlive the session and the grant. `TestEveryCredentialAndLinkRouteRefuses
 | Dashboard accounts | `POST /dashboard-users/`, `PATCH /dashboard-users/{id}`, `POST /dashboard-users/{id}/reset-totp`, `DELETE /dashboard-users/{id}` |
 | The caller's own credentials | `POST /account/password`, `POST /account/recovery-codes`, `POST /account/2fa/disable`, `POST /auth/2fa/setup`, `POST /auth/2fa/enable`, `POST /account/passkeys/register/begin`, `POST /account/passkeys/register/finish`, `PATCH /account/passkeys/{id}`, `DELETE /account/passkeys/{id}` |
 | Linux accounts and their keys | `POST /system-users/`, `PATCH /system-users/{name}/`, `PUT /system-users/{name}/sudo`, `POST /system-users/{name}/password`, `POST /system-users/{name}/keys/generate`, `POST /system-users/{name}/keys`, `PATCH /system-users/{name}/keys`, `POST /system-users/{name}/keys/import`, `POST /system-users/{name}/keys/copy`, `POST /system-accounts/bulk`, `PATCH /system-accounts/groups/{group}` |
-| Database users and roles | `POST /databases/{id}/server/roles`, `PUT /databases/{id}/server/roles/{name}`, `POST /databases/{id}/server/roles/{name}/grant`, `POST /databases/{id}/server/roles/{name}/privileges`, `POST /databases/{id}/mongo/users`, `PUT /databases/{id}/mongo/users`, `POST /databases/{id}/mongo/users/grant`, `PUT /databases/{id}/redis/acl/{name}`, `POST /databases/host/grant` |
-| Proxy basic-auth users | `POST /proxy/auth-files/` |
-| Deployment secrets and saved credentials | `POST /deploy/{id}/environments/{env}/triggers`, `PUT /deploy/{id}/environments/{env}/triggers/{trigger}`, `POST /deploy/{id}/environments/{env}/triggers/{trigger}/rotate-secret`, `POST /deploy/{id}/rotate-secret`, `POST /deploy/credentials`, `PUT /deploy/credentials/{id}`, `POST /deploy/secret-stores`, `PUT /deploy/secret-stores/{store}`, `POST /deploy/notifications`, `PUT /deploy/notifications/{channel}`, `POST /deploy/log-drains`, `PUT /deploy/log-drains/{drain}` |
+| Database users and roles | `POST /databases/{id}/server/roles`, `PUT /databases/{id}/server/roles/{name}`, `POST /databases/{id}/server/roles/{name}/grant`, `POST /databases/{id}/server/roles/{name}/privileges`, `POST /databases/{id}/mongo/users`, `PUT /databases/{id}/mongo/users`, `POST /databases/{id}/mongo/users/grant`, `PUT /databases/{id}/redis/acl/{name}`, `PUT /databases/{id}/redis/config`, `POST /databases/host/grant` |
+| Database passwords and data copies | `GET /databases/{id}/url`, `POST /deploy/{id}/environments/{env}/releases/{release}/data-copies`, `GET /deploy/{id}/environments/{env}/data-copies/{copy}/url` |
+| Proxy basic-auth users | `POST /proxy/auth-files/`, `POST /proxy/import/npm`, `POST /proxy/import/npm/apply` |
+| Deployment secrets and saved credentials | `POST /deploy/`, `POST /deploy/{id}/environments/{env}/triggers`, `PUT /deploy/{id}/environments/{env}/triggers/{trigger}`, `POST /deploy/{id}/environments/{env}/triggers/{trigger}/rotate-secret`, `POST /deploy/{id}/rotate-secret`, `POST /deploy/credentials`, `PUT /deploy/credentials/{id}`, `POST /deploy/secret-stores`, `PUT /deploy/secret-stores/{store}`, `POST /deploy/notifications`, `PUT /deploy/notifications/{channel}`, `POST /deploy/log-drains`, `PUT /deploy/log-drains/{drain}` |
+| Deployment secret variables | `GET /deploy/{id}/env/reveal`, `GET /deploy/{id}/environments/{env}/variables/{name}/reveal`, `POST /deploy/{id}/environments/{env}/variables/{name}/generate`, `POST /deploy/{id}/environments/{env}/variables/{name}/rotate`, `GET /deploy/shared-variables/{name}/reveal`, `GET /deploy/{id}/shared-variables/{name}/reveal` |
 | Git and GitHub | `POST /git/github/auth/device`, `POST /git/github/auth/device/{id}`, `POST /git/github/auth/token`, `POST /git/github/auth/configure`, `POST /deploy/github-app/manifest`, `POST /deploy/github-app/callback`, `POST /git/forge/account` |
 | DNS credentials, tunnels and TLS keys | `POST /certificates/dns-credentials`, `POST /certificates/import`, `POST /certificates/export`, `POST /network/dns/services/`, `PUT /network/dns/services/{id}`, `PUT /proxy/tunnel/`, `POST /proxy/tunnel/create` |
-| Network peers and check machines | `POST /network/vpn/wireguard/{iface}/peers`, `PATCH /network/vpn/wireguard/{iface}/peers/{id}`, `POST /network/vpn/archive/{file}/restore`, `POST /network/external/enrollments` |
+| Network peers and check machines | `POST /network/vpn/wireguard/{iface}/peers`, `PATCH /network/vpn/wireguard/{iface}/peers/{id}`, `GET /network/vpn/wireguard/{iface}/peers/{id}/config`, `POST /network/vpn/archive/{file}/restore`, `POST /network/external/enrollments` |
+| Remote Desktop | `POST /remote-desktop/computers`, `PUT /remote-desktop/computers/{id}`, `POST /remote-desktop/computers/{id}/stream/pair` |
 | Backups | `POST /backups/key/import`, `POST /backups/key/export`, `POST /backups/`, `PUT /backups/{id}`, `POST /backups/import` |
 | The assistant's provider keys | `PUT /assistant/providers/{preset}` |
 | The account link | `POST /dashboard/link/`, `DELETE /dashboard/link/request`, `PUT /dashboard/link/scope` |
@@ -537,9 +550,19 @@ routes), `PUT /proxy/tunnel/` and `POST /proxy/tunnel/create` (Cloudflare tunnel
 service routes (a DNS server's saved API credential), the backup job routes (a destination holds
 credentials of its own) and `PUT /assistant/providers/{preset}` (a provider's API key). The two `DELETE`
 rows the table lists are refused as well, although the rule leaves deletions open, because the table names
-them. `TestEveryRefusedRouteAnswersAHubSessionWith403` sends a hub session to each of them. A route added
-later that the rule covers joins the list, the test, the protocol's table and this table in the same
-change.
+them. A second walk, of every route that shows a stored secret and of every write route again (errata
+HL-3, second walk), found seventeen more: `GET /network/vpn/wireguard/{iface}/peers/{id}/config` (a peer's
+private key: the key that adding the peer is refused for), `GET /databases/{id}/url` (the connection
+string, with its password), `PUT /databases/{id}/redis/config` (`CONFIG SET` reaches `requirepass`,
+`masterauth` and the ACL file, which the refused ACL route exists to keep), the production data copy's
+two routes (making one makes a database login with a new password; its address is that password), the
+six routes that reveal, generate or rotate a deployment's secret variable, `POST /deploy/` (a new
+project's webhook secret, which starts its commands from anywhere), NPM's import and its preview (an NPM
+database's access-list users and passwords, written as basic-auth password files), and Remote Desktop's
+computer routes and stream pairing (a remote machine's saved sign-in, and a client certificate that
+machine trusts). `TestEveryRefusedRouteAnswersAHubSessionWith403` sends a hub session to each of them. A
+route added later that the rule covers joins the list, the test, the protocol's table and this table in
+the same change.
 
 What stays open to a hub session, because it only takes power away: disconnecting either link,
 `POST /dashboard/hub/sync`, removing a sign-in grant, revoking sessions, deleting a key, user, credential
@@ -571,12 +594,28 @@ again: both switches on, the link stored and not idle, and a grant for this acco
 hub user is the session's and that is not newer than the session. A revocation that was missed cannot
 keep one working; without the check installed, no hub session resolves at all.
 
+A socket is authenticated once, at the upgrade, and nothing in the request path looks at it again, so
+the sockets a hub session opens are tied to it: every socket `wsx.Upgrader` opens goes through the API's
+`wsx.Guard` (`api/hub_session_sockets.go`), as do the Remote Desktop stream bridge's proxied sockets
+(`guardHubStream`). One a hub session opened (a terminal, a container's shell, a log or event tail, a
+Remote Desktop session or stream) closes at the session's expiry, at once when a revocation of hub
+sessions commits (hublink's `SessionsEnded`, after each event above), and otherwise at its next check,
+every 15 seconds, through `auth.Service.CheckSession`, which runs every check `ResolveSession` does
+without counting as use. `TestAHubSessionsSocketsEndWithIt` holds every event above to it.
+
 **What it costs, plainly.** With hub sign-in on, whoever takes over the hub can open a session as every
-account that opted in, from a device on the tailnet. For an administrator that is the terminal, and
-root can change anything from there; the route list above stops the dashboard's own forms from minting
-lasting credentials, it does not contain a shell. Ending hub sign-in ends the hub's sessions; it does not
-undo what was done in them. Without it, a taken-over hub is limited to its scope's commands. That is why
-it is off by default and needs the operator, the hub's owner and each account holder.
+account that opted in, from a device on the tailnet, and do what that account can. The route list above
+stops the dashboard's own forms from minting, changing or revealing lasting credentials; it does not
+contain the general tools. The Files page reads every file under `JD_FILE_ROOTS` (`/` by default) as
+root, for every role, so any hub session can read every credential on disk (`/etc/shadow`, SSH private
+keys, WireGuard configurations, a project's `.env`, this dashboard's own `.env` with `JD_MASTER_KEY` and
+its database). With `file.write` (the `admin` and `limited` roles) it writes any file as root
+(`files.WriteChecked` has no deny-list), so it can plant an SSH key in `authorized_keys` or a sudoers
+rule; and an administrator's session has the terminal. For those roles a hub session is as good as root,
+and for every role it reads what root reads. Ending hub sign-in ends the hub's sessions; it does not undo
+what was done in them. Without it, a taken-over hub is limited to its scope's commands. That is why it is
+off by default and needs the operator, the hub's owner and each account holder, and why the opt-in
+screen says so.
 
 ## Invariant 3: which routes take a typed phrase
 

@@ -303,6 +303,26 @@ func (a *Authenticator) Recheck(r *http.Request, p *Principal) (*Principal, erro
 	return &current, nil
 }
 
+// SessionStands says whether the session a long-lived connection was opened
+// with still stands, and until when at the latest: everything ResolveSession
+// checks is checked again, a hub session's grant, link and switches included,
+// without counting the check as use of the session (auth.CheckSession).
+// Anything other than a session has nothing to check and stands.
+func (a *Authenticator) SessionStands(r *http.Request, p *Principal) (time.Time, error) {
+	if p == nil || p.Kind != "session" || p.SessionID == "" {
+		return time.Time{}, nil
+	}
+	found := a.sessionToken(r)
+	if found.token == "" {
+		return time.Time{}, ErrUnauthorized
+	}
+	sess, _, err := a.Svc.CheckSession(r.Context(), found.token)
+	if err != nil || sess.ID != p.SessionID || !sess.TwoFAPassed {
+		return time.Time{}, ErrUnauthorized
+	}
+	return sess.ExpiresAt, nil
+}
+
 // AuthenticateMCP admits an MCP key and nothing else. A session cookie is
 // not read, so no page in a browser can reach the endpoint and it needs no
 // CSRF header, and a key for the rest of the API is refused: an AI client

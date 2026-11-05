@@ -35,8 +35,8 @@ strategy, and feature ownership behind those rules.
 - [`backend/hub-link.md`](backend/hub-link.md) — how the dashboard implements it: the account link's engine run
   as a second instance with the hub's profile and sharing none of its state, the tailnet rule and the tailnet-only
   dialer, the hub's pinned machine and the idle link, the test origin, the cached fleet and notices, the discovery
-  probe, `/dashboard/hub` and its `check`, the session's `hub` field, `manage.sh hub`, and what hub sign-in still
-  needs.
+  probe, `/dashboard/hub` and its `check`, the session's `hub` field, `manage.sh hub`, and hub sign-in: grants, the
+  redeem, hub sessions, the routes they are refused and the sockets that end with them.
 - [`backend/usage-ping.md`](backend/usage-ping.md) — the optional daily count of servers: the three fields it
   sends, why there is no ID, how it decides to send, its switches, routes and surfaces, and the site's side.
 - [`backend/network.md`](backend/network.md) — the network module: the spec restored at boot, the

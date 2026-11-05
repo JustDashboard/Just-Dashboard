@@ -42,6 +42,8 @@ func (s *Server) initHubLink() {
 		Host: newAccountHost(s), Version: version.Version,
 		Endpoint: s.hubLinkEndpoint,
 		SignIn:   s.Cfg.HubSignIn, Auth: s.Auth,
+		// The sockets of the hub sessions a revocation ended close at once.
+		SessionsEnded: s.hubSockets.kick,
 	})
 	// A change to an account that ends its hub sign-in grant is made inside
 	// auth's own transaction; the audit entry is written here once it has

@@ -59,6 +59,20 @@ func (s *Service) newSession(ctx context.Context, userID int64, ip, ua string, t
 // the caller decides whether a half-authenticated session is acceptable for
 // the route being served.
 func (s *Service) ResolveSession(ctx context.Context, token string) (*Session, *User, error) {
+	return s.resolveSession(ctx, token, true)
+}
+
+// CheckSession is ResolveSession for a connection that outlasts the request
+// that opened it: every check runs again (expiry, idleness, a hub session's
+// grant, link and switches, a disabled account) and a session that fails one
+// is deleted, but the idle window does not slide and nothing is completed. A
+// socket left open is not use of the session, so watching one never keeps the
+// session alive.
+func (s *Service) CheckSession(ctx context.Context, token string) (*Session, *User, error) {
+	return s.resolveSession(ctx, token, false)
+}
+
+func (s *Service) resolveSession(ctx context.Context, token string, use bool) (*Session, *User, error) {
 	if token == "" {
 		return nil, nil, ErrSessionInvalid
 	}
@@ -115,6 +129,9 @@ func (s *Service) ResolveSession(ctx context.Context, token string) (*Session, *
 	// when it changed: their session is valid, it can never be elevated
 	// (there is no authenticator to prove), and every route but the enrolment
 	// ones refuses it until the cookie expires.
+	if !use {
+		return &sess, u, nil
+	}
 	if !sess.TwoFAPassed && !s.require2FA && !u.TOTPEnabled {
 		if err := s.elevate(ctx, sess.ID, u.ID); err == nil {
 			sess.TwoFAPassed = true

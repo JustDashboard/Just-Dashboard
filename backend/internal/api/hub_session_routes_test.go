@@ -2,8 +2,11 @@ package api
 
 import (
 	"net/http"
+	"os"
 	"reflect"
+	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -119,6 +122,27 @@ var hubSessionRefused = []string{
 	"PUT /api/v1/backups/{id}",
 	"POST /api/v1/backups/import",
 	"PUT /api/v1/assistant/providers/{preset}", // an AI provider's saved API key
+
+	// Found by the review of the walk (errata HL-3, second walk): routes that
+	// export a stored secret, read ones included, and writes the first walk
+	// missed.
+	"GET /api/v1/network/vpn/wireguard/{iface}/peers/{id}/config",                // a peer's private key
+	"GET /api/v1/databases/{id}/url",                                             // the connection string, password included
+	"PUT /api/v1/databases/{id}/redis/config",                                    // requirepass, masterauth and the ACL file
+	"POST /api/v1/deploy/{id}/environments/{env}/releases/{release}/data-copies", // a database login with a new password
+	"GET /api/v1/deploy/{id}/environments/{env}/data-copies/{copy}/url",          // that login's password
+	"GET /api/v1/deploy/{id}/env/reveal",                                         // a project's secret values
+	"GET /api/v1/deploy/{id}/environments/{env}/variables/{name}/reveal",         // a variable's secret value
+	"POST /api/v1/deploy/{id}/environments/{env}/variables/{name}/generate",      // a new secret, shown
+	"POST /api/v1/deploy/{id}/environments/{env}/variables/{name}/rotate",        // a rotated secret, shown
+	"GET /api/v1/deploy/shared-variables/{name}/reveal",                          // a shared secret value
+	"GET /api/v1/deploy/{id}/shared-variables/{name}/reveal",                     // a project's shared secret value
+	"POST /api/v1/deploy/",                                   // a project's webhook secret
+	"POST /api/v1/proxy/import/npm",                          // basic-auth users and their passwords
+	"POST /api/v1/proxy/import/npm/apply",                    // writes them as password files
+	"POST /api/v1/remote-desktop/computers",                  // a computer's saved sign-in
+	"PUT /api/v1/remote-desktop/computers/{id}",              // changes it, or where it is sent
+	"POST /api/v1/remote-desktop/computers/{id}/stream/pair", // a client certificate the computer trusts
 }
 
 // hubSessionCarriers is every route of the router that carries
@@ -141,8 +165,9 @@ func hubSessionCarriers(t *testing.T, h http.Handler) map[string]bool {
 	return out
 }
 
-// Every route of section 9.9 refuses a hub session, and nothing else does, so
-// the list in invariants.md is exactly what the router enforces.
+// Every route of section 9.9 refuses a hub session, and nothing else does:
+// hubSessionRefused is exactly what the router enforces, and
+// TestTheDocumentedRouteTablesAreHubSessionRefused holds the documents to it.
 func TestEveryCredentialAndLinkRouteRefusesAHubSession(t *testing.T) {
 	s := testServer(t)
 	got := hubSessionCarriers(t, s.Routes())
@@ -158,7 +183,69 @@ func TestEveryCredentialAndLinkRouteRefusesAHubSession(t *testing.T) {
 	}
 	sort.Strings(extra)
 	if len(extra) > 0 {
-		t.Errorf("routes refuse a hub session but are not in hubSessionRefused (or invariants.md): %s",
-			strings.Join(extra, ", "))
+		t.Errorf("routes refuse a hub session but are not in hubSessionRefused: %s", strings.Join(extra, ", "))
+	}
+}
+
+// documentedRoute is a route as the documents' tables write it, in backticks
+// and without the /api/v1 prefix.
+var documentedRoute = regexp.MustCompile("`(GET|POST|PUT|PATCH|DELETE) (/[^`]*)`")
+
+// routeTable reads the table that starts with the header line in the document
+// at path, and returns every route its rows name, with the /api/v1 prefix.
+func routeTable(t *testing.T, path, header string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	start := slices.Index(lines, header)
+	if start < 0 {
+		t.Fatalf("%s has no table headed %q", path, header)
+	}
+	var out []string
+	for _, line := range lines[start+1:] {
+		if !strings.HasPrefix(line, "|") {
+			break
+		}
+		for _, m := range documentedRoute.FindAllStringSubmatch(line, -1) {
+			out = append(out, m[1]+" /api/v1"+m[2])
+		}
+	}
+	if len(out) == 0 {
+		t.Fatalf("the table headed %q in %s names no route", header, path)
+	}
+	return out
+}
+
+// The route table in invariants.md and the one in protocol section 9.9 are
+// what the router enforces, route for route: neither can drift from
+// hubSessionRefused without this failing.
+func TestTheDocumentedRouteTablesAreHubSessionRefused(t *testing.T) {
+	want := slices.Clone(hubSessionRefused)
+	slices.Sort(want)
+	for _, doc := range []struct{ path, header string }{
+		{"../../../docs/internal/security/invariants.md", "| What | Routes, under `/api/v1` |"},
+		{"../../../docs/internal/backend/hub-link-protocol.md", "| What | Routes (JD 0.8.5) |"},
+	} {
+		got := routeTable(t, doc.path, doc.header)
+		slices.Sort(got)
+		for i := 1; i < len(got); i++ {
+			if got[i] == got[i-1] {
+				t.Errorf("%s lists %s twice", doc.path, got[i])
+			}
+		}
+		got = slices.Compact(got)
+		for _, rt := range want {
+			if _, found := slices.BinarySearch(got, rt); !found {
+				t.Errorf("%s does not list %s, which refuses a hub session", doc.path, rt)
+			}
+		}
+		for _, rt := range got {
+			if _, found := slices.BinarySearch(want, rt); !found {
+				t.Errorf("%s lists %s, which does not refuse a hub session", doc.path, rt)
+			}
+		}
 	}
 }

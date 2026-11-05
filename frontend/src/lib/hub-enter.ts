@@ -92,9 +92,9 @@ export const HUB_ENTER_SCRIPT = `(function () {
       return typeof payload.userId === "number" ? payload.userId : 0;
     } catch (e) { return 0; }
   }
-  function redeem() {
+  function redeem(replace) {
     show("working");
-    var body = JSON.stringify({ ticket: ticket });
+    var body = JSON.stringify(replace ? { ticket: ticket, replace: true } : { ticket: ticket });
     ticket = "";
     fetch("/api/v1/auth/hub/enter", {
       method: "POST",
@@ -120,29 +120,54 @@ export const HUB_ENTER_SCRIPT = `(function () {
       fail("This server could not be reached. Open it again from Just Hub.");
     });
   }
+  function ask(username) {
+    el("ask-known").hidden = !username;
+    el("ask-unknown").hidden = !!username;
+    if (username) {
+      el("as").textContent = username;
+      el("as-again").textContent = username;
+    }
+    show("ask");
+    el("continue").focus();
+  }
+  // Who this browser is signed in as decides whether to ask. 401 is nobody, and 200 names the
+  // account; anything else, or no answer, could be anyone, so the question is asked without a
+  // name rather than a session ended unasked. A session still owing its second factor is not
+  // signed in; one owing a new password is.
+  function signedInAs(session) {
+    var user = session && session.user;
+    if (!user || typeof user.id !== "number" || session.needsTotp || session.needsEnrollment) return null;
+    return session.authenticated || session.needsPasswordChange ? user : null;
+  }
   function start() {
     if (!ticket) {
       fail("This address carries no sign-in link. Open the server again from Just Hub.");
       return;
     }
-    el("continue").addEventListener("click", redeem);
+    el("continue").addEventListener("click", function () { redeem(true); });
     el("stay").addEventListener("click", function () {
       ticket = "";
       location.replace("/dashboard");
     });
     fetch("/api/v1/auth/session", { credentials: "same-origin", cache: "no-store" })
-      .then(function (response) { return response.ok ? response.json() : null; })
-      .then(function (session) {
-        var user = session && session.authenticated && session.user;
-        if (user && user.id !== userId(ticket)) {
-          el("as").textContent = user.username;
-          el("as-again").textContent = user.username;
-          show("ask");
-          el("continue").focus();
+      .then(function (response) {
+        if (response.status === 401) return { nobody: true };
+        if (response.status !== 200) return null;
+        return response.json().then(function (session) { return { session: session }; },
+          function () { return null; });
+      })
+      .then(function (read) {
+        if (!read) {
+          ask("");
           return;
         }
-        redeem();
-      }, redeem);
+        var user = read.nobody ? null : signedInAs(read.session);
+        if (user && user.id !== userId(ticket)) {
+          ask(typeof user.username === "string" && user.username ? user.username : "another account");
+          return;
+        }
+        redeem(false);
+      }, function () { ask(""); });
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start);
@@ -214,7 +239,8 @@ export function hubEnterDocument(nonce: string): string {
 </section>
 <section id="ask" hidden>
 <div><p class="eyebrow">Just Hub</p><h1>Continue through Just Hub?</h1></div>
-<p>You are signed in as <strong id="as"></strong>. Continuing signs <strong id="as-again"></strong> out in this browser and signs you in as the account Just Hub names.</p>
+<p id="ask-known">You are signed in as <strong id="as"></strong>. Continuing signs <strong id="as-again"></strong> out in this browser and signs you in as the account Just Hub names.</p>
+<p id="ask-unknown" hidden>This server could not say who is signed in in this browser. Continuing signs out whoever is, and signs you in as the account Just Hub names.</p>
 <div class="actions"><button id="continue" class="primary" type="button">Continue</button><button id="stay" type="button">Stay</button></div>
 </section>
 <section id="failed" hidden role="alert">

@@ -115,6 +115,7 @@ func newSignInEnv(t *testing.T) *signInEnv {
 	s.modules.hubLink = hublink.New(hublink.Options{
 		Store: s.Store, Sealer: s.Sealer, Audit: s.Audit, Enabled: true, TestOrigin: origin, SignIn: true,
 		Auth: s.Auth, Host: newAccountHost(s), Version: "test", Tailnet: stubTailnet{}, WhoIs: signInWhoIs{},
+		SessionsEnded: s.hubSockets.kick,
 	})
 	admin, adminID, secret := hubAccount(t, s, "ion", auth.RoleAdmin, true)
 	e := &signInEnv{t: t, s: s, h: s.Routes(), hub: hub, admin: admin, adminID: adminID}
@@ -175,7 +176,13 @@ func (e *signInEnv) ticket(key ed25519.PrivateKey, change func(ticketFields)) st
 // redeem posts a ticket from a browser at addr, with cookie if it holds one.
 func (e *signInEnv) redeem(ticket, addr, cookie string) *httptest.ResponseRecorder {
 	e.t.Helper()
-	body, _ := json.Marshal(map[string]string{"ticket": ticket})
+	return e.redeemBody(map[string]any{"ticket": ticket}, addr, cookie)
+}
+
+// redeemBody posts body as the redeem's, from a browser at addr.
+func (e *signInEnv) redeemBody(fields map[string]any, addr, cookie string) *httptest.ResponseRecorder {
+	e.t.Helper()
+	body, _ := json.Marshal(fields)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/hub/enter", strings.NewReader(string(body)))
 	// Each redeem comes from its own address, so the sign-in budget per
 	// address, which the redeem shares with the password form, is not what a
@@ -434,6 +441,40 @@ func TestADisconnectBetweenTheNonceAndTheSessionLeavesNoSession(t *testing.T) {
 	}
 }
 
+// A disconnect that starts after the session row is written, while the
+// transaction of steps 12 to 14 is still open, waits for it to commit and
+// then revokes what it made: no live hub session is left either way (section
+// 9.7, "Transactions").
+func TestADisconnectBetweenTheSessionAndTheCommitLeavesNoSession(t *testing.T) {
+	e := newSignInEnv(t)
+	done := make(chan error, 1)
+	hublink.SetBeforeSessionCommit(e.s.modules.hubLink, func() {
+		go func() {
+			_, err := e.s.modules.hubLink.Disconnect(context.Background())
+			done <- err
+		}()
+		// Long enough for the disconnect to reach its own write transaction
+		// and wait there; it cannot commit before this one does.
+		time.Sleep(200 * time.Millisecond)
+	})
+	w := e.redeem(e.ticket(e.hub.PrivateKey(), nil), "", "")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := e.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM sessions WHERE auth_method = 'hub'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("hub sessions = %d, %v", n, err)
+	}
+	// The redeem committed first, so it answered with a session; that
+	// session is the one the disconnect revoked.
+	if w.Code != 200 {
+		t.Fatalf("redeem = %d %s", w.Code, w.Body)
+	}
+	if hub := (&client{t: t, h: e.h, cookie: sessionCookieOf(t, w)}); alive(hub) {
+		t.Fatal("the session the redeem made still works after the disconnect")
+	}
+}
+
 // The link going idle between the nonce and the session leaves no session
 // either: the session's transaction reads the idle flag (sections 2.4, 9.7).
 func TestTheLinkGoingIdleBetweenTheNonceAndTheSessionLeavesNoSession(t *testing.T) {
@@ -454,23 +495,28 @@ func TestTheLinkGoingIdleBetweenTheNonceAndTheSessionLeavesNoSession(t *testing.
 	}
 }
 
-// Every event of section 9.3 that ends a grant, or the link, ends the hub
-// sessions it allowed: a session made before it is refused after it.
-func TestEveryEndOfAGrantEndsItsHubSessions(t *testing.T) {
-	events := []struct {
-		name string
-		fire func(e *signInEnv)
-	}{
-		{"the account removes its grant", func(e *signInEnv) {
+// grantEnd is one event of section 9.3 that ends a grant or the link.
+// unannounced is an event no revocation of this process follows, which a hub
+// session's open socket learns of at its next check rather than at once.
+type grantEnd struct {
+	name        string
+	fire        func(e *signInEnv)
+	unannounced bool
+}
+
+// grantEnds is every event of section 9.3 that ends a grant, or the link.
+func grantEnds() []grantEnd {
+	return []grantEnd{
+		{name: "the account removes its grant", fire: func(e *signInEnv) {
 			e.admin.do(http.MethodDelete, "/api/v1/account/hub-signin", "", nil)
 		}},
-		{"an administrator removes it", func(e *signInEnv) {
+		{name: "an administrator removes it", fire: func(e *signInEnv) {
 			other, _, _ := hubAccount(e.t, e.s, "second-admin", auth.RoleAdmin, false)
 			if w := other.do(http.MethodDelete, fmt.Sprintf("/api/v1/dashboard/hub/signin/%d", e.adminID), "", nil); w.Code != 204 {
 				e.t.Fatalf("remove = %d %s", w.Code, w.Body)
 			}
 		}},
-		{"the account replaces it with the same hub user", func(e *signInEnv) {
+		{name: "the account replaces it with the same hub user", fire: func(e *signInEnv) {
 			var secret string
 			e.s.Store.DB.QueryRow(`SELECT totp_secret FROM users WHERE id = ?`, e.adminID).Scan(&secret)
 			plain, err := e.s.Sealer.Open(secret)
@@ -482,49 +528,49 @@ func TestEveryEndOfAGrantEndsItsHubSessions(t *testing.T) {
 			e.s.Store.DB.Exec(`UPDATE users SET totp_last_step = 0 WHERE id = ?`, e.adminID)
 			e.allow(e.admin, "owner", hubPassword, nextCode(e.t, plain, 1), http.StatusNoContent)
 		}},
-		{"the link is disconnected", func(e *signInEnv) {
+		{name: "the link is disconnected", fire: func(e *signInEnv) {
 			e.admin.do(http.MethodDelete, "/api/v1/dashboard/hub", "", nil)
 		}},
-		{"the account is disabled", func(e *signInEnv) {
+		{name: "the account is disabled", fire: func(e *signInEnv) {
 			other, _, _ := hubAccount(e.t, e.s, "second-admin", auth.RoleAdmin, false)
 			other.do(http.MethodPatch, fmt.Sprintf("/api/v1/dashboard-users/%d", e.adminID), `{"disabled":true}`, nil)
 		}},
-		{"the account is deleted", func(e *signInEnv) {
+		{name: "the account is deleted", fire: func(e *signInEnv) {
 			hubAccount(e.t, e.s, "second-admin", auth.RoleAdmin, false)
 			if err := e.s.Auth.DeleteUser(e.t.Context(), e.adminID); err != nil {
 				e.t.Fatal(err)
 			}
 		}},
-		{"its password changes", func(e *signInEnv) {
+		{name: "its password changes", fire: func(e *signInEnv) {
 			e.admin.do(http.MethodPost, "/api/v1/account/password",
 				`{"currentPassword":"`+hubPassword+`","newPassword":"Another-Horse-Battery-10"}`, nil)
 		}},
-		{"its password is reset", func(e *signInEnv) {
+		{name: "its password is reset", fire: func(e *signInEnv) {
 			if err := e.s.Auth.ResetPassword(e.t.Context(), e.adminID, "Another-Horse-Battery-10"); err != nil {
 				e.t.Fatal(err)
 			}
 		}},
-		{"its authenticator is reset by an administrator", func(e *signInEnv) {
+		{name: "its authenticator is reset by an administrator", fire: func(e *signInEnv) {
 			other, _, _ := hubAccount(e.t, e.s, "second-admin", auth.RoleAdmin, false)
 			other.do(http.MethodPost, fmt.Sprintf("/api/v1/dashboard-users/%d/reset-totp", e.adminID), "", nil)
 		}},
-		{"its authenticator is turned off", func(e *signInEnv) {
+		{name: "its authenticator is turned off", fire: func(e *signInEnv) {
 			e.admin.do(http.MethodPost, "/api/v1/account/2fa/disable", `{"password":"`+hubPassword+`"}`, nil)
 		}},
-		{"its sessions are all revoked", func(e *signInEnv) {
+		{name: "its sessions are all revoked", fire: func(e *signInEnv) {
 			if err := e.s.Auth.RevokeAllSessions(e.t.Context(), e.adminID); err != nil {
 				e.t.Fatal(err)
 			}
 		}},
-		{"the hub stops offering its hub user", func(e *signInEnv) {
+		{name: "the hub stops offering its hub user", fire: func(e *signInEnv) {
 			e.hub.OfferSignIn("someone-else")
 			e.sync()
 		}},
-		{"the hub stops offering sign-in", func(e *signInEnv) {
+		{name: "the hub stops offering sign-in", fire: func(e *signInEnv) {
 			e.hub.OfferSignIn()
 			e.sync()
 		}},
-		{"hub sign-in is found off at start", func(e *signInEnv) {
+		{name: "hub sign-in is found off at start", unannounced: true, fire: func(e *signInEnv) {
 			off := hublink.New(hublink.Options{
 				Store: e.s.Store, Sealer: e.s.Sealer, Audit: e.s.Audit, Enabled: true, SignIn: false, Auth: e.s.Auth,
 				Version: "test", Tailnet: stubTailnet{}, WhoIs: signInWhoIs{},
@@ -541,7 +587,7 @@ func TestEveryEndOfAGrantEndsItsHubSessions(t *testing.T) {
 		}},
 		// No revocation at all: the row is simply gone. The session is still
 		// refused on its next use (section 9.3).
-		{"the grant row disappears without a revocation", func(e *signInEnv) {
+		{name: "the grant row disappears without a revocation", unannounced: true, fire: func(e *signInEnv) {
 			if _, err := e.s.Store.DB.Exec(`DELETE FROM hub_signin_grants`); err != nil {
 				e.t.Fatal(err)
 			}
@@ -549,7 +595,7 @@ func TestEveryEndOfAGrantEndsItsHubSessions(t *testing.T) {
 		// Nor here: the idle flag is written into the stored link with no
 		// session revoked beside it, as a restart finds a link that went idle
 		// before (sections 2.4 and 9.3).
-		{"the link is idle in the store without a revocation", func(e *signInEnv) {
+		{name: "the link is idle in the store without a revocation", unannounced: true, fire: func(e *signInEnv) {
 			if _, err := e.s.Store.DB.Exec(`UPDATE settings SET value = json_set(value, '$.idle',
 				json_object('code', 'hub_url_refused', 'reason', 'the hub''s machine changed', 'at', '2026-11-05T00:00:00Z'))
 				WHERE key = 'hub.link.state'`); err != nil {
@@ -557,7 +603,12 @@ func TestEveryEndOfAGrantEndsItsHubSessions(t *testing.T) {
 			}
 		}},
 	}
-	for _, ev := range events {
+}
+
+// Every event of section 9.3 that ends a grant, or the link, ends the hub
+// sessions it allowed: a session made before it is refused after it.
+func TestEveryEndOfAGrantEndsItsHubSessions(t *testing.T) {
+	for _, ev := range grantEnds() {
 		t.Run(ev.name, func(t *testing.T) {
 			e := newSignInEnv(t)
 			hubSession := e.enter()
@@ -738,15 +789,46 @@ func TestAHubSessionEndsAfterTwoHours(t *testing.T) {
 }
 
 // Redeeming in a browser that holds another session replaces it: one browser,
-// one session.
+// one session. Another account's complete session is ended only when the page
+// asked and the person chose to continue ("replace", section 9.5 step 2);
+// without that the redeem is refused and both stay as they were.
 func TestRedeemingReplacesTheBrowsersSession(t *testing.T) {
 	e := newSignInEnv(t)
 	other, _, _ := hubAccount(t, e.s, "someone", auth.RoleReadOnly, false)
 	w := e.redeem(e.ticket(e.hub.PrivateKey(), nil), "", other.cookie)
+	if w.Code != http.StatusConflict || codeOf(t, w) != "other_account_signed_in" {
+		t.Fatalf("redeem over another account's session, not asked = %d %s", w.Code, w.Body)
+	}
+	if !alive(other) {
+		t.Fatal("a refused redeem ended the browser's session")
+	}
+	var n int
+	e.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM sessions WHERE auth_method = 'hub'`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("a refused redeem left %d hub sessions", n)
+	}
+
+	w = e.redeemBody(map[string]any{"ticket": e.ticket(e.hub.PrivateKey(), nil), "replace": true}, "", other.cookie)
 	if w.Code != 200 {
-		t.Fatalf("redeem = %d %s", w.Code, w.Body)
+		t.Fatalf("redeem after Continue = %d %s", w.Code, w.Body)
 	}
 	if alive(other) {
 		t.Fatal("the browser's earlier session survived")
+	}
+
+	// The same account's own session, and a session still owing its second
+	// factor, are replaced without a question.
+	same := &client{t: t, h: e.h, cookie: sessionCookieOf(t, w)}
+	w = e.redeem(e.ticket(e.hub.PrivateKey(), nil), "", same.cookie)
+	if w.Code != 200 || alive(same) {
+		t.Fatalf("redeem over the same account's session = %d %s", w.Code, w.Body)
+	}
+	partial, _, _ := hubAccount(t, e.s, "partial", auth.RoleReadOnly, false)
+	if _, err := e.s.Store.DB.Exec(`UPDATE sessions SET twofa_passed = 0 WHERE token_hash = ?`,
+		auth.HashToken(strings.TrimPrefix(partial.cookie, httpx.SessionCookie+"="))); err != nil {
+		t.Fatal(err)
+	}
+	if w := e.redeem(e.ticket(e.hub.PrivateKey(), nil), "", partial.cookie); w.Code != 200 {
+		t.Fatalf("redeem over a half-signed-in session = %d %s", w.Code, w.Body)
 	}
 }

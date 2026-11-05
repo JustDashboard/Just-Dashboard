@@ -41,7 +41,8 @@ A Just Hub is a separate app that runs on its own machine on your tailnet and sh
 place: their health and version, a switcher between them in each dashboard, updates across them. Connecting a
 server is optional and off until you do it, and it is a separate thing from linking to just-dashboard.com: a
 server can be linked to both, and the two never share a key, a counter, a setting or a log name. It talks to
-the hub the same way: outbound only, signed, at a scope you choose on this server.
+the hub the same way: outbound only, except the hub sign-in ticket described below, signed, at a scope you
+choose on this server.
 
 In the hub, press **Connect** on a server it found; the server's **Settings → Hub** opens in a new tab (after you
 sign in there, if that browser is signed out) with the hub's address filled in, says that it came from a link, and shows whose machine that address is ("hub.example.ts.net,
@@ -128,11 +129,14 @@ have one) and the hub user who may sign you in. The hub asks for that hub user's
 and the link it opens works once, for about a minute, from the device that asked.
 
 What it costs: the hub's code stands in for this server's, so anyone who takes over the hub could open a
-session as every account that opted in, from a device on your tailnet — with the terminal, for an
-administrator. A session opened this way says so in your session list, lasts at most two hours, and cannot
-create or change API keys, accounts, passwords, authenticators, passkeys, Linux or database users, VPN peers,
-saved credentials or links; sign in on the server itself for those. It ends at once when you turn the choice
-off, change your password or authenticator, when the hub stops offering your hub user, when the server is
+session as every account that opted in, from a device on your tailnet, with everything that account can do.
+That includes the Files page, which reads every file on the server as root (`JD_FILE_ROOTS`, the whole server
+unless you narrowed it), passwords and keys included, for every role; an account that may change files can
+write any file, and an administrator has the terminal, so for those accounts such a session is as good as
+root. A session opened this way says so in your session list, lasts at most two hours, and the dashboard's own
+forms refuse it API keys, accounts, passwords, authenticators, passkeys, Linux or database users, database
+passwords, secret variables, VPN peers, saved credentials and links; sign in on the server itself for those.
+It ends at once, with any terminal or other live connection it opened, when you turn the choice off, change your password or authenticator, when the hub stops offering your hub user, when the server is
 disconnected, when the connection goes quiet (another machine took the hub's name, or its address no longer
 passes), and when `JD_HUB_SIGNIN` is found off at a start. While the connection is quiet nobody can be signed
 in from the hub, after a restart too, until it is disconnected and connected again. Ending it does not undo

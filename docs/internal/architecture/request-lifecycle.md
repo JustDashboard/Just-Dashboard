@@ -110,8 +110,12 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
 A session made by a Just Hub sign-in ticket (`auth_method = 'hub'`, only with `JD_HUB_SIGNIN=true`) is
 complete from the start and resolves like any other, with two differences: `ResolveSession` checks again on
 every use that the switches, the link and the account's grant still hold, deleting the session if not, and
-`httpx.RefuseHubSession` refuses it (`403 hub_session_not_allowed`) on every route that makes or changes a
-credential or a link. Its redeem, `POST /api/v1/auth/hub/enter`, sits with `POST /auth/login`: no session, the
+`httpx.RefuseHubSession` refuses it (`403 hub_session_not_allowed`) on every route that makes, changes or
+reveals a credential, or makes or changes a link. A socket is authenticated once, at the upgrade, so every
+socket `wsx.Upgrader` opens is handed to the API's guard (`wsx.Guard`, `hub_session_sockets.go`), which watches
+the ones a hub session opened, as it watches the Remote Desktop stream bridge's proxied sockets: each closes at
+the session's expiry, at once when a revocation of hub sessions commits, and at the next check (every 15 seconds,
+`auth.Service.CheckSession`, which does not count as use) when anything else ended the session. Its redeem, `POST /api/v1/auth/hub/enter`, sits with `POST /auth/login`: no session, the
 sign-in budget per address, the CSRF header and its own audit entry; the ticket is the credential
 ([invariants.md](../security/invariants.md#the-exception-hub-sign-in)).
 

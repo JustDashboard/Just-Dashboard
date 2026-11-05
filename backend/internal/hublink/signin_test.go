@@ -40,7 +40,7 @@ func newSignInLink(t *testing.T) (*env, *auth.Service, int64, string) {
 	}
 	var token string
 	if err := e.svc.writeTx(t.Context(), func(tx *sql.Tx) error {
-		start, err := svc.StartHubSessionTx(t.Context(), tx, u.ID, "owner", "127.0.0.1", "test", "")
+		start, err := svc.StartHubSessionTx(t.Context(), tx, u.ID, "owner", "127.0.0.1", "test", auth.HubReplace{})
 		if start != nil {
 			token = start.Token
 		}
@@ -182,7 +182,7 @@ func TestAnotherMachineAtTheHubsNameRevokesEveryHubSession(t *testing.T) {
 	}
 	var token string
 	if err := e.svc.writeTx(t.Context(), func(tx *sql.Tx) error {
-		start, err := svc.StartHubSessionTx(t.Context(), tx, u.ID, "owner", "127.0.0.1", "test", "")
+		start, err := svc.StartHubSessionTx(t.Context(), tx, u.ID, "owner", "127.0.0.1", "test", auth.HubReplace{})
 		if start != nil {
 			token = start.Token
 		}
@@ -269,7 +269,7 @@ func TestAnIdleLinkRefusesHubSignInAfterEveryRestart(t *testing.T) {
 	s.Start(t.Context())
 	var late string
 	if err := s.writeTx(t.Context(), func(tx *sql.Tx) error {
-		start, err := svc.StartHubSessionTx(t.Context(), tx, userID, "owner", "127.0.0.1", "test", "")
+		start, err := svc.StartHubSessionTx(t.Context(), tx, userID, "owner", "127.0.0.1", "test", auth.HubReplace{})
 		if start != nil {
 			late = start.Token
 		}
@@ -326,5 +326,63 @@ func TestRemovalInTheHubEndsGrantsAndHubSessions(t *testing.T) {
 	rows := e.auditRows("hub.signin.revoke")
 	if len(rows) != 1 || !strings.Contains(rows[0].Detail, `"reason":"link_ended"`) {
 		t.Fatalf("revoke audit = %+v", rows)
+	}
+}
+
+// Allow checks the link and the hub's offer before it asks for a write lock,
+// and again inside its transaction: a link set idle, or a reply that stopped
+// offering the hub user, committed in between makes no grant (sections 9.3
+// and 6.3).
+func TestAGrantIsNotMadeOnWhatChangedWhileItWaited(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(e *env)
+		want   error
+	}{
+		{"the link went idle", func(e *env) {
+			st, _, _ := e.svc.Linked(t.Context())
+			st.Idle = &accountlink.Idle{Code: CodeURLRefused, Reason: "the hub's machine changed", At: time.Now()}
+			if _, err := e.st.DB.Exec(`UPDATE settings SET value = ? WHERE key = 'hub.link.state'`, mustJSON(t, st)); err != nil {
+				t.Fatal(err)
+			}
+		}, ErrNotLinked},
+		{"the hub stopped offering the hub user", func(e *env) {
+			e.hub.setReply("signIn", map[string]any{"users": []string{"owner"}})
+			e.advance(time.Minute)
+			if err := e.svc.Sync(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		}, ErrHubUserNotOffered},
+		{"the hub stopped offering sign-in", func(e *env) {
+			e.hub.mu.Lock()
+			delete(e.hub.reply, "signIn")
+			e.hub.mu.Unlock()
+			e.advance(time.Minute)
+			if err := e.svc.Sync(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		}, ErrSignInNotOffered},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e, svc, _, _ := newSignInLink(t)
+			e.hub.setReply("signIn", map[string]any{"users": []string{"owner", "second"}})
+			if err := e.svc.Sync(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			ana, err := svc.CreateUser(t.Context(), "ana", "Correct-Horse-Battery-9", auth.RoleAdmin, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.svc.beforeAllowTx = func() { c.change(e) }
+			if err := e.svc.Allow(t.Context(), AllowRequest{UserID: ana.ID, HubUser: "second"}); !errors.Is(err, c.want) {
+				t.Fatalf("allow = %v, want %v", err, c.want)
+			}
+			var n int
+			e.st.DB.QueryRow(`SELECT COUNT(*) FROM hub_signin_grants WHERE user_id = ?`, ana.ID).Scan(&n)
+			if n != 0 {
+				t.Fatal("a grant was made on what changed while Allow waited")
+			}
+		})
 	}
 }

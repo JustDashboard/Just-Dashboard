@@ -45,7 +45,10 @@ func (s *Server) mountNetworkVPNRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/exit", s.handle(s.handleWireGuardExit))
 				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/peers", s.handle(s.handleWireGuardPeerAdd))
 				r.With(httpx.RefuseHubSession).Method(http.MethodPatch, "/peers/{id}", s.handle(s.handleWireGuardPeerEdit))
-				r.Method(http.MethodGet, "/peers/{id}/config", s.handle(s.handleWireGuardPeerConfig))
+				// A peer's configuration holds its private key: showing it is
+				// exporting the key, which outlives a hub session as adding the
+				// peer would (hub-link-protocol.md section 9.9).
+				r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/peers/{id}/config", s.handle(s.handleWireGuardPeerConfig))
 				r.Method(http.MethodPut, "/peers/{id}/quota", s.handle(s.handleWireGuardPeerQuota))
 				r.Method(http.MethodPost, "/peers/{id}/verify", s.handle(s.handleWireGuardSiteVerify))
 				s.destructive(r, func(r chi.Router) {

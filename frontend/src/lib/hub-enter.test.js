@@ -52,6 +52,27 @@ describe("the document", () => {
     expect(head.replace(/\s+/g, "")).toBe('<head><metacharset="utf-8">')
   })
 
+  // The document loads no stylesheet, so it repeats the tokens it draws with. Each is the value
+  // globals.css gives it on :root, its --muted being the app's --muted-foreground
+  // (design-system.md §1).
+  test("its colours are globals.css's own", () => {
+    const block = doc.slice(doc.indexOf(":root{"), doc.indexOf("}", doc.indexOf(":root{")))
+    const own = Object.fromEntries(
+      [...block.matchAll(/--([a-z0-9-]+):([^;}]+)/g)].map((m) => [m[1], m[2].trim()]),
+    )
+    const css = readFileSync(join(import.meta.dir, "..", "app", "globals.css"), "utf8")
+    const root = css.slice(css.indexOf(":root {"), css.indexOf("}", css.indexOf(":root {")))
+    const app = Object.fromEntries(
+      [...root.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]),
+    )
+    const names = Object.keys(own)
+    expect(names).toContain("brand")
+    for (const name of names) {
+      const appName = name === "muted" ? "muted-foreground" : name
+      expect(`${name}: ${own[name]}`).toBe(`${name}: ${app[appName]}`)
+    }
+  })
+
   test("it loads nothing from anywhere", () => {
     expect(doc).not.toMatch(/\b(src|href)="(https?:)?\/\//)
     expect(doc).not.toMatch(/<link\b(?![^>]*href="data:,")/)
@@ -75,8 +96,123 @@ describe("the document", () => {
   test("the ticket travels only in the redeem's body, which says it is not a form post", () => {
     expect(HUB_ENTER_SCRIPT).toContain('fetch("/api/v1/auth/hub/enter"')
     expect(HUB_ENTER_SCRIPT).toContain('"X-JD-CSRF": "1"')
-    expect(HUB_ENTER_SCRIPT).toContain("JSON.stringify({ ticket: ticket })")
+    expect(HUB_ENTER_SCRIPT).toContain(
+      "JSON.stringify(replace ? { ticket: ticket, replace: true } : { ticket: ticket })",
+    )
     expect(HUB_ENTER_SCRIPT.match(/fetch\(/g)).toHaveLength(2)
+  })
+})
+
+/**
+ * Runs the page's script against a stand-in document: the session read answers with `session`
+ * (a status and a body, or "offline" for no answer), and the redeem answers 200.
+ */
+async function enter(session, userId = 1) {
+  const elements = {}
+  const el = (id) =>
+    (elements[id] ??= {
+      hidden: false,
+      textContent: "",
+      listeners: {},
+      addEventListener(type, fn) {
+        this.listeners[type] = fn
+      },
+      focus() {},
+      click() {
+        this.listeners.click?.()
+      },
+    })
+  const world = { redeems: [], went: [] }
+  const answer = (status, body) =>
+    Promise.resolve({ status, ok: status >= 200 && status < 300, json: async () => body })
+  const fetch = (url, options) => {
+    if (url === "/api/v1/auth/session") {
+      return session === "offline"
+        ? Promise.reject(new TypeError("offline"))
+        : answer(session.status, session.body)
+    }
+    world.redeems.push(JSON.parse(options.body))
+    return answer(200, { next: "/landed" })
+  }
+  const document = { readyState: "complete", getElementById: el, addEventListener() {} }
+  const location = {
+    hash: `#ticket=v1.k.${payload({ userId })}.s`,
+    replace: (to) => world.went.push(to),
+  }
+  const history = { replaceState() {} }
+  new Function("document", "location", "history", "fetch", HUB_ENTER_SCRIPT)(
+    document,
+    location,
+    history,
+    fetch,
+  )
+  for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 0))
+  const asking = !el("ask").hidden && el("working").hidden
+  return { world, el, asking }
+}
+
+const signedInAs = (id, username, more = {}) => ({
+  status: 200,
+  body: { authenticated: true, user: { id, username }, ...more },
+})
+
+describe("who the browser is signed in as (§9.5 step 2)", () => {
+  test("signed out, or the same account: it redeems at once, replacing nobody's session", async () => {
+    for (const session of [
+      { status: 401, body: {} },
+      signedInAs(1, "ion"),
+      // Still owing a second factor is not signed in.
+      {
+        status: 200,
+        body: { authenticated: false, needsTotp: true, user: { id: 2, username: "maria" } },
+      },
+      // A 200 that names no account is the server saying nobody is; were it wrong, the server
+      // still refuses to end another account's session unasked.
+      { status: 200, body: "not an object" },
+    ]) {
+      const { world, asking } = await enter(session)
+      expect(asking).toBe(false)
+      expect(world.redeems).toHaveLength(1)
+      expect(world.redeems[0].replace).toBeUndefined()
+    }
+  })
+
+  test("another account, one owing a new password included: it asks, and Continue says so", async () => {
+    for (const session of [
+      signedInAs(2, "maria"),
+      {
+        status: 200,
+        body: {
+          authenticated: false,
+          needsPasswordChange: true,
+          user: { id: 2, username: "maria" },
+        },
+      },
+    ]) {
+      const { world, el, asking } = await enter(session)
+      expect(asking).toBe(true)
+      expect(el("as").textContent).toBe("maria")
+      expect(el("ask-known").hidden).toBe(false)
+      expect(world.redeems).toHaveLength(0)
+      el("continue").click()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(world.redeems).toHaveLength(1)
+      expect(world.redeems[0].replace).toBe(true)
+    }
+  })
+
+  test("an answer that names nobody it can trust asks without a name, and never redeems unasked", async () => {
+    for (const session of [
+      { status: 429, body: { error: { code: "rate_limited" } } },
+      { status: 500, body: {} },
+      "offline",
+    ]) {
+      const { world, el, asking } = await enter(session)
+      expect(asking).toBe(true)
+      expect(el("ask-unknown").hidden).toBe(false)
+      expect(el("ask-known").hidden).toBe(true)
+      expect(world.redeems).toHaveLength(0)
+    }
   })
 })
 

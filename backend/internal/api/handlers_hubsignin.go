@@ -45,6 +45,9 @@ func (s *Server) handleHubEnter(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
 	var body struct {
 		Ticket string `json:"ticket"`
+		// Replace is sent by /hub/enter only after the person chose to end
+		// another account's session in this browser (section 9.5 step 2).
+		Replace bool `json:"replace"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxHubTicketBody)
 	if err := httpx.DecodeJSON(r, &body); err != nil {
@@ -54,7 +57,7 @@ func (s *Server) handleHubEnter(w http.ResponseWriter, r *http.Request) error {
 	}
 	res, refused := s.modules.hubLink.Redeem(r.Context(), hublink.RedeemRequest{
 		Ticket: body.Ticket, Client: httpx.ClientIP(r), UserAgent: r.UserAgent(),
-		Cookie: s.Authn.SessionToken(r), Path: r.URL.Path,
+		Cookie: s.Authn.SessionToken(r), Replace: body.Replace, Path: r.URL.Path,
 	})
 	if refused != nil {
 		if refused.Status >= http.StatusInternalServerError {

@@ -35,7 +35,7 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   it types into a running program, waits for your Allow unless you gave it full access, and each one is in the
   audit log. When a command asks for a password, you type it into a field in the chat that goes straight to the
   terminal: the assistant and its model never see it, and it is not saved or logged. It cannot sign in, change your password, second factor, passkeys or sessions,
-  make an API key, uninstall the dashboard, attach to your own terminal windows or a stream, or read a database
+  let Just Hub sign you in (or stop it), make an API key, uninstall the dashboard, attach to your own terminal windows or a stream, or read a database
   connection you marked protected. It asks before any change unless you give it full access,
   which runs everything your role allows without asking. Text it reads, such as a log line, can try to talk a
   model into something, so leave "Ask before changes" on where someone else's text can reach it. Its chats
@@ -64,10 +64,14 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   its pinned key, valid for about a minute, for one account, one hub user and the device that asked,
   redeemed at `POST /api/v1/auth/hub/enter`. The hub's own authenticator code stands in for this
   server's. Anyone who takes over the hub can then sign in as those accounts, so a session opened this
-  way lasts at most two hours, cannot make or change keys, accounts, passwords, authenticators,
-  passkeys, Linux or database users, VPN peers, saved credentials or links, and ends as soon as its
-  grant, the link or the switch does, or the link goes quiet. An administrator's hub session still has
-  the terminal. The full list and its limits are in
+  way lasts at most two hours, is refused by the dashboard's own forms that make, change or reveal keys,
+  accounts, passwords, authenticators, passkeys, Linux or database users, database passwords, secret
+  variables, VPN peers, saved credentials or links, and ends as soon as its grant, the link or the
+  switch does, or the link goes quiet, with every terminal or other live connection it opened. What it
+  does not stop: the Files page reads every file on the server as root for every role, so a hub
+  session can read every credential on disk; with permission to change files it writes any file, and an
+  administrator's hub session has the terminal, so for those accounts it is as good as root. The full
+  list and its limits are in
   [the invariants](docs/internal/security/invariants.md#the-exception-hub-sign-in).
 - [The usage count](docs/guides/linking-and-usage.md#the-usage-count) is off until an administrator says yes, and is three fields with no ID.
 

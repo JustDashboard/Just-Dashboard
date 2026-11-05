@@ -101,7 +101,7 @@ description, which `api/deploy_openapi.go` generates from the router and is comm
 | `updates` | Six package-manager adapters, catalogue, upgrades, reboot state, and usage summaries | [`../backend/observability-security.md`](../backend/observability-security.md#packages-six-managers-one-interface) |
 | `usageping` | The optional daily count of servers: an administrator's answer, the three-field report with no ID, one per UTC day | [`../backend/usage-ping.md`](../backend/usage-ping.md) |
 | `version` | Build/release version normalization | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#configuration-version-release-self-update) |
-| `wsx` | WebSocket origin validation, upgrade, and shared socket behavior | [`../architecture/request-lifecycle.md`](../architecture/request-lifecycle.md) |
+| `wsx` | WebSocket origin validation, upgrade, and shared socket behavior, including the `Guard` every socket is handed so the API can end it with the session behind it | [`../architecture/request-lifecycle.md`](../architecture/request-lifecycle.md) |
 
 ## Frontend
 

@@ -2,13 +2,14 @@
 
 import { useState } from "react"
 import { errorMessage } from "@/lib/api"
-import { relativeTime } from "@/lib/format"
+import { calendarDate } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { HubLinkStatus } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { ConfirmDialog, type ConfirmRequest } from "@/components/confirm-dialog"
 import { Field, FormNote } from "@/components/form"
 import { Section } from "@/components/page"
+import { Row, RowList } from "@/components/row-list"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -25,17 +26,21 @@ type Grant = NonNullable<NonNullable<HubLinkStatus["admin"]>["grants"]>[number]
  * "Let Just Hub sign me in" (hub-link-protocol §9). Each account decides for itself, with its
  * password and, where it has one, its authenticator code; the operator's JD_HUB_SIGNIN and the
  * hub's own setting must both be on as well. The screen says plainly what turning it on costs:
- * whoever takes over the hub can then open a session as this account, a session it opens cannot
- * make or change credentials or links, and ending sign-in ends those sessions without undoing
- * what was done in them (§9.12).
+ * whoever takes over the hub can then open a session as this account, the Files page (and an
+ * administrator's terminal) is not contained, so such a session reads every file and, where it may
+ * change files, is as good as root (§9.1); the dashboard's own forms refuse it credentials and
+ * links; and ending sign-in ends those sessions without undoing what was done in them (§9.12).
  *
  * Everything here is this account's own, except the list of every account's choice, which only
  * an administrator is sent (`admin.grants`) and may end.
  *
  * `hubName` is the hub's name as the page attributes it, "Just Hub (hub)" (§8.10). `idle` is the
- * page's reading of an idle link (`idleReason`, administrators only): the server revoked every hub
- * session when the link went idle and refuses new ones and new choices until a disconnect, so the
- * form is not offered; a choice already made can still be ended.
+ * page's reading of an idle link for every reader (`isIdle`, the status's `idle`): the server
+ * revoked every hub session when the link went idle and refuses new ones and new choices until a
+ * disconnect, so no account is offered the form; a choice already made can still be ended.
+ *
+ * The page's brand face stays Connect's alone: opting in is a deliberate choice with a cost, so its
+ * command is an outline button, as stopping is.
  */
 export function SignInPanel({
   status,
@@ -111,11 +116,17 @@ function Costs({ hubName, me }: { hubName: string; me: string }) {
       </p>
       <p>
         <span className="text-foreground">What it costs:</span> anyone who takes over the hub could
-        open a session as {me} from a device on your tailnet, with everything {me} can do here
-        {" — "}for an administrator that includes the terminal. A session opened this way lasts at
-        most two hours, and it cannot create or change API keys, accounts, passwords,
-        authenticators, passkeys, Linux users, database users, VPN peers, saved credentials or
-        links: for those, sign in on this server itself.
+        open a session as {me} from a device on your tailnet, with everything {me} can do here. That
+        includes the Files page, which reads every file it reaches (the whole server unless the
+        operator narrowed it), passwords and keys included; with permission to change files it
+        writes them too, and an administrator&apos;s session has the terminal. Either of those is as
+        good as root.
+      </p>
+      <p>
+        A session opened this way lasts at most two hours. This dashboard&apos;s own forms refuse it
+        API keys, accounts, passwords, authenticators, passkeys, Linux users, database users, VPN
+        peers, saved credentials, revealed secrets and links: for those, sign in on this server
+        itself.
       </p>
       <p>
         This server tells the hub your username and the hub user you choose, and nothing else about
@@ -174,9 +185,10 @@ function Allow({
             hint="Only this hub user's sign-in links open this account."
           >
             {users.length === 1 ? (
-              <span id="hub-signin-user" className="font-mono text-body">
+              // An <output> is labelable, so "Hub user" names it as it names the select.
+              <output id="hub-signin-user" className="block font-mono text-body">
                 {users[0]}
-              </span>
+              </output>
             ) : (
               <Select value={hubUser} onValueChange={setHubUser}>
                 <SelectTrigger id="hub-signin-user" className="w-full">
@@ -220,6 +232,7 @@ function Allow({
           <div>
             <Button
               type="submit"
+              variant="outline"
               pending={busy}
               disabled={!hubUser || !password || (totp && code.length < 6)}
             >
@@ -266,7 +279,7 @@ function Mine({
     <div className="flex min-w-0 flex-col gap-4">
       <p className="text-body">
         <span className="font-mono">{grant.hubUser}</span> on {hubName} can sign you in as {me},
-        since {relativeTime(grant.since)}.
+        since {calendarDate(grant.since)}.
       </p>
       <Costs hubName={hubName} me={me} />
       <div>
@@ -290,35 +303,33 @@ function Grants({
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <p className="eyebrow">Accounts that let Just Hub sign them in</p>
-      <ul className="flex min-w-0 flex-col divide-y divide-hairline rounded-md border border-hairline">
+      <RowList>
         {grants.map((grant) => (
-          <li
+          <Row
             key={grant.userId}
-            className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2"
-          >
-            <span className="min-w-0 truncate text-body">
-              {grant.username} <span className="text-muted-foreground">by hub user</span>{" "}
-              <span className="font-mono">{grant.hubUser}</span>
-              <span className="text-muted-foreground"> · since {relativeTime(grant.since)}</span>
-            </span>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() =>
-                setConfirm({
-                  title: `Stop Just Hub signing in as ${grant.username}`,
-                  description:
-                    "Every session the hub opened for that account ends now. The account can turn it on again for itself.",
-                  confirmLabel: "Remove",
-                  action: () => onRemove(grant.userId),
-                })
-              }
-            >
-              Remove
-            </Button>
-          </li>
+            className="px-0 py-2.5"
+            title={grant.username}
+            subtitle={`by hub user ${grant.hubUser} · since ${calendarDate(grant.since)}`}
+            trailing={
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() =>
+                  setConfirm({
+                    title: `Stop Just Hub signing in as ${grant.username}`,
+                    description:
+                      "Every session the hub opened for that account ends now. The account can turn it on again for itself.",
+                    confirmLabel: "Remove",
+                    action: () => onRemove(grant.userId),
+                  })
+                }
+              >
+                Remove
+              </Button>
+            }
+          />
         ))}
-      </ul>
+      </RowList>
       <ConfirmDialog request={confirm} onOpenChange={(open) => !open && setConfirm(null)} />
     </div>
   )

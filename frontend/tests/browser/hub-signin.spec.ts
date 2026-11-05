@@ -57,25 +57,34 @@ const signedIn = (u: ReturnType<typeof user>) => ({
 
 type Redeem = { status: number; body: object }
 
-/** /hub/enter's two calls, and every request the page makes. */
-async function mockEnter(page: Page, session: object | null, redeem: Redeem) {
+/**
+ * /hub/enter's two calls, and every request the page makes. `session` is the session read's
+ * answer: an account's, `null` for signed out (401), or a bare status the read fails with.
+ */
+async function mockEnter(page: Page, session: object | number | null, redeem: Redeem) {
   const world = {
     requests: [] as Request[],
     redeems: [] as { body: unknown; csrf?: string; urlDuring: string }[],
   }
   page.on("request", (request) => world.requests.push(request))
   await page.route("**/api/v1/auth/session", (route) =>
-    session
+    typeof session === "number"
       ? route.fulfill({
-          status: 200,
+          status: session,
           contentType: "application/json",
-          body: JSON.stringify(session),
+          body: JSON.stringify({ error: { code: "rate_limited", message: "too many requests" } }),
         })
-      : route.fulfill({
-          status: 401,
-          contentType: "application/json",
-          body: JSON.stringify({ error: { code: "unauthorized", message: "session invalid" } }),
-        }),
+      : session
+        ? route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify(session),
+          })
+        : route.fulfill({
+            status: 401,
+            contentType: "application/json",
+            body: JSON.stringify({ error: { code: "unauthorized", message: "session invalid" } }),
+          }),
   )
   await page.route("**/api/v1/auth/hub/enter", async (route: Route) => {
     const request = route.request()
@@ -154,6 +163,19 @@ test.describe("/hub/enter", () => {
     await page.getByRole("button", { name: "Continue" }).click()
     await expect(page).toHaveURL(/\/landed$/)
     expect(world.redeems).toHaveLength(1)
+    // Continue is what lets the server end the other account's session.
+    expect(world.redeems[0].body).toEqual({ ticket: ticketFor(1), replace: true })
+  })
+
+  test("when it cannot tell who is signed in, it asks rather than redeems", async ({ page }) => {
+    const world = await mockEnter(page, 429, ok)
+    await page.goto(`/hub/enter#ticket=${ticketFor(1)}`)
+    await expect(page.getByRole("heading", { name: "Continue through Just Hub?" })).toBeVisible()
+    await expect(page.getByText("This server could not say who is signed in")).toBeVisible()
+    expect(world.redeems).toHaveLength(0)
+    await page.getByRole("button", { name: "Continue" }).click()
+    await expect(page).toHaveURL(/\/landed$/)
+    expect(world.redeems[0].body).toEqual({ ticket: ticketFor(1), replace: true })
   })
 
   test("Stay keeps the session the browser has and redeems nothing", async ({ page }) => {
@@ -221,7 +243,14 @@ test.describe("/hub/enter", () => {
 
 type SignIn = { enabled: boolean; offered: boolean; users: string[]; mine?: object }
 
-const status = (signIn: SignIn, grants: object[] = [], lastError?: string) => ({
+const status = (
+  signIn: SignIn,
+  grants: object[] = [],
+  lastError?: string,
+  view: { reader?: boolean; idle?: boolean } = {},
+) => ({
+  ...(view.idle ? { idle: true, reachable: false } : {}),
+  ...(view.reader ? {} : { admin: adminPart(grants, lastError) }),
   enabled: true,
   state: "linked",
   hubUrl: HUB,
@@ -232,17 +261,18 @@ const status = (signIn: SignIn, grants: object[] = [], lastError?: string) => ({
   fleet: [],
   notices: [],
   signIn,
-  admin: {
-    fingerprint: "21fe:31df:a154:a261",
-    link: {
-      serverId: "7a0d3c1e-0000-4000-8000-000000000002",
-      linkedAt: iso(now - 86_400_000),
-      linkedBy: "ion",
-      hubKeys: [{ kid: "hub-2026-11", fingerprint: "39f7:13d0:a644:253f" }],
-      lastError,
-    },
-    grants,
+})
+
+const adminPart = (grants: object[], lastError?: string) => ({
+  fingerprint: "21fe:31df:a154:a261",
+  link: {
+    serverId: "7a0d3c1e-0000-4000-8000-000000000002",
+    linkedAt: iso(now - 86_400_000),
+    linkedBy: "ion",
+    hubKeys: [{ kid: "hub-2026-11", fingerprint: "39f7:13d0:a644:253f" }],
+    lastError,
   },
+  grants,
 })
 
 /** What the status says about a link the server has set idle (hub-link.md, `idleReason`). */
@@ -252,14 +282,22 @@ const IDLE_ERROR =
 async function mockSettings(
   page: Page,
   first: SignIn,
-  options: { grants?: object[]; lastError?: string } = {},
+  options: { grants?: object[]; lastError?: string; reader?: boolean; idle?: boolean } = {},
 ) {
   const world = {
     signIn: first,
     grants: options.grants ?? ([] as object[]),
     calls: [] as { method: string; path: string; body?: unknown }[],
   }
-  const me = signedIn(user(1, "ion"))
+  const admin = signedIn(user(1, "ion"))
+  // A reader holds read alone, and the status it is sent has no admin part.
+  const me = options.reader
+    ? {
+        ...admin,
+        capabilities: ["read", "metrics.read"],
+        user: { ...user(3, "ana"), role: "readonly" },
+      }
+    : admin
   const respond = (route: Route, body: unknown, code = 200) =>
     route.fulfill({ status: code, contentType: "application/json", body: JSON.stringify(body) })
   await page.route("**/api/v1/**", async (route) => {
@@ -269,7 +307,13 @@ async function mockSettings(
     if (path === "/auth/session") {
       return respond(route, {
         ...me,
-        hub: { linked: true, name: "hub", url: HUB, reachable: true },
+        hub: {
+          linked: true,
+          name: "hub",
+          url: HUB,
+          reachable: !options.idle,
+          ...(options.idle ? { idle: true } : {}),
+        },
       })
     }
     if (path === "/account/profile") return respond(route, me.user)
@@ -286,7 +330,13 @@ async function mockSettings(
       })
     }
     if (path === "/dashboard/hub" && method === "GET")
-      return respond(route, status(world.signIn, world.grants, options.lastError))
+      return respond(
+        route,
+        status(world.signIn, world.grants, options.lastError, {
+          reader: options.reader,
+          idle: options.idle,
+        }),
+      )
     const removal = /^\/dashboard\/hub\/signin\/(\d+)$/.exec(path)
     if (removal && method === "DELETE") {
       world.calls.push({ method, path })
@@ -348,8 +398,12 @@ test.describe("Settings → Hub: Sign in from Just Hub", () => {
     })
     // What the hub can then do, what a hub session cannot, and what turning it off does not undo.
     await expect(section).toContainText("anyone who takes over the hub could open a session as ion")
-    await expect(section).toContainText("cannot create or change API keys")
+    // The Files page is not contained, and the costs say so, as they say the terminal is not.
+    await expect(section).toContainText("reads every file it reaches")
+    await expect(section).toContainText("own forms refuse it API keys")
     await expect(section).toContainText("it does not undo what was done in them")
+    // One hub user is shown, not chosen, and "Hub user" names it.
+    await expect(section.getByLabel("Hub user")).toHaveText("owner")
     const allow = section.getByRole("button", { name: "Let Just Hub sign me in" })
     await expect(allow).toBeDisabled()
     await section.getByLabel("Your password on this server").fill("wrong")
@@ -412,7 +466,7 @@ test.describe("Settings → Hub: Sign in from Just Hub", () => {
         users: ["owner"],
         mine: { hubUser: "owner", since: iso(now - 86_400_000) },
       },
-      { lastError: IDLE_ERROR },
+      { lastError: IDLE_ERROR, idle: true },
     )
     await page.goto("/dashboard/hub")
     const section = page.locator("section", {
@@ -426,5 +480,26 @@ test.describe("Settings → Hub: Sign in from Just Hub", () => {
     await expect(
       section.getByRole("button", { name: "Stop letting Just Hub sign me in" }),
     ).toBeVisible()
+  })
+
+  // The status says idle to every reader (§8.2 `idle`); only an administrator is told why. An
+  // account that cannot read the reason is still offered no form the server would refuse.
+  test("an idle link pauses it for an account that is not an administrator too", async ({
+    page,
+  }) => {
+    await mockSettings(
+      page,
+      { enabled: true, offered: true, users: ["owner"] },
+      { reader: true, idle: true },
+    )
+    await page.goto("/dashboard/hub")
+    const section = page.locator("section", {
+      has: page.getByRole("heading", { name: "Sign in from Just Hub" }),
+    })
+    await expect(section.locator('[data-slot="hub-signin-idle"]')).toContainText(
+      "Paused while the link is idle",
+    )
+    await expect(section.getByLabel("Your password on this server")).toHaveCount(0)
+    await expect(section.getByRole("button", { name: "Let Just Hub sign me in" })).toHaveCount(0)
   })
 })

@@ -3,8 +3,12 @@ package hublink
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -137,5 +141,49 @@ func TestSignInTicketVectors(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Step 10 is skipped only when tailscaled cannot be asked. A tailscaled that
+// answered, but named no login or no node for the browser's address, was
+// asked: the device is refused, through the real local API client, as one
+// that named someone else is (protocol 9.7 step 10).
+func TestADeviceTailscaledCannotNameIsRefused(t *testing.T) {
+	answers := map[string]func(http.ResponseWriter){
+		// A person's node whose profile has no login.
+		"100.101.102.110": func(w http.ResponseWriter) {
+			w.Write([]byte(`{"Node": {"StableID": "nLaptop", "Name": "laptop.tailed39ba.ts.net."},
+				"UserProfile": {"ID": 4, "LoginName": "", "DisplayName": ""}}`))
+		},
+		// No node and no profile at all.
+		"100.101.102.111": func(w http.ResponseWriter) { w.Write([]byte(`{}`)) },
+		// Not JSON.
+		"100.101.102.112": func(w http.ResponseWriter) { w.Write([]byte(`<html>`)) },
+		// tailscaled is there and says it cannot answer: an outage.
+		"100.101.102.113": func(w http.ResponseWriter) { http.Error(w, "backend not running", http.StatusServiceUnavailable) },
+	}
+	socket := filepath.Join(t.TempDir(), "tailscaled.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		answers[r.URL.Query().Get("addr")](w)
+	}))
+	server.Listener = listener
+	server.Start()
+	t.Cleanup(server.Close)
+	whois := tailnetgate.NewLocalAPI(nil, socket)
+	p := &TicketPayload{TSLogin: "wayy01@github", TSNode: "nLaptop"}
+
+	for _, addr := range []string{"100.101.102.110", "100.101.102.111", "100.101.102.112"} {
+		device, refused := checkDevice(t.Context(), whois, addr, p)
+		if refused == nil || refused.Code != "wrong_device" || device.Result != "refused" {
+			t.Fatalf("%s: %+v, %v; want wrong_device", addr, device, refused)
+		}
+	}
+	device, refused := checkDevice(t.Context(), whois, "100.101.102.113", p)
+	if refused != nil || device.Result != "skipped" {
+		t.Fatalf("tailscaled out of service: %+v, %v; want skipped", device, refused)
 	}
 }
