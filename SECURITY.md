@@ -46,6 +46,11 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Linking to a just-dashboard.com account is optional and outbound only. A command from the site runs
   only if its signature verifies against the key pinned at link time and its kind is within the scope
   you chose; linking is a browser-session action for an administrator, or root at the terminal.
+- Connecting to a Just Hub is optional and outbound only, to one machine on the server's own tailnet,
+  reached only over the tailnet. It has its own key, pinned hub key, counter and audit name, separate
+  from the just-dashboard.com link, and a hub's command runs only under the same checks and the scope
+  you chose. The hub's discovery probe is behind the network allowlist and answers nothing but whether
+  the server can be connected. `JD_HUB_LINK=false` switches all of it off.
 - [The usage count](docs/guides/linking-and-usage.md#the-usage-count) is off until an administrator says yes, and is three fields with no ID.
 
 ### Roles
@@ -63,4 +68,4 @@ disk.
 
 - [The complete security invariants](docs/internal/security/invariants.md), which every change has to keep
 - [What a deploy key can and cannot do](docs/guides/cli.md)
-- [What linking to just-dashboard.com sends](docs/guides/linking-and-usage.md)
+- [What linking to just-dashboard.com, or connecting to Just Hub, sends](docs/guides/linking-and-usage.md)

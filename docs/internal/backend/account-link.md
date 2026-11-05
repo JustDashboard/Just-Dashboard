@@ -14,6 +14,13 @@ in the site's repository, and both sides build to that one file, including its t
 change to both repositories. This page records how the dashboard implements it and the decisions that file
 leaves to the dashboard.
 
+**The same engine runs a second link.** `accountlink` is an engine that runs as more than one instance: a
+`Profile` (`profile.go`) gives each instance its settings prefix, command table, base path, peer wording, audit
+names, pacing and URL admission, and `Hooks` let an instance add its own. The account link is
+`AccountProfile`; the [hub link](hub-link.md) (`backend/internal/hublink`) is a second instance with the hub's
+profile, and the two share no state. Everything on this page is the account link's instance; the hub link's
+differences are tabled in [hub-link.md](hub-link.md#one-engine-two-instances).
+
 ## Trust model
 
 - **Outbound only.** The dashboard is not reachable from the internet (invariants 1 and 7) and linking does
@@ -85,6 +92,8 @@ means the owner removed the server on the site, and clears the link the same way
 | `executor.go` | The closed switch over kinds and the `Host` interface the `api` package implements |
 | `snapshot.go` | The heartbeat body and `Redact(scope)` |
 | `policy.go` | The automatic-update policy and when it is due |
+| `profile.go` | `Profile`, what makes one instance of the engine one link rather than another, `AccountProfile`, and the `Hooks` another instance uses |
+| `engine.go` | What another instance reads and sets: `Health`, `Fingerprint`, test timings, and the signed strings and canonical arguments for another implementation's vector tests |
 | `status.go` | `Status`, the JSON `GET /dashboard/link` returns |
 | `siteurl.go` | `ParseSiteURL`, used by `config` and the terminal command |
 | `linkstub/` | A signature-less stand-in site for the tests of the packages that drive a link |
@@ -95,7 +104,8 @@ implementation over the services the pages use), `admin/link.go` (the terminal c
 
 ## State
 
-All of it is in the `settings` table; only the identity is secret.
+All of it is in the `settings` table, under the instance's prefix (`account.link` here, `hub.link` for the hub
+link); only the identity is secret.
 
 | Key | Holds |
 | --- | --- |

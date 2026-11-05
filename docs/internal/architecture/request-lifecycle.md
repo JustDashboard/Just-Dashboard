@@ -114,7 +114,10 @@ password and revokes existing sessions; the sign-in page then signs straight bac
 password, through any required second factor. Password change has its own
 authentication middleware so it cannot bypass an outstanding second factor.
 
-Three deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname),
+Four deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname),
+`GET /api/v1/hub/hello` (the Just Hub discovery probe: unauthenticated, but behind the allowlist and the
+per-address API limit, a fixed body naming only the product, the protocol and whether this server can be
+connected, and not mounted with `JD_HUB_LINK=false` or in agent mode; [hub-link.md](../backend/hub-link.md#local-api)),
 `/api/v1/hooks/deploy/{hookID}` (HMAC over the raw body, still allowlisted, still audited so
 enumerating hook ids is not silent), and `GET /api/v1/tailnet/whois`, which a tailnet-only
 deployment's gate asks about every request: still behind the allowlist, outside the API rate limit,

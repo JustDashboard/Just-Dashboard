@@ -5955,6 +5955,10 @@ step: **the reading site, `.env.example`, `docker-compose.yml`, and the configur
 `accountlink.ParseSiteURL`, so a malformed one refuses to start) and [account link](account-link.md) says what
 they decide. `JD_USAGE_PING` follows it too, and [the usage count](usage-ping.md) says what it decides. An install
 that is never linked, and whose administrators never said yes to the count, sends the site nothing.
+`JD_HUB_LINK` follows it as well ([hub link](hub-link.md)). `JD_HUB_LINK_TEST_ORIGIN` is the one deliberate
+exception: a loopback origin for test harnesses, read by `config.go` (through `hublink.ParseTestOrigin`, so
+anything else refuses to start) and the terminal commands, and on purpose in no `.env.example`, Compose map or
+operator guide, so a Compose install cannot pick it up from `.env`.
 
 ### Cutting a release
 
