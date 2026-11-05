@@ -246,7 +246,8 @@ command on its standard input, so it is in no process list (`/proc/*/cmdline`) a
 is not `jht_` and 43 base64url characters is refused before anything is sent, and one the hub refuses
 (`bad_token`) is a failure, never a fallback to a code. Exit **0** connected (`Connected to Just Hub "<name>" at
 <url> as "<server>" (<scope>).`, then the pinned hub key's fingerprint to compare with the hub's Settings page),
-**2** declined, not approved within `--wait`, or interrupted (the request is forgotten), **1** anything else. A request begun in Settings is never taken over from the terminal. Audited as `hub.link` (by
+**2** declined, not approved within `--wait`, or interrupted (the request is forgotten), **1** anything else.
+`hub status` says when the link is idle, with the reason, instead of the last error. A request begun in Settings is never taken over from the terminal. Audited as `hub.link` (by
 `root` / `cli`; failures as failed with the outcome) and `hub.unlink`.
 
 ## Failure modes

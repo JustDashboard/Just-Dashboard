@@ -310,7 +310,10 @@ func hubStatusCommand(ctx context.Context, svc *hublink.Service, env hubEnvironm
 			beat = "last heartbeat " + ago(time.Since(*h.LastHeartbeatAt))
 		}
 		fmt.Fprintf(out, "Connected to Just Hub %q at %s as %s (%s); %s.", st.Owner, st.URL, name, st.Scope, beat)
-		if e := firstNonEmpty(h.HeartbeatError, h.PollError); e != "" {
+		if st.Idle != nil {
+			// Nothing is sent on an idle link until it is disconnected.
+			fmt.Fprintf(out, " The link is idle, and nothing is sent: %s. Run hub disconnect, then hub connect again.", st.Idle.Reason)
+		} else if e := firstNonEmpty(h.HeartbeatError, h.PollError); e != "" {
 			fmt.Fprintf(out, " Last error: %s", e)
 		}
 		fmt.Fprintln(out, off)

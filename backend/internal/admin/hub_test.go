@@ -288,3 +288,29 @@ func TestHubConnectNamesTheHubsMachine(t *testing.T) {
 		}
 	}
 }
+
+// hub status says when the link is idle, and why, rather than the last error.
+func TestHubStatusSaysWhenTheLinkIsIdle(t *testing.T) {
+	f := newHubFixture(t)
+	go func() {
+		f.hub.WaitForRequest()
+		f.hub.Approve()
+	}()
+	if _, err := f.run("hub-connect", f.hub.URL, "--wait", "30s"); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := hublink.New(hublink.Options{Store: st, Enabled: true, TestOrigin: f.hub.URL})
+	link, _, _ := svc.Linked(t.Context())
+	if set, err := svc.Engine().SetIdle(t.Context(), link.ServerID, accountlink.Idle{Code: "hub_url_refused", Reason: "the hub's machine changed"}, nil); !set || err != nil {
+		t.Fatalf("SetIdle = %v %v", set, err)
+	}
+	st.Close()
+	out, err := f.run("hub-status")
+	if err != nil || !strings.Contains(out, "The link is idle, and nothing is sent: the hub's machine changed. Run hub disconnect") {
+		t.Fatalf("hub-status = %q, %v", out, err)
+	}
+}
