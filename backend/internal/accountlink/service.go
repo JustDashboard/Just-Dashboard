@@ -256,9 +256,12 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 	ctx, s.cancel = context.WithCancel(ctx)
-	s.done = make(chan struct{})
+	// The goroutine closes its own channel: a Stop right after this returns
+	// clears s.done before the goroutine may have read it.
+	done := make(chan struct{})
+	s.done = done
 	go func() {
-		defer close(s.done)
+		defer close(done)
 		s.run(ctx)
 	}()
 }

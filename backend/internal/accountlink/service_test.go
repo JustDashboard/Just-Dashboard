@@ -561,3 +561,15 @@ func TestAnIdleLinkSendsNothingUntilItIsUnlinked(t *testing.T) {
 		t.Fatal("unlink kept the idle link")
 	}
 }
+
+// Stopping right after starting, again and again, waits for the loop that
+// started and never closes a channel twice or a nil one.
+func TestStopRightAfterStartIsSafe(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.link(ScopeObserve)
+	for i := 0; i < 200; i++ {
+		e.svc.Start(t.Context())
+		e.svc.Stop()
+	}
+}
