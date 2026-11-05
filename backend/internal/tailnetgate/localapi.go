@@ -43,7 +43,8 @@ type Peer struct {
 	// Node is the machine's MagicDNS name without the trailing dot.
 	Node string
 	// StableID is the machine's StableNodeID, which stays the machine's when
-	// its name or address changes. Hub sign-in binds a ticket to it.
+	// its name or address changes. The hub link pins its hub's machine by
+	// it, and hub sign-in binds a ticket's device to it.
 	StableID string
 	// Tags are the machine's ACL tags, tag:ci.
 	Tags []string
