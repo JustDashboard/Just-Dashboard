@@ -637,6 +637,20 @@ func TestAHubSessionCannotMakeCredentialsOrLinks(t *testing.T) {
 	if w := hubSession.do(http.MethodPost, "/api/v1/dashboard/hub/sync", "", nil); w.Code != 200 {
 		t.Errorf("sync with a hub session = %d %s", w.Code, w.Body)
 	}
+	// A code given from a hub session does not turn it into an ordinary one.
+	var sealed string
+	e.s.Store.DB.QueryRow(`SELECT totp_secret FROM users WHERE id = ?`, e.adminID).Scan(&sealed)
+	secret, _ := e.s.Sealer.Open(sealed)
+	e.s.Store.DB.Exec(`UPDATE users SET totp_last_step = 0 WHERE id = ?`, e.adminID)
+	hubSession.do(http.MethodPost, "/api/v1/auth/2fa/verify", `{"code":"`+nextCode(t, secret, 0)+`"}`, nil)
+	var method string
+	e.s.Store.DB.QueryRow(`SELECT auth_method FROM sessions WHERE user_id = ? AND hub_user = 'owner'`, e.adminID).Scan(&method)
+	if method != auth.MethodHub {
+		t.Fatalf("a code turned the hub session into %q", method)
+	}
+	if w := hubSession.do(http.MethodPost, "/api/v1/tokens/", `{"name":"k","role":"admin"}`, nil); codeOf(t, w) != "hub_session_not_allowed" {
+		t.Fatalf("after a code the hub session made a key: %d %s", w.Code, w.Body)
+	}
 }
 
 func TestAHubSessionEndsAfterTwoHours(t *testing.T) {
