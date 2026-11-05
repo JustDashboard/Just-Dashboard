@@ -40,12 +40,17 @@ goes quiet. `JD_ACCOUNT_URL` names the site, an origin only (`http://` just for 
 A Just Hub is a separate app that runs on its own machine on your tailnet and shows many dashboards in one
 place: their health and version, a switcher between them in each dashboard, updates across them. Connecting a
 server is optional and off until you do it, and it is a separate thing from linking to just-dashboard.com: a
-server can be linked to both, and the two never share a key, a counter, a setting or a log name.
+server can be linked to both, and the two never share a key, a counter, a setting or a log name. It talks to
+the hub the same way: outbound only, signed, at a scope you choose on this server.
 
-Connect from the dashboard's Settings, or over SSH:
+In the hub, press **Connect** on a server it found; the server's **Settings → Hub** opens in a new tab with the
+hub's address filled in, and shows exactly what the hub will see and be able to do. Check that the address is
+the hub you meant: anyone on the tailnet can send you such a link. You can also type the address there
+yourself. After you press **Connect**, the page shows a code and this server's key fingerprint; type that code
+into the hub's approval screen, where the fingerprint is shown too. Over SSH:
 
 ```bash
-sudo ./scripts/manage.sh hub connect hub.example.ts.net            # prints a code to approve in the hub
+sudo ./scripts/manage.sh hub connect hub.example.ts.net            # prints a code to type into the hub
 sudo ./scripts/manage.sh hub connect hub.example.ts.net --scope operate
 sudo ./scripts/manage.sh hub status
 sudo ./scripts/manage.sh hub disconnect
@@ -71,18 +76,33 @@ quiet until you disconnect and connect again. If the server later moves to anoth
 likewise stays stored but goes quiet, and Settings says why; disconnect and connect to a hub on the new
 tailnet.
 
-The scope works as for just-dashboard.com, with the table above, except that the default is `maintain`: a hub
-is yours and on your own network, and keeping servers updated is what it is for. Change it any time in
-Settings. Every command from the hub, run or refused, is written to the audit log as `hub:<hub name>`, and its
-destructive actions draw on their own budget. The hub never opens a connection to the dashboard, with one
-exception before you connect: it may ask `GET /api/v1/hub/hello` to find dashboards on the tailnet, which is
-behind your network allowlist and answers only whether this server can be connected, never its version or
-name.
+The scope works as for just-dashboard.com, with the table above ("the hub" for "the site"), except that the
+default is `maintain`: a hub is yours and on your own network, and keeping servers updated is what it is for.
+Change it any time in Settings. Every command from the hub, run or refused, is written to the audit log as
+`hub:<hub name>` (actions `hub.command.*`), and its destructive actions draw on their own budget. The hub never
+opens a connection to the dashboard, with one exception before you connect: it may ask
+`GET /api/v1/hub/hello` to find dashboards on the tailnet, which is behind your network allowlist and answers
+only whether this server can be connected, never its version or name.
+
+Once connected, the dashboard knows it is one of several:
+
+- the logo at the top of the sidebar becomes this server's name, and opens a list of every server on the hub
+  with its state (online, late, offline, updating) — pick one to open it in the same tab — and **Open Just
+  Hub**;
+- **Ctrl K** gets a **Servers** scope (`server:`) that finds and opens them the same way;
+- the browser tab's title carries this server's name, so several dashboard tabs can be told apart;
+- the hub's notices appear above your account in the sidebar, as the hub's, and can be dismissed in this
+  browser.
+
+All of it comes from this server's own copy of the hub's last reply, so the browser never contacts the hub,
+and when the hub is down every dashboard feature keeps working and the list says *Hub unreachable*.
+**Settings → Hub** shows the scope, the last report exactly as it was sent, the last command the hub ran here,
+and **Disconnect**. A server that has never been connected looks exactly as it always did.
 
 Disconnect from Settings, with `sudo ./scripts/manage.sh hub disconnect`, or by removing the server in the hub,
-after which `hub status` says it was removed there.
-`JD_HUB_LINK=false` switches the feature off entirely: no discovery answer, no page controls, no command, and a
-connection that exists goes quiet. The Settings page shows the exact body of the last report the hub was sent.
+after which `hub status` says it was removed there. Disconnecting clears the link here and tells the hub; the
+server keeps its key, so connecting again shows the same fingerprint. `JD_HUB_LINK=false` switches the feature off
+entirely: no discovery answer, no page controls, no command, and a connection that exists goes quiet.
 
 ## The usage count
 

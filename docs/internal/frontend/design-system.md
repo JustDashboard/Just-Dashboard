@@ -2912,6 +2912,19 @@ The passes, in order. Each one is a diff you can review on its own.
    text in tabular figures, mono kept for the fingerprints compared character by character, and
    the sections stand at the deploy settings pages' `py-8`. At 1440 the linked page went from
    3,387px to 2,112px.
+
+   Settings → Hub (`/dashboard/hub`, 0.8.5) is Connect pointed at a Just Hub and takes the same
+   exit for the same reason, with Connect as its reference rather than a new design. Its register
+   was the one real question: the hub's Connect button lands on it with `?connect=<hub host>`, which
+   is a sequence with an outcome, and the §16 test asks what the reader came to do. It stays in the
+   reading register because the sequence is one section of a page that reads the link before and
+   after it — exactly Connect's shape — and a page that flips register when the link changes state
+   would be half in each. So the connect form is a section under a hairline, not a `FlowPanel`;
+   **Connect** is its one brand face; the scopes are Connect's lit cards; the code and this server's
+   fingerprint sit side by side because the hub's approval screen shows both and matching them is
+   the whole check. The picture is Connect's (`LinkPicture`, which both pages now draw through)
+   with the hub's J and address at its end. Hub notices on the page are `Notice`s in the notice's
+   own tone, because each is a sentence the hub chose to say, not a reading.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed
@@ -3699,6 +3712,9 @@ back off at the operator's request: in the shell the washes read as the sign-in 
 dashboard. It is the account card's own container (`border-sidebar-border`, `bg-card`), tinted with
 `bg-wash-success` or `bg-wash-danger` only once a run has finished, and its life is the wire, the
 kind band and the beam (§11) rather than a ground. Arrival's light stays on arrival's screens.
+The hub notice beside it (`hub-link/hub-notice.tsx`) is the same container, tinted with
+`bg-wash-warning` or `bg-wash-danger` only for a notice the hub marked as a warning or critical, and
+has no motion of its own beyond arriving: it reports what another machine said.
 
 ## 17. Redesigning a flow page
 
