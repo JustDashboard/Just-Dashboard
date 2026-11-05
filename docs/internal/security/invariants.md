@@ -352,7 +352,8 @@ A change that weakens any of these has to say so explicitly.
     `call_operation` and its shaped reads, and runs a shell line on the host as the terminal would
     (`run_command`, invariant 6), which takes the terminal capability. What stays out of its reach is a closed list in
     `api/handlers_assistant_routes.go` (`agentExclusion`), each line something no role changes: its own routes
-    and those that ask the model; sign-in, password, second factor, passkeys, sessions and minting an API key;
+    and those that ask the model; sign-in, password, second factor, passkeys, sessions, letting Just Hub sign the
+    account in and minting an API key;
     uninstalling the dashboard, its account link, its hub link and its usage count (invariants 12, 16 and 17 want
     the person's own press); WebSockets and streams; webhooks, the MCP endpoint and other machines' routes. A database connection
     the operator protected is out of every chat's reach as well (`agentProtected`): its own chat is refused by the
