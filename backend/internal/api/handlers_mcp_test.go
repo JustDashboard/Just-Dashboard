@@ -289,7 +289,7 @@ func TestAnMCPKeyOpensNoOtherRoute(t *testing.T) {
 	// deploy. Neither reaches a route of the API.
 	key := b.deployKey(b.admin, auth.DeployRun, write(b.shop))
 	for _, rt := range apiRoutes(t, b.h) {
-		if rt.pattern == "/api/v1/mcp" {
+		if rt.pattern == "/api/v1/mcp" || isPublicAPIRoute(rt) {
 			continue
 		}
 		req := httptest.NewRequest(rt.method, rt.path, strings.NewReader("{}"))

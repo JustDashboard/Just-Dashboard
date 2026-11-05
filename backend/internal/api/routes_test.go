@@ -66,6 +66,21 @@ func testServer(t *testing.T) *Server {
 
 var routeParam = regexp.MustCompile(`\{[^}]*\}`)
 
+// publicAPIRoutes are the routes under /api/v1 that answer without any
+// credential, each with the exact body it answers: the hub's discovery probe
+// (hub-link-protocol.md section 8.1), which names nothing but the product, the
+// protocol and whether this server can be connected. A key reaches them as
+// nobody does and gains nothing, so the walks that check what a key may open
+// skip them, and TestNoAPIRouteAnswersWithoutAuthentication checks the bodies.
+var publicAPIRoutes = map[string]string{
+	"GET /api/v1/hub/hello": `{"product":"just-dashboard","protocol":1,"hub":"available"}`,
+}
+
+func isPublicAPIRoute(rt route) bool {
+	_, ok := publicAPIRoutes[rt.method+" "+rt.pattern]
+	return ok
+}
+
 type route struct{ method, pattern, path string }
 
 func apiRoutes(t *testing.T, h http.Handler) []route {
@@ -121,9 +136,7 @@ func TestEveryAPIRouteIsBehindTheNetworkAllowlist(t *testing.T) {
 func TestNoAPIRouteAnswersWithoutAuthentication(t *testing.T) {
 	s := testServer(t)
 	h := s.Routes()
-	exceptions := map[string]string{
-		"GET /api/v1/hub/hello": `{"product":"just-dashboard","protocol":1,"hub":"available"}`,
-	}
+	exceptions := publicAPIRoutes
 	seen := 0
 	for _, rt := range apiRoutes(t, h) {
 		req := httptest.NewRequest(rt.method, rt.path, nil)

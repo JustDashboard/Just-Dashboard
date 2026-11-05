@@ -287,6 +287,9 @@ func TestADeployKeyGetsTheDecidedAnswerOnEveryRoute(t *testing.T) {
 	for _, rt := range apiRoutes(t, b.h) {
 		route := rt.method + " " + strings.TrimPrefix(rt.pattern, "/api/v1")
 		walked[route] = true
+		if isPublicAPIRoute(rt) {
+			continue
+		}
 		key := b.call(b.deploy, rt.method, rt.path, "{}")
 		got := keyErrorCode(key)
 		if !strings.HasPrefix(rt.pattern, "/api/v1/deploy/") || rt.pattern == "/api/v1/deploy/{id}/hooks/{triggerID}" {
