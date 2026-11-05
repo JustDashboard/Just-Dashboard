@@ -19,6 +19,8 @@ import { NetworkChangeConfirmation } from "@/components/network/change-confirmat
 import { HeldSessionsHost, HeldSessionsProvider } from "@/components/remote-desktop/held-sessions"
 import { AgentDock } from "@/components/assistant/agent/dock"
 import { AskAboutPage } from "@/components/assistant/ask-about"
+import { HubLinkProvider, useShellHub } from "@/hooks/use-hub-link"
+import { ServerSwitcher } from "@/components/hub-link/server-switcher"
 
 /**
  * The page's name in the tab is what tells a row of dashboard tabs apart. This
@@ -26,18 +28,30 @@ import { AskAboutPage } from "@/components/assistant/ask-about"
  * the element to the head instead. The root layout declares no title for that
  * reason: Next would write its own over a `document.title`, and beside this one
  * would be the first of two.
+ *
+ * The hub link's provider sits above the title because a linked server names
+ * itself in the tab, and above the shell because the rail, the phone's strip
+ * and the palette all draw the hub from it. Unlinked it asks nothing and gives
+ * nothing, and every one of them is what it was.
  */
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <>
-      <title>{tabTitle(usePathname())}</title>
+    <HubLinkProvider>
+      <TabTitle />
       <DashboardShell>{children}</DashboardShell>
-    </>
+    </HubLinkProvider>
   )
+}
+
+function TabTitle() {
+  const pathname = usePathname()
+  const hub = useShellHub()
+  return <title>{tabTitle(pathname, hub?.self?.name)}</title>
 }
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const { status, loading, sessionEnded } = useAuth()
+  const hub = useShellHub()
   const router = useRouter()
 
   // Redirecting here is a convenience, not a security control: every API call
@@ -86,10 +100,11 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               It carried a breadcrumb every page already states in its own
               header. Below `md` the rail is a sheet with nothing left to open
               it, so this one strip stays: the trigger, and the name of the
-              product it belongs to. */}
+              product it belongs to — or, on a server linked to a hub, the
+              server it is, which is the switcher to the others. */}
                   <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:hidden">
                     <SidebarTrigger className="-ml-0.5 size-8 text-muted-foreground" />
-                    <Logo />
+                    {hub ? <ServerSwitcher hub={hub} strip /> : <Logo />}
                     {/* A phone has no ⌘K and the rail's search field is inside
                       a closed sheet, so search had no way in at all here; nor
                       had asking the assistant about the page. */}

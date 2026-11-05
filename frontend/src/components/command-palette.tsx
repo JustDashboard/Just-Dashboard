@@ -49,6 +49,9 @@ import { Spinner } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useArrivals } from "@/hooks/use-arrivals"
+import { useShellHub } from "@/hooks/use-hub-link"
+import { serverEntries } from "@/lib/hub-link"
+import { LogoGlyph } from "@/components/logo"
 import {
   highlight,
   localDestination,
@@ -57,6 +60,7 @@ import {
   rememberDestination,
   scopeQuery,
   searchItems,
+  searchScopes,
   SEARCH_SCOPES,
   type RecentDestination,
   type SearchKind,
@@ -267,6 +271,9 @@ function Palette({
   const pathname = usePathname()
   const { can, logout } = useAuth()
   const { hidden } = useHiddenSections()
+  // Servers is a scope only on a server linked to a Just Hub.
+  const hub = useShellHub()
+  const offered = searchScopes(Boolean(hub))
   // A section kept out of the sidebar is kept out of the empty list too, and
   // is still one word away: search is how a hidden page is reached on purpose.
   const isHidden = (href: string) => hidden.has(sectionOf(href) ?? "")
@@ -318,7 +325,9 @@ function Palette({
           href: page.href,
           icon: page.icon,
           product: PAGE_PRODUCTS[page.href],
-          explicit: isHidden(page.href),
+          // A hub-only page stays out of the empty list until there is a hub,
+          // and is found by name: the way to connect one from this side.
+          explicit: isHidden(page.href) || (Boolean(page.hubLink) && !hub),
           neighbours: parent
             ? { label: parent.title, pages: shown(parent.children ?? []) }
             : { label: group.label, pages: shown(group.items) },
@@ -430,6 +439,20 @@ function Palette({
     explicit: true,
     run: () => void logout(),
   })
+  // The other dashboards the hub holds. Another server is another origin,
+  // which `open` refuses by design, so choosing one assigns the location —
+  // in this tab, as the rail's switcher does.
+  const servers: PaletteItem[] = hub
+    ? serverEntries(hub).map(({ reading, self, hub: isHub, facts, ...entry }) => ({
+        ...entry,
+        icon: isHub ? HubMark : undefined,
+        noun: isHub ? "Hub" : undefined,
+        state: self ? undefined : reading?.label,
+        tone: reading?.tone,
+        facts,
+        run: !self && entry.href ? () => window.location.assign(entry.href!) : undefined,
+      }))
+    : []
   const resources = reads.flatMap((read) => read.items)
   const byHref = new Map(resources.map((item) => [item.href, item]))
   const linked = new Map<string, PaletteItem[]>()
@@ -458,6 +481,7 @@ function Palette({
     }),
     ...commands,
     ...pages,
+    ...servers,
     ...currentPages.map((page) => ({
       id: `page:database:${page.id}`,
       kind: "page" as const,
@@ -470,7 +494,7 @@ function Palette({
     })),
     ...resources,
   ]
-  const parsed = parseSearch(query)
+  const parsed = parseSearch(query, offered)
   const searchableIn = (scope: SearchScope) =>
     items.filter((item) => {
       if (
@@ -482,15 +506,15 @@ function Palette({
         return false
       return !item.explicit || !!parsed.text || scope === "command"
     })
-  const result = searchItems(searchableIn(parsed.scope), query)
+  const result = searchItems(searchableIn(parsed.scope), query, 60, offered)
   // What each scope would find for the same words, beside its name: the reader
   // sees that the three hits are a container, a stack and a repository before
   // choosing where to look.
   const counts: Partial<Record<SearchScope, number>> = parsed.text
     ? Object.fromEntries(
-        SEARCH_SCOPES.map(([scope]) => [
+        offered.map(([scope]) => [
           scope,
-          searchItems(searchableIn(scope), scopeQuery(query, scope)).total,
+          searchItems(searchableIn(scope), scopeQuery(query, scope, offered), 60, offered).total,
         ]),
       )
     : {}
@@ -558,7 +582,7 @@ function Palette({
     chips[(next + chips.length) % chips.length].focus()
   }
   const chooseScope = (scope: SearchScope) => {
-    changeQuery(scopeQuery(query, scope))
+    changeQuery(scopeQuery(query, scope, offered))
     input.current?.focus()
   }
 
@@ -611,7 +635,7 @@ function Palette({
         onKeyDown={roveScopes}
         className="flex shrink-0 [scrollbar-width:none] items-stretch overflow-x-auto border-b border-hairline [mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)] pr-8 pl-2 [&::-webkit-scrollbar]:hidden"
       >
-        {SEARCH_SCOPES.map(([scope, label]) => {
+        {offered.map(([scope, label]) => {
           const current = scope === parsed.scope
           const count = counts[scope]
           return (
@@ -708,7 +732,7 @@ function Palette({
                   <span className="flex min-w-0 flex-1 items-baseline gap-2">
                     <span className="max-w-[75%] shrink-0 truncate text-foreground">
                       {item.previous && "Back to "}
-                      {highlight(item.title, query).map((run, i) =>
+                      {highlight(item.title, query, offered).map((run, i) =>
                         run.hit ? (
                           <mark key={i} className="bg-transparent font-medium text-signal">
                             {run.text}
@@ -731,7 +755,12 @@ function Palette({
                       {visited(item.at)}
                     </span>
                   ) : item.state ? (
-                    <Status state={item.state} label={item.state} className="text-hint" />
+                    <Status
+                      state={item.state}
+                      tone={item.tone}
+                      label={item.state}
+                      className="text-hint"
+                    />
                   ) : item.href === currentHref ? (
                     <span className="text-hint text-muted-foreground">Current</span>
                   ) : (
@@ -814,6 +843,11 @@ function Palette({
       </div>
     </Command>
   )
+}
+
+/** The hub's J, in a result row's mark slot: Just Hub shares the dashboard's mark. */
+function HubMark({ className }: { className?: string }) {
+  return <LogoGlyph small className={cn("text-brand", className)} />
 }
 
 /**

@@ -652,8 +652,15 @@ export const APP_NAME = "Just Dashboard"
  * What the browser's tab says on a page: "Files · Just Dashboard". An address
  * the nav has no row for takes the section it sits in, and one under no
  * section takes the product's name alone.
+ *
+ * A server linked to a Just Hub is one of several, and five tabs that all say
+ * "Docker · Just Dashboard" cannot be told apart — so `host`, this server's
+ * name as the hub lists it, goes after the page: "Docker · atlas · Just
+ * Dashboard". After it rather than before, so the page still leads and a
+ * narrow tab cuts the product's name first. Unlinked, the title is exactly
+ * what it was.
  */
-export function tabTitle(pathname: string): string {
+export function tabTitle(pathname: string, host?: string): string {
   const page = navLocation(pathname)?.title ?? sectionsFor(pathname)[0]?.title
-  return page ? `${page} · ${APP_NAME}` : APP_NAME
+  return [page, host?.trim() || undefined, APP_NAME].filter(Boolean).join(" · ")
 }

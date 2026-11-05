@@ -17,6 +17,14 @@ test("an address under no section falls back to the product's name", () => {
   expect(tabTitle("/no-such-page")).toBe("Just Dashboard")
 })
 
+test("a server linked to a hub names itself after the page", () => {
+  expect(tabTitle("/docker", "atlas")).toBe("Docker · atlas · Just Dashboard")
+  expect(tabTitle("/no-such-page", "atlas")).toBe("atlas · Just Dashboard")
+  // Unlinked, or before the hub has named it, the title is what it always was.
+  expect(tabTitle("/docker", undefined)).toBe("Docker · Just Dashboard")
+  expect(tabTitle("/docker", "  ")).toBe("Docker · Just Dashboard")
+})
+
 test("Settings → Hub is in the rail only on a linked server, or while you are on it", () => {
   const settings = NAV.flatMap((group) => group.items).find((entry) => entry.href === "/dashboard")
   const hub = settings.children.find((child) => child.href === "/dashboard/hub")
