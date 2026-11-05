@@ -3,6 +3,7 @@ package accountlink
 import (
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json"
 	"time"
 )
@@ -34,6 +35,80 @@ func (s *Service) Fingerprint(ctx context.Context) string {
 		return id.Fingerprint()
 	}
 	return ""
+}
+
+// SetIdle stops using the stored link serverID: Idle is stored in its state,
+// and also, when set, runs in the same write transaction, so what must end
+// with the link's use (hub sign-in's sessions) cannot outlive the decision.
+// The running loops end, and nothing is sent on the link again until a person
+// unlinks. It reports whether this call made the link idle: false when it
+// was already idle, or is gone or another.
+func (s *Service) SetIdle(ctx context.Context, serverID string, idle Idle, also func(context.Context, *sql.Tx) error) (bool, error) {
+	ctx = context.WithoutCancel(ctx)
+	set := false
+	_, _, err := s.kv.updateStateTx(ctx, serverID, func(tx *sql.Tx, cur *State) (bool, error) {
+		if cur.Idle != nil {
+			return false, nil
+		}
+		if also != nil {
+			if err := also(ctx, tx); err != nil {
+				return false, err
+			}
+		}
+		cur.Idle, set = &idle, true
+		return true, nil
+	})
+	if err != nil {
+		return false, err
+	}
+	if set {
+		s.cancelLinked()
+		s.nudge()
+	}
+	return set, nil
+}
+
+// RecordNode pins the peer's machine on the stored link serverID, if it has
+// none yet. It reports whether it did.
+func (s *Service) RecordNode(ctx context.Context, serverID string, node PeerNode) (bool, error) {
+	set := false
+	_, _, err := s.kv.updateState(context.WithoutCancel(ctx), serverID, func(cur *State) bool {
+		if cur.HubNode != nil {
+			return false
+		}
+		cur.HubNode, set = &node, true
+		return true
+	})
+	return set, err
+}
+
+// RecordRequestNode keeps the peer's machine with the pending request id, if
+// it has none yet, and reports the request as it stands.
+func (s *Service) RecordRequestNode(ctx context.Context, id string, node PeerNode) (Request, bool, error) {
+	ctx = context.WithoutCancel(ctx)
+	var out Request
+	found := false
+	err := s.kv.tx(ctx, func(tx *sql.Tx) error {
+		var raw string
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, s.kv.key(keyRequest)).Scan(&raw); err != nil {
+			if err == sql.ErrNoRows {
+				return nil
+			}
+			return err
+		}
+		var req Request
+		if err := json.Unmarshal([]byte(raw), &req); err != nil || req.ID != id {
+			return err
+		}
+		found, out = true, req
+		if req.HubNode != nil {
+			return nil
+		}
+		req.HubNode = &node
+		out = req
+		return s.kv.putTx(ctx, tx, keyRequest, req)
+	})
+	return out, found && err == nil, err
 }
 
 // Timing shortens the engine's waits, for tests that cannot wait fifteen

@@ -112,7 +112,8 @@ type Options struct {
 	// Tailnet reads this server's tailnet; the host's tailscale by default.
 	Tailnet Tailnet
 	// WhoIs asks tailscaled who holds an address; its local API by default.
-	// It confirms a hub's name when a link is begun.
+	// It confirms a hub's name when a link is begun, and pins the hub's
+	// machine before anything is sent to it (protocol 2.4).
 	WhoIs tailnetgate.WhoIs
 	// HTTP and Now are for tests.
 	HTTP     *http.Client
@@ -133,17 +134,21 @@ type Service struct {
 	dial       *dialer
 	endpoint   func(context.Context) string
 	now        func() time.Time
+	audit      *audit.Logger
+	// gate remembers which address was last checked to be the hub node's.
+	gate nodeGate
 
 	mu sync.Mutex
-	// admitted is the rule's decision on each stored link, made once per
-	// link per process: when the connector starts with it.
+	// admitted holds the stored links the rule passed, once per link per
+	// process: when the connector starts with it. A link it refuses is set
+	// idle in the store instead, and stays so.
 	admitted map[string]error
 }
 
 func New(o Options) *Service {
 	s := &Service{
 		st: o.Store, log: o.Log, enabled: o.Enabled, testOrigin: o.TestOrigin,
-		tailnet: o.Tailnet, whois: o.WhoIs, endpoint: o.Endpoint, now: o.Now,
+		tailnet: o.Tailnet, whois: o.WhoIs, endpoint: o.Endpoint, now: o.Now, audit: o.Audit,
 		admitted: map[string]error{},
 	}
 	if s.log == nil {
@@ -159,6 +164,7 @@ func New(o Options) *Service {
 		s.now = func() time.Time { return time.Now().UTC() }
 	}
 	s.dial = newDialer(s.tailnet, s.testOrigin)
+	s.dial.gate = s.dialGate
 	client := o.HTTP
 	if client == nil {
 		client = newHTTPClient(s.dial)
@@ -169,9 +175,10 @@ func New(o Options) *Service {
 		Host: o.Host, Version: o.Version, Describe: o.Describe, HTTP: client, Now: s.now, Location: o.Location,
 		Profile: &p,
 		Hooks: accountlink.Hooks{
-			Admit:   s.admit,
-			OnReply: s.onReply,
-			OnClear: s.onClear,
+			Admit:      s.admit,
+			OnReply:    s.onReply,
+			OnClear:    s.onClear,
+			BeforePoll: s.beforePoll,
 			// Hub sign-in adds its grants to the heartbeat here, through
 			// HeartbeatExtra, once it exists. Until then the heartbeat is
 			// the snapshot alone and the hub reads that as sign-in off.
@@ -196,6 +203,8 @@ func (s *Service) Start(ctx context.Context) {
 	if s == nil {
 		return
 	}
+	// The hub node is checked again before the first request of every start.
+	s.gate.forget()
 	s.engine.Start(ctx)
 }
 
@@ -207,24 +216,30 @@ func (s *Service) Stop() {
 	s.engine.Stop()
 }
 
-// admit is the engine's hook for a stored link: the URL rule as it applies at
-// start, decided once per link.
+// admit is the engine's hook before anything is sent on a stored link: an idle
+// link sends nothing; the URL rule as it applies at start (2.2 "When the rule
+// runs"), decided once per link per process; and the hub node check of 2.4.
+// A link the rule refuses is set idle in the store, with every hub session
+// revoked in the same transaction, and audited as hub.link.idle.
 func (s *Service) admit(ctx context.Context, st accountlink.State) error {
+	if st.Idle != nil {
+		return refused(errors.New(st.Idle.Reason))
+	}
 	key := st.ServerID + " " + st.URL
 	s.mu.Lock()
-	err, decided := s.admitted[key]
+	_, passed := s.admitted[key]
 	s.mu.Unlock()
-	if decided {
-		return err
+	if !passed {
+		if why := s.admitStored(ctx, st.URL); why != nil {
+			reason := "the hub's address no longer passes this server's tailnet rule: " + why.Error()
+			s.goIdle(ctx, st, reason, "hub.link.idle", nil)
+			return refused(errors.New(reason))
+		}
+		s.mu.Lock()
+		s.admitted[key] = nil
+		s.mu.Unlock()
 	}
-	err = s.admitStored(ctx, st.URL)
-	if err != nil {
-		s.log.Warn("the hub link is idle: its address no longer passes this server's tailnet rule", "hub", st.URL, "err", err)
-	}
-	s.mu.Lock()
-	s.admitted[key] = err
-	s.mu.Unlock()
-	return err
+	return s.admitNode(ctx, st)
 }
 
 // translate gives the engine's errors this package's names.
@@ -282,7 +297,7 @@ func (s *Service) Connect(ctx context.Context, r ConnectRequest) (accountlink.Re
 	} else if linked {
 		return accountlink.Request{}, ErrAlreadyLinked
 	}
-	origin, err := s.checkURL(ctx, r.URL)
+	origin, node, err := s.checkURL(ctx, r.URL)
 	if err != nil {
 		return accountlink.Request{}, err
 	}
@@ -293,9 +308,32 @@ func (s *Service) Connect(ctx context.Context, r ConnectRequest) (accountlink.Re
 		}
 	}
 	req, err := s.engine.Begin(ctx, accountlink.LinkRequest{
-		Scope: r.Scope, By: r.By, Origin: origin, Endpoint: endpoint, Token: r.Token,
+		Scope: r.Scope, By: r.By, Origin: origin, Endpoint: endpoint, Token: r.Token, HubNode: node,
 	})
 	return req, translate(err)
+}
+
+// CheckResult is what GET /dashboard/hub/check answers: the hub URL as it
+// would be stored, the hub's machine when tailscaled could be asked, and
+// whether it is the test origin.
+type CheckResult struct {
+	HubURL     string   `json:"hubUrl"`
+	Machine    *Machine `json:"machine,omitempty"`
+	TestOrigin bool     `json:"testOrigin"`
+}
+
+// Check applies the URL rule, steps 1 to 8, without starting anything, so the
+// Settings page can show whose machine an address is before Connect (protocol
+// 8.2). It sends nothing to the hub.
+func (s *Service) Check(ctx context.Context, raw string) (CheckResult, error) {
+	if !s.enabled {
+		return CheckResult{}, ErrDisabled
+	}
+	origin, node, err := s.checkURL(ctx, raw)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	return CheckResult{HubURL: origin, Machine: node, TestOrigin: s.testOrigin != "" && origin == s.testOrigin}, nil
 }
 
 // Poll asks the hub whether the pending request has been decided.

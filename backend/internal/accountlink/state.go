@@ -49,6 +49,30 @@ func (k SiteKey) key() (ed25519.PublicKey, error) {
 
 func (k SiteKey) usable(now time.Time) bool { return k.NotAfter == 0 || now.Unix() < k.NotAfter }
 
+// PeerNode is the tailnet machine that answered at the peer's name, as
+// tailscaled's WhoIs named it: the hub link pins it (hub-link-protocol.md 2.4).
+// It is also the shape the hub link's local API shows it in.
+type PeerNode struct {
+	// ID is the node's StableNodeID, which stays the machine's when its name
+	// or address changes.
+	ID string `json:"id"`
+	// Name is its MagicDNS name without the trailing dot.
+	Name string `json:"name"`
+	// Owner is the login of the person the node belongs to; a tagged node has
+	// none, and Tags instead.
+	Owner string   `json:"owner,omitempty"`
+	Tags  []string `json:"tags"`
+}
+
+// Idle is a stored link the instance has stopped using, and why. It stays
+// until a person unlinks: nothing is sent on an idle link.
+type Idle struct {
+	// Code is the API's word for it, hub_url_refused for the hub link.
+	Code   string    `json:"code"`
+	Reason string    `json:"reason"`
+	At     time.Time `json:"at"`
+}
+
 // State is the link itself. It holds nothing secret: the site's public keys, the
 // scope chosen here and who the link belongs to.
 type State struct {
@@ -64,6 +88,11 @@ type State struct {
 	ServerName       string `json:"serverName,omitempty"`
 	HeartbeatSeconds int    `json:"heartbeatSeconds"`
 	PollWaitSeconds  int    `json:"pollWaitSeconds"`
+	// HubNode is the peer's machine, pinned when the link was made or
+	// recorded by the first check after it; nil until one is.
+	HubNode *PeerNode `json:"hubNode,omitempty"`
+	// Idle is set once the instance stopped using this link.
+	Idle *Idle `json:"idle,omitempty"`
 }
 
 func (s State) siteKey(kid string, now time.Time) (SiteKey, bool) {
@@ -93,6 +122,10 @@ type Request struct {
 	// terminal is polled by that command alone, so the running dashboard and
 	// the command never both collect the one-time approval.
 	Driver string `json:"driver"`
+	// HubNode is the peer's machine found when the request was made, or by
+	// the first check after it; the link pins the one its approval was polled
+	// from.
+	HubNode *PeerNode `json:"hubNode,omitempty"`
 }
 
 const (

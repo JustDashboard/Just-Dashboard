@@ -3,6 +3,7 @@ package hublink
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
@@ -58,12 +59,18 @@ type RequestStatus struct {
 	ApproveURL string    `json:"approveUrl"`
 	ExpiresAt  time.Time `json:"expiresAt"`
 	Scope      string    `json:"scope"`
+	// HubMachine is the hub node step 8 of the rule found, left out when it
+	// was not checked.
+	HubMachine *Machine `json:"hubMachine,omitempty"`
 }
 
 type LinkStatus struct {
-	ServerID     string                     `json:"serverId"`
-	LinkedAt     time.Time                  `json:"linkedAt"`
-	LinkedBy     string                     `json:"linkedBy"`
+	ServerID string    `json:"serverId"`
+	LinkedAt time.Time `json:"linkedAt"`
+	LinkedBy string    `json:"linkedBy"`
+	// HubMachine is the pinned hub node (protocol 2.4), left out until one is
+	// recorded.
+	HubMachine   *Machine                   `json:"hubMachine,omitempty"`
 	LastError    string                     `json:"lastError,omitempty"`
 	LastCommand  *accountlink.CommandStatus `json:"lastCommand,omitempty"`
 	HubKeys      []HubKeyStatus             `json:"hubKeys"`
@@ -117,8 +124,12 @@ func (s *Service) Status(ctx context.Context, admin bool) (Status, error) {
 		if a != nil && es.Link != nil {
 			l := es.Link
 			a.Link = &LinkStatus{
-				ServerID: l.ServerID, LinkedAt: l.LinkedAt, LinkedBy: l.LinkedBy, LastError: l.LastError,
+				ServerID: l.ServerID, LinkedAt: l.LinkedAt, LinkedBy: l.LinkedBy, HubMachine: st.HubNode, LastError: l.LastError,
 				LastCommand: l.LastCommand, HubKeys: []HubKeyStatus{}, UpdatePolicy: l.UpdatePolicy, LastSnapshot: l.LastSnapshot,
+			}
+			// An idle link says why, whatever the last exchange left behind.
+			if st.Idle != nil {
+				a.Link.LastError = refused(errors.New(st.Idle.Reason)).Error()
 			}
 			for _, k := range l.SiteKeys {
 				a.Link.HubKeys = append(a.Link.HubKeys, HubKeyStatus{Kid: k.Kid, Fingerprint: k.Fingerprint, NotAfter: k.NotAfter})
@@ -130,7 +141,7 @@ func (s *Service) Status(ctx context.Context, admin bool) (Status, error) {
 			if a != nil {
 				a.Request = &RequestStatus{
 					HubURL: req.URL, UserCode: req.UserCode, ApproveURL: req.ApproveURL,
-					ExpiresAt: req.ExpiresAt.UTC(), Scope: string(req.Scope),
+					ExpiresAt: req.ExpiresAt.UTC(), Scope: string(req.Scope), HubMachine: req.HubNode,
 				}
 			}
 		} else {
@@ -152,7 +163,7 @@ func (s *Service) Status(ctx context.Context, admin bool) (Status, error) {
 // reachable is the last heartbeat having succeeded, none having failed since,
 // and it being younger than three intervals.
 func (s *Service) reachable(st accountlink.State, h accountlink.Health) bool {
-	if !s.enabled || h.LastHeartbeatAt == nil || h.HeartbeatError != "" {
+	if !s.enabled || st.Idle != nil || h.LastHeartbeatAt == nil || h.HeartbeatError != "" {
 		return false
 	}
 	every := time.Duration(max(st.HeartbeatSeconds, 10)) * time.Second

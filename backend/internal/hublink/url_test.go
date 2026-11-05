@@ -57,7 +57,7 @@ func TestTheHubURLRule(t *testing.T) {
 		t.Run(tc.in, func(t *testing.T) {
 			s, _, who := ruleService(t, "")
 			who.node = hostOf(tc.origin) + "."
-			origin, err := s.checkURL(t.Context(), tc.in)
+			origin, _, err := s.checkURL(t.Context(), tc.in)
 			if codeOf(err) != tc.code || origin != tc.origin {
 				t.Fatalf("checkURL(%q) = %q, %v; want %q, %s", tc.in, origin, err, tc.origin, tc.code)
 			}
@@ -75,7 +75,7 @@ func TestTheRuleNeedsATailnetWithMagicDNS(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s, tn, _ := ruleService(t, "")
 			set(tn)
-			if _, err := s.checkURL(t.Context(), "hub.tailed39ba.ts.net"); codeOf(err) != CodeNotTailnet {
+			if _, _, err := s.checkURL(t.Context(), "hub.tailed39ba.ts.net"); codeOf(err) != CodeNotTailnet {
 				t.Fatalf("err = %v", err)
 			}
 		})
@@ -84,7 +84,7 @@ func TestTheRuleNeedsATailnetWithMagicDNS(t *testing.T) {
 
 func TestWhoIsConfirmsTheHubsNodeWhenItCanBeAsked(t *testing.T) {
 	s, _, who := ruleService(t, "")
-	if _, err := s.checkURL(t.Context(), "hub.tailed39ba.ts.net"); err != nil {
+	if _, _, err := s.checkURL(t.Context(), "hub.tailed39ba.ts.net"); err != nil {
 		t.Fatal(err)
 	}
 	// It asked about the address the dashboard would dial: from tailscale
@@ -93,15 +93,15 @@ func TestWhoIsConfirmsTheHubsNodeWhenItCanBeAsked(t *testing.T) {
 		t.Fatalf("asked = %v", who.asks)
 	}
 	who.node = "impostor.tailed39ba.ts.net."
-	if _, err := s.checkURL(t.Context(), "hub.tailed39ba.ts.net"); codeOf(err) != CodeNotOnTailnet {
+	if _, _, err := s.checkURL(t.Context(), "hub.tailed39ba.ts.net"); codeOf(err) != CodeNotOnTailnet {
 		t.Fatalf("another node = %v", err)
 	}
 	who.err = tailnetgate.ErrNotAPeer
-	if _, err := s.checkURL(t.Context(), "hub.tailed39ba.ts.net"); codeOf(err) != CodeNotOnTailnet {
+	if _, _, err := s.checkURL(t.Context(), "hub.tailed39ba.ts.net"); codeOf(err) != CodeNotOnTailnet {
 		t.Fatalf("not a peer = %v", err)
 	}
 	who.err = tailnetgate.ErrUnavailable
-	if _, err := s.checkURL(t.Context(), "hub.tailed39ba.ts.net"); err != nil {
+	if _, _, err := s.checkURL(t.Context(), "hub.tailed39ba.ts.net"); err != nil {
 		t.Fatalf("tailscaled unavailable should skip the check: %v", err)
 	}
 }
@@ -125,32 +125,43 @@ func TestTheTestOriginIsOneLoopbackOriginAndWidensNothingElse(t *testing.T) {
 	}
 
 	s, _, _ := ruleService(t, "http://127.0.0.1:43180")
-	if origin, err := s.checkURL(t.Context(), "http://127.0.0.1:43180/"); err != nil || origin != "http://127.0.0.1:43180" {
+	if origin, node, err := s.checkURL(t.Context(), "http://127.0.0.1:43180/"); err != nil || origin != "http://127.0.0.1:43180" || node != nil {
 		t.Fatalf("the test origin = %q, %v", origin, err)
 	}
-	if _, err := s.checkURL(t.Context(), "http://127.0.0.1:43181"); codeOf(err) != CodeURLInvalid {
+	if _, _, err := s.checkURL(t.Context(), "http://127.0.0.1:43181"); codeOf(err) != CodeURLInvalid {
 		t.Fatalf("another port = %v", err)
 	}
-	if _, err := s.checkURL(t.Context(), "hub.example.com"); codeOf(err) != CodeNotTailnet {
+	if _, _, err := s.checkURL(t.Context(), "hub.example.com"); codeOf(err) != CodeNotTailnet {
 		t.Fatalf("a real name still goes through the rule: %v", err)
 	}
 }
 
+// Steps 1 to 4 need no tailnet and always run on a stored link; steps 5 to 7
+// run when this server's suffix can be read (protocol 2.2, "When the rule
+// runs").
 func TestAStoredLinkIsCheckedOnlyWhenTheTailnetCanBeRead(t *testing.T) {
 	s, tn, _ := ruleService(t, "")
 	if err := s.admitStored(t.Context(), "https://hub.tailed39ba.ts.net"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.admitStored(t.Context(), "http://127.0.0.1:43180"); !errors.Is(err, ErrURLRefused) {
-		t.Fatalf("a removed test origin = %v", err)
-	}
 	tn.set(func(st *TailnetStatus) { st.Suffix = "other.ts.net" })
-	if err := s.admitStored(t.Context(), "https://hub.tailed39ba.ts.net"); !errors.Is(err, ErrURLRefused) {
-		t.Fatalf("another tailnet = %v", err)
+	if err := s.admitStored(t.Context(), "https://hub.tailed39ba.ts.net"); err == nil {
+		t.Fatal("another tailnet passed")
 	}
 	tn.err = errors.New("tailscaled is restarting")
 	if err := s.admitStored(t.Context(), "https://hub.tailed39ba.ts.net"); err != nil {
-		t.Fatalf("an unreadable tailnet decides nothing: %v", err)
+		t.Fatalf("an unreadable tailnet decides steps 5 to 7 nothing: %v", err)
+	}
+	// With no tailnet at all, steps 1 to 4 still refuse.
+	for _, stored := range []string{"http://127.0.0.1:43180", "https://127.0.0.1:43180", "https://[::1]", "https://localhost:9443", "http://hub.tailed39ba.ts.net"} {
+		if err := s.admitStored(t.Context(), stored); err == nil {
+			t.Errorf("%s passed with the tailnet unreadable", stored)
+		}
+	}
+	// The test origin itself passes while it is set.
+	s2, _, _ := ruleService(t, "http://127.0.0.1:43180")
+	if err := s2.admitStored(t.Context(), "http://127.0.0.1:43180"); err != nil {
+		t.Fatalf("the current test origin = %v", err)
 	}
 }
 

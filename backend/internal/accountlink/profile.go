@@ -124,4 +124,15 @@ type Hooks struct {
 	// HeartbeatExtra adds top-level keys to the heartbeat body. They are
 	// never cut; the snapshot's lists are cut to leave room for them.
 	HeartbeatExtra func(ctx context.Context, st State) (map[string]json.RawMessage, error)
+	// BeforePoll runs before every poll of a pending request, in whichever
+	// process polls it, and returns the request as it stands after it (it may
+	// record something on it). An error sends nothing: a *RequestEndedError
+	// ends the request as failed, anything else counts as a failed poll.
+	BeforePoll func(ctx context.Context, req Request) (Request, error)
 }
+
+// RequestEndedError is a hook ending a pending request: nothing more is sent
+// for it, and it ends as failed with Message.
+type RequestEndedError struct{ Message string }
+
+func (e *RequestEndedError) Error() string { return e.Message }

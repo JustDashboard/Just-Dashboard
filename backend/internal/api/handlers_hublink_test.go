@@ -364,6 +364,108 @@ func TestAnUnreachableHubIsABadGatewayThatSaysWhatFailed(t *testing.T) {
 	}
 }
 
+// peerTailnet is stubTailnet with the hub's machine on it.
+type peerTailnet struct{}
+
+func (peerTailnet) Status(context.Context) (hublink.TailnetStatus, error) {
+	return hublink.TailnetStatus{Running: true, Suffix: "tailed39ba.ts.net", Self: "box.tailed39ba.ts.net",
+		Peers: map[string]netip.Addr{"hub.tailed39ba.ts.net": netip.MustParseAddr("100.101.102.103")}}, nil
+}
+
+// hubWhoIs is tailscaled naming the hub's machine, or failing with err.
+type hubWhoIs struct{ err error }
+
+func (w hubWhoIs) WhoIs(_ context.Context, a netip.Addr) (tailnetgate.Peer, error) {
+	if w.err != nil {
+		return tailnetgate.Peer{}, w.err
+	}
+	return tailnetgate.Peer{Address: a, Node: "hub.tailed39ba.ts.net.", StableID: "nK7f2QbPaa21CNTRL", Login: "wayy01@github"}, nil
+}
+
+// GET /dashboard/hub/check applies the URL rule without starting anything and
+// shows the hub's machine before Connect (protocol 8.2, HL-11): an
+// administrator's, in a session, not audited, with Connect's error codes.
+func TestTheHubCheckShowsTheMachineBeforeConnect(t *testing.T) {
+	s, hub, admin := hubServer(t, true)
+	check := func(c *client, url string, headers map[string]string) (int, string) {
+		w := c.do(http.MethodGet, "/api/v1/dashboard/hub/check?url="+url, "", headers)
+		return w.Code, strings.TrimSpace(w.Body.String())
+	}
+	if code, body := check(admin, hub.URL, nil); code != 200 || body != `{"hubUrl":"`+hub.URL+`","testOrigin":true}` {
+		t.Fatalf("the test origin = %d %s", code, body)
+	}
+	// stubWhoIs cannot be asked: no machine, and the page says not checked.
+	if code, body := check(admin, "hub.tailed39ba.ts.net", nil); code != 200 || body != `{"hubUrl":"https://hub.tailed39ba.ts.net","testOrigin":false}` {
+		t.Fatalf("unchecked = %d %s", code, body)
+	}
+	for url, want := range map[string]string{
+		"http://hub.tailed39ba.ts.net": "hub_url_invalid",
+		"hub.example.com":              "hub_url_not_tailnet",
+		"box.tailed39ba.ts.net":        "hub_url_same_host",
+	} {
+		if code, body := check(admin, url, nil); code != 400 || linkErrorCode(t, body) != want {
+			t.Errorf("%s = %d %s, want %s", url, code, body, want)
+		}
+	}
+	// Only an administrator, and never with an API key.
+	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited} {
+		c := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "hub-check-"+string(role), role)}
+		if code, _ := check(c, "hub.tailed39ba.ts.net", nil); code != http.StatusForbidden {
+			t.Errorf("check as %s = %d", role, code)
+		}
+	}
+	user, err := s.Auth.UserByID(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secret, err := s.Auth.CreateAPIToken(t.Context(), user, "hub-check", auth.RoleAdmin, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, body := check(&client{t: t, h: s.Routes()}, "hub.tailed39ba.ts.net", map[string]string{"Authorization": "Bearer " + secret}); code != 403 || linkErrorCode(t, body) != "session_required" {
+		t.Errorf("check with a key = %d %s", code, body)
+	}
+	if r, _, _, _ := hub.Count(); r != 0 || len(linkAudit(t, s, "hub.link")) != 0 {
+		t.Fatal("check sent a request or wrote an audit entry")
+	}
+
+	// With tailscaled answering, the machine and its owner.
+	s.modules.hubLink = hublink.New(hublink.Options{
+		Store: s.Store, Sealer: s.Sealer, Audit: s.Audit, Enabled: true, Host: newAccountHost(s), Version: "test",
+		Tailnet: peerTailnet{}, WhoIs: hubWhoIs{},
+	})
+	admin = &client{t: t, h: s.Routes(), cookie: admin.cookie}
+	want := `{"hubUrl":"https://hub.tailed39ba.ts.net","machine":{"id":"nK7f2QbPaa21CNTRL","name":"hub.tailed39ba.ts.net","owner":"wayy01@github","tags":[]},"testOrigin":false}`
+	if code, body := check(admin, "https://HUB.tailed39ba.ts.net.:443", nil); code != 200 || body != want {
+		t.Fatalf("checked = %d %s", code, body)
+	}
+	s.modules.hubLink = hublink.New(hublink.Options{
+		Store: s.Store, Sealer: s.Sealer, Audit: s.Audit, Enabled: true, Host: newAccountHost(s), Version: "test",
+		Tailnet: peerTailnet{}, WhoIs: hubWhoIs{err: tailnetgate.ErrNotAPeer},
+	})
+	admin = &client{t: t, h: s.Routes(), cookie: admin.cookie}
+	if code, body := check(admin, "hub.tailed39ba.ts.net", nil); code != 400 || linkErrorCode(t, body) != "hub_not_on_tailnet" {
+		t.Fatalf("no machine at the address = %d %s", code, body)
+	}
+	s.modules.hubLink = hublink.New(hublink.Options{Store: s.Store, Sealer: s.Sealer, Enabled: false})
+	admin = &client{t: t, h: s.Routes(), cookie: admin.cookie}
+	if code, body := check(admin, "hub.tailed39ba.ts.net", nil); code != 403 || linkErrorCode(t, body) != "hub_link_disabled" {
+		t.Fatalf("switched off = %d %s", code, body)
+	}
+}
+
+// Connect records the hub node it found, or why it did not, in the
+// hub.link.begin audit entry (protocol 2.2 step 8).
+func TestTheBeginAuditNamesTheHubsMachine(t *testing.T) {
+	s, hub, admin := hubServer(t, true)
+	if w := admin.do(http.MethodPost, "/api/v1/dashboard/hub", `{"url":"`+hub.URL+`","scope":"observe"}`, nil); w.Code != 200 {
+		t.Fatalf("connect = %d %s", w.Code, w.Body)
+	}
+	if rows := linkAudit(t, s, "hub.link.begin"); len(rows) != 1 || !strings.Contains(rows[0].Detail, `"hubNode":"not checked: the test origin"`) {
+		t.Fatalf("begin audit = %+v", rows)
+	}
+}
+
 func TestHubRoutesDoNotExistInAgentMode(t *testing.T) {
 	s := testServer(t)
 	s.Cfg.AgentMode = true

@@ -29,6 +29,9 @@ var (
 	// another. The link's keys and its server id mean something only to the
 	// site it was made with, so nothing is sent to the new one on its account.
 	ErrSiteChanged = errors.New("this server is linked to a different site than JD_ACCOUNT_URL now names; set it back or unlink")
+	// ErrIdle is a link the instance stopped using (SetIdle); it stays so
+	// until a person unlinks.
+	ErrIdle = errors.New("this link is idle; unlink, then link again")
 )
 
 // Options are what a Service is made from. Everything but the store and the
@@ -202,6 +205,9 @@ func (s *Service) originFor(stored string) string {
 func (s *Service) admit(ctx context.Context, st State) error {
 	if s.hooks.Admit != nil {
 		return s.hooks.Admit(ctx, st)
+	}
+	if st.Idle != nil {
+		return fmt.Errorf("%w: %s", ErrIdle, st.Idle.Reason)
 	}
 	if st.URL != s.siteURL {
 		return ErrSiteChanged
@@ -490,6 +496,11 @@ func (s *Service) commandLoop(ctx context.Context, st State) {
 }
 
 func (s *Service) pollCommands(ctx context.Context, st State) (commandsResponse, error) {
+	// The same check as before a heartbeat: nothing is sent on a link the
+	// instance refuses now.
+	if err := s.admit(ctx, st); err != nil {
+		return commandsResponse{}, err
+	}
 	id, _, err := loadIdentity(ctx, s.kv, s.sealer)
 	if err != nil || id == nil {
 		return commandsResponse{}, fmt.Errorf("link identity: %w", firstErr(err, ErrIdentityUnreadable))
@@ -606,6 +617,9 @@ func (s *Service) sendHeartbeat(ctx context.Context, st State, patient bool) err
 		return ErrNoHost
 	}
 	if err := s.admit(ctx, st); err != nil {
+		// Nothing is sent, and the page says why: the link idle, or the
+		// instance's check of the peer failing this time.
+		s.setHeartbeatError(ctx, st.ServerID, s.describeError(err))
 		return err
 	}
 	if patient {

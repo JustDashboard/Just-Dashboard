@@ -318,6 +318,10 @@ func (s *Service) process(ctx context.Context, st State, cmd Command) {
 // report tells the site how a command ended. It tries a few times, because the
 // command already ran and the site is waiting to hear.
 func (s *Service) report(ctx context.Context, st State, commandID string, res CommandResult) {
+	if err := s.admit(ctx, st); err != nil {
+		s.log.Warn("the "+s.p.Peer+" was not told how a command ended: the link is refused now", "command", commandID, "err", err)
+		return
+	}
 	id, _, err := loadIdentity(ctx, s.kv, s.sealer)
 	if err != nil || id == nil {
 		return

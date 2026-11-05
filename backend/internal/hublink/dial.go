@@ -102,6 +102,9 @@ type dialer struct {
 	testOrigin string
 	lookup     func(ctx context.Context, host string) ([]netip.Addr, error)
 	net        net.Dialer
+	// gate checks that addr belongs to the hub node before it is dialled for
+	// host (protocol 2.4); nothing is dialled when it says no.
+	gate func(ctx context.Context, host string, addr netip.Addr) error
 
 	mu     sync.Mutex
 	cached map[string]cachedPeer
@@ -176,6 +179,11 @@ func (d *dialer) dial(ctx context.Context, network, address string) (net.Conn, e
 	}
 	if !tailnetRange.Contains(addr) {
 		return nil, fmt.Errorf("%s resolves to %s, which is not a tailnet address", host, addr)
+	}
+	if d.gate != nil {
+		if err := d.gate(ctx, trimName(host), addr); err != nil {
+			return nil, err
+		}
 	}
 	conn, err := d.net.DialContext(ctx, "tcp4", net.JoinHostPort(addr.String(), port))
 	if err != nil {

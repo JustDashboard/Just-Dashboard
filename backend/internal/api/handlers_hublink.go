@@ -175,8 +175,20 @@ func (s *Server) handleHubLinkConnect(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return mapHubLinkError(err)
 	}
-	httpx.SetAudit(r, "hub.link.begin", string(scope), map[string]any{"hub": req.URL})
+	httpx.SetAudit(r, "hub.link.begin", string(scope), map[string]any{"hub": req.URL, "hubNode": s.modules.hubLink.NodeNote(req)})
 	return s.writeHubLinkStatus(w, r)
+}
+
+// handleHubLinkCheck applies the URL rule, steps 1 to 8, to ?url= and says
+// what Connect would store and whose machine answers there (protocol 8.2). It
+// starts nothing and sends nothing to the hub, so it is not audited.
+func (s *Server) handleHubLinkCheck(w http.ResponseWriter, r *http.Request) error {
+	res, err := s.modules.hubLink.Check(r.Context(), r.URL.Query().Get("url"))
+	if err != nil {
+		return mapHubLinkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
 }
 
 func (s *Server) handleHubLinkCancel(w http.ResponseWriter, r *http.Request) error {

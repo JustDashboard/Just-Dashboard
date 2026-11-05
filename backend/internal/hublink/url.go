@@ -17,10 +17,13 @@ import (
 // The codes the URL rule refuses with (protocol section 2.2). They are the API's
 // error codes as they are.
 const (
-	CodeURLInvalid    = "hub_url_invalid"
-	CodeNotTailnet    = "hub_url_not_tailnet"
-	CodeSameHost      = "hub_url_same_host"
-	CodeNotOnTailnet  = "hub_not_on_tailnet"
+	CodeURLInvalid   = "hub_url_invalid"
+	CodeNotTailnet   = "hub_url_not_tailnet"
+	CodeSameHost     = "hub_url_same_host"
+	CodeNotOnTailnet = "hub_not_on_tailnet"
+	// CodeURLRefused is a stored link this server stopped using: the address
+	// fails the rule now, or another machine answers at the hub's name.
+	CodeURLRefused    = "hub_url_refused"
 	tailnetSuffixTail = ".ts.net"
 )
 
@@ -183,83 +186,98 @@ func oneMachine(host, suffix, self string) error {
 }
 
 // checkURL is the whole rule, applied when a person or the terminal names a
-// hub. whois is step 8, which runs only here.
-func (s *Service) checkURL(ctx context.Context, raw string) (string, error) {
+// hub. Step 8 runs only here, and finds the hub node, which is nil when
+// tailscaled could not be asked or the origin is the test origin.
+func (s *Service) checkURL(ctx context.Context, raw string) (string, *Machine, error) {
 	origin, u, err := readOrigin(raw)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if s.testOrigin != "" && origin == s.testOrigin {
-		return origin, nil
+		return origin, nil, nil
 	}
 	if strings.ToLower(u.Scheme) != "https" {
-		return "", urlError(CodeURLInvalid, "the hub's address must start with https://")
+		return "", nil, urlError(CodeURLInvalid, "the hub's address must start with https://")
 	}
 	host := hostOf(origin)
 	if isAddress(host) {
-		return "", urlError(CodeURLInvalid, "name the hub by its tailnet name, not by an address")
+		return "", nil, urlError(CodeURLInvalid, "name the hub by its tailnet name, not by an address")
 	}
 	st, err := s.tailnet.Status(ctx)
 	suffix, err := suffixOf(st, err)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := oneMachine(host, suffix, st.Self); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	if err := s.confirmNode(ctx, host); err != nil {
-		return "", err
+	node, err := s.confirmNode(ctx, host)
+	if err != nil {
+		return "", nil, err
 	}
-	return origin, nil
+	return origin, node, nil
 }
 
 // confirmNode is step 8: the address this dashboard would dial belongs, by
-// tailscaled's own account, to the machine of that name. When tailscaled
-// cannot be asked the check is skipped: the certificate and the steps before
-// already bind the name.
-func (s *Service) confirmNode(ctx context.Context, host string) error {
+// tailscaled's own account, to the machine of that name, and that machine is
+// the hub node. When tailscaled cannot be asked the check is skipped and
+// logged, and the node is recorded by a later check (2.4); the certificate and
+// the steps before already bind the name.
+func (s *Service) confirmNode(ctx context.Context, host string) (*Machine, error) {
 	if s.whois == nil {
-		return nil
+		return nil, nil
 	}
 	addr, err := s.dial.resolve(ctx, host)
 	if err != nil {
 		// Nothing to ask about; the request itself will say the hub cannot
 		// be reached.
-		return nil
+		return nil, nil
 	}
 	peer, err := s.whois.WhoIs(ctx, addr)
 	switch {
 	case errors.Is(err, tailnetgate.ErrNotAPeer):
-		return urlError(CodeNotOnTailnet, "no machine on this tailnet holds %s, the address %s has", addr, host)
+		return nil, urlError(CodeNotOnTailnet, "no machine on this tailnet holds %s, the address %s has", addr, host)
+	case err == nil && strings.TrimSpace(peer.StableID) == "":
+		err = fmt.Errorf("%w: its answer names no StableID", tailnetgate.ErrUnavailable)
+		fallthrough
 	case err != nil:
 		s.log.Info("the hub's tailnet node was not confirmed; tailscaled could not be asked", "hub", host, "err", err)
-		return nil
+		return nil, nil
 	case !strings.EqualFold(strings.TrimSuffix(peer.Node, "."), host):
-		return urlError(CodeNotOnTailnet, "%s is held by %s on this tailnet, not by %s", addr, clip(peer.Node, 100), host)
+		return nil, urlError(CodeNotOnTailnet, "%s is held by %s on this tailnet, not by %s", addr, clip(peer.Node, 100), host)
 	}
-	return nil
+	m := machineOf(peer)
+	// The address was checked just now; the request Connect sends next goes
+	// to it without asking again.
+	s.gate.pass(host, addr, s.now())
+	return &m, nil
 }
 
 // admitStored is the rule as it is applied to a stored link each time the
-// connector starts with one (protocol 2.2, "When the rule runs"). A hub at
-// the test origin passes while that origin is set. Otherwise the address must
-// still be an https name, and, when this server's suffix can be read, still
-// one machine under it that is not this server. When the suffix cannot be
-// read nothing is decided and the link runs.
+// connector starts with one (protocol 2.2, "When the rule runs"), and says why
+// it fails. A hub at the test origin passes while that origin is set.
+// Otherwise steps 1 to 4, which need no tailnet, always run: the address must
+// still be an https name, not an IP literal or a loopback name. Steps 5 to 7
+// run when this server's suffix can be read: still one machine under it that
+// is not this server. When the suffix cannot be read they are skipped this
+// time and the link runs.
 func (s *Service) admitStored(ctx context.Context, stored string) error {
 	if s.testOrigin != "" && stored == s.testOrigin {
 		return nil
 	}
 	origin, u, err := readOrigin(stored)
 	if err != nil {
-		return refused(err)
+		return err
 	}
 	if strings.ToLower(u.Scheme) != "https" {
-		return refused(errors.New("it is not an https address, and no test origin names it"))
+		return errors.New("it is not an https address, and no test origin names it")
 	}
 	host := hostOf(origin)
 	if isAddress(host) {
-		return refused(errors.New("it is an address, not a tailnet name"))
+		return errors.New("it is an address, not a tailnet name")
+	}
+	if loopbackHost(host) {
+		return errors.New("it is a loopback name, not a tailnet name, and no test origin names it")
 	}
 	st, err := s.tailnet.Status(ctx)
 	if err != nil || !st.Running || st.Suffix == "" {
@@ -267,21 +285,19 @@ func (s *Service) admitStored(ctx context.Context, stored string) error {
 		return nil
 	}
 	if _, err := suffixOf(st, nil); err != nil {
-		return refused(err)
+		return err
 	}
-	if err := oneMachine(host, st.Suffix, st.Self); err != nil {
-		return refused(err)
-	}
-	return nil
+	return oneMachine(host, st.Suffix, st.Self)
 }
 
-// ErrURLRefused is a stored hub address the rule now refuses: the server moved
-// to another tailnet, or the test origin that named it is gone. The link is
-// kept but idle.
+// ErrURLRefused is a stored link this server no longer uses: its address fails
+// the rule now (the server moved to another tailnet, or the test origin that
+// named it is gone), or another machine answers at the hub's name. The link is
+// kept but idle until a person disconnects.
 var ErrURLRefused = errors.New("this server no longer accepts the hub's address")
 
 func refused(why error) error {
-	return fmt.Errorf("%w: %v; disconnect, then connect to a hub on this server's tailnet", ErrURLRefused, why)
+	return fmt.Errorf("%w: %v; disconnect, then connect again", ErrURLRefused, why)
 }
 
 // sameOriginAs reports whether raw is an absolute URL on origin, spelt as the

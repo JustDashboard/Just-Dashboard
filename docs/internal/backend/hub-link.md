@@ -55,7 +55,8 @@ The hooks the hub link uses:
 
 | Hook | What the hub link does with it |
 | --- | --- |
-| `Admit` | The URL rule as it applies to a stored link (below). It replaces the account link's "still `JD_ACCOUNT_URL`" check everywhere that check ran: the top loop, the heartbeat, a manual sync and whether an unlink tells anyone |
+| `Admit` | Before anything is sent on a stored link: an idle link sends nothing, the URL rule as it applies to a stored link, and the hub node check (both below). It replaces the account link's "still `JD_ACCOUNT_URL`" check everywhere that check ran (the top loop, the heartbeat, a manual sync, whether an unlink tells anyone) and also runs before every command poll and every result |
+| `BeforePoll` | The hub node check before every poll of a pending request, in whichever process polls it. A `*RequestEndedError` ends the request as failed and nothing is sent |
 | `OnReply` | Decodes and checks `fleet`, `notices` and `signIn`, and returns the write that caches them in `hub.link.view`, which the engine runs inside the heartbeat's own transaction only while the link is still the one it was sent for. A reply that does not decode strictly fails the heartbeat and nothing in it is used |
 | `OnClear` | Deletes `hub.link.view` in the same transaction that ends a link (disconnect, removal in the hub) or stores a new one |
 | `HeartbeatExtra` | Unused. Hub sign-in adds `signIn` to the body here; the engine keeps such keys whole and cuts the snapshot's lists to make room |
@@ -66,6 +67,7 @@ The hooks the hub link uses:
 | --- | --- |
 | `hublink.go` | The profile, `Options`, `Service` and its methods: `Connect`, `Poll`, `Await`, `Cancel`, `SetScope`, `Disconnect`, `Sync`; the engine's errors under this package's names |
 | `url.go` | The URL rule (2.2), the test origin, the decision on a stored link (`admitStored`) |
+| `node.go` | The hub's machine (2.4): the check before sending, the dialer's gate, recording a node later, setting a link idle (`goIdle`), `NodeNote` for the begin audit |
 | `dial.go` | `tailscale status --json` on the host, and the dialer that only reaches a hub over `100.64.0.0/10` |
 | `view.go` | The fleet, notices and sign-in offer: strict decoding, per-entry rules, the cache |
 | `status.go` | `Status` (`GET /dashboard/hub`), `Session` (the `hub` field of `/auth/session`), `Hello` and its exact bodies |
@@ -88,11 +90,37 @@ every port of its host (`hub_url_same_host`). Then, when tailscaled's LocalAPI c
 steps before already bind the name. "One hub per server" is checked before any of this, so a refused second
 connect never asks the tailnet.
 
-**A stored link is checked again when the connector starts with it** (`admit`, once per link per process): an
-address that is not `https`, is an IP literal, or (when the suffix can be read) is no longer one machine under
-this server's suffix, idles the link with `ErrURLRefused`. The link is kept, the page shows the reason as the
-last error, a manual sync answers `409 hub_url_refused`, and a disconnect clears it without telling anyone. If
-the tailnet cannot be read at start, nothing is decided and the link runs.
+**A stored link is checked again when the connector starts with it** (`admit`, once per link per process, before
+anything is sent): steps 1 to 4 need no tailnet and always run, so an address that is not `https`, is an IP literal
+or a loopback name, and is not the current test origin, is refused; steps 5 to 7 run when the suffix can be read
+(no longer one machine under this server's suffix, or this server's own name, is refused) and are skipped this time
+when it cannot. A refusal **sets the link idle in the store** (`State.Idle`, `{code: "hub_url_refused", reason,
+at}` in `hub.link.state`, written by `Engine.SetIdle`), revokes every hub session in that same write transaction
+(`revokeHubSessionsTx`, which has nothing to revoke until hub sign-in exists), and audits `hub.link.idle` by `system`
+with the reason and `sessionsRevoked`. An idle link stays idle across restarts, whatever the rule or WhoIs says
+later: nothing is sent on it, the page shows the reason as the last error and `reachable: false`, a manual sync
+answers `409 hub_url_refused`, and only a disconnect clears it (without telling anyone). A link made at the test
+origin therefore stops at the first start after the variable is removed, and putting the variable back does not
+revive it.
+
+**The hub's machine** (`node.go`, protocol 2.4). The certificate proves only that the answering machine holds the
+hub's MagicDNS name, which goes to whichever machine registers it next. So step 8 of the rule keeps the WhoIs answer
+as the **hub node** (`{id: StableID, name, owner (the login) or tags}`, `accountlink.PeerNode`): with the request
+(`hub.link.request`), then in the link state (`hub.link.state.hubNode`) when the approval is collected, and in the
+`hub.link.begin` and `hub.link` audit details (`"not checked: tailscaled could not be asked"` when it was skipped).
+Before anything is sent on a stored link, WhoIs is asked about the address about to be dialled: at each connector
+start, at least every five minutes (`admitNode` from `Admit`), and whenever the dialer is about to dial an address
+it has not checked (`dialGate`, `dialer.gate`, so a DNS or peer change between checks is caught before a byte goes
+out). Another `StableID` sends nothing and sets the link idle with "the hub's machine changed", in the same way as
+above, audited `hub.link.node_changed` with the old and new node. No machine at the address (`ErrNotAPeer`) sends
+nothing and counts as a failed exchange with "the hub's machine is not on this tailnet", backing off without going
+idle. tailscaled not answering (`ErrUnavailable`, or an answer with no `StableID`) sends, and is logged at most once
+an hour. A link or request stored without a node records the first answer whose node name is the stored host (an
+answer naming another machine sends nothing), audited `hub.link.node_recorded` for a link. While a request is pending
+the check runs before **every** poll (`BeforePoll`), in whichever process polls it: another `StableID` ends the
+request as failed with no key, `serverId` or name stored, and audits `hub.link.node_changed`; the link pins the
+request's node as it stood at the poll that collected the approval. At the test origin no WhoIs is asked and no node
+is recorded.
 
 **Reaching the hub.** The hub link's HTTP client (`dial.go`) uses no proxy and a dialer of its own: the system
 resolver's answer if it is in `100.64.0.0/10`, else the tailnet IPv4 address `tailscale status` lists for the
@@ -150,14 +178,15 @@ the walks of what an API, deploy or MCP key may open read the same list.
 | Route | Guards | Does |
 | --- | --- | --- |
 | `GET /dashboard/hub` | any signed-in principal; the `admin` part only for `system.admin` | The status (shape below) |
-| `POST /dashboard/hub` `{url, scope}` | `system.admin`, session; audited `hub.link.begin` | Connect. `400` with the rule's code, `409 already_linked`, `409 link_pending`, `403 hub_link_disabled`, `502 hub_unreachable` (the message says what failed, `bad_token` and `unsupported_protocol` included) |
+| `GET /dashboard/hub/check?url=` | `system.admin`, session; not audited | The URL rule, steps 1 to 8, without starting anything: `{hubUrl, machine?, testOrigin}`, `machine` left out when tailscaled could not be asked. Connect's rule errors and `403 hub_link_disabled`. Settings calls it before Connect to show whose machine the address is |
+| `POST /dashboard/hub` `{url, scope}` | `system.admin`, session; audited `hub.link.begin` with `hubNode` | Connect. `400` with the rule's code, `409 already_linked`, `409 link_pending`, `403 hub_link_disabled`, `502 hub_unreachable` (the message says what failed, `bad_token` and `unsupported_protocol` included) |
 | `DELETE /dashboard/hub/request` | `system.admin`, session; `hub.link.cancel` | Forget the pending request (`204`); the hub is not told |
 | `PUT /dashboard/hub/scope` `{scope}` | `system.admin`, session; `hub.link.scope` | Change the scope; the next heartbeat tells the hub. `409 not_linked` |
 | `DELETE /dashboard/hub` | `system.admin`, session, `s.destructive`; `hub.unlink` with `hubNotified` | Disconnect (`204`). `409 not_linked` |
 | `POST /dashboard/hub/sync` | `system.admin` (an API key may) | A heartbeat now, then the status. `409 not_linked`, `409 hub_url_refused`. Held to twelve a minute: a press that would break the pace is skipped |
 
-The `GET` sits with the every-role reads of the `/dashboard` group (`handlers_selfupdate.go`); the rest sit in
-its `system.admin` part. The status is `hublink.Status`: optional fields are left out, never `null`; times are
+The `GET`s sit with the every-role reads of the `/dashboard` group (`handlers_selfupdate.go`; `check` with
+`system.admin` and `RequireSession` added); the rest sit in its `system.admin` part. The status is `hublink.Status`: optional fields are left out, never `null`; times are
 RFC 3339 in UTC. With `JD_HUB_LINK=false` it is exactly `{"enabled":false,"state":"…"}`. Otherwise:
 
 - everyone: `enabled`, `state` (`unlinked`, `pending`, `linked`), `hubUrl` (pending or linked), and while linked
@@ -165,9 +194,10 @@ RFC 3339 in UTC. With `JD_HUB_LINK=false` it is exactly `{"enabled":false,"state
   intervals), `lastHeartbeatAt` once one succeeded, and `fleet` and `notices` (`[]` before the first reply);
   `signIn` is `{enabled: false, offered, users}`, `offered` and `users` from the last reply.
 - `system.admin` also gets `admin`: `fingerprint` (once the identity exists), `testOrigin`, `request` (pending:
-  `hubUrl`, `userCode`, `approveUrl`, `expiresAt`, `scope`), `link` (linked: `serverId`, `linkedAt`, `linkedBy`,
-  `lastError`, `lastCommand`, `hubKeys` of `{kid, fingerprint, notAfter?}`, `updatePolicy`, and `lastSnapshot`,
-  the exact body of the last heartbeat sent), `lastOutcome` (unlinked after a request that ended without a
+  `hubUrl`, `userCode`, `approveUrl`, `expiresAt`, `scope`, and `hubMachine` when step 8 found one), `link` (linked:
+  `serverId`, `linkedAt`, `linkedBy`, `hubMachine` once one is pinned, `lastError` (an idle link's reason, whatever
+  the last exchange left), `lastCommand`, `hubKeys` of `{kid, fingerprint, notAfter?}`, `updatePolicy`, and
+  `lastSnapshot`, the exact body of the last heartbeat sent), `lastOutcome` (unlinked after a request that ended without a
   link). `admin.grants` belongs to hub sign-in and is never sent yet.
 
 `GET /auth/session` carries `hub: {linked: true, name, url, reachable}` only for a fully signed-in session (not one
@@ -200,7 +230,9 @@ The account link's table applies, with these for the hub:
 | The hub is down or unreachable | Heartbeat and poll back off from 1 s to 5 minutes; `reachable` goes false; nothing else on the dashboard depends on the hub |
 | A reply with an unknown field, or without `fleet` or `notices` | A failed heartbeat; the cached view is left as it was and nothing in the reply is used |
 | `410` on any signed request | The hub removed this server: link, policy, status and cached view cleared in one transaction, identity and sequence kept, `hub.unlink` by `system` with the reason "the server was removed in the hub" |
-| The server moved to another tailnet, or the test origin was removed | The link idles and says why; disconnect, then connect to a hub on this tailnet |
+| The server moved to another tailnet, or the test origin was removed | The link is set idle in the store at the next start and says why; it stays idle until a person disconnects |
+| Another machine answers at the hub's name | Nothing is sent; the link is set idle ("the hub's machine changed") and `hub.link.node_changed` audited; a pending request ends as failed with nothing stored |
+| No machine holds the hub's address | Nothing is sent; the exchange fails and backs off; the link stays as it is |
 | The hub is reinstalled with a new key | Its commands fail the key check (refused, audited); disconnect and connect again |
 | `JD_HUB_LINK=false` while linked | The link stays stored and idle; nothing is sent; a disconnect clears it and tells no one |
 

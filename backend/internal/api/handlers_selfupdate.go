@@ -31,6 +31,11 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 		// administrator is sent the admin part (handlers_hublink.go).
 		if s.modules.hubLink != nil {
 			r.Method(http.MethodGet, "/hub", s.handle(s.handleHubLinkStatus))
+			// The URL rule without starting anything, so Settings can show
+			// whose machine an address is before Connect. It asks this
+			// host's tailscaled, so it is an administrator's, in a session.
+			r.With(httpx.RequireCapability(auth.CapSystemAdmin), httpx.RequireSession).
+				Method(http.MethodGet, "/hub/check", s.handle(s.handleHubLinkCheck))
 		}
 
 		r.Group(func(r chi.Router) {

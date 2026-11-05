@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -106,6 +107,11 @@ type fakeHub struct {
 	// hold, when set, keeps the next heartbeat's answer until it is closed;
 	// arrived is closed once that heartbeat has been accepted.
 	hold, arrived chan struct{}
+	// origin is where the dashboard thinks the hub is: its own URL, or a
+	// tailnet name a test transport brings here.
+	origin string
+	// polls counts the request polls that reached the hub.
+	polls int
 }
 
 func newFakeHub(t *testing.T, now time.Time) *fakeHub {
@@ -120,6 +126,22 @@ func newFakeHub(t *testing.T, now time.Time) *fakeHub {
 }
 
 func (h *fakeHub) URL() string { return h.srv.URL }
+
+// Origin is the hub URL the dashboard links to.
+func (h *fakeHub) Origin() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.origin != "" {
+		return h.origin
+	}
+	return h.srv.URL
+}
+
+func (h *fakeHub) pollCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.polls
+}
 
 func (h *fakeHub) setNow(t time.Time) {
 	h.mu.Lock()
@@ -190,7 +212,7 @@ func (h *fakeHub) createRequest(w http.ResponseWriter, body []byte) {
 	code := "K7QM-29XD"
 	h.requests[id] = &hubRequest{id: id, code: code, pub: pub, scope: fmt.Sprint(in["scope"]), body: in, status: status}
 	writeJSON(w, 200, map[string]any{
-		"requestId": id, "userCode": code, "approveUrl": h.srv.URL + "/servers/pair?code=" + code,
+		"requestId": id, "userCode": code, "approveUrl": h.originLocked() + "/servers/add/?request=" + id,
 		"expiresAt": h.now.Add(15 * time.Minute).Unix(), "pollSeconds": 2,
 	})
 }
@@ -221,7 +243,15 @@ func (h *fakeHub) check(w http.ResponseWriter, r *http.Request, body []byte, pub
 	return true
 }
 
+func (h *fakeHub) originLocked() string {
+	if h.origin != "" {
+		return h.origin
+	}
+	return h.srv.URL
+}
+
 func (h *fakeHub) pollRequest(w http.ResponseWriter, r *http.Request, body []byte, id string) {
+	h.polls++
 	req := h.requests[id]
 	if req == nil || r.Header.Get("X-JD-Server") != id {
 		hubError(w, 401, "unknown_server")
@@ -480,18 +510,47 @@ func (f *fakeTailnet) calls() int {
 	return f.n
 }
 
+// fakeWhoIs is tailscaled's WhoIs: the hub's machine is node, StableID id,
+// owned by login (or tagged with tags), unless err says otherwise. Its fields
+// are set before the connector runs, or through set.
 type fakeWhoIs struct {
-	node string
-	err  error
-	asks []netip.Addr
+	mu    sync.Mutex
+	node  string
+	id    string
+	login string
+	tags  []string
+	err   error
+	asks  []netip.Addr
 }
 
 func (f *fakeWhoIs) WhoIs(_ context.Context, a netip.Addr) (tailnetgate.Peer, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.asks = append(f.asks, a)
 	if f.err != nil {
 		return tailnetgate.Peer{}, f.err
 	}
-	return tailnetgate.Peer{Address: a, Node: f.node, Tags: []string{"tag:hub"}}, nil
+	id := f.id
+	if id == "" {
+		id = "nHub1CNTRL"
+	}
+	tags := f.tags
+	if tags == nil && f.login == "" {
+		tags = []string{"tag:hub"}
+	}
+	return tailnetgate.Peer{Address: a, Node: f.node, StableID: id, Login: f.login, Tags: tags}, nil
+}
+
+func (f *fakeWhoIs) set(fn func(*fakeWhoIs)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fn(f)
+}
+
+func (f *fakeWhoIs) asked() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.asks)
 }
 
 // ---------------------------------------------------------------- the host --
@@ -567,6 +626,7 @@ type env struct {
 	tailnet *fakeTailnet
 	whois   *fakeWhoIs
 	svc     *Service
+	opts    Options
 
 	mu  sync.Mutex
 	now time.Time
@@ -588,6 +648,11 @@ func (e *env) advance(d time.Duration) {
 type envOption func(*Options)
 
 func newEnv(t *testing.T, opts ...envOption) *env {
+	t.Helper()
+	return newEnvAt(t, false, opts...)
+}
+
+func newEnvAt(t *testing.T, tailnet bool, opts ...envOption) *env {
 	t.Helper()
 	st, err := storetest.Open(t.TempDir())
 	if err != nil {
@@ -616,23 +681,74 @@ func newEnv(t *testing.T, opts ...envOption) *env {
 		},
 		Endpoint: func(context.Context) string { return "https://box.tailed39ba.ts.net:8443" },
 	}
+	if tailnet {
+		o.TestOrigin = ""
+		o.HTTP = &http.Client{Transport: toFakeHub{e.hub}}
+		e.hub.origin = tailnetOrigin
+	}
 	for _, f := range opts {
 		f(&o)
 	}
-	e.svc = New(o)
-	e.svc.Engine().SetTiming(accountlink.Timing{
+	e.opts = o
+	e.svc = e.service(o)
+	return e
+}
+
+// service makes a Service from o with the test's short waits, as the
+// dashboard would on its next start over the same store.
+func (e *env) service(o Options) *Service {
+	svc := New(o)
+	svc.Engine().SetTiming(accountlink.Timing{
 		Idle: 10 * time.Millisecond, Watch: 10 * time.Millisecond,
 		BackoffMin: 2 * time.Millisecond, BackoffMax: 10 * time.Millisecond,
 		PolicyFirst: time.Hour, PolicyEvery: time.Hour, HeartbeatsPerMinute: 1 << 20,
 	})
-	t.Cleanup(e.svc.Stop)
-	return e
+	// The system resolver knows no tailnet name here: the address is the one
+	// tailscale status lists.
+	svc.dial.lookup = func(context.Context, string) ([]netip.Addr, error) { return nil, errors.New("no such host") }
+	e.t.Cleanup(svc.Stop)
+	return svc
+}
+
+// restart stops the running Service and makes a new one over the same store,
+// with the env's options changed by opts.
+func (e *env) restart(opts ...envOption) *Service {
+	e.svc.Stop()
+	o := e.opts
+	for _, f := range opts {
+		f(&o)
+	}
+	e.svc = e.service(o)
+	return e.svc
+}
+
+// toFakeHub carries each request for the hub's tailnet name to the fake hub,
+// path, headers and signature unchanged.
+type toFakeHub struct{ hub *fakeHub }
+
+func (t toFakeHub) RoundTrip(r *http.Request) (*http.Response, error) {
+	to := r.Clone(r.Context())
+	to.URL.Scheme, to.URL.Host = "http", strings.TrimPrefix(t.hub.URL(), "http://")
+	to.Host = to.URL.Host
+	return http.DefaultTransport.RoundTrip(to)
+}
+
+// tailnetOrigin is where newTailnetEnv's hub is.
+const tailnetOrigin = "https://hub.tailed39ba.ts.net"
+
+// newTailnetEnv is newEnv with the hub at its tailnet name rather than the
+// test origin: the URL rule, WhoIs and the hub node check all run. The
+// resolver knows nothing, so the address checked is the one tailscale status
+// lists for the hub, 100.101.102.103.
+func newTailnetEnv(t *testing.T, opts ...envOption) *env {
+	t.Helper()
+	return newEnvAt(t, true, opts...)
 }
 
 // link connects to the fake hub and has the owner approve it in the hub.
 func (e *env) link(scope accountlink.Scope) accountlink.State {
 	e.t.Helper()
-	req, err := e.svc.Connect(e.t.Context(), ConnectRequest{URL: e.hub.URL(), Scope: scope, By: "ion"})
+	req, err := e.svc.Connect(e.t.Context(), ConnectRequest{URL: e.hub.Origin(), Scope: scope, By: "ion"})
 	if err != nil {
 		e.t.Fatal(err)
 	}

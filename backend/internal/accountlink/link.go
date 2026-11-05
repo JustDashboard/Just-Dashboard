@@ -60,6 +60,9 @@ type LinkRequest struct {
 	// Endpoint is this dashboard's own address and Token a one-time approval;
 	// each is sent only when set.
 	Endpoint, Token string
+	// HubNode is the peer's machine as the instance found it; it is kept with
+	// the request and becomes the link's.
+	HubNode *PeerNode
 }
 
 // ----------------------------------------------------------------- the flow --
@@ -152,6 +155,7 @@ func (s *Service) Begin(ctx context.Context, lr LinkRequest) (Request, error) {
 	if s.p.OriginPerLink {
 		req.URL = origin
 	}
+	req.HubNode = lr.HubNode
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
 		if err := s.kv.putTx(ctx, tx, keyRequest, req); err != nil {
 			return err
@@ -241,8 +245,16 @@ func (s *Service) PollLink(ctx context.Context) (PollResult, error) {
 	if err != nil || id == nil {
 		return PollResult{}, fmt.Errorf("link identity: %w", firstErr(err, ErrIdentityUnreadable))
 	}
+	// The instance's own check, before anything is sent: an approval is
+	// stored only from a poll it let through.
+	if s.hooks.BeforePoll != nil {
+		if req, err = s.hooks.BeforePoll(ctx, req); err != nil {
+			return s.pollRefused(ctx, err)
+		}
+	}
 	resp, err := s.newClientAt(s.originFor(req.URL), id).pollRequest(ctx, req.ID)
 	declined := "the request was declined " + s.p.PeerAt
+	var ended *RequestEndedError
 	switch {
 	case err == nil:
 	case isCode(err, http.StatusGone, "request_denied"):
@@ -267,6 +279,9 @@ func (s *Service) PollLink(ctx context.Context) (PollResult, error) {
 		forgot := "the " + s.p.Peer + " no longer knows this request"
 		s.endRequest(ctx, outcomeFailed, forgot)
 		return PollResult{State: PollFailed, Message: forgot}, nil
+	case errors.As(err, &ended):
+		// The transport's own check refused to dial.
+		return s.pollRefused(ctx, err)
 	default:
 		return PollResult{State: PollPending}, err
 	}
@@ -282,6 +297,17 @@ func (s *Service) PollLink(ctx context.Context) (PollResult, error) {
 		return PollResult{State: PollLinked, Link: st}, nil
 	}
 	return PollResult{State: PollPending}, fmt.Errorf("the %s answered with the status %q", s.p.Peer, clip(resp.Status, 32))
+}
+
+// pollRefused is the instance's check saying no to a poll: the request ends as
+// failed when it says so, and otherwise this poll counts as a failed one.
+func (s *Service) pollRefused(ctx context.Context, err error) (PollResult, error) {
+	var ended *RequestEndedError
+	if errors.As(err, &ended) {
+		s.endRequest(ctx, outcomeFailed, ended.Message)
+		return PollResult{State: PollFailed, Message: ended.Message}, nil
+	}
+	return PollResult{State: PollPending}, err
 }
 
 // completeLink stores what an approval carries and ends the request, in one
@@ -317,6 +343,7 @@ func (s *Service) completeLink(ctx context.Context, req Request, r pollResponse)
 		URL: origin, ServerID: r.ServerID, SiteKeys: []SiteKey{key}, Scope: req.Scope,
 		LinkedAt: s.now(), LinkedBy: req.By, Owner: fitText(r.Owner.Label, 254), ServerName: req.ServerName,
 		HeartbeatSeconds: clampInt(heartbeat, 10, 600), PollWaitSeconds: clampInt(pollWait, 1, 25),
+		HubNode: req.HubNode,
 	}
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
 		if err := s.kv.putTx(ctx, tx, keyState, st); err != nil {
@@ -335,9 +362,13 @@ func (s *Service) completeLink(ctx context.Context, req Request, r pollResponse)
 		if req.By == "cli" {
 			who, actor, method = "root", "cli", "CLI"
 		}
+		detail := map[string]any{"scope": st.Scope, "serverId": st.ServerID, s.p.Peer: origin}
+		if st.HubNode != nil {
+			detail["hubNode"] = st.HubNode
+		}
 		s.audit.Record(ctx, audit.Entry{
 			Username: who, Actor: actor, Action: s.p.AuditPrefix + ".link", Target: st.Owner, Method: method, Status: 200, Success: true,
-			Detail: audit.Detail(map[string]any{"scope": st.Scope, "serverId": st.ServerID, s.p.Peer: origin}),
+			Detail: audit.Detail(detail),
 		})
 	}
 	s.nudge()
