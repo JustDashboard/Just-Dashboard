@@ -179,9 +179,12 @@ export function serverEntries(hub: ShellHub): ServerEntry[] {
       id: `server:${server.serverId}`,
       kind: "server",
       title: server.name,
+      // The state is the row's `Status` at its far end; the line beside the name says the rest.
       detail: server.self
         ? "This server"
-        : [reading.label, server.version].filter(Boolean).join(" · "),
+        : [server.version || "no report yet", address ? undefined : "no address"]
+            .filter(Boolean)
+            .join(" · "),
       keywords: [hubHost(address), server.version].filter(Boolean),
       href: server.self ? "/" : address,
       self: server.self || undefined,

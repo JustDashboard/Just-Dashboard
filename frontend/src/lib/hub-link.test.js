@@ -208,7 +208,7 @@ describe("the palette's Servers", () => {
     expect(entries[0]).toMatchObject({ href: "/", self: true, detail: "This server" })
     expect(entries[2]).toMatchObject({
       href: "https://vmi3690758.tailed39ba.ts.net:8443",
-      detail: "Late · 0.8.5",
+      detail: "0.8.5",
       reading: { tone: "warning", label: "Late" },
     })
     expect(entries[3]).toMatchObject({
@@ -220,6 +220,7 @@ describe("the palette's Servers", () => {
 
   test("a server with no address is listed and says it cannot be opened", () => {
     expect(entries[1].href).toBeUndefined()
+    expect(entries[1].detail).toBe("no report yet · no address")
     expect(entries[1].facts).toContainEqual({ label: "Opens", value: "No address reported" })
   })
 
