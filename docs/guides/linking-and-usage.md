@@ -43,8 +43,8 @@ server is optional and off until you do it, and it is a separate thing from link
 server can be linked to both, and the two never share a key, a counter, a setting or a log name. It talks to
 the hub the same way: outbound only, signed, at a scope you choose on this server.
 
-In the hub, press **Connect** on a server it found; the server's **Settings → Hub** opens in a new tab with the
-hub's address filled in, says that it came from a link, and shows whose machine that address is ("hub.example.ts.net,
+In the hub, press **Connect** on a server it found; the server's **Settings → Hub** opens in a new tab (after you
+sign in there, if that browser is signed out) with the hub's address filled in, says that it came from a link, and shows whose machine that address is ("hub.example.ts.net,
 a machine of you@github") and exactly what the hub will see and be able to do at each scope. Check that the
 address and the machine are the hub you meant: anyone on the tailnet can send you such a link, which is also why
 no scope is chosen for you; pick one before **Connect**. You can also type the address there yourself. After
@@ -110,8 +110,9 @@ there), the last report exactly as it was sent, the last command the hub ran her
 that has never been connected looks exactly as it always did.
 
 Disconnect from Settings, with `sudo ./scripts/manage.sh hub disconnect`, or by removing the server in the hub.
-Disconnecting clears the link here and tells the hub; the server keeps its key, so connecting again shows the
-same fingerprint. A server removed in the hub forgets its link at its next exchange with the hub, and
+Disconnecting clears the link here and tells the hub; if the hub cannot be reached the link is cleared anyway,
+Settings says the hub was not told, and the hub lists the server until you remove it there. The server keeps its
+key, so connecting again shows the same fingerprint. A server removed in the hub forgets its link at its next exchange with the hub, and
 **Settings → Hub** says *Removed in Just Hub* once (as does `hub status`), with the form to connect again.
 `JD_HUB_LINK=false` switches the feature off entirely: no discovery answer, no page controls, no command, and a
 connection that exists goes quiet.

@@ -15,6 +15,7 @@ import {
   linkedByWords,
   linkReading,
   openable,
+  sentence,
   serverCount,
 } from "@/lib/hub-link"
 import { notify } from "@/lib/toast"
@@ -309,11 +310,6 @@ export default function HubLinkPage() {
   )
 }
 
-/** A reason as a sentence of its own: the backend's reasons end bare. */
-function sentence(text: string) {
-  return /[.!?]$/.test(text) ? text : `${text}.`
-}
-
 /** Each section stands alone under a hairline, at the deploy settings pages' rhythm. */
 const BLOCK = "py-8 first:pt-4 last:pb-2"
 
@@ -396,9 +392,7 @@ function Outcome({
   if (dismissed === outcome.at) return null
   const words = OUTCOME[outcome.result]
   const why =
-    outcome.result === "failed" && outcome.message
-      ? sentence(outcome.message.charAt(0).toUpperCase() + outcome.message.slice(1))
-      : words.body
+    outcome.result === "failed" && outcome.message ? sentence(outcome.message) : words.body
   return (
     <Notice tone={words.tone} title={words.title}>
       <p className="break-words">{why}</p>

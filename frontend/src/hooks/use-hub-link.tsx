@@ -134,11 +134,16 @@ export function useHubLink() {
     [adopt, guarded],
   )
 
+  /**
+   * Whether the hub was told (§8.2): the link is cleared here either way, and a hub that could not
+   * be reached still lists this server until it is removed there.
+   */
   const disconnect = useCallback(
     () =>
       guarded(async () => {
-        await del("/dashboard/hub")
+        const answer = await del<{ hubNotified?: boolean } | undefined>("/dashboard/hub")
         adopt(await read())
+        return answer?.hubNotified !== false
       }),
     [adopt, guarded, read],
   )

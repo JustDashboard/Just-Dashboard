@@ -21,6 +21,7 @@ import {
   refusedByPolicy,
   usePasskeyPlace,
 } from "@/lib/passkeys"
+import { returnAfterSignIn } from "@/lib/hub-link"
 import { cn } from "@/lib/utils"
 import type { AuthStatus } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -64,7 +65,11 @@ const HEADINGS: Record<Step, string> = {
  */
 export default function LoginPage() {
   const router = useRouter()
-  const endedInUrl = useSearchParams().get("reason") === "session"
+  const params = useSearchParams()
+  const endedInUrl = params.get("reason") === "session"
+  // Where the shell sent this browser from, when that is an address worth coming back to: the
+  // hub's Connect door, which the hub opens in a tab that is usually signed out.
+  const destination = returnAfterSignIn(params.get("next")) ?? "/"
   const { status, loading, sessionEnded, login, loginWithPasskey, verifyTotp, refresh, logout } =
     useAuth()
   // "auto" defers to whatever the session says; the explicit values are set
@@ -100,8 +105,8 @@ export default function LoginPage() {
   const hint = hintFor(step, recoveryMode, Boolean(recoveryCodes))
 
   useEffect(() => {
-    if (!loading && status?.authenticated) router.replace("/")
-  }, [loading, status, router])
+    if (!loading && status?.authenticated) router.replace(destination)
+  }, [loading, status, router, destination])
 
   // Where the page is open decides whether a passkey can be offered at all.
   const place = usePasskeyPlace()
@@ -130,7 +135,7 @@ export default function LoginPage() {
   }, [step, place, loading, loginWithPasskey])
 
   const advance = (next: AuthStatus) => {
-    if (next.authenticated) router.replace("/")
+    if (next.authenticated) router.replace(destination)
     else if (next.needsTotp) setStep("totp")
     else if (next.needsEnrollment) setStep("enroll")
     else if (next.needsPasswordChange) setStep("password")
@@ -202,7 +207,7 @@ export default function LoginPage() {
     setBusy(true)
     try {
       const next = await verifyTotp(code)
-      if (next.authenticated) router.replace("/")
+      if (next.authenticated) router.replace(destination)
       else if (next.needsPasswordChange) setStep("password")
     } catch (err) {
       notify.error("Code rejected", err instanceof ApiError ? err.message : String(err))

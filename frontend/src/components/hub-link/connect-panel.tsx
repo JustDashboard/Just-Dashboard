@@ -4,7 +4,7 @@ import { useEffect, useId, useState } from "react"
 import { External, Warning } from "@/components/icons"
 import { countdown, REQUEST_LIFETIME, scopeName } from "@/lib/account-link"
 import { errorMessage } from "@/lib/api"
-import { describeMachine, hubHost, openable, terminalCommand } from "@/lib/hub-link"
+import { describeMachine, hubHost, openable, sentence, terminalCommand } from "@/lib/hub-link"
 import { notify } from "@/lib/toast"
 import type { HubLinkCheck, HubLinkMachine, HubLinkScope, HubLinkStatus } from "@/lib/types"
 import { outdated } from "@/hooks/use-hub-link"
@@ -73,8 +73,8 @@ export function ConnectPanel({
     } catch (err) {
       // The terminal connected first, or a request already waits: the page has been redrawn into
       // that, without this form, so the refusal is said where it outlives the form.
-      if (outdated(err)) notify.error("Could not connect", errorMessage(err))
-      else setRefusal(errorMessage(err))
+      if (outdated(err)) notify.error("Could not connect", sentence(errorMessage(err)))
+      else setRefusal(sentence(errorMessage(err)))
     } finally {
       setBusy(false)
     }
@@ -182,7 +182,7 @@ function useMachineCheck(
         (result) => setAnswer({ url, state: "done", result }),
         (err) => {
           if (!controller.signal.aborted)
-            setAnswer({ url, state: "refused", message: errorMessage(err) })
+            setAnswer({ url, state: "refused", message: sentence(errorMessage(err)) })
         },
       )
     }, CHECK_AFTER)

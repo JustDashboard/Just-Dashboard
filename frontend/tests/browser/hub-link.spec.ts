@@ -345,8 +345,11 @@ async function mock(page: Page, initial: Status, auth = admin) {
     }
     if (path === "/dashboard/hub/sync" && method === "POST") return respond(route, world.hub)
     if (path === "/dashboard/hub" && method === "DELETE") {
+      // The link is cleared either way; an idle link sends nothing, and an unreachable hub is not
+      // told (§8.2).
+      const hubNotified = world.hub.reachable !== false
       world.hub = unlinked
-      return route.fulfill({ status: 204 })
+      return respond(route, { hubNotified })
     }
     return respond(route, { error: { code: "not_found", message: "no such route" } }, 404)
   })
@@ -548,6 +551,57 @@ test("?connect= fills in the hub, says so, shows its machine, chooses no scope, 
   await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible()
 })
 
+test("the hub's Connect door opened signed out comes back to it after signing in", async ({
+  page,
+}) => {
+  const world = await mock(page, unlinked)
+  // The hub opens the door in a new tab, which is usually signed out (§8.1).
+  let signedIn = false
+  await page.route("**/api/v1/auth/session", (route) =>
+    signedIn
+      ? route.fallback()
+      : route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            authenticated: false,
+            needsTotp: false,
+            needsEnrollment: false,
+          }),
+        }),
+  )
+  await page.route("**/api/v1/auth/login", (route) => {
+    signedIn = true
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(admin),
+    })
+  })
+
+  await page.goto("/dashboard/hub?connect=hub.tailed39ba.ts.net")
+  await expect(page).toHaveURL(
+    /\/login\?next=%2Fdashboard%2Fhub%3Fconnect%3Dhub\.tailed39ba\.ts\.net$/,
+  )
+  await page.getByLabel("Username", { exact: true }).fill("operator")
+  await page.getByLabel("Password", { exact: true }).fill("Correct-Horse-Battery-9")
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+
+  await expect(page).toHaveURL(/\/dashboard\/hub\?connect=hub\.tailed39ba\.ts\.net$/)
+  await expect(page.getByLabel("Hub address")).toHaveValue(HUB)
+  await expect(page.getByText("This address came from a link")).toBeVisible()
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(MACHINE_LINE)
+  expect(world.calls).toEqual([])
+
+  // Any other address still signs in to the Overview: a `next` someone else wrote leads nowhere.
+  signedIn = false
+  await page.goto("/login?next=%2F%2Fevil.example%2Fdashboard%2Fhub%3Fconnect%3Dhub")
+  await page.getByLabel("Username", { exact: true }).fill("operator")
+  await page.getByLabel("Password", { exact: true }).fill("Correct-Horse-Battery-9")
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(page).toHaveURL(/\/$/)
+})
+
 test("a link someone else wrote fills nothing in, and a refused hub says why", async ({ page }) => {
   const world = await mock(page, unlinked)
   await page.goto("/dashboard/hub?connect=javascript:alert(1)")
@@ -568,16 +622,18 @@ test("a link someone else wrote fills nothing in, and a refused hub says why", a
   await expect(
     page.getByText("sudo ./scripts/manage.sh hub connect https://hub.example.com"),
   ).toBeVisible()
-  // The rule's refusal shows as it is typed, before Connect.
-  await expect(page.locator("[data-slot=hub-link-machine]")).toContainText(
-    "the hub must be a machine on this server's tailnet",
+  // The rule's refusal shows as it is typed, before Connect, as a sentence of its own.
+  await expect(page.locator("[data-slot=hub-link-machine]")).toHaveText(
+    "The hub must be a machine on this server's tailnet, named like hub.tailed39ba.ts.net.",
   )
   // Arrived by a link, so the scope is the person's to choose before Connect is offered.
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeDisabled()
   await scopeCard(page, "Observe").click()
   await page.getByRole("button", { name: "Connect", exact: true }).click()
   const alert = page.getByRole("alert").filter({ hasText: "Could not connect" })
-  await expect(alert).toContainText("is not one machine on this server's tailnet")
+  await expect(alert).toContainText(
+    "Hub.example.com is not one machine on this server's tailnet (tailed39ba.ts.net).",
+  )
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled()
 })
 
@@ -921,6 +977,36 @@ test("linked: the hub's notices, newest first, as text, dismissed per browser", 
   await expect(listed.getByRole("link", { name: "Open in Just Hub" })).toHaveCount(1)
 })
 
+test("a long hub name is what the notice card clips, never who says it or the link's host", async ({
+  page,
+}) => {
+  // 22 of the 64 characters a hub may call itself (§6.1).
+  const name = "homelab-hub-eu-west-01"
+  const card = page.locator("[data-slot=hub-notice]")
+  const clipped = () =>
+    card.evaluate((el) =>
+      Array.from(el.querySelectorAll<HTMLElement>("p, a, span"))
+        .filter((node) => node.scrollWidth > node.clientWidth + 1)
+        .map((node) => node.textContent),
+    )
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await mock(page, linked("maintain", { hubName: name, notices: notices() }))
+    await page.goto("/account")
+    if (width < 768) await page.locator("[data-slot=sidebar-trigger]:visible").click()
+    await expect(card).toContainText("Update ready on 1 server")
+    await expect(card).toContainText(/\) says/)
+    await expect(card).toContainText(/· 2m/)
+    // Only the name may be cut, and then it is its own title.
+    for (const text of await clipped()) expect(text, `clipped at ${width}`).toBe(name)
+    await expect(card.getByTitle(name)).toHaveText(name)
+    const open = card.getByRole("link", { name: /Open in Just Hub/ })
+    await expect(open).toContainText("hub.tailed39ba.ts.net")
+    await expect(open).toHaveAttribute("title", `${HUB}/updates`)
+    await card.screenshot({ path: `test-results/hub-notice-long-name-${width}.png` })
+  }
+})
+
 test("a notice that reads like the dashboard's own prompt is drawn as the hub's", async ({
   page,
 }) => {
@@ -957,7 +1043,9 @@ test("a notice that reads like the dashboard's own prompt is drawn as the hub's"
 test("linked, hub unreachable: the switcher says so and the others read unknown", async ({
   page,
 }) => {
-  await mock(
+  // A request that got no answer, in Go's own words, as the engine records it.
+  const refused = `Post "${HUB}/api/hub/v1/heartbeat": dial tcp 100.101.102.103:443: connect: connection refused`
+  const world = await mock(
     page,
     linked("maintain", {
       reachable: false,
@@ -965,7 +1053,7 @@ test("linked, hub unreachable: the switcher says so and the others read unknown"
         ...(linked("maintain").admin as object),
         link: {
           ...(linked("maintain").admin as { link: object }).link,
-          lastError: "the heartbeat failed: the hub answered HTTP 503",
+          lastError: refused,
         },
       },
     }),
@@ -973,7 +1061,16 @@ test("linked, hub unreachable: the switcher says so and the others read unknown"
   await page.goto("/dashboard/hub")
   await expect(switcher(page)).toContainText("Hub unreachable")
   await expect(page.getByText("Connected, hub unreachable")).toBeVisible()
-  await expect(page.getByText("The last exchange with hub.tailed39ba.ts.net failed")).toBeVisible()
+  const failed = page.getByText("The last exchange with hub.tailed39ba.ts.net failed")
+  await expect(failed).toBeVisible()
+  // Said as what happened; Go's words are there for whoever opens them, not the headline.
+  await expect(
+    page.getByText("Could not reach hub.tailed39ba.ts.net: the connection was refused."),
+  ).toBeVisible()
+  const raw = page.locator("[data-slot=hub-link-raw-error]")
+  await expect(raw.getByText(refused)).toBeHidden()
+  await raw.getByText("What this server recorded").click()
+  await expect(raw.getByText(refused)).toBeVisible()
   await expect(
     page.locator("section", { hasText: "Activity" }).first().getByText("Not reaching the hub"),
   ).toBeVisible()
@@ -983,6 +1080,32 @@ test("linked, hub unreachable: the switcher says so and the others read unknown"
   await expect(menu.getByText("Hub unreachable")).toBeVisible()
   await expect(menu.getByRole("menuitem").nth(0)).toContainText("Not reaching the hub")
   await expect(menu.getByRole("menuitem").nth(2)).toContainText("Unknown")
+  await page.keyboard.press("Escape")
+
+  // Sync now says the report did not go, and why, in the same sentence.
+  await page.getByRole("button", { name: "Sync now" }).click()
+  await expect(page.getByText("Report not sent to hub.tailed39ba.ts.net")).toBeVisible()
+  await expect(
+    page
+      .locator("[data-sonner-toast]")
+      .getByText("Could not reach hub.tailed39ba.ts.net: the connection was refused."),
+  ).toBeVisible()
+
+  // The link is cleared here anyway, and the page says the hub was not told.
+  await page.getByRole("button", { name: "Disconnect", exact: true }).click()
+  await page
+    .getByRole("dialog", { name: "Disconnect from Just Hub" })
+    .getByRole("button", { name: "Disconnect", exact: true })
+    .click()
+  await expect(page.getByText("Disconnected here")).toBeVisible()
+  await expect(
+    page.getByText(
+      "hub.tailed39ba.ts.net could not be told, and still lists this server until it is removed there.",
+    ),
+  ).toBeVisible()
+  await expect(page.getByText("Disconnected from hub.tailed39ba.ts.net")).toHaveCount(0)
+  await expect(page.getByLabel("Hub address")).toBeVisible()
+  expect(world.calls.at(-1)?.path).toBe("/dashboard/hub")
 })
 
 test("an idle link says why, offers no sync, and a disconnect tells no one", async ({ page }) => {
@@ -1046,6 +1169,11 @@ test("an idle link says why, offers no sync, and a disconnect tells no one", asy
   await expect(dialog).toContainText("the hub is not told")
   await dialog.getByRole("button", { name: "Disconnect", exact: true }).click()
   await expect(page.getByLabel("Hub address")).toBeVisible()
+  await expect(
+    page.getByText(
+      "hub.tailed39ba.ts.net was not told, and still lists this server until it is removed there.",
+    ),
+  ).toBeVisible()
   expect(world.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
     "DELETE /dashboard/hub",
   ])

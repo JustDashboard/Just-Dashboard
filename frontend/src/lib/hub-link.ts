@@ -96,6 +96,80 @@ export function connectTarget(param: string | null | undefined, testOrigin?: str
   return `https://${raw.replace(/:443$/, "")}`
 }
 
+const SAME_ORIGIN = "http://dashboard.invalid"
+
+/**
+ * Where a browser the shell sent to sign in comes back to afterwards: the hub's Connect door,
+ * `/dashboard/hub?connect=<hub host>` (§8.1), and nothing else. The hub opens it in a new tab, which
+ * is usually signed out, and its waiting screen tells the person to sign in there; landing on the
+ * Overview after that lost the address the link filled in. Only this one address is kept, built
+ * afresh, so a `next=` someone else wrote cannot send a fresh sign-in anywhere but Settings → Hub,
+ * where `connect` is still only a suggestion (`connectTarget`).
+ */
+export function returnAfterSignIn(path: string | null | undefined): string | undefined {
+  if (!path?.startsWith("/")) return undefined
+  let url: URL
+  try {
+    url = new URL(path, SAME_ORIGIN)
+  } catch {
+    return undefined
+  }
+  if (url.origin !== SAME_ORIGIN || url.pathname !== "/dashboard/hub") return undefined
+  const connect = url.searchParams.get("connect")?.trim()
+  if (!connect || connect.length > 300) return undefined
+  return `/dashboard/hub?connect=${encodeURIComponent(connect)}`
+}
+
+/** The sign-in page for a signed-out browser at `path`, carrying `returnAfterSignIn`'s address. */
+export function signInAddress(path: string): string {
+  const back = returnAfterSignIn(path)
+  return back ? `/login?next=${encodeURIComponent(back)}` : "/login"
+}
+
+/**
+ * A reason from the backend as a sentence of its own. The API words its reasons in lower case with
+ * no full stop, to sit inside other text; standing alone under a title or a field they start with
+ * a capital and end with a stop, as the page's other reasons do. Anything the hub wrote that the
+ * backend quotes inside one is left as it is.
+ */
+export function sentence(text: string): string {
+  const trimmed = text.trim()
+  if (!trimmed) return ""
+  const capital = trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
+  return /[.!?…]["'”’)]?$/.test(capital) ? capital : `${capital}.`
+}
+
+/** A request that got no answer at all, in Go's words: `Post "<url>": <why>`. */
+const NO_ANSWER = /^(?:Get|Head|Post|Put|Patch|Delete) "[^"]*": ([\s\S]+)$/
+
+/** What Go's reason for no answer means to a person, checked in order. */
+const NO_ANSWER_WHY: [RegExp, string][] = [
+  [/connection refused/i, "the connection was refused"],
+  [/no such host|server misbehaving/i, "its name did not resolve"],
+  [/i\/o timeout|deadline exceeded|Client\.Timeout|timeout awaiting/i, "it did not answer in time"],
+  [
+    /no route to host|network is unreachable|host is unreachable/i,
+    "there is no network route to it",
+  ],
+  [/x509|certificate|tls:/i, "its certificate was not accepted"],
+  [/connection reset|broken pipe|EOF|server closed/i, "the connection closed before it answered"],
+]
+
+/**
+ * The last exchange's failure (`admin.link.lastError`) as a person reads it. A request that got
+ * no answer is in Go's own words — `Post "http://…/heartbeat": dial tcp …: connect: connection
+ * refused` — so it is said as what happened, "Could not reach hub.…: the connection was refused.",
+ * and Go's words are kept as `raw` for a disclosure. Anything else is already the backend's
+ * sentence, or the hub's answer quoted and attributed by it (§8.10), and is said as it is.
+ */
+export function exchangeFailure(error: string, host: string): { message: string; raw?: string } {
+  const raw = error.trim()
+  const noAnswer = NO_ANSWER.exec(raw)
+  if (!noAnswer) return { message: sentence(raw) }
+  const why = NO_ANSWER_WHY.find(([pattern]) => pattern.test(noAnswer[1]))?.[1]
+  return { message: why ? `Could not reach ${host}: ${why}.` : `Could not reach ${host}.`, raw }
+}
+
 /**
  * Whose machine an address is, the way the protocol words it (§8.2): "hub.tailed39ba.ts.net, a
  * machine of wayy01@github", or "…, tagged tag:server" for a machine with no person of its own.

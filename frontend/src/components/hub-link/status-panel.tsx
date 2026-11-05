@@ -13,7 +13,14 @@ import {
 import { commandWords } from "@/lib/account-link"
 import { errorMessage } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
-import { hubHost, hubSays, noticeHref, noticeTone, reportCadence } from "@/lib/hub-link"
+import {
+  exchangeFailure,
+  hubHost,
+  hubSays,
+  noticeHref,
+  noticeTone,
+  reportCadence,
+} from "@/lib/hub-link"
 import { notify } from "@/lib/toast"
 import type { HubLinkNotice, HubLinkStatus } from "@/lib/types"
 import { MarkTile, type Mark } from "@/components/account-link/marks"
@@ -55,7 +62,8 @@ function askedBy(issuedBy: string) {
  * here, each with its state at the far end. Every command is in the audit log under
  * `hub.command.*` with the hub as its actor, so the section leads there for the rest. An idle
  * link's last error is its reason, which the page already says above everything, so here the
- * report only reads as not sent.
+ * report only reads as not sent. Any other last error is said as what happened
+ * (`exchangeFailure`), with Go's own words for a request that got no answer behind a disclosure.
  */
 export function HubActivity({
   status,
@@ -89,7 +97,7 @@ export function HubActivity({
     >
       {link.lastError && !idle && (
         <Notice tone="warning" icon={Warning} title={`The last exchange with ${host} failed`}>
-          {link.lastError}
+          <ExchangeFailure error={link.lastError} host={host} />
         </Notice>
       )}
       <RowList>
@@ -137,6 +145,25 @@ export function HubActivity({
         )}
       </RowList>
     </Section>
+  )
+}
+
+function ExchangeFailure({ error, host }: { error: string; host: string }) {
+  const { message, raw } = exchangeFailure(error, host)
+  return (
+    <>
+      <p className="break-words">{message}</p>
+      {raw && (
+        <details data-slot="hub-link-raw-error" className="mt-1 min-w-0">
+          <summary className="cursor-pointer hover:text-foreground">
+            What this server recorded
+          </summary>
+          <pre className="mt-1 overflow-x-auto rounded-sm border border-hairline bg-surface-header/40 p-2 font-mono text-micro break-words whitespace-pre-wrap">
+            {raw}
+          </pre>
+        </details>
+      )}
+    </>
   )
 }
 
@@ -205,7 +232,9 @@ export function HubNotices({
 /**
  * Sync now and Disconnect, for the identity line: the two things done to a link that exists. An
  * idle link offers only Disconnect: a sync would be refused (`409 hub_url_refused`), and the hub
- * is not told of the disconnect, since this server no longer sends it anything.
+ * is not told of the disconnect, since this server no longer sends it anything. The link is
+ * cleared here whether or not the hub heard, so afterwards the page says which it was: a hub that
+ * was not told still lists this server until it is removed there.
  */
 export function HubLinkActions({
   host,
@@ -219,7 +248,8 @@ export function HubLinkActions({
   name: string
   idle?: boolean
   onSync: () => Promise<HubLinkStatus>
-  onDisconnect: () => Promise<void>
+  /** Disconnects, and answers whether the hub was told. */
+  onDisconnect: () => Promise<boolean>
 }) {
   const { confirm, dialog } = useConfirm()
   const [syncing, setSyncing] = useState(false)
@@ -228,8 +258,12 @@ export function HubLinkActions({
     setSyncing(true)
     try {
       const next = await onSync()
+      const failure = next.admin?.link?.lastError
       if (next.reachable === false)
-        notify.error(`Could not reach ${host}`, next.admin?.link?.lastError)
+        notify.error(
+          `Report not sent to ${host}`,
+          failure ? exchangeFailure(failure, host).message : undefined,
+        )
       else notify.success(`Report sent to ${host}`)
     } catch (err) {
       notify.error("Could not sync", errorMessage(err))
@@ -263,8 +297,12 @@ export function HubLinkActions({
         </>
       ),
       action: async () => {
-        await onDisconnect()
-        notify.success(`Disconnected from ${host}`)
+        if (await onDisconnect()) notify.success(`Disconnected from ${host}`)
+        else
+          notify.warning("Disconnected here", {
+            description: `${host} ${idle ? "was not told" : "could not be told"}, and still lists this server until it is removed there.`,
+            duration: 12_000,
+          })
         return "reported"
       },
     })

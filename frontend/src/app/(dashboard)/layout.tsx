@@ -20,6 +20,7 @@ import { HeldSessionsHost, HeldSessionsProvider } from "@/components/remote-desk
 import { AgentDock } from "@/components/assistant/agent/dock"
 import { AskAboutPage } from "@/components/assistant/ask-about"
 import { HubLinkProvider, useShellHub } from "@/hooks/use-hub-link"
+import { signInAddress } from "@/lib/hub-link"
 import { ServerSwitcher } from "@/components/hub-link/server-switcher"
 
 /**
@@ -63,11 +64,17 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   // Redirecting here is a convenience, not a security control: every API call
   // behind this shell is independently authenticated by the server. An
   // account that has not been asked what the dashboard is for is asked first,
-  // wherever it was headed; answering or skipping ends that for good.
+  // wherever it was headed; answering or skipping ends that for good. The
+  // hub's Connect door, which the hub opens in a new tab that is usually
+  // signed out, is carried through the sign-in (`returnAfterSignIn`).
   const onboarding = Boolean(status?.user?.needsOnboarding)
   useEffect(() => {
     if (!loading && !status?.authenticated)
-      router.replace(sessionEnded ? "/login?reason=session" : "/login")
+      router.replace(
+        sessionEnded
+          ? "/login?reason=session"
+          : signInAddress(window.location.pathname + window.location.search),
+      )
     else if (onboarding) router.replace("/welcome")
   }, [loading, status, sessionEnded, onboarding, router])
 

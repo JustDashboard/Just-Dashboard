@@ -1061,7 +1061,10 @@ on the tailnet can send an administrator such a link with a look-alike name, so 
 suggestion. It fills in `https://<hub host>`, says that the address came from a link and to check it is the hub
 they meant, shows the hub's machine and its owner from `GET /dashboard/hub/check` (8.2), and leaves the scope
 unselected: the administrator must choose one before Connect is enabled. It shows exactly what the hub will see
-and be able to do at the chosen scope, and does nothing until a server administrator presses Connect.
+and be able to do at the chosen scope, and does nothing until a server administrator presses Connect. The hub's
+new tab is often signed out; the dashboard then sends it to sign in and back to this address afterwards (this
+address only, rebuilt from its `connect` value, so a link someone else wrote cannot send a fresh sign-in anywhere
+else).
 
 ### 8.2 `/api/v1/dashboard/hub`
 

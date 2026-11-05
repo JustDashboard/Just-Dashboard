@@ -119,8 +119,9 @@ export function HubNotice({ collapsed }: { collapsed: boolean }) {
         <div className="flex min-w-0 items-start gap-2.5">
           <Mark tone={tone} />
           <div className="min-w-0 flex-1 space-y-1">
-            <p className="truncate text-hint leading-tight text-muted-foreground">
-              {hubSays(hub.name)} · {relativeTime(notice.at)}
+            <p className="text-hint leading-tight text-muted-foreground">
+              <HubSays name={hub.name} />{" "}
+              <span className="whitespace-nowrap">· {relativeTime(notice.at)}</span>
             </p>
             <p className="line-clamp-2 text-xs leading-snug font-semibold break-words">
               {notice.title}
@@ -143,11 +144,20 @@ export function HubNotice({ collapsed }: { collapsed: boolean }) {
         {(href || owed.length > 1) && (
           <div className="flex flex-col gap-1">
             {href && (
-              <Button asChild size="sm" variant="ghost" className="w-full justify-between">
-                <a href={href} target="_blank" rel="noopener noreferrer">
-                  <span className="min-w-0 truncate">
-                    Open in Just Hub{" "}
-                    <span className="font-normal text-muted-foreground">{hubHost(href)}</span>
+              <Button
+                asChild
+                size="sm"
+                variant="ghost"
+                className="h-auto min-h-8 w-full justify-between py-1.5"
+              >
+                <a href={href} target="_blank" rel="noopener noreferrer" title={href}>
+                  {/* The host is the part that matters (§8.10), so it has a line of its own
+                    rather than being what a narrow rail cuts. */}
+                  <span className="flex min-w-0 flex-col items-start text-left">
+                    <span>Open in Just Hub</span>
+                    <span className="max-w-full truncate text-hint font-normal text-muted-foreground">
+                      {hubHost(href)}
+                    </span>
                   </span>
                   <ArrowUpRight />
                 </a>
@@ -165,6 +175,26 @@ export function HubNotice({ collapsed }: { collapsed: boolean }) {
         )}
       </div>
     </section>
+  )
+}
+
+/**
+ * "Just Hub (hub) says", kept on one line with only the hub's name clipped when the rail is too
+ * narrow for it: the name is the hub's own and up to 64 characters, and "says" is what marks the
+ * words below as the hub's (§8.10), so it is the part that must stay. The name may take the line
+ * less the room the words around it need (16ch holds "Just Hub () says"), and its whole text is
+ * its title. Inline boxes rather than flex, so the line still reads, and copies, as one sentence.
+ */
+function HubSays({ name }: { name: string }) {
+  if (!name) return <span>{hubSays(name)}</span>
+  return (
+    <span className="whitespace-nowrap">
+      Just Hub (
+      <span className="inline-block max-w-[calc(100%-16ch)] truncate align-bottom" title={name}>
+        {name}
+      </span>
+      ) says
+    </span>
   )
 }
 
