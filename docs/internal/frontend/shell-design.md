@@ -300,9 +300,10 @@ reply, so the CSP is unchanged. `lib/hub-link.ts` holds the pure half and its Bu
 
 - **The server switcher** (`components/hub-link/server-switcher.tsx`) takes the logo row's place: the J,
   this server's name where the wordmark was, and a chevron. Its menu lists every server the hub holds,
-  this one first and marked *this one* (a link to the Overview), the rest by name with a `StatusDot` in
-  the hub's state (online green, late amber, offline red, updating grey; the word is in the row's
-  accessible name), their version and an arrow, then **Open Just Hub**. Another server is a real link to
+  this one first with the installed version the wordmark carried and marked *this one* (a link to
+  the Overview), the rest by name with a `StatusDot` in the hub's state (online green, late amber,
+  offline red, updating grey; the word is in the row's accessible name), their version and an
+  arrow, then **Open Just Hub**. Another server is a real link to
   its origin and opens **in this tab** — the hub's own Open button is the way to a new one — and a
   server with no reported address is listed, disabled, as *no address*. While the hub cannot be reached
   the trigger carries an amber dot, the menu says *Hub unreachable*, and the others' dots go grey

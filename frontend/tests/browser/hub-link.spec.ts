@@ -176,10 +176,8 @@ const linked = (scope: Scope, extra: Record<string, unknown> = {}): Status => ({
 })
 
 /** What a non-administrator is sent: no `admin` part (§8.2). */
-const forReader = (status: Status): Status => {
-  const { admin: _admin, ...rest } = status
-  return rest as Status
-}
+const forReader = (status: Status): Status =>
+  Object.fromEntries(Object.entries(status).filter(([key]) => key !== "admin")) as Status
 
 type Call = { method: string; path: string; body?: unknown; csrf?: string }
 
@@ -499,7 +497,7 @@ test("linked: the switcher lists the fleet, this one first, and another opens in
   await expect(menu).toBeVisible()
   const items = menu.getByRole("menuitem")
   await expect(items).toHaveText([
-    /^vps-07749119-vps-ovh-net, Online\s*this one$/,
+    /^vps-07749119-vps-ovh-net, Online\s*[\d.]+\s*this one$/,
     /^atlas, Offline\s*no address$/,
     /^vmi3690758, Late\s*0\.8\.5$/,
     /^Open Just Hub$/,

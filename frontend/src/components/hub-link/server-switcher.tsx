@@ -4,6 +4,7 @@ import Link from "next/link"
 import { ArrowUpRight, ChevronDown } from "@/components/icons"
 import { openable, orderFleet, serverAddress, serverReading } from "@/lib/hub-link"
 import { cn } from "@/lib/utils"
+import { VERSION } from "@/lib/version"
 import type { ShellHubValue } from "@/hooks/use-hub-link"
 import { LogoGlyph } from "@/components/logo"
 import { Status, StatusDot } from "@/components/status-dot"
@@ -27,10 +28,10 @@ import { useSidebar } from "@/components/ui/sidebar"
  * stays and the name takes the wordmark's place, with the chevron that says it opens.
  *
  * The menu is the hub's last word on each server, cached by this server's backend: a dot in the
- * server's state and its name, this one first and marked, then the rest by name with their
- * version and an arrow, since pressing one leaves for another origin. They open in this tab,
- * which is the point — the hub's own Open button is the way to a new one — and they are real
- * links, so a middle click still makes a tab. While the hub cannot be reached the others' dots go
+ * server's state and its name, this one first with the installed version the wordmark used to
+ * carry, then the rest by name with their version and an arrow, since pressing one leaves for
+ * another origin. They open in this tab, which is the point — the hub's own Open button is the
+ * way to a new one — and they are real links, so a middle click still makes a tab. While the hub cannot be reached the others' dots go
  * grey, because what it said last may be minutes old, and the menu says why.
  *
  * `strip` is the phone's top strip, where the rail is a closed sheet: the same trigger and menu,
@@ -124,6 +125,10 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
                 <Link href="/" data-self>
                   {dot}
                   {label}
+                  {/* The wordmark carried the installed version; its row here does now. */}
+                  <span className="numeric shrink-0 text-hint text-muted-foreground">
+                    {VERSION}
+                  </span>
                   <span className="shrink-0 text-hint text-muted-foreground">this one</span>
                 </Link>
               </DropdownMenuItem>
