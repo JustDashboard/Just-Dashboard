@@ -37,6 +37,10 @@ function factorLabel(session: SessionInfo) {
       return "passkey and authenticator code"
     case "passkey+recovery":
       return "passkey and recovery code"
+    case "hub":
+      return session.hubUser
+        ? `signed in through Just Hub as ${session.hubUser}`
+        : "signed in through Just Hub"
     default:
       return "authentication method not recorded"
   }

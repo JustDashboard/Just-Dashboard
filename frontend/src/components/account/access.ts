@@ -38,7 +38,7 @@ export function activeNow(session: Pick<SessionInfo, "lastSeenAt">, now: number)
  * the 2FA routes, and one let in on a password alone is the one an operator
  * of a root-equivalent panel wants to see first.
  */
-export type Guard = "code" | "recovery" | "password" | "passkey" | "pending" | "unknown"
+export type Guard = "code" | "recovery" | "password" | "passkey" | "hub" | "pending" | "unknown"
 
 export function sessionGuard(session: Pick<SessionInfo, "authMethod" | "twoFactorPassed">): Guard {
   if (!session.twoFactorPassed) return "pending"
@@ -55,6 +55,11 @@ export function sessionGuard(session: Pick<SessionInfo, "authMethod" | "twoFacto
     // phished, so it is not drawn as the amber password-alone line.
     case "passkey":
       return "passkey"
+    // Opened by a ticket from Just Hub, whose own authenticator code stood in
+    // for this server's (hub-link-protocol §9.1). Not amber: a second factor
+    // was proved, just not here.
+    case "hub":
+      return "hub"
     default:
       return "unknown"
   }

@@ -6926,7 +6926,16 @@ export type DbMetricsExport = {
 
 export type SessionInfo = {
   authMethod?:
-    "unknown" | "password" | "totp" | "recovery" | "passkey" | "passkey+totp" | "passkey+recovery"
+    | "unknown"
+    | "password"
+    | "totp"
+    | "recovery"
+    | "passkey"
+    | "passkey+totp"
+    | "passkey+recovery"
+    | "hub"
+  /** The Just Hub user whose grant opened a `hub` session (hub-link-protocol §9.9). */
+  hubUser?: string
   id: string
   userId: number
   twoFactorPassed: boolean
@@ -8707,7 +8716,10 @@ export type HubLinkStatus = {
   idle?: true
   fleet?: HubLinkServer[]
   notices?: HubLinkNotice[]
-  /** Hub sign-in (§9); typed so a strict reader keeps it, and drawn by nothing yet. */
+  /**
+   * Hub sign-in (§9): `enabled` is JD_HUB_SIGNIN, `offered` and `users` what the hub's last reply
+   * said, and `mine` the caller's own grant, when it has one for this link.
+   */
   signIn?: {
     enabled: boolean
     offered: boolean
