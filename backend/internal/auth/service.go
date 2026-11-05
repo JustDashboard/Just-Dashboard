@@ -38,6 +38,9 @@ type Service struct {
 	sessionTTL time.Duration
 	idleTTL    time.Duration
 	require2FA bool
+	// hubCheck and hubEnded are hub sign-in's (hub_signin.go).
+	hubCheck HubSessionCheck
+	hubEnded func(context.Context, HubGrantEnd)
 }
 
 func NewService(st *store.Store, sealer *Sealer, sessionTTL, idleTTL time.Duration, require2FA bool) *Service {
@@ -369,9 +372,35 @@ func (s *Service) SetPassword(ctx context.Context, userID int64, password string
 	if err != nil {
 		return err
 	}
-	_, err = s.st.DB.ExecContext(ctx,
-		`UPDATE users SET password_hash = ?, must_change_pw = 0 WHERE id = ?`, hash, userID)
-	return err
+	// A new password ends a hub sign-in grant with it (hub_signin.go).
+	return s.changeEndingHubGrant(ctx, userID, HubEndPasswordChanged, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`UPDATE users SET password_hash = ?, must_change_pw = 0 WHERE id = ?`, hash, userID)
+		return err
+	})
+}
+
+// changeEndingHubGrant runs change in one transaction together with the end of
+// the account's hub sign-in grant and the revocation of its hub sessions, and
+// reports the end once it has committed (hub-link-protocol.md section 9.3).
+func (s *Service) changeEndingHubGrant(ctx context.Context, userID int64, reason string, change func(*sql.Tx) error) error {
+	tx, err := s.st.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	end, err := endHubGrantTx(ctx, tx, userID, reason)
+	if err != nil {
+		return err
+	}
+	if err := change(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.hubEndedAfterCommit(ctx, end)
+	return nil
 }
 
 func (s *Service) VerifyUserPassword(ctx context.Context, userID int64, password string) bool {
@@ -401,25 +430,27 @@ func (s *Service) SetDisabled(ctx context.Context, userID int64, disabled bool) 
 			return err
 		}
 	}
-	v := 0
-	if disabled {
-		v = 1
-	}
-	if _, err := s.st.DB.ExecContext(ctx, `UPDATE users SET disabled = ? WHERE id = ?`, v, userID); err != nil {
+	if !disabled {
+		_, err := s.st.DB.ExecContext(ctx, `UPDATE users SET disabled = 0 WHERE id = ?`, userID)
 		return err
 	}
-	if disabled {
-		return s.RevokeAllSessions(ctx, userID)
-	}
-	return nil
+	return s.changeEndingHubGrant(ctx, userID, HubEndAccountDisabled, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET disabled = 1 WHERE id = ?`, userID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID)
+		return err
+	})
 }
 
 func (s *Service) DeleteUser(ctx context.Context, userID int64) error {
 	if err := s.guardLastAdmin(ctx, userID); err != nil {
 		return err
 	}
-	_, err := s.st.DB.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID)
-	return err
+	return s.changeEndingHubGrant(ctx, userID, HubEndAccountDeleted, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID)
+		return err
+	})
 }
 
 // guardLastAdmin refuses changes that would leave the dashboard with no way in.
@@ -658,24 +689,31 @@ func (s *Service) DisableTOTP(ctx context.Context, userID int64) error {
 	if s.require2FA {
 		return ErrTOTPRequired
 	}
-	if _, err := s.st.DB.ExecContext(ctx,
-		`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1, totp_failed_count = 0, totp_locked_until = 0 WHERE id = ?`, userID); err != nil {
+	// A grant made with a code must not outlive the authenticator it was
+	// made with (hub_signin.go).
+	return s.changeEndingHubGrant(ctx, userID, HubEndAuthenticatorChanged, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1, totp_failed_count = 0, totp_locked_until = 0 WHERE id = ?`, userID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID)
 		return err
-	}
-	_, err := s.st.DB.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID)
-	return err
+	})
 }
 
 // ResetTOTP clears an enrollment so a locked-out user can re-enroll. Admin only.
 func (s *Service) ResetTOTP(ctx context.Context, userID int64) error {
-	if _, err := s.st.DB.ExecContext(ctx,
-		`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1, totp_failed_count = 0, totp_locked_until = 0 WHERE id = ?`, userID); err != nil {
+	return s.changeEndingHubGrant(ctx, userID, HubEndAuthenticatorChanged, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1, totp_failed_count = 0, totp_locked_until = 0 WHERE id = ?`, userID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID)
 		return err
-	}
-	if _, err := s.st.DB.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	return s.RevokeAllSessions(ctx, userID)
+	})
 }
 
 func (s *Service) regenerateRecoveryCodes(ctx context.Context, userID int64) ([]string, error) {

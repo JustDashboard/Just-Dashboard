@@ -41,6 +41,17 @@ func (s *Server) initHubLink() {
 		// reads, and each link reads on its own schedule.
 		Host: newAccountHost(s), Version: version.Version,
 		Endpoint: s.hubLinkEndpoint,
+		SignIn:   s.Cfg.HubSignIn, Auth: s.Auth,
+	})
+	// A change to an account that ends its hub sign-in grant is made inside
+	// auth's own transaction; the audit entry is written here once it has
+	// committed, naming whoever made the change.
+	s.Auth.SetHubGrantEnded(func(ctx context.Context, end auth.HubGrantEnd) {
+		username, actor := "", ""
+		if p, ok := httpx.PrincipalFrom(ctx); ok && p.User != nil {
+			username, actor = p.Username(), "session"
+		}
+		s.modules.hubLink.AuditAccountEnd(ctx, end, username, actor)
 	})
 }
 
@@ -91,9 +102,17 @@ func (s *Server) mountHubLinkRoutes(r chi.Router) {
 	r.Method(http.MethodPost, "/hub/sync", s.handle(s.handleHubLinkSync))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireSession)
-		r.Method(http.MethodPost, "/hub", s.handle(s.handleHubLinkConnect))
-		r.Method(http.MethodDelete, "/hub/request", s.handle(s.handleHubLinkCancel))
-		r.Method(http.MethodPut, "/hub/scope", s.handle(s.handleHubLinkScope))
+		// A session a hub sign-in made may not hand this server to a hub or
+		// widen what one may do (hub-link-protocol.md section 9.9).
+		r.Group(func(r chi.Router) {
+			r.Use(httpx.RefuseHubSession)
+			r.Method(http.MethodPost, "/hub", s.handle(s.handleHubLinkConnect))
+			r.Method(http.MethodDelete, "/hub/request", s.handle(s.handleHubLinkCancel))
+			r.Method(http.MethodPut, "/hub/scope", s.handle(s.handleHubLinkScope))
+		})
+		// Removing an account's sign-in grant only takes power away from the
+		// hub, so a hub session may do it, as it may disconnect.
+		r.Method(http.MethodDelete, "/hub/signin/{userId}", s.handle(s.handleHubSignInRemove))
 		// Disconnecting stops everything the hub could do: it is in the
 		// destructive budget, as unlinking the account is.
 		s.destructive(r, func(r chi.Router) {
@@ -107,8 +126,8 @@ func (s *Server) handleHubLinkStatus(w http.ResponseWriter, r *http.Request) err
 }
 
 func (s *Server) writeHubLinkStatus(w http.ResponseWriter, r *http.Request) error {
-	admin := httpx.MustPrincipal(r).Can(auth.CapSystemAdmin)
-	st, err := s.modules.hubLink.Status(r.Context(), admin)
+	p := httpx.MustPrincipal(r)
+	st, err := s.modules.hubLink.StatusFor(r.Context(), p.Can(auth.CapSystemAdmin), p.UserID())
 	if err != nil {
 		return httpx.Internal(err)
 	}

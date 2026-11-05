@@ -42,6 +42,13 @@ func (s *Service) ConfirmTOTPEnrollmentForSession(ctx context.Context, userID in
 	if err != nil {
 		return nil, err
 	}
+	// A grant made with the password alone must not stand in for the code the
+	// account now requires (hub_signin.go): it ends here, with its hub
+	// sessions, and the person opts in again with a code.
+	end, err := endHubGrantTx(ctx, tx, userID, HubEndAuthenticatorChanged)
+	if err != nil {
+		return nil, err
+	}
 	if sessionID != "" {
 		if err := elevateTx(ctx, tx, sessionID, userID, "totp"); err != nil {
 			return nil, err
@@ -50,6 +57,7 @@ func (s *Service) ConfirmTOTPEnrollmentForSession(ctx context.Context, userID in
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	s.hubEndedAfterCommit(ctx, end)
 	return codes, nil
 }
 

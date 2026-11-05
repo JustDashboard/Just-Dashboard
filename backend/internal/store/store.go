@@ -22,7 +22,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = dnsRecordSchema + assistantChatSchema + deployTemplateSchema + cloudflareTunnelSchema + sleepSchema + runDiagnosisSchema + rehearsalSchema + dataRollbackSchema + previewBranchSchema + imageScanSchema + rollbackWatchSchema + canarySchema + deployEventSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + hubLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
+const schema = dnsRecordSchema + assistantChatSchema + deployTemplateSchema + cloudflareTunnelSchema + sleepSchema + runDiagnosisSchema + rehearsalSchema + dataRollbackSchema + previewBranchSchema + imageScanSchema + rollbackWatchSchema + canarySchema + deployEventSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + hubLinkSchema + hubSignInSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   token_hash   TEXT NOT NULL UNIQUE,
   twofa_passed INTEGER NOT NULL DEFAULT 0,
   auth_method  TEXT NOT NULL DEFAULT 'unknown',
+  hub_user     TEXT NOT NULL DEFAULT '',
   ip           TEXT NOT NULL DEFAULT '',
   user_agent   TEXT NOT NULL DEFAULT '',
   created_at   INTEGER NOT NULL,
@@ -1677,6 +1678,9 @@ END;
 var addedColumns = []struct{ table, column, spec string }{
 	// Access completion predates factor provenance; old sessions cannot prove a method.
 	{"sessions", "auth_method", "TEXT NOT NULL DEFAULT 'unknown'"},
+	// A session made by a hub sign-in ticket names the hub user whose grant
+	// made it (hub-link-protocol.md section 9.9); every other session has ''.
+	{"sessions", "hub_user", "TEXT NOT NULL DEFAULT ''"},
 	{"users", "totp_last_step", "INTEGER NOT NULL DEFAULT -1"},
 	// Wrong second-factor codes lock the account's second factor as wrong
 	// passwords lock its sign-in, each counted apart.

@@ -357,6 +357,7 @@ func (s *Service) completeLink(ctx context.Context, req Request, r pollResponse)
 		HeartbeatSeconds: clampInt(heartbeat, 10, 600), PollWaitSeconds: clampInt(pollWait, 1, 25),
 		HubNode: req.HubNode,
 	}
+	var after func()
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
 		if err := s.kv.putTx(ctx, tx, keyState, st); err != nil {
 			return err
@@ -364,10 +365,11 @@ func (s *Service) completeLink(ctx context.Context, req Request, r pollResponse)
 		if err := s.kv.delTx(ctx, tx, keyRequest, keyOutcome, keyStatus, keyPolicy, keyAttempt); err != nil {
 			return err
 		}
-		return s.onClear(ctx, tx)
+		return s.onClear(ctx, tx, &after)
 	}); err != nil {
 		return State{}, err
 	}
+	runAfter(after)
 	s.log.Info("linked to "+s.p.Title, "owner", st.Owner, "scope", st.Scope)
 	if s.audit != nil {
 		who, actor, method := req.By, "session", "LINK"
@@ -577,14 +579,16 @@ func (s *Service) Unlink(ctx context.Context) (siteNotified bool, err error) {
 	if id, _, e := loadIdentity(ctx, s.kv, s.sealer); e == nil && id != nil && s.enabled && s.admit(ctx, st) == nil {
 		tell = s.linkClient(st, id)
 	}
+	var after func()
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
 		if err := s.kv.delTx(ctx, tx, keyState, keyRequest, keyStatus, keyPolicy, keyAttempt, keyOutcome); err != nil {
 			return err
 		}
-		return s.onClear(ctx, tx)
+		return s.onClear(ctx, tx, &after)
 	}); err != nil {
 		return false, err
 	}
+	runAfter(after)
 	s.cancelLinked()
 	s.nudge()
 	if tell != nil {

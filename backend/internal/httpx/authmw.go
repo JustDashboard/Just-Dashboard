@@ -64,6 +64,11 @@ type sessionCookie struct {
 	stale  bool
 }
 
+// SessionToken is the session cookie the request carries, if any, without
+// resolving it. Hub sign-in revokes that session when it makes a new one, so
+// one browser holds one session.
+func (a *Authenticator) SessionToken(r *http.Request) string { return a.sessionToken(r).token }
+
 func (a *Authenticator) sessionToken(r *http.Request) sessionCookie {
 	var found sessionCookie
 	old, err := r.Cookie(sessioncookie.LegacyName)
@@ -224,6 +229,7 @@ func (a *Authenticator) AuthenticatePartial(next http.Handler) http.Handler {
 		p := &Principal{
 			User: user, Role: user.Role, SessionID: sess.ID, Kind: "session",
 			IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: sess.TwoFAPassed,
+			HubSession: sess.AuthMethod == auth.MethodHub,
 		}
 		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
 	})
@@ -272,6 +278,7 @@ func (a *Authenticator) resolveWithPasswordChange(w http.ResponseWriter, r *http
 	return &Principal{
 		User: user, Role: user.Role, SessionID: sess.ID, Kind: "session",
 		IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: true,
+		HubSession: sess.AuthMethod == auth.MethodHub,
 	}, nil
 }
 
@@ -399,6 +406,23 @@ func RequireSession(next http.Handler) http.Handler {
 		if p.Kind != "session" && !p.DeployRoute {
 			WriteError(w, r, Err(http.StatusForbidden, "session_required",
 				"this action requires an interactive session, not an API token"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RefuseHubSession refuses a session a Just Hub sign-in ticket made, on a
+// route that creates, changes, rotates, imports or exports a credential, or
+// creates or changes a link (hub-link-protocol.md section 9.9). A hub session
+// is short and ends with its grant; a credential made from one would outlive
+// both, so these are done from a session signed in on this server itself.
+// Tests find it by function identity, as they find RequireSession.
+func RefuseHubSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p, ok := PrincipalFrom(r.Context()); ok && p.HubSession {
+			WriteError(w, r, Err(http.StatusForbidden, "hub_session_not_allowed",
+				"sign in on this server itself to do this: a session opened through Just Hub cannot create or change credentials or links"))
 			return
 		}
 		next.ServeHTTP(w, r)

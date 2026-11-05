@@ -89,6 +89,9 @@ func (s *Server) Routes() http.Handler {
 				// A passkey's sign-in is a sign-in: the same budget per
 				// address, the same audit, the same session at the end.
 				s.mountPasskeySignInFinish(r)
+				// So is a ticket from the linked Just Hub, for an account
+				// that opted in (handlers_hubsignin.go).
+				s.mountHubSignIn(r)
 			})
 			s.mountPasskeySignIn(r)
 
@@ -99,8 +102,8 @@ func (s *Server) Routes() http.Handler {
 				r.Use(httpx.AuditMutations(s.Audit))
 				r.Use(httpx.RequireCSRF)
 				r.Method(http.MethodGet, "/auth/session", s.handle(s.handleSession))
-				r.Method(http.MethodPost, "/auth/2fa/setup", s.handle(s.handleTOTPSetup))
-				r.Method(http.MethodPost, "/auth/2fa/enable", s.handle(s.handleTOTPEnable))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/2fa/setup", s.handle(s.handleTOTPSetup))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/2fa/enable", s.handle(s.handleTOTPEnable))
 				r.Method(http.MethodPost, "/auth/2fa/verify", s.handle(s.handleTOTPVerify))
 				r.Method(http.MethodPost, "/auth/logout", s.handle(s.handleLogout))
 			})
@@ -110,7 +113,7 @@ func (s *Server) Routes() http.Handler {
 				r.Use(httpx.AuditMutations(s.Audit))
 				r.Use(httpx.RequireCSRF)
 				r.Use(httpx.RequireSession)
-				r.Method(http.MethodPost, "/account/password", s.handle(s.handleChangePassword))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/account/password", s.handle(s.handleChangePassword))
 			})
 		}
 
@@ -193,11 +196,11 @@ func (s *Server) Routes() http.Handler {
 func (s *Server) mountAccountRoutes(r chi.Router) {
 	r.Route("/account", func(r chi.Router) {
 		r.Use(httpx.RequireSession)
-		r.Method(http.MethodPost, "/recovery-codes", s.handle(s.handleRecoveryCodesRegen))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/recovery-codes", s.handle(s.handleRecoveryCodesRegen))
 		// Enrolling is on the half-authenticated group above, because that is
 		// where an install requiring 2FA sends you. Turning it off is only
 		// ever done by somebody already signed in, so it lives here.
-		r.Method(http.MethodPost, "/2fa/disable", s.handle(s.handleDisableTOTP))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/2fa/disable", s.handle(s.handleDisableTOTP))
 		r.Method(http.MethodGet, "/sessions", s.handle(s.handleListOwnSessions))
 		r.Method(http.MethodDelete, "/sessions/{id}", s.handle(s.handleRevokeOwnSession))
 		r.Method(http.MethodPost, "/sessions/revoke-others", s.handle(s.handleRevokeOtherSessions))
@@ -206,6 +209,8 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 		s.mountAccountPasskeys(r)
 		r.Method(http.MethodPatch, "/profile", s.handle(s.handleUpdateProfile))
 		r.Method(http.MethodPut, "/workspace", s.handle(s.handleSetWorkspace))
+		// "Let Just Hub sign me in" (handlers_hubsignin.go).
+		s.mountHubSignInGrant(r)
 		r.Method(http.MethodGet, "/avatar", s.handle(s.handleOwnAvatar))
 		r.Method(http.MethodPost, "/avatar", s.handle(s.handleUploadOwnAvatar))
 		r.Method(http.MethodDelete, "/avatar", s.handle(s.handleDeleteOwnAvatar))
@@ -215,15 +220,15 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleListTokens))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireSession)
-			r.Method(http.MethodPost, "/", s.handle(s.handleCreateToken))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/", s.handle(s.handleCreateToken))
 			// A key for an AI client, and the databases it reaches
 			// (handlers_mcp_keys.go).
-			r.Method(http.MethodPost, "/mcp", s.handle(s.handleCreateMCPToken))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/mcp", s.handle(s.handleCreateMCPToken))
 			// A key for the jd command line and CI (deploy_keys.go): it holds
 			// the administrator role, so only an administrator makes one.
-			r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+			r.With(httpx.RequireCapability(auth.CapSystemAdmin), httpx.RefuseHubSession).
 				Method(http.MethodPost, "/deploy", s.handle(s.handleCreateDeployToken))
-			r.Method(http.MethodPut, "/{id}/connections", s.handle(s.handleSetMCPTokenConnections))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/{id}/connections", s.handle(s.handleSetMCPTokenConnections))
 			r.Method(http.MethodDelete, "/{id}", s.handle(s.handleRevokeToken))
 			r.Group(func(r chi.Router) {
 				r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
@@ -238,12 +243,12 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Use(httpx.RequireSession)
 		r.Method(http.MethodGet, "/", s.handle(s.handleListUsers))
-		r.Method(http.MethodPost, "/", s.handle(s.handleCreateUser))
-		r.Method(http.MethodPatch, "/{id}", s.handle(s.handleUpdateUser))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/", s.handle(s.handleCreateUser))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPatch, "/{id}", s.handle(s.handleUpdateUser))
 		r.Method(http.MethodGet, "/{id}/avatar", s.handle(s.handleUserAvatar))
-		r.Method(http.MethodPost, "/{id}/reset-totp", s.handle(s.handleResetUserTOTP))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/reset-totp", s.handle(s.handleResetUserTOTP))
 		s.destructive(r, func(r chi.Router) {
-			r.Method(http.MethodDelete, "/{id}", s.handle(s.handleDeleteUser))
+			r.With(httpx.RefuseHubSession).Method(http.MethodDelete, "/{id}", s.handle(s.handleDeleteUser))
 		})
 	})
 

@@ -63,10 +63,23 @@ func (s *Service) UpdateUser(ctx context.Context, userID int64, update UserUpdat
 	} else if n != 1 {
 		return ErrNotFound
 	}
+	var end HubGrantEnd
 	if update.Password != nil || (update.Disabled != nil && *update.Disabled) {
+		// The hub sign-in grant ends with the sessions (hub_signin.go).
+		reason := HubEndPasswordReset
+		if update.Password == nil {
+			reason = HubEndAccountDisabled
+		}
+		if end, err = endHubGrantTx(ctx, tx, userID, reason); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.hubEndedAfterCommit(ctx, end)
+	return nil
 }

@@ -301,6 +301,14 @@ func (s *Service) nudge() {
 	}
 }
 
+// HeartbeatSoon asks the linked loop for a heartbeat now, without waiting for
+// it: hub sign-in tells the hub at once when a grant changes.
+func (s *Service) HeartbeatSoon() {
+	if s != nil {
+		s.kickHeartbeat()
+	}
+}
+
 func (s *Service) kickHeartbeat() {
 	select {
 	case s.kick <- struct{}{}:
@@ -922,6 +930,7 @@ func (s *Service) clearLink(ctx context.Context, st State, why string) {
 	// still finds this link stored, and not a newer one, is the only one that
 	// clears it and says so.
 	cleared := false
+	var after func()
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
 		cur, ok, err := s.kv.stateTx(ctx, tx)
 		if err != nil || !ok || cur.ServerID != st.ServerID {
@@ -936,7 +945,7 @@ func (s *Service) clearLink(ctx context.Context, st State, why string) {
 			}
 		}
 		cleared = true
-		return s.onClear(ctx, tx)
+		return s.onClear(ctx, tx, &after)
 	}); err != nil {
 		s.log.Warn("could not clear the "+s.p.Name, "err", err)
 		return
@@ -944,6 +953,7 @@ func (s *Service) clearLink(ctx context.Context, st State, why string) {
 	if !cleared {
 		return
 	}
+	runAfter(after)
 	s.cancelLinked()
 	s.log.Info(s.p.Name+" cleared", "reason", why)
 	if s.audit != nil {
@@ -956,12 +966,17 @@ func (s *Service) clearLink(ctx context.Context, st State, why string) {
 }
 
 // onClear deletes what the instance keeps beside the engine's own keys, in the
-// transaction that ends or replaces a link.
-func (s *Service) onClear(ctx context.Context, tx *sql.Tx) error {
+// transaction that ends or replaces a link. *after collects what the hook
+// asks to run once that transaction has committed; runAfter runs it.
+func (s *Service) onClear(ctx context.Context, tx *sql.Tx, after *func()) error {
 	if s.hooks.OnClear == nil {
 		return nil
 	}
-	return s.hooks.OnClear(ctx, tx)
+	fn, err := s.hooks.OnClear(ctx, tx)
+	if err == nil {
+		*after = fn
+	}
+	return err
 }
 
 // ------------------------------------------------------------------ status --

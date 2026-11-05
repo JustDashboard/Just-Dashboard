@@ -185,6 +185,14 @@ func (s *Server) handle(fn httpx.Handler) http.Handler { return fn }
 // New so that a failure to schedule backups is reported by main rather than
 // swallowed during construction.
 func (s *Server) Start(ctx context.Context) error {
+	// Before anything is served: with hub sign-in off, no grant and no hub
+	// session may survive this start, and if that cannot be written the
+	// dashboard does not start (hub-link-protocol.md section 9.3).
+	if s.modules.hubLink != nil {
+		if err := s.modules.hubLink.PrepareSignIn(ctx); err != nil {
+			return err
+		}
+	}
 	dnsCtx, dnsCancel := context.WithTimeout(ctx, 5*time.Second)
 	if err := s.modules.network.ReconcileDNSEvidence(dnsCtx); err != nil {
 		s.Log.Warn("interrupted DNS investigations could not be reconciled", "err", err)

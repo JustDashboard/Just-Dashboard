@@ -44,13 +44,14 @@ type Status struct {
 	Admin   *AdminStatus  `json:"admin,omitempty"`
 }
 
-// SignInStatus is where hub sign-in stands for the caller. This release has
-// no hub sign-in, so enabled is always false; offered and users report what
-// the hub's last reply said.
+// SignInStatus is where hub sign-in stands for the caller (section 9):
+// enabled is JD_HUB_SIGNIN, offered and users what the hub's last reply said,
+// and mine the caller's own grant, if it has one for this link.
 type SignInStatus struct {
 	Enabled bool     `json:"enabled"`
 	Offered bool     `json:"offered"`
 	Users   []string `json:"users"`
+	Mine    *MyGrant `json:"mine,omitempty"`
 }
 
 // AdminStatus is the part only a system administrator is sent.
@@ -60,6 +61,9 @@ type AdminStatus struct {
 	Request     *RequestStatus             `json:"request,omitempty"`
 	Link        *LinkStatus                `json:"link,omitempty"`
 	LastOutcome *accountlink.OutcomeStatus `json:"lastOutcome,omitempty"`
+	// Grants is every account's hub sign-in grant for this link, sent while
+	// linked with JD_HUB_SIGNIN on.
+	Grants []Grant `json:"grants,omitzero"`
 }
 
 type RequestStatus struct {
@@ -98,6 +102,11 @@ type HubKeyStatus struct {
 // Status reads the hub link as it is stored and cached. It contacts no one.
 // admin adds the part only a system administrator may read.
 func (s *Service) Status(ctx context.Context, admin bool) (Status, error) {
+	return s.StatusFor(ctx, admin, 0)
+}
+
+// StatusFor is Status for one account, whose own hub sign-in grant it names.
+func (s *Service) StatusFor(ctx context.Context, admin bool, userID int64) (Status, error) {
 	es, err := s.engine.Status(ctx)
 	if err != nil {
 		return Status{}, err
@@ -162,9 +171,23 @@ func (s *Service) Status(ctx context.Context, admin bool) (Status, error) {
 			a.LastOutcome = es.LastOutcome
 		}
 	}
-	out.SignIn = &SignInStatus{Users: []string{}}
+	out.SignIn = &SignInStatus{Enabled: s.SignInEnabled(), Users: []string{}}
 	if offer != nil {
 		out.SignIn.Offered, out.SignIn.Users = true, offer.Users
+	}
+	if out.State == StateLinked && s.SignInEnabled() {
+		grants, err := s.Grants(ctx)
+		if err != nil {
+			return Status{}, err
+		}
+		for _, g := range grants {
+			if g.UserID == userID && userID != 0 {
+				out.SignIn.Mine = &MyGrant{HubUser: g.HubUser, Since: g.Since}
+			}
+		}
+		if a != nil {
+			a.Grants = grants
+		}
 	}
 	out.Admin = a
 	return out, nil

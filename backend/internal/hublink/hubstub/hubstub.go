@@ -38,18 +38,23 @@ type Hub struct {
 	beats    int
 	unlinks  int
 	key      ed25519.PublicKey
+	private  ed25519.PrivateKey
 	lastBody map[string]any
 	// origin is where the dashboard thinks the hub is, when At set it.
-	origin string
+	origin   string
+	lastBeat map[string]any
+	// signIn is the hub users the heartbeat reply offers for hub sign-in;
+	// nil leaves signIn out of the reply, as a hub with sign-in off does.
+	signIn []string
 }
 
 // New starts a hub that has one request to give out at a time.
 func New(t testing.TB) *Hub {
-	pub, _, err := ed25519.GenerateKey(nil)
+	pub, private, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &Hub{t: t, status: "pending", label: "hub", key: pub, tokens: map[string]bool{}}
+	h := &Hub{t: t, status: "pending", label: "hub", key: pub, private: private, tokens: map[string]bool{}}
 	h.Server = httptest.NewServer(http.HandlerFunc(h.serve))
 	t.Cleanup(h.Close)
 	return h
@@ -111,6 +116,28 @@ func (h *Hub) Count() (requests, polls, heartbeats, unlinks int) {
 
 // KeyFingerprint is the fingerprint of the key the hub's approvals pin.
 func (h *Hub) KeyFingerprint() string { return accountlink.Fingerprint(h.key) }
+
+// Kid is the id of the key the stub's approval pins.
+const Kid = "hub-2026-11"
+
+// PrivateKey is the hub key, for tests that sign what a hub signs: sign-in
+// tickets.
+func (h *Hub) PrivateKey() ed25519.PrivateKey { return h.private }
+
+// OfferSignIn makes every later heartbeat reply offer hub sign-in for these hub
+// users; with none, signIn is left out of the reply.
+func (h *Hub) OfferSignIn(users ...string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.signIn = users
+}
+
+// LastHeartbeat is the body of the last heartbeat.
+func (h *Hub) LastHeartbeat() map[string]any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastBeat
+}
 
 // LastRequest is the body of the last link request.
 func (h *Hub) LastRequest() map[string]any {
@@ -179,7 +206,7 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 			// (protocol 4.2), so one lost in transit heals on the next poll.
 			reply(w, 200, map[string]any{
 				"status": "approved", "serverId": ServerID,
-				"siteKey":          map[string]string{"kid": "hub-2026-11", "publicKey": base64.StdEncoding.EncodeToString(h.key)},
+				"siteKey":          map[string]string{"kid": Kid, "publicKey": base64.StdEncoding.EncodeToString(h.key)},
 				"heartbeatSeconds": 15, "pollWaitSeconds": 1, "owner": map[string]string{"label": h.label},
 			})
 		case "denied":
@@ -193,7 +220,10 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	case path == "/heartbeat":
 		h.beats++
-		reply(w, 200, map[string]any{
+		var beat map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&beat)
+		h.lastBeat = beat
+		body := map[string]any{
 			"ok": true, "heartbeatSeconds": 15, "pendingCommands": 0,
 			"fleet": []map[string]any{{
 				"serverId": ServerID, "name": "box", "endpoint": "https://box.tailed39ba.ts.net:8443",
@@ -203,7 +233,11 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 				"id": "update-0.8.6", "level": "info", "title": "Update ready on 1 server", "body": "0.8.6 is out.",
 				"href": h.originLocked() + "/updates", "at": time.Now().Unix(),
 			}},
-		})
+		}
+		if h.signIn != nil {
+			body["signIn"] = map[string]any{"users": h.signIn}
+		}
+		reply(w, 200, body)
 	case path == "/commands":
 		reply(w, 200, map[string]any{"commands": []any{}})
 	case path == "/unlink":
