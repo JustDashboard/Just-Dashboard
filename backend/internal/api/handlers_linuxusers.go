@@ -23,12 +23,12 @@ func (s *Server) mountLinuxUserRoutes(r chi.Router) {
 		// exposes shells, groups and key counts.
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodGet, "/", s.handle(s.handleSysUserList))
-		r.With(httpx.RequireSession).Method(http.MethodPost, "/", s.handle(s.handleSysUserCreate))
+		r.With(httpx.RequireSession, httpx.RefuseHubSession).Method(http.MethodPost, "/", s.handle(s.handleSysUserCreate))
 
 		r.Route("/{name}", func(r chi.Router) {
 			r.Use(s.guardSystemAccount)
 			r.Method(http.MethodGet, "/", s.handle(s.handleSysUserGet))
-			r.Method(http.MethodPatch, "/", s.handle(s.handleSysUserUpdate))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPatch, "/", s.handle(s.handleSysUserUpdate))
 
 			r.Method(http.MethodGet, "/activity", s.handle(s.handleSysUserActivity))
 			r.Method(http.MethodGet, "/disk", s.handle(s.handleSysUserDisk))
@@ -37,19 +37,19 @@ func (s *Server) mountLinuxUserRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/limits", s.handle(s.handleSysUserLimits))
 			r.Method(http.MethodPut, "/limits", s.handle(s.handleSysUserLimitsSet))
 			r.Method(http.MethodGet, "/sudo", s.handle(s.handleSysUserSudo))
-			r.Method(http.MethodPut, "/sudo", s.handle(s.handleSysUserSudoSet))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/sudo", s.handle(s.handleSysUserSudoSet))
 			r.Method(http.MethodPost, "/failed-attempts/reset", s.handle(s.handleSysUserFailedReset))
 
 			// A password or a private key that leaves the dashboard is a way
 			// onto the machine, so a long-lived API key may not mint one.
-			r.With(httpx.RequireSession).Method(http.MethodPost, "/password", s.handle(s.handleSysUserPassword))
-			r.With(httpx.RequireSession).Method(http.MethodPost, "/keys/generate", s.handle(s.handleSSHKeyGenerate))
+			r.With(httpx.RequireSession, httpx.RefuseHubSession).Method(http.MethodPost, "/password", s.handle(s.handleSysUserPassword))
+			r.With(httpx.RequireSession, httpx.RefuseHubSession).Method(http.MethodPost, "/keys/generate", s.handle(s.handleSSHKeyGenerate))
 
 			r.Method(http.MethodGet, "/keys", s.handle(s.handleSSHKeyList))
-			r.Method(http.MethodPost, "/keys", s.handle(s.handleSSHKeyAdd))
-			r.Method(http.MethodPatch, "/keys", s.handle(s.handleSSHKeyUpdate))
-			r.Method(http.MethodPost, "/keys/import", s.handle(s.handleSSHKeyImport))
-			r.Method(http.MethodPost, "/keys/copy", s.handle(s.handleSSHKeyCopy))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/keys", s.handle(s.handleSSHKeyAdd))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPatch, "/keys", s.handle(s.handleSSHKeyUpdate))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/keys/import", s.handle(s.handleSSHKeyImport))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/keys/copy", s.handle(s.handleSSHKeyCopy))
 
 			s.destructive(r, func(r chi.Router) {
 				r.Method(http.MethodDelete, "/", s.handle(s.handleSysUserDelete))
@@ -67,12 +67,12 @@ func (s *Server) mountLinuxUserRoutes(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodGet, "/groups", s.handle(s.handleSysGroupList))
 		r.Method(http.MethodPost, "/groups", s.handle(s.handleSysGroupCreate))
-		r.Method(http.MethodPatch, "/groups/{group}", s.handle(s.handleSysGroupUpdate))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPatch, "/groups/{group}", s.handle(s.handleSysGroupUpdate))
 		r.Method(http.MethodGet, "/defaults", s.handle(s.handleSysDefaults))
 		r.Method(http.MethodPut, "/defaults", s.handle(s.handleSysDefaultsSet))
 		r.Method(http.MethodGet, "/templates", s.handle(s.handleSysTemplates))
 		r.Method(http.MethodPut, "/templates", s.handle(s.handleSysTemplatesSet))
-		r.Method(http.MethodPost, "/bulk", s.handle(s.handleSysBulk))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/bulk", s.handle(s.handleSysBulk))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/groups/{group}", s.handle(s.handleSysGroupDelete))
 			r.Method(http.MethodPost, "/bulk/delete", s.handle(s.handleSysBulkDelete))

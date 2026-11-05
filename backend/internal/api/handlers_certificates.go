@@ -71,13 +71,13 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/accounts", s.handle(s.handleCertAccounts))
 		// certbot update_account for an account on disk, at its authority.
 		r.Method(http.MethodPost, "/accounts/email", s.handle(s.handleCertAccountEmail))
-		r.Method(http.MethodPost, "/import", s.handle(s.handleCertImport))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/import", s.handle(s.handleCertImport))
 		// Writes nothing, but it may fetch an intermediate from the address
 		// a certificate names, which is why it sits behind admin too.
 		r.Method(http.MethodPost, "/import/inspect", s.handle(s.handleCertImportInspect))
 		// Export is administrator-only because a private key can impersonate the site.
-		r.Method(http.MethodPost, "/export", s.handle(s.handleCertExport))
-		r.Method(http.MethodPost, "/dns-credentials", s.handle(s.handleDNSCredentials))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/export", s.handle(s.handleCertExport))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/dns-credentials", s.handle(s.handleDNSCredentials))
 		// A DNS-01 dry run against a domain the caller names: an outbound
 		// exchange with the authority and a write to that zone's DNS.
 		r.Method(http.MethodPost, "/dns-credentials/{provider}/test", s.handle(s.handleDNSCredentialsTest))

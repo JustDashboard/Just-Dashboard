@@ -97,9 +97,9 @@ func (s *Server) mountDatabaseMongoRoutes(r chi.Router) {
 		// and level 2 records every operation on a database: a server
 		// setting, changed by whoever may change those.
 		r.Method(http.MethodPut, "/{id}/mongo/profiler", s.handle(s.handleMongoProfilerPut))
-		r.Method(http.MethodPost, "/{id}/mongo/users", s.handle(s.handleMongoUserCreate))
-		r.Method(http.MethodPut, "/{id}/mongo/users", s.handle(s.handleMongoUserPassword))
-		r.Method(http.MethodPost, "/{id}/mongo/users/grant", s.handle(s.handleMongoUserGrant))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/mongo/users", s.handle(s.handleMongoUserCreate))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/{id}/mongo/users", s.handle(s.handleMongoUserPassword))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/mongo/users/grant", s.handle(s.handleMongoUserGrant))
 		r.Method(http.MethodPost, "/{id}/mongo/users/revoke", s.handle(s.handleMongoUserRevoke))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/{id}/mongo/users", s.handle(s.handleMongoUserDrop))

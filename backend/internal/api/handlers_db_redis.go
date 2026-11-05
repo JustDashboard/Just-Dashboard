@@ -98,7 +98,7 @@ func (s *Server) mountDatabaseRedisRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPut, "/{id}/redis/config", s.handle(s.handleRedisConfigSet))
-		r.Method(http.MethodPut, "/{id}/redis/acl/{name}", s.handle(s.handleRedisACLSet))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/{id}/redis/acl/{name}", s.handle(s.handleRedisACLSet))
 		// MONITOR shows every command every client sends, with its arguments:
 		// session tokens being written, passwords being checked. That is a
 		// read of everything, and it is kept to administrators.
