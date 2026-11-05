@@ -151,6 +151,8 @@ func (s *Server) handleSelfUpdateInstall(w http.ResponseWriter, r *http.Request)
 		return httpx.BadRequest("%s is not newer than the installed %s", target, rep.Version)
 	case errors.Is(err, selfupdate.ErrNoLocation):
 		return httpx.Err(http.StatusServiceUnavailable, "update_unsupported", "this install cannot update itself in place")
+	case errors.Is(err, selfupdate.ErrDockerUnreachable):
+		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable", err.Error())
 	case err != nil:
 		return httpx.Err(http.StatusBadGateway, "update_failed", err.Error())
 	}

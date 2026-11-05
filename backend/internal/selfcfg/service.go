@@ -250,6 +250,9 @@ func (s *Service) Apply(ctx context.Context, next Settings, actor, clientIP stri
 	if len(changes) == 0 {
 		return nil, ErrNoChange
 	}
+	if err := s.applier.ready(ctx); err != nil {
+		return nil, err
+	}
 
 	// Switching to a Tailscale certificate obtains it *now*, before anything is
 	// written, so the proxy has the file by the time it restarts.
@@ -333,6 +336,9 @@ func (s *Service) Restart(ctx context.Context, rebuild bool, actor string) (*Run
 	action := ActionRestart
 	if rebuild {
 		action = ActionRebuild
+	}
+	if err := s.applier.ready(ctx); err != nil {
+		return nil, err
 	}
 	// No EnvPath and no Backup: nothing is written, so there is nothing to put
 	// back. A restart that fails to come up is a broken configuration that was

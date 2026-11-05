@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -95,6 +94,9 @@ func (a *Applier) Start(ctx context.Context, loc *selfupdate.Location, req Start
 	if err := selfupdate.CheckLifecycleIdle(a.dataDir); err != nil {
 		return nil, lifecycleError(err)
 	}
+	if err := a.ready(ctx); err != nil {
+		return nil, err
+	}
 	return a.start(ctx, loc, req)
 }
 
@@ -105,8 +107,21 @@ func lifecycleError(err error) error {
 	return err
 }
 
+// ready asks the daemon that would run the sibling whether it is there, before
+// anything is written. A restart against a daemon that does not answer can
+// only fail, and failing at `docker run` would first replace the last run's
+// record and transcript, and for Apply the .env and its backup, on behalf of a
+// restart that never began.
+func (a *Applier) ready(ctx context.Context) error {
+	if err := selfupdate.DockerReachable(ctx, a.dockerHost); err != nil {
+		return fmt.Errorf("the restart was not started: %w", err)
+	}
+	return nil
+}
+
 // start is called only with lifecycle admission held, including across the
-// preceding .env write when settings are being changed.
+// preceding .env write when settings are being changed, and once ready has
+// answered.
 func (a *Applier) start(ctx context.Context, loc *selfupdate.Location, req StartRequest) (*Run, error) {
 	if loc == nil {
 		return nil, ErrNoLocation
@@ -151,9 +166,9 @@ func (a *Applier) start(ctx context.Context, loc *selfupdate.Location, req Start
 		return nil, fmt.Errorf("record the restart: %w", err)
 	}
 
-	_ = exec.CommandContext(ctx, "docker", "rm", "-f", RestartContainer).Run()
+	_ = selfupdate.DockerCommand(ctx, a.dockerHost, "rm", "-f", RestartContainer).Run()
 
-	cmd := exec.CommandContext(ctx, "docker", a.siblingArgs(run)...)
+	cmd := selfupdate.DockerCommand(ctx, a.dockerHost, a.siblingArgs(run)...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

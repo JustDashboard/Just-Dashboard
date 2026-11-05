@@ -19,7 +19,9 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate/selfupdatetest"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
 )
 
@@ -359,6 +361,60 @@ func TestRestartFromTheSiteIsRefusedWhereTheDashboardCannotRestartItself(t *test
 	_, err := newAccountHost(s).RestartDashboard(t.Context(), siteActor, false)
 	if err == nil {
 		t.Fatal("a restart was started on an install with no compose project")
+	}
+}
+
+// dashboard.update.install and dashboard.restart on a dashboard whose
+// JD_DOCKER_HOST does not answer. The docker CLI used to be run with this
+// process's environment, so both went to /var/run/docker.sock — on the machine
+// where this was found, the live dashboard's daemon, with the same fixed
+// sibling names. Now each is failed with the reason and the host, before any
+// run is recorded, and nothing is asked of any daemon but whether it is there.
+func TestUpdateAndRestartFromTheSiteFailCleanlyWhenDockerCannotBeReached(t *testing.T) {
+	calls := selfupdatetest.Docker(t)
+	missing := selfupdatetest.MissingHost(t)
+	s := testServer(t)
+	h := newAccountHost(s)
+
+	checkout, dataDir := t.TempDir(), t.TempDir()
+	for name, body := range map[string]string{"docker-compose.yml": "services: {}\n", ".git": "gitdir: x\n"} {
+		if err := os.WriteFile(filepath.Join(checkout, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"releases":[
+			{"version":"0.9.1","date":"2026-10-01","title":"Next","summary":"s","changes":[{"kind":"added","text":"x"}]},
+			{"version":"0.8.2","date":"2026-09-01","title":"Now","summary":"s","changes":[{"kind":"added","text":"y"}]}]}`))
+	}))
+	defer manifest.Close()
+	noSiblings := func(context.Context) ([]selfupdate.Sibling, error) { return nil, nil }
+	s.modules.selfUpdate = selfupdate.New(selfupdate.Options{
+		Current: "0.8.2", DataDir: dataDir, UpdateDir: checkout, Repo: "o/r", Ref: "main", CheckOnline: true,
+		BaseURL: manifest.URL, DockerHost: missing, List: noSiblings, Log: s.Log,
+	})
+	s.modules.selfConfig = selfcfg.New(selfcfg.Options{
+		DataDir: dataDir, DockerHost: missing, Locate: s.modules.selfUpdate.Location, List: noSiblings, Log: s.Log,
+	})
+	if rep := s.modules.selfUpdate.Report(t.Context(), selfupdate.Forced); !rep.Available || !rep.Install.Supported {
+		t.Fatalf("fixture does not offer an update: %+v", rep)
+	}
+
+	_, err := h.InstallUpdate(t.Context(), siteActor, "0.9.1")
+	if err == nil || !strings.Contains(err.Error(), "the update was not started: the Docker daemon cannot be reached at "+missing) {
+		t.Fatalf("update against a daemon that is not there = %v", err)
+	}
+	_, err = h.RestartDashboard(t.Context(), siteActor, false)
+	if err == nil || !strings.Contains(err.Error(), "the restart was not started: the Docker daemon cannot be reached at "+missing) {
+		t.Fatalf("restart against a daemon that is not there = %v", err)
+	}
+	if diff := selfupdatetest.AimedAt(calls(), missing, "version ", "version "); diff != "" {
+		t.Fatal(diff)
+	}
+	for _, record := range []string{selfupdate.StateFile, selfupdate.LogFile, selfcfg.StateFile, selfcfg.LogFile} {
+		if _, err := os.Stat(filepath.Join(dataDir, record)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s was written for an operation that never began", record)
+		}
 	}
 }
 
