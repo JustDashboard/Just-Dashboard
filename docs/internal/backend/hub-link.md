@@ -110,13 +110,20 @@ by `config.go` and the terminal commands only, and on purpose appears in no `.en
 
 ## What the dashboard keeps from each reply
 
-`fleet` (at most 500), `notices` (at most 20) and `signIn` are decoded strictly: an unknown field, in the reply
-or in an entry, fails the heartbeat. Within that, the lists are for display, so an entry that breaks a rule of
-protocol section 6 is dropped and the rest kept: a `serverId` of the wrong shape, a name that is empty, over 64
-characters or has control characters, an unknown `state`, a missing required field, a second entry claiming
-`self`; a notice with a bad `id` or `level`, a title outside 1 to 120 characters or a body over 1000. A fleet
-`endpoint` must be an `https` origin, one label under the hub's own MagicDNS suffix, or it is removed and the
-entry kept without a link. A notice's `href` must be on the hub's own origin or it is removed. Nothing in a reply
+The reply is decoded strictly at the top level: an unknown field, a missing `ok`, `heartbeatSeconds`,
+`pendingCommands`, `fleet` or `notices`, `ok` not `true`, a `fleet` or `notices` that is not a list, or a `signIn`
+that is not an object holding exactly a list `users`, fails the heartbeat and nothing in it is used. Each element
+of `fleet` (at most 500 kept), `notices` (at most 20) and `signIn.users` (at most 50) is then decoded on its own
+(`[]json.RawMessage`, then each element strictly into its type) and checked against protocol section 6, because the
+lists are for display and one server's bad value must not stop every other server's heartbeat: an element with an
+unknown field, a wrong type or a missing required field is dropped, as is a `serverId` of the wrong shape, a name
+outside 1 to 64 characters or breaking the text rule of 5.3 (no Unicode Cc, Cf, Zl or Zp character, so no line
+break or bidirectional control), an unknown `state`, a second entry claiming `self`; a notice with a bad `id` or
+`level`, a title outside 1 to 120 characters or a body over 1000; a hub user that breaks the pattern of 6.3. A
+fleet `endpoint` must be an `https` origin, one label under the hub's own MagicDNS suffix, or it is removed and the
+entry kept without a link. With the hub at the test origin a loopback `http` or `https` origin passes instead, or
+one under this server's own MagicDNS suffix; any other `https` origin is removed there too. A notice's `href` must
+be on the hub's own origin (at the test origin, with its scheme) or it is removed. Nothing in a reply
 changes anything on the dashboard except the heartbeat interval and the cached view. `siteKeys` is decoded so
 strict decoding passes, and never applied (`IgnoreAnnouncedKeys` in the profile): no key is added, no pinned key's
 end changes, and a warning is logged once per link. A reply is authenticated by TLS alone, and a key pinned from

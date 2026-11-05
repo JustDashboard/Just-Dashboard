@@ -135,13 +135,32 @@ type heartbeatResponse struct {
 }
 
 // viewHeartbeatResponse is the reply of a profile with ReplyView: the same
-// fields, and the view, decoded as strictly as the rest. fleet and notices are
-// required; signIn is optional.
+// fields, and the view, decoded as strictly as the rest. ok, heartbeatSeconds,
+// pendingCommands, fleet and notices are required, which the pointers tell
+// from a zero; signIn is optional.
 type viewHeartbeatResponse struct {
-	heartbeatResponse
-	Fleet   json.RawMessage `json:"fleet"`
-	Notices json.RawMessage `json:"notices"`
-	SignIn  json.RawMessage `json:"signIn,omitempty"`
+	OK               *bool           `json:"ok"`
+	HeartbeatSeconds *int            `json:"heartbeatSeconds"`
+	PendingCommands  *int            `json:"pendingCommands"`
+	SiteKeys         []wireSiteKey   `json:"siteKeys,omitempty"`
+	Fleet            json.RawMessage `json:"fleet"`
+	Notices          json.RawMessage `json:"notices"`
+	SignIn           json.RawMessage `json:"signIn,omitempty"`
+}
+
+// base is the account link's part of the reply.
+func (r viewHeartbeatResponse) base() heartbeatResponse {
+	out := heartbeatResponse{SiteKeys: r.SiteKeys}
+	if r.OK != nil {
+		out.OK = *r.OK
+	}
+	if r.HeartbeatSeconds != nil {
+		out.HeartbeatSeconds = *r.HeartbeatSeconds
+	}
+	if r.PendingCommands != nil {
+		out.PendingCommands = *r.PendingCommands
+	}
+	return out
 }
 
 func present(raw json.RawMessage) bool {
@@ -318,8 +337,12 @@ func (c *Client) heartbeat(ctx context.Context, serverID string, body json.RawMe
 func (c *Client) heartbeatView(ctx context.Context, serverID string, body json.RawMessage) (viewHeartbeatResponse, error) {
 	var out viewHeartbeatResponse
 	_, err := c.call(ctx, http.MethodPost, c.base+"/heartbeat", body, serverID, 0, &out)
-	if err == nil && (!present(out.Fleet) || !present(out.Notices)) {
-		err = fmt.Errorf("the %s's response is not what protocol %d describes: fleet and notices are required", c.peer, ProtocolVersion)
+	switch {
+	case err != nil:
+	case out.OK == nil || out.HeartbeatSeconds == nil || out.PendingCommands == nil || !present(out.Fleet) || !present(out.Notices):
+		err = fmt.Errorf("the %s's response is not what protocol %d describes: ok, heartbeatSeconds, pendingCommands, fleet and notices are required", c.peer, ProtocolVersion)
+	case !*out.OK:
+		err = fmt.Errorf("the %s's response is not what protocol %d describes: ok is false on a 200", c.peer, ProtocolVersion)
 	}
 	return out, err
 }

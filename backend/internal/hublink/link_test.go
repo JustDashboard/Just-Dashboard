@@ -3,6 +3,7 @@ package hublink
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -154,9 +155,8 @@ func TestTheHeartbeatCarriesTheSnapshotAndCachesTheFleetAndNotices(t *testing.T)
 	e.link(accountlink.ScopeObserve)
 	e.hub.setReply("fleet", []map[string]any{
 		{"serverId": vectorServerID, "name": "box", "endpoint": "https://box.tailed39ba.ts.net:8443", "state": "online", "version": "0.8.5", "self": true, "lastSeenAt": vectorNow},
-		// An endpoint that breaks its rule is removed; the entry stays. (A hub
-		// at the test origin may name any https origin, so this one is http.)
-		{"serverId": "5b1f9a20-0000-4000-8000-000000000001", "name": "vmi3690758", "endpoint": "http://evil.example.com", "state": "late", "version": "0.8.5", "self": false},
+		// An endpoint that breaks its rule is removed; the entry stays.
+		{"serverId": "5b1f9a20-0000-4000-8000-000000000001", "name": "vmi3690758", "endpoint": "https://evil.example.com", "state": "late", "version": "0.8.5", "self": false},
 		// Entries that break a rule are dropped.
 		{"serverId": "bad", "name": "x", "state": "online", "version": "", "self": false},
 		{"serverId": "5b1f9a20-0000-4000-8000-000000000009", "name": "x", "state": "sleeping", "version": "", "self": false},
@@ -226,9 +226,17 @@ func TestAReplyThatIsNotProtocolOneFailsTheHeartbeatAndIsNotUsed(t *testing.T) {
 		"unknown top-level field": func(h *fakeHub) { h.setReply("plan", "pro") },
 		"no fleet":                func(h *fakeHub) { h.setReply("fleet", nil) },
 		"null notices":            func(h *fakeHub) { h.setReply("notices", json.RawMessage("null")) },
-		"unknown fleet field": func(h *fakeHub) {
-			h.setReply("fleet", []map[string]any{{"serverId": vectorServerID, "name": "box", "state": "online", "version": "", "self": true, "seats": 3}})
-		},
+		"fleet not a list":        func(h *fakeHub) { h.setReply("fleet", map[string]any{"serverId": vectorServerID}) },
+		"notices not a list":      func(h *fakeHub) { h.setReply("notices", "none") },
+		"no ok":                   func(h *fakeHub) { h.setReply("ok", nil) },
+		"ok false":                func(h *fakeHub) { h.setReply("ok", false) },
+		"no heartbeatSeconds":     func(h *fakeHub) { h.setReply("heartbeatSeconds", nil) },
+		"no pendingCommands":      func(h *fakeHub) { h.setReply("pendingCommands", nil) },
+		"signIn null":             func(h *fakeHub) { h.setReply("signIn", json.RawMessage("null")) },
+		"signIn a list":           func(h *fakeHub) { h.setReply("signIn", []string{"owner"}) },
+		"signIn without users":    func(h *fakeHub) { h.setReply("signIn", map[string]any{}) },
+		"signIn with more":        func(h *fakeHub) { h.setReply("signIn", map[string]any{"users": []string{"owner"}, "plan": "pro"}) },
+		"signIn users not a list": func(h *fakeHub) { h.setReply("signIn", map[string]any{"users": "owner"}) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t)
@@ -240,6 +248,59 @@ func TestAReplyThatIsNotProtocolOneFailsTheHeartbeatAndIsNotUsed(t *testing.T) {
 				t.Fatalf("status after a bad reply = %+v / %+v", s, s.Admin.Link)
 			}
 		})
+	}
+}
+
+// Each element of fleet, notices and signIn.users is decoded on its own (protocol
+// 6, HL-5): one that has an unknown field, a wrong type, a missing required field
+// or breaks a rule is dropped, and the heartbeat still succeeds with the rest.
+func TestABadElementIsDroppedAndTheHeartbeatStillSucceeds(t *testing.T) {
+	e := newEnv(t)
+	e.link(accountlink.ScopeObserve)
+	good := map[string]any{"serverId": vectorServerID, "name": "box", "state": "online", "version": "0.8.5", "self": true}
+	other := func(n int, name string) map[string]any {
+		return map[string]any{"serverId": fmt.Sprintf("5b1f9a20-0000-4000-8000-%012d", n), "name": name, "state": "online", "version": "", "self": false}
+	}
+	e.hub.setReply("fleet", []any{
+		map[string]any{"serverId": 5},
+		good,
+		"a string",
+		nil,
+		map[string]any{"serverId": "5b1f9a20-0000-4000-8000-000000000001", "name": "seats", "state": "online", "version": "", "self": false, "seats": 3},
+		map[string]any{"serverId": "5b1f9a20-0000-4000-8000-000000000002", "name": "late", "state": "online", "version": "", "self": "no"},
+		map[string]any{"serverId": "5b1f9a20-0000-4000-8000-000000000003", "name": "seen", "state": "online", "version": "", "self": false, "lastSeenAt": "yesterday"},
+		other(4, "line\nbreak"),
+		other(5, "bidi\u202egnirts"),
+		other(6, "joined\u200dname"),
+		other(7, strings.Repeat("n", 65)),
+		other(8, "vmi3690758"),
+	})
+	e.hub.setReply("notices", []any{
+		map[string]any{"id": "x", "level": "info", "title": "t", "body": "b", "at": "now"},
+		map[string]any{"id": "y", "level": "info", "title": "t", "body": "b", "at": vectorNow, "colour": "red"},
+		map[string]any{"id": "z", "level": "info", "title": "kept", "body": "b", "at": vectorNow},
+		42,
+	})
+	e.hub.setReply("signIn", map[string]any{"users": []any{"owner", 7, nil, "Not Valid", "ion", "owner"}})
+	if err := e.svc.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := e.svc.Status(t.Context(), true)
+	if !*s.Reachable || s.Admin.Link.LastError != "" {
+		t.Fatalf("the heartbeat failed over bad elements: %s", s.Admin.Link.LastError)
+	}
+	var names []string
+	for _, f := range s.Fleet {
+		names = append(names, f.Name)
+	}
+	if strings.Join(names, ",") != "box,vmi3690758" {
+		t.Fatalf("fleet kept %q", names)
+	}
+	if len(s.Notices) != 1 || s.Notices[0].Title != "kept" {
+		t.Fatalf("notices = %+v", s.Notices)
+	}
+	if !s.SignIn.Offered || strings.Join(s.SignIn.Users, ",") != "owner,ion" {
+		t.Fatalf("signIn = %+v", s.SignIn)
 	}
 }
 

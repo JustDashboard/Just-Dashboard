@@ -668,7 +668,7 @@ func (s *Service) sendHeartbeat(ctx context.Context, st State, patient bool) err
 		if err == nil && s.hooks.OnReply != nil {
 			err = s.hooks.OnReply(ctx, st, Reply{Fleet: full.Fleet, Notices: full.Notices, SignIn: full.SignIn, At: s.now()})
 		}
-		resp = full.heartbeatResponse
+		resp = full.base()
 	} else {
 		resp, err = c.heartbeat(ctx, st.ServerID, body)
 	}

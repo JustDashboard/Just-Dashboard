@@ -10,7 +10,9 @@ import (
 	"io"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -94,12 +96,8 @@ type wireNotice struct {
 	At    *int64  `json:"at"`
 }
 
-type wireSignIn struct {
-	Users []string `json:"users"`
-}
-
 // strict decodes the way the rest of the reply is decoded: no unknown field and
-// nothing after the value. A reply that does not decode is a failed heartbeat.
+// nothing after the value.
 func strict(raw json.RawMessage, out any) error {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
@@ -112,37 +110,80 @@ func strict(raw json.RawMessage, out any) error {
 	return nil
 }
 
-// readView turns a reply into what is cached. The lists are for display: an
-// entry that breaks a rule is dropped and the rest are kept, while a reply
-// that does not decode at all is an error.
-func readView(st accountlink.State, r accountlink.Reply, testOrigin string) (view, error) {
-	var fleet []wireFleet
-	var notices []wireNotice
-	if err := strict(r.Fleet, &fleet); err != nil {
-		return view{}, fmt.Errorf("the hub's fleet is not what protocol 1 describes: %w", err)
+// elements reads a list of the reply as its raw elements, so each can be
+// decoded on its own. Only a value that is not a list fails.
+func elements(raw json.RawMessage, what string) ([]json.RawMessage, error) {
+	t := bytes.TrimSpace(raw)
+	if len(t) == 0 || t[0] != '[' {
+		return nil, fmt.Errorf("the hub's %s is not a list, which protocol 1 requires", what)
 	}
-	if err := strict(r.Notices, &notices); err != nil {
-		return view{}, fmt.Errorf("the hub's notices are not what protocol 1 describes: %w", err)
+	var out []json.RawMessage
+	if err := strict(t, &out); err != nil {
+		return nil, fmt.Errorf("the hub's %s is not what protocol 1 describes: %w", what, err)
+	}
+	return out, nil
+}
+
+// readView turns a reply into what is cached (protocol section 6, "Decoding").
+// The reply's top level is strict: fleet and notices must be lists, and signIn,
+// when present, an object holding exactly a list users, or the heartbeat fails
+// and nothing in it is used. Each element of those three lists is then decoded
+// on its own, strictly, and checked against its rules; an element that fails is
+// dropped and the rest kept, because the lists are for display and one
+// server's bad value must not stop every other server's heartbeat.
+//
+// ownSuffix is this server's MagicDNS suffix, asked for only when the test
+// origin's endpoint rule needs it.
+func readView(st accountlink.State, r accountlink.Reply, testOrigin string, ownSuffix func() string) (view, error) {
+	fleet, err := elements(r.Fleet, "fleet")
+	if err != nil {
+		return view{}, err
+	}
+	notices, err := elements(r.Notices, "notices")
+	if err != nil {
+		return view{}, err
+	}
+	if ownSuffix != nil {
+		// Asked at most once per reply, and only if an entry needs it.
+		ownSuffix = sync.OnceValue(ownSuffix)
 	}
 	v := view{ServerID: st.ServerID, At: r.At.UTC(), Fleet: []FleetEntry{}, Notices: []Notice{}}
-	if len(bytes.TrimSpace(r.SignIn)) > 0 {
-		var offer wireSignIn
-		if err := strict(r.SignIn, &offer); err != nil {
+	if raw := bytes.TrimSpace(r.SignIn); len(raw) > 0 {
+		if raw[0] != '{' {
+			return view{}, errors.New("the hub's sign-in offer is not an object, which protocol 1 requires")
+		}
+		var offer struct {
+			Users json.RawMessage `json:"users"`
+		}
+		if err := strict(raw, &offer); err != nil {
 			return view{}, fmt.Errorf("the hub's sign-in offer is not what protocol 1 describes: %w", err)
 		}
+		users, err := elements(offer.Users, "sign-in users")
+		if err != nil {
+			return view{}, err
+		}
 		v.SignIn = &signInOffer{Users: []string{}}
-		for _, u := range offer.Users {
-			if hubUserPattern.MatchString(u) && len(v.SignIn.Users) < maxSignInUsers {
-				v.SignIn.Users = append(v.SignIn.Users, u)
+		for _, raw := range users {
+			if len(v.SignIn.Users) == maxSignInUsers {
+				break
 			}
+			var u string
+			if strict(raw, &u) != nil || !hubUserPattern.MatchString(u) || slices.Contains(v.SignIn.Users, u) {
+				continue
+			}
+			v.SignIn.Users = append(v.SignIn.Users, u)
 		}
 	}
 	self := false
-	for _, w := range fleet {
+	for _, raw := range fleet {
 		if len(v.Fleet) == maxFleet {
 			break
 		}
-		e, ok := fleetEntry(w, st.URL, testOrigin)
+		var w wireFleet
+		if strict(raw, &w) != nil {
+			continue
+		}
+		e, ok := fleetEntry(w, st.URL, testOrigin, ownSuffix)
 		// Exactly one entry is this server; a second claim is not believed.
 		if !ok || (e.Self && self) {
 			continue
@@ -150,9 +191,13 @@ func readView(st accountlink.State, r accountlink.Reply, testOrigin string) (vie
 		self = self || e.Self
 		v.Fleet = append(v.Fleet, e)
 	}
-	for _, w := range notices {
+	for _, raw := range notices {
 		if len(v.Notices) == maxNotices {
 			break
+		}
+		var w wireNotice
+		if strict(raw, &w) != nil {
+			continue
 		}
 		if n, ok := notice(w, st.URL, testOrigin); ok {
 			v.Notices = append(v.Notices, n)
@@ -161,7 +206,7 @@ func readView(st accountlink.State, r accountlink.Reply, testOrigin string) (vie
 	return v, nil
 }
 
-func fleetEntry(w wireFleet, hub, testOrigin string) (FleetEntry, bool) {
+func fleetEntry(w wireFleet, hub, testOrigin string, ownSuffix func() string) (FleetEntry, bool) {
 	if w.ServerID == nil || w.Name == nil || w.State == nil || w.Version == nil || w.Self == nil {
 		return FleetEntry{}, false
 	}
@@ -169,11 +214,11 @@ func fleetEntry(w wireFleet, hub, testOrigin string) (FleetEntry, bool) {
 	switch {
 	case !serverIDPattern.MatchString(e.ServerID):
 		return FleetEntry{}, false
-	case !printable(e.Name, 1, 64, false):
+	case !textRule(e.Name, 1, 64):
 		return FleetEntry{}, false
 	case e.State != "online" && e.State != "late" && e.State != "offline" && e.State != "updating":
 		return FleetEntry{}, false
-	case utf8.RuneCountInString(e.Version) > 32 || !printable(e.Version, 0, 32, false):
+	case !textRule(e.Version, 0, 32):
 		return FleetEntry{}, false
 	}
 	if w.LastSeenAt != nil && *w.LastSeenAt > 0 {
@@ -183,15 +228,18 @@ func fleetEntry(w wireFleet, hub, testOrigin string) (FleetEntry, bool) {
 	// An endpoint that fails its rule is removed; the entry stays, without a
 	// link.
 	if w.Endpoint != nil {
-		e.Endpoint = fleetEndpoint(*w.Endpoint, hub, testOrigin)
+		e.Endpoint = fleetEndpoint(*w.Endpoint, hub, testOrigin, ownSuffix)
 	}
 	return e, true
 }
 
-// fleetEndpoint applies section 6.1's endpoint rule: an https origin, at most
-// 255 characters, one label under the hub's own MagicDNS suffix. A hub at the
-// test origin may also name any https origin and any loopback http origin.
-func fleetEndpoint(raw, hub, testOrigin string) string {
+// fleetEndpoint applies section 6.1's endpoint rule: an https origin with no
+// path, query or fragment, at most 255 characters, whose host is one label
+// under the hub URL's MagicDNS suffix. With the hub at the test origin (2.3) a
+// loopback http or https origin passes instead, as does one that passes the
+// rule with this server's own MagicDNS suffix when that can be read. Nothing
+// else passes there: an https origin anywhere else is removed too.
+func fleetEndpoint(raw, hub, testOrigin string, ownSuffix func() string) string {
 	if len(raw) > 255 || !strings.Contains(raw, "://") {
 		return ""
 	}
@@ -201,7 +249,10 @@ func fleetEndpoint(raw, hub, testOrigin string) string {
 	}
 	scheme, host := strings.ToLower(u.Scheme), hostOf(origin)
 	if testOrigin != "" && hub == testOrigin {
-		if scheme == "https" || (scheme == "http" && loopbackHost(host)) {
+		switch {
+		case (scheme == "http" || scheme == "https") && loopbackHost(host):
+			return origin
+		case scheme == "https" && ownSuffix != nil && underSuffix(host, ownSuffix()):
 			return origin
 		}
 		return ""
@@ -209,14 +260,20 @@ func fleetEndpoint(raw, hub, testOrigin string) string {
 	if scheme != "https" {
 		return ""
 	}
-	_, suffix, ok := strings.Cut(hostOf(hub), ".")
-	if !ok || !strings.HasSuffix(suffix, tailnetSuffixTail) {
-		return ""
+	if _, suffix, ok := strings.Cut(hostOf(hub), "."); ok && underSuffix(host, suffix) {
+		return origin
 	}
-	if label, rest, ok := strings.Cut(host, "."); !ok || rest != suffix || !labelPattern.MatchString(label) {
-		return ""
+	return ""
+}
+
+// underSuffix is host being exactly one MagicDNS label under suffix, a
+// tailnet's .ts.net name.
+func underSuffix(host, suffix string) bool {
+	if suffix == "" || !strings.HasSuffix(suffix, tailnetSuffixTail) {
+		return false
 	}
-	return origin
+	label, rest, ok := strings.Cut(host, ".")
+	return ok && rest == suffix && labelPattern.MatchString(label)
 }
 
 func notice(w wireNotice, hub, testOrigin string) (Notice, bool) {
@@ -232,7 +289,8 @@ func notice(w wireNotice, hub, testOrigin string) (Notice, bool) {
 	case !printable(n.Title, 1, 120, false), !printable(n.Body, 0, 1000, true):
 		return Notice{}, false
 	}
-	// A link anywhere but the hub's own origin is removed from the notice.
+	// A link anywhere but the hub's own origin is removed from the notice. At
+	// the test origin, that origin's own scheme is the one allowed (2.3).
 	if w.Href != nil && len(*w.Href) <= 512 && sameOriginAs(hub, *w.Href) {
 		u, _ := url.Parse(*w.Href)
 		if strings.EqualFold(u.Scheme, "https") || (testOrigin != "" && hub == testOrigin) {
@@ -240,6 +298,25 @@ func notice(w wireNotice, hub, testOrigin string) (Notice, bool) {
 		}
 	}
 	return n, true
+}
+
+// textRule is protocol 5.3's text rule with a length: valid UTF-8, min to max
+// characters, and no character in the Unicode categories Cc (control, CR and
+// LF among them), Cf (format, the bidirectional controls among them), Zl or
+// Zp, any of which can make a name read as something it is not.
+func textRule(s string, min, max int) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	if n := utf8.RuneCountInString(s); n < min || n > max {
+		return false
+	}
+	for _, r := range s {
+		if unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp) {
+			return false
+		}
+	}
+	return true
 }
 
 // printable is text of min to max characters with no control characters; a
@@ -266,10 +343,19 @@ func printable(s string, min, max int, lines bool) bool {
 	return true
 }
 
+// ownSuffix is this server's MagicDNS suffix, or "" when it cannot be read.
+func (s *Service) ownSuffix(ctx context.Context) string {
+	st, err := s.tailnet.Status(ctx)
+	if err != nil || !st.Running {
+		return ""
+	}
+	return st.Suffix
+}
+
 // onReply is the engine's hook for every successful heartbeat reply: it checks
 // the view and keeps it for the dashboard's own pages.
 func (s *Service) onReply(ctx context.Context, st accountlink.State, r accountlink.Reply) error {
-	v, err := readView(st, r, s.testOrigin)
+	v, err := readView(st, r, s.testOrigin, func() string { return s.ownSuffix(ctx) })
 	if err != nil {
 		return err
 	}

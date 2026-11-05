@@ -168,19 +168,36 @@ func TestFleetEndpointsAndNoticeLinksStayOnTheHubsTailnet(t *testing.T) {
 		"javascript:alert(1)":                  "",
 		"https://box.tailed39ba.ts.net?next=x": "",
 	} {
-		if got := fleetEndpoint(raw, hub, ""); got != want {
+		if got := fleetEndpoint(raw, hub, "", nil); got != want {
 			t.Errorf("fleetEndpoint(%q) = %q, want %q", raw, got, want)
 		}
 	}
+	// At the test origin exactly one thing relaxes (2.3, 6.1): a loopback
+	// http or https origin passes, as does one under this server's own
+	// MagicDNS suffix. Any other https origin is still removed.
 	const test = "http://127.0.0.1:43180"
+	own := func() string { return "tailed39ba.ts.net" }
 	for raw, want := range map[string]string{
-		"https://anything.example.com": "https://anything.example.com",
-		"http://127.0.0.1:43117":       "http://127.0.0.1:43117",
-		"http://example.com":           "",
+		"https://example.com":                "",
+		"https://anything.example.com":       "",
+		"http://127.0.0.1:18443":             "http://127.0.0.1:18443",
+		"http://127.0.0.2:18453":             "http://127.0.0.2:18453",
+		"https://localhost:8443":             "https://localhost:8443",
+		"http://[::1]:8443":                  "http://[::1]:8443",
+		"https://box.tailed39ba.ts.net:8443": "https://box.tailed39ba.ts.net:8443",
+		"http://box.tailed39ba.ts.net:8443":  "",
+		"https://box.other.ts.net:8443":      "",
+		"http://example.com":                 "",
+		"http://127.0.0.1:18443/path":        "",
+		"ftp://127.0.0.1:21":                 "",
 	} {
-		if got := fleetEndpoint(raw, test, test); got != want {
+		if got := fleetEndpoint(raw, test, test, own); got != want {
 			t.Errorf("at the test origin, fleetEndpoint(%q) = %q, want %q", raw, got, want)
 		}
+	}
+	// With this server's suffix unreadable, only loopback passes there.
+	if got := fleetEndpoint("https://box.tailed39ba.ts.net:8443", test, test, func() string { return "" }); got != "" {
+		t.Errorf("an unreadable own suffix still passed %q", got)
 	}
 	at := int64(1)
 	n := func(href string) wireNotice {
