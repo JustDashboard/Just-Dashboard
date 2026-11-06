@@ -49,6 +49,7 @@ export const GUARD_WORDS: Record<Guard, string> = {
   recovery: "recovery code",
   password: "password only",
   passkey: "passkey",
+  hub: "through Just Hub",
   pending: "owes a code",
   unknown: "method not recorded",
 }

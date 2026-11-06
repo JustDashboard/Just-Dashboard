@@ -78,6 +78,19 @@ export interface ActiveWork {
   run?: EngineRun
 }
 
+/** api.agentAttachment in the dashboard's source. */
+export interface AgentAttachment {
+  label?: string
+  text?: string
+}
+
+/** api.agentImage in the dashboard's source. */
+export interface AgentImage {
+  data?: string
+  mediaType?: string
+  thumb?: AssistantImage
+}
+
 /** githubapp.AppSummary in the dashboard's source. */
 export interface AppSummary {
   createdAt?: string
@@ -131,6 +144,12 @@ export const ArtifactKind = {
 } as const
 export type ArtifactKind = (typeof ArtifactKind)[keyof typeof ArtifactKind]
 
+/** assistant.Image in the dashboard's source. */
+export interface AssistantImage {
+  data?: string
+  mediaType?: string
+}
+
 /** accesslog.Audience in the dashboard's source. */
 export interface Audience {
   botRequests?: number
@@ -155,6 +174,7 @@ export interface Automation {
 
 /** deploy.Availability in the dashboard's source. */
 export interface Availability {
+  days?: AvailabilityDay[] | null
   down?: boolean
   liveRelease?: number | null
   observedAt?: string
@@ -162,6 +182,14 @@ export interface Availability {
   recordSince?: string | null
   status?: string
   windows?: AvailabilityWindow[] | null
+}
+
+/** deploy.AvailabilityDay in the dashboard's source. */
+export interface AvailabilityDay {
+  downSeconds?: number
+  from?: string
+  incidents?: number
+  observedSeconds?: number
 }
 
 /** deploy.AvailabilityWindow in the dashboard's source. */
@@ -205,7 +233,7 @@ export interface Blueprint {
   fixtures?: Fixture[] | null
   iconId?: string
   id?: string
-  image?: Image
+  image?: BlueprintImage
   inputs?: Input[] | null
   name?: string
   operations?: Operations
@@ -235,7 +263,7 @@ export interface BlueprintDetail {
   fixtures?: Fixture[] | null
   iconId?: string
   id?: string
-  image?: Image
+  image?: BlueprintImage
   inputs?: Input[] | null
   name?: string
   operations?: Operations
@@ -251,6 +279,15 @@ export interface BlueprintDetail {
   update?: Update
   version?: string
   volumes?: Volume[] | null
+}
+
+/** blueprint.Image in the dashboard's source. */
+export interface BlueprintImage {
+  command?: string[] | null
+  platforms?: string[] | null
+  pullPolicy?: string
+  reference?: string
+  tagPolicy?: string
 }
 
 /** blueprint.Operation in the dashboard's source. */
@@ -463,6 +500,12 @@ export interface Change {
   ttl?: number
   type?: Type
   want?: string[] | null
+}
+
+/** assistant.ChatAbout in the dashboard's source. */
+export interface ChatAbout {
+  path?: string
+  title?: string
 }
 
 /** blueprint.Check in the dashboard's source. */
@@ -2752,15 +2795,6 @@ export interface Identity {
   state?: string
 }
 
-/** blueprint.Image in the dashboard's source. */
-export interface Image {
-  command?: string[] | null
-  platforms?: string[] | null
-  pullPolicy?: string
-  reference?: string
-  tagPolicy?: string
-}
-
 /** deploy.ImageBuildIssue in the dashboard's source. */
 export interface ImageBuildIssue {
   code?: string
@@ -3045,6 +3079,14 @@ export interface MemorySizing {
   verdict?: Verdict
 }
 
+/** One of the values of assistant.Mode. */
+export const Mode = {
+  Ask: "ask",
+  Changes: "changes",
+  Full: "full",
+} as const
+export type Mode = (typeof Mode)[keyof typeof Mode]
+
 /** deploy.NotificationAttempt in the dashboard's source. */
 export interface NotificationAttempt {
   createdAt?: string
@@ -3165,9 +3207,14 @@ export interface OperationsSummary {
 
 /** api.operatorRequest in the dashboard's source. */
 export interface OperatorRequest {
+  about?: ChatAbout | null
+  attached?: AgentAttachment[] | null
   conversation?: string
   decisions?: Record<string, boolean> | null
+  images?: AgentImage[] | null
+  mode?: Mode
   question?: string
+  takeOver?: boolean
 }
 
 /** secretstore.Outcome in the dashboard's source. */
@@ -4623,7 +4670,7 @@ export interface Service {
   egress?: boolean
   environment?: Environment[] | null
   healthcheck?: Healthcheck
-  image?: Image
+  image?: BlueprintImage
   name?: string
   ports?: Port[] | null
   purpose?: string

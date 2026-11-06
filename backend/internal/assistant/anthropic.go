@@ -41,6 +41,12 @@ type anthropicClient struct {
 
 func (c *anthropicClient) Tools() bool { return true }
 
+// Models is the closed list: the request is shaped for these models, and an
+// older one given the same body answers with a 400.
+func (c *anthropicClient) Models(context.Context) ([]Model, error) {
+	return AnthropicModels, nil
+}
+
 func (c *anthropicClient) headers(req *http.Request) {
 	req.Header.Set("x-api-key", c.key)
 	req.Header.Set("anthropic-version", anthropicVersion)
@@ -143,8 +149,10 @@ func encodeAnthropicBlock(b Block) (json.RawMessage, error) {
 	case BlockText:
 		return json.Marshal(map[string]string{"type": "text", "text": b.Text})
 	case BlockToolUse:
-		input := b.Input
-		if len(input) == 0 {
+		// The input goes back as an object whatever the call was: one another
+		// provider wrote as text that is not JSON would refuse the request.
+		input, ok := objectOf(b.Input)
+		if !ok {
 			input = json.RawMessage(`{}`)
 		}
 		return json.Marshal(map[string]any{"type": "tool_use", "id": b.ToolID, "name": b.ToolName, "input": input})
@@ -156,6 +164,10 @@ func encodeAnthropicBlock(b Block) (json.RawMessage, error) {
 		return json.Marshal(result)
 	case BlockRaw:
 		return b.Raw, nil
+	case BlockImage:
+		return json.Marshal(map[string]any{"type": "image", "source": map[string]string{
+			"type": "base64", "media_type": b.Image.MediaType, "data": b.Image.Data,
+		}})
 	}
 	return nil, fmt.Errorf("a %q block cannot be sent to Anthropic", b.Type)
 }
@@ -212,6 +224,9 @@ type streamBlock struct {
 	signature string
 	input     strings.Builder
 	id, name  string
+	// startInput is a call's input as its block began, which is all of it when
+	// no fragment follows.
+	startInput json.RawMessage
 }
 
 type anthropicStream struct {
@@ -250,14 +265,15 @@ func (s *anthropicStream) event(name, data string) error {
 		s.usage.merge(msg.Usage)
 	case "content_block_start":
 		var block struct {
-			Type     string `json:"type"`
-			Text     string `json:"text"`
-			Thinking string `json:"thinking"`
-			ID       string `json:"id"`
-			Name     string `json:"name"`
+			Type     string          `json:"type"`
+			Text     string          `json:"text"`
+			Thinking string          `json:"thinking"`
+			ID       string          `json:"id"`
+			Name     string          `json:"name"`
+			Input    json.RawMessage `json:"input"`
 		}
 		_ = json.Unmarshal(head.Block, &block)
-		b := &streamBlock{kind: block.Type, start: head.Block, id: block.ID, name: block.Name}
+		b := &streamBlock{kind: block.Type, start: head.Block, id: block.ID, name: block.Name, startInput: block.Input}
 		b.text.WriteString(block.Text + block.Thinking)
 		s.blocks[head.Index] = b
 		switch block.Type {
@@ -372,13 +388,21 @@ func (s *anthropicStream) reply() Reply {
 			if at < boundary {
 				continue
 			}
-			input := json.RawMessage(strings.TrimSpace(b.input.String()))
-			if len(input) == 0 || !json.Valid(input) {
-				// Asked for with input that is not JSON: nothing will run
-				// for it, and the call is checked as an empty request.
-				input = json.RawMessage(`{}`)
+			written := strings.TrimSpace(b.input.String())
+			input := json.RawMessage(written)
+			if written == "" {
+				input = bytes.TrimSpace(b.startInput)
 			}
-			out.Blocks = append(out.Blocks, Block{Type: BlockToolUse, ToolID: b.id, ToolName: b.name, Input: input})
+			block := Block{Type: BlockToolUse, ToolID: b.id, ToolName: b.name, Input: input}
+			if len(input) == 0 {
+				block.Input = json.RawMessage(`{}`)
+			} else if !json.Valid(input) {
+				// Streamed fragments that do not add up to JSON: the call goes back
+				// to Anthropic as an empty one, and what was written is kept so its
+				// check can say what was wrong (readFields).
+				block.Input, block.Text = json.RawMessage(`{}`), written
+			}
+			out.Blocks = append(out.Blocks, block)
 		}
 	}
 	return out

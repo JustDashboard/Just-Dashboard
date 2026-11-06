@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -196,6 +195,14 @@ func (s *Service) Begin(ctx context.Context, req Request, actor string) (*Run, e
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNoLocation, err)
 	}
+	// The sibling that finishes the job needs the daemon, and the backend's
+	// half pauses everything before it gets that far. Asked now, a daemon that
+	// does not answer refuses the uninstall with nothing paused; asked at the
+	// hand-over, it would leave the deployments paused behind a resume that
+	// needs the same daemon.
+	if err := selfupdate.DockerReachable(ctx, s.o.DockerHost); err != nil {
+		return nil, fmt.Errorf("the uninstall was not started: %w", err)
+	}
 
 	run := &Run{
 		ID:            time.Now().UTC().Format("20060102T150405Z"),
@@ -324,8 +331,8 @@ func (s *Service) transcript() (io.Writer, func()) {
 
 // startSibling launches the container that finishes the job.
 func (s *Service) startSibling(ctx context.Context, run *Run) error {
-	_ = exec.CommandContext(ctx, "docker", "rm", "-f", SiblingContainer).Run()
-	cmd := exec.CommandContext(ctx, "docker", s.siblingArgs(run)...)
+	_ = selfupdate.DockerCommand(ctx, s.o.DockerHost, "rm", "-f", SiblingContainer).Run()
+	cmd := selfupdate.DockerCommand(ctx, s.o.DockerHost, s.siblingArgs(run)...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {

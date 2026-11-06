@@ -7,7 +7,7 @@
 Deploy apps, run Docker, manage databases, shape the network, open a real shell and keep it all
 backed up, behind one login that lives on your private network.
 
-**Version 0.8.4** · Free and self-hosted · AGPL-3.0
+**Version 0.8.5** · Free and self-hosted · AGPL-3.0
 
 [![Install](https://img.shields.io/badge/Install-CAE9FF?style=for-the-badge&logoColor=141414)](#install)
 [![Features](https://img.shields.io/badge/Features-1f2328?style=for-the-badge)](FEATURES.md)
@@ -18,7 +18,7 @@ backed up, behind one login that lives on your private network.
 
 </div>
 
-<a href="FEATURES.md"><img src="docs/readme/overview.png" alt="The server overview: the machine, shortcuts to every section, live resources, storage and the deployed projects"></a>
+<a href="FEATURES.md"><img src="docs/readme/overview.png" alt="The server overview: the machine, shortcuts to what a visit starts, live resources, storage and the deployed projects"></a>
 
 ## What it does
 
@@ -53,7 +53,7 @@ Upgrade with **Update now** in the dashboard. [Everything about installing →](
 | [**Configuration**](docs/guides/configuration.md) | Every environment variable, and running it by hand |
 | [**The `jd` command line**](docs/guides/cli.md) | Deploy from a terminal, CI or an AI client |
 | [**Administration**](docs/guides/administration.md) | Account scripts, API keys, updates, backups and uninstalling |
-| [**Linking and the usage count**](docs/guides/linking-and-usage.md) | The two optional things that talk to just-dashboard.com |
+| [**Linking and the usage count**](docs/guides/linking-and-usage.md) | The two optional things that talk to just-dashboard.com, and connecting to a Just Hub on your tailnet |
 | [**Security**](SECURITY.md) | How the dashboard protects your server, and how to report a vulnerability |
 | [**Contributing**](CONTRIBUTING.md) | How to work on the project |
 

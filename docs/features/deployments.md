@@ -90,7 +90,9 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 
 - Build logs, runtime, console, request logs and traffic alerts per project
 - A failed run named from its own output, and on request explained by your own model, secrets masked
-- Diagnose: ask your own model what is wrong with a deployment; it reads runs, logs, usage, events, alerts, firewall rules and pending updates only as you allow each read, and proposes a restart, rollback or maintenance that runs only when you press it
+- An assistant on your own model, with a page of its own for each project and a chat for the whole server: ask it anything, as you would any assistant, with a screenshot pasted in if that says it better, and it reads your project's code, logs, requests, metrics and your databases, changes settings, domains and variables, runs backups and deploys, and reaches the rest of the dashboard, as you and with your whole role. It asks before changes unless you give it full access, every change is audited as the assistant's, secret values are masked before your model sees them, and each change comes with a shortcut to where it shows
+- Chats are saved: open one again later, from another browser or after a restart, and take over one still running in another tab
+- Hand a new deployment's settings to it: pick a repository, and it configures the rest while you press Deploy
 - Each release's image and the base images it was built on scanned for known vulnerabilities after the build and daily, offline; told when a fixable one meets a newer base, rebuilt in one click
 - Request insights that count real visitors apart from bots, with their devices and pages
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover, e-mail and webhooks

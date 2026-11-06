@@ -126,7 +126,8 @@ and chmod, which act *on* a symlink.
 
 The Files page's handlers (and `GET /system/disk-usage`) use `modules.hostFiles`, the same `Service`
 made with `OnHost(InHostMounts)`: every exported operation, `Resolve` included, runs whole in the host's
-mount namespace, so the page sees `/tmp`, `/usr` and `/var/lib` as the terminal does and a path is never
+mount namespace (the disk scan's walk, which several workers share, runs each worker through
+`modules.onHost` itself, since a goroutine started inside `InHostMounts` is back in the container's), so the page sees `/tmp`, `/usr` and `/var/lib` as the terminal does and a path is never
 resolved in one tree and opened in another. Every other caller keeps `modules.files`, in the container's
 view, because it resolves a path and then opens it itself. The roots and the checks are identical in
 both; only the tree they are evaluated against differs. Resolving through `/host` was the alternative
@@ -169,7 +170,9 @@ CSRF header and `SameSite=Strict` are unchanged. The WebSocket upgrader uses the
 scheme for its same-origin check, so HTTP tunnel installs can open live streams. A
 session that still owes a second factor is accepted only by
 the 2FA routes (`AuthenticatePartial`); everything else answers `totp_required` /
-`totp_enrollment_required`. Who owes one is decided per account: an enrolled account is always challenged,
+`totp_enrollment_required`. Who owes one is decided per account: an enrolled account is always challenged
+(except by a Just Hub sign-in ticket, which starts a complete session only where the operator turned hub
+sign-in on and the account opted in: [the exception](../security/invariants.md#the-exception-hub-sign-in)),
 and `JD_REQUIRE_2FA` (default false, reported as the `require2fa` status field) decides only whether an
 *unenrolled* account may sign in at all — see
 [invariant 2](../security/invariants.md#invariant-2-what-two-factor-still-guarantees). With the policy off,
@@ -288,7 +291,7 @@ and another SQLite closing its connection afterwards would believe it was the la
 `-wal` and `-shm` the store is still writing through, corrupting the database. Inspect a live store
 read-only: `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
-`api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `api_token_deployments` — the deployments a deploy key, or an MCP key's deployment grant, was narrowed to —, `audit_log`, whose `key_id` and `key_name` name the API key behind a request); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, the images placed on them in `board_files`, the install's shape library in `board_library`, and `sticky_boards`, which nothing reads since Stickyboard was removed in 0.8 but which stays so the boards made with it in 0.7.2–0.7.5 survive an update); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
+`api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `api_token_deployments` — the deployments a deploy key, or an MCP key's deployment grant, was narrowed to —, `audit_log`, whose `key_id` and `key_name` name the API key behind a request, and whose `session_id` and `hub_user` name the session a Just Hub sign-in ticket opened and its hub user); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, the images placed on them in `board_files`, the install's shape library in `board_library`, and `sticky_boards`, which nothing reads since Stickyboard was removed in 0.8 but which stays so the boards made with it in 0.7.2–0.7.5 survive an update); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
 `remote_desktop_sessions`); backups
 (`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
@@ -323,7 +326,9 @@ leaves the row. Fields a request can choose are bounded in both the row and the 
 128 bytes, `Target` 1000, `Path` 2048, `Detail` 4000, `KeyName` 200, cut on a character boundary and
 ending in `…`). An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
-`Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.
+`Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target. A call the
+dashboard's assistant makes for a person is their entry, under their name and role, with `Actor = assistant`
+(`Principal.Assistant`, [the dashboard's assistant](../deployments/operator.md)).
 
 ## Passkeys
 
@@ -389,6 +394,12 @@ that does not make it a password-and-code session. Enrolment proves its code, wh
 elevation retains its recorded provenance, including unknown legacy provenance. Account session summaries use this distinction and display
 legacy/unknown authentication honestly. Migration and authentication tests cover existing rows and
 password/code/recovery completion; route authorization and per-account enforcement are unchanged.
+
+A session a Just Hub sign-in ticket made records `hub`, with the hub user whose grant made it in
+`sessions.hub_user` (additive, default `''`), and the account's session list says it was signed in through
+Just Hub. It is the one provenance that changes what a session may do: `ResolveSession` checks its grant,
+the link and both switches on every use, and `httpx.RefuseHubSession` refuses it on the routes
+[the exception](../security/invariants.md#the-exception-hub-sign-in) lists.
 
 ## Container limits in `docker-compose.yml`
 

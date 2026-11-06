@@ -140,23 +140,32 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	JSON(w, apiErr.Status, map[string]any{"error": apiErr})
 }
 
+// maxJSONBody bounds a JSON request body, unless a route says otherwise.
+const maxJSONBody = 4 << 20
+
 func DecodeJSON(r *http.Request, dst any) error {
-	return decodeJSON(r, dst, false)
+	return decodeJSON(r, dst, false, maxJSONBody)
+}
+
+// DecodeJSONWithin is DecodeJSON for a route whose body may be larger, such as a
+// question to the assistant with screenshots in it.
+func DecodeJSONWithin(r *http.Request, dst any, limit int64) error {
+	return decodeJSON(r, dst, false, max(limit, maxJSONBody))
 }
 
 // DecodeJSONNumbers keeps arbitrary database values exact until the database
 // adapter binds them. JSON numbers otherwise round through float64 in any fields.
 func DecodeJSONNumbers(r *http.Request, dst any) error {
-	return decodeJSON(r, dst, true)
+	return decodeJSON(r, dst, true, maxJSONBody)
 }
 
-func decodeJSON(r *http.Request, dst any, exactNumbers bool) error {
+func decodeJSON(r *http.Request, dst any, exactNumbers bool, limit int64) error {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return Err(http.StatusUnsupportedMediaType, "json_content_type_required",
 			"request body must use application/json")
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4<<20))
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, limit))
 	if exactNumbers {
 		dec.UseNumber()
 	}

@@ -17,14 +17,14 @@ A control center for every database on the server, even the ones nothing has con
 ## Working in the data
 
 - Table editor with staged, reviewed edits and a SQL editor with plans and stored programs (DELIMITER, GO and PL/SQL scripts)
-- An optional SQL assistant on your own Anthropic key or local model, told the schema and never the rows
+- An optional assistant on your own key (Anthropic, OpenAI, Gemini, OpenRouter and others) or local model, set up once for the whole dashboard: every connection has its own Assistant page to ask what it holds, what is slow, who can write to it and whether it is backed up, and the same chat sits beside the SQL editor, where the statement, a result, an error or a plan goes with a question only when you attach it. A protected connection is never sent to it
 - Schema browser, diagram, code generation, mock seed data written parents first, performance
 
 <table>
 <tr>
 <td width="50%" valign="top">
-<a href="../readme/database-assistant.png"><img src="../readme/database-assistant.png" alt="The SQL editor with the assistant beside it, answering with statements to open or insert"></a>
-<p align="center"><b>SQL assistant</b><br><sub>Ask for a statement, an error or a plan explained</sub></p>
+<a href="../readme/database-assistant.png"><img src="../readme/database-assistant.png" alt="The SQL editor with the assistant beside it: the statement and its result attached, and an answer whose statement opens in a tab or is inserted"></a>
+<p align="center"><b>The assistant</b><br><sub>Its own page, and beside the SQL editor with what you attach</sub></p>
 </td>
 <td width="50%" valign="top">
 <a href="../readme/database-explain.png"><img src="../readme/database-explain.png" alt="A measured plan with a hash join and a sequential scan flagged as misjudged"></a>

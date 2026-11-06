@@ -1,15 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import {
-  ArrowUpRight,
-  ChevronRight,
-  Copy,
-  Cross,
-  Crosshair,
-  Layers,
-  Logs,
-} from "@/components/icons"
+import { ArrowUpRight, ChevronRight, Copy, Crosshair, Layers, Logs } from "@/components/icons"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { KEYCAP } from "@/components/command-search/keycaps"
 import { Status } from "@/components/status-dot"
@@ -50,7 +42,6 @@ export function MapInspector({
   onHover,
   onFocus,
   onFrame,
-  onClose,
 }: {
   systems: System[]
   system: System | undefined
@@ -62,23 +53,18 @@ export function MapInspector({
   onFocus: (id: string) => void
   /** Bring the chosen box into view with what it is wired to. */
   onFrame: (id: string) => void
-  onClose: () => void
 }) {
   const HeadGlyph = node ? KIND_GLYPH[node.kind] : system ? Layers : undefined
   return (
     <aside
       aria-label="Inspector"
-      className="flex min-h-0 min-w-0 flex-col border-hairline max-lg:border-t lg:border-l"
+      className="flex min-h-0 min-w-0 flex-col border-l border-hairline"
     >
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline pr-2 pl-4">
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline px-4">
         {HeadGlyph && <HeadGlyph aria-hidden className="size-3.5 text-muted-foreground" />}
         <span className="eyebrow">
           {node ? nodeKindLabel(node) : system ? SYSTEM_LABEL[system.kind] : "This server"}
         </span>
-        <span className="flex-1" />
-        <IconAction label="Close the inspector (I)" className="size-7" onClick={onClose}>
-          <Cross />
-        </IconAction>
       </div>
 
       <div
@@ -98,12 +84,11 @@ export function MapInspector({
         ) : system ? (
           <SystemView system={system} onChoose={onChoose} onHover={onHover} />
         ) : (
-          <ServerView systems={systems} onFocus={onFocus} />
+          <ServerView systems={systems} />
         )}
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-4 py-2.5 text-hint text-muted-foreground max-lg:hidden">
-        <Key cap="/">Find</Key>
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-4 py-2.5 text-hint text-muted-foreground">
         <Key cap="F">Fit</Key>
         <Key cap="I">Panel</Key>
         <Key cap="↵">Open</Key>
@@ -466,7 +451,7 @@ function SystemView({
   )
 }
 
-function ServerView({ systems, onFocus }: { systems: System[]; onFocus: (id: string) => void }) {
+function ServerView({ systems }: { systems: System[] }) {
   // Each thing once, however many systems draw it.
   const seen = new Map<string, string>()
   for (const s of systems) {
@@ -502,22 +487,6 @@ function ServerView({ systems, onFocus }: { systems: System[]; onFocus: (id: str
           />
         </Section>
       )}
-      {/* The rail lists them beside the canvas; on a narrow window it is here. */}
-      <div className="lg:hidden">
-        <Section title="Systems" count={systems.length}>
-          <ul className="-mx-2 space-y-0.5">
-            {systems.map((s) => (
-              <Row
-                key={s.id}
-                mark={<SystemMark system={s} />}
-                title={systemTitle(s)}
-                line={SYSTEM_LABEL[s.kind]}
-                onPress={() => onFocus(s.id)}
-              />
-            ))}
-          </ul>
-        </Section>
-      </div>
     </>
   )
 }

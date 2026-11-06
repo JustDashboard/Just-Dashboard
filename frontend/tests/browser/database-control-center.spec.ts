@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { hold } from "./database-fixture"
 import { dockerInventory, dockerlessInventory, mockFleet, refusal } from "./database-fleet-fixture"
+import { risen } from "./risen"
 
 /**
  * The section-wide pages of Databases: the control center, the map and Add a
@@ -280,27 +281,30 @@ test.describe("the control center", () => {
     // counted apart rather than drawn as an empty span.
     const sessions = band.getByRole("region", { name: "Sessions" })
     expect(await names("Busiest databases")).toEqual(["Open app", "Open shop", "Open cache"])
-    await expect(sessions).toContainText(/3\s*clients/)
+    await sessions.getByRole("link", { name: "Open cache" }).hover()
+    await expect(sessions.locator("[data-slot=reading-line]")).toContainText(/3\s*clients/)
     await expect(sessions).toContainText("1 server not answering")
 
-    // Never dumped first, then the oldest; a row opens the database's dumps.
+    // Never dumped first, then the oldest; a standing opens the dumps of the
+    // worst database in it, which its line names.
     const backups = band.getByRole("region", { name: "Backups" })
     await expect(backups).toContainText(/3\s*of 5 in the last day/)
-    await expect(
-      backups.getByRole("img", { name: /^Databases by their newest backup: 3 today, .*1 never$/ }),
-    ).toBeVisible()
+    await expect(backups.getByRole("img", { name: /^Backups: 1 never, .*3 today$/ })).toBeVisible()
     expect(await names("Databases by last backup")).toEqual([
       "Backups of cache",
       "Backups of app",
       "Backups of blog",
-      "Backups of notes",
-      "Backups of shop",
     ])
     const never = backups.getByRole("link", { name: "Backups of cache" })
     await expect(never).toHaveAttribute("href", "/databases/4/backups")
-    await expect(never.getByText("never backed up")).toHaveClass(/text-warning/)
+    const reading = backups.locator("[data-slot=reading-line]")
+    await expect(reading).toContainText("cache")
+    await expect(reading.getByText("never backed up")).toHaveClass(/text-warning/)
+    await backups.getByRole("link", { name: "Backups of blog" }).hover()
+    await expect(reading).toContainText("3 today")
+    await expect(reading).toContainText("blog")
 
-    // One database, one hue: its span's key in the band is its card's size bar,
+    // One database, one hue: its mark's key in the band is its card's size bar,
     // and the card's edge carries none.
     const hue = (el: Element) => getComputedStyle(el).backgroundColor
     const edge = async (name: string) =>
@@ -309,7 +313,7 @@ test.describe("the control center", () => {
       band
         .getByRole("list", { name: "Largest databases" })
         .getByRole("link", { name: `Open ${name}` })
-        .locator("[data-slot=hue-key]")
+        .locator("i")
         .evaluate(hue)
     expect(await key("shop")).toBe(await edge("shop"))
     expect(await key("cache")).toBe(await edge("cache"))
@@ -317,12 +321,31 @@ test.describe("the control center", () => {
     // Five databases are five hues.
     const edges = await band
       .getByRole("list", { name: "Largest databases" })
-      .locator("[data-slot=hue-key]")
+      .locator("i")
       .evaluateAll((spans) => spans.map((span) => getComputedStyle(span).backgroundColor))
     expect(new Set(edges).size).toBe(5)
 
     await band.getByRole("list", { name: "Largest databases" }).getByRole("link").first().click()
     await expect(page).toHaveURL(/\/databases\/1$/)
+  })
+
+  test("every block of the band is one height, whatever it has to say", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    // Nothing connected: Sessions says so in a line, beside two blocks with bars.
+    await mockFleet(page, {
+      fleet: Object.fromEntries([1, 2, 3, 4, 5].map((id) => [id, { sessions: 0 }])),
+    })
+    await page.goto("/databases")
+    const blocks = page.locator("[data-slot=fleet-band] [data-slot=bar-reading]")
+    await expect(blocks).toHaveCount(3)
+    await expect(page.getByRole("region", { name: "Sessions" })).toContainText(
+      "Nothing is connected to any database right now.",
+    )
+    await risen(page)
+    const heights = await blocks.evaluateAll((all) =>
+      all.map((block) => block.getBoundingClientRect().height),
+    )
+    expect(new Set(heights).size).toBe(1)
   })
 
   test("what the attention list fixed is fixed from the database's own card", async ({ page }) => {

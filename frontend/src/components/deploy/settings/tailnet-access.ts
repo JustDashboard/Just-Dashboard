@@ -73,6 +73,9 @@ export function tailnetSwitchClears(configuration: Configuration): string[] {
   if (runtime.forwardAuth) out.push("the sign-in")
   if (runtime.allowFrom?.length) out.push("the allowed addresses")
   if (runtime.responseHeaders?.length) out.push("the response headers")
+  if (runtime.edgeRules?.length) out.push("the edge rules")
+  if (runtime.rateLimit) out.push("the rate limit")
+  if (runtime.crowdSec) out.push("the CrowdSec list")
   if (runtime.hsts) out.push("HSTS")
   if (runtime.maintenance) out.push("the maintenance settings")
   if (runtime.errorPages?.length || runtime.interceptErrors) out.push("the error pages")
@@ -116,6 +119,9 @@ export function tailnetRuntime(
     forwardAuth: undefined,
     allowFrom: undefined,
     responseHeaders: undefined,
+    edgeRules: undefined,
+    rateLimit: undefined,
+    crowdSec: undefined,
     hsts: undefined,
     maintenance: undefined,
     errorPages: undefined,

@@ -3,7 +3,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 /**
  * The Overview's silhouette: the environment's title and hairline, the
  * preview's sixteen-by-ten tile beside the four nodes of the wiring, and the
- * row of four readings under them — so the first paint lands where the page
+ * four reading lines under them — so the first paint lands where the page
  * will, rather than as a framed table that the page then replaces. The
  * project shell draws it under its own while the project's first read is in
  * flight, and the page while a legacy link redirects.
@@ -29,12 +29,15 @@ export function OverviewSkeleton() {
           ))}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-5 border-t border-hairline pt-4 xl:grid-cols-4">
+      <div className="grid gap-x-6 gap-y-5 border-t border-hairline pt-5 xl:grid-cols-2">
         {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} className="space-y-2">
-            <Skeleton className="h-2.5 w-16" />
-            <Skeleton className="h-6 w-20" />
-            <Skeleton className="h-9 w-full" />
+          <div key={index} className="flex items-center gap-3.5">
+            <Skeleton className="size-11 shrink-0 rounded-xl" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Skeleton className="h-2.5 w-16" />
+              <Skeleton className="h-3.5 w-40 max-w-full" />
+              <Skeleton className="h-3 w-56 max-w-full" />
+            </div>
           </div>
         ))}
       </div>

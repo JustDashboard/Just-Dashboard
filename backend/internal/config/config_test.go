@@ -210,3 +210,63 @@ func TestAccountLinkDefaultsToOnAtTheProjectsSiteAndRefusesAnythingButAnOrigin(t
 		t.Fatalf("a malformed switch must refuse to start, got %v", err)
 	}
 }
+
+func TestHubLinkDefaultsToOnAndItsTestOriginIsOneLoopbackOrigin(t *testing.T) {
+	t.Setenv("JD_MASTER_KEY", strings.Repeat("ab", 32))
+	t.Setenv("JD_ADDR", "127.0.0.1:0")
+	c, err := Load()
+	if err != nil || !c.HubLink || c.HubLinkTestOrigin != "" {
+		t.Fatalf("defaults: link %v, test origin %q, %v", c.HubLink, c.HubLinkTestOrigin, err)
+	}
+	// Independent of the account link.
+	t.Setenv("JD_ACCOUNT_LINK", "false")
+	t.Setenv("JD_HUB_LINK_TEST_ORIGIN", "http://127.0.0.1:43180/")
+	c, err = Load()
+	if err != nil || !c.HubLink || c.HubLinkTestOrigin != "http://127.0.0.1:43180" {
+		t.Fatalf("account link off, test origin set: link %v, origin %q, %v", c.HubLink, c.HubLinkTestOrigin, err)
+	}
+	t.Setenv("JD_HUB_LINK", "false")
+	if c, err := Load(); err != nil || c.HubLink {
+		t.Fatalf("switched off: %v, %v", c.HubLink, err)
+	}
+	for _, bad := range []string{"https://hub.tailed39ba.ts.net", "http://10.0.0.1:43180", "http://127.0.0.1:43180/path", "ftp://127.0.0.1"} {
+		t.Setenv("JD_HUB_LINK_TEST_ORIGIN", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "JD_HUB_LINK_TEST_ORIGIN") {
+			t.Fatalf("%q must refuse to start, got %v", bad, err)
+		}
+	}
+	t.Setenv("JD_HUB_LINK_TEST_ORIGIN", "")
+	t.Setenv("JD_HUB_LINK", "maybe")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "JD_HUB_LINK") {
+		t.Fatalf("a malformed switch must refuse to start, got %v", err)
+	}
+}
+
+// Hub sign-in is off unless the operator turns it on, and never runs against
+// a hub at a test origin in a build made for release.
+func TestHubSignInIsOffByDefaultAndRefusesATestOriginInARelease(t *testing.T) {
+	t.Setenv("JD_MASTER_KEY", strings.Repeat("ab", 32))
+	t.Setenv("JD_ADDR", "127.0.0.1:0")
+	c, err := Load()
+	if err != nil || c.HubSignIn {
+		t.Fatalf("default: sign-in %v, %v", c.HubSignIn, err)
+	}
+	t.Setenv("JD_HUB_SIGNIN", "true")
+	if c, err = Load(); err != nil || !c.HubSignIn {
+		t.Fatalf("switched on: %v, %v", c.HubSignIn, err)
+	}
+	t.Setenv("JD_HUB_LINK_TEST_ORIGIN", "http://127.0.0.1:43180")
+	_, err = Load()
+	if hubSignInTestOriginAllowed {
+		if err != nil {
+			t.Fatalf("a hublinktest build must allow both: %v", err)
+		}
+	} else if err == nil || !strings.Contains(err.Error(), "JD_HUB_SIGNIN") {
+		t.Fatalf("sign-in with a test origin must refuse to start in a release build, got %v", err)
+	}
+	t.Setenv("JD_HUB_LINK_TEST_ORIGIN", "")
+	t.Setenv("JD_HUB_SIGNIN", "maybe")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "JD_HUB_SIGNIN") {
+		t.Fatalf("a malformed switch must refuse to start, got %v", err)
+	}
+}

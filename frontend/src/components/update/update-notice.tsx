@@ -32,7 +32,8 @@ import { Spinner } from "@/components/state"
  * "you're up to date" row is the sort of chrome that gets tuned out, and it
  * would take the tuning-out with it on the day the row says something else.
  * The version an operator wants to know casually is already beside the
- * wordmark at the top of the same rail.
+ * wordmark at the top of the same rail — or, on a server linked to a Just
+ * Hub, on this server's row of the switcher that takes the wordmark's place.
  *
  * When it does speak it is the account card's container — the same edge and
  * ground as the card under it, tinted green or red only once a run has

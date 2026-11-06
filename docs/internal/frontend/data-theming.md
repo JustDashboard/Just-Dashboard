@@ -185,8 +185,11 @@ are dated evidence, not proof of current attachment ownership.
   `X-Confirm-Encoding: uri` only when a typed phrase is supplied (including Unicode and surrounding
   whitespace), `ApiError` with
   `needsConfirmation`/`isAuthProblem`/`needsTotp` and the whole parsed `body`, for a refusal that
-  carries more than the error (the proxy engine's config-test refusal carries the test); `wsUrl()` and
-  `downloadUrl()` build the non-JSON URLs. A `Query` value may be an array, which is a repeated
+  carries more than the error (the proxy engine's config-test refusal carries the test). A
+  `403 hub_session_not_allowed` (a session opened through Just Hub, on a route that makes or changes a
+  credential or a link) gets `HUB_SESSION_REFUSED` as its message, so every page says to sign in on this
+  server itself rather than repeating the server's words. `wsUrl()` and `downloadUrl()` build the non-JSON
+  URLs. A `Query` value may be an array, which is a repeated
   parameter (`f=a&f=b`, the log routes' field predicates): joining on a character and splitting it again
   on the server breaks on a value that holds it, and an IPv6 address is all colons. `useSocket` takes the
   same `Query`.
@@ -219,6 +222,19 @@ are dated evidence, not proof of current attachment ownership.
   open statement's `/statements/history/{statement}` on the same cadence; both are the backend's
   store, which the recorder writes every five minutes. A point no reading falls in is a gap in a
   statement's charts, and a reset is a mark on their time axis.
+- The hub link is read in two places, both through `usePoll` (`hooks/use-hub-link.tsx`).
+  `HubLinkProvider`, above the dashboard layout's title and shell, reads `GET /dashboard/hub` every
+  15 seconds for the switcher, the palette's Servers and the notice card — and is disabled, asking
+  nothing, unless `/auth/session` carried a `hub` field; once it has an answer, a status that is not
+  `linked` takes the hub away from the shell, and an idle one takes away the hub's address and every
+  notice's link (`shellHub` in `lib/hub-link.ts`). The name the tab and the switcher give the server
+  is not the hub's: it is the host name the shell's metrics stream already reads (`useHostName`,
+  `/system/host`). Settings → Hub's own `useHubLink` is the account link's hook pointed at the hub's
+  routes: every 3 seconds while a request waits for approval and every 15 otherwise, each mutation's
+  answer drawn at once, and a `409` or `hub_link_disabled` refusal (`outdated`) followed by a read —
+  which takes Connect's form away, so Connect says that refusal in a toast rather than in the form. Because the session is read
+  once per load, the page refreshes it (and the provider) whenever the link starts or stops, which
+  is what turns the shell hub-aware without a reload.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
   ref so a fresh closure does not rebuild the socket. The delay doubles from 1 s to a 15 s ceiling with
   half of each step random (`retryDelay`), and resets only after a connection has stayed open for 10 s:

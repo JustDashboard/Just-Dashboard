@@ -74,6 +74,10 @@ backend accepts a single line of at most 4096 bytes and never prints it or puts 
   `CLI`, actions `dashboard.user.create-user`, `dashboard.user.reset-password`, and
   `dashboard.user.revoke-sessions`. The target identifies the dashboard account. Success/failure is
   recorded in the database and mirrored to stderr. Audit detail contains only the chosen role.
+- `reset-password` and `revoke-sessions` also end the account's hub sign-in grant and revoke its hub
+  sessions, in the same transaction, and record `hub.signin.revoke` the same way (`root`, `cli`, `CLI`;
+  the hub user as target; the account, the reason and `sessionsRevoked` as detail), as the dashboard
+  does for every grant end (hub-link-protocol 9.10).
 
 Neither command issues a temporary password. Until 0.7.3 both set `must_change_pw`, so an operator
 who had just reset their own password from a root shell was signed in and immediately asked for a
@@ -90,6 +94,21 @@ address and a code, waits (`--wait`, 15 minutes by default) and exits 0 when lin
 approved in time, 1 for any other failure; `manage.sh` keeps that status. They run in the same image against
 the same store as the running dashboard, which picks up a link or unlink within seconds. Audit: `account.link`
 and `account.unlink`, actor `cli`, username `root`, method `CLI`. Agent mode refuses all `--admin` commands.
+
+`hub connect URL [--scope S] [--token-stdin] [--wait D]`, `hub disconnect` and `hub status` run
+`--admin hub-connect`, `--admin hub-disconnect` and `--admin hub-status` (`admin/hub.go`) the same way, reading
+`JD_MASTER_KEY`, `JD_HUB_LINK` and `JD_HUB_LINK_TEST_ORIGIN`; `hub status` needs no key. `manage.sh` checks the
+subcommand, that `connect` has an address, and each option's name and the scope's value before Docker, then
+forwards the rest. A token is never an argument: `--token TOKEN` (or `--token=`) exits 1 with "pass the token on
+standard input with --token-stdin", in `manage.sh` and in the admin command alike. With `--token-stdin`,
+`manage.sh` asks `Link token: ` with echo off (`read -rs`) when standard input is a terminal and reads one line
+otherwise, then hands the token to the admin command on that command's standard input (a here-string), never in
+its argv. `hub connect` applies the tailnet rule, prints the hub URL, the hub's machine and owner ("not checked"
+when tailscaled could not be asked, or at the test origin), the code, this server's fingerprint and the hub's
+approval screen for the request (its `approveUrl`), waits, prints the pinned hub key's fingerprint on success, and
+exits 0 connected, 2 declined, not approved in time or interrupted, 1 otherwise, a second `hub connect` while one
+still waits included ([hub-link.md](../backend/hub-link.md#terminal)). Audit: `hub.link` and `hub.unlink`,
+actor `cli`, username `root`.
 
 ## Stack commands
 

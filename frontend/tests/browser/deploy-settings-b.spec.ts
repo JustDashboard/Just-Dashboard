@@ -208,7 +208,7 @@ test.describe("Redirects, access and headers", () => {
     await page.getByRole("button", { name: "Actions for www.api.example.test" }).click()
     await page.getByRole("menuitem", { name: "Redirect to another domain" }).click()
     const row = page.getByRole("list", { name: "Domains" }).getByRole("listitem").nth(1)
-    await expect(row.getByText("Redirects to")).toBeVisible()
+    await expect(row.getByText("Sends visitors to")).toBeVisible()
     await expect(page.getByRole("combobox", { name: "Sends visitors to" })).toHaveText(
       "api.example.test",
     )
@@ -258,7 +258,7 @@ test.describe("Redirects, access and headers", () => {
     // Removing the name redirected to puts the other back to serving.
     await page.getByRole("button", { name: "Actions for api.example.test" }).click()
     await page.getByRole("menuitem", { name: "Remove" }).click()
-    await expect(page.getByText("Redirects to")).toHaveCount(0)
+    await expect(page.getByText("Sends visitors to")).toHaveCount(0)
   })
 
   test("each domain says its own scheme, and HSTS follows the HTTPS domains", async ({ page }) => {
@@ -274,7 +274,11 @@ test.describe("Redirects, access and headers", () => {
     })
     await page.goto("/deploy/7/settings/domains")
     const list = page.getByRole("list", { name: "Domains" })
-    await expect(list.getByText("Plain HTTP is redirected to HTTPS", { exact: true })).toBeVisible()
+    // An HTTPS name is the expected answer: the line has nothing to add, and
+    // what it does for plain visitors is the switch's tooltip.
+    await expect(list.getByText("Plain HTTP, no redirect", { exact: true })).toHaveCount(0)
+    await page.getByRole("button", { name: "HTTPS on api.example.test" }).hover()
+    await expect(page.getByRole("tooltip")).toContainText("Plain HTTP is redirected to HTTPS")
 
     // A second name added over plain HTTP is served that way, whatever the
     // first does: its row says so, and no certificate is asked for.
@@ -289,9 +293,7 @@ test.describe("Redirects, access and headers", () => {
       { hostname: "old.example.test", https: false, ownership: "managed" },
     ])
     const rows = list.getByRole("listitem")
-    await expect(
-      rows.nth(0).getByText("Plain HTTP is redirected to HTTPS", { exact: true }),
-    ).toBeVisible()
+    await expect(rows.nth(0).getByText("Plain HTTP, no redirect", { exact: true })).toHaveCount(0)
     await expect(rows.nth(1).getByText("Plain HTTP, no redirect", { exact: true })).toBeVisible()
 
     // HSTS names the HTTPS domain it is sent on and the plain one it is not.

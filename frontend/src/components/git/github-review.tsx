@@ -394,7 +394,7 @@ export function PullReview({
             ))}
         </>
       ) : (
-        <div className="space-y-2.5 px-3 py-3">
+        <div className="space-y-2.5 px-4 py-3">
           {conversation.error && <ErrorState error={conversation.error} />}
           {conversation.loading && <LoadingRows rows={3} />}
           {conversation.data && entries.length === 0 && (
@@ -440,7 +440,7 @@ export function PullReview({
       {ctx.canControl && (
         <form
           aria-label={`Comment on #${pull.number}`}
-          className="space-y-2.5 border-t border-hairline px-3 py-3"
+          className="space-y-2.5 border-t border-hairline px-4 py-3"
           onSubmit={(event) => {
             event.preventDefault()
             if (!blocked) void send()
@@ -453,7 +453,7 @@ export function PullReview({
                 provider="github"
                 size="sm"
                 account
-                className="mt-0.5"
+                className="mt-0.5 max-sm:hidden"
               />
             ) : null}
             <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-input bg-control focus-ring-within">

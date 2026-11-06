@@ -158,7 +158,7 @@ test("every container can be listed and one opens into its chart, service and pe
   const band = page.getByLabel("Traffic by container", { exact: true })
   await expect(band.getByRole("button", { name: "Open registry's traffic" })).toHaveCount(0)
   await band.getByRole("button", { name: "Show all 7" }).click()
-  await band.getByRole("button", { name: "Open registry's traffic" }).click()
+  await page.getByRole("menuitem", { name: "Open registry's traffic" }).click()
   const sheet = page.getByRole("dialog")
   await expect(sheet).toContainText("infra/registry")
   await expect(sheet).toContainText("registry:2")

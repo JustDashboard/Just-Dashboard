@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
@@ -279,6 +281,8 @@ type boundedRecorder struct {
 	status int
 	body   bytes.Buffer
 	total  int
+	// limit is how much of the body is kept; zero is mcpAnswerBytes.
+	limit int
 }
 
 func (b *boundedRecorder) Header() http.Header { return b.header }
@@ -294,7 +298,11 @@ func (b *boundedRecorder) Write(p []byte) (int, error) {
 		b.status = http.StatusOK
 	}
 	b.total += len(p)
-	if room := mcpAnswerBytes - b.body.Len(); room > 0 {
+	limit := b.limit
+	if limit == 0 {
+		limit = mcpAnswerBytes
+	}
+	if room := limit - b.body.Len(); room > 0 {
 		if len(p) < room {
 			room = len(p)
 		}
@@ -306,6 +314,35 @@ func (b *boundedRecorder) Write(p []byte) (int, error) {
 // dispatchMCP makes a generated tool's request through the router, as the
 // MCP key.
 func (s *Server) dispatchMCP(r *http.Request, p *httpx.Principal, method string, req mcp.RouteRequest) (*boundedRecorder, error) {
+	return s.dispatchKeeping(r, p, method, req, 0)
+}
+
+// dispatchKeeping makes a generated tool's request through the router as the
+// MCP key whose principal p is, keeping up to limit bytes of the answer.
+func (s *Server) dispatchKeeping(r *http.Request, p *httpx.Principal, method string, req mcp.RouteRequest, limit int) (*boundedRecorder, error) {
+	return s.dispatchInner(httpx.WithMCPDelegate(r.Context(), p), r, method, req, limit, false)
+}
+
+// errDispatchTimeout is a request through the router that did not answer before
+// its context ended.
+var errDispatchTimeout = errors.New("the route did not answer in time")
+
+// assistantDispatch makes one request through the router as the dashboard's
+// assistant acting for the person whose session principal p is
+// (httpx.WithAssistant): the person's own role, capability checks, rate limit and
+// handler rules, the route's own audit entry marked as the assistant's. It is a
+// browser's request for every check that asks — the CSRF header a page sends is
+// set — and it is not waited for past ctx: a route that does not answer is left
+// to finish on its own, and the call says so.
+func (s *Server) assistantDispatch(ctx context.Context, r *http.Request, p *httpx.Principal, method string, req mcp.RouteRequest) (*boundedRecorder, error) {
+	return s.dispatchInner(httpx.WithAssistant(ctx, p), r, method, req, agentAnswerBytes, true)
+}
+
+// dispatchInner makes one request through the router from its root, as any other
+// request is made: a fresh route context, the credential ctx carries, nothing of
+// the outer request's own audit entry, and the outer request's address, so the
+// allowlist and the trail see the client, not a proxy in front of it.
+func (s *Server) dispatchInner(ctx context.Context, r *http.Request, method string, req mcp.RouteRequest, limit int, browser bool) (*boundedRecorder, error) {
 	src := s.deployOpenAPI.Load()
 	if src == nil {
 		return nil, fmt.Errorf("the routes were not built")
@@ -318,10 +355,7 @@ func (s *Server) dispatchMCP(r *http.Request, p *httpx.Principal, method string,
 	if q := req.Query.Encode(); q != "" {
 		target += "?" + q
 	}
-	// The request starts from the router's root as any other does: a fresh
-	// route context, the MCP key as its credential, nothing of the MCP
-	// request's own audit entry.
-	ctx := context.WithValue(httpx.WithMCPDelegate(r.Context(), p), chi.RouteCtxKey, nil)
+	ctx = context.WithValue(ctx, chi.RouteCtxKey, nil)
 	var body *bytes.Reader
 	if req.Body != nil {
 		body = bytes.NewReader(req.Body)
@@ -336,16 +370,45 @@ func (s *Server) dispatchMCP(r *http.Request, p *httpx.Principal, method string,
 	if err != nil {
 		return nil, err
 	}
-	// The address the MCP request was resolved to, so the allowlist and the
-	// trail see the client, not a proxy in front of it.
 	inner.RemoteAddr = net.JoinHostPort(httpx.ClientIP(r), "0")
 	inner.Header.Set("Accept", "application/json")
 	inner.Header.Set("User-Agent", r.UserAgent())
 	if req.Body != nil {
 		inner.Header.Set("Content-Type", "application/json")
 	}
-	rec := &boundedRecorder{header: http.Header{}}
-	handler.ServeHTTP(rec, inner)
+	if browser {
+		inner.Header.Set(httpx.CSRFHeader, "1")
+	}
+	rec := &boundedRecorder{header: http.Header{}, limit: limit}
+	if !browser {
+		handler.ServeHTTP(rec, inner)
+		if rec.status == 0 {
+			rec.status = http.StatusOK
+		}
+		return rec, nil
+	}
+	// The recorder is the goroutine's alone until it is done; one not waited for
+	// writes to a recorder nobody reads.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				s.Log.Error("an assistant's request panicked", "path", req.Path, "panic", recovered)
+				rec.status = http.StatusInternalServerError
+			}
+		}()
+		handler.ServeHTTP(rec, inner)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			return nil, errDispatchTimeout
+		}
+	}
 	if rec.status == 0 {
 		rec.status = http.StatusOK
 	}

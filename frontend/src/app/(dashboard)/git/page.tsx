@@ -16,7 +16,6 @@ import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { GroupRule } from "@/components/flow"
 import { CloneDialog } from "@/components/git/clone-dialog"
-import { GitHelp } from "@/components/git/help"
 import { GitHubAccountControl } from "@/components/git/github-account"
 import { ForgeFace } from "@/components/git/marks"
 import { REPO_GRID, RepoCard } from "@/components/git/repo-card"
@@ -221,7 +220,6 @@ export default function GitPage() {
     <span className="ml-auto flex max-w-full flex-wrap items-center gap-2">
       {/* The connected identity matters before a repository is chosen too. */}
       <GitHubAccountControl status={github} />
-      <GitHelp />
       {canClone && repos.data?.available && (
         <Button size="sm" variant="outline" onClick={() => setCloning(true)}>
           <CloudDownload className="size-4" />

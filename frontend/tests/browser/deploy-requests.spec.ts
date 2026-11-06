@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { risen } from "./risen"
 import {
   INGRESS_CONTAINER,
   deploymentRequests,
@@ -41,6 +42,47 @@ async function mockProject(...args: Parameters<typeof mockProjectBase>) {
   const result = await mockProjectBase(...args)
   await args[0].route("**/api/v1/firewall/", (route) => json(route, editableFirewall))
   return result
+}
+
+/** The window with the people in it, which is what opens Insights. */
+async function withAudience(page: Page) {
+  await page.route("**/api/v1/deploy/7/requests?*", (route) => {
+    const window = deploymentRequests(new URL(route.request().url()))
+    window.summary = {
+      ...window.summary,
+      buckets: window.summary.buckets.map((bucket, i) => ({ ...bucket, visitors: 2 + (i % 3) })),
+      audience: {
+        visitors: 87,
+        bots: 9,
+        humanRequests: 1097,
+        botRequests: 131,
+        devices: [
+          { value: "desktop", count: 52, errors: 0 },
+          { value: "phone", count: 35, errors: 0 },
+        ],
+        browsers: [{ value: "Chrome", count: 60, errors: 0 }],
+        systems: [{ value: "macOS", count: 40, errors: 0 }],
+        top: [
+          {
+            client: "89.28.56.43",
+            agent:
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+            requests: 41,
+            pages: 4,
+            errors: 0,
+            refused: 0,
+            bytes: 900_000,
+            first: "2026-09-03T11:20:00Z",
+            last: "2026-09-03T11:58:00Z",
+            landing: "/",
+            referer: "www.google.com",
+            journey: ["/", "/pricing", "/signup"],
+          },
+        ],
+      },
+    } as typeof window.summary
+    return json(route, window)
+  })
 }
 
 /**
@@ -440,11 +482,11 @@ test.describe("a deployment's traffic", () => {
     // agents reading counts what is a browser as well as what is a bot.
     await expect(page.getByText("12% bots · 88% browsers")).toBeVisible()
     await expect(
-      page.locator('[data-slot="bar-list"] img[src="/logos/google.svg"]').first(),
+      page.locator('[data-slot="rank-list"] img[src="/logos/google.svg"]').first(),
     ).toBeVisible()
-    // The distribution is a ladder rather than a line of footer text.
+    // The distribution in words a reader brings, not in percentile notation.
     await expect(page.getByText("Response times", { exact: true })).toBeVisible()
-    await expect(page.getByText("mean 78ms")).toBeVisible()
+    await expect(page.getByRole("button", { name: /^19 in 20: 412ms/ })).toBeVisible()
 
     // Clicking a page narrows the rows to it. Two rows name this path — the
     // Pages list and the Slowest list — and either does.
@@ -468,7 +510,7 @@ test.describe("a deployment's traffic", () => {
     await expect
       .poll(() => asked.some((url) => url.searchParams.get("status") === "404"))
       .toBe(true)
-    await page.getByRole("button", { name: "Show the requests slower than p95 (412ms)" }).click()
+    await page.getByRole("button", { name: /^19 in 20: 412ms/ }).click()
     await expect.poll(() => asked.some((url) => url.searchParams.get("minMs") === "412")).toBe(true)
 
     // Each narrowing is a chip with its own way back.
@@ -493,9 +535,9 @@ test.describe("a deployment's traffic", () => {
       .toBe(true)
     // The export link is the window's own query, so a download is what the
     // page shows and not the whole record.
-    const href = await page.getByRole("link", { name: "Export" }).getAttribute("href")
-    expect(href).toContain("/api/v1/deploy/7/requests/export?")
-    expect(href).toContain("pages=true")
+    const exported = page.getByRole("link", { name: "Export" })
+    await expect(exported).toHaveAttribute("href", /\/api\/v1\/deploy\/7\/requests\/export\?/)
+    await expect(exported).toHaveAttribute("href", /pages=true/)
   })
 
   test("a failing request shows what its container and its proxy wrote, and opens Output there", async ({
@@ -651,43 +693,7 @@ test.describe("a deployment's traffic", () => {
 
   test("Insights says how many people came, on what, and who they were", async ({ page }) => {
     await mockProject(page)
-    await page.route("**/api/v1/deploy/7/requests?*", (route) => {
-      const window = deploymentRequests(new URL(route.request().url()))
-      window.summary = {
-        ...window.summary,
-        buckets: window.summary.buckets.map((bucket, i) => ({ ...bucket, visitors: 2 + (i % 3) })),
-        audience: {
-          visitors: 87,
-          bots: 9,
-          humanRequests: 1097,
-          botRequests: 131,
-          devices: [
-            { value: "desktop", count: 52, errors: 0 },
-            { value: "phone", count: 35, errors: 0 },
-          ],
-          browsers: [{ value: "Chrome", count: 60, errors: 0 }],
-          systems: [{ value: "macOS", count: 40, errors: 0 }],
-          top: [
-            {
-              client: "89.28.56.43",
-              agent:
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
-              requests: 41,
-              pages: 4,
-              errors: 0,
-              refused: 0,
-              bytes: 900_000,
-              first: "2026-09-03T11:20:00Z",
-              last: "2026-09-03T11:58:00Z",
-              landing: "/",
-              referer: "www.google.com",
-              journey: ["/", "/pricing", "/signup"],
-            },
-          ],
-        },
-      } as typeof window.summary
-      return json(route, window)
-    })
+    await withAudience(page)
     await page.goto("/deploy/7/logs?view=insights")
 
     // The people first, apart from the bots and scripts the window also served.
@@ -1495,7 +1501,7 @@ test.describe("a deployment's traffic", () => {
       .toBe(true)
   })
 
-  test("the Agents and Came from lists narrow like every other, and the output's failures close Insights", async ({
+  test("the Agents and Came from lists narrow like every other, and Insights ends at its lists", async ({
     page,
   }) => {
     await mockProject(page, { runtime: stackRuntime })
@@ -1521,29 +1527,70 @@ test.describe("a deployment's traffic", () => {
     await page.getByRole("button", { name: "Clear the referer filter" }).click()
     await page.getByRole("button", { name: "Clear the agent filter" }).click()
 
-    // At the end, what the live release's services threw over the same
-    // window, ranked by what the exception says.
-    const output = page.getByRole("region", { name: "Output" })
-    await expect(output.getByText("Error: connect ECONNREFUSED 10.0.4.7:5432")).toBeVisible()
-    const ranked = searches.find((q) => q.get("facets") === "error")!
-    expect(ranked.get("source")).toBe("stack:api-production")
-    expect(ranked.getAll("f")).toEqual(["event:exception"])
-    expect(ranked.get("since")).toBeTruthy()
-    // A row opens Output around the last time it was thrown.
-    // Each row is named by what it says, so a reader hears which exception
-    // it is — and the tooltip is where a line longer than the column is read.
-    await output
-      .getByRole("button", {
-        name: 'Read the output around the last "Error: connect ECONNREFUSED 10.0.4.7:5432"',
-      })
-      .click()
-    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+    // The output's own ranking is the Output view's: Insights never asks for it.
+    await expect(page.getByRole("region", { name: "Output" })).toHaveCount(0)
+    expect(searches.some((q) => q.get("facets") === "error")).toBe(false)
+  })
+
+  test("a filter changes the figures in place, and the pane under the bar holds still", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await withAudience(page)
+    let hold: (() => void) | undefined
+    await page.route("**/api/v1/deploy/7/requests*", async (route) => {
+      if (new URL(route.request().url()).searchParams.get("methods") === "GET") {
+        await new Promise<void>((resolve) => (hold = resolve))
+      }
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/logs?view=insights")
+    const tile = page.locator("[data-slot=stat-tile]").filter({ hasText: "Visitors" })
+    await expect(tile).toContainText("87")
+    await tile.evaluate((node) => node.setAttribute("data-kept", ""))
+
+    await page.getByRole("button", { name: "GET", exact: true }).click()
+    await expect.poll(() => Boolean(hold)).toBe(true)
+    // While the answer is on its way the last one stays, a little quieter:
+    // no skeleton, and the very same elements rather than new ones.
+    await expect(page.locator("[data-slot=skeleton]")).toHaveCount(0)
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(1)
+    await expect(page.locator("[data-kept]")).toContainText("87")
+
+    hold!()
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0)
+    await expect(page.locator("[data-kept]")).toHaveCount(1)
+  })
+
+  test("the stat tiles keep their lines in a row, and a list's figures end on its head's edge", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await withAudience(page)
+    await page.setViewportSize({ width: 1600, height: 1000 })
+    await page.goto("/deploy/7/logs?view=insights")
+    const tiles = page
+      .locator("[data-slot=stat-grid]")
+      .filter({ hasText: "Bots and scripts" })
+      .locator("[data-slot=stat-tile]")
+    await expect(tiles).toHaveCount(5)
+    await risen(page)
+    // Every tile's first and last lines, its name and its hint, stand in one row.
+    const lines = await tiles.evaluateAll((all) =>
+      all.map((tile) => [
+        tile.firstElementChild!.getBoundingClientRect().top,
+        tile.lastElementChild!.getBoundingClientRect().bottom,
+      ]),
     )
-    await expect
-      .poll(() => new URL(page.url()).searchParams.get("moment"))
-      .toBe("2026-09-03T11:59:30.900Z")
+    for (const [top, bottom] of lines) {
+      expect(Math.abs(top - lines[0][0])).toBeLessThanOrEqual(0.5)
+      expect(Math.abs(bottom - lines[0][1])).toBeLessThanOrEqual(0.5)
+    }
+
+    const pages = page.getByRole("heading", { name: "Pages", exact: true }).locator("../..")
+    const head = await pages.locator("h3").locator("..").boundingBox()
+    const share = await pages.locator("[data-slot=rank-share]").first().boundingBox()
+    expect(Math.abs(share!.x + share!.width - (head!.x + head!.width))).toBeLessThanOrEqual(1)
   })
 
   test("a band of response times is asked for, and the question survives a reload", async ({
@@ -1751,7 +1798,7 @@ test.describe("a deployment's traffic", () => {
     expect(own[0].get("until")).toBe("2026-09-03T11:59:32.000Z")
   })
 
-  test("a deployment nobody routes to still has its output's failures on Insights", async ({
+  test("a deployment nobody routes to says so on Insights, and offers the way out", async ({
     page,
   }) => {
     await mockProject(page, {
@@ -1766,21 +1813,14 @@ test.describe("a deployment's traffic", () => {
         entries: [],
       }),
     )
-    const { searches } = await mockOutput(page)
     await page.goto("/deploy/7/logs?view=insights")
 
-    // Which nothing this is, and the owner's way out of it, above the section.
     await expect(page.getByText("No request record for this deployment")).toBeVisible()
     await expect(page.getByRole("link", { name: "Add a domain" })).toHaveAttribute(
       "href",
       "/deploy/7/settings/domains",
     )
-    const output = page.getByRole("region", { name: "Output" })
-    await expect(output.getByText("Error: connect ECONNREFUSED 10.0.4.7:5432")).toBeVisible()
-    await expect(output.getByRole("heading", { level: 2, name: "Output" })).toBeVisible()
-    expect(searches.find((q) => q.get("facets") === "error")!.get("source")).toBe(
-      "stack:api-production",
-    )
+    await expect(page.getByRole("region", { name: "Output" })).toHaveCount(0)
   })
 
   test("an OOM loop folds, a clean loop is not a failure, and a removed container's last lines are said to be gone", async ({

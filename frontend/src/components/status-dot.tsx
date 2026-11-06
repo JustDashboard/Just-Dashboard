@@ -18,6 +18,16 @@ const DOT_TONE: Record<DotTone, string> = {
   unknown: "bg-muted-foreground",
 }
 
+/** The same fills as a colour, for something other than a dot drawn in the tone. */
+export const DOT_COLOR: Record<DotTone, string> = {
+  running: "var(--success)",
+  stopped: "var(--muted-foreground)",
+  warning: "var(--warning)",
+  danger: "var(--destructive)",
+  notice: "var(--muted-foreground)",
+  unknown: "var(--muted-foreground)",
+}
+
 /**
  * The label's colour. Only the two that need acting on take a hue — a column
  * of green "running" text is as hard to scan as a column with no signal at

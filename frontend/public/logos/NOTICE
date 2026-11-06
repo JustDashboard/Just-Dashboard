@@ -24,6 +24,9 @@ centos.svg had their darkest colour lifted to the same hue at the L 0.72 rung
 (#a80030 to #ff6a79, #294172 to #87a5dd, #0d597f to #6aadd7, #262577 to
 #8e9cf9) so they read on a dark ground.
 
+trivy.svg is Simple Icons' path (CC0) filled with Trivy's navy lifted to
+#7d8cff, the L 0.72 rung, as the dark marks above are.
+
 The marks for what a backup covers and where it goes, and for the programs a
 terminal runs, come from the same collection: git.svg, backblaze.svg,
 nodejs.svg, python.svg, vim.svg, neovim.svg, npm.svg, kubernetes.svg and
@@ -275,3 +278,11 @@ lxd.svg, zsh.svg, fish.svg and bash-light.svg are from Simple Icons 13.21.0
 filled with Ubuntu's #E95420, Zsh's #F15A24, fish's #34C534 and Bash's #4EAA25,
 because Simple Icons ships the path alone and the Linux Containers mark's own
 #333333 and devicon's dark bash.svg disappear on a dark ground.
+
+deepseek.svg, gemini.svg, groq.svg, lmstudio.svg, mistral.svg, openrouter.svg and
+xai.svg are from Lobe Icons (https://github.com/lobehub/lobe-icons, the
+@lobehub/icons-static-svg 1.102.0 package), MIT: the collection's -color files
+where it has one, and otherwise its mono path filled with the brand's colour
+(openrouter's #94A3FF and lmstudio's #7B8CFF on the L 0.72 rung, groq's #F55036,
+and white for xAI's black mark), because a mono file's currentColor is black in an
+image and disappears on a dark ground.

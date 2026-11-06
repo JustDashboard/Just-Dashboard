@@ -23,7 +23,8 @@ func (s *Server) mountRemoteDesktopStreamRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/stream", s.handle(s.handleRemoteDesktopBridge))
 	r.Method(http.MethodPost, "/stream", s.handle(s.handleRemoteDesktopBridgeInstall))
 	r.Method(http.MethodGet, "/computers/{id}/stream", s.handle(s.handleRemoteDesktopStream))
-	r.Method(http.MethodPost, "/computers/{id}/stream/pair", s.handle(s.handleRemoteDesktopStreamPair))
+	// Pairing leaves the bridge a client certificate the computer trusts.
+	r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/computers/{id}/stream/pair", s.handle(s.handleRemoteDesktopStreamPair))
 	r.Method(http.MethodDelete, "/computers/{id}/stream", s.handle(s.handleRemoteDesktopStreamUnpair))
 	s.destructive(r, func(r chi.Router) {
 		r.Method(http.MethodDelete, "/stream", s.handle(s.handleRemoteDesktopBridgeRemove))
@@ -98,6 +99,13 @@ func (s *Server) mountRemoteDesktopBridge(r chi.Router) {
 			// The bridge says how long each of its files may be kept.
 			h.Del("Cache-Control")
 			r = r.WithContext(context.WithValue(r.Context(), bridgeTargetKey{}, target))
+			if isUpgrade(r) {
+				// A proxied socket outlives the request that authenticated
+				// it, so a hub session's ends with the session.
+				guarded, done := s.guardHubStream(r)
+				defer done()
+				r = guarded
+			}
 			if isUpgrade(r) && strings.HasSuffix(r.URL.Path, "/api/host/stream") {
 				s.proxyStream(w, r, proxy)
 				return

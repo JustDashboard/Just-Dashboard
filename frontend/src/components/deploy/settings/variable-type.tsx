@@ -36,6 +36,30 @@ export function VariableMark({
 }
 
 /**
+ * A stored value read back, drawn in the place its mask was, so revealing one
+ * moves nothing on the page. It was a framed band under the row, which pushed
+ * every variable below it down for the length of a look. One line however long
+ * the value is: it scrolls sideways, a press selects all of it, and the row's
+ * copy verb takes it exactly, line breaks included. A press stays here because
+ * the row around it opens the editor.
+ */
+export function RevealedValue({ name, value }: { name: string; value: string }) {
+  return (
+    <span
+      tabIndex={0}
+      aria-label={`Value of ${name}`}
+      onClick={(event) => event.stopPropagation()}
+      className={cn(
+        "block h-4 animate-rise cursor-text [scrollbar-width:none] overflow-x-auto rounded-sm font-mono leading-4 whitespace-nowrap focus-ring-inset select-all [&::-webkit-scrollbar]:hidden",
+        value ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      {value || "empty"}
+    </span>
+  )
+}
+
+/**
  * Secret or setting, as the two faces of one control. It was two filter chips
  * — a control for narrowing a list, pressed into service as a choice — beside
  * a field three times their height.

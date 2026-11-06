@@ -62,7 +62,6 @@ test("every system is its own diagram, listed in the rail by what anchors it", a
     })
     for (const name of names) await expect(section.getByRole("button", { name })).toBeVisible()
   }
-  await expect(page.getByText("17 systems")).toBeVisible()
   for (const system of [
     "system:dashboard:self",
     "system:project:1",
@@ -176,19 +175,11 @@ test("what two systems both use is drawn in each, and the inspector flies betwee
   await expect(inspector(page).getByRole("heading", { name: "data", exact: true })).toBeVisible()
 })
 
-test("the rail flies the canvas to a system, and a search keeps what holds a match", async ({
-  page,
-}) => {
+test("the rail flies the canvas to a system", async ({ page }) => {
   await open(page)
   await railRow(page, "system:stack:monitoring").click()
   await expect(railRow(page, "system:stack:monitoring")).toHaveAttribute("aria-current", "true")
   await expect(node(page, "system:stack:monitoring/container:c-grafana")).toBeInViewport()
-  await page.getByRole("textbox", { name: "Find a system or anything in one" }).fill("pgbouncer")
-  await expect(page.getByText("1 match")).toBeVisible()
-  await expect(rail(page).getByRole("button")).toHaveCount(2)
-  await expect(rail(page).getByRole("button", { name: "shop" })).toBeVisible()
-  await page.keyboard.press("Enter")
-  await expect(inspector(page).getByRole("heading", { name: "jd-db-shop-pgbouncer" })).toBeVisible()
 })
 
 test("a box dragged stays where it was put, across a reload, until the map is tidied", async ({
@@ -236,6 +227,104 @@ test("an arrangement the mind map saved is read as a fresh one", async ({ page }
   })
   await expect(page.locator(".react-flow__minimap")).toHaveCount(0)
   await expect(frame(page, "system:project:1")).toBeVisible()
+})
+
+test("the desk has the canvas and its panels, with no bar over them and no minimap", async ({
+  page,
+}) => {
+  const mock = await open(page, "/map?system=system:stack:monitoring")
+  for (const gone of ["Map options", "Show all"]) {
+    await expect(page.getByRole("button", { name: gone })).toHaveCount(0)
+  }
+  await expect(page.getByRole("textbox", { name: /Find a system/ })).toHaveCount(0)
+  await expect(page.locator(".react-flow__minimap")).toHaveCount(0)
+  await expect(rail(page).getByText("Systems", { exact: true })).toHaveCount(0)
+  // The rail starts at the top of the frame, and the canvas under nothing.
+  const pane = (await page.locator("[data-slot=pane]").boundingBox())!
+  expect((await page.locator("[data-slot=server-map]").boundingBox())!.y - pane.y).toBeLessThan(2)
+  // Nothing moved, nothing to tidy.
+  await expect(page.getByRole("button", { name: /Tidy up/ })).toHaveCount(0)
+
+  const canvas = page.locator("[data-slot=server-map]")
+  await canvas.getByRole("button", { name: /Hide the inspector/ }).click()
+  await expect(inspector(page)).toHaveCount(0)
+  await canvas.getByRole("button", { name: /Show the inspector/ }).click()
+  await expect(inspector(page)).toBeVisible()
+  await expect(canvas.getByRole("button", { name: "Full screen" })).toBeVisible()
+  expect(mock.saved.puts).toBe(0)
+})
+
+test.describe("on a phone", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
+
+  async function openPhone(page: Page, path = "/map") {
+    const mock = await mockServerMap(page)
+    await page.goto(path)
+    await expect(page.locator(".react-flow__node").first()).toBeVisible()
+    await still(page)
+    return mock
+  }
+
+  test("it is only the map, edge to edge", async ({ page }) => {
+    await openPhone(page)
+    await expect(rail(page)).toHaveCount(0)
+    await expect(inspector(page)).toHaveCount(0)
+    await expect(page.locator(".react-flow__minimap")).toHaveCount(0)
+    for (const gone of [/inspector/, "Full screen", "Zoom in", "Fit", "All"]) {
+      await expect(page.getByRole("button", { name: gone, exact: true })).toHaveCount(0)
+    }
+    await expect(page.getByRole("link", { name: /^Open/ })).toHaveCount(0)
+    const canvas = (await page.locator("[data-slot=server-map]").boundingBox())!
+    expect(canvas.x).toBe(0)
+    expect(canvas.width).toBe(390)
+    // The first system across its width, and at the top rather than centred under a gap.
+    const first = await at(page, "frame:system:dashboard:self")
+    expect(first.y - canvas.y).toBeLessThan(16)
+    expect(first.x).toBeGreaterThanOrEqual(0)
+    expect(first.x + first.width).toBeLessThanOrEqual(390)
+  })
+
+  test("a tap on a box floats the way to its page, and a tap on open ground takes it away", async ({
+    page,
+  }) => {
+    const mock = await openPhone(page, "/map?system=system:project:1")
+    const s = "system:project:1"
+    await node(page, `${s}/db:1`).tap()
+    const open = page.getByRole("link", { name: "Open shop-db" })
+    await expect(open).toHaveAttribute("href", "/databases/1")
+    await expect(open).toBeInViewport({ ratio: 1 })
+
+    const f = await at(page, `frame:${s}`)
+    await page.touchscreen.tap(f.x + f.width / 2, f.y + f.height + 12)
+    await expect(open).toHaveCount(0)
+
+    // A system's head opens the system.
+    const head = (await frame(page, s).locator("[title], .map-name").first().boundingBox())!
+    await page.touchscreen.tap(head.x + head.width / 2, head.y + head.height / 2)
+    await page.getByRole("link", { name: "Open shop", exact: true }).click()
+    await expect(page).toHaveURL(/\/deploy\/|\/projects\//)
+    // Looking from a phone leaves the desk's arrangement as it was.
+    expect(mock.saved.puts).toBe(0)
+  })
+
+  test("a finger dragged across a box slides the canvas and moves nothing", async ({ page }) => {
+    const mock = await openPhone(page, "/map?system=system:project:1")
+    const box = await at(page, "system:project:1/db:1")
+    const before = await view(page)
+    const cdp = await page.context().newCDPSession(page)
+    const from = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [from] })
+    for (let step = 1; step <= 6; step++) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: from.x + step * 10, y: from.y + step * 15 }],
+      })
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
+    await expect.poll(async () => (await view(page)).x).not.toBe(before.x)
+    expect((await view(page)).y).toBeGreaterThan(before.y)
+    expect(mock.saved.puts).toBe(0)
+  })
 })
 
 test("nothing changes size but by the zoom: far out, every word is the same size, only smaller", async ({

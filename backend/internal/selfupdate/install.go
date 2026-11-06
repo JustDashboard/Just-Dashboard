@@ -124,6 +124,12 @@ func (i *Installer) Start(ctx context.Context, loc *Location, req StartRequest) 
 	if !Newer(req.From, req.To) {
 		return nil, ErrNotNewer
 	}
+	// Before anything is written: a daemon that does not answer cannot run the
+	// updater, and finding that out from `docker run` would first replace the
+	// last update's record and transcript with a failure nothing began.
+	if err := DockerReachable(ctx, i.dockerHost); err != nil {
+		return nil, fmt.Errorf("the update was not started: %w", err)
+	}
 
 	run := &Run{
 		ID:          time.Now().UTC().Format("20060102T150405Z"),
@@ -157,9 +163,9 @@ func (i *Installer) Start(ctx context.Context, loc *Location, req StartRequest) 
 	// Removing it here rather than at the end of the last run is what leaves a
 	// failed one around long enough for `docker logs` to be useful when things
 	// went wrong badly enough that our own transcript never got written.
-	_ = exec.CommandContext(ctx, "docker", "rm", "-f", UpdaterContainer).Run()
+	_ = DockerCommand(ctx, i.dockerHost, "rm", "-f", UpdaterContainer).Run()
 
-	cmd := exec.CommandContext(ctx, "docker", i.updaterArgs(run, loc)...)
+	cmd := DockerCommand(ctx, i.dockerHost, i.updaterArgs(run, loc)...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -266,7 +272,7 @@ func (i *Installer) Reconcile(ctx context.Context, current string, list Lister) 
 		// exited container in the operator's Docker list after every upgrade
 		// is litter. A failed one is kept, because `docker logs` on it is the
 		// last resort when the transcript is empty.
-		_ = exec.CommandContext(ctx, "docker", "rm", "-f", UpdaterContainer).Run()
+		_ = DockerCommand(ctx, i.dockerHost, "rm", "-f", UpdaterContainer).Run()
 		return
 	}
 	_ = i.store.Finish(fmt.Errorf(

@@ -558,6 +558,37 @@
         "title": "api.DataCopyTable",
         "type": "object"
       },
+      "api.agentAttachment": {
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "title": "api.agentAttachment",
+        "type": "object"
+      },
+      "api.agentImage": {
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "thumb": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/assistant.Image"
+              }
+            ]
+          }
+        },
+        "title": "api.agentImage",
+        "type": "object"
+      },
       "api.archivedDeployment": {
         "properties": {
           "archivedAt": {
@@ -2223,6 +2254,25 @@
       },
       "api.operatorRequest": {
         "properties": {
+          "about": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/assistant.ChatAbout"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attached": {
+            "items": {
+              "$ref": "#/components/schemas/api.agentAttachment"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "conversation": {
             "type": "string"
           },
@@ -2235,8 +2285,29 @@
               "null"
             ]
           },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/api.agentImage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "mode": {
+            "enum": [
+              "ask",
+              "changes",
+              "full"
+            ],
+            "title": "assistant.Mode",
+            "type": "string"
+          },
           "question": {
             "type": "string"
+          },
+          "takeOver": {
+            "type": "boolean"
           }
         },
         "title": "api.operatorRequest",
@@ -2927,6 +2998,30 @@
           }
         },
         "title": "api.watchSimulationRequest",
+        "type": "object"
+      },
+      "assistant.ChatAbout": {
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "title": "assistant.ChatAbout",
+        "type": "object"
+      },
+      "assistant.Image": {
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          }
+        },
+        "title": "assistant.Image",
         "type": "object"
       },
       "blueprint.Acceptance": {
@@ -4454,6 +4549,15 @@
       },
       "deploy.Availability": {
         "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.AvailabilityDay"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "down": {
             "type": "boolean"
           },
@@ -4492,6 +4596,28 @@
           }
         },
         "title": "deploy.Availability",
+        "type": "object"
+      },
+      "deploy.AvailabilityDay": {
+        "properties": {
+          "downSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "from": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "incidents": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "observedSeconds": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "deploy.AvailabilityDay",
         "type": "object"
       },
       "deploy.AvailabilityWindow": {
@@ -16673,7 +16799,7 @@
     },
     "summary": "The deployment routes of a Just Dashboard, as its router mounts them.",
     "title": "Just Dashboard deployment API",
-    "version": "0.8.1"
+    "version": "0.8.4"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -17390,6 +17516,59 @@
           "drafts"
         ],
         "x-deploy-key": "allowed"
+      }
+    },
+    "/deploy/drafts/{draft}/assistant": {
+      "parameters": [
+        {
+          "description": "The draft's id.",
+          "in": "path",
+          "name": "draft",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "A session's route. It streams the lines POST /deploy/{id}/assistant does.",
+        "operationId": "draftOperator",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.operatorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Ask the assistant to configure a draft: what it saves runs nothing until a person commits it.",
+        "tags": [
+          "drafts"
+        ],
+        "x-deploy-key": "refused (session_required): the assistant works for a person at the dashboard, who answers what it asks and is the role it acts under; there is nobody to ask behind a key"
       }
     },
     "/deploy/drafts/{draft}/commit": {
@@ -19966,7 +20145,7 @@
         }
       ],
       "post": {
-        "description": "A session's route. The answer streams one JSON object a line: start, thinking, text, ran (what each allowed read read), proposal (an action whose card the person may press; nothing has run), done (with the reads waiting for a decision) or error.",
+        "description": "A session's route. The answer streams one JSON object a line: start, thinking, text, call (a tool call as it starts), called (what became of it, the shortcut to what it changed, and for a terminal call the chat's window and what it waits on), link (a shortcut the assistant offers), done (with the calls waiting for a decision) or error. A conversation is a saved chat (GET /assistant/chats): carried on by its id, it is answered 409 chat_busy while a press runs it elsewhere unless takeOver stops that press.",
         "operationId": "deploymentOperator",
         "parameters": [
           {
@@ -20010,11 +20189,11 @@
             "session": []
           }
         ],
-        "summary": "Ask the deployment operator about an environment, or answer the reads it asked for.",
+        "summary": "Ask the deployment's assistant anything about an environment, or answer the calls it is waiting on.",
         "tags": [
           "runs"
         ],
-        "x-deploy-key": "refused (session_required): the operator reads with a person's leave a call at a time and proposes actions only a person's press runs, in the dashboard"
+        "x-deploy-key": "refused (session_required): the assistant works for a person at the dashboard, who answers what it asks and is the role it acts under; there is nobody to ask behind a key"
       }
     },
     "/deploy/{id}/availability": {

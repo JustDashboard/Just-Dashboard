@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"slices"
@@ -220,7 +219,10 @@ func (s *Server) dockerErr(err error) error {
 	lower := strings.ToLower(raw)
 
 	switch {
-	case errors.Is(err, dockerx.ErrUnavailable):
+	// First, by type: the SDK's text for a socket this process may not open
+	// says "permission denied", and for one that is not there names nothing
+	// the cases below know, so both used to read as Docker refusing.
+	case dockerx.Unreachable(err):
 		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable",
 			"The Docker daemon is not reachable from this dashboard.").
 			Because("The socket is not there, or this process cannot read it. On most hosts that is the daemon being stopped, or the dashboard's container not having /var/run/docker.sock mounted.", raw).

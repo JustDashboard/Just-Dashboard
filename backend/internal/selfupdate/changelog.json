@@ -1,6 +1,74 @@
 {
-  "latest": "0.8.4",
+  "latest": "0.8.5",
   "releases": [
+    {
+      "version": "0.8.5",
+      "date": "2026-11-06",
+      "title": "Just Hub, and an assistant on every page",
+      "summary": "A dashboard can now connect to a Just Hub on its tailnet, so every server is in one place: you choose what the hub may do, and it is visible under Settings, Hub. An assistant on each deployment and database can look into a problem and act on it as far as the mode you pick allows. The Git workspace, a project's Overview, Insights and the variables list read more clearly, and long commands no longer drop behind a proxy.",
+      "changes": [
+        {
+          "kind": "added",
+          "text": "Connect a dashboard to a Just Hub",
+          "detail": "Settings, Hub connects this server to a Just Hub on the same tailnet with a one-time code you type into the hub, or with sudo ./scripts/manage.sh hub connect over SSH. You choose what the hub may do: watch, operate, or also run updates. Every action it takes is recorded as hub:<name>, and you can disconnect at any time."
+        },
+        {
+          "kind": "added",
+          "text": "A tip to turn off Tailscale key expiry",
+          "detail": "Tailscale gives every new machine a key that expires after 180 days by default, and a server whose key expires drops off the tailnet, and out of a hub. Settings, Hub and Network, VPN, Tailscale now suggest turning key expiry off for this machine, with a link to the Tailscale admin console."
+        },
+        {
+          "kind": "added",
+          "text": "Sign in from the hub, if you turn it on",
+          "detail": "With JD_HUB_SIGNIN=true, an account that opted in can be opened from the linked hub without signing in again. It is off by default."
+        },
+        {
+          "kind": "added",
+          "text": "An assistant on every deployment and database",
+          "detail": "Each deployment and database connection has an Assistant page, and the SQL editor's column is the same chat. It can read logs, files and structure, and change things as you, as far as the mode you choose lets it: ask every time, ask before changes, or full access. Chats are saved, a screenshot can be pasted in, and the model and API keys are set up once for the whole dashboard."
+        },
+        {
+          "kind": "changed",
+          "text": "A clearer Git workspace that works on a phone",
+          "detail": "Pull requests show their screenshots, videos and folds in place, list rows say one thing each, and the workspace has a phone layout."
+        },
+        {
+          "kind": "changed",
+          "text": "Overview, Insights and variables read as words and figures",
+          "detail": "A project's Overview reads as one page of sentences with four shortcuts. Insights shows figures in columns that update in place when a filter moves, and the delivery charts answer each day with a tooltip. Variables are one line each, and revealing a value no longer moves the page."
+        },
+        {
+          "kind": "changed",
+          "text": "The bands over list pages hold still",
+          "detail": "Each band is a bar with one reading and one strip of marks, the same height in every state, instead of rows that reordered on every poll. A container's usage is drawn the way the Metrics page draws the host, and each domain's controls sit on one line."
+        },
+        {
+          "kind": "fixed",
+          "text": "Long commands keep their answer behind a proxy",
+          "detail": "A command that ran for minutes could end in a network error, because a quiet stream was closed by the proxy in front of the dashboard. The stream now keeps the connection alive."
+        },
+        {
+          "kind": "fixed",
+          "text": "A disk scan of / answers with what it counted",
+          "detail": "A scan that reached its limits returned nothing. It now reports what it counted."
+        },
+        {
+          "kind": "fixed",
+          "text": "Update, restart and uninstall reach the right Docker",
+          "detail": "Their helper containers now use JD_DOCKER_HOST like the rest of the dashboard."
+        },
+        {
+          "kind": "fixed",
+          "text": "Chrome no longer offers saved passwords on variable forms",
+          "detail": "Secret fields on a project's variables are no longer taken for a sign-in form."
+        },
+        {
+          "kind": "security",
+          "text": "A hub can only do what you allowed",
+          "detail": "A hub link is approved with a one-time code and the hub's fingerprint, both shown on both sides. Commands are checked against the hub's pinned key and the scope you chose, and a hub never sees passwords, sessions or secrets."
+        }
+      ]
+    },
     {
       "version": "0.8.4",
       "date": "2026-10-30",

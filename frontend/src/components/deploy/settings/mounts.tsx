@@ -2,6 +2,8 @@
 
 import { useId } from "react"
 import { ArrowRight, LockClosed, Servers, Trash } from "@/components/icons"
+import { ownershipTip } from "@/components/deploy/settings/domain-rows"
+import { HoverTip } from "@/components/deploy/settings/hover-tip"
 import { cn } from "@/lib/utils"
 import type { DeploymentConfiguration } from "@/lib/types"
 import { Field } from "@/components/form"
@@ -55,13 +57,18 @@ export const OWNERSHIP: Record<Ownership, { word: string; hint: string }> = {
   observed: { word: "Observed", hint: "watched only; never removed" },
 }
 
-/** Ownership uses the shared select; removal consequences stay beside the chosen value. */
+/**
+ * Ownership uses the shared select; removal consequences stay beside the chosen
+ * value, or with `quiet`, where the select shares a line with other controls,
+ * in its tooltip and accessible description.
+ */
 export function OwnershipSelect<T extends Ownership>({
   value,
   onChange,
   label,
   options = Object.keys(OWNERSHIP) as T[],
   disabled,
+  quiet,
   className,
 }: {
   value: T
@@ -70,19 +77,32 @@ export function OwnershipSelect<T extends Ownership>({
   label: string
   options?: T[]
   disabled?: boolean
+  quiet?: boolean
   className?: string
 }) {
   const descriptionId = useId()
+  const trigger = (
+    <SelectTrigger
+      aria-label={label}
+      aria-describedby={descriptionId}
+      // Wide enough for the longest word, so the rows' selects line up.
+      className={cn("max-sm:text-body", quiet && "w-28")}
+    >
+      <SelectValue />
+    </SelectTrigger>
+  )
   return (
     <div className={cn("flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1", className)}>
       <Select value={value} onValueChange={(next) => onChange(next as T)} disabled={disabled}>
-        <SelectTrigger
-          aria-label={label}
-          aria-describedby={descriptionId}
-          className="max-sm:text-body"
-        >
-          <SelectValue />
-        </SelectTrigger>
+        {quiet ? (
+          // A wrapper rather than the trigger itself, whose open state its
+          // `data-state` has to keep for the chevron and the list.
+          <HoverTip tip={ownershipTip(options.map((option) => OWNERSHIP[option]))}>
+            <span className="inline-flex">{trigger}</span>
+          </HoverTip>
+        ) : (
+          trigger
+        )}
         <SelectContent>
           {options.map((ownership) => (
             <SelectItem key={ownership} value={ownership}>
@@ -91,7 +111,7 @@ export function OwnershipSelect<T extends Ownership>({
           ))}
         </SelectContent>
       </Select>
-      <span id={descriptionId} className="text-hint text-muted-foreground">
+      <span id={descriptionId} className={quiet ? "sr-only" : "text-hint text-muted-foreground"}>
         {OWNERSHIP[value].hint}
       </span>
     </div>

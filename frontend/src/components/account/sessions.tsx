@@ -37,6 +37,11 @@ function factorLabel(session: SessionInfo) {
       return "passkey and authenticator code"
     case "passkey+recovery":
       return "passkey and recovery code"
+    case "hub":
+      // "by hub user", as the grants on Settings → Hub say it: "as" would read as the account.
+      return session.hubUser
+        ? `signed in through Just Hub by hub user ${session.hubUser}`
+        : "signed in through Just Hub"
     default:
       return "authentication method not recorded"
   }

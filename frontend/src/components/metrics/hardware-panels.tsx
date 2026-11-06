@@ -360,8 +360,10 @@ export function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
       )
       setBreakdown((prev) => ({ ...prev, [mountpoint]: entries }))
     } catch {
-      // A scan that times out or hits an unreadable tree is not worth a toast;
-      // the row simply stays un-expanded.
+      // A scan that runs out of time answers with what it counted, each entry it
+      // did not finish said to be "at least"; what still fails here — a directory
+      // of more than 10,000 entries, two scans already running — is not worth a
+      // toast, and the row simply stays un-expanded.
     } finally {
       setScanning(null)
     }
@@ -415,7 +417,15 @@ export function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
                       {breakdown[mount.mountpoint].map((entry) => (
                         <div key={entry.path} className="flex justify-between gap-2 text-hint">
                           <span className="truncate font-mono">{entry.name}</span>
-                          <span className="numeric shrink-0 text-muted-foreground">
+                          <span
+                            className="numeric shrink-0 text-muted-foreground"
+                            title={
+                              entry.partial
+                                ? "The scan ran out of time before it had counted all of it"
+                                : undefined
+                            }
+                          >
+                            {entry.partial && "at least "}
                             {bytes(entry.size)}
                           </span>
                         </div>
@@ -593,22 +603,41 @@ export function TrafficBar({
   busiest: number
   colors: { in: string; out: string }
 }) {
-  const inbound = (iface.recvRate / busiest) * 100
-  const outbound = (iface.sendRate / busiest) * 100
+  return (
+    <SplitBar
+      label={`${rate(iface.recvRate)} in, ${rate(iface.sendRate)} out`}
+      busiest={busiest}
+      parts={[
+        { value: iface.recvRate, color: colors.in },
+        { value: iface.sendRate, color: colors.out },
+      ]}
+    />
+  )
+}
+
+/** Two sides of one quantity as one bar, against the largest of the bars beside it. */
+export function SplitBar({
+  label,
+  busiest,
+  parts,
+}: {
+  label: string
+  busiest: number
+  parts: { value: number; color: string }[]
+}) {
   return (
     <div
       role="img"
-      aria-label={`${rate(iface.recvRate)} in, ${rate(iface.sendRate)} out`}
+      aria-label={label}
       className="flex h-1.5 w-full min-w-16 overflow-hidden rounded-full bg-meter-track"
     >
-      <span
-        className="h-full transition-[width] duration-700 ease-out"
-        style={{ width: `${inbound}%`, background: colors.in }}
-      />
-      <span
-        className="h-full transition-[width] duration-700 ease-out"
-        style={{ width: `${outbound}%`, background: colors.out }}
-      />
+      {parts.map((part, index) => (
+        <span
+          key={index}
+          className="h-full transition-[width] duration-700 ease-out"
+          style={{ width: `${(part.value / busiest) * 100}%`, background: part.color }}
+        />
+      ))}
     </div>
   )
 }

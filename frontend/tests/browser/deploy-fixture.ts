@@ -2714,6 +2714,18 @@ export async function mockProject(
         recordSince,
         liveRelease: 20,
         down: false,
+        // Thirty stretches, nine on the record; the six minutes three days ago.
+        days: Array.from({ length: 30 }, (_, index) => {
+          const back = 30 - index
+          const observed = back <= 9 ? 86400 : 0
+          const down = back === 3 ? 372 : 0
+          return {
+            from: minutesAgo(back * 24 * 60),
+            observedSeconds: observed,
+            downSeconds: down,
+            incidents: down ? 2 : 0,
+          }
+        }),
         windows: [
           {
             window: "24h",

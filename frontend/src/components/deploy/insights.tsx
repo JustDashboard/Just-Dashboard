@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { useViewState } from "@/lib/view-state"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
@@ -8,12 +9,15 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentInsights } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { BarList } from "@/components/bar-list"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { Rocket } from "@/components/icons"
+import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
+import { StatusDot } from "@/components/status-dot"
 import { formatDuration } from "@/components/deploy/vocabulary"
 import { causeTitle } from "@/components/deploy/failure-cause"
-import { NumberTicker } from "@/components/ui/number-ticker"
+import { deliveryLead } from "@/components/deploy/delivery-model"
+import { WireMark, WireNode } from "@/components/deploy/wire"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
   SelectContent,
@@ -62,6 +66,138 @@ function dayLabel(date: string) {
   })
 }
 
+/** "Wed, Oct 28": the weekday is what a day's releases are usually remembered by. */
+function dayHeading(date: string) {
+  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  })
+}
+
+type Day = DeploymentInsights["daily"][number]
+type DayLine = { text: string; fill?: string }
+
+function releaseLines(day: Day): DayLine[] {
+  const lines = (Object.keys(FILL) as Outcome[])
+    .filter((outcome) => day[outcome] > 0)
+    .map((outcome) => ({ text: `${day[outcome]} ${outcome}`, fill: FILL[outcome] }))
+  return lines.length > 0 ? lines : [{ text: "No releases" }]
+}
+
+function durationLines(day: Day): DayLine[] {
+  if (!day.medianDurationSeconds) return [{ text: "No successful release" }]
+  return [
+    {
+      text: `${seconds(day.medianDurationSeconds)}, median of ${day.succeeded} successful release${day.succeeded === 1 ? "" : "s"}`,
+      fill: "bg-chart-2",
+    },
+  ]
+}
+
+/**
+ * A chart's days, each column its own hover target and reading. The native
+ * `title` these used to carry took a second of holding still to appear and
+ * never appeared at all for a finger or a keyboard, so the chart read as
+ * having no detail behind it.
+ *
+ * The whole column answers rather than only its bar: most days have nothing
+ * but a tick on the baseline, and they are readings too. One tab stop per
+ * chart, with the arrow keys walking the days, because 90 stops would put the
+ * records below out of reach.
+ */
+function DayBars({
+  days,
+  label,
+  testId,
+  className,
+  lines,
+  children,
+}: {
+  days: Day[]
+  label: string
+  testId: string
+  className?: string
+  lines: (day: Day) => DayLine[]
+  children: (day: Day) => React.ReactNode
+}) {
+  const [active, setActive] = useState<number | null>(null)
+  return (
+    <ol
+      className={cn("flex items-end gap-px border-b border-hairline", className)}
+      aria-label={label}
+      data-testid={testId}
+      onKeyDown={(event) => {
+        const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0
+        if (!step) return
+        const columns = Array.from(event.currentTarget.children) as HTMLElement[]
+        const at = columns.indexOf(event.target as HTMLElement)
+        if (at < 0) return
+        event.preventDefault()
+        columns[at + step]?.focus()
+      }}
+    >
+      {days.map((day, index) => {
+        const reading = lines(day)
+        return (
+          <Tooltip
+            // Dates repeat when a window is longer than the recorded history;
+            // the position is what makes a bar unique.
+            key={`${day.date}-${index}`}
+            open={active === index}
+            onOpenChange={(open) =>
+              setActive((current) => (open ? index : current === index ? null : current))
+            }
+          >
+            {/* Radix closes on a press and on the pointer leaving, and a tap is
+                both, so a finger would never see the reading. Preventing the
+                default skips only Radix's own handler. */}
+            <TooltipTrigger
+              asChild
+              onPointerDown={(event) => {
+                event.preventDefault()
+                setActive(index)
+              }}
+              onClick={(event) => event.preventDefault()}
+              onPointerLeave={(event) => {
+                if (event.pointerType === "touch") event.preventDefault()
+              }}
+            >
+              <li
+                // Full height, or the bar's percentage has nothing to resolve
+                // against and every day draws at zero.
+                className={cn(
+                  "flex h-full min-w-0 flex-1 flex-col items-center justify-end rounded-t-sm focus-ring-inset",
+                  active === index && "bg-row-hover",
+                )}
+                tabIndex={index === (active ?? days.length - 1) ? 0 : -1}
+              >
+                {children(day)}
+                <span className="sr-only">
+                  {`${dayHeading(day.date)}: ${reading.map((line) => line.text).join(", ")}`}
+                </span>
+              </li>
+            </TooltipTrigger>
+            {/* No entrance: moving along the days swaps the reading many times
+                a second, and each one sliding in reads as flicker. */}
+            <TooltipContent side="top" sideOffset={6} className="animate-none!">
+              <p className="font-medium">{dayHeading(day.date)}</p>
+              {reading.map((line) => (
+                <p key={line.text} className="numeric flex items-center gap-1.5">
+                  {line.fill && (
+                    <span aria-hidden className={cn("size-2 shrink-0 rounded-[2px]", line.fill)} />
+                  )}
+                  {line.text}
+                </p>
+              ))}
+            </TooltipContent>
+          </Tooltip>
+        )
+      })}
+    </ol>
+  )
+}
+
 /**
  * Delivery figures computed by the server from persisted runs: frequency,
  * success rate, release duration and time to recover from a failure. Nothing
@@ -69,15 +205,11 @@ function dayLabel(date: string) {
  * cannot be read as more than it is. The caller hides this for legacy
  * projects, which the engine never scored.
  *
- * Four figures, not five: the failure streak was a tile of its own that sat
- * alone on a row at most widths, and it is a fact about the success rate —
- * its count is that tile's trailing reading now, and when the last failure
- * happened is said beside the chart that draws it. The release time carries
- * the window's shape in its trend; how often the project ships already has
- * its shape in the chart of releases per day under the tiles; the rate
- * fills, and keeps a meter. On the Overview, recent runs sit between these
- * readings and the historical charts, so its shorter tiles leave room for
- * the records that explain them.
+ * On the Overview that is a sentence on the source's own mark, the wiring's
+ * shape, over the releases per day: "14 releases in the last 30 days, all
+ * successful" where four `StatTile`s left the reader to make that sentence out
+ * of a rate, a median, a dash and a frequency. The recent runs follow as the
+ * records that explain them.
  *
  * `onFailureClick` lets a page that lists the runs narrow to the failed ones
  * from a reason's row.
@@ -94,16 +226,19 @@ export function Insights({
   projectId,
   onFailureClick,
   children,
-  presentation = "tiles",
+  presentation = "overview",
+  mark,
   environmentId,
 }: {
   projectId: number
   /** Staging's figures in place of the project's, which leave staging out. */
   environmentId?: number
   onFailureClick?: (code: string) => void
-  /** Overview records placed between the delivery figures and their history. */
+  /** The Overview's records, under the delivery figures. */
   children?: React.ReactNode
-  presentation?: "tiles" | "history"
+  presentation?: "overview" | "history"
+  /** Where the releases come from, as a `product-logo` id: the Overview's lead stands on it. */
+  mark?: string
 }) {
   const history = presentation === "history"
   const [range, setRange] = useViewState<(typeof WINDOWS)[number][0]>("deploy.insights.range", "30")
@@ -123,8 +258,7 @@ export function Insights({
   const durationValues = daily.map((day) => day.medianDurationSeconds).filter((value) => value > 0)
   // The window's median is drawn across the days, so it has to be on their scale.
   const slowest = Math.max(data?.medianDurationSeconds ?? 0, ...durationValues)
-  const total = (day: DeploymentInsights["daily"][number]) =>
-    day.succeeded + day.failed + day.cancelled
+  const total = (day: Day) => day.succeeded + day.failed + day.cancelled
   const peak = Math.max(1, ...daily.map(total))
   const reading = "space-y-1"
   const figure = "numeric text-2xl font-semibold tracking-tight"
@@ -191,10 +325,7 @@ export function Insights({
       className={cn(
         "grid min-w-0 gap-x-10",
         history ? "gap-y-8" : "gap-y-6",
-        (history || failures) &&
-          (children
-            ? "2xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]"
-            : "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"),
+        (history || failures) && "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
       )}
     >
       <div className="min-w-0 space-y-2">
@@ -236,58 +367,45 @@ export function Insights({
             ))}
           </p>
         </div>
-        <ol
+        <DayBars
           // Keyed by the window so a new range arrives rather than
           // the old bars stretching into it.
           key={range}
-          className={cn(
-            "flex animate-rise items-end gap-px border-b border-hairline",
-            history ? "h-28" : "h-20",
-          )}
-          aria-label="Releases per day"
-          data-testid="insights-daily"
+          days={daily}
+          label="Releases per day"
+          testId="insights-daily"
+          className={cn("animate-rise", history ? "h-28" : "h-20")}
+          lines={releaseLines}
         >
-          {daily.map((day, index) => {
+          {(day) => {
             const count = total(day)
-            return (
-              <li
-                // Dates repeat when a window is longer than the recorded
-                // history; the position is what makes a bar unique.
-                key={`${day.date}-${index}`}
-                // Full height, or the bar's percentage has nothing to
-                // resolve against and every day draws at zero.
-                className="flex h-full min-w-0 flex-1 flex-col items-center justify-end"
-                title={`${day.date}: ${day.succeeded} succeeded, ${day.failed} failed${day.cancelled ? `, ${day.cancelled} cancelled` : ""}`}
+            return count ? (
+              <span
+                // A thin bar centred in its day, so a week is
+                // eight marks rather than eight slabs.
+                className="flex w-full max-w-3 flex-col overflow-hidden rounded-t-sm transition-[height] duration-500 ease-out"
+                style={{ height: `${Math.max(8, Math.round((count / peak) * 100))}%` }}
               >
-                {count ? (
-                  <span
-                    // A thin bar centred in its day, so a week is
-                    // eight marks rather than eight slabs.
-                    className="flex w-full max-w-3 flex-col overflow-hidden rounded-t-sm transition-[height] duration-500 ease-out"
-                    style={{ height: `${Math.max(8, Math.round((count / peak) * 100))}%` }}
-                  >
-                    {STACK.map((outcome) =>
-                      day[outcome] ? (
-                        <span
-                          key={outcome}
-                          className={cn(
-                            "block w-full shrink-0 transition-[height] duration-500 ease-out",
-                            FILL[outcome],
-                          )}
-                          style={{ height: `${(day[outcome] / count) * 100}%` }}
-                        />
-                      ) : null,
-                    )}
-                  </span>
-                ) : (
-                  // Nothing ran: a tick on the baseline, never a
-                  // faint success.
-                  <span className="block h-0.5 w-full max-w-3 bg-meter-track" />
+                {STACK.map((outcome) =>
+                  day[outcome] ? (
+                    <span
+                      key={outcome}
+                      className={cn(
+                        "block w-full shrink-0 transition-[height] duration-500 ease-out",
+                        FILL[outcome],
+                      )}
+                      style={{ height: `${(day[outcome] / count) * 100}%` }}
+                    />
+                  ) : null,
                 )}
-              </li>
+              </span>
+            ) : (
+              // Nothing ran: a tick on the baseline, never a
+              // faint success.
+              <span className="block h-0.5 w-full max-w-3 bg-meter-track" />
             )
-          })}
-        </ol>
+          }}
+        </DayBars>
         {axis}
       </div>
 
@@ -337,34 +455,26 @@ export function Insights({
                   scale. The first line of the plot is kept for the scale's
                   top, so the slowest day never runs under its own label. */}
               <div key={range} className="relative animate-rise">
-                <ol
-                  className="flex h-28 items-end gap-px border-b border-hairline pt-4"
-                  aria-label="Median release time per day"
-                  data-testid="insights-durations"
+                <DayBars
+                  days={daily}
+                  label="Median release time per day"
+                  testId="insights-durations"
+                  className="h-28 pt-4"
+                  lines={durationLines}
                 >
-                  {daily.map((day, index) => (
-                    <li
-                      key={`${day.date}-${index}`}
-                      className="flex h-full min-w-0 flex-1 flex-col items-center justify-end"
-                      title={
-                        day.medianDurationSeconds
-                          ? `${day.date}: ${seconds(day.medianDurationSeconds)}, median of ${day.succeeded} successful release${day.succeeded === 1 ? "" : "s"}`
-                          : `${day.date}: no successful release`
-                      }
-                    >
-                      {day.medianDurationSeconds ? (
-                        <span
-                          className="block w-full max-w-3 rounded-t-sm bg-chart-2"
-                          style={{
-                            height: `${Math.max(4, (day.medianDurationSeconds / slowest) * 100)}%`,
-                          }}
-                        />
-                      ) : (
-                        <span className="block h-0.5 w-full max-w-3 bg-meter-track" />
-                      )}
-                    </li>
-                  ))}
-                </ol>
+                  {(day) =>
+                    day.medianDurationSeconds ? (
+                      <span
+                        className="block w-full max-w-3 rounded-t-sm bg-chart-2"
+                        style={{
+                          height: `${Math.max(4, (day.medianDurationSeconds / slowest) * 100)}%`,
+                        }}
+                      />
+                    ) : (
+                      <span className="block h-0.5 w-full max-w-3 bg-meter-track" />
+                    )
+                  }
+                </DayBars>
                 <span className="numeric absolute top-0 left-0 text-micro leading-4 text-muted-foreground">
                   {seconds(slowest)}
                 </span>
@@ -389,6 +499,8 @@ export function Insights({
     </div>
   )
 
+  const lead = !history && data && data.runs > 0 ? deliveryLead(data, seconds) : undefined
+
   return (
     <div className={children ? "space-y-8" : undefined}>
       <Panel plain>
@@ -409,7 +521,7 @@ export function Insights({
             </Select>
           }
         />
-        <PanelBody className={children ? undefined : "space-y-6"}>
+        <PanelBody className={cn("space-y-6", lead && "pt-4")}>
           {insights.error && <ErrorState error={insights.error} />}
           {insights.loading && !data && <LoadingRows rows={2} />}
           {data && data.runs === 0 && (
@@ -417,88 +529,39 @@ export function Insights({
               No release finished in this window. Figures appear after the first deployment ends.
             </EmptyNote>
           )}
-          {!history && data && data.runs > 0 && (
-            <>
-              <StatGrid
-                columns={4}
-                dense
-                className={children ? "[&_[data-slot=stat-tile]]:py-3" : undefined}
-              >
-                <StatTile
-                  label="Success rate"
-                  value={
-                    decided ? (
-                      <>
-                        <NumberTicker value={Math.round(data.successRate * 100)} />%
-                      </>
-                    ) : (
-                      "—"
-                    )
-                  }
-                  meter={decided ? data.successRate * 100 : undefined}
-                  tone={data.failureStreak > 0 ? "warning" : "default"}
-                  trailing={
-                    data.failureStreak > 0 && (
-                      <span className="text-destructive">{data.failureStreak} failed in a row</span>
-                    )
-                  }
-                  hint={`${data.succeeded} of ${decided} decided release${decided === 1 ? "" : "s"}`}
-                />
-                <StatTile
-                  label="Median release"
-                  value={seconds(data.medianDurationSeconds)}
-                  trend={
-                    !children && (
-                      <TileTrend
-                        // Only the days something shipped: a day with no release
-                        // has no duration, and drawing it at zero would say the
-                        // releases got faster.
-                        values={durationValues}
-                        label={`Median release time per day over the last ${data.windowDays} days`}
-                        color="var(--chart-2)"
-                      />
-                    )
-                  }
-                  hint={`p95 ${seconds(data.p95DurationSeconds)} · claim to finish`}
-                />
-                <StatTile
-                  label="Recovery time"
-                  value={data.recoveredFailures ? seconds(data.meanRecoverySeconds) : "—"}
-                  hint={
-                    data.recoveredFailures
-                      ? `mean over ${data.recoveredFailures} recovered failure${data.recoveredFailures === 1 ? "" : "s"}`
-                      : data.failed
-                        ? "no failure followed by a success yet"
-                        : "no failures in this window"
-                  }
-                />
-                {/* No trend of its own: its shape is the Releases per day chart
-                  below the records, and a day's zero or one drew as noise. */}
-                <StatTile
-                  label="Deploys per week"
-                  value={<NumberTicker value={data.deploysPerWeek} decimalPlaces={1} />}
-                  hint={`${data.succeeded} successful over ${data.windowDays} days`}
-                />
-              </StatGrid>
-            </>
+          {lead && data && (
+            <WireNode
+              mark={
+                <span className="relative flex">
+                  <WireMark tone="logo" size="md">
+                    {hasProductLogo(mark) ? <ProductGlyph id={mark} /> : <Rocket aria-hidden />}
+                  </WireMark>
+                  <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
+                    <StatusDot
+                      tone={
+                        data.failureStreak > 0 ? "danger" : data.failed > 0 ? "warning" : "running"
+                      }
+                    />
+                  </span>
+                </span>
+              }
+              title={lead.title}
+              hint={
+                <>
+                  {lead.hint}
+                  {data.failureStreak > 0 && (
+                    <span className="ml-2 text-destructive">
+                      {data.failureStreak} failed in a row
+                    </span>
+                  )}
+                </>
+              }
+            />
           )}
-          {!children && charts}
+          {charts}
         </PanelBody>
       </Panel>
       {children}
-      {children && charts && (
-        <Panel plain>
-          <PanelHeader
-            title="Release history"
-            actions={
-              <span className="text-hint text-muted-foreground">
-                {WINDOWS.find(([value]) => value === range)?.[1]}
-              </span>
-            }
-          />
-          <PanelBody>{charts}</PanelBody>
-        </Panel>
-      )}
     </div>
   )
 }

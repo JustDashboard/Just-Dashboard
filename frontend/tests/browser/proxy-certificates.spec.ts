@@ -855,11 +855,14 @@ test("a deployment domain Caddy renews says so, with no days left and no certifi
 
   const form = page.getByRole("form", { name: "Domains" })
   await expect(form.getByText("Certificate valid", { exact: true })).toBeVisible()
-  await expect(form.getByText("Renewed by Caddy", { exact: true })).toBeVisible()
+  // Who renews it is behind the reading, so the line stays one line.
+  await expect(form.getByText("Renewed by Caddy", { exact: true })).toHaveCount(0)
+  await form.getByText("Certificate valid", { exact: true }).hover()
+  await expect(page.getByRole("tooltip")).toContainText("Renewed by Caddy.")
   await expect(page.getByText(/\bdays? left$/)).toHaveCount(0)
 
   await page.getByRole("button", { name: "Actions for api.example.test" }).click()
-  await expect(page.getByRole("menuitem", { name: "Open the serving site" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Open the Proxy site" })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: "Open the certificate" })).toHaveCount(0)
 })
 

@@ -1,6 +1,8 @@
 package accountlink
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,7 +111,9 @@ func TestTheSiteRemovingTheServerClearsTheLinkAndStopsEverything(t *testing.T) {
 	e.site.remove(st.ServerID)
 	waitFor(t, "the link to be cleared", func() bool { _, ok := e.linkedState(); return !ok })
 	after, _ := e.svc.Status(t.Context())
-	if after.State != StateUnlinked || after.Link != nil || after.Fingerprint != before.Fingerprint {
+	// The account link has no RemovalOutcome: Settings → Connect knows only
+	// the outcomes of a request, so a removal leaves none for it to read.
+	if after.State != StateUnlinked || after.Link != nil || after.Fingerprint != before.Fingerprint || after.LastOutcome != nil {
 		t.Fatalf("status = %+v", after)
 	}
 	waitFor(t, "the unlink to be audited", func() bool { return len(e.auditRows("account.unlink")) == 1 })
@@ -146,6 +150,35 @@ func TestFailedExchangesBackOffShowAsAnErrorAndRecover(t *testing.T) {
 		s, _ := e.svc.Status(t.Context())
 		return s.Link != nil && s.Link.LastError == "" && s.Link.LastHeartbeatAt != nil && len(e.site.heartbeatBodies()) > 0
 	})
+}
+
+// A poll error stays only while polls fail. Once the site takes a poll and
+// holds it, the error goes, before the held poll returns: the status could
+// otherwise show a poll that failed before the site came back for the whole
+// long-poll, beside heartbeats that succeed (e2e: about 29 s after a hub
+// restart).
+func TestAPollErrorGoesOnceTheSiteHoldsAPollAgain(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.svc.pollHeld = 50 * time.Millisecond
+	e.site.fail("/commands", 1000)
+	e.svc.Start(t.Context())
+	e.link(ScopeObserve)
+	e.svc.nudge()
+	waitFor(t, "the poll error", func() bool { return e.svc.Health(t.Context()).PollError != "" })
+	e.site.mu.Lock()
+	e.site.hold = 20 * time.Second
+	e.site.mu.Unlock()
+	e.site.fail("/commands", 0)
+	polls := e.site.hitCount("GET /commands")
+	began := time.Now()
+	waitFor(t, "the poll error to go", func() bool { return e.svc.Health(t.Context()).PollError == "" })
+	if took := time.Since(began); took > 3*time.Second {
+		t.Fatalf("the poll error stayed %s", took)
+	}
+	if n := e.site.hitCount("GET /commands"); n > polls+1 {
+		t.Fatalf("the error went after %d more polls, not while the first was held", n-polls)
+	}
 }
 
 func TestTheBackoffGrowsFromOneSecondToFiveMinutes(t *testing.T) {
@@ -444,7 +477,7 @@ func TestNotingAHeartbeatAndChangingTheScopeDoNotOverwriteEachOther(t *testing.T
 		defer wg.Done()
 		for i := 0; i < rounds; i++ {
 			e.svc.noteHeartbeat(t.Context(), st, heartbeatResponse{OK: true, HeartbeatSeconds: 30,
-				SiteKeys: []wireSiteKey{{Kid: fmt.Sprintf("k-%03d", i), PublicKey: pub}}})
+				SiteKeys: []wireSiteKey{{Kid: fmt.Sprintf("k-%03d", i), PublicKey: pub}}}, nil)
 		}
 	}()
 	go func() {
@@ -484,7 +517,7 @@ func TestNothingIsSentToASiteThatIsNotTheOneTheLinkWasMadeWith(t *testing.T) {
 		t.Fatalf("sendHeartbeat = %v", err)
 	}
 	// A heartbeat answer never merges keys into a link it was not made for.
-	moved.noteHeartbeat(t.Context(), st, heartbeatResponse{SiteKeys: []wireSiteKey{{Kid: "x", PublicKey: pubB64(seedKey(t, vectorServerSeed))}}})
+	moved.noteHeartbeat(t.Context(), st, heartbeatResponse{SiteKeys: []wireSiteKey{{Kid: "x", PublicKey: pubB64(seedKey(t, vectorServerSeed))}}}, nil)
 	if cur, _, _ := moved.Linked(t.Context()); len(cur.SiteKeys) != 1 {
 		// noteHeartbeat itself is only reached from a send; this documents
 		// that the guard above is what keeps the other site's keys out.
@@ -502,5 +535,115 @@ func TestNothingIsSentToASiteThatIsNotTheOneTheLinkWasMadeWith(t *testing.T) {
 	}
 	if s, _ := moved.Status(t.Context()); s.State != StateUnlinked {
 		t.Fatalf("status = %+v", s)
+	}
+}
+
+// SetIdle stores the idle flag in the link state with whatever must end with
+// the link's use, in one transaction; an idle link sends nothing until it is
+// unlinked, and setting it idle again changes nothing.
+func TestAnIdleLinkSendsNothingUntilItIsUnlinked(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	st := e.link(ScopeObserve)
+	idle := Idle{Code: "test_idle", Reason: "the peer's machine changed", At: e.svc.now()}
+
+	// What runs with it failing rolls the flag back.
+	boom := errors.New("boom")
+	if set, err := e.svc.SetIdle(t.Context(), st.ServerID, idle, func(context.Context, *sql.Tx) error { return boom }); set || !errors.Is(err, boom) {
+		t.Fatalf("a failing companion write = %v %v", set, err)
+	}
+	if cur, _, _ := e.svc.Linked(t.Context()); cur.Idle != nil {
+		t.Fatal("the idle flag outlived its failed transaction")
+	}
+
+	ran := 0
+	also := func(ctx context.Context, tx *sql.Tx) error {
+		ran++
+		_, err := tx.ExecContext(ctx, `INSERT INTO settings(key, value) VALUES('test.idle.companion', 'x')`)
+		return err
+	}
+	if set, err := e.svc.SetIdle(t.Context(), st.ServerID, idle, also); !set || err != nil {
+		t.Fatalf("SetIdle = %v %v", set, err)
+	}
+	if set, err := e.svc.SetIdle(t.Context(), st.ServerID, idle, also); set || err != nil || ran != 1 {
+		t.Fatalf("a second SetIdle = %v %v, companion ran %d times", set, err, ran)
+	}
+	if _, ok, _ := e.st.Setting(t.Context(), "test.idle.companion"); !ok {
+		t.Fatal("the companion write is missing")
+	}
+	if set, _ := e.svc.SetIdle(t.Context(), "another-server", idle, nil); set {
+		t.Fatal("another link was set idle")
+	}
+	cur, _, _ := e.svc.Linked(t.Context())
+	if cur.Idle == nil || cur.Idle.Reason != idle.Reason {
+		t.Fatalf("idle = %+v", cur.Idle)
+	}
+	before := len(e.site.heartbeatBodies())
+	if err := e.svc.SyncNow(t.Context()); !errors.Is(err, ErrIdle) {
+		t.Fatalf("sync on an idle link = %v", err)
+	}
+	if len(e.site.heartbeatBodies()) != before {
+		t.Fatal("an idle link sent a heartbeat")
+	}
+	if _, err := e.svc.Unlink(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, linked, _ := e.svc.Linked(t.Context()); linked {
+		t.Fatal("unlink kept the idle link")
+	}
+}
+
+// A manual sync answers with the instance's Admit error only when it is the
+// link refused (it wraps ErrIdle). A check that failed this time sends nothing
+// and is a failed heartbeat on the status, and the sync itself succeeds, so
+// the page shows the status rather than a server error.
+func TestSyncNowRefusesOnlyARefusedLink(t *testing.T) {
+	var mu sync.Mutex
+	var admitErr error
+	e := newEnv(t, func(o *Options) {
+		o.Hooks.Admit = func(context.Context, State) error {
+			mu.Lock()
+			defer mu.Unlock()
+			return admitErr
+		}
+	})
+	e.link(ScopeObserve)
+	set := func(err error) {
+		mu.Lock()
+		admitErr = err
+		mu.Unlock()
+	}
+
+	set(errors.New("the peer's machine is not on this tailnet"))
+	if err := e.svc.SyncNow(t.Context()); err != nil {
+		t.Fatalf("sync with a failed check = %v", err)
+	}
+	if st, _ := e.svc.Status(t.Context()); st.Link == nil || st.Link.LastError != "the peer's machine is not on this tailnet" {
+		t.Fatalf("link status = %+v", st.Link)
+	}
+	if n := len(e.site.heartbeatBodies()); n != 0 {
+		t.Fatalf("%d heartbeats with the check failed", n)
+	}
+
+	set(fmt.Errorf("%w: another machine holds the name", ErrIdle))
+	if err := e.svc.SyncNow(t.Context()); !errors.Is(err, ErrIdle) {
+		t.Fatalf("sync on a refused link = %v", err)
+	}
+
+	set(nil)
+	if err := e.svc.SyncNow(t.Context()); err != nil || len(e.site.heartbeatBodies()) != 1 {
+		t.Fatalf("sync = %v, %d heartbeats", err, len(e.site.heartbeatBodies()))
+	}
+}
+
+// Stopping right after starting, again and again, waits for the loop that
+// started and never closes a channel twice or a nil one.
+func TestStopRightAfterStartIsSafe(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.link(ScopeObserve)
+	for i := 0; i < 200; i++ {
+		e.svc.Start(t.Context())
+		e.svc.Stop()
 	}
 }

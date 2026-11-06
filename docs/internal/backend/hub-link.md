@@ -1,0 +1,500 @@
+# Connecting to Just Hub
+
+A server administrator can connect this dashboard to a Just Hub: a separate app that runs as its own machine
+on the same tailnet and shows many dashboards in one place. The hub lists the server with its health and
+version, offers the other linked servers in the dashboard's own switcher, and, at a scope chosen on this
+machine, can ask it to do the same few things a linked just-dashboard.com account can. It is optional, does
+nothing until an administrator connects, and can be switched off outright with `JD_HUB_LINK=false`.
+
+**The contract is [hub-link-protocol.md](hub-link-protocol.md)**, with its vectors in
+[`hub-link-vectors.json`](hub-link-vectors.json). That file is normative for both sides; this page records how
+the dashboard implements it. It is the account link's protocol pointed at a different peer, so read
+[account-link.md](account-link.md) first: everything there about signing, the sequence, the snapshot and its
+scopes, command verification, the replay table, budgets, automatic updates and the dashboard's own containers
+applies here unchanged, with the names below.
+
+Hub sign-in (protocol section 9) is built and **off by default** (`JD_HUB_SIGNIN=false`): see
+[Hub sign-in](#hub-sign-in). It is the documented exception to invariant 2, with its limits in
+[invariants.md](../security/invariants.md#the-exception-hub-sign-in).
+
+## One engine, two instances
+
+`backend/internal/accountlink` is the engine: identity, signed client, sequence, request flow, heartbeat,
+command verification and execution, update policy, loops and backoff. A `Profile` (`accountlink/profile.go`)
+says what one instance is, and `Hooks` are where an instance adds behaviour of its own. The account link is
+`accountlink.AccountProfile`; `backend/internal/hublink` builds a second instance with the hub's profile. The
+two run side by side in one process and share nothing:
+
+| | Account link | Hub link |
+| --- | --- | --- |
+| Settings keys | `account.link.*` | `hub.link.*` |
+| Replay table | `account_link_commands` | `hub_link_commands` (`store/hub_link_schema.go`, additive) |
+| Base path, part of every signed string | `/api/link/v1` | `/api/hub/v1` |
+| Identity and sequence | `account.link.identity`, `.sequence` | `hub.link.identity`, `.sequence` |
+| Sequence rule | `stored + 1` | `max(stored + 1, unix milliseconds)` in the same statement (`ClockSequence`), so a database restored from an older copy carries on above every number it sent |
+| Where it points | `JD_ACCOUNT_URL`, fixed by configuration | Chosen at connect time, stored with the request and the link (`OriginPerLink`); must pass the tailnet rule |
+| Discovery | `GET /site` before a request | None: the protocol header on `POST /requests` is the version check |
+| Approval | A code approved on the site | A code approved in the hub, or a one-time token |
+| Heartbeat reply | `ok`, `heartbeatSeconds`, `pendingCommands`, `siteKeys` | The same, plus `fleet` and `notices` (required) and `signIn` (optional), strictly decoded (`ReplyView`) |
+| Pacing, default interval | 4 a minute, 30 s | 12 a minute, 15 s |
+| Key id and owner label | `kid` may hold a dot; any non-empty label | `kid` has no dot; the label is the hub's name, `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` |
+| Key rotation | `siteKeys` in a reply adds a successor and retires old keys | None: `siteKeys` is decoded and ignored (`IgnoreAnnouncedKeys`) |
+| Audit actor, destructive-budget key | `account:<owner>` | `hub:<hub name>` |
+| Audit actions | `account.link`, `account.unlink`, `account.command.*`, `account.update.auto` | `hub.link`, `hub.unlink`, `hub.command.*`, `hub.update.auto` |
+| A `backup.run`'s trigger | `account_link` | `hub_link` |
+| Messages | "the site", "on the site" | "the hub", "in the hub" |
+| Switch | `JD_ACCOUNT_LINK` | `JD_HUB_LINK` |
+
+Each instance has its own `Host` (`newAccountHost(s)` twice in `api`), so their snapshot rates are their own,
+while a command does the same thing whichever link sent it. Each keeps and evaluates its own update policy; a
+server installs an update when either says so, and the installer refuses a second run while one is under way.
+`TestTheAccountLinkAndTheHubLinkRunSideBySide` links both on one store, heartbeats both, runs a hub command,
+and ends each link in turn while the other keeps running. `TestTheAccountLinkKeepsItsKeysWhereEarlierReleasesWroteThem`
+pins that the refactor moved none of the account link's stored keys.
+
+The hooks the hub link uses:
+
+| Hook | What the hub link does with it |
+| --- | --- |
+| `Admit` | Before anything is sent on a stored link: an idle link sends nothing, the URL rule as it applies to a stored link, and the hub node check (both below). It replaces the account link's "still `JD_ACCOUNT_URL`" check everywhere that check ran (the top loop, the heartbeat, a manual sync, whether an unlink tells anyone) and also runs before every command poll and every result. Its refusals (an idle link) wrap `accountlink.ErrIdle` as well as `hublink.ErrURLRefused`; any other error is a check that failed this time, which the engine counts as a failed exchange. A manual sync (`SyncNow`) answers with a refusal and puts any other error on the status as a failed heartbeat. Hub sign-in asks `admitRule`, the same without the node check, on every use of a hub session |
+| `BeforePoll` | The hub node check before every poll of a pending request, in whichever process polls it. A `*RequestEndedError` ends the request as failed and nothing is sent |
+| `OnReply` | Decodes and checks `fleet`, `notices` and `signIn`, and returns the write the engine runs inside the heartbeat's own transaction, only while the link is still the one it was sent for: it caches them in `hub.link.view` and ends every sign-in grant whose hub user the reply no longer offers, and audits those ends once that transaction commits. A reply that does not decode strictly fails the heartbeat and nothing in it is used |
+| `OnClear` | In the same transaction that ends a link (disconnect, removal in the hub) or stores a new one: deletes `hub.link.view`, every sign-in grant and ticket record, and every hub session. What it returns runs after the commit (the audit entries) |
+| `HeartbeatExtra` | With `JD_HUB_SIGNIN=true`, adds `signIn: {grants: [...]}` to every heartbeat; the engine keeps such keys whole and cuts the snapshot's lists to make room. Off, the body is the snapshot alone |
+
+## Files
+
+| File | What it holds |
+| --- | --- |
+| `hublink.go` | The profile, `Options`, `Service` and its methods: `Connect`, `Poll`, `Await`, `Cancel`, `SetScope`, `Disconnect`, `Sync`; the engine's errors under this package's names |
+| `url.go` | The URL rule (2.2), the test origin, the decision on a stored link (`admitStored`) |
+| `node.go` | The hub's machine (2.4): the check before sending, the dialer's gate, recording a node later, setting a link idle (`goIdle`), `NodeNote` for the begin audit |
+| `dial.go` | `tailscale status --json` on the host, and the dialer that only reaches a hub over `100.64.0.0/10` |
+| `view.go` | The fleet, notices and sign-in offer: strict decoding, per-entry rules, the cache |
+| `status.go` | `Status` (`GET /dashboard/hub`), `Session` (the `hub` field of `/auth/session`), `Hello` and its exact bodies |
+| `ticket.go` | Hub sign-in tickets: the shape, the pinned key, the signature, the payload scanned token by token, the server, time and second-factor checks, and the device check (protocol 9.4, 9.7 steps 3 to 10) |
+| `redeem.go` | `Redeem`: section 9.7 from the switches to the session, and its `hub.signin` audit entry |
+| `signin.go` | Grants (`Allow`, `Revoke`, `Grants`), the heartbeat's `signIn`, the hub-session check auth asks on every use, and every link and switch event that ends grants or hub sessions |
+| `hubstub/` | A signature-less stand-in hub for the `api` and `admin` tests |
+
+Outside the package: `api/handlers_hublink.go` (routes, construction), `api/handlers_hubsignin.go` (the redeem
+and grant routes), the `hub` field in `api/handlers_auth.go`, `admin/hub.go` (terminal commands),
+`store/hub_link_schema.go` and `store/hub_signin_schema.go`, `auth/hub_signin.go` (hub sessions, and the end of a
+grant inside auth's own transactions), `httpx.RefuseHubSession`, `JD_HUB_LINK*` and `JD_HUB_SIGNIN` in `config`,
+and on the frontend `app/hub/enter/route.ts` with `lib/hub-enter.ts`, and `components/hub-link/sign-in-panel.tsx`.
+
+## The URL rule and how a hub is reached
+
+`Connect` reads the address a person typed in the order of protocol 2.2 and stops at the first failure, with
+that step's code: an origin only (a bare host is read as `https://`), spelt one way (lowercase, no trailing dot,
+no `:443`), `https`, a name not an address (`hub_url_invalid`); this server on a running tailnet with a
+`.ts.net` MagicDNS suffix, read from `tailscale status --json` on the host (`CurrentTailnet.MagicDNSSuffix`, else
+the top-level field, else the self name without its first label); exactly one label under that suffix
+(`hub_url_not_tailnet`); not this server's own name, on any port, because a browser sends a host-only cookie to
+every port of its host (`hub_url_same_host`). Then, when tailscaled's LocalAPI can be asked
+(`tailnetgate.NewLocalAPI`), `whois` on the address the dashboard would dial must name that same machine
+(`hub_not_on_tailnet`); when it cannot be asked the check is skipped and logged, since the certificate and the
+steps before already bind the name. A name with no tailnet address (see "Reaching the hub") leaves nothing to ask
+about: the skip is logged, `Check` shows the machine as not checked, and `Connect` stops there with
+`502 hub_unreachable`, so no request goes out whose step 8 never ran. Step 8 here (`confirmNode`) changes nothing:
+it compares the name only, never a pinned node, so it never marks an address as checked for the connector, and
+a `check` of a linked hub's address cannot stand in for the connector's own check. "One hub per server" is checked
+before any of this, so a refused second connect never asks the tailnet.
+
+**A stored link is checked again when the connector starts with it** (`admit`, once per link per process, before
+anything is sent): steps 1 to 4 need no tailnet and always run, so an address that is not `https`, is an IP literal
+or a loopback name, and is not the current test origin, is refused; steps 5 to 7 run when the suffix can be read
+(no longer one machine under this server's suffix, or this server's own name, is refused) and are skipped this time
+when it cannot. A refusal **sets the link idle in the store** (`State.Idle`, `{code: "hub_url_refused", reason,
+at}` in `hub.link.state`, written by `Engine.SetIdle`), revokes every hub session in that same write transaction
+(`revokeHubSessionsTx`; see [Hub sign-in](#hub-sign-in)), and audits `hub.link.idle` by `system`
+with the reason and `sessionsRevoked`. An idle link stays idle across restarts, whatever the rule or WhoIs says
+later: nothing is sent on it, the status says `idle: true` to every reader and gives an administrator the reason as
+the last error (`refused`: "this server no longer accepts the hub's address: <reason>; disconnect, then connect
+again") with `reachable: false`, the session's `hub` field says `idle: true` too, a manual sync answers
+`409 hub_url_refused`, and only a disconnect clears it (without telling anyone). Settings → Hub reads the reason back
+out of that shape (`idleReason` in `lib/hub-link.ts`) and draws the link as **Idle**, with the reason at the top for
+an administrator, no Sync now, and a Disconnect that says the hub is not told. While it is idle nothing in the
+dashboard links to the stored hub URL, which after "the hub's machine changed" answers on a machine this server
+refused: the page's title is the host as text, notices lose their links, and `shellHub` drops the address, so the
+switcher has no "Open Just Hub", the palette's hub opens nothing and the rail's notice card no "Open in Just Hub".
+`status_test.go` holds the backend to the shape and the flag. A link made at the test origin therefore stops at the
+first start after the variable is removed, and putting the variable back does not revive it.
+
+**The hub's machine** (`node.go`, protocol 2.4). The certificate proves only that the answering machine holds the
+hub's MagicDNS name, which goes to whichever machine registers it next. So step 8 of the rule keeps the WhoIs answer
+as the **hub node** (`{id: StableID, name, owner (the login) or tags}`, `accountlink.PeerNode`): with the request
+(`hub.link.request`), then in the link state (`hub.link.state.hubNode`) when the approval is collected, and in the
+`hub.link.begin` and `hub.link` audit details (`"not checked: tailscaled could not be asked"` when it was skipped).
+Before anything is sent on a stored link, WhoIs is asked about the address about to be dialled: at each connector
+start, at least every five minutes (`admitNode` from `Admit`), and whenever the dialer is about to dial an address
+it has not checked (`dialGate`, `dialer.gate`, so a DNS or peer change between checks is caught before a byte goes
+out). With nothing pinned yet, which is `Connect`'s own request (the one that may carry the one-time token), the
+dialer's check is step 8's: a machine of another name at the address is refused with `hub_not_on_tailnet`. A check
+that is due when the hub's name has no tailnet address sends nothing and counts as a failed exchange or poll, since
+the transport could otherwise carry the request on a connection it keeps open, with no dial and so no check.
+Another `StableID` sends nothing and sets the link idle with "the hub's machine changed", in the same way as
+above, audited `hub.link.node_changed` with the old and new node. No machine at the address (`ErrNotAPeer`) sends
+nothing and counts as a failed exchange with "the hub's machine is not on this tailnet", backing off without going
+idle. tailscaled not answering (`ErrUnavailable`, or an answer with no `StableID`) sends, and is logged at most once
+an hour. A link or request stored without a node records the first answer whose node name is the stored host (an
+answer naming another machine sends nothing), audited `hub.link.node_recorded` for a link. While a request is pending
+the check runs before **every** poll (`BeforePoll`), in whichever process polls it: another `StableID` ends the
+request as failed with no key, `serverId` or name stored, and audits `hub.link.node_changed`; the link pins the
+request's node as it stood at the poll that collected the approval. At the test origin no WhoIs is asked and no node
+is recorded.
+
+**Reaching the hub.** The hub link's HTTP client (`dial.go`) uses no proxy and a dialer of its own: the system
+resolver's answer if it is in `100.64.0.0/10`, else the tailnet IPv4 address `tailscale status` lists for the
+peer of that name (cached for a minute, dropped after a failed dial), else the hub is unreachable. It never
+dials anything outside `100.64.0.0/10`. TLS still verifies the certificate for the name, against the system
+roots, and the request's `Host` is the name. Redirects are refused.
+
+**The test origin.** `JD_HUB_LINK_TEST_ORIGIN` names one loopback origin (`http` or `https`, `localhost`,
+`127.0.0.0/8` or `[::1]`); anything else refuses to start. A hub URL equal to it skips the rule and is dialled as
+written, and no WhoIs is asked about it; every other URL still goes through the whole rule, and signing, scopes and
+commands are unchanged. With the stored hub URL at the test origin exactly two rules relax (protocol 2.3): a notice
+`href` must be on that origin, whatever its scheme, and a fleet `endpoint` may be a loopback `http` or `https`
+origin, or one under this server's own MagicDNS suffix; any other `https` origin is still removed. When it is set
+the backend logs a warning at start and `GET /dashboard/hub` reports it as `admin.testOrigin` (the Settings page
+uses it to accept `?connect=` naming that origin, or its host, exactly). It is read by `config.go` and the terminal
+commands only, and on purpose appears in no `.env.example`, no Compose `environment:` map and no operator guide.
+
+**A loopback dashboard's own address**, as the local end-to-end harness runs it, is reported by the rules that
+apply everywhere, with nothing special for tests: `access.kind` is `tunnel` when `JD_SITE` is empty, `localhost`
+or `127.0.0.1` (protocol 5.1, `accountHost.access`), and `access.endpoint` is the address a browser opens it at,
+for example `http://127.0.0.1:18443`. A hub in dev mode keeps a loopback endpoint (5.3's endpoint rule, its dev
+clause) and relays it in `fleet`; a dashboard linked at the test origin keeps it (6.1). Protocol 6.1's "left out
+when that server is reached by an SSH tunnel" is what 5.3's rule does to such an endpoint in production (it is not
+an `https` origin on the hub's WhoIs node), not a separate rule on `access.kind`. The side that was wrong was this
+dashboard: at the test origin it used to keep any `https` endpoint as well.
+
+## What the dashboard keeps from each reply
+
+The reply is decoded strictly at the top level: an unknown field, a missing `ok`, `heartbeatSeconds`,
+`pendingCommands`, `fleet` or `notices`, `ok` not `true`, a `fleet` or `notices` that is not a list, or a `signIn`
+that is not an object holding exactly a list `users`, fails the heartbeat and nothing in it is used. Each element
+of `fleet` (at most 500 kept), `notices` (at most 20) and `signIn.users` (at most 50) is then decoded on its own
+(`[]json.RawMessage`, then each element strictly into its type) and checked against protocol section 6, because the
+lists are for display and one server's bad value must not stop every other server's heartbeat: an element with an
+unknown field, a wrong type or a missing required field is dropped, as is a `serverId` of the wrong shape, a name
+outside 1 to 64 characters or breaking the text rule of 5.3 (no Unicode Cc, Cf, Zl or Zp character, so no line
+break or bidirectional control), an unknown `state`, a second entry claiming `self`; a notice with a bad `id` or
+`level`, a title outside 1 to 120 characters or a body over 1000; a hub user that breaks the pattern of 6.3. A
+fleet `endpoint` must be an `https` origin, one label under the hub's own MagicDNS suffix, or it is removed and the
+entry kept without a link. With the hub at the test origin a loopback `http` or `https` origin passes instead, or
+one under this server's own MagicDNS suffix; any other `https` origin is removed there too. A notice's `href` must
+be on the hub's own origin (at the test origin, with its scheme) or it is removed. Nothing in a reply
+changes anything on the dashboard except the heartbeat interval and the cached view. `siteKeys` is decoded so
+strict decoding passes, and never applied (`IgnoreAnnouncedKeys` in the profile): no key is added, no pinned key's
+end changes, and a warning is logged once per link. A reply is authenticated by TLS alone, and a key pinned from
+one could sign commands; a new hub key needs a new link.
+
+**Writes belong to the link they describe** (protocol 8.9). `OnReply` only checks the reply and hands back its
+write; the engine runs it in the transaction that records the heartbeat (`noteHeartbeat`, `kv.updateStateTx`),
+which re-reads `hub.link.state` first and writes nothing, neither the interval nor the view, when the stored link
+is gone or has another `serverId`. `setStatus` (the last heartbeat time and the last errors in `hub.link.status`)
+does the same check in its own transaction. A reply that lands after a disconnect therefore leaves no cached view
+and no status behind, and cannot bring an old hub's fleet, notices or sign-in users back under a new link. The
+cache also names the `serverId` it came from, and is cleared with the link.
+
+## The hub's words are shown as the hub's
+
+A hub that is taken over can put any text in what it sends, and within the rules some of it could read like this
+dashboard's own prompt ("your session expired, sign in again"). Protocol 8.10 says every piece of it is shown as
+plain text attributed to the hub. In the backend that is the hub's `message` in an error: the profile's `Speaker`
+("Just Hub") makes `APIError` quote it as `the hub answered 503 maintenance. Just Hub (hub) says: "…"`, named by the
+link's `owner.label`, or by the hub's host before a link names it (`Connect`'s `hub_unreachable`). The message is
+cut to 300 characters with its control, format (bidirectional), line and paragraph separator characters made
+spaces (`plainText`), so it cannot reorder the sentence around it. So `admin.link.lastError` and the Connect
+errors never carry the hub's words unattributed; the account link's messages are unchanged. Notices, fleet names
+and `owner.label` are structured fields and stay raw in the API; the pages render them as text under the hub's
+name: every notice, in the rail's card and on Settings → Hub, is headed "Just Hub (<name>) says" before its words,
+and its link names the host it opens (`hubSays`, `hub-notice.tsx`, `HubNotices`); the hub's name is said as
+"Just Hub (<name>)" (`hubLabel`) on the Settings page, in its picture, in the palette and in the toast that
+announces a link; the switcher's menu says "Listed by Just Hub (<name>)" under its label and each palette server
+says who listed it. Another server's endpoint, and the hub, open from the switcher and the palette in a new tab
+with `noopener noreferrer`, never in the dashboard's own tab. The Settings page calls `check` as an address is
+typed or filled and shows the machine under it, shows `hubMachine` on the request and the link (or that the test
+origin checks none) with the hub key's fingerprint to compare with the hub's Settings page, and leaves the scope
+unchosen after a `?connect=` link ([feature map](../frontend/feature-map.md)).
+
+## Local API
+
+`GET /api/v1/hub/hello` is the hub's discovery probe: no sign-in, but inside `/api/v1`, so the allowlist runs
+first, under the API rate limit per address, `Cache-Control: no-store`, and nothing in it but
+`{"product":"just-dashboard","protocol":1,"hub":"available|pending|linked"}` (written by hand, byte for byte the
+vectors' bodies). It is not mounted with `JD_HUB_LINK=false` or in agent mode, so those answer `404` as an older
+dashboard does. It is the one route under `/api/v1` that answers without a credential: `publicAPIRoutes` in
+`routes_test.go` lists it with its exact body, `TestNoAPIRouteAnswersWithoutAuthentication` checks that body, and
+the walks of what an API, deploy or MCP key may open read the same list.
+
+| Route | Guards | Does |
+| --- | --- | --- |
+| `GET /dashboard/hub` | any signed-in principal; the `admin` part only for `system.admin` | The status (shape below) |
+| `GET /dashboard/hub/check?url=` | `system.admin`, session; not audited | The URL rule, steps 1 to 8, without starting anything or changing anything: `{hubUrl, machine?, testOrigin}`, `machine` left out when tailscaled could not be asked or the name has no tailnet address. Connect's rule errors and `403 hub_link_disabled`. Settings calls it before Connect to show whose machine the address is |
+| `POST /dashboard/hub` `{url, scope}` | `system.admin`, session; audited `hub.link.begin` with `hubNode` | Connect. `400` with the rule's code, `409 already_linked`, `409 link_pending`, `403 hub_link_disabled`, `502 hub_unreachable` (the message says what failed, `bad_token` and `unsupported_protocol` included; a `429` says the hub is not taking new requests now and to try again later, before the hub's own words, protocol 4.7) |
+| `DELETE /dashboard/hub/request` | `system.admin`, session; `hub.link.cancel` | Forget the pending request (`204`); the hub is not told |
+| `PUT /dashboard/hub/scope` `{scope}` | `system.admin`, session; `hub.link.scope` | Change the scope; the next heartbeat tells the hub. `409 not_linked` |
+| `DELETE /dashboard/hub` | `system.admin`, session, `s.destructive`; `hub.unlink` with `hubNotified` | Disconnect: `200 {"hubNotified": bool}`, whether the hub was told; the link is cleared either way. `409 not_linked` |
+| `POST /dashboard/hub/sync` | `system.admin` (an API key may) | A heartbeat now, then the status. `409 not_linked`, `409 hub_url_refused` (an idle link only). A check of the hub's machine that fails this time (no machine at the address, or no address) sends nothing and answers `200` with the reason as `admin.link.lastError`. Held to twelve a minute: a press that would break the pace is skipped |
+
+The `GET`s sit with the every-role reads of the `/dashboard` group (`handlers_selfupdate.go`; `check` with
+`system.admin` and `RequireSession` added); the rest sit in its `system.admin` part. The status is `hublink.Status`: optional fields are left out, never `null`; times are
+RFC 3339 in UTC. With `JD_HUB_LINK=false` it is exactly `{"enabled":false,"state":"…"}`. Otherwise:
+
+- everyone: `enabled`, `state` (`unlinked`, `pending`, `linked`), `hubUrl` (pending or linked), and while linked
+  `hubName`, `scope`, `reachable` (the last heartbeat succeeded, none failed since, younger than three
+  intervals), `lastHeartbeatAt` once one succeeded, `heartbeatSeconds` (the hub's interval, clamped to 10–600 as
+  the heartbeat loop clamps it; the page says how often it reports in it), `idle: true` while the link is idle, and
+  `fleet` and `notices` (`[]` before the first reply); `signIn` is `{enabled, offered, users, mine?}`: `enabled` is
+  `JD_HUB_SIGNIN`, `offered` and `users` the last reply's, `mine` the caller's own grant for this link.
+- `system.admin` also gets `admin`: `fingerprint` (once the identity exists), `testOrigin`, `request` (pending:
+  `hubUrl`, `userCode`, `approveUrl`, `expiresAt`, `scope`, and `hubMachine` when step 8 found one), `link` (linked:
+  `serverId`, `linkedAt`, `linkedBy`, `hubMachine` once one is pinned, `lastError` (an idle link's reason, whatever
+  the last exchange left; otherwise the last heartbeat's failure, else the last command poll's, which
+  `clearPollErrorOnceHeld` clears once a poll has gone two seconds unanswered: the hub answers a failure at once and
+  holds only a poll it took, so a poll error from before a hub restart does not sit beside good heartbeats for the
+  25 s the next poll is held), `lastCommand`, `hubKeys` of `{kid, fingerprint, notAfter?}`, `updatePolicy`, and
+  `lastSnapshot`, the exact body of the last heartbeat sent), `lastOutcome` (unlinked after a request that ended
+  without a link — `denied`, `expired`, `failed` — or after the hub removed the link: `removed`, with "the server
+  was removed in the hub", written in the transaction that clears it because the profile sets `RemovalOutcome`;
+  the account link does not, so Settings → Connect never reads one), and `grants` (linked with `JD_HUB_SIGNIN` on:
+  every account's grant, `{userId, username, hubUser, since}`).
+
+`GET /auth/session` carries `hub: {linked: true, name, url, reachable}`, and `idle: true` while the link is idle,
+only for a fully signed-in session (not one owing a second factor or a password change, and never to nobody), with
+`JD_HUB_LINK` on and a hub link stored. The fleet and notices come from `GET /dashboard/hub`, so this stays small.
+
+## Terminal
+
+`scripts/manage.sh hub connect URL [--scope observe|operate|maintain] [--token-stdin] [--wait 15m]`,
+`hub disconnect` and `hub status` check their arguments and run `docker compose run --rm --no-deps -T backend
+--admin hub-connect|hub-disconnect|hub-status …` (`admin/hub.go`), keeping the exit status with `exec`. They read
+`JD_HUB_LINK`, `JD_HUB_LINK_TEST_ORIGIN` and `JD_MASTER_KEY` from the Compose environment; `connect` and
+`disconnect` need the master key, `status` does not.
+
+`hub connect` applies the rule, prints the hub URL, the hub's machine and owner (`hublink.DescribeMachine`: "<name>,
+a machine of <owner>", "<name>, tagged <tags>", or "not checked" with why), the code, this server's fingerprint and
+the hub's approval screen for the request (its `approveUrl` as the hub gave it, `/servers/add/?request=<id>`; one
+with a character that is not printable ASCII is printed escaped and without its query), and waits (default 15 minutes, at most an hour). The default scope is `maintain`. **A token is only ever read from
+standard input** (protocol 8.4): `--token TOKEN` and `--token=` exit 1 with "pass the token on standard input with
+--token-stdin", in `manage.sh` and in `admin/hub.go` both. With `--token-stdin`, `manage.sh` prompts `Link token: `
+and reads with `read -rs` at a terminal, or one line from a pipe (the hub's installer), and passes it to the admin
+command on its standard input, so it is in no process list (`/proc/*/cmdline`) and no shell history. A token that
+is not `jht_` and 43 base64url characters is refused before anything is sent, and one the hub refuses
+(`bad_token`) is a failure, never a fallback to a code. Exit **0** connected (`Connected to Just Hub "<name>" at
+<url> as "<server>" (<scope>).`, then the pinned hub key's fingerprint to compare with the hub's Settings page),
+**2** declined, not approved within `--wait`, or interrupted (the request is forgotten), **1** anything else.
+`hub status` says when the link is idle, with the reason, instead of the last error, and "It was removed in the
+hub." after a removal. A request begun in Settings is never taken over from the terminal, nor is one a `hub
+connect` still waits on: the waiting command stamps `waitingAt` on `hub.link.request` every 5 seconds, a second
+`hub connect` exits 1 naming the first one's code, and only a request whose command has been silent for 20 seconds
+(killed outright; an interrupt forgets its request) is replaced. The waiting command polls and cancels only its own
+request, and stops if another replaced it. Audited as `hub.link` (by
+`root` / `cli`; failures as failed with the outcome) and `hub.unlink`.
+
+## Failure modes
+
+The account link's table applies, with these for the hub:
+
+| What happens | What the dashboard does |
+| --- | --- |
+| The hub is down or unreachable | Heartbeat and poll back off from 1 s to 5 minutes; `reachable` goes false; nothing else on the dashboard depends on the hub |
+| A reply with an unknown top-level field, or without `ok`, `heartbeatSeconds`, `pendingCommands`, `fleet` or `notices` | A failed heartbeat; the cached view is left as it was and nothing in the reply is used |
+| A bad element in `fleet`, `notices` or `signIn.users` | That element is dropped; the heartbeat succeeds with the rest |
+| A reply that arrives after a disconnect | Nothing is written: no view, no interval, no status |
+| `410` on any signed request | The hub removed this server: link, policy, status and cached view cleared in one transaction, which also keeps the outcome `removed` for Settings → Hub to say once (and `hub status` to say "It was removed in the hub."), identity and sequence kept, `hub.unlink` by `system` with the reason "the server was removed in the hub" |
+| A disconnect while requests are in flight on the link (the terminal's, with the dashboard running) | The link is cleared before the hub is told, and `clearLink` re-reads it inside its transaction, so the `410` those requests then get clears nothing: one `hub.unlink`, by whoever disconnected |
+| The hub restarts while the dashboard runs | Heartbeat and poll fail and back off; the poll error clears two seconds after the hub holds a poll again, not when that 25 s poll returns |
+| A Docker command (`container.*`, `stack.restart`) while Docker cannot be reached | `failed` with "The Docker daemon is not reachable from this dashboard. Docker said: …"; a daemon that does not answer a ping within 10 s fails it at once with that, rather than holding the command for its 10 minutes |
+| The server moved to another tailnet, or the test origin was removed | The link is set idle in the store at the next start and says why; it stays idle until a person disconnects |
+| Another machine answers at the hub's name | Nothing is sent; the link is set idle ("the hub's machine changed") and `hub.link.node_changed` audited; a pending request ends as failed with nothing stored |
+| No machine holds the hub's address | Nothing is sent; the exchange fails and backs off; the link stays as it is. A manual sync answers `200` with the reason on the status |
+| The hub's name has no tailnet address | Connect fails with `502 hub_unreachable` before its request. A check that is due sends nothing (not even on a connection kept open) and the exchange or poll fails and backs off |
+| The hub holds too many waiting requests (`429` on Connect) | Connect fails with `502 hub_unreachable`, saying to try again later |
+| The hub is reinstalled with a new key | Its commands fail the key check (refused, audited); disconnect and connect again |
+| `JD_HUB_LINK=false` while linked | The link stays stored and idle; nothing is sent; a disconnect clears it and tells no one |
+
+## Hub sign-in
+
+Off unless the operator sets `JD_HUB_SIGNIN=true`, and only for accounts that opt in. Protocol section 9 is the
+contract; [invariants.md](../security/invariants.md#the-exception-hub-sign-in) says what it weakens and every
+limit on it.
+
+| Route | Guards | Does |
+| --- | --- | --- |
+| `POST /auth/hub/enter` `{ticket, replace?}` | none (the ticket is the credential); with `/auth/login`: `loginLim` per address, `RequireCSRF`, at most 4 KiB; audited `hub.signin` by the handler | Section 9.7. `200` is `/auth/login`'s complete answer plus `next`, and sets the session cookie. `409 other_account_signed_in` when the browser's cookie is another account's complete session and `replace` is not `true` |
+| `PUT /account/hub-signin` `{hubUser, password, code}` | the caller's session, `RefuseHubSession` | Make or replace the caller's grant. `403 hub_signin_disabled`, `409 not_linked`, `409 hub_signin_not_offered`, `400 bad_request`, `401 invalid_credentials`, `401 invalid_code`, `409 hub_user_taken`, `403 hub_session_not_allowed`. Audited `hub.signin.allow` |
+| `DELETE /account/hub-signin` | the caller's session (a hub session may) | Remove the caller's grant (`204`). Audited `hub.signin.revoke` |
+| `DELETE /dashboard/hub/signin/{userId}` | `system.admin`, session (a hub session may) | Remove any account's grant (`204`, `404` without one). Audited `hub.signin.revoke` |
+
+**The redeem**, in `hublink.Service.Redeem`, stops at the first failure: both switches (`403
+hub_signin_disabled`); a stored link the connector has not set idle (`403 hub_not_linked`); then `checkTicket`
+(steps 3 to 9: `bad_ticket`, `wrong_server`, `ticket_expired`, `mfa_stale`), `checkDevice` (step 10:
+`wrong_device`, skipped for a loopback client or a tailscaled that cannot be asked, `tailnetgate.ErrUnavailable`;
+an answer naming no node or login, `ErrNoIdentity`, is refused), the nonce (`INSERT … ON
+CONFLICT(nonce) DO NOTHING` in `hub_signin_tickets`, committed on its own: `ticket_used`), and one write
+transaction that re-reads `hub.link.state`, finds the grant (`403 not_permitted`), checks the account and makes
+the session (`auth.Service.StartHubSessionTx`: `403 account_unavailable`). The session cookie the browser sent, if
+any, is revoked in that transaction; when it is another account's complete session, only if the body says
+`"replace": true`, which `/hub/enter` sends after the person pressed Continue, and otherwise nothing is made and
+the answer is `409 other_account_signed_in`. A hub session has `auth_method = 'hub'`, `twofa_passed = 1`, the grant's hub
+user in `sessions.hub_user`, and lasts two hours at most and one hour idle. It never owes a code, so every
+second-factor route refuses it, `POST /auth/2fa/verify` included, before a guess is spent. Every outcome writes `hub.signin`:
+the account (or `anonymous`) as username, `hub:<name>` as actor once the signature held, the status the redeem
+answered (`200`, or the refusal's own: `401`, `403`, `409` or `500`), and the ticket's
+`hubUser`, `userId`, `nonce`, `tsLogin`, `tsNode`, `deviceCheck`, and `sessionId` or the refusal's `code`.
+
+**Grants** (`hub_signin_grants`, one row per account, one account per hub user) name the link's `serverId`; a
+grant for another link is void. `PUT` checks what it can without a guess first (switch, link, offer, hub user),
+then spends the account's guess budget and checks the password and code with
+`auth.Service.VerifyReauthentication`, which uses the code's step up. Making a grant replaces the old one in one
+transaction that also revokes the old grant's hub sessions, and that transaction checks the link and the offer
+again (`Allow`: not idle, and the stored reply still offers the hub user), so a change committed while the
+password was being checked makes no grant. Every change sends a heartbeat at once.
+
+**Ending.** A hub session ends in the same write transaction as whatever ends what made it, and is checked again
+on every use (`auth.Service.ResolveSession` calls `checkHubSession`, which auth requires before it accepts any
+hub session):
+
+| Event | Where |
+| --- | --- |
+| The account removes or replaces its grant, or an administrator removes it | `Revoke`, `Allow` |
+| Its password changes or is reset; its authenticator is enrolled, reset or turned off; it is disabled or deleted; all its sessions are revoked | `auth.endHubGrantTx`, inside each of those changes' transaction in `auth`; the API audits `hub.signin.revoke` afterwards through `auth.Service.SetHubGrantEnded`, and so does the terminal's `--admin reset-password` and `revoke-sessions` (as `root`, actor `cli`) |
+| A heartbeat reply no longer offers its hub user, or carries no `signIn` | `onReply` (`endUnofferedTx`) |
+| The link ends or is replaced | `onClear` (`endEveryGrantTx`), also from the terminal's `hub disconnect` |
+| The link goes idle: its address fails the URL rule at start, or another machine answers at the hub's name | `goIdle` → `revokeHubSessionsTx`, in the one write transaction that stores the idle flag; grants stay, unusable; audited `hub.link.idle` or `hub.link.node_changed` with `sessionsRevoked`, and `hub.session.revoke` |
+| `JD_HUB_SIGNIN` or `JD_HUB_LINK` off at start | `PrepareSignIn`, first thing in `api.Server.Start`; an error stops the backend starting |
+
+The idle flag is part of the stored link, so a restart does not decide an idle link again and does not revive it:
+`checkHubSession`, the redeem (`403 hub_not_linked`) and `PUT /account/hub-signin` (`409 not_linked`) all read the
+link through `usableLink`, which refuses one that is idle in the store whatever the URL rule or WhoIs would say
+by then. A redeem also re-reads the link inside its session transaction (`idleOrUndecided`), so one that races
+the link going idle either commits first and is revoked by it, or finds the flag. Only a disconnect clears the
+flag, and it ends the grants with it.
+
+**Sockets.** A socket is authenticated once, at the upgrade, so the revocations above would not reach a terminal
+a hub session already holds. `wsx.Upgrader` hands every socket it opens to a `wsx.Guard`; the API's
+(`api/hub_session_sockets.go`) watches the ones a hub session opened, and `guardHubStream` does the same for the
+Remote Desktop stream bridge's proxied sockets by cancelling the proxied request. Each closes at the session's
+`expires_at`, at once when hublink reports hub sessions revoked (`Options.SessionsEnded`, called after each
+event's transaction has committed, from `auditGrantEnd` and `auditLinkEvent`), and otherwise at its next check
+every 15 seconds: `httpx.Authenticator.SessionStands`, through `auth.Service.CheckSession`, which runs every
+check `ResolveSession` does without sliding the idle window, so an open socket is not use of the session.
+
+**Refused routes.** `httpx.RefuseHubSession` sits on every route protocol 9.9's table lists (the table now holds
+the seventeen routes JD's walk of every write route added to it, and the seventeen its second walk, of the routes
+that show a stored secret too, added after);
+[invariants.md](../security/invariants.md#the-exception-hub-sign-in) repeats the list, and
+`api/hub_session_routes_test.go` holds the router to exactly that list, and both documents' tables to it. The
+final review added the dashboard's own settings (`PUT /dashboard/config`, which also takes a session now). The
+assistant is offered none of the grant routes (`agentExcludedAreas`, `agentExcludedRoutes`): letting the hub
+sign an account in is the person's own choice.
+
+**On the page.** Settings → Hub's "Sign in from Just Hub" (`components/hub-link/sign-in-panel.tsx`) names the hub
+as `hubLabel` does everywhere else ("Just Hub (hub)"), offers the opt-in with the password and, where the account
+has one, an authenticator code, and lists every account's grant as rows with Remove for an administrator. The
+opt-in and its undoing are outline buttons: Connect stays the page's one brand command. While the link is idle
+(`isIdle`, the status's `idle`, which every reader is sent) it offers no account a form, says sign-in is paused
+until a disconnect, and keeps the account's own "Stop letting Just Hub sign me in". A `403 hub_session_not_allowed` anywhere in the app reads "Sign in on this
+server itself to do this" (`HUB_SESSION_REFUSED` in `lib/api.ts`). The audit page says a hub session's rows
+are "through Just Hub as <hub user>", with the session's id in the tooltip (`keyWords`, `keyTitle` in
+`components/audit/marks.tsx`).
+
+**Audit.** `Principal.HubUser` is the session's hub user, and every audit entry for a principal is built by
+`httpx.principalEntry`, which records a hub session as actor `hub-session` (the assistant in one stays
+`assistant`) with `hubUser` and `sessionId` (`audit_log.hub_user`, `session_id`); the session id is the
+`hub.signin` entry's `sessionId`. Handlers that write their own entry start from `httpx.AuditEntry` (protocol
+9.10).
+
+**`/hub/enter`** is a document written by hand (`lib/hub-enter.ts`) and served by a route handler
+(`app/hub/enter/route.ts`) rather than a page of the app: Next puts its own chunks ahead of anything a layout
+renders in `<head>`, and section 9.5 needs the page's first script to take the ticket out of the address before
+any other runs. Its one script, with the response's CSP nonce, reads `ticket=` from the fragment into a variable
+of its own closure and calls `history.replaceState(null, "", "/hub/enter")` before anything else; it then asks
+`GET /api/v1/auth/session`, asks "Continue through Just Hub?" when the browser is signed in as another account
+(the ticket's `userId` read for display only), and asks the same without a name when the read answers anything
+but `200` or `401`, or nothing; it redeems unasked only for nobody (`401`), the same account, or a session still
+owing its second factor. It posts the redeem with `X-JD-CSRF: 1`, with `"replace": true` after Continue, and
+`location.replace`s to `next`. A refusal shows the page's own sentence for its code (`HUB_ENTER_REFUSALS`: each
+step of 9.7, the sign-in rate limit and a server error, each naming the page's **Sign in on this server** where it
+sends the person there, never the API's lower-case clause or its "sign in here"; an unknown code is the server's
+message made a sentence) and a link to `/login`, and the ticket is never sent twice. The page
+loads nothing: its style and mark are inline.
+
+## Verification
+
+```bash
+scripts/test-changed.sh origin/patch/0.8.5
+cd backend && go test ./internal/hublink/... ./internal/accountlink/... ./internal/admin ./internal/config
+cd backend && go test ./internal/api -run 'Hub|Link|NoAPIRoute|EveryAPIRoute|Ticket|SignIn|Grant'
+cd backend && go test -tags hublinktest ./internal/config
+python3 scripts/test_manage.py
+cd frontend && bun test src/lib/hub-enter.test.js && bunx playwright test tests/browser/hub-signin.spec.ts
+```
+
+`hublink` tests run against a fake hub that checks the protocol header, the signature, the time window and the sequence
+of every signed request in section 3.1's order with its own reading of the signed string, and answers an approved poll
+on every poll until it is collected and after (4.2): connecting with a code and with a token, a refused token creating
+nothing, declines, a lost approved answer healing and a repeated one ignored, one hub per server, the heartbeat body and
+the cached view (bad elements of each list dropped with the heartbeat still succeeding, endpoints and links removed, the
+text rule), strict top-level replies, a reply after a disconnect writing nothing, `siteKeys` in a reply changing no
+pinned key, the clock-based sequence surviving a restored database, the hub's words quoted as the hub's, every kind at
+every scope run as `hub:hub` or refused, replay, expiry, a forged key, an unpinned `kid`, a command for another server
+and an unknown kind (refused, reported and audited, and only commands past the signature recorded in
+`hub_link_commands`), disconnect, removal in the hub (and the outcome it leaves for the page), a stored link that no
+longer passes the rule, and both links side by side. `node_test.go` reaches the same fake hub at
+`https://hub.tailed39ba.ts.net` through a test transport, so the URL rule and the hub node check run: the node pinned at
+connect, another `StableID` idling the link and surviving a restart, `ErrNotAPeer` backing off and `ErrUnavailable`
+sending, the five-minute cadence, a node recorded later, a pending request ended by another machine (from the running
+dashboard and from the terminal command), a test-origin link idled once the variable is gone, `Check` (and that a
+`Check` of the linked hub's address while another machine holds the name still lets the next heartbeat find it, idle the
+link and send nothing), the dialer's gate (with nothing pinned, another machine's name refused), a name with no address
+sending no poll and no heartbeat, a sync that finds no machine succeeding with the reason on the status, and a `429` on
+Connect saying to try again later. `status_test.go` pins the words an idle link's status carries, which the Settings
+page reads, its `idle` for every reader and in the session, and `heartbeatSeconds` clamped as the loop clamps it. The
+vectors test reads `hub-link-vectors.json` and runs every key, canonical-JSON, rejected-args, request and command case
+and the hello bodies against the dashboard's own code, the hub-link command cases through the real connector. The URL
+rule, the test origin, `tailscale status` parsing and the dialer have table tests. The `api` tests cover the routes and
+their role rules through the HTTP stack, `check` with tailscaled answering and not, `sync` answering `200` with the
+reason when no machine holds the hub's address and `409 hub_url_refused` once another machine holds its name (the
+stand-in hub answers at a tailnet name through `hubstub.At`), the begin audit's node, the session field and the probe;
+the `admin` and `test_manage.py` tests cover the terminal path, a token refused as an argument and read with echo off at
+a terminal included, a second `hub connect` refused while the first waits, the approval screen printed as the hub gave
+it, and `hub status` after a removal in the hub. The engine's own tests cover a disconnect whose `410` reaches the
+running dashboard before the terminal command has its answer (no second unlink, no removal outcome), a waiting terminal
+command's request kept from the next and one replaced once its command stopped, and a poll error clearing while a poll
+is held; the `api` tests cover a Docker command against a socket that is missing, one this process may not open, a
+daemon that never answers and one that refuses.
+
+Hub sign-in: `TestSignInTicketVectors` redeems all 37 ticket vectors through steps 3 to 11 with the real
+`checkTicket`, `checkDevice` and nonce store, `deviceCheck` and `secondRedeem` included. The `api` tests
+(`handlers_hubsignin_test.go`) redeem real signed tickets through the router: a valid one (a complete session for
+an account with an authenticator, two hours long, audited), a refusal at each step (expired, another key, another
+server or hub, a stale second factor, another device, not on the tailnet, another account, another hub user,
+garbage), a replay, a wrong device that does not spend the ticket, the switch off, no link, no grant, a locked
+account, a disconnect or the link going idle between the nonce and the session, every grant-ending event of section
+9.3 with the hub session refused after it (a grant row deleted, or the idle flag written, with no revocation
+included), an idle link refusing the redeem and the opt-in, enrolling an authenticator ending a password-only
+grant, the opt-in's checks, a hub session refused with `403 hub_session_not_allowed` on every route of the refused
+list (a right code to `POST /auth/2fa/verify` among them, with no guess spent and no `auth.2fa.verify` entry),
+two-hour expiry, a disconnect that starts after the session row is written and waits for the commit
+(`SetBeforeSessionCommit`), and a browser's earlier session replaced (another account's only with `replace`).
+`hub_session_sockets_test.go` opens a real socket from a hub session and closes it at once after every
+grant-ending event of section 9.3 (at the next check for the two nothing announces), at the session's expiry,
+and for a proxied stream, and leaves a password session's socket open. `hub_session_routes_test.go` walks the
+router for `RefuseHubSession` and reads both route tables. `auth/hub_signin_test.go` holds a hub session to an
+hour idle under a 12-hour install limit, and `admin/cli_test.go` the terminal's audit of a grant it ends.
+`TestWhatAHubSessionDoesIsAuditedApartFromALocalSession` and `httpx`'s
+`TestAHubSessionIsAuditedApartFromTheSameAccountsOwnSession` hold the trail to 9.10's last row, and
+`TestOnlyASessionChangesTheDashboardsOwnSettings` keeps an API key off the settings route. The `hublink` tests (`signin_test.go`) cover the link going idle and another machine at the
+hub's name (every hub session revoked with the flag), an idle link refusing hub sessions, redeems and grants after
+every restart until a disconnect, removal in the hub, a disconnect, a late reply, the heartbeat's `signIn`, a
+key a reply announces never signing a ticket, a grant refused when the link went idle or the offer changed
+while `Allow` waited, and, through the real local API client, a tailscaled answer that names no login or node
+refused at step 10 while an error status skips it. `hub-signin.spec.ts` holds `/hub/enter` to section 9.5 in a browser
+(asking without a name when the session read fails, and `replace` only after Continue; `hub-enter.test.js` runs
+the page's script against each answer, and holds every refusal code in `hublink/ticket.go` to a sentence of the
+page's own) and covers Settings → Hub's opt-in, the hub's name, an administrator
+removing another account's grant, and the panel paused on an idle link for an administrator and for a reader.

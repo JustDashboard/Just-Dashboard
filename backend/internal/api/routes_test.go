@@ -53,6 +53,9 @@ func testServer(t *testing.T) *Server {
 		// real install rather than reporting themselves disabled.
 		MetricsInterval:  15 * time.Second,
 		MetricsRetention: 24 * time.Hour,
+		// On, as it is by default, so the walks below see the hub's
+		// discovery route.
+		HubLink: true,
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL, cfg.Require2FA)
@@ -62,6 +65,21 @@ func testServer(t *testing.T) *Server {
 }
 
 var routeParam = regexp.MustCompile(`\{[^}]*\}`)
+
+// publicAPIRoutes are the routes under /api/v1 that answer without any
+// credential, each with the exact body it answers: the hub's discovery probe
+// (hub-link-protocol.md section 8.1), which names nothing but the product, the
+// protocol and whether this server can be connected. A key reaches them as
+// nobody does and gains nothing, so the walks that check what a key may open
+// skip them, and TestNoAPIRouteAnswersWithoutAuthentication checks the bodies.
+var publicAPIRoutes = map[string]string{
+	"GET /api/v1/hub/hello": `{"product":"just-dashboard","protocol":1,"hub":"available"}`,
+}
+
+func isPublicAPIRoute(rt route) bool {
+	_, ok := publicAPIRoutes[rt.method+" "+rt.pattern]
+	return ok
+}
 
 type route struct{ method, pattern, path string }
 
@@ -110,17 +128,34 @@ func TestEveryAPIRouteIsBehindTheNetworkAllowlist(t *testing.T) {
 // Nothing under /api/v1 answers an unauthenticated caller, even one on the
 // right network. The deploy webhook authenticates by HMAC rather than by
 // session, and answers 401 to an unsigned request like everything else.
+//
+// The one deliberate exception is the hub's discovery probe, which answers a
+// fixed body naming nothing but the product, the protocol and whether this
+// server can be linked (hub-link-protocol.md section 8.1). It is still behind
+// the allowlist, which the test above checks for it like every other route.
 func TestNoAPIRouteAnswersWithoutAuthentication(t *testing.T) {
 	s := testServer(t)
 	h := s.Routes()
+	exceptions := publicAPIRoutes
+	seen := 0
 	for _, rt := range apiRoutes(t, h) {
 		req := httptest.NewRequest(rt.method, rt.path, nil)
 		req.RemoteAddr = "127.0.0.1:9999"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
+		if body, ok := exceptions[rt.method+" "+rt.pattern]; ok {
+			seen++
+			if w.Code != http.StatusOK || w.Body.String() != body {
+				t.Errorf("%s %s: %d %s", rt.method, rt.pattern, w.Code, w.Body)
+			}
+			continue
+		}
 		if w.Code < 400 {
 			t.Errorf("%s %s: answered %d without a session", rt.method, rt.pattern, w.Code)
 		}
+	}
+	if seen != len(exceptions) {
+		t.Errorf("walked %d of the %d unauthenticated exceptions", seen, len(exceptions))
 	}
 }
 

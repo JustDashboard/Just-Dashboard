@@ -37,9 +37,12 @@ func (s *Server) mountRemoteDesktopRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/engine", s.handle(s.handleRemoteDesktopEngine))
 			r.Method(http.MethodPost, "/engine", s.handle(s.handleRemoteDesktopInstall))
 			r.Method(http.MethodGet, "/probe", s.handle(s.handleRemoteDesktopProbe))
-			r.Method(http.MethodPost, "/computers", s.handle(s.handleRemoteDesktopAdd))
+			// A computer is saved with its sign-in, a credential for another
+			// machine this server then holds; a session opened through Just
+			// Hub may not save or change one (hub-link-protocol.md 9.9).
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/computers", s.handle(s.handleRemoteDesktopAdd))
 			r.Method(http.MethodGet, "/computers/{id}", s.handle(s.handleRemoteDesktopComputer))
-			r.Method(http.MethodPut, "/computers/{id}", s.handle(s.handleRemoteDesktopUpdate))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/computers/{id}", s.handle(s.handleRemoteDesktopUpdate))
 			s.mountRemoteDesktopStreamRoutes(r)
 			s.destructive(r, func(r chi.Router) {
 				r.Method(http.MethodDelete, "/engine", s.handle(s.handleRemoteDesktopRemove))

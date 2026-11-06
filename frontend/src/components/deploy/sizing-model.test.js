@@ -81,10 +81,14 @@ describe("right-sizing words", () => {
 
   test("each limit's readings sit after its suggestion", () => {
     const value = sizing()
-    expect(memoryReadings(value.memory)).toBe("limit 512 MiB · p95 491 MiB · peak 500 MiB")
-    expect(cpuReadings(value.cpu)).toBe("limit 4 cores · p95 0.21 cores · peak 0.4 cores")
+    expect(memoryReadings(value.memory)).toBe(
+      "491 MiB most of the time · 500 MiB at its peak · limit 512 MiB",
+    )
+    expect(cpuReadings(value.cpu)).toBe(
+      "0.21 cores most of the time · 0.4 cores at its peak · limit 4 cores",
+    )
     expect(cpuReadings({ ...value.cpu, limit: 0, throttledShare: 0.12 })).toBe(
-      "no limit · p95 0.21 cores · peak 0.4 cores · throttled 12%",
+      "0.21 cores most of the time · 0.4 cores at its peak · no limit yet · throttled 12%",
     )
     expect(applyLines(value)).toEqual(["memory 512 MiB → 640 MiB", "CPU 4 cores → 0.35 cores"])
     expect(applyLines(sizing({ apply: { cpus: 0.35 } }))).toEqual(["CPU 4 cores → 0.35 cores"])

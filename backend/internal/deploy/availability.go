@@ -80,7 +80,27 @@ type Availability struct {
 	// since to end it.
 	Down    bool                 `json:"down"`
 	Windows []AvailabilityWindow `json:"windows"`
+	// Days is the longest window cut into twenty-four-hour stretches ending
+	// now, oldest first, so a page can draw when the downtime happened as
+	// well as how much there was. They run back from now rather than from
+	// midnight: the last is the same span as the "24h" window, and no
+	// timezone has to be agreed on to say so.
+	Days []AvailabilityDay `json:"days"`
 }
+
+// AvailabilityDay is one twenty-four-hour stretch of the record. ObservedSeconds
+// is zero for a stretch before the record began or with no release live, which
+// is unknown rather than up. A downtime crossing a boundary is an incident in
+// each stretch it touches, which is what a reader pointing at either expects.
+type AvailabilityDay struct {
+	From            time.Time `json:"from"`
+	ObservedSeconds int64     `json:"observedSeconds"`
+	DownSeconds     int64     `json:"downSeconds"`
+	Incidents       int       `json:"incidents"`
+}
+
+// availabilityDayCount is how many stretches Days holds: the longest window's.
+const availabilityDayCount = 30
 
 // ReleaseSpans reads when each of an environment's releases was live, for
 // every release live at any point from `since` on. A release's activation
@@ -177,7 +197,48 @@ func ComputeAvailability(now, recordSince time.Time, spans []LiveSpan, events []
 	for _, window := range AvailabilityWindows {
 		out.Windows = append(out.Windows, availabilityOver(now, recordSince, window, spans, downs))
 	}
+	out.Days = availabilityDays(now, recordSince, spans, downs)
 	return out
+}
+
+// availabilityDays cuts the record into stretches, by the rule the windows
+// follow: only time the record reaches and a release was live is observed.
+func availabilityDays(now, recordSince time.Time, spans []LiveSpan, downs []interval) []AvailabilityDay {
+	days := make([]AvailabilityDay, 0, availabilityDayCount)
+	for back := availabilityDayCount; back > 0; back-- {
+		from := now.Add(-time.Duration(back) * 24 * time.Hour)
+		to := from.Add(24 * time.Hour)
+		day := AvailabilityDay{From: from.UTC()}
+		start := from
+		if recordSince.After(start) {
+			start = recordSince
+		}
+		if !recordSince.IsZero() && start.Before(to) {
+			var observed, down time.Duration
+			for _, span := range spans {
+				end := span.To
+				if end.IsZero() {
+					end = now
+				}
+				observed += overlap(span.From, end, start, to)
+			}
+			if observed > 0 {
+				for _, d := range downs {
+					if o := overlap(d.from, d.to, start, to); o > 0 {
+						down += o
+						day.Incidents++
+					}
+				}
+				if down > observed {
+					down = observed
+				}
+				day.ObservedSeconds = int64(observed / time.Second)
+				day.DownSeconds = int64(down / time.Second)
+			}
+		}
+		days = append(days, day)
+	}
+	return days
 }
 
 // downIntervals walks the events and returns every stretch a live release's
@@ -398,5 +459,5 @@ func labelInt(raw string) int64 {
 
 // Unavailability is the answer when the figure cannot be read at all.
 func Unavailability(now time.Time, reason string) Availability {
-	return Availability{Status: "unavailable", Reason: reason, ObservedAt: now.UTC(), Windows: []AvailabilityWindow{}}
+	return Availability{Status: "unavailable", Reason: reason, ObservedAt: now.UTC(), Windows: []AvailabilityWindow{}, Days: []AvailabilityDay{}}
 }

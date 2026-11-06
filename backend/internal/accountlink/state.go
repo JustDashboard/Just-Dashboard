@@ -14,17 +14,19 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
 
-// Everything this package keeps lives in the dashboard's settings table, under
-// these keys. Nothing but the identity is secret, and the identity is sealed.
+// Everything an instance keeps lives in the dashboard's settings table, under
+// its profile's prefix and these names: account.link.identity for the account
+// link, hub.link.identity for the hub link. Nothing but the identity is
+// secret, and the identity is sealed.
 const (
-	keyIdentity = "account.link.identity"
-	keyState    = "account.link.state"
-	keyRequest  = "account.link.request"
-	keySequence = "account.link.sequence"
-	keyPolicy   = "account.link.update-policy"
-	keyOutcome  = "account.link.outcome"
-	keyStatus   = "account.link.status"
-	keyAttempt  = "account.link.update-attempt"
+	keyIdentity = "identity"
+	keyState    = "state"
+	keyRequest  = "request"
+	keySequence = "sequence"
+	keyPolicy   = "update-policy"
+	keyOutcome  = "outcome"
+	keyStatus   = "status"
+	keyAttempt  = "update-attempt"
 )
 
 // SiteKey is a key the site signs commands with, pinned when the link was made
@@ -47,6 +49,30 @@ func (k SiteKey) key() (ed25519.PublicKey, error) {
 
 func (k SiteKey) usable(now time.Time) bool { return k.NotAfter == 0 || now.Unix() < k.NotAfter }
 
+// PeerNode is the tailnet machine that answered at the peer's name, as
+// tailscaled's WhoIs named it: the hub link pins it (hub-link-protocol.md 2.4).
+// It is also the shape the hub link's local API shows it in.
+type PeerNode struct {
+	// ID is the node's StableNodeID, which stays the machine's when its name
+	// or address changes.
+	ID string `json:"id"`
+	// Name is its MagicDNS name without the trailing dot.
+	Name string `json:"name"`
+	// Owner is the login of the person the node belongs to; a tagged node has
+	// none, and Tags instead.
+	Owner string   `json:"owner,omitempty"`
+	Tags  []string `json:"tags"`
+}
+
+// Idle is a stored link the instance has stopped using, and why. It stays
+// until a person unlinks: nothing is sent on an idle link.
+type Idle struct {
+	// Code is the API's word for it, hub_url_refused for the hub link.
+	Code   string    `json:"code"`
+	Reason string    `json:"reason"`
+	At     time.Time `json:"at"`
+}
+
 // State is the link itself. It holds nothing secret: the site's public keys, the
 // scope chosen here and who the link belongs to.
 type State struct {
@@ -62,6 +88,11 @@ type State struct {
 	ServerName       string `json:"serverName,omitempty"`
 	HeartbeatSeconds int    `json:"heartbeatSeconds"`
 	PollWaitSeconds  int    `json:"pollWaitSeconds"`
+	// HubNode is the peer's machine, pinned when the link was made or
+	// recorded by the first check after it; nil until one is.
+	HubNode *PeerNode `json:"hubNode,omitempty"`
+	// Idle is set once the instance stopped using this link.
+	Idle *Idle `json:"idle,omitempty"`
 }
 
 func (s State) siteKey(kid string, now time.Time) (SiteKey, bool) {
@@ -75,6 +106,9 @@ func (s State) siteKey(kid string, now time.Time) (SiteKey, bool) {
 
 // Request is a link request waiting for a person to approve it on the site.
 type Request struct {
+	// URL is the origin the request was made to, for a profile that chooses
+	// it per link; empty for one whose origin is configured.
+	URL         string    `json:"url,omitempty"`
 	ID          string    `json:"id"`
 	UserCode    string    `json:"userCode"`
 	ApproveURL  string    `json:"approveUrl"`
@@ -88,14 +122,35 @@ type Request struct {
 	// terminal is polled by that command alone, so the running dashboard and
 	// the command never both collect the one-time approval.
 	Driver string `json:"driver"`
+	// HubNode is the peer's machine found when the request was made, or by
+	// the first check after it; the link pins the one its approval was polled
+	// from.
+	HubNode *PeerNode `json:"hubNode,omitempty"`
+	// WaitingAt is when the terminal command polling a request it began last
+	// said it is still waiting on it, which it does every waitRenewEvery. A
+	// command killed outright stops; once it has been silent for waitLease,
+	// the next terminal command may replace its request.
+	WaitingAt time.Time `json:"waitingAt,omitzero"`
 }
+
+// FromTerminal reports whether the request was begun by the terminal command,
+// which polls it itself.
+func (r Request) FromTerminal() bool { return r.Driver == driverCLI }
 
 const (
 	driverDashboard = "dashboard"
 	driverCLI       = "cli"
 )
 
-// Outcome is why the last request ended without a link.
+// A terminal command waiting on its request says so every waitRenewEvery, and
+// a request whose command has not for waitLease has nobody waiting on it.
+const (
+	waitRenewEvery = 5 * time.Second
+	waitLease      = 20 * time.Second
+)
+
+// Outcome is why the last request ended without a link, or, for a profile
+// with RemovalOutcome, why the last link ended.
 type Outcome struct {
 	Result  string    `json:"result"`
 	At      time.Time `json:"at"`
@@ -107,6 +162,11 @@ const (
 	outcomeExpired = "expired"
 	outcomeFailed  = "failed"
 )
+
+// OutcomeRemoved is a link the peer removed, for a profile with
+// RemovalOutcome: not a request that ended, but the same "why is this server
+// not linked" the Settings page says once.
+const OutcomeRemoved = "removed"
 
 // runtimeStatus is what the last exchanges with the site left behind, kept so
 // a terminal command can say it too.
@@ -126,10 +186,20 @@ func (r runtimeStatus) lastError() string {
 	return r.PollError
 }
 
-// kv is the settings table with the few operations this package needs.
-type kv struct{ st *store.Store }
+// kv is the settings table with the few operations this package needs, under
+// one instance's prefix. Every key it is given is a name under that prefix.
+type kv struct {
+	st     *store.Store
+	prefix string
+	// clock, when set, puts a floor under the request counter: the current
+	// unix milliseconds (Profile.ClockSequence).
+	clock func() time.Time
+}
 
-func (k kv) get(ctx context.Context, key string, out any) (bool, error) {
+func (k kv) key(name string) string { return k.prefix + "." + name }
+
+func (k kv) get(ctx context.Context, name string, out any) (bool, error) {
+	key := k.key(name)
 	raw, ok, err := k.st.Setting(ctx, key)
 	if err != nil || !ok {
 		return false, err
@@ -140,17 +210,17 @@ func (k kv) get(ctx context.Context, key string, out any) (bool, error) {
 	return true, nil
 }
 
-func (k kv) put(ctx context.Context, key string, v any) error {
+func (k kv) put(ctx context.Context, name string, v any) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	return k.st.SetSetting(ctx, key, string(raw))
+	return k.st.SetSetting(ctx, k.key(name), string(raw))
 }
 
-func (k kv) del(ctx context.Context, keys ...string) error {
-	for _, key := range keys {
-		if _, err := k.st.DB.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, key); err != nil {
+func (k kv) del(ctx context.Context, names ...string) error {
+	for _, name := range names {
+		if _, err := k.st.DB.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, k.key(name)); err != nil {
 			return err
 		}
 	}
@@ -170,19 +240,19 @@ func (k kv) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	return tx.Commit()
 }
 
-func putTx(ctx context.Context, tx *sql.Tx, key string, v any) error {
+func (k kv) putTx(ctx context.Context, tx *sql.Tx, name string, v any) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, string(raw))
+		`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, k.key(name), string(raw))
 	return err
 }
 
-func delTx(ctx context.Context, tx *sql.Tx, keys ...string) error {
-	for _, key := range keys {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, key); err != nil {
+func (k kv) delTx(ctx context.Context, tx *sql.Tx, names ...string) error {
+	for _, name := range names {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, k.key(name)); err != nil {
 			return err
 		}
 	}
@@ -195,32 +265,73 @@ func delTx(ctx context.Context, tx *sql.Tx, keys ...string) error {
 // take the write lock when they begin. It changes nothing unless the stored
 // link is serverID's, and reports the state as it stands afterwards.
 func (k kv) updateState(ctx context.Context, serverID string, change func(*State) bool) (State, bool, error) {
+	return k.updateStateTx(ctx, serverID, func(_ *sql.Tx, st *State) (bool, error) { return change(st), nil })
+}
+
+// updateStateTx is updateState for a change that writes more than the state in
+// the same transaction. An error from change rolls all of it back.
+func (k kv) updateStateTx(ctx context.Context, serverID string, change func(*sql.Tx, *State) (bool, error)) (State, bool, error) {
 	var out State
 	found := false
 	err := k.tx(ctx, func(tx *sql.Tx) error {
-		var raw string
-		err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, keyState).Scan(&raw)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
+		st, ok, err := k.stateTx(ctx, tx)
+		if err != nil || !ok || st.ServerID != serverID {
 			return err
 		}
-		var st State
-		if err := json.Unmarshal([]byte(raw), &st); err != nil {
-			return fmt.Errorf("%s is unreadable: %w", keyState, err)
-		}
-		if st.ServerID != serverID {
-			return nil
-		}
 		found, out = true, st
-		if !change(&st) {
-			return nil
+		changed, err := change(tx, &st)
+		if err != nil || !changed {
+			return err
 		}
 		out = st
-		return putTx(ctx, tx, keyState, st)
+		return k.putTx(ctx, tx, keyState, st)
 	})
 	return out, found && err == nil, err
+}
+
+// stateTx reads the stored link inside a transaction.
+func (k kv) stateTx(ctx context.Context, tx *sql.Tx) (State, bool, error) {
+	var raw string
+	err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, k.key(keyState)).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return State{}, false, nil
+	}
+	if err != nil {
+		return State{}, false, err
+	}
+	var st State
+	if err := json.Unmarshal([]byte(raw), &st); err != nil {
+		return State{}, false, fmt.Errorf("%s is unreadable: %w", k.key(keyState), err)
+	}
+	return st, st.ServerID != "", nil
+}
+
+// requestTx reads the pending request inside a transaction.
+func (k kv) requestTx(ctx context.Context, tx *sql.Tx) (Request, bool, error) {
+	var raw string
+	err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, k.key(keyRequest)).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Request{}, false, nil
+	}
+	if err != nil {
+		return Request{}, false, err
+	}
+	var r Request
+	if err := json.Unmarshal([]byte(raw), &r); err != nil {
+		return Request{}, false, fmt.Errorf("%s is unreadable: %w", k.key(keyRequest), err)
+	}
+	return r, r.ID != "", nil
+}
+
+// statusTx reads the status inside a transaction; one that cannot be read is
+// only a missing hint.
+func (k kv) statusTx(ctx context.Context, tx *sql.Tx) runtimeStatus {
+	var s runtimeStatus
+	var raw string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, k.key(keyStatus)).Scan(&raw); err == nil {
+		_ = json.Unmarshal([]byte(raw), &s)
+	}
+	return s
 }
 
 func (k kv) state(ctx context.Context) (State, bool, error) {
@@ -259,12 +370,26 @@ func (k kv) status(ctx context.Context) runtimeStatus {
 // durable before this returns, so the number is on disk before it is on the
 // wire and two processes can never be handed the same one. The counter spans
 // the life of the identity: it is not reset by an unlink.
+//
+// With a clock the new number is max(stored + 1, unix milliseconds), computed
+// in that same statement: a database restored from a copy taken before the
+// last thousand requests (a VPS snapshot rolled back) would otherwise send
+// numbers the peer has already seen until it caught up.
 func (k kv) nextSequence(ctx context.Context) (int64, error) {
 	var raw string
-	err := k.st.DB.QueryRowContext(ctx,
-		`INSERT INTO settings(key, value) VALUES(?, '1')
-		 ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
-		 RETURNING value`, keySequence).Scan(&raw)
+	var err error
+	if k.clock != nil {
+		ms := k.clock().UnixMilli()
+		err = k.st.DB.QueryRowContext(ctx,
+			`INSERT INTO settings(key, value) VALUES(?, CAST(? AS TEXT))
+			 ON CONFLICT(key) DO UPDATE SET value = CAST(MAX(CAST(value AS INTEGER) + 1, ?) AS TEXT)
+			 RETURNING value`, k.key(keySequence), ms, ms).Scan(&raw)
+	} else {
+		err = k.st.DB.QueryRowContext(ctx,
+			`INSERT INTO settings(key, value) VALUES(?, '1')
+			 ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
+			 RETURNING value`, k.key(keySequence)).Scan(&raw)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("persist request sequence: %w", err)
 	}

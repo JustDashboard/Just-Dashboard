@@ -174,8 +174,9 @@ func parseInstant(v string) (time.Time, error) {
 }
 
 // handleDiskBreakdown answers "what is filling this mount". It is a recursive
-// walk, so it runs under a hard deadline and returns whatever it measured if
-// the tree is too large to finish.
+// walk, so it runs under a hard deadline and a bound on its work, and answers
+// with whatever it measured when either runs out: each entry it did not finish
+// says so (partial), its figures then floors.
 func (s *Server) handleDiskBreakdown(w http.ResponseWriter, r *http.Request) error {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -203,12 +204,13 @@ func (s *Server) handleDiskBreakdown(w http.ResponseWriter, r *http.Request) err
 	}
 	ctx, cancel := timeoutCtx(r, 45*time.Second)
 	defer cancel()
-	var entries []sysinfo.DirEntry
-	s.modules.onHost(func() { entries, err = sysinfo.DirBreakdown(ctx, resolved, limit) })
+	// Each of the scan's workers runs in the host's mount namespace, which a
+	// goroutine does not inherit.
+	entries, err := sysinfo.DirBreakdown(ctx, resolved, limit, s.modules.onHost)
 	if err != nil {
 		if errors.Is(err, sysinfo.ErrDirScanLimit) {
 			return httpx.Err(http.StatusUnprocessableEntity, "disk_scan_limit",
-				"the directory is too large to scan safely")
+				fmt.Sprintf("%s holds more than 10,000 entries, more than a breakdown ranks: scan a folder inside it", path))
 		}
 		return httpx.BadRequest("cannot scan %s: %v", path, err)
 	}

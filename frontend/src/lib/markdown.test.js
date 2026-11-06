@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { markdownText, parseInline, parseMarkdown, safeHref } from "./markdown"
+import {
+  isForgeMedia,
+  markdownMedia,
+  markdownText,
+  onlyMedia,
+  parseInline,
+  parseMarkdown,
+  safeHref,
+} from "./markdown"
 
 describe("reading a pull request's description", () => {
   test("headings, paragraphs and soft breaks", () => {
@@ -78,9 +86,100 @@ describe("inline runs", () => {
     expect(safeHref("https://github.com")).toBe("https://github.com")
   })
 
-  test("an image is a link to itself", () => {
+  test("an image is data, and one that would run something is its text", () => {
     expect(parseInline("![shot](https://x.test/a.png)")).toEqual([
-      { t: "link", href: "https://x.test/a.png", c: [{ t: "text", v: "shot" }] },
+      { t: "image", src: "https://x.test/a.png", alt: "shot" },
     ])
+    expect(parseInline("![shot](javascript:alert(1))")).toEqual([{ t: "text", v: "shot" }])
+  })
+
+  test("a badge is its picture rather than brackets around one", () => {
+    expect(parseInline("[![ci](https://x.test/b.svg)](https://x.test/run)")).toEqual([
+      { t: "image", src: "https://x.test/b.svg", alt: "ci" },
+    ])
+  })
+
+  test("an upload alone on its line is the file, and in a sentence a link", () => {
+    const url = "https://github.com/user-attachments/assets/1a2b-3c"
+    expect(parseInline(url)).toEqual([{ t: "image", src: url, alt: "" }])
+    expect(parseInline(`see ${url} there`)[1]).toEqual({
+      t: "link",
+      href: url,
+      c: [{ t: "text", v: url }],
+    })
+  })
+})
+
+describe("the HTML a description is written in", () => {
+  test("a fold keeps its summary and reads what is in it", () => {
+    const blocks = parseMarkdown(
+      "<details><summary><code>/docker</code></summary>\n\n**Before**\n\n![](https://x.test/a.png)\n\n</details>\n\nAfter it",
+    )
+    expect(blocks[0].t).toBe("details")
+    expect(blocks[0].open).toBe(false)
+    expect(parseMarkdown("<details open>\nx\n</details>")[0].open).toBe(true)
+    expect(blocks[0].summary).toEqual([{ t: "code", v: "/docker" }])
+    expect(blocks[0].c.map((b) => b.t)).toEqual(["paragraph", "paragraph"])
+    expect(blocks[1]).toEqual({ t: "paragraph", c: [{ t: "text", v: "After it" }] })
+  })
+
+  test("a fold inside a fold closes where it should", () => {
+    const blocks = parseMarkdown(
+      "<details><summary>a</summary>\n<details><summary>b</summary>\nin\n</details>\nout\n</details>",
+    )
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].c.map((b) => b.t)).toEqual(["details", "paragraph"])
+  })
+
+  test("a tag with no opening one is not printed", () => {
+    expect(parseMarkdown("text\n</details>")).toEqual([
+      { t: "paragraph", c: [{ t: "text", v: "text" }] },
+    ])
+  })
+
+  test("img and video are the media they name", () => {
+    const [p] = parseMarkdown(
+      '<img src="https://x.test/a.png" alt="shot" width="300"> <video src="https://x.test/b.mp4" controls></video>',
+    )
+    expect(p.c.filter((r) => r.t === "image")).toEqual([
+      { t: "image", src: "https://x.test/a.png", alt: "shot" },
+      { t: "image", src: "https://x.test/b.mp4", alt: "" },
+    ])
+  })
+
+  test("what is inside code stays the words the author typed", () => {
+    expect(parseMarkdown('```html\n<img src="https://x.test/a.png">\n```')).toEqual([
+      { t: "code", lang: "html", v: '<img src="https://x.test/a.png">' },
+    ])
+    expect(parseInline("`<b>x</b>`")).toEqual([{ t: "code", v: "<b>x</b>" }])
+    expect(parseMarkdown("`<details>` is a tag")[0].c[0]).toEqual({ t: "code", v: "<details>" })
+  })
+})
+
+describe("media", () => {
+  test("only GitHub's media hosts are drawn", () => {
+    expect(isForgeMedia("https://raw.githubusercontent.com/o/r/abc/a.png")).toBe(true)
+    expect(isForgeMedia("https://github.com/user-attachments/assets/abc")).toBe(true)
+    expect(isForgeMedia("https://github.com/settings/profile")).toBe(false)
+    expect(isForgeMedia("http://raw.githubusercontent.com/a.png")).toBe(false)
+    expect(isForgeMedia("https://githubusercontent.com.evil.test/a.png")).toBe(false)
+    expect(isForgeMedia("https://x.test/a.png")).toBe(false)
+    expect(isForgeMedia("not a url")).toBe(false)
+  })
+
+  test("the lightbox steps through a body's pictures once each, folds and tables included", () => {
+    const a = "https://raw.githubusercontent.com/o/r/s/a.png"
+    const b = "https://raw.githubusercontent.com/o/r/s/b.png"
+    const blocks = parseMarkdown(
+      `![one](${a})\n\n|x|\n|-|\n|![two](${b})|\n\n<details><summary>s</summary>\n\n![again](${a})\n![far](https://x.test/c.png)\n</details>`,
+    )
+    expect(markdownMedia(blocks).map((m) => m.src)).toEqual([a, b])
+  })
+
+  test("a paragraph of pictures is told from a sentence with one in it", () => {
+    expect(onlyMedia(parseInline("![a](https://x.test/a.png)\n![b](https://x.test/b.png)"))).toBe(
+      true,
+    )
+    expect(onlyMedia(parseInline("see ![a](https://x.test/a.png)"))).toBe(false)
   })
 })

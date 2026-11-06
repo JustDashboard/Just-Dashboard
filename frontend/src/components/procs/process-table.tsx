@@ -259,11 +259,13 @@ export function LiveProcesses() {
       <Page className="animate-rise" {...inspection.bindings}>
         <PageContext eyebrow="Processes" title="Live" />
 
-        {known && (
-          <HostIdentity
-            mark={platformProduct(host.platform)}
-            title={host.hostname}
-            facts={
+        {/* Held open before the metrics socket lands, so the band under it does
+            not move when it does. */}
+        <HostIdentity
+          mark={host && platformProduct(host.platform)}
+          title={host?.hostname ?? <TextShimmer>Reading this host…</TextShimmer>}
+          facts={
+            known ? (
               <>
                 <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
                 <FactDot />
@@ -291,20 +293,21 @@ export function LiveProcesses() {
                   </>
                 )}
               </>
-            }
-            aside={controls}
-          />
-        )}
+            ) : (
+              <span>&nbsp;</span>
+            )
+          }
+          aside={controls}
+        />
 
-        {held?.groups && (
-          <WorkloadBand
-            groups={held.groups}
-            snapshot={snapshot}
-            ratesReady={held.ratesReady}
-            selected={group}
-            onSelect={setGroup}
-          />
-        )}
+        <WorkloadBand
+          groups={held?.groups}
+          loading={!data && !processList.error}
+          snapshot={snapshot}
+          ratesReady={held?.ratesReady ?? false}
+          selected={group}
+          onSelect={setGroup}
+        />
 
         {/* Framed, because it is a table: the grid owns a scroll region and the
           edge is what says so (§2). Everything above it stays plain. */}

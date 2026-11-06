@@ -43,6 +43,7 @@ import {
   ShieldCheck,
   ShieldOff,
   SignIn,
+  Sparkles,
   Terminal,
   TerminalWindow,
   ServerMap,
@@ -53,6 +54,7 @@ import {
   Wrench,
   ArrowLeftRight,
   Plus,
+  Hub,
 } from "@/components/icons"
 import type { Capability } from "@/lib/types"
 import { sectionOf, type SectionKey } from "@/lib/sidebar-sections"
@@ -76,6 +78,13 @@ export type NavChild = {
   icon: React.ComponentType<{ className?: string }>
   /** Hidden unless the signed-in role holds this capability. */
   capability?: Capability
+  /**
+   * Drawn only while this server is linked to a Just Hub, or while you are on
+   * it. An unlinked server's rail is exactly what it was before hubs existed;
+   * the page is still one word away in search, and the hub's Connect button
+   * opens it directly.
+   */
+  hubLink?: boolean
 }
 
 export type NavItem = {
@@ -84,6 +93,8 @@ export type NavItem = {
   icon: React.ComponentType<{ className?: string }>
   /** Hidden unless the signed-in role holds this capability. */
   capability?: Capability
+  /** See `NavChild.hubLink`. */
+  hubLink?: boolean
   /**
    * A feature large enough to be several pages. The row opens a panel holding
    * exactly these, and the first of them is the section's own landing page —
@@ -135,6 +146,9 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
       // Beside the Overview rather than in a section: it is about every
       // section at once, and like the Overview it cannot be hidden.
       { title: "Map", href: "/map", icon: ServerMap },
+      // Who the assistant asks, for every page that uses it: about the whole
+      // dashboard rather than a section, so it cannot be hidden either.
+      { title: "Assistant", href: "/assistant", icon: Sparkles },
       {
         title: "Monitoring",
         icon: Monitoring,
@@ -388,6 +402,15 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
             icon: Link,
             capability: "system.admin",
           },
+          // Beside Connect: the other place this server can report to. The
+          // name is the product's, since the page is about one hub.
+          {
+            title: "Hub",
+            href: "/dashboard/hub",
+            icon: Hub,
+            capability: "system.admin",
+            hubLink: true,
+          },
         ],
       },
     ],
@@ -443,6 +466,7 @@ export type ProjectNavEntry = {
 
 export const PROJECT_NAV: ProjectNavEntry[] = [
   { title: "Overview", path: "", icon: GridSquare },
+  { title: "Assistant", path: "/assistant", icon: Sparkles },
   { title: "Deployments", path: "/deployments", icon: Layers },
   { title: "Logs", path: "/logs", icon: Logs },
   { title: "Runtime", path: "/runtime", icon: Servers },
@@ -504,18 +528,22 @@ function hideableKey(href: string): SectionKey | null {
  * where you are — and a group goes when nothing in it is left to draw, which
  * is why the role is asked here rather than beside the call: Server
  * configuration with Packages hidden is empty to an account that cannot see
- * System users or the audit log.
+ * System users or the audit log. A `hubLink` page follows the same rule with
+ * `hubLinked` in place of the account's choice: drawn while this server is
+ * linked to a hub, and while you are on it either way.
  */
 export function shownFor(
-  entry: { href?: string; capability?: Capability; children?: NavEntry[] },
+  entry: { href?: string; capability?: Capability; children?: NavEntry[]; hubLink?: boolean },
   hidden: ReadonlySet<string>,
   pathname: string,
   can: (capability: Capability) => boolean,
+  hubLinked = false,
 ): boolean {
   if (entry.capability && !can(entry.capability)) return false
   if (entry.href === undefined) {
-    return (entry.children ?? []).some((child) => shownFor(child, hidden, pathname, can))
+    return (entry.children ?? []).some((child) => shownFor(child, hidden, pathname, can, hubLinked))
   }
+  if (entry.hubLink && !hubLinked && !navMatches(entry.href, pathname)) return false
   const key = hideableKey(entry.href)
   return !key || !hidden.has(key) || navMatches(entry.href, pathname)
 }
@@ -624,8 +652,16 @@ export const APP_NAME = "Just Dashboard"
  * What the browser's tab says on a page: "Files · Just Dashboard". An address
  * the nav has no row for takes the section it sits in, and one under no
  * section takes the product's name alone.
+ *
+ * A server linked to a Just Hub is one of several, and five tabs that all say
+ * "Docker · Just Dashboard" cannot be told apart — so `host`, this server's
+ * own host name, goes after the page: "Docker · atlas · Just Dashboard". It is
+ * never the name the hub lists the server under, which is the hub's text and
+ * the title has no room to say whose (hub-link-protocol §8.10). After the page
+ * rather than before, so the page still leads and a narrow tab cuts the
+ * product's name first. Unlinked, the title is exactly what it was.
  */
-export function tabTitle(pathname: string): string {
+export function tabTitle(pathname: string, host?: string): string {
   const page = navLocation(pathname)?.title ?? sectionsFor(pathname)[0]?.title
-  return page ? `${page} · ${APP_NAME}` : APP_NAME
+  return [page, host?.trim() || undefined, APP_NAME].filter(Boolean).join(" · ")
 }

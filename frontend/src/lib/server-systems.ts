@@ -515,8 +515,6 @@ export type System = {
   /** The content's size; the frame adds `FRAME.head` and `FRAME.pad` round it. */
   width: number
   height: number
-  /** Every name and state in it, lowercased, for the rail's search. */
-  haystack: string
 }
 
 /** The sizes the shapes are drawn at, by face and, for a container, by role. */
@@ -633,10 +631,8 @@ function logsHref(kind: string, item: MapItem): string | undefined {
   }
 }
 
-type Built = Omit<System, "haystack">
-
 /** One system's nodes, frames and lines, laid out. */
-function buildSystem(graph: Graph, draft: Draft, sharedBy: Map<string, string[]>): Built {
+function buildSystem(graph: Graph, draft: Draft, sharedBy: Map<string, string[]>): System {
   const sid = draft.id
   const nodeId = (itemId: string) => `${sid}/${itemId}`
   const members = new Set(draft.members)
@@ -1087,22 +1083,7 @@ export function detectSystems(map: ServerMap | undefined): System[] {
   for (const d of drafts) {
     for (const id of d.members) sharedBy.set(id, [...(sharedBy.get(id) ?? []), d.id])
   }
-  return drafts.map((d) => {
-    const built = buildSystem(graph, d, sharedBy)
-    const haystack = [
-      built.anchor.name,
-      SYSTEM_LABEL[built.kind],
-      ...built.nodes.flatMap((n) => [
-        n.item.name,
-        n.item.state,
-        n.item.detail ?? "",
-        n.item.product ?? "",
-      ]),
-    ]
-      .join("\n")
-      .toLowerCase()
-    return { ...built, haystack }
-  })
+  return drafts.map((d) => buildSystem(graph, d, sharedBy))
 }
 
 /** The name a system goes by: the loose one has none of its own. */
@@ -1146,29 +1127,6 @@ export function layoutAtlas(systems: System[]): Placed[] {
     rowHeight = Math.max(rowHeight, f.height)
   }
   return out
-}
-
-/** The systems a search keeps: by any name, state or product in them. */
-export function searchSystems(systems: System[], query: string): Set<string> | null {
-  const q = query.trim().toLowerCase()
-  if (!q) return null
-  return new Set(systems.filter((s) => s.haystack.includes(q)).map((s) => s.id))
-}
-
-/** The nodes in a system a search lights. */
-export function searchNodes(system: System, query: string): Set<string> {
-  const q = query.trim().toLowerCase()
-  if (!q) return new Set()
-  return new Set(
-    system.nodes
-      .filter((n) =>
-        [n.item.name, n.item.state, n.item.detail ?? "", n.item.product ?? "", n.role ?? ""]
-          .join("\n")
-          .toLowerCase()
-          .includes(q),
-      )
-      .map((n) => n.id),
-  )
 }
 
 /** A count of a system's things by face, for the rail's line under its name. */

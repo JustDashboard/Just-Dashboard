@@ -1316,8 +1316,11 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           hosts={hosts}
           appOf={appOf}
           healthOf={(v) => siteUpstreams(v, upstreamPoll.data)}
-          traffic={hasTraffic ? trafficPoll.data : undefined}
+          traffics={hasNginx}
+          traffic={trafficPoll.data}
+          trafficError={trafficPoll.error}
           certs={certPoll.data}
+          certsLoading={certPoll.loading}
           onChip={setChip}
         />
       )}

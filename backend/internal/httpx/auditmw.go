@@ -95,31 +95,68 @@ func AuditMutations(log *audit.Logger) func(http.Handler) http.Handler {
 			if sw.Status() >= 400 && p.FailureReason != "" {
 				detail = strings.TrimSpace(detail + " " + p.FailureReason)
 			}
-			log.Record(r.Context(), audit.Entry{
-				UserID:   p.UserID(),
-				Username: p.Username(),
-				Role:     string(p.Role),
-				IP:       ClientIP(r),
-				Actor:    actor,
-				Action:   info.Action,
-				Target:   info.Target,
-				Method:   r.Method,
-				Path:     r.URL.Path,
-				Status:   sw.Status(),
-				Success:  sw.Status() < 400 && !info.Failed,
-				Detail:   detail,
-				KeyID:    p.KeyID(),
-				KeyName:  p.KeyName(),
-			})
+			e := principalEntry(r, p)
+			e.Actor, e.Action, e.Target, e.Detail = actor, info.Action, info.Target, detail
+			e.Status, e.Success = sw.Status(), sw.Status() < 400 && !info.Failed
+			log.Record(r.Context(), e)
 		})
 	}
 }
 
+// principalKind is who acted as the trail records it. The assistant acting for
+// a person is "assistant", with the person's name, so what it did reads apart
+// from what they did themselves. A session a Just Hub sign-in ticket opened is
+// "hub-session", so what was done through the hub reads apart from what the
+// account did in a session of this server's own (hub-link-protocol.md section
+// 9.10); the assistant acting in one stays "assistant", and both carry the hub
+// user and the session (principalEntry).
 func principalKind(p *Principal) string {
-	if p == nil || p.Kind == "" {
+	switch {
+	case p == nil || p.Kind == "":
 		return "anonymous"
+	case p.Assistant:
+		return "assistant"
+	case p.HubSession:
+		return "hub-session"
 	}
 	return p.Kind
+}
+
+// AuditWho is the part of an audit entry that names a principal: the account
+// and its role, the actor, the API key behind a token, and a hub session's hub
+// user and session id, which is the sessionId of the hub.signin entry that
+// opened it. Every entry written for a principal starts from it, so none of
+// them can leave the hub out; a package that writes an entry for a change a
+// request made (hublink's hub.signin.revoke) is handed it.
+func AuditWho(p *Principal) audit.Entry {
+	if p == nil {
+		p = &Principal{}
+	}
+	e := audit.Entry{
+		UserID: p.UserID(), Username: p.Username(), Role: string(p.Role), Actor: principalKind(p),
+		KeyID: p.KeyID(), KeyName: p.KeyName(),
+	}
+	if p.HubSession {
+		e.SessionID, e.HubUser = p.SessionID, p.HubUser
+	}
+	return e
+}
+
+// principalEntry is AuditWho with where the request came from and what it
+// asked for.
+func principalEntry(r *http.Request, p *Principal) audit.Entry {
+	e := AuditWho(p)
+	e.IP, e.Method, e.Path = ClientIP(r), r.Method, r.URL.Path
+	return e
+}
+
+// AuditEntry is principalEntry for the request's own principal, for a handler
+// that writes an entry of its own rather than through AuditMutations: a socket
+// recorded when it opens, a read recorded before it runs, an outcome recorded
+// after the response. It fills in who, the method and the path; the caller
+// fills in what happened.
+func AuditEntry(r *http.Request) audit.Entry {
+	return principalEntry(r, MustPrincipal(r))
 }
 
 // apiVersionSegment matches the leading "v1/" of a trimmed API path.
@@ -167,20 +204,7 @@ func defaultAction(r *http.Request) string {
 // send traffic somewhere the caller chose in a way worth a trail. It is
 // written before the read runs, so a probe that hangs is still on record.
 func AuditRead(log *audit.Logger, r *http.Request, action, target string) {
-	p := MustPrincipal(r)
-	log.Record(r.Context(), audit.Entry{
-		UserID:   p.UserID(),
-		Username: p.Username(),
-		Role:     string(p.Role),
-		IP:       ClientIP(r),
-		Actor:    principalKind(p),
-		Action:   action,
-		Target:   target,
-		Method:   r.Method,
-		Path:     r.URL.Path,
-		Status:   http.StatusOK,
-		Success:  true,
-		KeyID:    p.KeyID(),
-		KeyName:  p.KeyName(),
-	})
+	e := AuditEntry(r)
+	e.Action, e.Target, e.Status, e.Success = action, target, http.StatusOK, true
+	log.Record(r.Context(), e)
 }

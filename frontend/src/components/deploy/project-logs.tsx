@@ -7,7 +7,6 @@ import { ArrowRight, Bell } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { agentProduct } from "@/lib/clients"
-import { dockerSource, stackSource } from "@/lib/log-sources"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -39,7 +38,6 @@ import type { ChartMarker } from "@/components/deploy/request-chart"
 import { LifecycleFeed } from "@/components/deploy/lifecycle-feed"
 import { RequestLines } from "@/components/deploy/request-lines"
 import { ProjectOutput } from "@/components/deploy/project-output"
-import { OutputInsights } from "@/components/deploy/output-insights"
 import { ProjectBuilds } from "@/components/deploy/project-builds"
 import {
   EMPTY_REQUEST_QUERY,
@@ -48,8 +46,6 @@ import {
   completeQuery,
   containerAt,
   defaultView,
-  liveStack,
-  orderedServices,
   queryAround,
   queryFromParams,
   queryParams,
@@ -325,11 +321,6 @@ export function ProjectLogs() {
     }),
     [primary, kind, project.product],
   )
-  const stack = liveStack(services)
-  const live = orderedServices(
-    services.filter((s) => s.liveRelease),
-    lead,
-  )[0]
   const containerOf = (id: string | undefined) =>
     id
       ? services.find((s) => s.containerId.startsWith(id) || id.startsWith(s.containerId))
@@ -425,18 +416,6 @@ export function ProjectLogs() {
             renderInline={(entry, window) => (
               <RequestLines entry={entry} window={window} answering={answering(entry)} />
             )}
-            afterInsights={
-              live
-                ? (window) => (
-                    <OutputInsights
-                      sourceId={stack ? stackSource(stack) : dockerSource(live.containerId)}
-                      label={stack ? "the live release's services" : live.name}
-                      window={window}
-                      onOpen={(at, container) => openOutput(containerOf(container) ?? live, at)}
-                    />
-                  )
-                : undefined
-            }
           />
         )}
         {view === "output" && (

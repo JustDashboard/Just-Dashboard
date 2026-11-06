@@ -18,20 +18,20 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { AssistantSettingsSheet } from "@/components/assistant/settings-sheet"
+import { useAssistantSettings } from "@/components/assistant/settings"
+import { askAgent, useAgentSession } from "@/components/assistant/agent/sessions"
+import type { AgentAttachment } from "@/components/assistant/agent/model"
+import { databaseScope } from "@/components/database/assistant"
 import {
-  AssistantPane,
-  type AssistantContext,
-} from "@/components/database/query/assistant/assistant-pane"
-import { AssistantSettingsSheet } from "@/components/database/query/assistant/settings-sheet"
-import {
-  attachable,
+  ERROR_QUESTION,
+  PLAN_QUESTION,
+  errorText,
+  planAttachmentText,
   planSource,
-  type AssistantTask,
-} from "@/components/database/query/assistant/transcript"
-import {
-  useAssistant,
-  useAssistantSettings,
-} from "@/components/database/query/assistant/use-assistant"
+  type QueryContext,
+} from "@/components/database/query/attachments"
+import { QueryAssistant } from "@/components/database/query/query-assistant"
 import { CommandStrip } from "@/components/database/query/command-strip"
 import type { SchemaTable } from "@/components/database/query/completion"
 import { dialectOf, qualifiedName, quoteName } from "@/components/database/query/dialect"
@@ -448,7 +448,10 @@ export function SqlQuery() {
   /* ----------------------------------------------------------- assistant */
 
   const assistantSettings = useAssistantSettings(offersAssistant)
-  const assistant = useAssistant(id)
+  // The chat the connection's Assistant page has in front: one conversation about
+  // this database, whichever of the two it is carried on in.
+  const agentScope = useMemo(() => databaseScope(id, conn.name), [id, conn.name])
+  const assistant = useAgentSession(agentScope)
   const [settingUp, setSettingUp] = useState(false)
   // What the tab holds that a question can carry, each only when the reader
   // attaches it: the statement the cursor is on, the last result, the
@@ -459,9 +462,9 @@ export function SqlQuery() {
   )
   const explained =
     held?.explain?.phase === "done" && held.explain.answer ? held.explain : undefined
-  const assistantContext: AssistantContext = {
+  const assistantContext: QueryContext = {
     statement: targetSql || tab.sql,
-    result: resultStep?.result ? attachable(resultStep.result) : undefined,
+    result: resultStep?.result,
     failed: failedStep?.error ? { sql: failedStep.sql, error: failedStep.error } : undefined,
     plan: explained?.answer
       ? { sql: explained.sql, text: planSource(explained.answer) }
@@ -470,9 +473,9 @@ export function SqlQuery() {
   // The results and the plan offer a question of their own once there is
   // somebody to ask it of.
   const assistantReady = offersAssistant && !readOnly && assistantSettings.data?.configured === true
-  const askAssistant = (task: AssistantTask) => {
+  const askAssistant = (question: string, attached: AgentAttachment[]) => {
     showAssistant(true)
-    assistant.ask(task, picked)
+    askAgent(assistant, question, [], attached)
   }
 
   /* ------------------------------------------------------ saved queries */
@@ -869,23 +872,20 @@ export function SqlQuery() {
               onAskAboutError={
                 assistantReady
                   ? (step) =>
-                      askAssistant({
-                        kind: "error",
-                        prompt: "",
-                        statement: step.sql,
-                        error: step.error ?? "",
-                      })
+                      askAssistant(ERROR_QUESTION, [
+                        {
+                          label: "error",
+                          text: errorText({ sql: step.sql, error: step.error ?? "" }),
+                        },
+                      ])
                   : undefined
               }
               onAskAboutPlan={
                 assistantReady && assistantContext.plan
                   ? () =>
-                      askAssistant({
-                        kind: "plan",
-                        prompt: "",
-                        statement: assistantContext.plan!.sql,
-                        plan: assistantContext.plan!.text,
-                      })
+                      askAssistant(PLAN_QUESTION, [
+                        { label: "plan", text: planAttachmentText(assistantContext.plan!) },
+                      ])
                   : undefined
               }
               empty={empty}
@@ -919,11 +919,9 @@ export function SqlQuery() {
                 className="absolute inset-y-0 -left-1 z-20"
               />
             )}
-            <AssistantPane
-              assistant={assistant}
+            <QueryAssistant
+              session={assistant}
               settings={assistantSettings}
-              schema={picked}
-              tables={schema.model.tables.filter((table) => !picked || table.schema === picked)}
               context={assistantContext}
               canSetUp={can("system.admin")}
               onSetUp={() => setSettingUp(true)}
@@ -947,10 +945,7 @@ export function SqlQuery() {
           open={settingUp}
           settings={assistantSettings.data}
           onClose={() => setSettingUp(false)}
-          onSaved={() => {
-            assistantSettings.refresh()
-            assistant.reset()
-          }}
+          onSaved={assistantSettings.refresh}
           confirm={confirm}
         />
       )}

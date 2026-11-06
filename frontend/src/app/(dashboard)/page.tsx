@@ -19,7 +19,6 @@ import type {
   TerminalList,
   TrafficPulse,
   UpdateReport,
-  VHost,
 } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
@@ -389,14 +388,6 @@ function useModuleReads(
       [],
       { enabled: shows("proxy") },
     ),
-    // Only for the Add a site shortcut's count, so only for an account that
-    // is shown it: the list is the Proxy section's own read.
-    sites: usePoll<VHost[]>(
-      (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
-      300_000,
-      [],
-      { enabled: shows("proxy") && can("system.admin") },
-    ),
     exposure: usePoll<Exposure>(
       (signal) => get<Exposure>("/exposure", undefined, signal),
       60_000,
@@ -482,38 +473,19 @@ function shortcutsFor(
   can: ReturnType<typeof useAuth>["can"],
   hostname: string,
 ): Shortcut[] {
-  const admin = can("system.admin")
-  const write = can("service.control")
   const list: (Shortcut | false)[] = [
     shows("deploy") &&
-      admin && {
+      can("system.admin") && {
         key: "deploy",
         label: "New project",
         detail: counted(reads.fleet.data?.deployments.length, "project"),
         fallback: SHORTCUT_GLYPH.deploy,
+        verb: "new",
         href: "/deploy/new",
       },
-    // The Sites page opens its form on a new site from ?new=1, as a port or a
-    // container with nothing in front of it already links there.
-    shows("proxy") &&
-      admin && {
-        key: "site",
-        label: "Add a site",
-        detail: counted(reads.sites.data?.length, "site"),
-        fallback: SHORTCUT_GLYPH.site,
-        href: "/proxy/sites?new=1",
-      },
-    shows("databases") &&
-      admin && {
-        key: "database",
-        label: "Add a database",
-        detail: counted(reads.databases.data?.connections.length, "database"),
-        fallback: SHORTCUT_GLYPH.database,
-        href: "/databases/new",
-      },
     reads.terminal.enabled && {
-      key: "shell",
-      label: "New shell",
+      key: "terminal",
+      label: "New terminal",
       // The count first: the account it signs in as is the part a narrow
       // card can lose.
       detail: reads.terminal.data
@@ -522,14 +494,16 @@ function shortcutsFor(
           : `as ${reads.terminal.data.login.user}`
         : undefined,
       product: "terminal",
+      verb: "new",
       href: newShellHref(reads.terminal.data),
     },
     reads.drawings.enabled &&
-      write && {
+      can("service.control") && {
         key: "drawing",
         label: "New drawing",
         detail: counted(reads.drawings.data?.length, "drawing"),
         product: "excalidraw",
+        verb: "new",
         create: "drawing",
       },
     shows("files") && {
@@ -537,23 +511,9 @@ function shortcutsFor(
       label: "Browse files",
       detail: hostname,
       fallback: SHORTCUT_GLYPH.files,
+      verb: "open",
       href: "/files",
     },
-    reads.remote.enabled && {
-      key: "computer",
-      label: "Add a computer",
-      detail: counted(reads.remote.data?.computers.length, "computer"),
-      fallback: SHORTCUT_GLYPH.computer,
-      href: "/remote-desktop/new",
-    },
-    shows("backups") &&
-      admin && {
-        key: "backup",
-        label: "Back up",
-        detail: counted(reads.backups.data?.length, "job"),
-        fallback: SHORTCUT_GLYPH.backup,
-        href: "/backups",
-      },
   ]
   return list.filter((shortcut): shortcut is Shortcut => Boolean(shortcut))
 }

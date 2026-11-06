@@ -42,6 +42,10 @@ import { cn } from "@/lib/utils"
  * (curl), and a key as the service its name says holds it — GitLab, Jenkins,
  * Ansible, Home Assistant, Postman beside the ones above.
  *
+ * The assistant's pages draw who answers: Claude, OpenAI, Gemini, OpenRouter,
+ * Groq, Mistral, DeepSeek, xAI, Ollama and LM Studio. Most of those marks are
+ * Lobe Icons' (MIT), the mono ones filled with the brand's own colour.
+ *
  * The deploy pages draw what a project is made of and what it talks to: the
  * language its recipe builds and the framework detection found, the package
  * manager, the host its source or image lives on (GitHub, Codeberg, Quay, an
@@ -117,6 +121,13 @@ const LOGOS: Record<string, string> = {
   chroma: "chroma.svg",
   chrome: "chrome.svg",
   claude: "claude.svg",
+  deepseek: "deepseek.svg",
+  gemini: "gemini.svg",
+  groq: "groq.svg",
+  lmstudio: "lmstudio.svg",
+  mistral: "mistral.svg",
+  openrouter: "openrouter.svg",
+  xai: "xai.svg",
   clickhouse: "clickhouse.svg",
   cloudflare: "cloudflare.svg",
   cockroachdb: "cockroachdb.svg",
@@ -353,6 +364,7 @@ const LOGOS: Record<string, string> = {
   symfony: "symfony.svg",
   syncthing: "syncthing.svg",
   systemd: "systemd.svg",
+  trivy: "trivy.svg",
   tailscale: "tailscale.svg",
   tanstack: "tanstack.svg",
   telegram: "telegram.svg",

@@ -43,9 +43,9 @@ func (s *Server) mountDatabaseAdminRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/{id}/backups", s.handle(s.handleDBBackupList))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
-		r.Method(http.MethodPost, "/{id}/server/roles", s.handle(s.handleDBRoleCreate))
-		r.Method(http.MethodPut, "/{id}/server/roles/{name}", s.handle(s.handleDBRoleAlter))
-		r.Method(http.MethodPost, "/{id}/server/roles/{name}/grant", s.handle(s.handleDBRoleGrant))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/server/roles", s.handle(s.handleDBRoleCreate))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/{id}/server/roles/{name}", s.handle(s.handleDBRoleAlter))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/server/roles/{name}/grant", s.handle(s.handleDBRoleGrant))
 		r.Method(http.MethodPost, "/{id}/server/databases", s.handle(s.handleDBDatabaseCreate))
 		// A sibling connection to another database on the same server, with
 		// the same credentials: the way from "I can see it in the list" to

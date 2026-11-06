@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { PG_LINES } from "./logs-lens-fixture"
+import { risen } from "./risen"
 
 /**
  * The three claims the Docker overhaul rests on, checked in a browser.
@@ -1420,6 +1421,39 @@ test("a stack narrows the table from its chip or its row", async ({ page }) => {
   await expect(page.locator("tbody tr")).toHaveCount(2)
 })
 
+test("the band does not move when the first frame lands", async ({ page }) => {
+  await mockDocker(page)
+  let land!: () => void
+  const held = new Promise<void>((resolve) => (land = resolve))
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/stream/, async (socket) => {
+    await held
+    socket.send(JSON.stringify({ type: "containers", data: containers }))
+    socket.send(
+      JSON.stringify({
+        type: "stats",
+        data: [{ id: containers[0].id, cpuPercent: 12, memUsage: 1e8, memLimit: 5e8, hostCpus: 8 }],
+      }),
+    )
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker/containers")
+
+  const band = page.locator("[data-slot=container-band]")
+  const blocks = band.locator("[data-slot=bar-reading]")
+  await expect(blocks).toHaveCount(3)
+  const measure = () =>
+    blocks.evaluateAll((all) => all.map((block) => block.getBoundingClientRect().height))
+  await risen(page)
+  const before = await measure()
+  expect(new Set(before).size).toBe(1)
+
+  land()
+  const processor = page.getByLabel("Processor by container")
+  await expect(processor.getByRole("button", { name: `Open ${containers[0].name}` })).toBeVisible()
+  await risen(page)
+  expect(await measure()).toEqual(before)
+})
+
 /**
  * What happened lately is Docker's own event log, with a restart loop as one
  * line and a kill for memory said on the exit it caused — which also turns
@@ -1466,8 +1500,10 @@ test("recent events fold a restart loop and name a kill for memory", async ({ pa
   await page.goto("/docker/containers")
 
   const recent = page.getByRole("region", { name: "Recent container events" })
-  await expect(recent.getByText(/restarted ×4 in \d+ min · exit 1/)).toBeVisible()
-  await expect(recent.getByText("killed for memory")).toBeVisible()
+  const line = recent.locator("[data-slot=reading-line]")
+  await expect(line).toContainText("killed for memory")
+  await recent.getByRole("button", { name: "Open web" }).hover()
+  await expect(line.getByText(/restarted ×4 in \d+ min · exit 1/)).toBeVisible()
   const db = page.getByRole("row").filter({ hasText: "postgres:16" })
   await expect(db.getByText("Out of memory")).toBeVisible()
   await expect(page.getByRole("button", { name: /^Failing/ })).toContainText("1")
@@ -1783,21 +1819,40 @@ async function mockUsage(
 
 /**
  * The Usage tab reads a container the way a project's Runtime reads a
- * release — each chart headed by its reading now — and breaks those
- * readings down under the charts the way the Metrics page breaks the host
- * down.
+ * release — the Metrics page's row of readings over its charts — and breaks
+ * those readings down under the charts the way the Metrics page breaks the
+ * host down.
  */
-test("usage heads each chart with its reading now and breaks the readings down", async ({
-  page,
-}) => {
+test("usage reads as the Metrics page does and breaks the readings down", async ({ page }) => {
   const feed = await mockUsage(page)
   const usage = page.getByTestId("container-usage")
   await feed.send(0, 1024 * 1024)
   await feed.send(2, 1024 * 1024 + 4096)
   await expect(usage.getByText("Live", { exact: true }).first()).toBeVisible()
-  // The processor's share of a core heads its chart, and a rate needs two frames.
-  await expect(usage.getByText("150.0%", { exact: true })).toBeVisible()
+  // The five readings, as on Metrics: a share of a core against its quota, and
+  // a rate, which needs two frames.
+  const readings = usage.locator("[data-slot=stat-grid]").first()
+  await expect(readings.locator("[data-slot=stat-tile]")).toHaveCount(5)
+  await expect(readings.locator("[data-slot=stat-tile]", { hasText: "CPU" })).toContainText(
+    "150.0%",
+  )
+  await expect(readings.getByText("of a 2-core quota")).toBeVisible()
+  await expect(readings.getByText("of 512.0 MB")).toBeVisible()
   await expect(usage.getByText("2.0 KB/s").first()).toBeVisible()
+
+  // The counters since it started are what moved, not a table of limits: one
+  // bar each for the network and the disk, on one scale.
+  const moved = usage.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Data moved", exact: true }),
+  })
+  await expect(moved.getByText("since it started")).toBeVisible()
+  await expect(moved.getByRole("img")).toHaveCount(2)
+  await expect(moved.getByRole("img", { name: /in, .* out/ })).toBeVisible()
+  await expect(moved.getByRole("img", { name: /read, .* written/ })).toBeVisible()
+  await expect(moved.getByText(/quota|limit/)).toHaveCount(0)
+
+  // The line that used to end the block, said nowhere now.
+  await expect(usage.getByText(/Live from Docker's stats stream|Recorded every/)).toHaveCount(0)
 
   // Where the memory is: the inactive cache apart from the working set.
   await expect(usage.getByRole("heading", { name: "Allocation", exact: true })).toBeVisible()
@@ -1834,7 +1889,7 @@ test("a stopped container keeps its history and opens no socket", async ({ page 
   const stopped = await mockUsage(page, { stopped: true })
   const usage = page.getByTestId("container-usage")
   await expect(usage.getByText("Not running", { exact: true })).toBeVisible()
-  await expect(usage.getByRole("heading", { name: "Processor", exact: true })).toBeVisible()
+  await expect(usage.getByRole("heading", { name: "Utilisation", exact: true })).toBeVisible()
   await expect(usage.getByText("Not running. These are read while it runs.").first()).toBeVisible()
   expect(stopped.connections()).toBe(0)
 })
@@ -1858,7 +1913,7 @@ for (const width of [1280, 1720, 390]) {
     await feed.send(0, 1024 * 1024)
     await feed.send(2, 1024 * 1024 + 4096)
     await expect(page.getByRole("heading", { name: "Interfaces", exact: true })).toBeVisible()
-    await expect(page.getByRole("heading", { name: "Since it started", exact: true })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Data moved", exact: true })).toBeVisible()
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)

@@ -88,6 +88,19 @@ type ActiveWork struct {
 	Run           EngineRun `json:"run,omitzero"`
 }
 
+// AgentAttachment is api.agentAttachment in the dashboard's source.
+type AgentAttachment struct {
+	Label string `json:"label,omitempty"`
+	Text  string `json:"text,omitempty"`
+}
+
+// AgentImage is api.agentImage in the dashboard's source.
+type AgentImage struct {
+	Data      string         `json:"data,omitempty"`
+	MediaType string         `json:"mediaType,omitempty"`
+	Thumb     AssistantImage `json:"thumb,omitzero"`
+}
+
 // AppSummary is githubapp.AppSummary in the dashboard's source.
 type AppSummary struct {
 	CreatedAt time.Time `json:"createdAt,omitzero"`
@@ -143,6 +156,12 @@ const (
 	ArtifactKindExport        ArtifactKind = "export"
 )
 
+// AssistantImage is assistant.Image in the dashboard's source.
+type AssistantImage struct {
+	Data      string `json:"data,omitempty"`
+	MediaType string `json:"mediaType,omitempty"`
+}
+
 // Audience is accesslog.Audience in the dashboard's source.
 type Audience struct {
 	BotRequests   int64     `json:"botRequests,omitempty"`
@@ -167,6 +186,7 @@ type Automation struct {
 
 // Availability is deploy.Availability in the dashboard's source.
 type Availability struct {
+	Days        []AvailabilityDay    `json:"days"`
 	Down        bool                 `json:"down,omitempty"`
 	LiveRelease *int64               `json:"liveRelease,omitempty"`
 	ObservedAt  time.Time            `json:"observedAt,omitzero"`
@@ -174,6 +194,14 @@ type Availability struct {
 	RecordSince *time.Time           `json:"recordSince,omitempty"`
 	Status      string               `json:"status,omitempty"`
 	Windows     []AvailabilityWindow `json:"windows"`
+}
+
+// AvailabilityDay is deploy.AvailabilityDay in the dashboard's source.
+type AvailabilityDay struct {
+	DownSeconds     int64     `json:"downSeconds,omitempty"`
+	From            time.Time `json:"from,omitzero"`
+	Incidents       int64     `json:"incidents,omitempty"`
+	ObservedSeconds int64     `json:"observedSeconds,omitempty"`
 }
 
 // AvailabilityWindow is deploy.AvailabilityWindow in the dashboard's source.
@@ -207,62 +235,71 @@ type BackupSummary struct {
 
 // Blueprint is blueprint.Blueprint in the dashboard's source.
 type Blueprint struct {
-	Access      Access       `json:"access,omitzero"`
-	Automation  []Automation `json:"automation"`
-	Category    Category     `json:"category,omitempty"`
-	Checks      []Check      `json:"checks"`
-	Description string       `json:"description,omitempty"`
-	DocsURL     string       `json:"docsUrl,omitempty"`
-	Files       []ConfigFile `json:"files"`
-	Fixtures    []Fixture    `json:"fixtures"`
-	IconID      string       `json:"iconId,omitempty"`
-	ID          string       `json:"id,omitempty"`
-	Image       Image        `json:"image,omitzero"`
-	Inputs      []Input      `json:"inputs"`
-	Name        string       `json:"name,omitempty"`
-	Operations  Operations   `json:"operations,omitzero"`
-	Ports       []Port       `json:"ports"`
-	Profile     Profile      `json:"profile,omitempty"`
-	Provenance  Provenance   `json:"provenance,omitzero"`
-	Resources   Resources    `json:"resources,omitzero"`
-	Retired     string       `json:"retired,omitempty"`
-	Secrets     []Secret     `json:"secrets"`
-	Security    Security     `json:"security,omitzero"`
-	Services    []Service    `json:"services"`
-	Update      Update       `json:"update,omitzero"`
-	Version     string       `json:"version,omitempty"`
-	Volumes     []Volume     `json:"volumes"`
+	Access      Access         `json:"access,omitzero"`
+	Automation  []Automation   `json:"automation"`
+	Category    Category       `json:"category,omitempty"`
+	Checks      []Check        `json:"checks"`
+	Description string         `json:"description,omitempty"`
+	DocsURL     string         `json:"docsUrl,omitempty"`
+	Files       []ConfigFile   `json:"files"`
+	Fixtures    []Fixture      `json:"fixtures"`
+	IconID      string         `json:"iconId,omitempty"`
+	ID          string         `json:"id,omitempty"`
+	Image       BlueprintImage `json:"image,omitzero"`
+	Inputs      []Input        `json:"inputs"`
+	Name        string         `json:"name,omitempty"`
+	Operations  Operations     `json:"operations,omitzero"`
+	Ports       []Port         `json:"ports"`
+	Profile     Profile        `json:"profile,omitempty"`
+	Provenance  Provenance     `json:"provenance,omitzero"`
+	Resources   Resources      `json:"resources,omitzero"`
+	Retired     string         `json:"retired,omitempty"`
+	Secrets     []Secret       `json:"secrets"`
+	Security    Security       `json:"security,omitzero"`
+	Services    []Service      `json:"services"`
+	Update      Update         `json:"update,omitzero"`
+	Version     string         `json:"version,omitempty"`
+	Volumes     []Volume       `json:"volumes"`
 }
 
 // BlueprintDetail is api.blueprintDetail in the dashboard's source.
 type BlueprintDetail struct {
-	Access              Access       `json:"access,omitzero"`
-	Automation          []Automation `json:"automation"`
-	Category            Category     `json:"category,omitempty"`
-	Checks              []Check      `json:"checks"`
-	DeploymentSupported bool         `json:"deploymentSupported,omitempty"`
-	Description         string       `json:"description,omitempty"`
-	DocsURL             string       `json:"docsUrl,omitempty"`
-	Files               []ConfigFile `json:"files"`
-	Fixtures            []Fixture    `json:"fixtures"`
-	IconID              string       `json:"iconId,omitempty"`
-	ID                  string       `json:"id,omitempty"`
-	Image               Image        `json:"image,omitzero"`
-	Inputs              []Input      `json:"inputs"`
-	Name                string       `json:"name,omitempty"`
-	Operations          Operations   `json:"operations,omitzero"`
-	Ports               []Port       `json:"ports"`
-	Profile             Profile      `json:"profile,omitempty"`
-	Provenance          Provenance   `json:"provenance,omitzero"`
-	Resources           Resources    `json:"resources,omitzero"`
-	Retired             string       `json:"retired,omitempty"`
-	Secrets             []Secret     `json:"secrets"`
-	Security            Security     `json:"security,omitzero"`
-	Services            []Service    `json:"services"`
-	UnavailableReason   string       `json:"unavailableReason,omitempty"`
-	Update              Update       `json:"update,omitzero"`
-	Version             string       `json:"version,omitempty"`
-	Volumes             []Volume     `json:"volumes"`
+	Access              Access         `json:"access,omitzero"`
+	Automation          []Automation   `json:"automation"`
+	Category            Category       `json:"category,omitempty"`
+	Checks              []Check        `json:"checks"`
+	DeploymentSupported bool           `json:"deploymentSupported,omitempty"`
+	Description         string         `json:"description,omitempty"`
+	DocsURL             string         `json:"docsUrl,omitempty"`
+	Files               []ConfigFile   `json:"files"`
+	Fixtures            []Fixture      `json:"fixtures"`
+	IconID              string         `json:"iconId,omitempty"`
+	ID                  string         `json:"id,omitempty"`
+	Image               BlueprintImage `json:"image,omitzero"`
+	Inputs              []Input        `json:"inputs"`
+	Name                string         `json:"name,omitempty"`
+	Operations          Operations     `json:"operations,omitzero"`
+	Ports               []Port         `json:"ports"`
+	Profile             Profile        `json:"profile,omitempty"`
+	Provenance          Provenance     `json:"provenance,omitzero"`
+	Resources           Resources      `json:"resources,omitzero"`
+	Retired             string         `json:"retired,omitempty"`
+	Secrets             []Secret       `json:"secrets"`
+	Security            Security       `json:"security,omitzero"`
+	Services            []Service      `json:"services"`
+	UnavailableReason   string         `json:"unavailableReason,omitempty"`
+	Update              Update         `json:"update,omitzero"`
+	Version             string         `json:"version,omitempty"`
+	Volumes             []Volume       `json:"volumes"`
+}
+
+// BlueprintImage is blueprint.Image in the dashboard's source.
+type BlueprintImage struct {
+	Command    []string `json:"command"`
+	Platforms  []string `json:"platforms"`
+	PullPolicy string   `json:"pullPolicy,omitempty"`
+	Reference  string   `json:"reference,omitempty"`
+	TagPolicy  string   `json:"tagPolicy,omitempty"`
 }
 
 // BlueprintOperation is blueprint.Operation in the dashboard's source.
@@ -479,6 +516,12 @@ type Change struct {
 	TTL        int64    `json:"ttl,omitempty"`
 	Type       Type     `json:"type,omitempty"`
 	Want       []string `json:"want"`
+}
+
+// ChatAbout is assistant.ChatAbout in the dashboard's source.
+type ChatAbout struct {
+	Path  string `json:"path,omitempty"`
+	Title string `json:"title,omitempty"`
 }
 
 // Check is blueprint.Check in the dashboard's source.
@@ -2720,15 +2763,6 @@ type Identity struct {
 	State        string `json:"state,omitempty"`
 }
 
-// Image is blueprint.Image in the dashboard's source.
-type Image struct {
-	Command    []string `json:"command"`
-	Platforms  []string `json:"platforms"`
-	PullPolicy string   `json:"pullPolicy,omitempty"`
-	Reference  string   `json:"reference,omitempty"`
-	TagPolicy  string   `json:"tagPolicy,omitempty"`
-}
-
 // ImageBuildIssue is deploy.ImageBuildIssue in the dashboard's source.
 type ImageBuildIssue struct {
 	Code     string            `json:"code,omitempty"`
@@ -3013,6 +3047,16 @@ type MemorySizing struct {
 	Verdict     Verdict  `json:"verdict,omitempty"`
 }
 
+// Mode is one of the values of assistant.Mode.
+type Mode string
+
+// The values of Mode.
+const (
+	ModeAsk     Mode = "ask"
+	ModeChanges Mode = "changes"
+	ModeFull    Mode = "full"
+)
+
 // NotificationAttempt is deploy.NotificationAttempt in the dashboard's source.
 type NotificationAttempt struct {
 	CreatedAt     time.Time  `json:"createdAt,omitzero"`
@@ -3135,9 +3179,14 @@ type OperationsSummary struct {
 
 // OperatorRequest is api.operatorRequest in the dashboard's source.
 type OperatorRequest struct {
-	Conversation string          `json:"conversation,omitempty"`
-	Decisions    map[string]bool `json:"decisions"`
-	Question     string          `json:"question,omitempty"`
+	About        *ChatAbout        `json:"about,omitempty"`
+	Attached     []AgentAttachment `json:"attached"`
+	Conversation string            `json:"conversation,omitempty"`
+	Decisions    map[string]bool   `json:"decisions"`
+	Images       []AgentImage      `json:"images"`
+	Mode         Mode              `json:"mode,omitempty"`
+	Question     string            `json:"question,omitempty"`
+	TakeOver     bool              `json:"takeOver,omitempty"`
 }
 
 // Outcome is secretstore.Outcome in the dashboard's source.
@@ -4603,17 +4652,17 @@ type Series struct {
 
 // Service is blueprint.Service in the dashboard's source.
 type Service struct {
-	DependsOn   []Dependency  `json:"dependsOn"`
-	Egress      bool          `json:"egress,omitempty"`
-	Environment []Environment `json:"environment"`
-	Healthcheck Healthcheck   `json:"healthcheck,omitzero"`
-	Image       Image         `json:"image,omitzero"`
-	Name        string        `json:"name,omitempty"`
-	Ports       []Port        `json:"ports"`
-	Purpose     string        `json:"purpose,omitempty"`
-	Resources   Resources     `json:"resources,omitzero"`
-	Role        ServiceRole   `json:"role,omitempty"`
-	Volumes     []Volume      `json:"volumes"`
+	DependsOn   []Dependency   `json:"dependsOn"`
+	Egress      bool           `json:"egress,omitempty"`
+	Environment []Environment  `json:"environment"`
+	Healthcheck Healthcheck    `json:"healthcheck,omitzero"`
+	Image       BlueprintImage `json:"image,omitzero"`
+	Name        string         `json:"name,omitempty"`
+	Ports       []Port         `json:"ports"`
+	Purpose     string         `json:"purpose,omitempty"`
+	Resources   Resources      `json:"resources,omitzero"`
+	Role        ServiceRole    `json:"role,omitempty"`
+	Volumes     []Volume       `json:"volumes"`
 }
 
 // ServiceRole is one of the values of blueprint.ServiceRole.

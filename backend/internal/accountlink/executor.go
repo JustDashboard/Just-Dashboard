@@ -78,10 +78,10 @@ func (s *Service) execute(ctx context.Context, cmd Command, a Args, actor string
 // one tried and failed is forgotten.
 func (s *Service) setPolicy(ctx context.Context, p UpdatePolicy) (string, error) {
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
-		if err := putTx(ctx, tx, keyPolicy, p); err != nil {
+		if err := s.kv.putTx(ctx, tx, keyPolicy, p); err != nil {
 			return err
 		}
-		return delTx(ctx, tx, keyAttempt)
+		return s.kv.delTx(ctx, tx, keyAttempt)
 	}); err != nil {
 		return "", err
 	}

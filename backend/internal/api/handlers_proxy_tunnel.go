@@ -99,8 +99,8 @@ func (s *Server) mountTunnelRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/sync", s.handle(s.handleTunnelSync))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireSession)
-			r.Method(http.MethodPut, "/", s.handle(s.handleTunnelConnect))
-			r.Method(http.MethodPost, "/create", s.handle(s.handleTunnelCreate))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/", s.handle(s.handleTunnelConnect))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/create", s.handle(s.handleTunnelCreate))
 		})
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/", s.handle(s.handleTunnelDisconnect))

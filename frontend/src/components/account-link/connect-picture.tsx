@@ -101,24 +101,90 @@ export function ConnectPicture({
   scope: AccountLinkScope
 }) {
   const now = useNow(1000)
+  const link = status.state === "linked" ? status.link : undefined
+  const pending = status.state === "pending"
+  const quiet = Boolean(link?.lastError) || heartbeatStale(link?.lastHeartbeatAt, now)
+  const host = siteHost(status.siteUrl)
+
+  return (
+    <LinkPicture
+      label={`How this server connects to ${host}`}
+      linked={Boolean(link)}
+      pending={pending}
+      quiet={quiet}
+      scope={scope}
+      snapshot={link?.lastSnapshot}
+      cadence="Heartbeat every 30 s"
+      peer={{
+        eyebrow: host,
+        title: link ? (
+          <span className="block truncate">{link.owner}</span>
+        ) : pending ? (
+          <TextShimmer>Waiting for approval</TextShimmer>
+        ) : (
+          <span className="text-muted-foreground">Not linked</span>
+        ),
+        hint: link ? (
+          link.lastError ? (
+            <span className="text-warning">Not reaching the site</span>
+          ) : link.lastHeartbeatAt ? (
+            <span className={quiet ? "text-warning" : undefined}>
+              Heartbeat {relativeTime(link.lastHeartbeatAt)}
+            </span>
+          ) : (
+            "First heartbeat within 30 seconds"
+          )
+        ) : pending ? (
+          "Approve the code below"
+        ) : (
+          "Pick a scope, then link"
+        ),
+      }}
+    />
+  )
+}
+
+/**
+ * The picture itself, for either peer: what this server reads, the server, and the peer it
+ * reports to — just-dashboard.com and an account on Settings → Connect, a Just Hub on
+ * Settings → Hub. The snapshot is the same bytes to both, so the left half is the same drawing;
+ * the caller says who the peer is and how the link to it reads.
+ */
+export function LinkPicture({
+  label,
+  linked,
+  pending,
+  quiet,
+  scope,
+  snapshot,
+  cadence,
+  peer,
+}: {
+  label: string
+  linked: boolean
+  pending: boolean
+  /** Linked, but not heard from as it should be: the peer's line holds still in amber. */
+  quiet: boolean
+  /** The scope in force, or the one being chosen while nothing is linked. */
+  scope: AccountLinkScope
+  snapshot?: Snapshot
+  /** The server's hint while it is linked and not on Tailscale. */
+  cadence: string
+  peer: { eyebrow: string; title: React.ReactNode; hint: React.ReactNode }
+}) {
   const container = useRef<HTMLDivElement>(null)
   const serverMark = useRef<HTMLDivElement>(null)
   const siteMark = useRef<HTMLDivElement>(null)
   // One ref per kind; the set of kinds never changes, so they are made once.
   const kindMarks = useMemo(() => KINDS.map(() => createRef<HTMLDivElement>()), [])
 
-  const link = status.state === "linked" ? status.link : undefined
-  const pending = status.state === "pending"
-  const quiet = Boolean(link?.lastError) || heartbeatStale(link?.lastHeartbeatAt, now)
-  const sending = Boolean(link) && !quiet
-  const snapshot = link?.lastSnapshot
+  const sending = linked && !quiet
   const server = record(snapshot?.server)
   const access = record(snapshot?.access)
-  const host = siteHost(status.siteUrl)
 
   return (
     <SettingPicture
-      label={`How this server connects to ${host}`}
+      label={label}
       containerRef={container}
       className="py-4"
       lines={
@@ -130,7 +196,7 @@ export function ConnectPicture({
               fromRef={mark}
               toRef={serverMark}
               still={!sending}
-              dashed={!link}
+              dashed={!linked}
               duration={2.6}
               delay={index * 0.4}
             />
@@ -140,7 +206,7 @@ export function ConnectPicture({
             fromRef={serverMark}
             toRef={siteMark}
             still={!sending && !pending}
-            dashed={!link && !pending}
+            dashed={!linked && !pending}
             tone={quiet ? "warning" : "default"}
             duration={pending ? 3.4 : 2.2}
             delay={sending ? 1.2 : 0}
@@ -185,7 +251,7 @@ export function ConnectPicture({
               </span>
             ) : (
               // The fingerprint is the identity line's; said here it would be said twice.
-              link && "Heartbeat every 30 s"
+              linked && cadence
             )
           }
         />
@@ -199,33 +265,9 @@ export function ConnectPicture({
               <LogoGlyph className="text-brand" />
             </WireMark>
           }
-          eyebrow={host}
-          title={
-            link ? (
-              <span className="block truncate">{link.owner}</span>
-            ) : pending ? (
-              <TextShimmer>Waiting for approval</TextShimmer>
-            ) : (
-              <span className="text-muted-foreground">Not linked</span>
-            )
-          }
-          hint={
-            link ? (
-              link.lastError ? (
-                <span className="text-warning">Not reaching the site</span>
-              ) : link.lastHeartbeatAt ? (
-                <span className={quiet ? "text-warning" : undefined}>
-                  Heartbeat {relativeTime(link.lastHeartbeatAt)}
-                </span>
-              ) : (
-                "First heartbeat within 30 seconds"
-              )
-            ) : pending ? (
-              "Approve the code below"
-            ) : (
-              "Pick a scope, then link"
-            )
-          }
+          eyebrow={peer.eyebrow}
+          title={peer.title}
+          hint={peer.hint}
         />
       }
     />

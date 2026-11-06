@@ -2271,8 +2271,11 @@ test("a host whose sites keep no access log says so once and claims no zero", as
   await expect(
     page.getByRole("region", { name: "Live traffic" }).getByText("No traffic to count yet"),
   ).toBeVisible()
-  // The band does not say it a second time.
-  await expect(page.getByRole("region", { name: "Traffic", exact: true })).toHaveCount(0)
+  // Traffic stays where it stands, so nothing moves when a reading lands, and
+  // says in one line that it has nothing to count.
+  await expect(page.getByRole("region", { name: "Traffic", exact: true })).toContainText(
+    "No site writes an access log the dashboard can read.",
+  )
   const errors = page.getByRole("region", { name: "Recent errors" })
   await expect(errors).toContainText("nginx logged no errors this hour")
   await expect(errors).not.toContainText("server errors this hour")
