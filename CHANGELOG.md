@@ -19,6 +19,8 @@ A dashboard can now connect to a Just Hub on its tailnet, so every server is in 
 
 - Connect a dashboard to a Just Hub
   - Settings, Hub connects this server to a Just Hub on the same tailnet with a one-time code you type into the hub, or with sudo ./scripts/manage.sh hub connect over SSH. You choose what the hub may do: watch, operate, or also run updates. Every action it takes is recorded as hub:<name>, and you can disconnect at any time.
+- A tip to turn off Tailscale key expiry
+  - Tailscale gives every new machine a key that expires after 180 days by default, and a server whose key expires drops off the tailnet, and out of a hub. Settings, Hub and Network, VPN, Tailscale now suggest turning key expiry off for this machine, with a link to the Tailscale admin console.
 - Sign in from the hub, if you turn it on
   - With JD_HUB_SIGNIN=true, an account that opted in can be opened from the linked hub without signing in again. It is off by default.
 - An assistant on every deployment and database

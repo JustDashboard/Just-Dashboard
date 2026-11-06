@@ -73,6 +73,12 @@ the command asks `Link token:` and does not echo what you paste, and from a pipe
 is in no process list and no shell history. There is no option that takes it as an argument. The command exits 0
 once connected, 2 if the request was declined, not approved in time or interrupted, and 1 for anything else.
 
+**Turn off key expiry for this server's machine, and the hub's.** Tailscale gives every new machine a key that
+expires, 180 days later by default, and a machine whose key has expired drops off the tailnet: a server leaves the
+hub, and the hub leaves every server. The Connect form says so beside its button, Network → VPN → Tailscale shows
+it as a tip while this server's key still expires, and warns two weeks before it does. Turn it off in the Tailscale
+admin console (Machines → … → Disable key expiry).
+
 **The hub must be on this server's tailnet.** The address you give must be one machine directly under this
 server's own MagicDNS name (`hub.example.ts.net` beside `server.example.ts.net`), never this server's own name,
 and the dashboard reaches it only over the tailnet: it never dials a hub at an address outside Tailscale's

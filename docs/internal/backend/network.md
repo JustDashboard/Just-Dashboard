@@ -559,7 +559,8 @@ Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `w
   `prefsReadable` explicitly distinguishes failed preference reads from empty advertised routes; the
   editor retains a rejected subnet draft and retries against refreshed authoritative preferences.
   `approval` says which advertised offers the tailnet serves from this node's own status, and the
-  node's key expiry warns before it takes the server off the tailnet. Headscale reads snake_case
+  node's key expiry warns 14 days before it takes the server off the tailnet; further off, the
+  Tailscale view shows a tip to disable key expiry (`keyExpiryTip`, `components/network/vpn/record-logic.ts`). Headscale reads snake_case
   and camelCase output, node expiry and advertised/approved routes (node-level or the older
   `routes list`), including a Headscale in a container.
 
