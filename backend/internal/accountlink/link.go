@@ -31,10 +31,39 @@ var (
 type SiteError struct {
 	URL string
 	Err error
+	// Peer is what the other end is called; "site" when unset.
+	Peer string
 }
 
-func (e *SiteError) Error() string { return fmt.Sprintf("the site at %s: %v", e.URL, e.Err) }
+func (e *SiteError) Error() string {
+	peer := e.Peer
+	if peer == "" {
+		peer = "site"
+	}
+	return fmt.Sprintf("the %s at %s: %v", peer, e.URL, e.Err)
+}
 func (e *SiteError) Unwrap() error { return e.Err }
+
+func (s *Service) peerError(origin string, err error) *SiteError {
+	return &SiteError{URL: origin, Err: err, Peer: s.p.Peer}
+}
+
+// LinkRequest is what a link is begun with.
+type LinkRequest struct {
+	Scope Scope
+	// By is the dashboard account that asks, or "cli" for the terminal
+	// command, which then polls the request itself.
+	By string
+	// Origin is where to ask, for a profile that chooses it per link; a
+	// profile with a configured site ignores it.
+	Origin string
+	// Endpoint is this dashboard's own address and Token a one-time approval;
+	// each is sent only when set.
+	Endpoint, Token string
+	// HubNode is the peer's machine as the instance found it; it is kept with
+	// the request and becomes the link's.
+	HubNode *PeerNode
+}
 
 // ----------------------------------------------------------------- the flow --
 
@@ -42,6 +71,12 @@ func (e *SiteError) Unwrap() error { return e.Err }
 // the dashboard (or the terminal command, when by is "cli") learns of it by
 // polling. Scope is chosen here and kept here.
 func (s *Service) BeginLink(ctx context.Context, scope Scope, by string) (Request, error) {
+	return s.Begin(ctx, LinkRequest{Scope: scope, By: by})
+}
+
+// Begin is BeginLink with everything a request can carry.
+func (s *Service) Begin(ctx context.Context, lr LinkRequest) (Request, error) {
+	scope, by := lr.Scope, lr.By
 	driver := driverDashboard
 	if by == "cli" {
 		driver = driverCLI
@@ -63,10 +98,12 @@ func (s *Service) BeginLink(ctx context.Context, scope Scope, by string) (Reques
 		switch {
 		case !s.now().Before(req.ExpiresAt):
 			s.endRequest(ctx, outcomeExpired, "the request was not approved in time")
-		case driver == driverCLI && req.Driver == driverCLI:
+		case driver == driverCLI && req.Driver == driverCLI && !s.waitedOn(req):
 			// A terminal command that was killed outright leaves its request
 			// behind, with nobody polling it. The next terminal command is
-			// the only thing that could be, so it starts over.
+			// the only thing that could be, so it starts over. One still
+			// waiting keeps its request: two commands polling for one
+			// approval would both collect it.
 			if err := s.CancelLink(ctx); err != nil {
 				return Request{}, err
 			}
@@ -75,21 +112,29 @@ func (s *Service) BeginLink(ctx context.Context, scope Scope, by string) (Reques
 		}
 	}
 
-	id, err := ensureIdentity(ctx, s.st, s.sealer)
+	origin := s.siteURL
+	if s.p.OriginPerLink {
+		if origin = lr.Origin; origin == "" {
+			return Request{}, errors.New("a link request needs the address to ask")
+		}
+	}
+	id, err := ensureIdentity(ctx, s.kv, s.sealer)
 	if errors.Is(err, ErrIdentityUnreadable) {
 		// Nothing is linked, so there is nothing a new key would strand.
-		id, err = replaceUnreadableIdentity(ctx, s.st, s.sealer)
+		id, err = replaceUnreadableIdentity(ctx, s.kv, s.sealer)
 	}
 	if err != nil {
 		return Request{}, err
 	}
-	c := s.newClient(id)
-	info, err := c.site(ctx)
-	if err != nil {
-		return Request{}, &SiteError{s.siteURL, err}
-	}
-	if !slices.Contains(info.Protocol, ProtocolVersion) {
-		return Request{}, &SiteError{s.siteURL, fmt.Errorf("does not speak protocol %d (it lists %v); update this dashboard", ProtocolVersion, info.Protocol)}
+	c := s.newClientAt(origin, id)
+	if s.p.Discover {
+		info, err := c.site(ctx)
+		if err != nil {
+			return Request{}, s.peerError(origin, err)
+		}
+		if !slices.Contains(info.Protocol, ProtocolVersion) {
+			return Request{}, s.peerError(origin, fmt.Errorf("does not speak protocol %d (it lists %v); update this dashboard", ProtocolVersion, info.Protocol))
+		}
 	}
 
 	d := s.desc(ctx)
@@ -97,22 +142,30 @@ func (s *Service) BeginLink(ctx context.Context, scope Scope, by string) (Reques
 		PublicKey: id.PublicKey(), Scope: scope,
 		Server: serverDescription{
 			Name: fitText(d.Name, 64), Hostname: fitText(d.Hostname, 64), Version: fitText(s.version, 32),
-			OS: fitText(d.OS, 64), Arch: fitText(d.Arch, 16),
+			OS: fitText(d.OS, 64), Arch: fitText(d.Arch, 16), Endpoint: lr.Endpoint,
 		},
+		Token: lr.Token,
 	})
 	if err != nil {
-		return Request{}, &SiteError{s.siteURL, err}
+		return Request{}, s.peerError(origin, err)
 	}
-	req, err := s.checkRequestResponse(resp, scope, by, driver)
+	req, err := s.checkRequestResponse(origin, resp, scope, by, driver)
 	req.ServerName = fitText(d.Name, 64)
 	if err != nil {
-		return Request{}, &SiteError{s.siteURL, err}
+		return Request{}, s.peerError(origin, err)
+	}
+	if s.p.OriginPerLink {
+		req.URL = origin
+	}
+	req.HubNode = lr.HubNode
+	if driver == driverCLI {
+		req.WaitingAt = s.now()
 	}
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
-		if err := putTx(ctx, tx, keyRequest, req); err != nil {
+		if err := s.kv.putTx(ctx, tx, keyRequest, req); err != nil {
 			return err
 		}
-		return delTx(ctx, tx, keyOutcome)
+		return s.kv.delTx(ctx, tx, keyOutcome)
 	}); err != nil {
 		return Request{}, err
 	}
@@ -135,14 +188,14 @@ func fitText(s string, max int) string {
 
 // checkRequestResponse refuses a site answer this dashboard should not act on
 // or show a person.
-func (s *Service) checkRequestResponse(r createRequestResponse, scope Scope, by, driver string) (Request, error) {
+func (s *Service) checkRequestResponse(origin string, r createRequestResponse, scope Scope, by, driver string) (Request, error) {
 	switch {
 	case !requestIDPattern.MatchString(r.RequestID):
 		return Request{}, errors.New("answered with a request id this dashboard does not accept")
 	case !userCodePattern.MatchString(r.UserCode):
 		return Request{}, errors.New("answered with a code that is not of the form ABCD-1234")
-	case !sameOrigin(s.siteURL, r.ApproveURL):
-		return Request{}, errors.New("answered with an approval address on another site")
+	case !sameOrigin(origin, r.ApproveURL):
+		return Request{}, errors.New("answered with an approval address on another " + s.p.Peer)
 	}
 	expires := time.Unix(r.ExpiresAt, 0).UTC()
 	if !expires.After(s.now()) || expires.After(s.now().Add(time.Hour)) {
@@ -174,7 +227,11 @@ type PollResult struct {
 // PollLink asks the site whether the pending request has been decided. An error
 // means the site could not be asked this time and the request stands; a result
 // other than PollPending means the request is over.
-func (s *Service) PollLink(ctx context.Context) (PollResult, error) {
+func (s *Service) PollLink(ctx context.Context) (PollResult, error) { return s.poll(ctx, "") }
+
+// poll is PollLink for the request id, or for whichever is pending when id is
+// empty.
+func (s *Service) poll(ctx context.Context, id string) (PollResult, error) {
 	s.pollMu.Lock()
 	defer s.pollMu.Unlock()
 	if st, linked, err := s.kv.state(ctx); err != nil {
@@ -189,20 +246,32 @@ func (s *Service) PollLink(ctx context.Context) (PollResult, error) {
 	if !ok {
 		return PollResult{State: PollFailed, Message: "there is no link request"}, nil
 	}
+	if id != "" && req.ID != id {
+		return PollResult{State: PollFailed, Message: "another link request replaced this one"}, nil
+	}
 	if !s.now().Before(req.ExpiresAt) {
 		s.endRequest(ctx, outcomeExpired, "the request was not approved in time")
 		return PollResult{State: PollExpired, Message: "the request was not approved in time"}, nil
 	}
-	id, _, err := loadIdentity(ctx, s.st, s.sealer)
-	if err != nil || id == nil {
+	ident, _, err := loadIdentity(ctx, s.kv, s.sealer)
+	if err != nil || ident == nil {
 		return PollResult{}, fmt.Errorf("link identity: %w", firstErr(err, ErrIdentityUnreadable))
 	}
-	resp, err := s.newClient(id).pollRequest(ctx, req.ID)
+	// The instance's own check, before anything is sent: an approval is
+	// stored only from a poll it let through.
+	if s.hooks.BeforePoll != nil {
+		if req, err = s.hooks.BeforePoll(ctx, req); err != nil {
+			return s.pollRefused(ctx, err)
+		}
+	}
+	resp, err := s.newClientAt(s.originFor(req.URL), ident).pollRequest(ctx, req.ID)
+	declined := "the request was declined " + s.p.PeerAt
+	var ended *RequestEndedError
 	switch {
 	case err == nil:
 	case isCode(err, http.StatusGone, "request_denied"):
-		s.endRequest(ctx, outcomeDenied, "the request was declined on the site")
-		return PollResult{State: PollDenied, Message: "the request was declined on the site"}, nil
+		s.endRequest(ctx, outcomeDenied, declined)
+		return PollResult{State: PollDenied, Message: declined}, nil
 	case isCode(err, http.StatusGone, "request_expired"):
 		s.endRequest(ctx, outcomeExpired, "the request was not approved in time")
 		return PollResult{State: PollExpired, Message: "the request was not approved in time"}, nil
@@ -215,12 +284,16 @@ func (s *Service) PollLink(ctx context.Context) (PollResult, error) {
 		// here: a poll answered but the link could not be stored, or the
 		// process stopped between the two. Nothing else is to blame, and the
 		// only remedy is a new code.
-		const lost = "the site had already handed over this request's approval, but no link was stored on this server; request a new code"
+		lost := "the " + s.p.Peer + " had already handed over this request's approval, but no link was stored on this server; request a new code"
 		s.endRequest(ctx, outcomeFailed, lost)
 		return PollResult{State: PollFailed, Message: lost}, nil
 	case isCode(err, http.StatusUnauthorized, "unknown_server"):
-		s.endRequest(ctx, outcomeFailed, "the site no longer knows this request")
-		return PollResult{State: PollFailed, Message: "the site no longer knows this request"}, nil
+		forgot := "the " + s.p.Peer + " no longer knows this request"
+		s.endRequest(ctx, outcomeFailed, forgot)
+		return PollResult{State: PollFailed, Message: forgot}, nil
+	case errors.As(err, &ended):
+		// The transport's own check refused to dial.
+		return s.pollRefused(ctx, err)
 	default:
 		return PollResult{State: PollPending}, err
 	}
@@ -235,53 +308,79 @@ func (s *Service) PollLink(ctx context.Context) (PollResult, error) {
 		}
 		return PollResult{State: PollLinked, Link: st}, nil
 	}
-	return PollResult{State: PollPending}, fmt.Errorf("the site answered with the status %q", clip(resp.Status, 32))
+	return PollResult{State: PollPending}, fmt.Errorf("the %s answered with the status %q", s.p.Peer, clip(resp.Status, 32))
+}
+
+// pollRefused is the instance's check saying no to a poll: the request ends as
+// failed when it says so, and otherwise this poll counts as a failed one.
+func (s *Service) pollRefused(ctx context.Context, err error) (PollResult, error) {
+	var ended *RequestEndedError
+	if errors.As(err, &ended) {
+		s.endRequest(ctx, outcomeFailed, ended.Message)
+		return PollResult{State: PollFailed, Message: ended.Message}, nil
+	}
+	return PollResult{State: PollPending}, err
 }
 
 // completeLink stores what an approval carries and ends the request, in one
 // transaction, so a link is either there with its keys or not there at all.
 func (s *Service) completeLink(ctx context.Context, req Request, r pollResponse) (State, error) {
+	kids := s.p.KidPattern
+	if kids == nil {
+		kids = kidPattern
+	}
 	switch {
 	case !requestIDPattern.MatchString(r.ServerID):
 		return State{}, errors.New("the approval names a server id this dashboard does not accept")
-	case r.SiteKey == nil || !kidPattern.MatchString(r.SiteKey.Kid):
-		return State{}, errors.New("the approval carries no usable site key")
+	case r.SiteKey == nil || !kids.MatchString(r.SiteKey.Kid):
+		return State{}, errors.New("the approval carries no usable " + s.p.Peer + " key")
 	case r.Owner == nil || strings.TrimSpace(r.Owner.Label) == "":
 		return State{}, errors.New("the approval names no account")
+	case s.p.OwnerPattern != nil && !s.p.OwnerPattern.MatchString(r.Owner.Label):
+		return State{}, errors.New("the approval names the " + s.p.Peer + " with a label this dashboard does not accept")
 	}
 	key := SiteKey{Kid: r.SiteKey.Kid, PublicKey: r.SiteKey.PublicKey}
 	if raw, err := base64.StdEncoding.DecodeString(key.PublicKey); err != nil || len(raw) != ed25519.PublicKeySize {
-		return State{}, errors.New("the approval's site key is not a 32-byte Ed25519 key")
+		return State{}, errors.New("the approval's " + s.p.Peer + " key is not a 32-byte Ed25519 key")
 	}
 	heartbeat, pollWait := r.HeartbeatSeconds, r.PollWaitSeconds
 	if heartbeat == 0 {
-		heartbeat = 30
+		heartbeat = s.p.DefaultHeartbeatSeconds
 	}
 	if pollWait == 0 {
 		pollWait = 25
 	}
+	origin := s.originFor(req.URL)
 	st := State{
-		URL: s.siteURL, ServerID: r.ServerID, SiteKeys: []SiteKey{key}, Scope: req.Scope,
+		URL: origin, ServerID: r.ServerID, SiteKeys: []SiteKey{key}, Scope: req.Scope,
 		LinkedAt: s.now(), LinkedBy: req.By, Owner: fitText(r.Owner.Label, 254), ServerName: req.ServerName,
 		HeartbeatSeconds: clampInt(heartbeat, 10, 600), PollWaitSeconds: clampInt(pollWait, 1, 25),
+		HubNode: req.HubNode,
 	}
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
-		if err := putTx(ctx, tx, keyState, st); err != nil {
+		if err := s.kv.putTx(ctx, tx, keyState, st); err != nil {
 			return err
 		}
-		return delTx(ctx, tx, keyRequest, keyOutcome, keyStatus, keyPolicy, keyAttempt)
+		if err := s.kv.delTx(ctx, tx, keyRequest, keyOutcome, keyStatus, keyPolicy, keyAttempt); err != nil {
+			return err
+		}
+		return s.onClear(ctx, tx)
 	}); err != nil {
 		return State{}, err
 	}
-	s.log.Info("linked to a just-dashboard.com account", "owner", st.Owner, "scope", st.Scope)
+	s.log.Info("linked to "+s.p.Title, "owner", st.Owner, "scope", st.Scope)
 	if s.audit != nil {
 		who, actor, method := req.By, "session", "LINK"
 		if req.By == "cli" {
 			who, actor, method = "root", "cli", "CLI"
 		}
+		detail := map[string]any{"scope": st.Scope, "serverId": st.ServerID, s.p.Peer: origin}
+		if st.HubNode != nil {
+			detail["hubNode"] = st.HubNode
+		}
 		s.audit.Record(ctx, audit.Entry{
-			Username: who, Actor: actor, Action: "account.link", Target: st.Owner, Method: method, Status: 200, Success: true,
-			Detail: audit.Detail(map[string]any{"scope": st.Scope, "serverId": st.ServerID, "site": s.siteURL}),
+			Username: who, Actor: actor, Action: s.p.AuditPrefix + ".link", Target: st.Owner, Method: method, Status: 200, Success: true,
+			Detail: audit.Detail(detail),
 		})
 	}
 	s.nudge()
@@ -293,10 +392,10 @@ func (s *Service) completeLink(ctx context.Context, req Request, r pollResponse)
 func (s *Service) endRequest(ctx context.Context, result, message string) {
 	ctx = context.WithoutCancel(ctx)
 	err := s.kv.tx(ctx, func(tx *sql.Tx) error {
-		if err := delTx(ctx, tx, keyRequest); err != nil {
+		if err := s.kv.delTx(ctx, tx, keyRequest); err != nil {
 			return err
 		}
-		return putTx(ctx, tx, keyOutcome, Outcome{Result: result, At: s.now(), Message: message})
+		return s.kv.putTx(ctx, tx, keyOutcome, Outcome{Result: result, At: s.now(), Message: message})
 	})
 	if err != nil {
 		s.log.Warn("could not close the link request", "err", err)
@@ -324,32 +423,99 @@ func (s *Service) CancelLink(ctx context.Context) error {
 
 // AwaitLink polls the pending request until it is decided or ctx ends, which is
 // the terminal command's whole job. If ctx ends first the request is cancelled.
+// While it waits it says so (Request.WaitingAt), so another terminal command
+// is refused rather than replacing the request; and it polls only the request
+// it began with, and cancels only that one.
 func (s *Service) AwaitLink(ctx context.Context) (PollResult, error) {
+	req, ok, err := s.kv.request(ctx)
+	if err != nil {
+		return PollResult{}, err
+	}
+	if !ok {
+		return s.PollLink(ctx)
+	}
+	stop := s.keepWaiting(ctx, req.ID)
+	defer stop()
 	var lastErr error
 	for {
-		res, err := s.PollLink(ctx)
+		res, err := s.poll(ctx, req.ID)
 		if err == nil && res.State != PollPending {
 			return res, nil
 		}
 		if err != nil {
 			lastErr = err
 		}
-		wait := 5 * time.Second
-		if req, ok, e := s.kv.request(ctx); e == nil && ok {
-			wait = time.Duration(clampInt(req.PollSeconds, 2, 30)) * time.Second
-		}
+		wait := time.Duration(clampInt(req.PollSeconds, 2, 30)) * time.Second
 		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			t.Stop()
-			_ = s.CancelLink(ctx)
+			s.cancelRequest(ctx, req.ID)
 			msg := "no decision was made in time"
 			if lastErr != nil {
-				msg += "; the last attempt to ask the site failed: " + lastErr.Error()
+				msg += "; the last attempt to ask the " + s.p.Peer + " failed: " + lastErr.Error()
 			}
 			return PollResult{State: PollExpired, Message: msg}, nil
 		case <-t.C:
 		}
+	}
+}
+
+// waitedOn reports whether the terminal command that began req still says it
+// is waiting on it.
+func (s *Service) waitedOn(req Request) bool {
+	return !req.WaitingAt.IsZero() && s.now().Sub(req.WaitingAt) < waitLease
+}
+
+// keepWaiting says, every waitRenew until stop is called, that the terminal
+// command is still waiting on request id.
+func (s *Service) keepWaiting(ctx context.Context, id string) (stop func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTicker(s.waitRenew)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.changeRequest(ctx, id, func(r *Request) { r.WaitingAt = s.now() })
+			}
+		}
+	}()
+	return func() { cancel(); <-done }
+}
+
+// changeRequest changes the stored request if it is still id, in one
+// transaction.
+func (s *Service) changeRequest(ctx context.Context, id string, change func(*Request)) {
+	err := s.kv.tx(ctx, func(tx *sql.Tx) error {
+		req, ok, err := s.kv.requestTx(ctx, tx)
+		if err != nil || !ok || req.ID != id {
+			return err
+		}
+		change(&req)
+		return s.kv.putTx(ctx, tx, keyRequest, req)
+	})
+	if err != nil && ctx.Err() == nil {
+		s.log.Debug("could not update the "+s.p.Name+" request", "err", err)
+	}
+}
+
+// cancelRequest forgets request id, and not one that has replaced it.
+func (s *Service) cancelRequest(ctx context.Context, id string) {
+	ctx = context.WithoutCancel(ctx)
+	err := s.kv.tx(ctx, func(tx *sql.Tx) error {
+		req, ok, err := s.kv.requestTx(ctx, tx)
+		if err != nil || !ok || req.ID != id {
+			return err
+		}
+		return s.kv.delTx(ctx, tx, keyRequest)
+	})
+	if err != nil {
+		s.log.Warn("could not cancel the "+s.p.Name+" request", "err", err)
 	}
 }
 
@@ -385,10 +551,16 @@ func (s *Service) SetScope(ctx context.Context, scope Scope) error {
 	return nil
 }
 
-// Unlink tells the site and forgets the link. A site that cannot be reached
+// Unlink forgets the link and tells the site. A site that cannot be reached
 // does not keep the link alive: the dashboard's own state is what matters, and
 // the owner can remove the server on the site. The result says whether the
 // site was told.
+//
+// The link is forgotten first. Once the site has heard, it answers 410 to
+// every signed request still in flight on the link, from this process or,
+// when this is the terminal command, from the running dashboard's. A loop that
+// hears that while the link is still stored takes it for the site removing
+// the server, and records a second unlink, by system and with that reason.
 func (s *Service) Unlink(ctx context.Context) (siteNotified bool, err error) {
 	st, linked, err := s.kv.state(ctx)
 	if err != nil {
@@ -398,25 +570,35 @@ func (s *Service) Unlink(ctx context.Context) (siteNotified bool, err error) {
 		return false, ErrNotLinked
 	}
 	// Only the site the link was made with is told: a URL that has changed
-	// since names somebody who never heard of this server.
-	if id, _, e := loadIdentity(ctx, s.st, s.sealer); e == nil && id != nil && s.enabled && st.URL == s.siteURL {
-		ctx2, cancel := context.WithTimeout(ctx, requestTimeout)
-		e = s.newClient(id).unlink(ctx2, st.ServerID)
-		cancel()
-		siteNotified = e == nil || isCode(e, http.StatusGone, "")
+	// since names somebody who never heard of this server. Whether it may be
+	// told is decided while the link is still stored, as for any request on
+	// it.
+	var tell *Client
+	if id, _, e := loadIdentity(ctx, s.kv, s.sealer); e == nil && id != nil && s.enabled && s.admit(ctx, st) == nil {
+		tell = s.linkClient(st, id)
 	}
 	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
-		return delTx(ctx, tx, keyState, keyRequest, keyStatus, keyPolicy, keyAttempt, keyOutcome)
+		if err := s.kv.delTx(ctx, tx, keyState, keyRequest, keyStatus, keyPolicy, keyAttempt, keyOutcome); err != nil {
+			return err
+		}
+		return s.onClear(ctx, tx)
 	}); err != nil {
-		return siteNotified, err
+		return false, err
 	}
 	s.cancelLinked()
 	s.nudge()
+	if tell != nil {
+		ctx2, cancel := context.WithTimeout(ctx, requestTimeout)
+		e := tell.unlink(ctx2, st.ServerID)
+		cancel()
+		siteNotified = e == nil || isCode(e, http.StatusGone, "")
+	}
 	return siteNotified, nil
 }
 
 // SyncNow sends a heartbeat now and returns once it has been tried; the result
-// is on the status either way.
+// is on the status either way. Of the link's own state, only a link refused
+// (idle, or made with another site) is an error.
 func (s *Service) SyncNow(ctx context.Context) error {
 	if !s.enabled {
 		return ErrDisabled
@@ -428,8 +610,14 @@ func (s *Service) SyncNow(ctx context.Context) error {
 	if !linked {
 		return ErrNotLinked
 	}
-	if st.URL != s.siteURL {
-		return ErrSiteChanged
+	if err := s.admit(ctx, st); err != nil {
+		if refusedLink(err) {
+			return err
+		}
+		// The instance's check of the peer failed this time: nothing is
+		// sent, and the status says why, as for a heartbeat that failed.
+		s.setHeartbeatError(ctx, st.ServerID, s.describeError(err))
+		return nil
 	}
 	if err := s.sendHeartbeat(ctx, st, false); err != nil && !errors.Is(err, ErrTooSoon) {
 		// The failure is already on the status as lastError.

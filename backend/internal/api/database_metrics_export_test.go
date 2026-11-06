@@ -291,7 +291,7 @@ func TestAScopedKeyReachesNothingButTheMetrics(t *testing.T) {
 	// reads, writes and the ones a readonly role may call.
 	checked := 0
 	for _, rt := range apiRoutes(t, h) {
-		if rt.pattern == "/api/v1"+databaseMetricsPath || rt.pattern == deploymentMetricsEndpoint {
+		if rt.pattern == "/api/v1"+databaseMetricsPath || rt.pattern == deploymentMetricsEndpoint || isPublicAPIRoute(rt) {
 			continue
 		}
 		req := httptest.NewRequest(rt.method, rt.path, nil)

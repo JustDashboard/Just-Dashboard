@@ -350,8 +350,8 @@ A change that weakens any of these has to say so explicitly.
     (`run_command`, invariant 6), which takes the terminal capability. What stays out of its reach is a closed list in
     `api/handlers_assistant_routes.go` (`agentExclusion`), each line something no role changes: its own routes
     and those that ask the model; sign-in, password, second factor, passkeys, sessions and minting an API key;
-    uninstalling the dashboard and its account link and usage count (invariants 12 and 16 want the person's own
-    press); WebSockets and streams; webhooks, the MCP endpoint and other machines' routes. A database connection
+    uninstalling the dashboard, its account link, its hub link and its usage count (invariants 12, 16 and 17 want
+    the person's own press); WebSockets and streams; webhooks, the MCP endpoint and other machines' routes. A database connection
     the operator protected is out of every chat's reach as well (`agentProtected`): its own chat is refused by the
     guard, and a call into its routes is answered with why, so nothing in it is sent to a model. What used to be
     refused is asked instead: how much runs without asking is the mode, which the server holds on every press —
@@ -394,6 +394,28 @@ A change that weakens any of these has to say so explicitly.
     key cannot give it. The report is the three fields of `usageping.Report` with no identifier, at most once per
     UTC day, and a redirect is never followed. `JD_USAGE_PING=false` or `JD_ACCOUNT_LINK=false` stops it, and an
     agent has none. See [the usage count](../backend/usage-ping.md).
+17. Connecting to a Just Hub adds no inbound path and no second authority, as invariant 12's link does not. It is
+    outbound only: every exchange is a request from this server to one machine on its own tailnet, dialled only
+    inside `100.64.0.0/10`, over TLS verified for the hub's MagicDNS name, never following a redirect; the hub's
+    one call the other way is the discovery probe `GET /api/v1/hub/hello`, behind the allowlist, which names
+    nothing but whether this server can be connected. A command from the hub runs only if its signature verifies
+    against the hub key pinned at approval, which no heartbeat reply can add to, end or replace
+    (`IgnoreAnnouncedKeys`: a new hub key needs a new link), it has not expired or been seen before, and its kind
+    is one of the closed set of protocol 7.1 within the scope chosen and enforced on this server; each is
+    audited as `hub:<hub name>` whatever its outcome, and draws on its own destructive budget. **The hub's
+    machine is pinned as well**: the `StableNodeID` WhoIs gives for its address at connect, checked before
+    anything is sent (at each connector start, whenever the dialled address changes, at least every five
+    minutes, and before every poll of a pending request); another machine at that name is sent nothing and
+    the link goes idle, as does a stored address the tailnet rule refuses at start, and an idle link stays idle
+    in the store until a person disconnects. Only that check, against the pinned node, lets a request through:
+    the URL check before Connect compares the name alone and changes nothing, before anything is pinned the
+    machine WhoIs names must bear the hub's name, and a check that cannot run for want of an address sends
+    nothing. Connecting, cancelling, changing the scope and disconnecting are session-only in the browser (an
+    API key is refused) and root-only at the terminal, where the hub's one-time
+    token is read only from standard input. Everything the hub sends for display (notices, fleet names, its
+    name, its error messages) is shown as plain text attributed to the hub, never as this dashboard's own
+    prompt. See [hub link](../backend/hub-link.md) and its
+    [protocol](../backend/hub-link-protocol.md).
 
 ## Invariant 2: what two-factor still guarantees
 

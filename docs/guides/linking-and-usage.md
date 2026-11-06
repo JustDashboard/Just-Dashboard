@@ -2,7 +2,8 @@
 
 [← README](../../README.md) · [Features](../../FEATURES.md) · [Install](install.md) · [Configuration](configuration.md) · [Command line](cli.md) · [Administration](administration.md) · [Linking & usage count](linking-and-usage.md) · [Security](../../SECURITY.md)
 
-Two things that talk to just-dashboard.com. Both are optional, and neither sends anything until an administrator says so.
+Two things that talk to just-dashboard.com, and one that talks to a Just Hub on your own tailnet. All are
+optional, and none sends anything until an administrator says so.
 
 ## Linking to just-dashboard.com
 
@@ -33,6 +34,55 @@ is written to the audit log as the site account. Unlink from Settings, with
 `sudo ./scripts/manage.sh unlink`, or by removing the server on the site. `JD_ACCOUNT_LINK=false` switches
 the feature off entirely: no page controls, no installer question, no command, and a link that exists
 goes quiet. `JD_ACCOUNT_URL` names the site, an origin only (`http://` just for `localhost`).
+
+## Connecting to Just Hub
+
+A Just Hub is a separate app that runs on its own machine on your tailnet and shows many dashboards in one
+place: their health and version, a switcher between them in each dashboard, updates across them. Connecting a
+server is optional and off until you do it, and it is a separate thing from linking to just-dashboard.com: a
+server can be linked to both, and the two never share a key, a counter, a setting or a log name.
+
+Connect from the dashboard's Settings, or over SSH:
+
+```bash
+sudo ./scripts/manage.sh hub connect hub.example.ts.net            # prints a code to approve in the hub
+sudo ./scripts/manage.sh hub connect hub.example.ts.net --scope operate
+sudo ./scripts/manage.sh hub status
+sudo ./scripts/manage.sh hub disconnect
+```
+
+`hub connect` prints the hub's machine and its owner (or "not checked" when Tailscale could not be asked), a code,
+this server's key fingerprint and the address of the hub's screen for this request, and waits (15 minutes by
+default, `--wait` up to an hour) while the hub's owner types that code into the hub. While it waits, another `hub
+connect` is refused and names the code already waiting. Once connected it prints the hub's key fingerprint; compare it with the one on the
+hub's Settings page. The hub's own installer and its "Add by command" screen give a one-time token instead, which
+approves the request in advance. A token is only ever given on standard input, with `--token-stdin`: at a terminal
+the command asks `Link token:` and does not echo what you paste, and from a pipe it reads one line, so the token
+is in no process list and no shell history. There is no option that takes it as an argument. The command exits 0
+once connected, 2 if the request was declined, not approved in time or interrupted, and 1 for anything else.
+
+**The hub must be on this server's tailnet.** The address you give must be one machine directly under this
+server's own MagicDNS name (`hub.example.ts.net` beside `server.example.ts.net`), never this server's own name,
+and the dashboard reaches it only over the tailnet: it never dials a hub at an address outside Tailscale's
+range. If tailscaled can be asked, the dashboard also checks that the address belongs to the machine of that
+name, shows that machine and its owner before you connect, and remembers it: from then on it sends nothing to
+another machine that takes the hub's name (a hub machine deleted and its name reused), and the connection goes
+quiet until you disconnect and connect again. If the server later moves to another tailnet, the connection
+likewise stays stored but goes quiet, and Settings says why; disconnect and connect to a hub on the new
+tailnet.
+
+The scope works as for just-dashboard.com, with the table above, except that the default is `maintain`: a hub
+is yours and on your own network, and keeping servers updated is what it is for. Change it any time in
+Settings. Every command from the hub, run or refused, is written to the audit log as `hub:<hub name>`, and its
+destructive actions draw on their own budget. The hub never opens a connection to the dashboard, with one
+exception before you connect: it may ask `GET /api/v1/hub/hello` to find dashboards on the tailnet, which is
+behind your network allowlist and answers only whether this server can be connected, never its version or
+name.
+
+Disconnect from Settings, with `sudo ./scripts/manage.sh hub disconnect`, or by removing the server in the hub,
+after which `hub status` says it was removed there.
+`JD_HUB_LINK=false` switches the feature off entirely: no discovery answer, no page controls, no command, and a
+connection that exists goes quiet. The Settings page shows the exact body of the last report the hub was sent.
 
 ## The usage count
 

@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
+	"regexp"
 	"sync"
 	"time"
 
@@ -28,6 +30,9 @@ var (
 	// another. The link's keys and its server id mean something only to the
 	// site it was made with, so nothing is sent to the new one on its account.
 	ErrSiteChanged = errors.New("this server is linked to a different site than JD_ACCOUNT_URL now names; set it back or unlink")
+	// ErrIdle is a link the instance stopped using (SetIdle); it stays so
+	// until a person unlinks.
+	ErrIdle = errors.New("this link is idle; unlink, then link again")
 )
 
 // Options are what a Service is made from. Everything but the store and the
@@ -53,6 +58,11 @@ type Options struct {
 	// Location is the clock the update window is read on; the server's own
 	// time zone by default.
 	Location *time.Location
+	// Profile makes this instance one link rather than another; nil is the
+	// account link.
+	Profile *Profile
+	// Hooks are what the instance adds of its own.
+	Hooks Hooks
 }
 
 // ServerDescription is what a link request tells the site about this machine.
@@ -64,6 +74,8 @@ type ServerDescription struct {
 // the update policy. Its state is in the dashboard's store, so a link begun at
 // the terminal is picked up by the running dashboard without a restart.
 type Service struct {
+	p       Profile
+	hooks   Hooks
 	st      *store.Store
 	sealer  *auth.Sealer
 	audit   *audit.Logger
@@ -86,6 +98,13 @@ type Service struct {
 	// pollEvery overrides the interval the site asked a pending request be
 	// polled at; zero means use the site's.
 	pollEvery time.Duration
+	// waitRenew is how often a terminal command waiting on its request says
+	// it still is (Request.WaitingAt).
+	waitRenew time.Duration
+	// pollHeld is how long a command poll may go unanswered before it counts
+	// as working: a peer answers an error at once, and holds only a poll it
+	// took.
+	pollHeld time.Duration
 	// The bounds of the wait after a failed exchange.
 	backoffMin, backoffMax time.Duration
 	// First and later evaluations of the update policy. Once a minute, because
@@ -108,25 +127,36 @@ type Service struct {
 
 	mu           sync.Mutex
 	lastSnapshot []byte
-	linkedCancel context.CancelFunc
-	cancel       context.CancelFunc
-	done         chan struct{}
-	interrupted  sync.Once
+	// keysIgnoredFor is the link whose announced keys were last logged as
+	// ignored, so the warning is said once per link.
+	keysIgnoredFor string
+	linkedCancel   context.CancelFunc
+	cancel         context.CancelFunc
+	done           chan struct{}
+	interrupted    sync.Once
 }
 
 func New(o Options) *Service {
+	p := AccountProfile
+	if o.Profile != nil {
+		p = *o.Profile
+	}
 	s := &Service{
-		st: o.Store, sealer: o.Sealer, audit: o.Audit, log: o.Log, kv: kv{o.Store},
+		p: p, hooks: o.Hooks,
+		st: o.Store, sealer: o.Sealer, audit: o.Audit, log: o.Log, kv: kv{st: o.Store, prefix: p.KeyPrefix},
 		siteURL: o.SiteURL, enabled: o.Enabled, host: o.Host, version: o.Version,
 		desc: o.Describe, http: o.HTTP, now: o.Now, loc: o.Location,
-		idle: 15 * time.Second, watch: 5 * time.Second,
+		idle: 15 * time.Second, watch: 5 * time.Second, waitRenew: waitRenewEvery, pollHeld: 2 * time.Second,
 		backoffMin: time.Second, backoffMax: 5 * time.Minute,
 		policyFirst: time.Minute, policyEvery: time.Minute,
 		wake: make(chan struct{}, 1), kick: make(chan struct{}, 1),
-		hbPerMinute: maxHeartbeatsPerMinute,
+		hbPerMinute: p.HeartbeatsPerMinute,
 	}
-	if s.siteURL == "" {
+	if s.siteURL == "" && !p.OriginPerLink {
 		s.siteURL = DefaultSiteURL
+	}
+	if s.hbPerMinute <= 0 {
+		s.hbPerMinute = maxHeartbeatsPerMinute
 	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
@@ -136,6 +166,9 @@ func New(o Options) *Service {
 	}
 	if s.now == nil {
 		s.now = func() time.Time { return time.Now().UTC() }
+	}
+	if p.ClockSequence {
+		s.kv.clock = s.now
 	}
 	if s.loc == nil {
 		s.loc = time.Local
@@ -155,11 +188,71 @@ func (s *Service) Enabled() bool { return s != nil && s.enabled }
 // SiteURL is the origin this service talks to.
 func (s *Service) SiteURL() string { return s.siteURL }
 
-func (s *Service) newClient(id *Identity) *Client {
+// newClient talks to the configured site.
+func (s *Service) newClient(id *Identity) *Client { return s.newClientAt(s.siteURL, id) }
+
+func (s *Service) newClientAt(origin string, id *Identity) *Client {
 	return &Client{
-		origin: s.siteURL, http: s.http, id: id, next: s.kv.nextSequence,
-		now: s.now, version: s.version,
+		origin: origin, http: s.http, id: id, next: s.kv.nextSequence,
+		now: s.now, version: s.version, base: s.p.BasePath, agent: s.p.Agent, peer: s.p.Peer,
+		speaker: s.speaker(origin, ""),
 	}
+}
+
+// linkClient talks to the peer of the stored link st, which quotes the peer
+// under its own name.
+func (s *Service) linkClient(st State, id *Identity) *Client {
+	c := s.newClientAt(s.originFor(st.URL), id)
+	c.speaker = s.speaker(st.URL, st.Owner)
+	return c
+}
+
+// speaker is how the peer's words are attributed: by the owner label once
+// the link names one, else by the host it was asked at.
+func (s *Service) speaker(origin, owner string) string {
+	if s.p.Speaker == "" {
+		return ""
+	}
+	name := owner
+	if name == "" {
+		if u, err := url.Parse(origin); err == nil && u.Host != "" {
+			name = u.Host
+		} else {
+			name = s.p.Peer
+		}
+	}
+	return s.p.Speaker + " (" + clip(plainText(name), 64) + ")"
+}
+
+// originFor is where a stored request or link is reached: where it was made,
+// for a profile that chooses that per link, or the configured site.
+func (s *Service) originFor(stored string) string {
+	if s.p.OriginPerLink {
+		return stored
+	}
+	return s.siteURL
+}
+
+// refusedLink reports whether an admit error is the link itself refused (idle,
+// or made with another site) rather than a check that failed this time.
+func refusedLink(err error) bool {
+	return errors.Is(err, ErrIdle) || errors.Is(err, ErrSiteChanged)
+}
+
+// admit says whether a stored link may run now. Without a hook, a link runs
+// only while it is to the configured site: its keys and its server id mean
+// something only to the site it was made with.
+func (s *Service) admit(ctx context.Context, st State) error {
+	if s.hooks.Admit != nil {
+		return s.hooks.Admit(ctx, st)
+	}
+	if st.Idle != nil {
+		return fmt.Errorf("%w: %s", ErrIdle, st.Idle.Reason)
+	}
+	if st.URL != s.siteURL {
+		return ErrSiteChanged
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------- lifecycle --
@@ -176,9 +269,12 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 	ctx, s.cancel = context.WithCancel(ctx)
-	s.done = make(chan struct{})
+	// The goroutine closes its own channel: a Stop right after this returns
+	// clears s.done before the goroutine may have read it.
+	done := make(chan struct{})
+	s.done = done
 	go func() {
-		defer close(s.done)
+		defer close(done)
 		s.run(ctx)
 	}()
 }
@@ -239,12 +335,20 @@ func sleep(ctx context.Context, d time.Duration) {
 func (s *Service) run(ctx context.Context) {
 	for ctx.Err() == nil {
 		st, linked, err := s.kv.state(ctx)
+		var refused error
+		if err == nil && linked {
+			refused = s.admit(ctx, st)
+		}
 		switch {
 		case err != nil:
-			s.log.Warn("account link state is unreadable", "err", err)
+			s.log.Warn(s.p.Name+" state is unreadable", "err", err)
 			s.pause(ctx, s.idle)
-		case linked && st.URL != s.siteURL:
-			s.setHeartbeatError(ctx, fmt.Sprintf("this server is linked to %s but JD_ACCOUNT_URL is now %s; set it back or unlink", st.URL, s.siteURL))
+		case refused != nil:
+			msg := refused.Error()
+			if s.hooks.Admit == nil && errors.Is(refused, ErrSiteChanged) {
+				msg = fmt.Sprintf("this server is linked to %s but JD_ACCOUNT_URL is now %s; set it back or unlink", st.URL, s.siteURL)
+			}
+			s.setHeartbeatError(ctx, st.ServerID, msg)
 			s.pause(ctx, s.idle)
 		case linked:
 			s.runLinked(ctx, st)
@@ -331,7 +435,7 @@ func (s *Service) currentLink(ctx context.Context, st State) (State, bool) {
 		// A read that failed says nothing about the link; keep going.
 		return st, true
 	}
-	if !ok || cur.ServerID != st.ServerID || cur.URL != s.siteURL {
+	if !ok || cur.ServerID != st.ServerID || cur.URL != st.URL {
 		return State{}, false
 	}
 	return cur, true
@@ -403,17 +507,19 @@ func (s *Service) commandLoop(ctx context.Context, st State) {
 			return
 		}
 		began := time.Now()
+		answered := s.clearPollErrorOnceHeld(ctx, cur.ServerID)
 		resp, err := s.pollCommands(ctx, cur)
+		answered()
 		if err != nil {
 			if ctx.Err() != nil || s.linkEnded(ctx, cur, err) {
 				return
 			}
-			s.setPollError(ctx, describeError(err))
+			s.setPollError(ctx, cur.ServerID, s.describeError(err))
 			sleep(ctx, bo.next())
 			continue
 		}
 		bo.reset()
-		s.setPollError(ctx, "")
+		s.setPollError(ctx, cur.ServerID, "")
 		for _, cmd := range resp.Commands {
 			if ctx.Err() != nil {
 				return
@@ -434,12 +540,47 @@ func (s *Service) commandLoop(ctx context.Context, st State) {
 	}
 }
 
+// clearPollErrorOnceHeld clears the poll error the status still shows once the
+// poll about to be sent has gone pollHeld without an answer. A peer answers a
+// failure at once and holds only a poll it took, which then returns only when
+// a command comes or the long-poll's wait ends; until then a failure from
+// before the peer came back would sit beside heartbeats that succeed, and say
+// so across a restart. The func it returns is called once the poll is
+// answered, and returns once no clearing can follow, so a clear never lands
+// after the poll's own outcome.
+func (s *Service) clearPollErrorOnceHeld(ctx context.Context, serverID string) (answered func()) {
+	if s.kv.status(ctx).PollError == "" {
+		return func() {}
+	}
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTimer(s.pollHeld)
+		defer t.Stop()
+		select {
+		case <-stop:
+		case <-ctx.Done():
+		case <-t.C:
+			s.setPollError(ctx, serverID, "")
+		}
+	}()
+	return func() {
+		close(stop)
+		<-done
+	}
+}
+
 func (s *Service) pollCommands(ctx context.Context, st State) (commandsResponse, error) {
-	id, _, err := loadIdentity(ctx, s.st, s.sealer)
+	// The same check as before a heartbeat: nothing is sent on a link the
+	// instance refuses now.
+	if err := s.admit(ctx, st); err != nil {
+		return commandsResponse{}, err
+	}
+	id, _, err := loadIdentity(ctx, s.kv, s.sealer)
 	if err != nil || id == nil {
 		return commandsResponse{}, fmt.Errorf("link identity: %w", firstErr(err, ErrIdentityUnreadable))
 	}
-	return s.newClient(id).commands(ctx, st.ServerID, clampInt(st.PollWaitSeconds, 1, 25))
+	return s.linkClient(st, id).commands(ctx, st.ServerID, clampInt(st.PollWaitSeconds, 1, 25))
 }
 
 func firstErr(errs ...error) error {
@@ -454,7 +595,7 @@ func firstErr(errs ...error) error {
 // closeInterrupted settles the commands a previous process was running when it
 // stopped, which will never finish.
 func (s *Service) closeInterrupted(ctx context.Context, st State) {
-	rows, err := s.st.DB.QueryContext(ctx, `SELECT id FROM account_link_commands WHERE status = 'running'`)
+	rows, err := s.st.DB.QueryContext(ctx, `SELECT id FROM `+s.p.CommandsTable+` WHERE status = 'running'`)
 	if err != nil {
 		return
 	}
@@ -517,7 +658,7 @@ func (s *Service) evaluatePolicy(ctx context.Context, st State) {
 	if err := s.kv.put(ctx, keyAttempt, version); err != nil {
 		return
 	}
-	actor := "account:" + st.Owner + " (update policy)"
+	actor := s.p.ActorPrefix + st.Owner + " (update policy)"
 	_, err = s.host.InstallUpdate(ctx, actor, version)
 	if s.audit != nil {
 		detail := map[string]any{"from": status.Version, "to": version, "policy": p.Auto}
@@ -525,7 +666,7 @@ func (s *Service) evaluatePolicy(ctx context.Context, st State) {
 			detail["error"] = clip(err.Error(), 300)
 		}
 		s.audit.Record(ctx, audit.Entry{
-			Username: "account:" + st.Owner, Actor: "system", Action: "account.update.auto", Target: version,
+			Username: s.p.ActorPrefix + st.Owner, Actor: "system", Action: s.p.AuditPrefix + ".update.auto", Target: version,
 			Method: "LINK", Status: map[bool]int{true: 200, false: 500}[err == nil], Success: err == nil,
 			Detail: audit.Detail(detail),
 		})
@@ -550,8 +691,11 @@ func (s *Service) sendHeartbeat(ctx context.Context, st State, patient bool) err
 	if s.host == nil {
 		return ErrNoHost
 	}
-	if st.URL != s.siteURL {
-		return ErrSiteChanged
+	if err := s.admit(ctx, st); err != nil {
+		// Nothing is sent, and the page says why: the link idle, or the
+		// instance's check of the peer failing this time.
+		s.setHeartbeatError(ctx, st.ServerID, s.describeError(err))
+		return err
 	}
 	if patient {
 		s.hbMu.Lock()
@@ -569,10 +713,10 @@ func (s *Service) sendHeartbeat(ctx context.Context, st State, patient bool) err
 			return ctx.Err()
 		}
 	}
-	id, _, err := loadIdentity(ctx, s.st, s.sealer)
+	id, _, err := loadIdentity(ctx, s.kv, s.sealer)
 	if err != nil || id == nil {
 		err = fmt.Errorf("link identity: %w", firstErr(err, ErrIdentityUnreadable))
-		s.setHeartbeatError(ctx, describeError(err))
+		s.setHeartbeatError(ctx, st.ServerID, s.describeError(err))
 		return err
 	}
 	snap, err := s.host.Collect(ctx)
@@ -593,20 +737,39 @@ func (s *Service) sendHeartbeat(ctx context.Context, st State, patient bool) err
 	if p, ok := s.policy(ctx); ok && p.Auto != AutoOff {
 		snap.Server.UpdatePolicy = &p
 	}
-	body, err := snap.Redact(st.Scope).encode()
+	var extra map[string]json.RawMessage
+	if s.hooks.HeartbeatExtra != nil {
+		if extra, err = s.hooks.HeartbeatExtra(ctx, st); err != nil {
+			s.setHeartbeatError(ctx, st.ServerID, s.describeError(err))
+			return err
+		}
+	}
+	body, err := snap.Redact(st.Scope).encodeWith(extra)
 	if err != nil {
 		return err
 	}
 	s.hbTimes = append(s.hbTimes, time.Now())
-	resp, err := s.newClient(id).heartbeat(ctx, st.ServerID, body)
+	c := s.linkClient(st, id)
+	var resp heartbeatResponse
+	var write ReplyWrite
+	if s.p.ReplyView {
+		var full viewHeartbeatResponse
+		full, err = c.heartbeatView(ctx, st.ServerID, body)
+		if err == nil && s.hooks.OnReply != nil {
+			write, err = s.hooks.OnReply(ctx, st, Reply{Fleet: full.Fleet, Notices: full.Notices, SignIn: full.SignIn, At: s.now()})
+		}
+		resp = full.base()
+	} else {
+		resp, err = c.heartbeat(ctx, st.ServerID, body)
+	}
 	if err != nil {
-		s.setHeartbeatError(ctx, describeError(err))
+		s.setHeartbeatError(ctx, st.ServerID, s.describeError(err))
 		return err
 	}
 	s.mu.Lock()
 	s.lastSnapshot = body
 	s.mu.Unlock()
-	s.noteHeartbeat(ctx, st, resp)
+	s.noteHeartbeat(ctx, st, resp, write)
 	return nil
 }
 
@@ -629,27 +792,60 @@ func (s *Service) heartbeatWait() time.Duration {
 }
 
 // noteHeartbeat records a good exchange and takes what the site announced in
-// it: a successor key, and how often it wants to hear from this server.
-func (s *Service) noteHeartbeat(ctx context.Context, st State, resp heartbeatResponse) {
+// it: a successor key, and how often it wants to hear from this server. write,
+// when set, is what the instance keeps from the reply, written in the same
+// transaction.
+func (s *Service) noteHeartbeat(ctx context.Context, st State, resp heartbeatResponse, write ReplyWrite) {
 	now := s.now()
+	ctx = context.WithoutCancel(ctx)
+	var after func()
 	// Read and written back inside one transaction, and only if the link is
 	// still this one: a link ended while this was in flight has nothing left
-	// to record on, and a scope changed meanwhile must not be put back.
-	_, current, err := s.kv.updateState(ctx, st.ServerID, func(cur *State) bool {
+	// to record on, a scope changed meanwhile must not be put back, and what
+	// an old link's peer said must not reappear as a new link's.
+	_, current, err := s.kv.updateStateTx(ctx, st.ServerID, func(tx *sql.Tx, cur *State) (bool, error) {
 		changed := false
 		if hb := clampInt(resp.HeartbeatSeconds, 10, 600); resp.HeartbeatSeconds != 0 && hb != cur.HeartbeatSeconds {
 			cur.HeartbeatSeconds, changed = hb, true
 		}
-		if keys, rotated := mergeSiteKeys(cur.SiteKeys, resp.SiteKeys, now); rotated {
+		if write != nil {
+			var err error
+			if after, err = write(ctx, tx); err != nil {
+				return false, err
+			}
+		}
+		if s.p.IgnoreAnnouncedKeys {
+			return changed, nil
+		}
+		if keys, rotated := mergeSiteKeysMatching(cur.SiteKeys, resp.SiteKeys, now, s.p.RotationKidPattern); rotated {
 			cur.SiteKeys, changed = keys, true
 		}
-		return changed
+		return changed, nil
 	})
+	if err == nil && current {
+		runAfter(after)
+	}
+	if s.p.IgnoreAnnouncedKeys && len(resp.SiteKeys) > 0 {
+		s.mu.Lock()
+		first := s.keysIgnoredFor != st.ServerID
+		s.keysIgnoredFor = st.ServerID
+		s.mu.Unlock()
+		if first {
+			s.log.Warn("the "+s.p.Peer+" announced signing keys in a heartbeat; they are ignored, and a new key needs a new link",
+				"server", st.ServerID)
+		}
+	}
 	if err != nil {
-		s.log.Warn("could not store what the site announced in a heartbeat", "err", err)
+		s.log.Warn("could not store what the "+s.p.Peer+" announced in a heartbeat", "err", err)
 	}
 	if current {
-		s.setStatus(ctx, func(rs *runtimeStatus) { rs.LastHeartbeatAt, rs.HeartbeatError = &now, "" })
+		s.setStatus(ctx, st.ServerID, func(rs *runtimeStatus) { rs.LastHeartbeatAt, rs.HeartbeatError = &now, "" })
+	}
+}
+
+func runAfter(after func()) {
+	if after != nil {
+		after()
 	}
 }
 
@@ -658,6 +854,12 @@ func (s *Service) noteHeartbeat(ctx context.Context, st State, resp heartbeatRes
 // It never leaves the set empty: a dashboard with no key could not verify
 // anything, and the link would have to be made again.
 func mergeSiteKeys(pinned []SiteKey, announced []wireSiteKey, now time.Time) ([]SiteKey, bool) {
+	return mergeSiteKeysMatching(pinned, announced, now, nil)
+}
+
+// mergeSiteKeysMatching is mergeSiteKeys with a stricter rule for a key id,
+// when the profile has one.
+func mergeSiteKeysMatching(pinned []SiteKey, announced []wireSiteKey, now time.Time, kid *regexp.Regexp) ([]SiteKey, bool) {
 	out := append([]SiteKey(nil), pinned...)
 	changed := false
 	for _, a := range announced {
@@ -666,6 +868,9 @@ func mergeSiteKeys(pinned []SiteKey, announced []wireSiteKey, now time.Time) ([]
 			k.NotAfter = *a.NotAfter
 		}
 		if _, err := k.key(); err != nil || k.Kid == "" || len(k.Kid) > 64 {
+			continue
+		}
+		if kid != nil && !kid.MatchString(k.Kid) {
 			continue
 		}
 		found := false
@@ -702,84 +907,137 @@ func (s *Service) linkEnded(ctx context.Context, st State, err error) bool {
 	if !isCode(err, http.StatusGone, "") {
 		return false
 	}
-	s.clearLink(ctx, st, "the server was removed on the site")
+	s.clearLink(ctx, st, "the server was removed "+s.p.PeerAt)
 	return true
 }
 
 // clearLink forgets a link that is over. It forgets the link and what the site
 // set (the update policy), and keeps the identity, so linking again shows the
-// same fingerprint.
+// same fingerprint. A profile with RemovalOutcome also keeps why, as the
+// outcome the Settings page says once, in the same transaction.
 func (s *Service) clearLink(ctx context.Context, st State, why string) {
 	ctx = context.WithoutCancel(ctx)
-	// Two loops can hear the same 410 together; only the first has a link to
-	// clear, and only that link, not a newer one.
-	cur, ok, err := s.kv.state(ctx)
-	if err != nil || !ok || cur.ServerID != st.ServerID {
+	// Two loops can hear the same 410 together, and an unlink in another
+	// process can end the link while this one hears it. The transaction that
+	// still finds this link stored, and not a newer one, is the only one that
+	// clears it and says so.
+	cleared := false
+	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
+		cur, ok, err := s.kv.stateTx(ctx, tx)
+		if err != nil || !ok || cur.ServerID != st.ServerID {
+			return err
+		}
+		if err := s.kv.delTx(ctx, tx, keyState, keyRequest, keyStatus, keyPolicy, keyAttempt); err != nil {
+			return err
+		}
+		if s.p.RemovalOutcome {
+			if err := s.kv.putTx(ctx, tx, keyOutcome, Outcome{Result: OutcomeRemoved, At: s.now(), Message: why}); err != nil {
+				return err
+			}
+		}
+		cleared = true
+		return s.onClear(ctx, tx)
+	}); err != nil {
+		s.log.Warn("could not clear the "+s.p.Name, "err", err)
 		return
 	}
-	if err := s.kv.tx(ctx, func(tx *sql.Tx) error {
-		return delTx(ctx, tx, keyState, keyRequest, keyStatus, keyPolicy, keyAttempt)
-	}); err != nil {
-		s.log.Warn("could not clear the account link", "err", err)
+	if !cleared {
 		return
 	}
 	s.cancelLinked()
-	s.log.Info("account link cleared", "reason", why)
+	s.log.Info(s.p.Name+" cleared", "reason", why)
 	if s.audit != nil {
 		s.audit.Record(ctx, audit.Entry{
-			Username: "system", Actor: "system", Action: "account.unlink", Target: st.Owner,
+			Username: "system", Actor: "system", Action: s.p.AuditPrefix + ".unlink", Target: st.Owner,
 			Method: "LINK", Status: 200, Success: true,
 			Detail: audit.Detail(map[string]any{"reason": why, "serverId": st.ServerID}),
 		})
 	}
 }
 
+// onClear deletes what the instance keeps beside the engine's own keys, in the
+// transaction that ends or replaces a link.
+func (s *Service) onClear(ctx context.Context, tx *sql.Tx) error {
+	if s.hooks.OnClear == nil {
+		return nil
+	}
+	return s.hooks.OnClear(ctx, tx)
+}
+
 // ------------------------------------------------------------------ status --
 
-// setStatus changes the small record of how the last exchanges went, and
-// writes it only when it changed.
-func (s *Service) setStatus(ctx context.Context, change func(*runtimeStatus)) {
+// setStatus changes the small record of how the last exchanges with the link
+// serverID went, and writes it only when it changed. The write is skipped when
+// that link is gone or another is stored: an exchange that ends after a
+// disconnect has nothing to report on, and must not leave its error on the
+// next link's page.
+func (s *Service) setStatus(ctx context.Context, serverID string, change func(*runtimeStatus)) {
+	ctx = context.WithoutCancel(ctx)
 	before := s.kv.status(ctx)
 	after := before
 	change(&after)
-	b1, _ := json.Marshal(before)
-	b2, _ := json.Marshal(after)
-	if string(b1) == string(b2) {
+	if sameStatus(before, after) {
 		return
 	}
-	if err := s.kv.put(context.WithoutCancel(ctx), keyStatus, after); err != nil {
-		s.log.Debug("could not store the account link status", "err", err)
+	err := s.kv.tx(ctx, func(tx *sql.Tx) error {
+		cur, linked, err := s.kv.stateTx(ctx, tx)
+		if err != nil || !linked || cur.ServerID != serverID {
+			return err
+		}
+		now := s.kv.statusTx(ctx, tx)
+		next := now
+		change(&next)
+		if sameStatus(now, next) {
+			return nil
+		}
+		return s.kv.putTx(ctx, tx, keyStatus, next)
+	})
+	if err != nil {
+		s.log.Debug("could not store the "+s.p.Name+" status", "err", err)
 	}
+}
+
+func sameStatus(a, b runtimeStatus) bool {
+	b1, _ := json.Marshal(a)
+	b2, _ := json.Marshal(b)
+	return string(b1) == string(b2)
 }
 
 // An exchange cut short because the connector is stopping, or the link is being
 // ended, failed for no reason the page should report.
-func (s *Service) setHeartbeatError(ctx context.Context, msg string) {
+func (s *Service) setHeartbeatError(ctx context.Context, serverID, msg string) {
 	if msg != "" && ctx.Err() != nil {
 		return
 	}
-	s.setStatus(ctx, func(rs *runtimeStatus) { rs.HeartbeatError = msg })
+	s.setStatus(ctx, serverID, func(rs *runtimeStatus) { rs.HeartbeatError = msg })
 }
 
-func (s *Service) setPollError(ctx context.Context, msg string) {
+func (s *Service) setPollError(ctx context.Context, serverID, msg string) {
 	if msg != "" && ctx.Err() != nil {
 		return
 	}
-	s.setStatus(ctx, func(rs *runtimeStatus) { rs.PollError = msg })
+	s.setStatus(ctx, serverID, func(rs *runtimeStatus) { rs.PollError = msg })
 }
 
 // describeError says in a sentence why an exchange failed, for the person
 // reading the Settings page.
-func describeError(err error) string {
+func describeError(err error) string { return describeErrorFor(AccountProfile, err) }
+
+func (s *Service) describeError(err error) string { return describeErrorFor(s.p, err) }
+
+func describeErrorFor(p Profile, err error) string {
 	var api *APIError
 	if errors.As(err, &api) {
 		switch api.Code {
 		case "stale_time":
-			return "This server's clock and the site's differ by more than 60 seconds; correct the time on this server."
+			return "This server's clock and the " + p.Peer + "'s differ by more than 60 seconds; correct the time on this server."
 		case "bad_signature", "unknown_server":
-			return "The site does not accept this server's signature. If the server was removed from the account, unlink and link it again."
+			if p.Peer == AccountProfile.Peer {
+				return "The site does not accept this server's signature. If the server was removed from the account, unlink and link it again."
+			}
+			return "The " + p.Peer + " does not accept this server's signature. If the server was removed " + p.PeerAt + ", disconnect and connect again."
 		case "rate_limited", "poll_in_flight":
-			return "The site is limiting how often this server may call it; it will try again."
+			return "The " + p.Peer + " is limiting how often this server may call it; it will try again."
 		}
 		return api.Error()
 	}

@@ -78,6 +78,9 @@ func (s *Server) Routes() http.Handler {
 			s.mountAgentRoutes(r)
 		} else {
 			s.mountNetworkVantageMachineRoutes(r)
+			// The hub's discovery probe: no sign-in, behind the allowlist
+			// and the per-address limit (handlers_hublink.go).
+			s.mountHubHello(r)
 			r.Group(func(r chi.Router) {
 				r.Use(s.loginLim.Middleware)
 				r.Use(httpx.AuditMutations(s.Audit))

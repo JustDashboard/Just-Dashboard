@@ -510,8 +510,11 @@ func (s *Server) startBackupRun(ctx context.Context, actor string, id int64) (*b
 		return nil, httpx.Err(http.StatusConflict, "already_running", backups.ErrAlreadyRunning.Error())
 	}
 	trigger, failure := "manual", "manual backup failed"
-	if strings.HasPrefix(actor, "account:") {
+	switch {
+	case strings.HasPrefix(actor, "account:"):
 		trigger, failure = "account_link", "backup started by a linked account failed"
+	case strings.HasPrefix(actor, "hub:"):
+		trigger, failure = "hub_link", "backup started by Just Hub failed"
 	}
 	go func() {
 		ctx, cancel := detachedContext(12 * 60 * 60)

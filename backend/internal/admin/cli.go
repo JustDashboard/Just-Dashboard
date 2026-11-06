@@ -30,6 +30,11 @@ Link this server to a just-dashboard.com account:
   --admin unlink
   --admin link-status
 
+Connect this server to a Just Hub on its tailnet:
+  --admin hub-connect URL [--scope observe|operate|maintain] [--token-stdin] [--wait 15m]
+  --admin hub-disconnect
+  --admin hub-status
+
 Run through scripts/manage.sh on the host. Password commands read one line
 from stdin; never supply passwords in command arguments. The password set here
 is the one used to sign in. Existing two-factor enrollment is kept.
@@ -38,6 +43,14 @@ link prints a code to enter on just-dashboard.com, waits for you to approve it
 there, and exits 0 once linked, 2 if it was declined or not approved in time.
 The scope (default observe) is what the site may see and do; widen it later in
 Settings. Linking needs JD_MASTER_KEY and is refused when JD_ACCOUNT_LINK=false.
+
+hub-connect checks that URL is one machine on this server's tailnet, prints a
+code and this server's fingerprint, waits for the hub owner to approve it in the
+hub, and exits 0 once connected, 2 if it was declined, not approved within
+--wait, or interrupted. A one-time token from the hub approves it in advance;
+pipe it in with --token-stdin, never as an argument, where the process list and
+shell history would keep it. The scope (default maintain) is what the hub may
+see and do. It needs JD_MASTER_KEY and is refused when JD_HUB_LINK=false.
 `
 
 func Run(ctx context.Context, dataDir string, args []string, in io.Reader, out, errOut io.Writer) error {
@@ -67,6 +80,9 @@ func run(ctx context.Context, dataDir string, args []string, in io.Reader, out, 
 	defer st.Close()
 	if isLinkCommand(args[0]) {
 		return runLink(ctx, st, args, out, errOut)
+	}
+	if isHubCommand(args[0]) {
+		return runHub(ctx, st, args, in, out, errOut)
 	}
 	// These operations never decrypt secrets or evaluate login policy.
 	svc := auth.NewService(st, nil, time.Hour, time.Hour, false)
@@ -164,6 +180,15 @@ func validateArgs(args []string) error {
 		}
 		return nil
 	case "unlink", "link-status":
+		if len(args) == 1 {
+			return nil
+		}
+	case "hub-connect":
+		if _, err := parseHubConnectArgs(args[1:]); err != nil {
+			return err
+		}
+		return nil
+	case "hub-disconnect", "hub-status":
 		if len(args) == 1 {
 			return nil
 		}
