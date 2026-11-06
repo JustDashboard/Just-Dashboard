@@ -272,6 +272,11 @@ never into `docs/audits/`.
   what the API suite spent, and a hash carries its own parameters, so verification is unchanged. A
   test that names a MongoDB nothing listens on puts `serverSelectionTimeoutMS` in the connection
   string, or it waits eight seconds to find out.
+- A test that reaches an update, restart or uninstall puts the recording `docker` of
+  `selfupdatetest.Docker` (`internal/selfupdate/selfupdatetest`) on `PATH` first. Those operations run
+  the docker CLI, and without it the test would ask the daemon of the machine running it to remove and
+  start the dashboard's own fixed-name sibling containers. The fake records the `DOCKER_HOST` and
+  arguments of each call, and fails like the real CLI for a socket named by `selfupdatetest.MissingHost`.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
   Recipe/detection/default changes also run

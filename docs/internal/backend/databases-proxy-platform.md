@@ -6111,6 +6111,20 @@ pending/running operation blocks the other paths even after the launching proces
 Unreadable or corrupt records fail closed and must be dismissed explicitly. This prevents concurrent
 requests from overwriting the configuration needed for rollback.
 
+The three siblings are started, replaced (`docker rm -f` of the fixed name) and removed with the docker CLI,
+always through `selfupdate.DockerCommand`, which appends `DOCKER_HOST=<JD_DOCKER_HOST>` to the inherited
+environment as `dockerx`'s compose calls do. A CLI left to the process environment talks to
+`/var/run/docker.sock` whatever `JD_DOCKER_HOST` says, so on a host where the two differ a restart or an
+update would replace a container of the same fixed name on another daemon — another dashboard's. Under the
+lock and before anything is written, update, apply, restart, rebuild and uninstall ask that daemon for its
+version (`selfupdate.DockerReachable`, 15 s). One that does not answer refuses the operation with
+`ErrDockerUnreachable` and a message naming the host and the CLI's own reason (`the restart was not started:
+the Docker daemon cannot be reached at unix:///… (JD_DOCKER_HOST): …`): `503 docker_unavailable` from the
+routes, a `failed` command for a linked account. The previous run's record and transcript, the `.env` and
+its backup stay as they were, no `docker rm` or `docker run` is attempted, and an uninstall pauses nothing.
+The tests stand a recording `docker` on `PATH` (`selfupdate/selfupdatetest`), so none of them reaches the
+daemon of the machine running them.
+
 - **One source of truth**: the `.env` beside the compose file, edited the way a person would. `EnvFile`
   keeps the file as lines, so the paragraph of explanation above each setting survives a change made from
   a browser, and a setting already present is replaced in place rather than appended. Every write takes a

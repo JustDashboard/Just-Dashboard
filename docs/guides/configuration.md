@@ -36,7 +36,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | `JD_REMOTE_DESKTOP_BRIDGE` | none | A Moonlight Web stream bridge on another tailnet machine, as `host:port`, used in place of the container this server would run. Remote Desktop's picture always passes through the bridge; one near you and your computers spares it the trip to this server and back. The bridge must trust the dashboard's account header from this server only. |
 | `JD_SESSION_TTL` | `12h` | Absolute session lifetime. |
 | `JD_SESSION_IDLE_TTL` | `60m` | Idle timeout. |
-| `JD_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker Engine endpoint. |
+| `JD_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker Engine endpoint. The containers that update, restart and uninstall the dashboard are started on it too, and those operations are refused, with nothing changed, while it does not answer. |
 | `JD_DEPLOY_HEAVY_SLOTS` | `1` | Concurrent deployment build/activation workers. Valid range: 1–8. |
 | `JD_DEPLOY_LIGHT_SLOTS` | `2` | Concurrent validation/metadata deployment workers. Valid range: 1–8. |
 | `JD_DEPLOY_LEASE_TTL` | `30s` | Time before a silent deployment worker claim is reconciled after a crash. Valid range: 5s–5m. |
