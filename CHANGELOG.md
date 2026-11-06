@@ -4,6 +4,46 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.8.5 — 6 November 2026
+
+**Just Hub, and an assistant on every page**
+
+A dashboard can now connect to a Just Hub on its tailnet, so every server is in one place: you choose what the hub may do, and it is visible under Settings, Hub. An assistant on each deployment and database can look into a problem and act on it as far as the mode you pick allows. The Git workspace, a project's Overview, Insights and the variables list read more clearly, and long commands no longer drop behind a proxy.
+
+### Security
+
+- A hub can only do what you allowed
+  - A hub link is approved with a one-time code and the hub's fingerprint, both shown on both sides. Commands are checked against the hub's pinned key and the scope you chose, and a hub never sees passwords, sessions or secrets.
+
+### Added
+
+- Connect a dashboard to a Just Hub
+  - Settings, Hub connects this server to a Just Hub on the same tailnet with a one-time code you type into the hub, or with sudo ./scripts/manage.sh hub connect over SSH. You choose what the hub may do: watch, operate, or also run updates. Every action it takes is recorded as hub:<name>, and you can disconnect at any time.
+- Sign in from the hub, if you turn it on
+  - With JD_HUB_SIGNIN=true, an account that opted in can be opened from the linked hub without signing in again. It is off by default.
+- An assistant on every deployment and database
+  - Each deployment and database connection has an Assistant page, and the SQL editor's column is the same chat. It can read logs, files and structure, and change things as you, as far as the mode you choose lets it: ask every time, ask before changes, or full access. Chats are saved, a screenshot can be pasted in, and the model and API keys are set up once for the whole dashboard.
+
+### Changed
+
+- A clearer Git workspace that works on a phone
+  - Pull requests show their screenshots, videos and folds in place, list rows say one thing each, and the workspace has a phone layout.
+- Overview, Insights and variables read as words and figures
+  - A project's Overview reads as one page of sentences with four shortcuts. Insights shows figures in columns that update in place when a filter moves, and the delivery charts answer each day with a tooltip. Variables are one line each, and revealing a value no longer moves the page.
+- The bands over list pages hold still
+  - Each band is a bar with one reading and one strip of marks, the same height in every state, instead of rows that reordered on every poll. A container's usage is drawn the way the Metrics page draws the host, and each domain's controls sit on one line.
+
+### Fixed
+
+- Long commands keep their answer behind a proxy
+  - A command that ran for minutes could end in a network error, because a quiet stream was closed by the proxy in front of the dashboard. The stream now keeps the connection alive.
+- A disk scan of / answers with what it counted
+  - A scan that reached its limits returned nothing. It now reports what it counted.
+- Update, restart and uninstall reach the right Docker
+  - Their helper containers now use JD_DOCKER_HOST like the rest of the dashboard.
+- Chrome no longer offers saved passwords on variable forms
+  - Secret fields on a project's variables are no longer taken for a sign-in form.
+
 ## 0.8.4 — 30 October 2026
 
 **Passkeys that sign in, updates that roll back**
