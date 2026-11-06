@@ -64,6 +64,11 @@ type sessionCookie struct {
 	stale  bool
 }
 
+// SessionToken is the session cookie the request carries, if any, without
+// resolving it. Hub sign-in revokes that session when it makes a new one, so
+// one browser holds one session.
+func (a *Authenticator) SessionToken(r *http.Request) string { return a.sessionToken(r).token }
+
 func (a *Authenticator) sessionToken(r *http.Request) sessionCookie {
 	var found sessionCookie
 	old, err := r.Cookie(sessioncookie.LegacyName)
@@ -224,6 +229,7 @@ func (a *Authenticator) AuthenticatePartial(next http.Handler) http.Handler {
 		p := &Principal{
 			User: user, Role: user.Role, SessionID: sess.ID, Kind: "session",
 			IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: sess.TwoFAPassed,
+			HubSession: sess.AuthMethod == auth.MethodHub, HubUser: sess.HubUser,
 		}
 		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
 	})
@@ -272,6 +278,7 @@ func (a *Authenticator) resolveWithPasswordChange(w http.ResponseWriter, r *http
 	return &Principal{
 		User: user, Role: user.Role, SessionID: sess.ID, Kind: "session",
 		IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: true,
+		HubSession: sess.AuthMethod == auth.MethodHub, HubUser: sess.HubUser,
 	}, nil
 }
 
@@ -294,6 +301,26 @@ func (a *Authenticator) Recheck(r *http.Request, p *Principal) (*Principal, erro
 	current := *p
 	current.User, current.Role = user, user.Role
 	return &current, nil
+}
+
+// SessionStands says whether the session a long-lived connection was opened
+// with still stands, and until when at the latest: everything ResolveSession
+// checks is checked again, a hub session's grant, link and switches included,
+// without counting the check as use of the session (auth.CheckSession).
+// Anything other than a session has nothing to check and stands.
+func (a *Authenticator) SessionStands(r *http.Request, p *Principal) (time.Time, error) {
+	if p == nil || p.Kind != "session" || p.SessionID == "" {
+		return time.Time{}, nil
+	}
+	found := a.sessionToken(r)
+	if found.token == "" {
+		return time.Time{}, ErrUnauthorized
+	}
+	sess, _, err := a.Svc.CheckSession(r.Context(), found.token)
+	if err != nil || sess.ID != p.SessionID || !sess.TwoFAPassed {
+		return time.Time{}, ErrUnauthorized
+	}
+	return sess.ExpiresAt, nil
 }
 
 // AuthenticateMCP admits an MCP key and nothing else. A session cookie is
@@ -405,6 +432,24 @@ func RequireSession(next http.Handler) http.Handler {
 	})
 }
 
+// RefuseHubSession refuses a session a Just Hub sign-in ticket made, on a
+// route that creates, changes, rotates, imports or exports a credential,
+// creates or changes a link, or changes the dashboard's own settings
+// (hub-link-protocol.md section 9.9). A hub session is short and ends with its
+// grant; a credential or a setting made from one would outlive both, so these
+// are done from a session signed in on this server itself. Tests find it by
+// function identity, as they find RequireSession.
+func RefuseHubSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p, ok := PrincipalFrom(r.Context()); ok && p.HubSession {
+			WriteError(w, r, Err(http.StatusForbidden, "hub_session_not_allowed",
+				"sign in on this server itself to do this: a session opened through Just Hub cannot create or change credentials, links or this dashboard's own settings"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // recordKeyRefusal writes a deploy key's refused request to the audit trail
 // the way AuditMutations writes a refused write, reads included: what was
 // asked for is the target, and the refusal is the detail.
@@ -414,10 +459,8 @@ func recordKeyRefusal(log *audit.Logger, r *http.Request, p *Principal, err erro
 	if errors.As(err, &apiErr) {
 		status, detail = apiErr.Status, apiErr.Code+": "+apiErr.Message
 	}
-	log.Record(r.Context(), audit.Entry{
-		UserID: p.UserID(), Username: p.Username(), Role: string(p.Role), IP: ClientIP(r),
-		Actor: principalKind(p), Action: "auth.deploy_key.refused", Target: r.Method + " " + r.URL.Path,
-		Method: r.Method, Path: r.URL.Path, Status: status, Success: false, Detail: detail,
-		KeyID: p.KeyID(), KeyName: p.KeyName(),
-	})
+	e := principalEntry(r, p)
+	e.Action, e.Target = "auth.deploy_key.refused", r.Method+" "+r.URL.Path
+	e.Status, e.Success, e.Detail = status, false, detail
+	log.Record(r.Context(), e)
 }

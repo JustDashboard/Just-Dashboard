@@ -20,7 +20,11 @@ is now one bootstrap script: it puts `.dark` on the root element before first pa
 shadcn primitives' `dark:` variants resolve, sets `color-scheme`, and clears the stored preference
 from anyone upgrading. `hooks/use-theme.tsx` and `/appearance` are gone.
 
-Colours live on `:root` in `app/globals.css`. That is the only place a colour is named.
+Colours live on `:root` in `app/globals.css`. That is the only place a colour is named. One page
+holds a copy: `/hub/enter` (`lib/hub-enter.ts`) is a document written by hand that loads no
+stylesheet, because its first script must run before anything else the app would load, so it repeats
+the few tokens it draws with (its `--muted` is `--muted-foreground`). `hub-enter.test.js` reads both
+and fails when a value drifts.
 
 ## 2. Nothing lifts
 
@@ -2931,7 +2935,9 @@ The passes, in order. Each one is a diff you can review on its own.
    line's far end, and the reason once, as a danger `Notice` above the picture, not again as the
    Activity section's failed exchange; Sync now leaves the identity line, since it would be refused,
    and the hub's address stops being a link anywhere, the title included, since it may now answer on
-   the machine this server refused.
+   the machine this server refused. The linked page's *Sign in from Just Hub* section keeps Connect
+   the page's one brand face: **Let Just Hub sign me in** is a choice with a cost, so it is an outline
+   button, as stopping is, and every account's choice is a `RowList`, not a framed list.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed

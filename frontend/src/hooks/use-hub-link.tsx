@@ -175,6 +175,38 @@ export function useHubLink() {
     [],
   )
 
+  /**
+   * "Let Just Hub sign me in" (hub-link-protocol §9.3). The password and code are this account's
+   * own, asked again; the page reads the result back rather than guessing it.
+   */
+  const allowSignIn = useCallback(
+    (hubUser: string, password: string, code: string) =>
+      guarded(async () => {
+        await put("/account/hub-signin", { hubUser, password, code })
+        adopt(await read())
+      }),
+    [adopt, guarded, read],
+  )
+
+  const revokeSignIn = useCallback(
+    () =>
+      guarded(async () => {
+        await del("/account/hub-signin")
+        adopt(await read())
+      }),
+    [adopt, guarded, read],
+  )
+
+  /** An administrator removing someone's grant. */
+  const removeGrant = useCallback(
+    (userId: number) =>
+      guarded(async () => {
+        await del(`/dashboard/hub/signin/${userId}`)
+        adopt(await read())
+      }),
+    [adopt, guarded, read],
+  )
+
   const status = adopted && (poll.lastSuccess ?? 0) < adopted.at ? adopted.status : poll.data
 
   return useMemo(
@@ -187,7 +219,22 @@ export function useHubLink() {
       sync,
       disconnect,
       check,
+      allowSignIn,
+      revokeSignIn,
+      removeGrant,
     }),
-    [status, poll.error, begin, cancel, changeScope, sync, disconnect, check],
+    [
+      status,
+      poll.error,
+      begin,
+      cancel,
+      changeScope,
+      sync,
+      disconnect,
+      check,
+      allowSignIn,
+      revokeSignIn,
+      removeGrant,
+    ],
   )
 }

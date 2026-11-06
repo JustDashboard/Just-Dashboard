@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 )
 
@@ -324,12 +325,17 @@ func (s *Service) goIdle(ctx context.Context, st accountlink.State, reason, acti
 	}
 	detail["serverId"], detail["reason"], detail["sessionsRevoked"] = st.ServerID, reason, revoked
 	s.auditSystem(ctx, action, st.Owner, detail)
+	// The hub sessions it ended, as every link event's are (section 9.10).
+	s.auditLinkEvent(ctx, nil, revoked, endLinkIdle)
 }
 
 // revokeHubSessionsTx ends every session hub sign-in opened, inside the
-// transaction that makes the link unusable. This release has no hub sign-in,
-// so there are none; it is the one place that revocation belongs.
-func (s *Service) revokeHubSessionsTx(context.Context, *sql.Tx) (int64, error) { return 0, nil }
+// transaction that makes the link unusable (section 9.3): a redeem either
+// commits first and its session is revoked here, or starts after and finds
+// the link idle. The grants stay, unusable, until a person disconnects.
+func (s *Service) revokeHubSessionsTx(ctx context.Context, tx *sql.Tx) (int64, error) {
+	return auth.RevokeHubSessionsTx(ctx, tx, 0)
+}
 
 func (s *Service) auditSystem(ctx context.Context, action, target string, detail map[string]any) {
 	if s.audit == nil {

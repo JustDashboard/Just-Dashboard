@@ -60,6 +60,9 @@ func whoisAnswers(asked *atomic.Int32) http.HandlerFunc {
 }`))
 		case "100.64.0.66":
 			w.Write([]byte(`{"Node": {"Name": "broken."}}`))
+		case "100.64.0.67":
+			w.Write([]byte(`{"Node": {"StableID": "nBlank", "Name": "blank.tail1234.ts.net."},
+	"UserProfile": {"ID": 40, "LoginName": "", "DisplayName": ""}}`))
 		default:
 			http.Error(w, "no match for IP:port", http.StatusNotFound)
 		}
@@ -86,10 +89,15 @@ func TestLocalAPIWhoIsReadsTailscaledsAnswer(t *testing.T) {
 	if _, err := client.WhoIs(ctx, netip.MustParseAddr("100.70.0.1")); !errors.Is(err, ErrNotAPeer) {
 		t.Fatalf("an address nobody holds = %v", err)
 	}
-	if _, err := client.WhoIs(ctx, netip.MustParseAddr("100.64.0.66")); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("an answer naming nobody = %v", err)
+	// tailscaled answered, so it was asked: an answer naming no device or no
+	// login is not an outage, and a check that skips only an outage must not
+	// skip it.
+	for _, addr := range []string{"100.64.0.66", "100.64.0.67"} {
+		if _, err := client.WhoIs(ctx, netip.MustParseAddr(addr)); !errors.Is(err, ErrNoIdentity) || errors.Is(err, ErrUnavailable) {
+			t.Fatalf("an answer naming nobody (%s) = %v", addr, err)
+		}
 	}
-	if asked.Load() != 4 {
+	if asked.Load() != 5 {
 		t.Fatalf("the local API was asked %d times", asked.Load())
 	}
 }

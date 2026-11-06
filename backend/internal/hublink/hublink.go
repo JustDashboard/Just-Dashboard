@@ -117,6 +117,17 @@ type Options struct {
 	// It confirms a hub's name when a link is begun, and pins the hub's
 	// machine before anything is sent to it (protocol 2.4).
 	WhoIs tailnetgate.WhoIs
+	// SignIn is JD_HUB_SIGNIN: a ticket from the linked hub may open a
+	// session for an account that opted in (hub-link-protocol.md section 9).
+	SignIn bool
+	// Auth makes the sessions hub sign-in opens, and asks this package to
+	// check each one again every time it is used. The terminal commands leave
+	// it out.
+	Auth *auth.Service
+	// SessionsEnded is told, once the transaction has committed, that hub
+	// sessions were revoked, so the API can close the sockets they opened at
+	// once rather than at their next check.
+	SessionsEnded func()
 	// HTTP and Now are for tests.
 	HTTP     *http.Client
 	Now      func() time.Time
@@ -137,6 +148,18 @@ type Service struct {
 	endpoint   func(context.Context) string
 	now        func() time.Time
 	audit      *audit.Logger
+	signIn     bool
+	auth       *auth.Service
+	// sessionsEnded is Options.SessionsEnded.
+	sessionsEnded func()
+	// afterNonce runs between steps 11 and 12 of a redeem, and
+	// beforeSessionCommit between the session row and the commit, for tests
+	// that change the link there.
+	afterNonce          func()
+	beforeSessionCommit func()
+	// beforeAllowTx runs between Allow's checks and its transaction, for
+	// tests that change the link or the hub's offer there.
+	beforeAllowTx func()
 	// gate remembers which address was last checked to be the hub node's.
 	gate nodeGate
 
@@ -150,7 +173,8 @@ type Service struct {
 func New(o Options) *Service {
 	s := &Service{
 		st: o.Store, log: o.Log, enabled: o.Enabled, testOrigin: o.TestOrigin,
-		tailnet: o.Tailnet, whois: o.WhoIs, endpoint: o.Endpoint, now: o.Now, audit: o.Audit,
+		tailnet: o.Tailnet, whois: o.WhoIs, endpoint: o.Endpoint, now: o.Now,
+		signIn: o.SignIn, auth: o.Auth, audit: o.Audit, sessionsEnded: o.SessionsEnded,
 		admitted: map[string]error{},
 	}
 	if s.log == nil {
@@ -181,11 +205,15 @@ func New(o Options) *Service {
 			OnReply:    s.onReply,
 			OnClear:    s.onClear,
 			BeforePoll: s.beforePoll,
-			// Hub sign-in adds its grants to the heartbeat here, through
-			// HeartbeatExtra, once it exists. Until then the heartbeat is
-			// the snapshot alone and the hub reads that as sign-in off.
+			// With hub sign-in on, every heartbeat names the accounts that
+			// opted in; off, it is the snapshot alone and the hub reads that
+			// as sign-in off here.
+			HeartbeatExtra: s.heartbeatExtra,
 		},
 	})
+	if s.auth != nil {
+		s.auth.SetHubSessionCheck(s.checkHubSession)
+	}
 	return s
 }
 
@@ -224,6 +252,16 @@ func (s *Service) Stop() {
 // A link the rule refuses is set idle in the store, with every hub session
 // revoked in the same transaction, and audited as hub.link.idle.
 func (s *Service) admit(ctx context.Context, st accountlink.State) error {
+	if err := s.admitRule(ctx, st); err != nil {
+		return err
+	}
+	return s.admitNode(ctx, st)
+}
+
+// admitRule is admit without the hub node check: an idle link is refused, and
+// the URL rule as it applies at start is decided once per link per process.
+// It asks nothing of tailscaled, so hub sign-in may ask it on every use.
+func (s *Service) admitRule(ctx context.Context, st accountlink.State) error {
 	if st.Idle != nil {
 		return refused(errors.New(st.Idle.Reason))
 	}
@@ -241,7 +279,22 @@ func (s *Service) admit(ctx context.Context, st accountlink.State) error {
 		s.admitted[key] = nil
 		s.mu.Unlock()
 	}
-	return s.admitNode(ctx, st)
+	return nil
+}
+
+// idleOrUndecided says, without deciding anything, whether a link may not be
+// used for a sign-in: it is idle in the store, or the connector has not yet
+// applied the rule to it in this process. It asks nothing of the network or
+// of tailscaled, so a write transaction and every use of a hub session may
+// ask it; deciding could need a write of its own (goIdle).
+func (s *Service) idleOrUndecided(st accountlink.State) bool {
+	if st.Idle != nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err, decided := s.admitted[st.ServerID+" "+st.URL]
+	return !decided || err != nil
 }
 
 // translate gives the engine's errors this package's names.

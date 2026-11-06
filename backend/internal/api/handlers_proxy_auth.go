@@ -18,7 +18,7 @@ import (
 func (s *Server) mountAuthFileRoutes(r chi.Router) {
 	r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 	r.Method(http.MethodGet, "/", s.handle(s.handleAuthFileList))
-	r.Method(http.MethodPost, "/", s.handle(s.handleAuthUserSet))
+	r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/", s.handle(s.handleAuthUserSet))
 	s.destructive(r, func(r chi.Router) {
 		r.Method(http.MethodDelete, "/{file}", s.handle(s.handleAuthFileDelete))
 		r.Method(http.MethodDelete, "/{file}/users/{user}", s.handle(s.handleAuthUserRemove))

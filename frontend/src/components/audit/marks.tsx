@@ -264,17 +264,27 @@ export function isMachine(entry: Pick<AuditEntry, "actor">) {
 /**
  * Which key wrote an entry, in the words its row has room for: the key's own
  * name where the server recorded it, since an account holding a CI key and a
- * laptop key needs to know which of the two changed something.
+ * laptop key needs to know which of the two changed something. A session Just
+ * Hub opened is said too, with the hub user whose grant opened it: after a hub
+ * is taken over, that is how what was done through it is told apart from what
+ * the account did here.
  */
-export function keyWords(entry: Pick<AuditEntry, "actor" | "keyId" | "keyName">) {
+export function keyWords(entry: Pick<AuditEntry, "actor" | "keyId" | "keyName" | "hubUser">) {
+  const hub = entry.hubUser ? `through Just Hub as ${entry.hubUser}` : "through Just Hub"
   // The assistant acting for the person whose name the entry carries.
-  if (entry.actor === "assistant") return "by the assistant"
+  if (entry.actor === "assistant")
+    return entry.hubUser ? `by the assistant, ${hub}` : "by the assistant"
+  if (entry.actor === "hub-session") return hub
   if (entry.actor !== "token") return undefined
   return entry.keyName ? `key ${entry.keyName}` : "API key"
 }
 
-/** The key's record number, for the tooltip over its name. */
-export function keyTitle(entry: Pick<AuditEntry, "keyId">) {
+/**
+ * The key's record number, or the hub session's id, for the tooltip over its
+ * words: the session id is the one the `hub.signin` row that opened it carries.
+ */
+export function keyTitle(entry: Pick<AuditEntry, "keyId" | "sessionId">) {
+  if (entry.sessionId) return `hub session ${entry.sessionId}`
   return entry.keyId ? `key #${entry.keyId}` : undefined
 }
 

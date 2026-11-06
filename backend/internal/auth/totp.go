@@ -42,6 +42,13 @@ func (s *Service) ConfirmTOTPEnrollmentForSession(ctx context.Context, userID in
 	if err != nil {
 		return nil, err
 	}
+	// A grant made with the password alone must not stand in for the code the
+	// account now requires (hub_signin.go): it ends here, with its hub
+	// sessions, and the person opts in again with a code.
+	end, err := endHubGrantTx(ctx, tx, userID, HubEndAuthenticatorChanged)
+	if err != nil {
+		return nil, err
+	}
 	if sessionID != "" {
 		if err := elevateTx(ctx, tx, sessionID, userID, "totp"); err != nil {
 			return nil, err
@@ -50,6 +57,7 @@ func (s *Service) ConfirmTOTPEnrollmentForSession(ctx context.Context, userID in
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	s.hubEndedAfterCommit(ctx, end)
 	return codes, nil
 }
 
@@ -155,10 +163,16 @@ func (s *Service) verifySecondFactor(ctx context.Context, sessionID string, user
 // elevateTx completes a session with its second factor. One begun with a
 // passkey keeps saying so: it reads "passkey+totp", not "totp", since a code
 // after a passkey is not the password-and-code pair "totp" has always meant.
+// A hub session is never touched: it is complete already, and rewriting its
+// method would turn it into an ordinary session that none of hub sign-in's
+// limits reach (hub_signin.go). The code route refuses a hub session before
+// a guess is spent (httpx.RefuseHubSession); this keeps it so for any other
+// caller.
 func elevateTx(ctx context.Context, tx *sql.Tx, sessionID string, userID int64, method string) error {
 	res, err := tx.ExecContext(ctx, `UPDATE sessions SET twofa_passed = 1,
 		auth_method = CASE WHEN auth_method = 'passkey' THEN 'passkey+' || ? ELSE ? END
-		WHERE id = ? AND user_id = ? AND expires_at > ?`, method, method, sessionID, userID, time.Now().Unix())
+		WHERE id = ? AND user_id = ? AND expires_at > ? AND auth_method <> ?`,
+		method, method, sessionID, userID, time.Now().Unix(), MethodHub)
 	if err != nil {
 		return err
 	}

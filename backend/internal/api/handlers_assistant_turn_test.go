@@ -643,6 +643,24 @@ func TestACallOutsideItsToolsIsAnsweredWithWhy(t *testing.T) {
 	}
 }
 
+// Letting Just Hub sign an account in weakens invariant 2 for that account, so
+// it is the person's own press: the assistant is offered neither the opt-in,
+// nor turning it off, nor an administrator's removal of someone's choice.
+func TestTheAssistantIsNotOfferedHubSignIn(t *testing.T) {
+	s := testServer(t)
+	s.Routes()
+	cat := s.apiCatalogue()
+	for _, key := range []string{"PUT /account/hub-signin", "DELETE /account/hub-signin", "DELETE /dashboard/hub/signin/{userId}"} {
+		route := cat.byKey[key]
+		if route == nil {
+			t.Fatalf("the catalogue has no %s", key)
+		}
+		if route.Excluded == "" || !strings.Contains(route.Excluded, "invariant 2") {
+			t.Errorf("%s is offered to the assistant (excluded: %q)", key, route.Excluded)
+		}
+	}
+}
+
 // The catalogue is every route under /deploy the person could make, but for what no
 // request of the assistant's makes; every line that names a route names a real one,
 // and every change says where it is shown.

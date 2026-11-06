@@ -174,19 +174,22 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPut, "/{id}/environments/{env}/releases/{release}/pin", s.handle(s.handleDeploymentReleasePin))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/reject", s.handle(s.handleDeploymentPreviewReject))
 				r.Method(http.MethodGet, "/{id}/environments/{env}/triggers/{trigger}/deliveries", s.handle(s.handleDeploymentTriggerDeliveries))
-				r.Method(http.MethodPost, "/{id}/environments/{env}/triggers/{trigger}/rotate-secret", s.handle(s.handleDeploymentTriggerRotateSecret))
-				r.Method(http.MethodGet, "/{id}/environments/{env}/variables/{name}/reveal", s.handle(s.handleDeploymentVariableReveal))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/environments/{env}/triggers/{trigger}/rotate-secret", s.handle(s.handleDeploymentTriggerRotateSecret))
+				// A variable's value, a generated one and a rotated one may be
+				// a secret the deployment holds; a session opened through Just
+				// Hub may not read one out or make a new one (section 9.9).
+				r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/{id}/environments/{env}/variables/{name}/reveal", s.handle(s.handleDeploymentVariableReveal))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariablePut))
 				r.Method(http.MethodDelete, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariableDelete))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/import", s.handle(s.handleDeploymentDotenvImport))
-				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/{name}/generate", s.handle(s.handleDeploymentVariableGenerate))
-				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/{name}/rotate", s.handle(s.handleDeploymentVariableRotate))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/environments/{env}/variables/{name}/generate", s.handle(s.handleDeploymentVariableGenerate))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/environments/{env}/variables/{name}/rotate", s.handle(s.handleDeploymentVariableRotate))
 				// A shared variable is written and revealed on the terms an
 				// environment's own variable is: an administrator, in a session.
 				r.Method(http.MethodPut, "/shared-variables/{name}", s.handle(s.handleSharedVariablePut))
-				r.Method(http.MethodGet, "/shared-variables/{name}/reveal", s.handle(s.handleSharedVariableReveal))
+				r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/shared-variables/{name}/reveal", s.handle(s.handleSharedVariableReveal))
 				r.Method(http.MethodPut, "/{id}/shared-variables/{name}", s.handle(s.handleSharedVariablePut))
-				r.Method(http.MethodGet, "/{id}/shared-variables/{name}/reveal", s.handle(s.handleSharedVariableReveal))
+				r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/{id}/shared-variables/{name}/reveal", s.handle(s.handleSharedVariableReveal))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfigurationSave))
 				// A domain's DNS record, read and written in its zone with the
 				// DNS credentials saved under Certificates: an administrator's
@@ -211,9 +214,11 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// A copy of a release's data beside production: a second copy
 				// of production's data, whose address carries a password, so
 				// an administrator's in a session. Nothing production holds is
-				// written, so none of it is destructive.
-				r.Method(http.MethodPost, "/{id}/environments/{env}/releases/{release}/data-copies", s.handle(s.handleDeploymentDataCopyCreate))
-				r.Method(http.MethodGet, "/{id}/environments/{env}/data-copies/{copy}/url", s.handle(s.handleDeploymentDataCopyURL))
+				// written, so none of it is destructive. Making one makes a
+				// database login, and its address is that login's password, so
+				// a session opened through Just Hub may do neither.
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/environments/{env}/releases/{release}/data-copies", s.handle(s.handleDeploymentDataCopyCreate))
+				r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/{id}/environments/{env}/data-copies/{copy}/url", s.handle(s.handleDeploymentDataCopyURL))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/data-copies/{copy}/extend", s.handle(s.handleDeploymentDataCopyExtend))
 				r.Method(http.MethodDelete, "/{id}/environments/{env}/data-copies/{copy}", s.handle(s.handleDeploymentDataCopyRemove))
 				r.Method(http.MethodGet, "/{id}/environments/{env}/data-copies/{copy}/comparison", s.handle(s.handleDeploymentDataCopyComparison))
@@ -225,11 +230,11 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/{id}/duplicate", s.handle(s.handleDeploymentDuplicate))
 				r.Method(http.MethodPost, "/{id}/removal-plan", s.handle(s.handleDeploymentRemovalPlan))
 				r.Method(http.MethodGet, "/credentials", s.handle(s.handleDeploymentCredentials))
-				r.Method(http.MethodPost, "/credentials", s.handle(s.handleDeploymentCredentialCreate))
-				r.Method(http.MethodPut, "/credentials/{id}", s.handle(s.handleDeploymentCredentialUpdate))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/credentials", s.handle(s.handleDeploymentCredentialCreate))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/credentials/{id}", s.handle(s.handleDeploymentCredentialUpdate))
 				r.Method(http.MethodPost, "/credentials/{id}/test", s.handle(s.handleDeploymentCredentialTest))
-				r.Method(http.MethodPost, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggerCreate))
-				r.Method(http.MethodPut, "/{id}/environments/{env}/triggers/{trigger}", s.handle(s.handleDeploymentTriggerUpdate))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggerCreate))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/{id}/environments/{env}/triggers/{trigger}", s.handle(s.handleDeploymentTriggerUpdate))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/triggers/{trigger}/test", s.handle(s.handleDeploymentTriggerTest))
 				r.Method(http.MethodDelete, "/{id}/environments/{env}/triggers/{trigger}", s.handle(s.handleDeploymentTriggerDelete))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/watch-paths/simulate", s.handle(s.handleDeploymentWatchPathSimulate))
@@ -241,19 +246,21 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPut, "/{id}/alerts/{alert}", s.handle(s.handleTrafficAlertUpdate))
 				r.Method(http.MethodDelete, "/{id}/alerts/{alert}", s.handle(s.handleTrafficAlertDelete))
 				r.Method(http.MethodPost, "/{id}/alerts/{alert}/test", s.handle(s.handleTrafficAlertTest))
-				r.Method(http.MethodPost, "/notifications", s.handle(s.handleDeploymentNotificationCreate))
-				r.Method(http.MethodPut, "/notifications/{channel}", s.handle(s.handleDeploymentNotificationUpdate))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/notifications", s.handle(s.handleDeploymentNotificationCreate))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/notifications/{channel}", s.handle(s.handleDeploymentNotificationUpdate))
 				r.Method(http.MethodPost, "/notifications/{channel}/test", s.handle(s.handleDeploymentNotificationTest))
 				r.Method(http.MethodPut, "/notifications/{channel}/enabled", s.handle(s.handleDeploymentNotificationEnabled))
 				r.Method(http.MethodDelete, "/notifications/{channel}", s.handle(s.handleDeploymentNotificationDelete))
 				s.mountLogDrainWrites(r)
 				s.mountSecretStoreWrites(r)
 			})
-			r.Method(http.MethodPost, "/", s.handle(s.handleDeployCreate))
+			// A new project's webhook secret starts its commands from
+			// anywhere, long after a hub session has ended.
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/", s.handle(s.handleDeployCreate))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleDeployUpdate))
-			r.Method(http.MethodPost, "/{id}/rotate-secret", s.handle(s.handleDeployRotateSecret))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/rotate-secret", s.handle(s.handleDeployRotateSecret))
 			r.Method(http.MethodPut, "/{id}/env", s.handle(s.handleDeployEnvSet))
-			r.Method(http.MethodGet, "/{id}/env/reveal", s.handle(s.handleDeployEnvReveal))
+			r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/{id}/env/reveal", s.handle(s.handleDeployEnvReveal))
 			r.Method(http.MethodDelete, "/{id}/env/{key}", s.handle(s.handleDeployEnvDelete))
 		})
 		s.destructive(r, func(r chi.Router) {
@@ -1502,14 +1509,10 @@ func (s *Server) handleDeployEnvReveal(w http.ResponseWriter, r *http.Request) e
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	p := httpx.MustPrincipal(r)
-	s.Audit.Record(r.Context(), audit.Entry{
-		UserID: p.UserID(), Username: p.Username(), Role: string(p.Role),
-		IP: httpx.ClientIP(r), Actor: p.Kind, KeyID: p.KeyID(), KeyName: p.KeyName(),
-		Action: "deploy.env.reveal", Target: project.Name,
-		Method: r.Method, Path: r.URL.Path, Status: http.StatusOK, Success: true,
-		Detail: audit.Detail(map[string]any{"count": len(vars)}),
-	})
+	e := httpx.AuditEntry(r)
+	e.Action, e.Target, e.Status, e.Success = "deploy.env.reveal", project.Name, http.StatusOK, true
+	e.Detail = audit.Detail(map[string]any{"count": len(vars)})
+	s.Audit.Record(r.Context(), e)
 	httpx.JSON(w, http.StatusOK, vars)
 	return nil
 }

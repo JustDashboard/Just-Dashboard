@@ -26,10 +26,10 @@ func (s *Server) mountGitHubAppRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/repositories", s.handle(s.handleGitHubAppRepositories))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
-			r.Method(http.MethodPost, "/manifest", s.handle(s.handleGitHubAppManifest))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/manifest", s.handle(s.handleGitHubAppManifest))
 			// The page finishes GitHub's redirect here with the code and
 			// state it was sent back with, under its own session.
-			r.Method(http.MethodPost, "/callback", s.handle(s.handleGitHubAppCallback))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/callback", s.handle(s.handleGitHubAppCallback))
 			r.Method(http.MethodDelete, "/", s.handle(s.handleGitHubAppDisconnect))
 		})
 	})

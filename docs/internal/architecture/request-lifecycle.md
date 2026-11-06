@@ -91,7 +91,11 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   variable at a credential, database or secret store is refused with `session_required` (see
   [invariant 4](../security/invariants.md)).
 - **`httpx.AuditMutations`** records every state-changing request, with the API key's id and name
-  (`audit_log.key_id`, `key_name`) when the request carried one. WebSocket routes are GET and
+  (`audit_log.key_id`, `key_name`) when the request carried one, and, for a session a Just Hub sign-in
+  ticket opened, actor `hub-session` with its hub user and session id (`audit_log.hub_user`,
+  `session_id`). Who acted is filled in by one builder (`httpx.principalEntry`; `httpx.AuditEntry` for a
+  handler writing an entry of its own), so `AuditRead`, `s.recordAudit` and the handlers' own entries
+  record the same. WebSocket routes are GET and
   long-lived, so they call `s.recordAudit(...)` at open time — the event is "a terminal was opened".
 - **`httpx.RequireCSRF`** requires `X-JD-CSRF: 1` on every browser-session mutation, including login
   and partial 2FA sessions. The header makes a same-site sibling origin preflight, and this application
@@ -106,6 +110,18 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   does not determine the browser-facing scheme. A socket whose client names a subprotocol upgrades
   through `UpgradeProtocol`, which answers with it only when it was offered — Remote Desktop's
   Guacamole tunnel asks for `guacamole`, and a browser drops a handshake that does not name it.
+
+A session made by a Just Hub sign-in ticket (`auth_method = 'hub'`, only with `JD_HUB_SIGNIN=true`) is
+complete from the start and resolves like any other, with two differences: `ResolveSession` checks again on
+every use that the switches, the link and the account's grant still hold, deleting the session if not, and
+`httpx.RefuseHubSession` refuses it (`403 hub_session_not_allowed`) on every route that makes, changes or
+reveals a credential, or makes or changes a link. A socket is authenticated once, at the upgrade, so every
+socket `wsx.Upgrader` opens is handed to the API's guard (`wsx.Guard`, `hub_session_sockets.go`), which watches
+the ones a hub session opened, as it watches the Remote Desktop stream bridge's proxied sockets: each closes at
+the session's expiry, at once when a revocation of hub sessions commits, and at the next check (every 15 seconds,
+`auth.Service.CheckSession`, which does not count as use) when anything else ended the session. Its redeem, `POST /api/v1/auth/hub/enter`, sits with `POST /auth/login`: no session, the
+sign-in budget per address, the CSRF header and its own audit entry; the ticket is the credential
+([invariants.md](../security/invariants.md#the-exception-hub-sign-in)).
 
 After completing any required second factor, an account marked `must_change_pw` may use only
 the session-only `POST /account/password` mutation and authentication status/logout routes. Feature

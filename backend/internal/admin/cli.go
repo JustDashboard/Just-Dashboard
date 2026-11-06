@@ -101,6 +101,23 @@ func run(ctx context.Context, dataDir string, args []string, in io.Reader, out, 
 	}
 
 	logger := audit.New(st, slog.New(slog.NewTextHandler(errOut, nil)))
+	// Resetting a password and revoking every session each end the account's
+	// hub sign-in grant and revoke its hub sessions inside auth's own
+	// transaction; every grant end is audited (hub-link-protocol.md 9.10),
+	// here as root at the terminal did it.
+	svc.SetHubGrantEnded(func(ctx context.Context, end auth.HubGrantEnd) {
+		account := fmt.Sprintf("user %d", end.UserID)
+		if u, err := svc.UserByID(ctx, end.UserID); err == nil {
+			account = u.Username
+		}
+		logger.Record(ctx, audit.Entry{
+			UserID: end.UserID, Username: "root", Role: "admin", Actor: "cli", Method: "CLI", Status: 200, Success: true,
+			Action: "hub.signin.revoke", Target: end.HubUser,
+			Detail: audit.Detail(map[string]any{
+				"account": account, "hubUser": end.HubUser, "reason": end.Reason, "sessionsRevoked": end.SessionsRevoked,
+			}),
+		})
+	})
 	entry := audit.Entry{Username: "root", Role: "admin", Actor: "cli", Method: "CLI",
 		Action: "dashboard.user." + args[0], Target: strings.TrimSpace(strings.ToLower(args[1]))}
 	var operationErr error

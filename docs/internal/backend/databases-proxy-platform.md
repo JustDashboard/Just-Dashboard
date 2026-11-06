@@ -5955,10 +5955,12 @@ step: **the reading site, `.env.example`, `docker-compose.yml`, and the configur
 `accountlink.ParseSiteURL`, so a malformed one refuses to start) and [account link](account-link.md) says what
 they decide. `JD_USAGE_PING` follows it too, and [the usage count](usage-ping.md) says what it decides. An install
 that is never linked, and whose administrators never said yes to the count, sends the site nothing.
-`JD_HUB_LINK` follows it as well ([hub link](hub-link.md)). `JD_HUB_LINK_TEST_ORIGIN` is the one deliberate
-exception: a loopback origin for test harnesses, read by `config.go` (through `hublink.ParseTestOrigin`, so
-anything else refuses to start) and the terminal commands, and on purpose in no `.env.example`, Compose map or
-operator guide, so a Compose install cannot pick it up from `.env`.
+`JD_HUB_LINK` and `JD_HUB_SIGNIN` follow it as well ([hub link](hub-link.md)). `JD_HUB_LINK_TEST_ORIGIN` is the
+one deliberate exception: a loopback origin for test harnesses, read by `config.go` (through
+`hublink.ParseTestOrigin`, so anything else refuses to start) and the terminal commands, and on purpose in no
+`.env.example`, Compose map or operator guide, so a Compose install cannot pick it up from `.env`. Beside it
+`JD_HUB_SIGNIN=true` refuses to start unless the binary was built with `-tags hublinktest`, as only the local
+end-to-end harness's is (`hubsignin_test_build.go`).
 
 ### Cutting a release
 
@@ -6161,7 +6163,10 @@ requests from overwriting the configuration needed for rollback.
 - Routes: `GET/PUT /api/v1/dashboard/config`, `POST /api/v1/dashboard/restart`,
   `DELETE /api/v1/dashboard/config/run` and `GET /api/v1/dashboard/config/log` (the whole restart
   transcript as `text/plain`, the same two reads the update transcript has), all `system.admin`, the two
-  mutations inside `s.destructive`.
+  mutations inside `s.destructive`. Applying settings also takes a session, and not one a Just Hub sign-in
+  ticket opened (`RequireSession`, `RefuseHubSession`): the allowlist, the address, `JD_REQUIRE_2FA`, the
+  session lifetimes and the terminal outlive whoever changed them (hub-link-protocol.md section 9.9).
+  Restarting is left to the role: it comes back on the configuration already on disk.
 
 Database provisioning uses the shared `internal/portalloc` range selection instead of a 64-port window.
 It returns and audits Docker's actual host binding if a competing process claims the initial choice.

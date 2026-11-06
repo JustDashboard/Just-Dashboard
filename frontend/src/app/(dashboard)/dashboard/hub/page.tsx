@@ -29,6 +29,7 @@ import { SharedFields } from "@/components/account-link/shared-fields"
 import { Keys, ScopeSection } from "@/components/account-link/status-panel"
 import { ConnectPanel, MachineFact, WaitingPanel } from "@/components/hub-link/connect-panel"
 import { HubPicture } from "@/components/hub-link/hub-picture"
+import { SignInPanel } from "@/components/hub-link/sign-in-panel"
 import { HubActivity, HubLinkActions, HubNotices } from "@/components/hub-link/status-panel"
 import { LogoGlyph } from "@/components/logo"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
@@ -70,6 +71,10 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  *
  * Without `system.admin` the status has no `admin` part, and the page says what it can: whether
  * and to which hub this server is connected, and what the hub is saying.
+ *
+ * Once linked, every account also finds "Sign in from Just Hub" here (`sign-in-panel.tsx`): its
+ * own choice to let a hub user open this server signed in as it (§9), which is off unless the
+ * operator, the hub and the account each turn it on.
  */
 export default function HubLinkPage() {
   const hub = useHubLink()
@@ -247,6 +252,15 @@ export default function HubLinkPage() {
                 {admin && status.scope && (
                   <ScopeSection scope={status.scope} onChange={hub.changeScope} className={BLOCK} />
                 )}
+                <SignInPanel
+                  status={status}
+                  hubName={status.hubName ? hubLabel(status.hubName) : host}
+                  idle={stopped}
+                  onAllow={hub.allowSignIn}
+                  onRevoke={hub.revokeSignIn}
+                  onRemove={hub.removeGrant}
+                  className={BLOCK}
+                />
                 {link && (
                   <>
                     <SharedFields

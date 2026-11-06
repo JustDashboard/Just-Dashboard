@@ -204,3 +204,22 @@ func TestHealthURLIsSomethingTheUpdaterCanActuallyAsk(t *testing.T) {
 		t.Errorf("an unparseable bind address produced %q", got)
 	}
 }
+
+// The dashboard's own settings are the perimeter and the sign-in policy, and
+// a change to them outlives whoever made it: an API key, which a person did
+// not sign in for, is refused them, as a session Just Hub opened is
+// (hub_session_routes_test.go). Restarting changes nothing that outlives it
+// and is left to the role.
+func TestOnlyASessionChangesTheDashboardsOwnSettings(t *testing.T) {
+	s := testServer(t)
+	signInAs(t, s, "settings-admin", auth.RoleAdmin)
+	key := &client{t: t, h: s.Routes()}
+	bearer := map[string]string{"Authorization": "Bearer " + apiTokenFor(t, s, "settings-admin")}
+	w := key.do(http.MethodPut, "/api/v1/dashboard/config", `{"allowedCidrs":"0.0.0.0/0","require2fa":false}`, bearer)
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "session_required") {
+		t.Fatalf("an admin key changing the settings = %d %s", w.Code, w.Body)
+	}
+	if w := key.do(http.MethodPost, "/api/v1/dashboard/restart", `{}`, bearer); w.Code == http.StatusForbidden {
+		t.Fatalf("an admin key restarting = %d %s", w.Code, w.Body)
+	}
+}

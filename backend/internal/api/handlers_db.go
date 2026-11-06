@@ -69,7 +69,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			// And for a server whose password nobody knows: make the account
 			// from the host's own shell, where peer authentication lets the
 			// engine's system account in without one.
-			r.Method(http.MethodPost, "/host/grant", s.handle(s.handleDBHostGrant))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/host/grant", s.handle(s.handleDBHostGrant))
 			r.Method(http.MethodPost, "/sync", s.handle(s.handleDBSync))
 			r.Method(http.MethodGet, "/provision/options", s.handle(s.handleDBProvisionOptions))
 			r.Method(http.MethodGet, "/provision/capacity", s.handle(s.handleDBProvisionCapacity))
@@ -78,7 +78,9 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			// first part of provisioning one, and the same capability.
 			r.Method(http.MethodPost, "/provision/build", s.handle(s.handleDBProvisionBuild))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleDBConnUpdate))
-			r.Method(http.MethodGet, "/{id}/url", s.handle(s.handleDBConnURL))
+			// The connection string carries the database's password: a
+			// session opened through Just Hub may not take it away with it.
+			r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/{id}/url", s.handle(s.handleDBConnURL))
 			// Where the server is reachable from. Reading it lists containers
 			// and the firewall; changing it recreates the container with a
 			// different port binding, which is the Docker page's Recreate

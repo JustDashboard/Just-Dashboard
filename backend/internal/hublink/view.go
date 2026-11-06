@@ -354,10 +354,12 @@ func (s *Service) ownSuffix(ctx context.Context) string {
 
 // onReply is the engine's hook for every successful heartbeat reply: it checks
 // the view and hands back its write, which the engine runs in the transaction
-// that records the heartbeat and only while the stored link is still the one
+// that records the heartbeat, and only while the stored link is still the one
 // the heartbeat was sent for (section 8.9, "Writes belong to the link they
-// describe"). A reply that lands after a disconnect therefore cannot bring
-// back the old hub's fleet, notices or sign-in users.
+// describe"): the cached view, and the end of every hub sign-in grant whose
+// hub user the reply no longer offers (section 6.3). A reply that lands after
+// a disconnect therefore cannot bring back the old hub's users, notices or
+// fleet. The grant ends are audited once that transaction has committed.
 func (s *Service) onReply(ctx context.Context, st accountlink.State, r accountlink.Reply) (accountlink.ReplyWrite, error) {
 	v, err := readView(st, r, s.testOrigin, func() string { return s.ownSuffix(ctx) })
 	if err != nil {
@@ -368,18 +370,24 @@ func (s *Service) onReply(ctx context.Context, st accountlink.State, r accountli
 		return nil, err
 	}
 	return func(ctx context.Context, tx *sql.Tx) (func(), error) {
-		_, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-			keyView, string(raw))
-		return nil, err
+			keyView, string(raw)); err != nil {
+			return nil, err
+		}
+		ends, err := endUnofferedTx(ctx, tx, v.SignIn)
+		if err != nil {
+			return nil, err
+		}
+		return func() {
+			for _, end := range ends {
+				s.auditGrantEnd(ctx, end, system)
+			}
+			if len(ends) > 0 {
+				s.engine.HeartbeatSoon()
+			}
+		}, nil
 	}, nil
-}
-
-// onClear forgets the view with the link it belongs to. Hub sign-in's grants
-// and tickets are cleared here too once they exist.
-func (s *Service) onClear(ctx context.Context, tx *sql.Tx) error {
-	_, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, keyView)
-	return err
 }
 
 // readStoredView is the cached reply for the link st, if there is one.

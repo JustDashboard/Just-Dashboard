@@ -74,6 +74,10 @@ backend accepts a single line of at most 4096 bytes and never prints it or puts 
   `CLI`, actions `dashboard.user.create-user`, `dashboard.user.reset-password`, and
   `dashboard.user.revoke-sessions`. The target identifies the dashboard account. Success/failure is
   recorded in the database and mirrored to stderr. Audit detail contains only the chosen role.
+- `reset-password` and `revoke-sessions` also end the account's hub sign-in grant and revoke its hub
+  sessions, in the same transaction, and record `hub.signin.revoke` the same way (`root`, `cli`, `CLI`;
+  the hub user as target; the account, the reason and `sessionsRevoked` as detail), as the dashboard
+  does for every grant end (hub-link-protocol 9.10).
 
 Neither command issues a temporary password. Until 0.7.3 both set `must_change_pw`, so an operator
 who had just reset their own password from a root shell was signed in and immediately asked for a

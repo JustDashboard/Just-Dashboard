@@ -415,6 +415,17 @@ test("Done discards a one-time key and the next creation starts with a blank for
   expect(minted).toBe(2)
 })
 
+// A session Just Hub opened says so, with the hub user whose ticket opened it (hub-link-protocol
+// §9.9), in the same words Settings → Hub lists the account's choice with.
+test("a session opened through Just Hub names the hub user", async ({ page }) => {
+  await mockAccount(page, session(false, false))
+  await page.route("**/api/v1/account/sessions", (route) =>
+    json(route, [sessions[0], { ...sessions[1], authMethod: "hub", hubUser: "owner" }]),
+  )
+  await page.goto("/account/sessions")
+  await expect(page.getByText("signed in through Just Hub by hub user owner")).toBeVisible()
+})
+
 for (const method of ["password", "unknown"]) {
   test(`completed ${method} session reports its recorded proof honestly`, async ({ page }) => {
     await mockAccount(page, session(false, false))

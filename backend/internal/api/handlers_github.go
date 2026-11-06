@@ -77,10 +77,10 @@ func (s *Server) mountGitHubRoutes(r chi.Router) {
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
-			r.Method(http.MethodPost, "/auth/device", s.handle(s.handleGitHubDeviceStart))
-			r.Method(http.MethodPost, "/auth/device/{id}", s.handle(s.handleGitHubDevicePoll))
-			r.Method(http.MethodPost, "/auth/token", s.handle(s.handleGitHubToken))
-			r.Method(http.MethodPost, "/auth/configure", s.handle(s.handleGitHubConfigure))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/device", s.handle(s.handleGitHubDeviceStart))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/device/{id}", s.handle(s.handleGitHubDevicePoll))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/token", s.handle(s.handleGitHubToken))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/configure", s.handle(s.handleGitHubConfigure))
 			r.Method(http.MethodPost, "/auth/logout", s.handle(s.handleGitHubLogout))
 		})
 	})

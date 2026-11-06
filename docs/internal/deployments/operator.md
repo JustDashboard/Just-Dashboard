@@ -43,9 +43,9 @@ instead, unless they chose full access. What still holds it is below, and
   | --- | --- |
   | `/assistant/*`, `/databases/assistant`, `/databases/{id}/assistant`, `POST /deploy/{id}/assistant`, `POST /deploy/drafts/{draft}/assistant` | Its own routes: a press inside a press, and the provider's keys |
   | `POST /deploy/{id}/runs/{run}/diagnosis`, `POST /boards/diagram` | They ask the model themselves; it reads the run, or describes the drawing in words |
-  | `/auth/*`, `/account/password`, `/account/2fa`, `/account/recovery-codes`, `/account/passkeys`, `/account/sessions` | A person's own credentials |
+  | `/auth/*`, `/account/password`, `/account/2fa`, `/account/recovery-codes`, `/account/passkeys`, `/account/sessions`, `/account/hub-signin` | A person's own credentials, and whether Just Hub may sign the account in (the exception to [invariant 2](../security/invariants.md#the-exception-hub-sign-in)) |
   | `POST /tokens`, `/tokens/deploy`, `/tokens/mcp` | A new key's value is shown once, and would be masked from the model and the page alike |
-  | `POST /dashboard/uninstall`, `/dashboard/link` and `/dashboard/hub` writes, `PUT /dashboard/usage-ping` | The person's own press ([invariants 12, 16 and 17](../security/invariants.md)) |
+  | `POST /dashboard/uninstall`, `/dashboard/link` and `/dashboard/hub` writes (an administrator removing an account's hub sign-in among them), `PUT /dashboard/usage-ping` | The person's own press ([invariants 12, 16 and 17](../security/invariants.md)) |
   | WebSockets and streams: a terminal's attach, a container's exec and stats, log, event, run, request and lifecycle streams, image pull and build, a stack's run, Redis monitor, Remote Desktop (`agentStreamHandlers`) | A recorded request cannot hold one; `TestEveryStreamingHandlerIsKeptFromTheAssistant` reads the handlers' source for an upgrade |
   | `/hooks/*`, `POST /deploy/{id}/hooks/{triggerID}`, `/mcp`, `/tailnet/*`, `/probe-agent/*` | Other callers' routes, authenticated by a signature, a key or a certificate |
 

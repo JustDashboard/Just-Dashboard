@@ -33,8 +33,10 @@ password a script sets is the one the account signs in with — the dashboard do
 at sign-in. An account an admin creates from Account → Users, and a bootstrap password the backend
 generated, are the ones replaced on first sign-in, after any required two-factor step. A reset
 clears failed-login and failed-code lockouts and revokes that account's sessions, API tokens and passkeys, while keeping
-two-factor enrolment, recovery codes, role and disabled state. Account changes are audited as local
-root; `revoke-sessions` leaves API tokens unchanged.
+two-factor enrolment, recovery codes, role and disabled state. A reset and `revoke-sessions` also end the
+account's choice to be [signed in from Just Hub](linking-and-usage.md#signing-in-from-just-hub), with every
+session the hub opened. Account changes are audited as local root; `revoke-sessions` leaves API tokens
+unchanged.
 
 For automation, append `--password-stdin` to either password command and pipe one password line from
 a trusted source — never put passwords in arguments or shell history. The scripts find the checkout

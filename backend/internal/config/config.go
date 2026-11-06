@@ -127,6 +127,13 @@ type Config struct {
 	// harness runs a hub at, which is accepted without the tailnet rule. It is
 	// for tests only and is documented nowhere an operator would copy it from.
 	HubLinkTestOrigin string
+	// HubSignIn is JD_HUB_SIGNIN, the operator's switch for hub sign-in
+	// (hub-link-protocol.md section 9): a Just Hub this server is linked to
+	// may open a session for an account that opted in, without this server's
+	// own second factor. Off by default; it counts as off while HubLink is.
+	// With a test origin set it refuses to start, unless the binary was built
+	// for the local end-to-end harness (the hublinktest build tag).
+	HubSignIn bool
 }
 
 func Load() (*Config, error) {
@@ -174,9 +181,17 @@ func Load() (*Config, error) {
 		AccountLink:      l.boolean("JD_ACCOUNT_LINK", true),
 		UsagePing:        l.boolean("JD_USAGE_PING", true),
 		HubLink:          l.boolean("JD_HUB_LINK", true),
+		HubSignIn:        l.boolean("JD_HUB_SIGNIN", false),
 	}
 	c.AccountURL = l.accountURL()
 	c.HubLinkTestOrigin = l.hubLinkTestOrigin()
+	if c.HubSignIn && c.HubLinkTestOrigin != "" && !hubSignInTestOriginAllowed {
+		// A hub at a test origin is reached over plain HTTP and checked by
+		// nothing on the tailnet; letting it sign people in is for the local
+		// end-to-end harness alone, which builds with the hublinktest tag.
+		l.errs = append(l.errs, "JD_HUB_SIGNIN=true cannot be used with JD_HUB_LINK_TEST_ORIGIN: "+
+			"the test origin is for tests, and only a build made for them (go build -tags hublinktest) allows both")
+	}
 
 	// The dashboard is root-equivalent. It must never be reachable from the
 	// open internet, so an explicit network allowlist is mandatory. Binding

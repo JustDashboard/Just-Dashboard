@@ -6864,6 +6864,13 @@ export type AuditEntry = {
    */
   keyId?: number
   keyName?: string
+  /**
+   * A session a Just Hub sign-in ticket opened, and the hub user whose grant opened it, on every
+   * row that session wrote (actor `hub-session`, or `assistant` for the assistant acting in one).
+   * The id is the one the `hub.signin` row that opened it records. Absent for every other row.
+   */
+  sessionId?: string
+  hubUser?: string
 }
 
 export type ApiToken = {
@@ -6926,7 +6933,16 @@ export type DbMetricsExport = {
 
 export type SessionInfo = {
   authMethod?:
-    "unknown" | "password" | "totp" | "recovery" | "passkey" | "passkey+totp" | "passkey+recovery"
+    | "unknown"
+    | "password"
+    | "totp"
+    | "recovery"
+    | "passkey"
+    | "passkey+totp"
+    | "passkey+recovery"
+    | "hub"
+  /** The Just Hub user whose grant opened a `hub` session (hub-link-protocol §9.9). */
+  hubUser?: string
   id: string
   userId: number
   twoFactorPassed: boolean
@@ -8707,7 +8723,10 @@ export type HubLinkStatus = {
   idle?: true
   fleet?: HubLinkServer[]
   notices?: HubLinkNotice[]
-  /** Hub sign-in (§9); typed so a strict reader keeps it, and drawn by nothing yet. */
+  /**
+   * Hub sign-in (§9): `enabled` is JD_HUB_SIGNIN, `offered` and `users` what the hub's last reply
+   * said, and `mine` the caller's own grant, when it has one for this link.
+   */
   signIn?: {
     enabled: boolean
     offered: boolean

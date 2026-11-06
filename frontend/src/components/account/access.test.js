@@ -66,6 +66,9 @@ test("a session's wire says what let it in", () => {
   expect(sessionGuard(session({ twoFactorPassed: false, authMethod: "password" }))).toBe("pending")
   expect(sessionGuard(session({ authMethod: "recovery" }))).toBe("recovery")
   expect(sessionGuard(session({ authMethod: undefined }))).toBe("unknown")
+  // A hub session proved a second factor on the hub: not the amber password-alone line.
+  expect(sessionGuard(session({ authMethod: "hub", twoFactorPassed: true }))).toBe("hub")
+  expect(sessionLine(session({ authMethod: "hub" }), NOW).tone).toBe("default")
 
   expect(sessionLine(session(), NOW)).toEqual({ still: false, dashed: false, tone: "default" })
   expect(sessionLine(session({ authMethod: "password", lastSeenAt: ago(DAY) }), NOW)).toEqual({

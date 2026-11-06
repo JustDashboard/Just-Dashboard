@@ -133,8 +133,10 @@ type Hooks struct {
 	OnReply func(ctx context.Context, st State, r Reply) (ReplyWrite, error)
 	// OnClear runs inside the transaction that ends a link (unlink, removal by
 	// the peer) or starts a new one, to delete what the instance keeps beside
-	// the engine's own keys.
-	OnClear func(ctx context.Context, tx *sql.Tx) error
+	// the engine's own keys. What it returns, when not nil, runs once that
+	// transaction has committed, for what must not happen inside it (the
+	// audit log is written through its own connection).
+	OnClear func(ctx context.Context, tx *sql.Tx) (after func(), err error)
 	// HeartbeatExtra adds top-level keys to the heartbeat body. They are
 	// never cut; the snapshot's lists are cut to leave room for them.
 	HeartbeatExtra func(ctx context.Context, st State) (map[string]json.RawMessage, error)
