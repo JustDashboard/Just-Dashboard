@@ -14,6 +14,9 @@ import { useCommandPalette } from "@/components/command-palette"
 import { KEYCAP, useLauncherKeys } from "@/components/command-search/keycaps"
 import { Logo, LogoMark } from "@/components/logo"
 import { UpdateNotice } from "@/components/update/update-notice"
+import { HubNotice } from "@/components/hub-link/hub-notice"
+import { ServerSwitcher } from "@/components/hub-link/server-switcher"
+import { useShellHub } from "@/hooks/use-hub-link"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
@@ -246,6 +249,7 @@ export function AppSidebar() {
   const collapsed = state === "collapsed"
   const scope = useNavScopeValue()
   const { hidden } = useHiddenSections()
+  const hub = useShellHub()
   const here = sectionOf(pathname)
 
   const [knownDatabases] = useSessionState<Record<string, KnownDatabase>>(KNOWN_DATABASES_KEY, {})
@@ -309,13 +313,19 @@ export function AppSidebar() {
             the two stack — the trigger stays reachable in the icon rail, which
             is the state you most need it in. */}
         <div className="flex min-w-0 items-center gap-2 group-data-[collapsible=icon]:flex-col">
-          <Link
-            href="/"
-            className="flex h-8 min-w-0 flex-1 items-center rounded-lg focus-ring group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center"
-          >
-            <Logo className="group-data-[collapsible=icon]:hidden" />
-            <LogoMark className="hidden group-data-[collapsible=icon]:block" />
-          </Link>
+          {/* On a server linked to a Just Hub the row names this server and
+              opens the others; unlinked it is the wordmark, untouched. */}
+          {hub ? (
+            <ServerSwitcher hub={hub} />
+          ) : (
+            <Link
+              href="/"
+              className="flex h-8 min-w-0 flex-1 items-center rounded-lg focus-ring group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center"
+            >
+              <Logo className="group-data-[collapsible=icon]:hidden" />
+              <LogoMark className="hidden group-data-[collapsible=icon]:block" />
+            </Link>
+          )}
           <SidebarTrigger className="size-8 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:hidden" />
         </div>
 
@@ -346,7 +356,13 @@ export function AppSidebar() {
           {onRoute && here && hidden.has(here) && <HiddenHere section={here} />}
           {panel.groups.map((group, index) => {
             const items = group.items.filter((item) =>
-              shownFor("section" in item ? item.section : item, hidden, pathname, can),
+              shownFor(
+                "section" in item ? item.section : item,
+                hidden,
+                pathname,
+                can,
+                Boolean(hub),
+              ),
             )
             if (items.length === 0) return null
             return (
@@ -405,6 +421,9 @@ export function AppSidebar() {
             self-hosted panel ends up eighteen months behind. It renders
             nothing when there is nothing to say. */}
         <UpdateNotice collapsed={collapsed} />
+        {/* What a linked hub has to say, nearest the account card, and
+            nothing at all without one. */}
+        <HubNotice collapsed={collapsed} />
         <UserCard collapsed={collapsed} />
       </SidebarFooter>
       <SidebarRail />

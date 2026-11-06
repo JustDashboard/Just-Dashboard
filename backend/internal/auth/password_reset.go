@@ -32,6 +32,11 @@ func (s *Service) ResetPassword(ctx context.Context, userID int64, password stri
 	} else if n != 1 {
 		return ErrNotFound
 	}
+	// The hub sign-in grant ends with the old password (hub_signin.go).
+	end, err := endHubGrantTx(ctx, tx, userID, HubEndPasswordReset)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
@@ -44,5 +49,9 @@ func (s *Service) ResetPassword(ctx context.Context, userID int64, password stri
 	if _, err := tx.ExecContext(ctx, `DELETE FROM webauthn_credentials WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.hubEndedAfterCommit(ctx, end)
+	return nil
 }

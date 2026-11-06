@@ -468,21 +468,10 @@ func (s *Server) handleMongoExport(w http.ResponseWriter, r *http.Request) error
 // The usual reason is the browser going away, which cancels the request's
 // context, so the entry is written on one that is not cancelled with it.
 func (s *Server) recordExportFailure(r *http.Request, target string, detail any) {
-	p := httpx.MustPrincipal(r)
-	s.Audit.Record(context.WithoutCancel(r.Context()), audit.Entry{
-		UserID:   p.UserID(),
-		Username: p.Username(),
-		Role:     string(p.Role),
-		IP:       httpx.ClientIP(r),
-		Actor:    p.Kind,
-		Action:   "database.export",
-		Target:   target,
-		Method:   r.Method,
-		Path:     r.URL.Path,
-		// What the request would have answered had it failed a moment
-		// earlier, before its headers went out.
-		Status:  http.StatusBadGateway,
-		Success: false,
-		Detail:  audit.Detail(detail),
-	})
+	e := httpx.AuditEntry(r)
+	e.Action, e.Target, e.Detail = "database.export", target, audit.Detail(detail)
+	// What the request would have answered had it failed a moment earlier,
+	// before its headers went out.
+	e.Status, e.Success = http.StatusBadGateway, false
+	s.Audit.Record(context.WithoutCancel(r.Context()), e)
 }

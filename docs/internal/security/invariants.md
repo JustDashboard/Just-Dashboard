@@ -7,7 +7,10 @@ A change that weakens any of these has to say so explicitly.
    than a constant — see [Invariant 2](#invariant-2-what-two-factor-still-guarantees) below. An account
    with an authenticator is **always** asked for a code, and a session that owes one reaches nothing but
    the 2FA routes. What `JD_REQUIRE_2FA` decides is whether an account that has *not* enrolled may sign
-   in at all. It defaults to false.
+   in at all. It defaults to false. **One documented exception:** with `JD_HUB_SIGNIN=true` (off by
+   default), an account that opted in may be opened by a sign-in ticket from the Just Hub this server is
+   linked to, without this server's own code. Its limits are in
+   [the exception to invariant 2](#the-exception-hub-sign-in).
 3. Every destructive action is behind `s.destructive` — capability, `destrLim`, audit entry. Actions
    with a meaningful accidental-click risk pause the operator with a confirmation dialog. A **subset**
    also requires the typed `X-Confirm` phrase,
@@ -203,7 +206,10 @@ A change that weakens any of these has to say so explicitly.
 5. Every state-changing request lands in the audit log. A request made with an API key carries the
    key's id and name (`audit_log.key_id`, `key_name`) as well as its account, and a deploy key refused
    by the gate is written as `auth.deploy_key.refused`, reads included, since it is answered before the
-   group's audit middleware runs.
+   group's audit middleware runs. Every request a hub session makes is audited as actor `hub-session`
+   (the assistant acting in one, `assistant`) with its hub user and session id (`audit_log.hub_user`,
+   `session_id`), so it reads apart from the same account's own session
+   ([below](#the-exception-hub-sign-in)).
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
    operations (bind-mount source, build context, a new stack's directory). Host commands go through
    `hostexec` with an argv, never a shell string. Request-defined shell source is confined to `deploy.Deployer.shell`, deliberately:
@@ -349,9 +355,10 @@ A change that weakens any of these has to say so explicitly.
     `call_operation` and its shaped reads, and runs a shell line on the host as the terminal would
     (`run_command`, invariant 6), which takes the terminal capability. What stays out of its reach is a closed list in
     `api/handlers_assistant_routes.go` (`agentExclusion`), each line something no role changes: its own routes
-    and those that ask the model; sign-in, password, second factor, passkeys, sessions and minting an API key;
-    uninstalling the dashboard and its account link and usage count (invariants 12 and 16 want the person's own
-    press); WebSockets and streams; webhooks, the MCP endpoint and other machines' routes. A database connection
+    and those that ask the model; sign-in, password, second factor, passkeys, sessions, letting Just Hub sign the
+    account in and minting an API key;
+    uninstalling the dashboard, its account link, its hub link and its usage count (invariants 12, 16 and 17 want
+    the person's own press); WebSockets and streams; webhooks, the MCP endpoint and other machines' routes. A database connection
     the operator protected is out of every chat's reach as well (`agentProtected`): its own chat is refused by the
     guard, and a call into its routes is answered with why, so nothing in it is sent to a model. What used to be
     refused is asked instead: how much runs without asking is the mode, which the server holds on every press —
@@ -394,6 +401,34 @@ A change that weakens any of these has to say so explicitly.
     key cannot give it. The report is the three fields of `usageping.Report` with no identifier, at most once per
     UTC day, and a redirect is never followed. `JD_USAGE_PING=false` or `JD_ACCOUNT_LINK=false` stops it, and an
     agent has none. See [the usage count](../backend/usage-ping.md).
+17. Connecting to a Just Hub adds no inbound path and no second authority, as invariant 12's link does not,
+    except hub sign-in: with `JD_HUB_SIGNIN=true` (off by default) the hub signs single-use tickets that this
+    server redeems at `POST /api/v1/auth/hub/enter` for accounts that opted in, within the limits of
+    [the exception to invariant 2](#the-exception-hub-sign-in). Otherwise it is
+    outbound only: every exchange is a request from this server to one machine on its own tailnet, dialled only
+    inside `100.64.0.0/10`, over TLS verified for the hub's MagicDNS name, never following a redirect; the hub's
+    one call the other way is the discovery probe `GET /api/v1/hub/hello`, behind the allowlist, which names
+    nothing but whether this server can be connected. A command from the hub runs only if its signature verifies
+    against the hub key pinned at approval, which no heartbeat reply can add to, end or replace
+    (`IgnoreAnnouncedKeys`: a new hub key needs a new link), it has not expired or been seen before, and its kind
+    is one of the closed set of protocol 7.1 within the scope chosen and enforced on this server; each is
+    audited as `hub:<hub name>` whatever its outcome, and draws on its own destructive budget. **The hub's
+    machine is pinned as well**: the `StableNodeID` WhoIs gives for its address at connect, checked before
+    anything is sent (at each connector start, whenever the dialled address changes, at least every five
+    minutes, and before every poll of a pending request); another machine at that name is sent nothing and
+    the link goes idle, as does a stored address the tailnet rule refuses at start, and an idle link stays idle
+    in the store until a person disconnects. Only that check, against the pinned node, lets a request through:
+    the URL check before Connect compares the name alone and changes nothing, before anything is pinned the
+    machine WhoIs names must bear the hub's name, and a check that cannot run for want of an address sends
+    nothing. Connecting, cancelling, changing the scope and disconnecting are session-only in the browser (an
+    API key is refused) and root-only at the terminal, where the hub's one-time
+    token is read only from standard input. Everything the hub sends for display (notices, fleet names, its
+    name, its error messages) is shown as plain text attributed to the hub, never as this dashboard's own
+    prompt or where the dashboard speaks for itself (the tab's title and the rail's wordmark name the server by
+    its own host name, not the hub's name for it), and an address it hands over (another server's endpoint, a
+    notice's link) opens only in a new tab with `noopener noreferrer`, never in this dashboard's own. While the
+    link is idle nothing links to the stored hub address at all, since it may answer on the machine that was
+    refused. See [hub link](../backend/hub-link.md) and its [protocol](../backend/hub-link-protocol.md).
 
 ## Invariant 2: what two-factor still guarantees
 
@@ -405,8 +440,9 @@ install into a chore that could not be skipped.
 
 What did **not** change, and must not:
 
-- An account with `totp_enabled` is asked for a code at every sign-in, whatever `JD_REQUIRE_2FA` says.
-  `Service.Login` decides on the account, not on the policy.
+- An account with `totp_enabled` is asked for a code at every sign-in on this server, whatever
+  `JD_REQUIRE_2FA` says, the one documented exception being a hub sign-in ticket
+  ([below](#the-exception-hub-sign-in)). `Service.Login` decides on the account, not on the policy.
 - A session that owes a second factor is never elevated. `httpx.Authenticator.resolve` refuses it
   everywhere but the 2FA routes, exactly as before.
 - Where `JD_REQUIRE_2FA` is true, an account with no authenticator gets a password-only session that
@@ -432,10 +468,190 @@ What did **not** change, and must not:
   status/logout and the session-only password change are available until `must_change_pw` is
   cleared. API tokens cannot bypass this restriction.
 
-The one deliberate loosening: with the policy off, an account that has never enrolled signs in on a
-password alone. `auth.Service.Login` elevates that session at creation, and `ResolveSession` completes a
-session that was left half-authenticated when the policy changed under it — without that, turning the
-setting off would strand everyone who was mid-flow with a session that can never be elevated.
+Two deliberate loosenings. The first: with the policy off, an account that has never enrolled signs in
+on a password alone. `auth.Service.Login` elevates that session at creation, and `ResolveSession`
+completes a session that was left half-authenticated when the policy changed under it — without that,
+turning the setting off would strand everyone who was mid-flow with a session that can never be
+elevated. The second is hub sign-in, [below](#the-exception-hub-sign-in), within its own limits.
+
+### The exception: hub sign-in
+
+Hub sign-in ([hub-link-protocol.md section 9](../backend/hub-link-protocol.md#9-hub-sign-in-version-1-off-by-default),
+implemented as [hub-link.md "Hub sign-in"](../backend/hub-link.md#hub-sign-in)) lets a person open this
+server from the Just Hub it is linked to and land on it signed in. A ticket the hub signs starts a
+**complete** session (`twofa_passed = 1`, `auth_method = 'hub'`) for an account with an authenticator
+without asking it for this server's code. That is a weakening of this invariant, made on purpose, and it
+is allowed only while all six of these hold:
+
+1. **The operator turned it on.** `JD_HUB_SIGNIN=true`, set by root in `.env`. It defaults to `false`,
+   counts as off while `JD_HUB_LINK=false`, and with `JD_HUB_LINK_TEST_ORIGIN` set the backend refuses to
+   start unless it was built with `-tags hublinktest`, which release builds never are (`config.go`).
+2. **The account holder opted in**, from a complete session on this server that a ticket did not make,
+   with the password and, where the account has an authenticator, a current code
+   (`PUT /api/v1/account/hub-signin`, checked by `auth.Service.VerifyReauthentication` on the account's
+   shared guess budget, the code's step used up). Each account decides for itself.
+3. **One hub user.** The grant (`hub_signin_grants`) names one hub user, and only that hub user's tickets
+   open the account. A hub user name names one person for the hub's whole life.
+4. **The hub's own second factor is fresh.** The ticket's `mfaAt`, under the pinned hub key, is the hub
+   user's last TOTP code in the hub session that asked, at most 600 seconds before the ticket was made. A
+   recovery code on the hub does not count.
+5. **Nothing on this server says no.** The account is not disabled, not locked (`locked_until`,
+   `totp_locked_until`), does not owe a password change, and is not unenrolled while
+   `JD_REQUIRE_2FA=true` (`auth.Service.StartHubSessionTx`).
+6. **The device that asked uses it.** The ticket names the hub session's tailnet login and the
+   `StableNodeID` of the device that asked; WhoIs of the browser's address must name both, unless the
+   browser is on loopback (an SSH tunnel) or tailscaled cannot be asked (`tailnetgate.ErrUnavailable`: no
+   answer, or an error status), which the audit entry records. A tailscaled that answered but named no
+   node or no login (`ErrNoIdentity`) was asked, and the device is refused.
+
+The ticket itself is checked in the order of protocol 9.7 (`hublink.checkTicket`, `checkDevice`,
+`Service.redeem`): the shape, a pinned hub key not past its end, the Ed25519 signature over the exact
+payload segment before any JSON is read, the payload's JSON rules (scanned token by token, so a key in
+another case, a repeated key or a `null` is refused), this hub and this `serverId`, its time with 30
+seconds of grace (accepted for at most 120 seconds), the hub's second factor, the device, and then its
+nonce, spent in a statement that commits on its own (`hub_signin_tickets`), so it opens one session at
+most. The grant, the account and the new session are one write transaction.
+
+**What a hub session cannot do.** It lasts at most two hours (one hour idle), and
+`httpx.RefuseHubSession` refuses it with `403 hub_session_not_allowed` on every route that creates,
+changes, rotates, imports or exports a credential, creates or changes a link, or changes the
+dashboard's own settings, because what it made would outlive the session and the grant. Exporting includes a read: a `GET` that shows a stored secret
+is refused as an export is. `TestEveryCredentialAndLinkRouteRefusesAHubSession`
+(`api/hub_session_routes_test.go`) walks the router and fails unless exactly these carry it, and
+`TestTheDocumentedRouteTablesAreHubSessionRefused` reads this table and the protocol's and fails when
+either names a route the router does not refuse, or leaves one out:
+
+| What | Routes, under `/api/v1` |
+| --- | --- |
+| API, MCP and deploy keys | `POST /tokens/`, `POST /tokens/mcp`, `POST /tokens/deploy`, `PUT /tokens/{id}/connections` |
+| Dashboard accounts | `POST /dashboard-users/`, `PATCH /dashboard-users/{id}`, `POST /dashboard-users/{id}/reset-totp`, `DELETE /dashboard-users/{id}` |
+| The caller's own credentials | `POST /account/password`, `POST /account/recovery-codes`, `POST /account/2fa/disable`, `POST /auth/2fa/setup`, `POST /auth/2fa/enable`, `POST /auth/2fa/verify`, `POST /account/passkeys/register/begin`, `POST /account/passkeys/register/finish`, `PATCH /account/passkeys/{id}`, `DELETE /account/passkeys/{id}` |
+| Linux accounts and their keys | `POST /system-users/`, `PATCH /system-users/{name}/`, `PUT /system-users/{name}/sudo`, `POST /system-users/{name}/password`, `POST /system-users/{name}/keys/generate`, `POST /system-users/{name}/keys`, `PATCH /system-users/{name}/keys`, `POST /system-users/{name}/keys/import`, `POST /system-users/{name}/keys/copy`, `POST /system-accounts/bulk`, `PATCH /system-accounts/groups/{group}` |
+| Database users and roles | `POST /databases/{id}/server/roles`, `PUT /databases/{id}/server/roles/{name}`, `POST /databases/{id}/server/roles/{name}/grant`, `POST /databases/{id}/server/roles/{name}/privileges`, `POST /databases/{id}/mongo/users`, `PUT /databases/{id}/mongo/users`, `POST /databases/{id}/mongo/users/grant`, `PUT /databases/{id}/redis/acl/{name}`, `PUT /databases/{id}/redis/config`, `POST /databases/host/grant` |
+| Database passwords and data copies | `GET /databases/{id}/url`, `POST /deploy/{id}/environments/{env}/releases/{release}/data-copies`, `GET /deploy/{id}/environments/{env}/data-copies/{copy}/url` |
+| Proxy basic-auth users | `POST /proxy/auth-files/`, `POST /proxy/import/npm`, `POST /proxy/import/npm/apply` |
+| Deployment secrets and saved credentials | `POST /deploy/`, `POST /deploy/{id}/environments/{env}/triggers`, `PUT /deploy/{id}/environments/{env}/triggers/{trigger}`, `POST /deploy/{id}/environments/{env}/triggers/{trigger}/rotate-secret`, `POST /deploy/{id}/rotate-secret`, `POST /deploy/credentials`, `PUT /deploy/credentials/{id}`, `POST /deploy/secret-stores`, `PUT /deploy/secret-stores/{store}`, `POST /deploy/notifications`, `PUT /deploy/notifications/{channel}`, `POST /deploy/log-drains`, `PUT /deploy/log-drains/{drain}` |
+| Deployment secret variables | `GET /deploy/{id}/env/reveal`, `GET /deploy/{id}/environments/{env}/variables/{name}/reveal`, `POST /deploy/{id}/environments/{env}/variables/{name}/generate`, `POST /deploy/{id}/environments/{env}/variables/{name}/rotate`, `GET /deploy/shared-variables/{name}/reveal`, `GET /deploy/{id}/shared-variables/{name}/reveal` |
+| Git and GitHub | `POST /git/github/auth/device`, `POST /git/github/auth/device/{id}`, `POST /git/github/auth/token`, `POST /git/github/auth/configure`, `POST /deploy/github-app/manifest`, `POST /deploy/github-app/callback`, `POST /git/forge/account` |
+| DNS credentials, tunnels and TLS keys | `POST /certificates/dns-credentials`, `POST /certificates/import`, `POST /certificates/export`, `POST /network/dns/services/`, `PUT /network/dns/services/{id}`, `PUT /proxy/tunnel/`, `POST /proxy/tunnel/create` |
+| Network peers and check machines | `POST /network/vpn/wireguard/{iface}/peers`, `PATCH /network/vpn/wireguard/{iface}/peers/{id}`, `GET /network/vpn/wireguard/{iface}/peers/{id}/config`, `POST /network/vpn/archive/{file}/restore`, `POST /network/external/enrollments` |
+| Remote Desktop | `POST /remote-desktop/computers`, `PUT /remote-desktop/computers/{id}`, `POST /remote-desktop/computers/{id}/stream/pair` |
+| Backups | `POST /backups/key/import`, `POST /backups/key/export`, `POST /backups/`, `PUT /backups/{id}`, `POST /backups/import` |
+| The assistant's provider keys | `PUT /assistant/providers/{preset}` |
+| The account link | `POST /dashboard/link/`, `DELETE /dashboard/link/request`, `PUT /dashboard/link/scope` |
+| The hub link | `POST /dashboard/hub`, `DELETE /dashboard/hub/request`, `PUT /dashboard/hub/scope` |
+| Hub sign-in | `PUT /account/hub-signin` |
+| The dashboard's own settings | `PUT /dashboard/config` |
+
+This is the protocol's table (section 9.9), which its first version did not hold whole: the walk of every
+write route found seventeen more that its rule covers, and the protocol lists them since (errata HL-3,
+route walk): `POST /git/forge/account` (a saved Git host token), `POST /databases/host/grant` and
+`POST /databases/{id}/server/roles/{name}/privileges` (a database login and its rights),
+`POST /system-accounts/bulk` and `PATCH /system-accounts/groups/{group}` (Linux accounts, and group
+membership such as `sudo` or `docker`), the two WireGuard peer routes and the restore of an archived tunnel
+(a peer's key lets a device onto this server's network), `POST /network/external/enrollments` (the token a
+machine that runs external checks enrols with, after which it keeps calling this server's probe-agent
+routes), `PUT /proxy/tunnel/` and `POST /proxy/tunnel/create` (Cloudflare tunnel tokens), the two DNS
+service routes (a DNS server's saved API credential), the backup job routes (a destination holds
+credentials of its own) and `PUT /assistant/providers/{preset}` (a provider's API key). The two `DELETE`
+rows the table lists are refused as well, although the rule leaves deletions open, because the table names
+them. A second walk, of every route that shows a stored secret and of every write route again (errata
+HL-3, second walk), found seventeen more: `GET /network/vpn/wireguard/{iface}/peers/{id}/config` (a peer's
+private key: the key that adding the peer is refused for), `GET /databases/{id}/url` (the connection
+string, with its password), `PUT /databases/{id}/redis/config` (`CONFIG SET` reaches `requirepass`,
+`masterauth` and the ACL file, which the refused ACL route exists to keep), the production data copy's
+two routes (making one makes a database login with a new password; its address is that password), the
+six routes that reveal, generate or rotate a deployment's secret variable, `POST /deploy/` (a new
+project's webhook secret, which starts its commands from anywhere), NPM's import and its preview (an NPM
+database's access-list users and passwords, written as basic-auth password files), and Remote Desktop's
+computer routes and stream pairing (a remote machine's saved sign-in, and a client certificate that
+machine trusts). `TestEveryRefusedRouteAnswersAHubSessionWith403` sends a hub session to each of them. A
+route added later that the rule covers joins the list, the test, the protocol's table and this table in
+the same change. Every second-factor route is refused, `POST /auth/2fa/verify` with the rest, which the
+end-to-end run of hub sign-in found still open: a hub session is made complete and never owes a code, and a
+code given from one would turn it into an ordinary session that none of these limits reach. The
+middleware refuses it before the handler spends a guess from the account's budget, so a right code from a
+hub session is neither counted nor audited as a wrong one
+(`TestAHubSessionIsRefusedTheCodeRouteBeforeAGuessIsSpent`); `auth.elevateTx` still leaves a hub session
+as it is, should another caller ever reach it. The final review found the dashboard's own settings open
+too: `PUT /dashboard/config` writes `JD_ALLOWED_CIDRS`, the address it binds, `JD_REQUIRE_2FA`, the
+session lifetimes and `JD_TERMINAL_ENABLED`, all of which outlive the session, and turning
+`JD_REQUIRE_2FA` off would loosen condition 5 above, under which the session was opened. It is refused
+since, and takes a session (`RequireSession`), so an API key cannot change them either
+(`TestOnlyASessionChangesTheDashboardsOwnSettings`). Restarting on the configuration already on disk
+stays open.
+
+What stays open to a hub session, because it only takes power away: disconnecting either link,
+`POST /dashboard/hub/sync`, removing a sign-in grant, revoking sessions, deleting a key, user, credential
+or channel, and signing GitHub out.
+
+**What it leaves in the audit log.** Every request a hub session makes is audited as actor
+`hub-session` (the assistant acting in one stays `assistant`) with its hub user and the session's id
+(`audit_log.hub_user`, `session_id`), and that id is the `sessionId` of the `hub.signin` entry that
+opened it. The same account in a session of this server's own is `session`, with neither. One builder
+writes who acted on every entry for a principal (`httpx.principalEntry`; `httpx.AuditEntry` for a
+handler that writes its own: a socket at open, a read before it runs, an outcome after the response),
+so the mutation middleware, `AuditRead`, `recordAudit` (a terminal, a container's shell, a Remote
+Desktop session) and the rest cannot leave the hub out
+(`TestAHubSessionIsAuditedApartFromTheSameAccountsOwnSession`,
+`TestWhatAHubSessionDoesIsAuditedApartFromALocalSession`). The device check makes a hub session's
+address the device the person uses here, so without this the trail could not tell what a taken-over
+hub did from what the person did.
+
+**When it ends.** A hub session lives only while what made it still holds. Every one of these is a write
+transaction that also revokes the hub sessions it ends, so a redeem either commits first and is revoked,
+or finds nothing to stand on:
+
+- the account's grant ends: the account or an administrator removes it, the account replaces it, its
+  password changes or is reset, its authenticator is enrolled, replaced, reset or turned off, it is
+  disabled or deleted, or all its sessions are revoked (`auth.endHubGrantTx`, inside each of those
+  changes' own transaction);
+- the hub's heartbeat reply no longer offers its hub user, or offers no sign-in at all (`hublink.onReply`,
+  in the transaction that keeps the reply, and only for the link the reply came from);
+- the link ends (disconnect, removal in the hub, a new link): every grant, every ticket record and every
+  hub session go with it (`hublink.onClear`, in the engine's clearing transaction);
+- the link goes idle, because its address fails the URL rule at start or another machine answers at the
+  hub's name: every hub session is revoked in the write transaction that stores the idle flag, and the
+  grants stay unusable (`hublink.goIdle`, `revokeHubSessionsTx`). The flag is kept in the stored link,
+  so every later start finds the link idle without deciding again, and refuses hub sessions, redeems and
+  new grants until a person disconnects, even once the address passes the rule again;
+- `JD_HUB_SIGNIN` or `JD_HUB_LINK` is found off at start: every grant, ticket record and hub session is
+  deleted before the API serves its first request, and if that cannot be written the backend does not
+  start (`hublink.PrepareSignIn` from `api.Server.Start`).
+
+And every time a hub session is resolved, `auth.Service.ResolveSession` asks `hublink.checkHubSession`
+again: both switches on, the link stored and not idle, and a grant for this account and this link whose
+hub user is the session's and that is not newer than the session. A revocation that was missed cannot
+keep one working; without the check installed, no hub session resolves at all.
+
+A socket is authenticated once, at the upgrade, and nothing in the request path looks at it again, so
+the sockets a hub session opens are tied to it: every socket `wsx.Upgrader` opens goes through the API's
+`wsx.Guard` (`api/hub_session_sockets.go`), as do the Remote Desktop stream bridge's proxied sockets
+(`guardHubStream`). One a hub session opened (a terminal, a container's shell, a log or event tail, a
+Remote Desktop session or stream) closes at the session's expiry, at once when a revocation of hub
+sessions commits (hublink's `SessionsEnded`, after each event above), and otherwise at its next check,
+every 15 seconds, through `auth.Service.CheckSession`, which runs every check `ResolveSession` does
+without counting as use. `TestAHubSessionsSocketsEndWithIt` holds every event above to it.
+
+**What it costs, plainly.** With hub sign-in on, whoever takes over the hub can open a session as every
+account that opted in, from a device on the tailnet, and do what that account can. The route list above
+stops the dashboard's own forms from minting, changing or revealing lasting credentials; it does not
+contain the general tools. The Files page reads every file under `JD_FILE_ROOTS` (`/` by default) as
+root, for every role, so any hub session can read every credential on disk (`/etc/shadow`, SSH private
+keys, WireGuard configurations, a project's `.env`, this dashboard's own `.env` with `JD_MASTER_KEY` and
+its database). With `file.write` (the `admin` and `limited` roles) it writes any file as root
+(`files.WriteChecked` has no deny-list), so it can plant an SSH key in `authorized_keys` or a sudoers
+rule; and an administrator's session has the terminal. For those roles a hub session is as good as root,
+and for every role it reads what root reads. Ending hub sign-in ends the hub's sessions; it does not undo
+what was done in them; the audit log says what was. Without it, a taken-over hub is limited to its
+scope's commands. That is why it is off by default and needs the operator, the hub's owner and each
+account holder, and why the opt-in screen says so.
+
+**The review.** Condition 1 of protocol 9.1 asks for a written security review before a release turns
+this on. The review of JD 0.8.5, item by item against protocol 9.12 with the code and test for each and
+the residual risks above, is
+[docs/audits/2026-11-05-hub-signin/security-review.md](../../audits/2026-11-05-hub-signin/security-review.md);
+the owner signs it there before `JD_HUB_SIGNIN=true` is set on any server.
 
 ## Invariant 3: which routes take a typed phrase
 

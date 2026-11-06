@@ -79,7 +79,7 @@ func (s *Server) mountDatabaseOpsRoutes(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPut, "/{id}/settings", s.handle(s.handleDBSettingChange))
 		r.Method(http.MethodPost, "/{id}/statements/preload", s.handle(s.handleDBStatementsPreload))
-		r.Method(http.MethodPost, "/{id}/server/roles/{name}/privileges", s.handle(s.handleDBPrivilegeGrant))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/{id}/server/roles/{name}/privileges", s.handle(s.handleDBPrivilegeGrant))
 		r.Method(http.MethodPost, "/{id}/server/roles/{name}/privileges/revoke", s.handle(s.handleDBPrivilegeRevoke))
 	})
 	s.destructive(r, func(r chi.Router) {

@@ -14,6 +14,15 @@ in the site's repository, and both sides build to that one file, including its t
 change to both repositories. This page records how the dashboard implements it and the decisions that file
 leaves to the dashboard.
 
+**The same engine runs a second link.** `accountlink` is an engine that runs as more than one instance: a
+`Profile` (`profile.go`) gives each instance its settings prefix, command table, base path, peer wording, audit
+names, pacing and URL admission, and switches the account link leaves off (`IgnoreAnnouncedKeys`, `ClockSequence`,
+`Speaker`, `RemovalOutcome`), and `Hooks` let an instance add its own (`Admit`, `OnReply`, `OnClear`,
+`HeartbeatExtra`, `BeforePoll`). The account link is
+`AccountProfile`; the [hub link](hub-link.md) (`backend/internal/hublink`) is a second instance with the hub's
+profile, and the two share no state. Everything on this page is the account link's instance; the hub link's
+differences are tabled in [hub-link.md](hub-link.md#one-engine-two-instances).
+
 ## Trust model
 
 - **Outbound only.** The dashboard is not reachable from the internet (invariants 1 and 7) and linking does
@@ -56,20 +65,25 @@ running dashboard (every `pollSeconds`). A request begun by `--admin link` is po
 the approval, which the site delivers once, is never collected by two processes; if the other process did
 collect it (`request_consumed`) the poller looks at the stored state and reports it as linked. Within one
 process `PollLink` holds `pollMu`, so two polls that overlap never race for the approval: the one that collects
-it has stored the link before the other asks, and the other finds it stored. A terminal
-command that was killed outright leaves its request behind with nobody polling it; the next terminal command
-replaces it, whereas a request from Settings is never taken over from the terminal.
+it has stored the link before the other asks, and the other finds it stored. A terminal command waiting on its
+request says so every 5 seconds (`AwaitLink` stamps `Request.WaitingAt`), and while it does a second terminal
+command is refused with `ErrLinkPending`, as one beside a request from Settings always is: two commands polling
+for one approval would both collect it. One that was killed outright stops saying so and leaves its request
+behind with nobody polling it; once it has been silent for 20 seconds the next terminal command replaces it. A
+waiting command polls and cancels only its own request, and stops if another replaced it.
 
 **A link made at the terminal reaches a running dashboard without a restart.** While nothing is linked the
 connector looks at the stored state every 15 seconds, and a running link checks every 5 seconds that it still
 is the stored one. An unlink at the terminal therefore stops the heartbeat and the poll, and a re-link starts
 them.
 
-Unlinking tells the site (`POST /unlink`, signed), forgets the link state and everything the site set (the
-update policy), and keeps the identity so a later link shows the same fingerprint. If the site cannot be
-reached the link is cleared anyway; the result says the site was not told. A `410` on any signed request
-means the owner removed the server on the site, and clears the link the same way (audited as
-`account.unlink` by `system`).
+Unlinking forgets the link state and everything the site set (the update policy), keeps the identity so a later
+link shows the same fingerprint, and then tells the site (`POST /unlink`, signed). If the site cannot be reached
+the link is cleared anyway; the result says the site was not told. A `410` on any signed request means the owner
+removed the server on the site, and clears the link the same way (audited as `account.unlink` by `system`). The
+order matters: once the site has heard of an unlink it answers `410` to everything still in flight on the link,
+the running dashboard's included when the unlink is the terminal's, and `clearLink`, which reads the link inside
+its own transaction, finds nothing left to clear, so an unlink is recorded once, by whoever unlinked.
 
 ## Files
 
@@ -77,7 +91,7 @@ means the owner removed the server on the site, and clears the link the same way
 | --- | --- |
 | `protocol.go` | Scopes and kinds, the key fingerprint, the signed request and command strings, canonical JSON, strict response decoding |
 | `identity.go` | The sealed Ed25519 identity; an identity the master key cannot open is replaced only while nothing is linked |
-| `state.go` | Settings keys, `State`, `Request`, the persisted sequence (`UPDATE ... RETURNING`, committed before the request is sent) |
+| `state.go` | Settings keys, `State` (with the hub link's `HubNode` and `Idle`, which the account link leaves empty), `Request`, the persisted sequence (`UPDATE ... RETURNING`, committed before the request is sent), and `updateStateTx`, the serverId-guarded transaction a heartbeat's writes run in |
 | `client.go` | The signed HTTP client: TLS 1.2 at least, 15 s per request plus the long poll's wait, no redirects, a 64 KiB request and 256 KiB response bound, one retry path for `replayed_sequence` |
 | `link.go` | `BeginLink`, `PollLink`, `AwaitLink` (the terminal's wait), `CancelLink`, `SetScope`, `Unlink`, `SyncNow` |
 | `service.go` | Options, the loops (top, heartbeat, command, policy, watch), backoff, rate pacing, key rotation, `410` handling |
@@ -85,6 +99,8 @@ means the owner removed the server on the site, and clears the link the same way
 | `executor.go` | The closed switch over kinds and the `Host` interface the `api` package implements |
 | `snapshot.go` | The heartbeat body and `Redact(scope)` |
 | `policy.go` | The automatic-update policy and when it is due |
+| `profile.go` | `Profile`, what makes one instance of the engine one link rather than another, `AccountProfile`, and the `Hooks` another instance uses |
+| `engine.go` | What another instance reads and sets: `Health`, `Fingerprint`, `SetIdle`, `RecordNode`, `RecordRequestNode`, test timings, and the signed strings and canonical arguments for another implementation's vector tests |
 | `status.go` | `Status`, the JSON `GET /dashboard/link` returns |
 | `siteurl.go` | `ParseSiteURL`, used by `config` and the terminal command |
 | `linkstub/` | A signature-less stand-in site for the tests of the packages that drive a link |
@@ -95,7 +111,8 @@ implementation over the services the pages use), `admin/link.go` (the terminal c
 
 ## State
 
-All of it is in the `settings` table; only the identity is secret.
+All of it is in the `settings` table, under the instance's prefix (`account.link` here, `hub.link` for the hub
+link); only the identity is secret.
 
 | Key | Holds |
 | --- | --- |
@@ -109,6 +126,9 @@ All of it is in the `settings` table; only the identity is secret.
 The link state is read and written back inside one transaction wherever more than one writer can reach it
 (`kv.updateState`): a heartbeat storing a rotated key or a new interval and the page changing the scope
 cannot read the same copy and each put their own back. Transactions here take the write lock when they begin.
+What a heartbeat reply changes, and the status record of the last exchanges, are written only while the stored
+link is still the one the exchange was for (`updateStateTx`, `setStatus(serverID)`), so an answer that lands after
+an unlink leaves nothing behind.
 
 The sequence is taken with one statement that raises and returns it and is committed before the request is
 built, so a number is on disk before it is on the wire and the dashboard and a terminal command can never be
@@ -243,7 +263,11 @@ terminal), `account.link.begin`, `.cancel`, `.scope` and `account.unlink`.
 
 Results sent back carry the service's message, never a command's output: output is cut at 8 KiB and errors at
 1000 characters, and compose's own output stays on the machine because it can carry values from a stack's
-environment.
+environment. A Docker failure carries the sentence a page shows and what Docker said (`dockerFailure`: "The
+Docker daemon is not reachable from this dashboard. Docker said: Cannot connect to the Docker daemon at …"), so
+a daemon that cannot be reached never reads as one that refused. A container or stack command first needs the
+daemon to answer a ping within 10 seconds, so a daemon that takes the connection and says nothing fails the
+command then rather than holding it for its 10 minutes.
 
 ## Automatic updates
 
@@ -289,8 +313,8 @@ commands, and root-only. They read `JD_ACCOUNT_LINK`, `JD_ACCOUNT_URL` and `JD_M
 environment (the account commands never decrypt anything; these have to, so they build a sealer, with a clear
 error when the key is absent; `link-status` needs no key). `link` prints the approval address and the code,
 waits, and exits **0** when linked, **2** when the request was declined or not approved before `--wait` (or
-the command was interrupted), **1** for anything else (switched off, already linked, key missing, site
-unreachable). Interrupted or timed out, it forgets its request. Audited as `account.link` by `root` /
+the command was interrupted), **1** for anything else (switched off, already linked, a request already waiting,
+another `link` still waiting on its own included, key missing, site unreachable). Interrupted or timed out, it forgets its request. Audited as `account.link` by `root` /
 `cli`; failures are audited as failed; `unlink` as `account.unlink`.
 
 `install.sh` asks in the Behaviour step, after the two-factor question and only when linking is not switched

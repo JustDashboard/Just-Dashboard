@@ -71,3 +71,19 @@ test("a row written by an API key names the key when the server recorded it", ()
   expect(keyWords({ actor: "session", keyName: "ignored" })).toBeUndefined()
   expect(keyWords({ actor: "assistant" })).toBe("by the assistant")
 })
+
+test("a row written in a session Just Hub opened says so, with the hub user and the session", () => {
+  const row = { actor: "hub-session", hubUser: "owner", sessionId: "V2xvT2Yy" }
+  expect(keyWords(row)).toBe("through Just Hub as owner")
+  expect(keyTitle(row)).toBe("hub session V2xvT2Yy")
+  expect(keyWords({ actor: "hub-session" })).toBe("through Just Hub")
+  // The assistant acting in one is still the assistant's, and still the hub's.
+  expect(keyWords({ actor: "assistant", hubUser: "owner" })).toBe(
+    "by the assistant, through Just Hub as owner",
+  )
+  // The same account in a session of this server's own says nothing more.
+  expect(keyWords({ actor: "session" })).toBeUndefined()
+  expect(keyTitle({})).toBeUndefined()
+  expect(actorName({ actor: "hub-session", username: "ion" })).toBe("ion")
+  expect(isMachine({ actor: "hub-session" })).toBe(false)
+})

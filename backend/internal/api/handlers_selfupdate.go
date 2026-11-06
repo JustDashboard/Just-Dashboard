@@ -26,6 +26,17 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 		// The same audience as the report, which already carries this
 		// transcript's last 64 KB: this is the rest of it, asked for once.
 		r.Method(http.MethodGet, "/update/log", s.handle(s.handleSelfUpdateLog))
+		// Where this server stands with Just Hub, and the hub's fleet and
+		// notices for the server switcher: every role reads it; only an
+		// administrator is sent the admin part (handlers_hublink.go).
+		if s.modules.hubLink != nil {
+			r.Method(http.MethodGet, "/hub", s.handle(s.handleHubLinkStatus))
+			// The URL rule without starting anything, so Settings can show
+			// whose machine an address is before Connect. It asks this
+			// host's tailscaled, so it is an administrator's, in a session.
+			r.With(httpx.RequireCapability(auth.CapSystemAdmin), httpx.RequireSession).
+				Method(http.MethodGet, "/hub/check", s.handle(s.handleHubLinkCheck))
+		}
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
@@ -55,7 +66,19 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 			// they belong in the same budget as everything else that stops a
 			// running service.
 			s.destructive(r, func(r chi.Router) {
-				r.Method(http.MethodPut, "/config", s.handle(s.handleSelfConfigApply))
+				// Applying settings is a person's, in a session this server
+				// opened itself. What it writes is the perimeter and the
+				// sign-in policy (the allowlist, the address, whether an
+				// unenrolled account may sign in, how long a session lasts,
+				// the terminal), and it outlives whoever wrote it: from a
+				// session Just Hub opened it would loosen the very limits
+				// that session was opened under (hub-link-protocol.md
+				// section 9.9), and from an API key it is a perimeter change
+				// nobody reviewed on the form that says what each one does.
+				r.With(httpx.RequireSession, httpx.RefuseHubSession).
+					Method(http.MethodPut, "/config", s.handle(s.handleSelfConfigApply))
+				// Restarting changes nothing that outlives it: the stack comes
+				// back on the configuration already on disk.
 				r.Method(http.MethodPost, "/restart", s.handle(s.handleSelfConfigRestart))
 			})
 			// Asking for the certificate now rather than at the next check.
@@ -70,6 +93,10 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 			// site account, so the routes do not exist there.
 			if s.modules.accountLink != nil {
 				s.mountAccountLinkRoutes(r)
+			}
+			// Connecting it to a Just Hub on its tailnet.
+			if s.modules.hubLink != nil {
+				s.mountHubLinkRoutes(r)
 			}
 			if s.modules.usagePing != nil {
 				s.mountUsagePingRoutes(r)

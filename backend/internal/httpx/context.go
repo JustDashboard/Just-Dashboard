@@ -54,6 +54,16 @@ type Principal struct {
 	// authenticator means something different when the session that asked is
 	// already signed in.
 	Elevated bool
+	// HubSession is a session a Just Hub sign-in ticket made
+	// (hub-link-protocol.md section 9.9). It may do what its account may,
+	// except what RefuseHubSession refuses: anything that would leave a
+	// credential, a link or a setting behind it. Everything it does is
+	// audited as actor "hub-session" with HubUser and SessionID, so it reads
+	// apart from what the account did in a session of this server's own.
+	HubSession bool
+	// HubUser is the hub user whose grant made a hub session; empty for every
+	// other principal.
+	HubUser string
 
 	// FailureReason is filled in by the error writer so the audit middleware
 	// can record why a request was rejected.

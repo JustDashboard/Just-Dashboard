@@ -172,7 +172,9 @@ addresses are plain HTTP and a `Secure` cookie is never sent to them anyway.
 4. 204 with `X-Tailnet-Login` (the login, or a tagged machine's tags) and `X-Tailnet-User` (the display
    name, or the machine's name; RFC 2047-encoded where not printable ASCII) when the list admits the
    peer; 403 when it does not, or when no device on the tailnet holds the address; **503** when
-   tailscaled cannot be asked — never 403, so a daemon restarting is an outage and not a refusal.
+   tailscaled cannot be asked — never 403, so a daemon restarting is an outage and not a refusal. An
+   answer that names no node or no login (`ErrNoIdentity`, which hub sign-in's device check refuses)
+   is answered the same 503 here.
 
 Answers from tailscaled, and an environment's list, are kept five seconds: a page and its assets are
 one question rather than forty, and a login removed from the list stops working within the same few

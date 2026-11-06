@@ -14,7 +14,7 @@ func TestSignedRequestsRoundTripAgainstTheSite(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	st := e.link(ScopeObserve)
-	id, _, err := loadIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _, err := loadIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if err != nil || id == nil {
 		t.Fatalf("identity: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestRequestsCarryTheProtocolHeaderAndAnIdentifyingAgentButNoSecret(t *testi
 	}))
 	defer srv.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = srv.URL })
-	id, err := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, err := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +75,51 @@ func TestSequenceNumbersOnlyGoUpAndSurviveARestart(t *testing.T) {
 	}
 }
 
+// A profile with ClockSequence takes max(stored + 1, unix milliseconds), so a
+// database restored from an older copy carries on above every number it sent
+// (hub-link-protocol.md 3.1, HL-16).
+func TestAClockSequenceContinuesAboveARestoredDatabase(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	clock := time.UnixMilli(1761350400000).UTC()
+	p := AccountProfile
+	p.ClockSequence = true
+	svc := New(Options{Store: e.st, Sealer: e.svc.sealer, Enabled: true, Profile: &p, Now: func() time.Time { return clock }})
+	key := svc.kv.key(keySequence)
+	for _, tc := range []struct {
+		name   string
+		stored string
+		want   int64
+	}{
+		{"nothing stored", "", 1761350400000},
+		{"stored below the clock", "5", 1761350400000},
+		{"stored above the clock", "1761350400999", 1761350401000},
+		{"stored equal to the clock", "1761350400000", 1761350400001},
+	} {
+		if tc.stored == "" {
+			if _, err := e.st.DB.Exec(`DELETE FROM settings WHERE key = ?`, key); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := e.st.SetSetting(t.Context(), key, tc.stored); err != nil {
+			t.Fatal(err)
+		}
+		n, err := svc.kv.nextSequence(t.Context())
+		if err != nil || n != tc.want {
+			t.Fatalf("%s: got %d (%v), want %d", tc.name, n, err, tc.want)
+		}
+		if raw, _, _ := e.st.Setting(t.Context(), key); raw != strconv.FormatInt(tc.want, 10) {
+			t.Fatalf("%s: stored %q", tc.name, raw)
+		}
+	}
+	// The account link's own counter is untouched by the switch: stored + 1.
+	if err := e.st.SetSetting(t.Context(), e.svc.kv.key(keySequence), "5"); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := e.svc.kv.nextSequence(t.Context()); err != nil || n != 6 {
+		t.Fatalf("account link sequence = %d, %v", n, err)
+	}
+}
+
 func TestASequenceTheSiteRefusesIsRetriedWithANewOne(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -84,7 +129,7 @@ func TestASequenceTheSiteRefusesIsRetriedWithANewOne(t *testing.T) {
 	e.site.mu.Lock()
 	e.site.servers[st.ServerID].seq += 2
 	e.site.mu.Unlock()
-	id, _, _ := loadIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _, _ := loadIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if _, err := e.svc.newClient(id).heartbeat(t.Context(), st.ServerID, []byte(`{}`)); err != nil {
 		t.Fatalf("the refused sequence was not retried: %v", err)
 	}
@@ -102,7 +147,7 @@ func TestResponsesAreDecodedStrictly(t *testing.T) {
 	}))
 	defer srv.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = srv.URL })
-	id, _ := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _ := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	c := e.svc.newClient(id)
 	if _, err := c.site(t.Context()); err == nil || !strings.Contains(err.Error(), "protocol 1") {
 		t.Fatalf("unknown field accepted: %v", err)
@@ -123,7 +168,7 @@ func TestRedirectsAreNeverFollowed(t *testing.T) {
 	}))
 	defer srv.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = srv.URL })
-	id, _ := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _ := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if _, err := e.svc.newClient(id).site(t.Context()); err == nil {
 		t.Fatal("a redirect was treated as an answer")
 	}
@@ -139,7 +184,7 @@ func TestResponsesAboveTheLimitAreRefused(t *testing.T) {
 	}))
 	defer srv.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = srv.URL })
-	id, _ := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _ := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if _, err := e.svc.newClient(id).site(t.Context()); err == nil || !strings.Contains(err.Error(), "larger") {
 		t.Fatalf("oversize response accepted: %v", err)
 	}
@@ -149,7 +194,7 @@ func TestANoContentAnswerNeedsNoBody(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	st := e.link(ScopeObserve)
-	id, _, _ := loadIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _, _ := loadIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	c := e.svc.newClient(id)
 	if err := c.result(t.Context(), st.ServerID, ulid(1), CommandResult{Status: resultSucceeded}); err != nil {
 		t.Fatalf("204 treated as an error: %v", err)
@@ -166,7 +211,7 @@ func TestErrorsKeepTheSitesCodeAndAreBounded(t *testing.T) {
 	}))
 	defer srv.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = srv.URL })
-	id, _ := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _ := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	_, err := e.svc.newClient(id).site(t.Context())
 	if !isCode(err, 429, "rate_limited") {
 		t.Fatalf("code lost: %v", err)
@@ -192,7 +237,7 @@ func TestALongPollAsksForItsWaitAndIsAllowedToHoldForIt(t *testing.T) {
 	}))
 	defer slow.Close()
 	e := newEnv(t, func(o *Options) { o.SiteURL = slow.URL })
-	id, _ := ensureIdentity(t.Context(), e.st, e.svc.sealer)
+	id, _ := ensureIdentity(t.Context(), e.svc.kv, e.svc.sealer)
 	if _, err := e.svc.newClient(id).commands(t.Context(), "server-1", 25); err != nil {
 		t.Fatal(err)
 	}

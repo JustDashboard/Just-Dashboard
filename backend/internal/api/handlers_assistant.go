@@ -55,7 +55,7 @@ func (s *Server) mountAssistantRoutes(r chi.Router) {
 			r.Use(httpx.RequireSession)
 			r.Method(http.MethodPost, "/models", s.handle(s.handleAssistantModels))
 			r.Method(http.MethodPut, "/preferences", s.handle(s.handleAssistantPreferences))
-			r.Method(http.MethodPut, "/providers/{preset}", s.handle(s.handleAssistantProviderSave))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/providers/{preset}", s.handle(s.handleAssistantProviderSave))
 			r.Method(http.MethodDelete, "/providers/{preset}", s.handle(s.handleAssistantProviderRemove))
 			r.Method(http.MethodPost, "/providers/{preset}/activate", s.handle(s.handleAssistantProviderActivate))
 		})

@@ -91,7 +91,11 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   variable at a credential, database or secret store is refused with `session_required` (see
   [invariant 4](../security/invariants.md)).
 - **`httpx.AuditMutations`** records every state-changing request, with the API key's id and name
-  (`audit_log.key_id`, `key_name`) when the request carried one. WebSocket routes are GET and
+  (`audit_log.key_id`, `key_name`) when the request carried one, and, for a session a Just Hub sign-in
+  ticket opened, actor `hub-session` with its hub user and session id (`audit_log.hub_user`,
+  `session_id`). Who acted is filled in by one builder (`httpx.principalEntry`; `httpx.AuditEntry` for a
+  handler writing an entry of its own), so `AuditRead`, `s.recordAudit` and the handlers' own entries
+  record the same. WebSocket routes are GET and
   long-lived, so they call `s.recordAudit(...)` at open time — the event is "a terminal was opened".
 - **`httpx.RequireCSRF`** requires `X-JD-CSRF: 1` on every browser-session mutation, including login
   and partial 2FA sessions. The header makes a same-site sibling origin preflight, and this application
@@ -107,6 +111,18 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   through `UpgradeProtocol`, which answers with it only when it was offered — Remote Desktop's
   Guacamole tunnel asks for `guacamole`, and a browser drops a handshake that does not name it.
 
+A session made by a Just Hub sign-in ticket (`auth_method = 'hub'`, only with `JD_HUB_SIGNIN=true`) is
+complete from the start and resolves like any other, with two differences: `ResolveSession` checks again on
+every use that the switches, the link and the account's grant still hold, deleting the session if not, and
+`httpx.RefuseHubSession` refuses it (`403 hub_session_not_allowed`) on every route that makes, changes or
+reveals a credential, or makes or changes a link. A socket is authenticated once, at the upgrade, so every
+socket `wsx.Upgrader` opens is handed to the API's guard (`wsx.Guard`, `hub_session_sockets.go`), which watches
+the ones a hub session opened, as it watches the Remote Desktop stream bridge's proxied sockets: each closes at
+the session's expiry, at once when a revocation of hub sessions commits, and at the next check (every 15 seconds,
+`auth.Service.CheckSession`, which does not count as use) when anything else ended the session. Its redeem, `POST /api/v1/auth/hub/enter`, sits with `POST /auth/login`: no session, the
+sign-in budget per address, the CSRF header and its own audit entry; the ticket is the credential
+([invariants.md](../security/invariants.md#the-exception-hub-sign-in)).
+
 After completing any required second factor, an account marked `must_change_pw` may use only
 the session-only `POST /account/password` mutation and authentication status/logout routes. Feature
 routes and API tokens return `password_change_required`. Changing the password requires the current
@@ -114,7 +130,10 @@ password and revokes existing sessions; the sign-in page then signs straight bac
 password, through any required second factor. Password change has its own
 authentication middleware so it cannot bypass an outstanding second factor.
 
-Three deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname),
+Four deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname),
+`GET /api/v1/hub/hello` (the Just Hub discovery probe: unauthenticated, but behind the allowlist and the
+per-address API limit, a fixed body naming only the product, the protocol and whether this server can be
+connected, and not mounted with `JD_HUB_LINK=false` or in agent mode; [hub-link.md](../backend/hub-link.md#local-api)),
 `/api/v1/hooks/deploy/{hookID}` (HMAC over the raw body, still allowlisted, still audited so
 enumerating hook ids is not silent), and `GET /api/v1/tailnet/whois`, which a tailnet-only
 deployment's gate asks about every request: still behind the allowlist, outside the API rate limit,

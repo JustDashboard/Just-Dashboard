@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -19,21 +20,33 @@ import (
 // time it asks the site to hold it.
 const requestTimeout = 15 * time.Second
 
-// APIError is the site refusing a request in the dashboard's own error shape.
+// APIError is the peer refusing a request in the dashboard's own error shape.
 type APIError struct {
 	Status  int
 	Code    string
 	Message string
+	// Peer is what the other end is called in the message; "site" when unset.
+	Peer string
+	// Speaker, when set, attributes Message to the peer by name, "Just Hub
+	// (hub)", and quotes it: the peer's words are shown as its own and never
+	// read as this dashboard's (hub-link-protocol.md 8.10).
+	Speaker string
 }
 
 func (e *APIError) Error() string {
-	switch {
-	case e.Code != "" && e.Message != "":
-		return fmt.Sprintf("the site answered %d %s: %s", e.Status, e.Code, e.Message)
-	case e.Code != "":
-		return fmt.Sprintf("the site answered %d %s", e.Status, e.Code)
+	peer := e.Peer
+	if peer == "" {
+		peer = "site"
 	}
-	return fmt.Sprintf("the site answered HTTP %d", e.Status)
+	switch {
+	case e.Code != "" && e.Message != "" && e.Speaker != "":
+		return fmt.Sprintf("the %s answered %d %s. %s says: \"%s\"", peer, e.Status, e.Code, e.Speaker, e.Message)
+	case e.Code != "" && e.Message != "":
+		return fmt.Sprintf("the %s answered %d %s: %s", peer, e.Status, e.Code, e.Message)
+	case e.Code != "":
+		return fmt.Sprintf("the %s answered %d %s", peer, e.Status, e.Code)
+	}
+	return fmt.Sprintf("the %s answered HTTP %d", peer, e.Status)
 }
 
 func isCode(err error, status int, code string) bool {
@@ -51,6 +64,11 @@ type Client struct {
 	next    func(context.Context) (int64, error)
 	now     func() time.Time
 	version string
+	// base, agent and peer come from the instance's profile.
+	base, agent, peer string
+	// speaker names the peer when its own words are quoted, for a profile
+	// with a Speaker.
+	speaker string
 }
 
 // NewHTTPClient is the transport every exchange uses: TLS 1.2 at least, the
@@ -84,12 +102,17 @@ type serverDescription struct {
 	Version  string `json:"version"`
 	OS       string `json:"os"`
 	Arch     string `json:"arch"`
+	// Endpoint is this dashboard's own address. Only the hub link sends it.
+	Endpoint string `json:"endpoint,omitempty"`
 }
 
 type createRequestBody struct {
 	PublicKey string            `json:"publicKey"`
 	Scope     Scope             `json:"scope"`
 	Server    serverDescription `json:"server"`
+	// Token is a one-time approval the hub handed out. Only the hub link's
+	// terminal command sends one.
+	Token string `json:"token,omitempty"`
 }
 
 type createRequestResponse struct {
@@ -119,6 +142,40 @@ type heartbeatResponse struct {
 	HeartbeatSeconds int           `json:"heartbeatSeconds"`
 	PendingCommands  int           `json:"pendingCommands"`
 	SiteKeys         []wireSiteKey `json:"siteKeys,omitempty"`
+}
+
+// viewHeartbeatResponse is the reply of a profile with ReplyView: the same
+// fields, and the view, decoded as strictly as the rest. ok, heartbeatSeconds,
+// pendingCommands, fleet and notices are required, which the pointers tell
+// from a zero; signIn is optional.
+type viewHeartbeatResponse struct {
+	OK               *bool           `json:"ok"`
+	HeartbeatSeconds *int            `json:"heartbeatSeconds"`
+	PendingCommands  *int            `json:"pendingCommands"`
+	SiteKeys         []wireSiteKey   `json:"siteKeys,omitempty"`
+	Fleet            json.RawMessage `json:"fleet"`
+	Notices          json.RawMessage `json:"notices"`
+	SignIn           json.RawMessage `json:"signIn,omitempty"`
+}
+
+// base is the account link's part of the reply.
+func (r viewHeartbeatResponse) base() heartbeatResponse {
+	out := heartbeatResponse{SiteKeys: r.SiteKeys}
+	if r.OK != nil {
+		out.OK = *r.OK
+	}
+	if r.HeartbeatSeconds != nil {
+		out.HeartbeatSeconds = *r.HeartbeatSeconds
+	}
+	if r.PendingCommands != nil {
+		out.PendingCommands = *r.PendingCommands
+	}
+	return out
+}
+
+func present(raw json.RawMessage) bool {
+	t := bytes.TrimSpace(raw)
+	return len(t) > 0 && !bytes.Equal(t, []byte("null"))
 }
 
 type commandsResponse struct {
@@ -191,7 +248,7 @@ func (c *Client) once(ctx context.Context, method, pathWithQuery string, raw []b
 		return 0, err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "just-dashboard/"+c.version+" account-link")
+	req.Header.Set("User-Agent", "just-dashboard/"+c.version+" "+c.agent)
 	req.Header.Set(headerProtocol, strconv.Itoa(ProtocolVersion))
 	if raw != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -217,21 +274,23 @@ func (c *Client) once(ctx context.Context, method, pathWithQuery string, raw []b
 		return resp.StatusCode, err
 	}
 	if len(data) > maxResponseBody {
-		return resp.StatusCode, fmt.Errorf("the site's response is larger than the %d bytes the protocol allows", maxResponseBody)
+		return resp.StatusCode, fmt.Errorf("the %s's response is larger than the %d bytes the protocol allows", c.peer, maxResponseBody)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return resp.StatusCode, decodeAPIError(resp.StatusCode, data)
+		api := decodeAPIError(resp.StatusCode, data)
+		api.Peer, api.Speaker = c.peer, c.speaker
+		return resp.StatusCode, api
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return resp.StatusCode, nil
 	}
 	if err := decodeStrict(data, out); err != nil {
-		return resp.StatusCode, fmt.Errorf("the site's response is not what protocol %d describes: %w", ProtocolVersion, err)
+		return resp.StatusCode, fmt.Errorf("the %s's response is not what protocol %d describes: %w", c.peer, ProtocolVersion, err)
 	}
 	return resp.StatusCode, nil
 }
 
-func decodeAPIError(status int, data []byte) error {
+func decodeAPIError(status int, data []byte) *APIError {
 	var body struct {
 		Error struct {
 			Code    string `json:"code"`
@@ -240,7 +299,20 @@ func decodeAPIError(status int, data []byte) error {
 	}
 	// An error that does not parse is still an error; only its detail is lost.
 	_ = json.Unmarshal(data, &body)
-	return &APIError{Status: status, Code: clip(body.Error.Code, 64), Message: clip(body.Error.Message, 300)}
+	return &APIError{Status: status, Code: clip(plainText(body.Error.Code), 64), Message: clip(plainText(body.Error.Message), 300)}
+}
+
+// plainText is the peer's text with every character that could make it read
+// as something it is not (Unicode Cf, Zl and Zp: the bidirectional controls,
+// line and paragraph separators) made a space; clip does the same for
+// controls. It is shown inside this dashboard's own messages.
+func plainText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 func clip(s string, n int) string {
@@ -262,41 +334,55 @@ func clip(s string, n int) string {
 
 func (c *Client) site(ctx context.Context) (siteInfo, error) {
 	var info siteInfo
-	_, err := c.call(ctx, http.MethodGet, basePath+"/site", nil, "", 0, &info)
+	_, err := c.call(ctx, http.MethodGet, c.base+"/site", nil, "", 0, &info)
 	return info, err
 }
 
 func (c *Client) createRequest(ctx context.Context, body createRequestBody) (createRequestResponse, error) {
 	var out createRequestResponse
-	_, err := c.call(ctx, http.MethodPost, basePath+"/requests", body, "", 0, &out)
+	_, err := c.call(ctx, http.MethodPost, c.base+"/requests", body, "", 0, &out)
 	return out, err
 }
 
 func (c *Client) pollRequest(ctx context.Context, requestID string) (pollResponse, error) {
 	var out pollResponse
-	_, err := c.call(ctx, http.MethodGet, basePath+"/requests/"+requestID, nil, requestID, 0, &out)
+	_, err := c.call(ctx, http.MethodGet, c.base+"/requests/"+requestID, nil, requestID, 0, &out)
 	return out, err
 }
 
 func (c *Client) heartbeat(ctx context.Context, serverID string, body json.RawMessage) (heartbeatResponse, error) {
 	var out heartbeatResponse
-	_, err := c.call(ctx, http.MethodPost, basePath+"/heartbeat", body, serverID, 0, &out)
+	_, err := c.call(ctx, http.MethodPost, c.base+"/heartbeat", body, serverID, 0, &out)
+	return out, err
+}
+
+// heartbeatView is heartbeat for a profile whose reply carries the view.
+func (c *Client) heartbeatView(ctx context.Context, serverID string, body json.RawMessage) (viewHeartbeatResponse, error) {
+	var out viewHeartbeatResponse
+	_, err := c.call(ctx, http.MethodPost, c.base+"/heartbeat", body, serverID, 0, &out)
+	switch {
+	case err != nil:
+	case out.OK == nil || out.HeartbeatSeconds == nil || out.PendingCommands == nil || !present(out.Fleet) || !present(out.Notices):
+		err = fmt.Errorf("the %s's response is not what protocol %d describes: ok, heartbeatSeconds, pendingCommands, fleet and notices are required", c.peer, ProtocolVersion)
+	case !*out.OK:
+		err = fmt.Errorf("the %s's response is not what protocol %d describes: ok is false on a 200", c.peer, ProtocolVersion)
+	}
 	return out, err
 }
 
 func (c *Client) commands(ctx context.Context, serverID string, wait int) (commandsResponse, error) {
 	var out commandsResponse
-	path := basePath + "/commands?wait=" + strconv.Itoa(wait)
+	path := c.base + "/commands?wait=" + strconv.Itoa(wait)
 	_, err := c.call(ctx, http.MethodGet, path, nil, serverID, time.Duration(wait)*time.Second, &out)
 	return out, err
 }
 
 func (c *Client) result(ctx context.Context, serverID, commandID string, res CommandResult) error {
-	_, err := c.call(ctx, http.MethodPost, basePath+"/commands/"+commandID+"/result", res, serverID, 0, nil)
+	_, err := c.call(ctx, http.MethodPost, c.base+"/commands/"+commandID+"/result", res, serverID, 0, nil)
 	return err
 }
 
 func (c *Client) unlink(ctx context.Context, serverID string) error {
-	_, err := c.call(ctx, http.MethodPost, basePath+"/unlink", nil, serverID, 0, nil)
+	_, err := c.call(ctx, http.MethodPost, c.base+"/unlink", nil, serverID, 0, nil)
 	return err
 }

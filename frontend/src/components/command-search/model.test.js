@@ -8,6 +8,7 @@ import {
   rememberDestination,
   scopeQuery,
   searchItems,
+  searchScopes,
 } from "./model"
 
 const items = [
@@ -114,5 +115,41 @@ describe("recent destinations", () => {
         .map((run) => run.text)
         .join(""),
     ).toBe("api-worker")
+  })
+})
+
+describe("the Servers scope", () => {
+  const servers = [
+    { id: "server:a", kind: "server", title: "vmi3690758", detail: "Online · 0.8.5" },
+    { id: "server:hub", kind: "server", title: "Just Hub", keywords: ["hub"] },
+    { id: "page:hub", kind: "page", title: "Hub", detail: "Settings" },
+  ]
+
+  test("is offered only on a server linked to a hub", () => {
+    expect(searchScopes(true).map(([id]) => id)).toContain("server")
+    expect(searchScopes(false).map(([id]) => id)).not.toContain("server")
+    // Everything else, in the same order, either way.
+    expect(searchScopes(false)).toEqual(searchScopes(true).filter(([id]) => id !== "server"))
+  })
+
+  test("server: narrows to servers when it is offered, and is plain text when it is not", () => {
+    expect(parseSearch("server: vmi", searchScopes(true))).toEqual({ scope: "server", text: "vmi" })
+    expect(parseSearch("servers: vmi", searchScopes(true)).scope).toBe("server")
+    expect(parseSearch("server: vmi", searchScopes(false))).toEqual({
+      scope: "all",
+      text: "server: vmi",
+    })
+    expect(
+      searchItems(servers, "server:", 60, searchScopes(true)).items.map((item) => item.id),
+    ).toEqual(["server:a", "server:hub"])
+    expect(scopeQuery("vmi", "server", searchScopes(true))).toBe("server: vmi")
+  })
+
+  test("the other aliases keep working with a narrowed list", () => {
+    expect(parseSearch("db: shop", searchScopes(false))).toEqual({
+      scope: "database",
+      text: "shop",
+    })
+    expect(parseSearch("domain: shop", searchScopes(true))).toEqual({ scope: "site", text: "shop" })
   })
 })

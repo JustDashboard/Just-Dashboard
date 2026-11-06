@@ -74,7 +74,7 @@ func at(unix int64) time.Time { return time.Unix(unix, 0).UTC() }
 func (s *Service) Status(ctx context.Context) (Status, error) {
 	out := Status{Enabled: s.enabled, SiteURL: s.siteURL, State: StateUnlinked}
 	if s.sealer != nil {
-		if id, _, err := loadIdentity(ctx, s.st, s.sealer); err == nil && id != nil {
+		if id, _, err := loadIdentity(ctx, s.kv, s.sealer); err == nil && id != nil {
 			out.Fingerprint = id.Fingerprint()
 		}
 	}
@@ -142,7 +142,7 @@ func (s *Service) lastCommand(ctx context.Context, since int64) *CommandStatus {
 	var received int64
 	var finished *int64
 	err := s.st.DB.QueryRowContext(ctx,
-		`SELECT id, kind, status, issued_by, received_at, finished_at FROM account_link_commands
+		`SELECT id, kind, status, issued_by, received_at, finished_at FROM `+s.p.CommandsTable+`
 		 WHERE status <> 'running' AND received_at >= ? ORDER BY received_at DESC, rowid DESC LIMIT 1`, since).
 		Scan(&c.ID, &c.Kind, &c.Status, &c.IssuedBy, &received, &finished)
 	if err != nil {

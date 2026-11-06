@@ -22,7 +22,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = dnsRecordSchema + assistantChatSchema + deployTemplateSchema + cloudflareTunnelSchema + sleepSchema + runDiagnosisSchema + rehearsalSchema + dataRollbackSchema + previewBranchSchema + imageScanSchema + rollbackWatchSchema + canarySchema + deployEventSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
+const schema = dnsRecordSchema + assistantChatSchema + deployTemplateSchema + cloudflareTunnelSchema + sleepSchema + runDiagnosisSchema + rehearsalSchema + dataRollbackSchema + previewBranchSchema + imageScanSchema + rollbackWatchSchema + canarySchema + deployEventSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + hubLinkSchema + hubSignInSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   token_hash   TEXT NOT NULL UNIQUE,
   twofa_passed INTEGER NOT NULL DEFAULT 0,
   auth_method  TEXT NOT NULL DEFAULT 'unknown',
+  hub_user     TEXT NOT NULL DEFAULT '',
   ip           TEXT NOT NULL DEFAULT '',
   user_agent   TEXT NOT NULL DEFAULT '',
   created_at   INTEGER NOT NULL,
@@ -114,7 +115,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
   -- acted is the question a leaked key raises, and the account alone cannot
   -- answer it. The name is copied, so a key deleted later still reads.
   key_id    INTEGER NOT NULL DEFAULT 0,
-  key_name  TEXT NOT NULL DEFAULT ''
+  key_name  TEXT NOT NULL DEFAULT '',
+  -- A session a Just Hub sign-in ticket opened, and the hub user whose grant
+  -- opened it, on every row that session wrote: the id is the one its
+  -- hub.signin row records. Empty for every other row.
+  session_id TEXT NOT NULL DEFAULT '',
+  hub_user   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
@@ -1677,6 +1683,9 @@ END;
 var addedColumns = []struct{ table, column, spec string }{
 	// Access completion predates factor provenance; old sessions cannot prove a method.
 	{"sessions", "auth_method", "TEXT NOT NULL DEFAULT 'unknown'"},
+	// A session made by a hub sign-in ticket names the hub user whose grant
+	// made it (hub-link-protocol.md section 9.9); every other session has ''.
+	{"sessions", "hub_user", "TEXT NOT NULL DEFAULT ''"},
 	{"users", "totp_last_step", "INTEGER NOT NULL DEFAULT -1"},
 	// Wrong second-factor codes lock the account's second factor as wrong
 	// passwords lock its sign-in, each counted apart.
@@ -1925,6 +1934,11 @@ var addedColumns = []struct{ table, column, spec string }{
 	// before it name only the account, as they always did.
 	{"audit_log", "key_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"audit_log", "key_name", "TEXT NOT NULL DEFAULT ''"},
+	// What a session Just Hub's sign-in opened did reads apart from what one
+	// opened on this server did (hub-link-protocol.md section 9.10). Rows
+	// written before were never a hub session's.
+	{"audit_log", "session_id", "TEXT NOT NULL DEFAULT ''"},
+	{"audit_log", "hub_user", "TEXT NOT NULL DEFAULT ''"},
 	// Skew protection keeps a window's warm release running rather than
 	// paused, and the watcher reads how many requests it still answers. A
 	// window opened before either is a paused one that served nobody.

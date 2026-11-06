@@ -31,9 +31,9 @@ import (
 //     drawing's diagram);
 //   - signing in and out, the second factor, passkeys, sessions and a new API
 //     key, which are a person's own credentials;
-//   - uninstalling the dashboard, and linking it to a just-dashboard.com account
-//     or turning its usage count on (security invariants 12 and 16 ask for a
-//     person's own press);
+//   - uninstalling the dashboard, linking it to a just-dashboard.com account or
+//     connecting it to a Just Hub, or turning its usage count on (security
+//     invariants 12, 16 and 17 ask for a person's own press);
 //   - what is not a request and an answer: WebSockets and streams — a terminal,
 //     a container's exec, Remote Desktop, a log or an event stream — which a
 //     recorder cannot hold;
@@ -102,6 +102,12 @@ var agentExcludedRoutes = map[string]string{
 	"PUT /dashboard/link/scope":              "the account link's scope is the person's own, in the browser (security invariant 12)",
 	"DELETE /dashboard/link/request":         "the account link is the person's own, in the browser (security invariant 12)",
 	"POST /dashboard/link/sync":              "the account link is the person's own, in the browser (security invariant 12)",
+	"POST /dashboard/hub":                    "connecting to a Just Hub is the person's own, in the browser (security invariant 17)",
+	"DELETE /dashboard/hub":                  "disconnecting from a Just Hub is the person's own, in the browser (security invariant 17)",
+	"PUT /dashboard/hub/scope":               "the hub link's scope is the person's own, in the browser (security invariant 17)",
+	"DELETE /dashboard/hub/request":          "the hub link is the person's own, in the browser (security invariant 17)",
+	"POST /dashboard/hub/sync":               "the hub link is the person's own, in the browser (security invariant 17)",
+	"DELETE /dashboard/hub/signin/{userId}":  "whether Just Hub may sign an account in is that person's own choice, or an administrator's, in the browser (the exception to security invariant 2)",
 	"POST /tokens":                           "a new key's value is shown once and would reach nobody, masked from the model and the page; the person makes it under Account → API keys",
 	"POST /tokens/deploy":                    "a new key's value is shown once and would reach nobody, masked from the model and the page; the person makes it under Account → API keys",
 	"POST /tokens/mcp":                       "a new key's value is shown once and would reach nobody, masked from the model and the page; the person makes it under Account → API keys",
@@ -121,6 +127,7 @@ var agentExcludedAreas = []struct{ prefix, why string }{
 	{"/account/recovery-codes", "the account's recovery codes are the person's own"},
 	{"/account/passkeys", "the account's passkeys are the person's own"},
 	{"/account/sessions", "the account's sessions are the person's own"},
+	{"/account/hub-signin", "letting Just Hub sign the account in is the person's own choice (the exception to security invariant 2)"},
 	{"/hooks/", "a webhook authenticates by its own signature, not as a person"},
 	{"/mcp", "the MCP endpoint takes an MCP key, not a person"},
 	{"/tailnet/", "the tailnet gate answers the proxy alone"},
@@ -256,7 +263,7 @@ func buildAPICatalogue(root chi.Routes, doc *openapiDocument) *apiCatalogue {
 	cat.excluded = []string{
 		"the assistant's own routes and the ones that ask the model",
 		"signing in, the password, the second factor, passkeys, sessions and making an API key",
-		"uninstalling the dashboard and its just-dashboard.com link and usage count",
+		"uninstalling the dashboard, its just-dashboard.com link, its Just Hub connection and its usage count",
 		"live streams: a terminal, a container's exec, Remote Desktop, log and event streams",
 		"webhooks, the MCP endpoint and other machines' routes",
 	}

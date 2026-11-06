@@ -2,7 +2,8 @@
 
 [← README](../../README.md) · [Features](../../FEATURES.md) · [Install](install.md) · [Configuration](configuration.md) · [Command line](cli.md) · [Administration](administration.md) · [Linking & usage count](linking-and-usage.md) · [Security](../../SECURITY.md)
 
-Two things that talk to just-dashboard.com. Both are optional, and neither sends anything until an administrator says so.
+Two things that talk to just-dashboard.com, and one that talks to a Just Hub on your own tailnet. All are
+optional, and none sends anything until an administrator says so.
 
 ## Linking to just-dashboard.com
 
@@ -33,6 +34,115 @@ is written to the audit log as the site account. Unlink from Settings, with
 `sudo ./scripts/manage.sh unlink`, or by removing the server on the site. `JD_ACCOUNT_LINK=false` switches
 the feature off entirely: no page controls, no installer question, no command, and a link that exists
 goes quiet. `JD_ACCOUNT_URL` names the site, an origin only (`http://` just for `localhost`).
+
+## Connecting to Just Hub
+
+A Just Hub is a separate app that runs on its own machine on your tailnet and shows many dashboards in one
+place: their health and version, a switcher between them in each dashboard, updates across them. Connecting a
+server is optional and off until you do it, and it is a separate thing from linking to just-dashboard.com: a
+server can be linked to both, and the two never share a key, a counter, a setting or a log name. It talks to
+the hub the same way: outbound only, except the hub sign-in ticket described below, signed, at a scope you
+choose on this server.
+
+In the hub, press **Connect** on a server it found; the server's **Settings → Hub** opens in a new tab (after you
+sign in there, if that browser is signed out) with the hub's address filled in, says that it came from a link, and shows whose machine that address is ("hub.example.ts.net,
+a machine of you@github") and exactly what the hub will see and be able to do at each scope. Check that the
+address and the machine are the hub you meant: anyone on the tailnet can send you such a link, which is also why
+no scope is chosen for you; pick one before **Connect**. An address the dashboard refuses (one that is not a
+machine on this server's tailnet) is refused under the field, and **Connect** stays off until you correct it. You
+can also type the address there yourself. After you press **Connect**, the page shows a code and this server's
+key fingerprint; type that code into the hub's approval screen, where the fingerprint is shown too. Once
+connected, the page shows the hub key's fingerprint to compare with the one on the hub's Settings page, and
+reads *Connected, first report due* until this server's first report reaches the hub, usually within seconds. Notices and messages from the hub are always shown under
+"Just Hub (name) says", never as the dashboard's own words. Over SSH:
+
+```bash
+sudo ./scripts/manage.sh hub connect hub.example.ts.net            # prints a code to type into the hub
+sudo ./scripts/manage.sh hub connect hub.example.ts.net --scope operate
+sudo ./scripts/manage.sh hub status
+sudo ./scripts/manage.sh hub disconnect
+```
+
+`hub connect` prints the hub's machine and its owner (or "not checked" when Tailscale could not be asked), a code,
+this server's key fingerprint and the address of the hub's screen for this request, and waits (15 minutes by
+default, `--wait` up to an hour) while the hub's owner types that code into the hub. While it waits, another `hub
+connect` is refused and names the code already waiting. Once connected it prints the hub's key fingerprint; compare it with the one on the
+hub's Settings page. The hub's own installer and its "Add by command" screen give a one-time token instead, which
+approves the request in advance. A token is only ever given on standard input, with `--token-stdin`: at a terminal
+the command asks `Link token:` and does not echo what you paste, and from a pipe it reads one line, so the token
+is in no process list and no shell history. There is no option that takes it as an argument. The command exits 0
+once connected, 2 if the request was declined, not approved in time or interrupted, and 1 for anything else.
+
+**The hub must be on this server's tailnet.** The address you give must be one machine directly under this
+server's own MagicDNS name (`hub.example.ts.net` beside `server.example.ts.net`), never this server's own name,
+and the dashboard reaches it only over the tailnet: it never dials a hub at an address outside Tailscale's
+range. If tailscaled can be asked, the dashboard also checks that the address belongs to the machine of that
+name, shows that machine and its owner before you connect, and remembers it: from then on it sends nothing to
+another machine that takes the hub's name (a hub machine deleted and its name reused), and the connection goes
+idle until you disconnect and connect again. If the server later moves to another tailnet, the connection
+likewise stays stored but goes idle; disconnect and connect to a hub on the new tailnet. **Settings → Hub** then
+reads *Idle* and says why at the top of the page ("The hub's machine changed: …"); it offers no **Sync now**,
+and **Disconnect** clears the link here without telling the hub, which this server no longer contacts. While the
+link is idle the dashboard offers no link to the hub's address anywhere (not **Open Just Hub**, not a notice's
+**Open in Just Hub**): that address may now answer on a machine you did not connect to, so open the hub you trust
+by typing its address yourself.
+
+The scope works as for just-dashboard.com, with the table above ("the hub" for "the site"), except that the
+default is `maintain`: a hub is yours and on your own network, and keeping servers updated is what it is for.
+Change it any time in Settings. Every command from the hub, run or refused, is written to the audit log as
+`hub:<hub name>` (actions `hub.command.*`), and its destructive actions draw on their own budget. The hub never
+opens a connection to the dashboard, with one exception before you connect: it may ask
+`GET /api/v1/hub/hello` to find dashboards on the tailnet, which is behind your network allowlist and answers
+only whether this server can be connected, never its version or name.
+
+Once connected, the dashboard knows it is one of several:
+
+- the logo at the top of the sidebar becomes this server's own host name, and opens a list of every server on the hub
+  with its state (online, late, offline, updating), under "Listed by Just Hub (name)" — pick one to open it in
+  a new tab — and **Open Just Hub**;
+- **Ctrl K** gets a **Servers** scope (`server:`) that finds them and opens them the same way, in a new tab;
+- the browser tab's title carries this server's host name, so several dashboard tabs can be told apart (the
+  name the hub gives the server appears only in that list, as the hub's);
+- the hub's notices appear above your account in the sidebar, as the hub's, and can be dismissed in this
+  browser.
+
+All of it comes from this server's own copy of the hub's last reply, so the browser never contacts the hub,
+and when the hub is down every dashboard feature keeps working and the list says *Hub unreachable*.
+**Settings → Hub** shows the scope, how often the server reports (the hub sets it, 15 seconds unless changed
+there), the last report exactly as it was sent, the last command the hub ran here, and **Disconnect**. A server
+that has never been connected looks exactly as it always did.
+
+Disconnect from Settings, with `sudo ./scripts/manage.sh hub disconnect`, or by removing the server in the hub.
+Disconnecting clears the link here and tells the hub; if the hub cannot be reached the link is cleared anyway,
+Settings says the hub was not told, and the hub lists the server until you remove it there. The server keeps its
+key, so connecting again shows the same fingerprint. A server removed in the hub forgets its link at its next exchange with the hub, and
+**Settings → Hub** says *Removed in Just Hub* once (as does `hub status`), with the form to connect again.
+`JD_HUB_LINK=false` switches the feature off entirely: no discovery answer, no page controls, no command, and a
+connection that exists goes quiet.
+
+### Signing in from Just Hub
+
+Off by default. With `JD_HUB_SIGNIN=true` in this server's `.env`, and sign-in turned on in the hub, opening
+this server from the hub can land you here already signed in. Each account decides for itself: in
+**Settings → Hub**, **Let Just Hub sign me in** asks for your password (and your authenticator code, if you
+have one) and the hub user who may sign you in. The hub asks for that hub user's own authenticator code first,
+and the link it opens works once, for about a minute, from the device that asked.
+
+What it costs: the hub's code stands in for this server's, so anyone who takes over the hub could open a
+session as every account that opted in, from a device on your tailnet, with everything that account can do.
+That includes the Files page, which reads every file on the server as root (`JD_FILE_ROOTS`, the whole server
+unless you narrowed it), passwords and keys included, for every role; an account that may change files can
+write any file, and an administrator has the terminal, so for those accounts such a session is as good as
+root. A session opened this way says so in your session list and in the audit log (*through Just Hub as* the
+hub user), lasts at most two hours, and the dashboard's own forms refuse it API keys, accounts, passwords,
+authenticators, passkeys, Linux or database users, database passwords, secret variables, VPN peers, saved
+credentials, links and this dashboard's own settings; sign in on the server itself for those.
+It ends at once, with any terminal or other live connection it opened, when you turn the choice off, change your password or authenticator, when the hub stops offering your hub user, when the server is
+disconnected, when the connection goes quiet (another machine took the hub's name, or its address no longer
+passes), and when `JD_HUB_SIGNIN` is found off at a start. While the connection is quiet nobody can be signed
+in from the hub, after a restart too, until it is disconnected and connected again. Ending it does not undo
+what was done in it.
+The only account detail the hub is told is your username and the hub user you chose.
 
 ## The usage count
 

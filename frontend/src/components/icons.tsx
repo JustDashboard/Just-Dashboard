@@ -427,8 +427,11 @@ export const Lifebuoy: Icon = adapt(LifebuoyIcon, "Lifebuoy")
  * `Servers` is the whole rack; `Connection` is the radio glyph, because a link
  * already means `Link` in this vocabulary; `Route` is the map. `ChartActivity`
  * is the rising trend and `LineChart` the chart with axes; the sidebar's
- * `Monitoring` is a screen, and so is `DesktopDevice` below. */
+ * `Monitoring` is a screen, and so is `DesktopDevice` below. `Hub` is the
+ * rack as well: a Just Hub is the servers it holds, and Settings → Hub and the
+ * palette's Servers draw it so. */
 export const Servers: Icon = adapt(ServerStackIcon, "Servers")
+export const Hub: Icon = adapt(ServerStackIcon, "Hub")
 export const Cpu: Icon = adapt(CpuChipIcon, "Cpu")
 export const GridSquare: Icon = adapt(Squares2X2Icon, "GridSquare")
 export const Gauge: Icon = adapt(ChartBarIcon, "Gauge")

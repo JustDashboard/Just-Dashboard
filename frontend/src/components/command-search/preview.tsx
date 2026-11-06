@@ -4,7 +4,7 @@ import { duration } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { ProductLogo } from "@/components/product-logo"
 import { ProjectMarkOf } from "@/components/deploy/project-mark"
-import { Status } from "@/components/status-dot"
+import { Status, type DotTone } from "@/components/status-dot"
 import { KEYCAP, Keycaps } from "./keycaps"
 import { KINDS, ResultMark } from "./marks"
 import type { Fact } from "./inventory"
@@ -17,6 +17,10 @@ export type PreviewItem = SearchItem & {
   product?: string
   projectId?: number
   state?: string
+  /** The state's tone, where `state` is a word `toneFor` does not read (a server's "Late"). */
+  tone?: DotTone
+  /** What one of it is called, where the kind's noun is not the word (the hub among servers). */
+  noun?: string
   keys?: string
   facts?: Fact[]
   /** When a recent destination was arrived at. */
@@ -98,7 +102,12 @@ export function Preview({
         {(item.state || item.current || item.previous) && (
           <p className="text-body text-muted-foreground">
             {item.state ? (
-              <Status state={item.state} label={item.state} className="text-body" />
+              <Status
+                state={item.state}
+                tone={item.tone}
+                label={item.state}
+                className="text-body"
+              />
             ) : item.current ? (
               "You are on this page."
             ) : (
@@ -243,5 +252,5 @@ function eyebrow(item: PreviewItem) {
   if (item.kind === "recent") return item.at ? `Visited ${visited(item.at)}` : "Visited"
   if (item.kind === "page") return item.detail
   if (item.kind === "command") return item.detail ? `Command · ${item.detail}` : "Command"
-  return KINDS[item.kind].noun
+  return item.noun ?? KINDS[item.kind].noun
 }

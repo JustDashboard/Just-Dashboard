@@ -24,6 +24,14 @@ import (
 
 var ErrUnavailable = errors.New("docker is not available on this host")
 
+// Unreachable reports whether err is the daemon not being reached at all: no
+// client, or no connection to its socket or address (missing, refused, not
+// permitted, timed out). The daemon has refused nothing then, and saying it
+// did sends a person looking in the wrong place.
+func Unreachable(err error) bool {
+	return errors.Is(err, ErrUnavailable) || client.IsErrConnectionFailed(err)
+}
+
 type Client struct {
 	mu   sync.RWMutex
 	cli  *client.Client
@@ -241,6 +249,21 @@ type Availability struct {
 	ServerVersion string `json:"serverVersion,omitempty"`
 	APIVersion    string `json:"apiVersion,omitempty"`
 }
+
+// Answers asks the daemon for nothing but a reply, and returns the client's
+// error when there is none: ErrUnavailable, a failed connection, or ctx
+// ending first.
+func (c *Client) Answers(ctx context.Context) error {
+	cli, err := c.api()
+	if err != nil {
+		return err
+	}
+	_, err = cli.Ping(ctx)
+	return err
+}
+
+// Host is the daemon address this client was made for.
+func (c *Client) Host() string { return c.host }
 
 // Ping is what the UI calls before rendering the Docker section, so an
 // unreachable daemon reads as "not configured" rather than a wall of errors.

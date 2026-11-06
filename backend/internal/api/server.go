@@ -138,6 +138,9 @@ type Server struct {
 	assistant *assistantState
 	// The drawings' shared-library downloads and live rooms (boards_live.go).
 	boards *boardsState
+	// The sockets hub sessions have open, each closed when its session ends
+	// (hub_session_sockets.go).
+	hubSockets hubSockets
 	// The tool calls each MCP key has in flight (handlers_mcp.go).
 	mcp mcpState
 
@@ -175,6 +178,9 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, svc *auth.Servic
 		assistant: newAssistantState(),
 		boards:    newBoardsState(),
 	}
+	// Every socket is tied to the session that opened it where that session
+	// is one a hub sign-in made.
+	s.WS.SetGuard(s.guardHubSocket)
 	s.initModules()
 	return s
 }
@@ -185,6 +191,14 @@ func (s *Server) handle(fn httpx.Handler) http.Handler { return fn }
 // New so that a failure to schedule backups is reported by main rather than
 // swallowed during construction.
 func (s *Server) Start(ctx context.Context) error {
+	// Before anything is served: with hub sign-in off, no grant and no hub
+	// session may survive this start, and if that cannot be written the
+	// dashboard does not start (hub-link-protocol.md section 9.3).
+	if s.modules.hubLink != nil {
+		if err := s.modules.hubLink.PrepareSignIn(ctx); err != nil {
+			return err
+		}
+	}
 	dnsCtx, dnsCancel := context.WithTimeout(ctx, 5*time.Second)
 	if err := s.modules.network.ReconcileDNSEvidence(dnsCtx); err != nil {
 		s.Log.Warn("interrupted DNS investigations could not be reconciled", "err", err)
@@ -364,6 +378,8 @@ func (s *Server) Start(ctx context.Context) error {
 	// Last, because a link's first heartbeat reads nearly everything above. A
 	// no-op until the dashboard is linked, and always when linking is off.
 	s.modules.accountLink.Start(ctx)
+	// The hub link beside it, sharing nothing with it.
+	s.modules.hubLink.Start(ctx)
 	// Runs and sends nothing until an administrator has said yes.
 	s.modules.usagePing.Start(ctx)
 	return nil
@@ -411,6 +427,7 @@ func (s *Server) startDeployEngine(ctx context.Context) error {
 func (s *Server) Shutdown() {
 	s.modules.usagePing.Stop()
 	s.modules.accountLink.Stop()
+	s.modules.hubLink.Stop()
 	s.modules.deployPreviews.Stop()
 	s.modules.deployGit.Stop()
 	s.modules.previewReconciler.Stop()

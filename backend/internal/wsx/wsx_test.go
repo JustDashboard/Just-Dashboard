@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -94,5 +95,54 @@ func TestUpgradeProtocolNamesTheProtocolOnlyWhenOffered(t *testing.T) {
 		if got := res.Header.Get("Sec-Websocket-Protocol"); got != want {
 			t.Fatalf("offered %v, answered %q, want %q", offered, got, want)
 		}
+	}
+}
+
+// Every socket is handed to the Guard with the request that opened it; ending
+// it from there closes the socket, and the channel the Guard watches closes
+// whichever side ended it.
+func TestTheGuardSeesEverySocketAndCanEndIt(t *testing.T) {
+	u := NewUpgrader(nil, false)
+	type opened struct {
+		path  string
+		end   func()
+		ended <-chan struct{}
+	}
+	got := make(chan opened, 1)
+	u.SetGuard(func(r *http.Request, end func(), ended <-chan struct{}) {
+		got <- opened{r.URL.Path, end, ended}
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := u.Upgrade(w, r)
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		for {
+			if _, _, err := c.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	g := <-got
+	if g.path != "/stream" {
+		t.Fatalf("guarded %q", g.path)
+	}
+	select {
+	case <-g.ended:
+		t.Fatal("ended before anything ended it")
+	default:
+	}
+	g.end()
+	<-g.ended
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("the socket is still open after the guard ended it")
 	}
 }

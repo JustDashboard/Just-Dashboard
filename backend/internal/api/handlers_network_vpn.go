@@ -30,9 +30,11 @@ func (s *Server) mountNetworkVPNRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleVPN))
 		r.Method(http.MethodPost, "/tailscale", s.handle(s.handleTailscaleSet))
 		// Archived tunnels live outside /wireguard so an interface may be
-		// called anything wg-quick allows, "archive" included.
+		// called anything wg-quick allows, "archive" included. Restoring one
+		// lets its peers' keys back onto this server's network, so a session
+		// opened through Just Hub may not, as it may not add a peer.
 		r.Method(http.MethodGet, "/archive", s.handle(s.handleWireGuardArchive))
-		r.Method(http.MethodPost, "/archive/{file}/restore", s.handle(s.handleWireGuardRestore))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/archive/{file}/restore", s.handle(s.handleWireGuardRestore))
 
 		r.Route("/wireguard", func(r chi.Router) {
 			r.Method(http.MethodPost, "/", s.handle(s.handleWireGuardCreate))
@@ -41,9 +43,12 @@ func (s *Server) mountNetworkVPNRoutes(r chi.Router) {
 				r.Method(http.MethodGet, "/endpoint", s.handle(s.handleWireGuardEndpoint))
 				r.Method(http.MethodPost, "/up", s.handle(s.handleWireGuardUp))
 				r.Method(http.MethodPost, "/exit", s.handle(s.handleWireGuardExit))
-				r.Method(http.MethodPost, "/peers", s.handle(s.handleWireGuardPeerAdd))
-				r.Method(http.MethodPatch, "/peers/{id}", s.handle(s.handleWireGuardPeerEdit))
-				r.Method(http.MethodGet, "/peers/{id}/config", s.handle(s.handleWireGuardPeerConfig))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/peers", s.handle(s.handleWireGuardPeerAdd))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPatch, "/peers/{id}", s.handle(s.handleWireGuardPeerEdit))
+				// A peer's configuration holds its private key: showing it is
+				// exporting the key, which outlives a hub session as adding the
+				// peer would (hub-link-protocol.md section 9.9).
+				r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/peers/{id}/config", s.handle(s.handleWireGuardPeerConfig))
 				r.Method(http.MethodPut, "/peers/{id}/quota", s.handle(s.handleWireGuardPeerQuota))
 				r.Method(http.MethodPost, "/peers/{id}/verify", s.handle(s.handleWireGuardSiteVerify))
 				s.destructive(r, func(r chi.Router) {

@@ -289,6 +289,14 @@ func TestBackupRunFromTheSiteStartsTheJobAndSaysItCameFromTheAccount(t *testing.
 	if runs = settledBackupRuns(t, s, job.ID, 2); runs[0].Trigger != "manual" {
 		t.Fatalf("runs after the button = %+v", runs)
 	}
+
+	// The hub link runs it through the same path, and says it came from the hub.
+	if _, err := newAccountHost(s).RunBackup(t.Context(), "hub:hub", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if runs = settledBackupRuns(t, s, job.ID, 3); runs[0].Trigger != "hub_link" {
+		t.Fatalf("runs after the hub = %+v", runs)
+	}
 }
 
 // settledBackupRuns waits for a job's runs to number want with the newest

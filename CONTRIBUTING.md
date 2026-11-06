@@ -776,7 +776,8 @@ never into `docs/audits/`.
   starts an isolated backend and deploys real nginx, busybox and PostgreSQL-blueprint releases through
   the public API, including generated-password authentication over TCP and paused backup automation.
 - Keep the security posture intact. The network allowlist runs before
-  authentication, enrolled accounts always require their second factor, every destructive route sits behind
+  authentication, enrolled accounts always require their second factor (hub sign-in, off by default, is the one
+  documented exception, within the limits of invariant 2), every destructive route sits behind
   the destructive capability with an audit entry, and deletion of deployment projects, entire databases,
   Docker stacks and a host account's home with no archive requires a typed confirmation phrase enforced
   server-side. A change that
