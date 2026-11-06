@@ -109,7 +109,7 @@ func (s *Service) resolveSession(ctx context.Context, token string, use bool) (*
 	// protocol.md section 9.3): asked here on every use, so a revocation that
 	// was missed or lost a race cannot leave one working. Without a check
 	// installed, none is accepted.
-	if sess.AuthMethod == MethodHub && (s.hubCheck == nil || !s.hubCheck(ctx, &sess)) {
+	if check := s.hubCheck.Load(); sess.AuthMethod == MethodHub && (check == nil || *check == nil || !(*check)(ctx, &sess)) {
 		s.st.DB.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, sess.ID)
 		return nil, nil, ErrSessionInvalid
 	}

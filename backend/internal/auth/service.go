@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
@@ -38,9 +39,11 @@ type Service struct {
 	sessionTTL time.Duration
 	idleTTL    time.Duration
 	require2FA bool
-	// hubCheck and hubEnded are hub sign-in's (hub_signin.go).
-	hubCheck HubSessionCheck
-	hubEnded func(context.Context, HubGrantEnd)
+	// hubCheck and hubEnded are hub sign-in's (hub_signin.go). They are
+	// atomic because hub link wiring may install them while sessions are
+	// already being resolved, as a restart inside one process does in tests.
+	hubCheck atomic.Pointer[HubSessionCheck]
+	hubEnded atomic.Pointer[func(context.Context, HubGrantEnd)]
 }
 
 func NewService(st *store.Store, sealer *Sealer, sessionTTL, idleTTL time.Duration, require2FA bool) *Service {

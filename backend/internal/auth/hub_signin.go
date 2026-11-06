@@ -81,12 +81,12 @@ type HubSessionCheck func(ctx context.Context, sess *Session) bool
 
 // SetHubSessionCheck installs the check every hub session passes each time it
 // is resolved.
-func (s *Service) SetHubSessionCheck(check HubSessionCheck) { s.hubCheck = check }
+func (s *Service) SetHubSessionCheck(check HubSessionCheck) { s.hubCheck.Store(&check) }
 
 // SetHubGrantEnded installs what is told, after the change has committed, that
 // a change to an account ended its grant or revoked its hub sessions. The API
 // writes hub.signin.revoke from it.
-func (s *Service) SetHubGrantEnded(fn func(context.Context, HubGrantEnd)) { s.hubEnded = fn }
+func (s *Service) SetHubGrantEnded(fn func(context.Context, HubGrantEnd)) { s.hubEnded.Store(&fn) }
 
 // RevokeHubSessionsTx deletes the hub sessions of one account, or of every
 // account when userID is 0, inside the caller's transaction, and says how
@@ -126,10 +126,11 @@ func endHubGrantTx(ctx context.Context, tx *sql.Tx, userID int64, reason string)
 // nothing is reported for an account that had neither a grant nor a hub
 // session.
 func (s *Service) hubEndedAfterCommit(ctx context.Context, end HubGrantEnd) {
-	if s.hubEnded == nil || (end.HubUser == "" && end.SessionsRevoked == 0) {
+	fn := s.hubEnded.Load()
+	if fn == nil || *fn == nil || (end.HubUser == "" && end.SessionsRevoked == 0) {
 		return
 	}
-	s.hubEnded(context.WithoutCancel(ctx), end)
+	(*fn)(context.WithoutCancel(ctx), end)
 }
 
 // otherAccountsSessionTx says whether token is a session another account is
