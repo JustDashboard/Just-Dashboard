@@ -3,7 +3,7 @@
 import { useEffect } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
-import { MetricsStream } from "@/hooks/use-metrics"
+import { MetricsStream, useHostName } from "@/hooks/use-metrics"
 import { SelfUpdateProvider } from "@/hooks/use-self-update"
 import { AppSidebar } from "@/components/app-sidebar"
 import { Logo, LogoStacked } from "@/components/logo"
@@ -19,6 +19,9 @@ import { NetworkChangeConfirmation } from "@/components/network/change-confirmat
 import { HeldSessionsHost, HeldSessionsProvider } from "@/components/remote-desktop/held-sessions"
 import { AgentDock } from "@/components/assistant/agent/dock"
 import { AskAboutPage } from "@/components/assistant/ask-about"
+import { HubLinkProvider, useShellHub } from "@/hooks/use-hub-link"
+import { signInAddress } from "@/lib/hub-link"
+import { ServerSwitcher } from "@/components/hub-link/server-switcher"
 
 /**
  * The page's name in the tab is what tells a row of dashboard tabs apart. This
@@ -26,28 +29,52 @@ import { AskAboutPage } from "@/components/assistant/ask-about"
  * the element to the head instead. The root layout declares no title for that
  * reason: Next would write its own over a `document.title`, and beside this one
  * would be the first of two.
+ *
+ * The hub link's provider sits above the title because a linked server names
+ * itself in the tab, and above the shell because the rail, the phone's strip
+ * and the palette all draw the hub from it. Unlinked it asks nothing and gives
+ * nothing, and every one of them is what it was.
+ *
+ * The name in the tab is this server's own host name, the Overview's title,
+ * never the name the hub lists it under: that one is the hub's text, and a hub
+ * that is taken over could make it read "Session expired - sign in"
+ * (hub-link-protocol §8.10). The hub only decides whether a name is shown.
  */
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <>
-      <title>{tabTitle(usePathname())}</title>
+    <HubLinkProvider>
+      <TabTitle />
       <DashboardShell>{children}</DashboardShell>
-    </>
+    </HubLinkProvider>
   )
+}
+
+function TabTitle() {
+  const pathname = usePathname()
+  const hub = useShellHub()
+  const host = useHostName()
+  return <title>{tabTitle(pathname, hub ? (host ?? undefined) : undefined)}</title>
 }
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const { status, loading, sessionEnded } = useAuth()
+  const hub = useShellHub()
   const router = useRouter()
 
   // Redirecting here is a convenience, not a security control: every API call
   // behind this shell is independently authenticated by the server. An
   // account that has not been asked what the dashboard is for is asked first,
-  // wherever it was headed; answering or skipping ends that for good.
+  // wherever it was headed; answering or skipping ends that for good. The
+  // hub's Connect door, which the hub opens in a new tab that is usually
+  // signed out, is carried through the sign-in (`returnAfterSignIn`).
   const onboarding = Boolean(status?.user?.needsOnboarding)
   useEffect(() => {
     if (!loading && !status?.authenticated)
-      router.replace(sessionEnded ? "/login?reason=session" : "/login")
+      router.replace(
+        sessionEnded
+          ? "/login?reason=session"
+          : signInAddress(window.location.pathname + window.location.search),
+      )
     else if (onboarding) router.replace("/welcome")
   }, [loading, status, sessionEnded, onboarding, router])
 
@@ -86,10 +113,11 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               It carried a breadcrumb every page already states in its own
               header. Below `md` the rail is a sheet with nothing left to open
               it, so this one strip stays: the trigger, and the name of the
-              product it belongs to. */}
+              product it belongs to — or, on a server linked to a hub, the
+              server it is, which is the switcher to the others. */}
                   <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:hidden">
                     <SidebarTrigger className="-ml-0.5 size-8 text-muted-foreground" />
-                    <Logo />
+                    {hub ? <ServerSwitcher hub={hub} strip /> : <Logo />}
                     {/* A phone has no ⌘K and the rail's search field is inside
                       a closed sheet, so search had no way in at all here; nor
                       had asking the assistant about the page. */}

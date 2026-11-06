@@ -26,7 +26,8 @@ export function ScopeCards({
   onChange,
   disabled,
 }: {
-  value: AccountLinkScope
+  /** None is chosen yet when it is absent. */
+  value?: AccountLinkScope
   onChange: (scope: AccountLinkScope) => void
   disabled?: boolean
 }) {

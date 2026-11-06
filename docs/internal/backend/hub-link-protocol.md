@@ -1061,7 +1061,10 @@ on the tailnet can send an administrator such a link with a look-alike name, so 
 suggestion. It fills in `https://<hub host>`, says that the address came from a link and to check it is the hub
 they meant, shows the hub's machine and its owner from `GET /dashboard/hub/check` (8.2), and leaves the scope
 unselected: the administrator must choose one before Connect is enabled. It shows exactly what the hub will see
-and be able to do at the chosen scope, and does nothing until a server administrator presses Connect.
+and be able to do at the chosen scope, and does nothing until a server administrator presses Connect. The hub's
+new tab is often signed out; the dashboard then sends it to sign in and back to this address afterwards (this
+address only, rebuilt from its `connect` value, so a link someone else wrote cannot send a fresh sign-in anywhere
+else).
 
 ### 8.2 `/api/v1/dashboard/hub`
 
@@ -1125,6 +1128,8 @@ only the ones its state allows, as the table after it says.
   "scope": "maintain",
   "reachable": true,
   "lastHeartbeatAt": "2026-11-05T10:00:00Z",
+  "heartbeatSeconds": 15,
+  "idle": true,
   "fleet": [
     {
       "serverId": "7a0d3c1e-0000-4000-8000-000000000002",
@@ -1195,6 +1200,8 @@ only the ones its state allows, as the table after it says.
 | `scope` | everyone | The scope held, when linked |
 | `reachable` | everyone | When linked: the last heartbeat succeeded, no heartbeat has failed since, and it is younger than three intervals |
 | `lastHeartbeatAt` | everyone | When linked and one has succeeded |
+| `heartbeatSeconds` | everyone | When linked: the interval the hub set (4.2, 4.3), clamped to 10–600 as the heartbeat loop clamps it. The page says how often the server reports in it |
+| `idle` | everyone | `true`, only while the stored link is idle (2.2 "When the rule runs", 2.4); left out otherwise. The reason is `admin.link.lastError`. While it is set no page offers the stored hub URL as a link: after "the hub's machine changed" it answers on a machine this server refused |
 | `fleet`, `notices` | everyone | The cached reply (section 6) with times as RFC 3339. `[]` before the first reply. Only when linked |
 | `signIn.enabled` | everyone | `JD_HUB_SIGNIN` |
 | `signIn.offered` | everyone | The last reply carried `signIn` |
@@ -1238,10 +1245,11 @@ shortens `user`.
 | `hub.name` | string | The hub's name (`owner.label`) |
 | `hub.url` | string | The stored hub URL, for "Open Just Hub" |
 | `hub.reachable` | bool | As `reachable` in 8.2 |
+| `hub.idle` | bool, optional | `true` only while the link is idle, as `idle` in 8.2; the shell then offers no link to `hub.url` |
 
 In Go this is a field `Hub *hubLinkSession` on `authStatus`, with the tag `json:"hub,omitempty"`. In TypeScript
-it is `hub?: { linked: true; name: string; url: string; reachable: boolean }` on `AuthStatus`. The fleet and
-notices come from `GET /dashboard/hub`, not from here, so this field stays small.
+it is `hub?: { linked: true; name: string; url: string; reachable: boolean; idle?: true }` on `AuthStatus`. The
+fleet and notices come from `GET /dashboard/hub`, not from here, so this field stays small.
 
 ### 8.4 Terminal: `manage.sh hub`
 

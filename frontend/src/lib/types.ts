@@ -53,6 +53,8 @@ export type AuthStatus = {
   needsEnrollment: boolean
   needsPasswordChange?: boolean
   require2fa: boolean
+  /** Present only when this server is linked to a Just Hub; see `HubLinkSession`. */
+  hub?: HubLinkSession
 }
 
 export type HostInfo = {
@@ -8606,6 +8608,156 @@ export type AccountLinkStatus = {
   }
   /** Why the most recent link request ended without a link, so the page can say so. */
   lastOutcome?: { result: "denied" | "expired" | "failed"; at: string; message?: string }
+}
+
+/**
+ * What a Just Hub may be shown and ask for: the account link's three scopes, chosen, stored and
+ * enforced here (docs/internal/backend/hub-link-protocol.md §7.1).
+ */
+export type HubLinkScope = AccountLinkScope
+
+/**
+ * The `hub` field on `GET /auth/session` (hub-link-protocol §8.3). Present only for a fully
+ * signed-in session on a server with a stored hub link; the shell draws every hub feature from
+ * its presence and nothing at all without it.
+ */
+export type HubLinkSession = {
+  linked: true
+  /** The hub's name, its `owner.label`: "hub". */
+  name: string
+  /** The stored hub URL, for "Open Just Hub". */
+  url: string
+  reachable: boolean
+  /**
+   * Present, as true, only while the link is idle (§2.2, §2.4): the hub's address may now answer
+   * on a machine this server refused, so the shell offers no link to it.
+   */
+  idle?: true
+}
+
+/** A server the hub lists, as its last heartbeat reply named it (hub-link-protocol §6.1). */
+export type HubLinkServer = {
+  serverId: string
+  name: string
+  /** The address a browser opens it at; absent for a server reached by a tunnel. */
+  endpoint?: string
+  state: "online" | "late" | "offline" | "updating"
+  /** Its dashboard version, or "" before its first heartbeat. */
+  version: string
+  /** True on exactly one entry: this server. */
+  self: boolean
+  lastSeenAt?: string
+}
+
+/** A short message the hub wants every linked dashboard to show (hub-link-protocol §6.2). */
+export type HubLinkNotice = {
+  /** Stable while the notice stands, so a dismissal can name it. */
+  id: string
+  level: "info" | "warning" | "critical"
+  title: string
+  /** Plain text, never markup. */
+  body: string
+  /** On the hub's own origin; the backend drops anything else. */
+  href?: string
+  at: string
+}
+
+/**
+ * The hub's tailnet machine, as tailscaled's WhoIs named it (hub-link-protocol §2.4): its
+ * StableNodeID, MagicDNS name, and the login it belongs to, or its tags for a tagged machine.
+ */
+export type HubLinkMachine = {
+  id: string
+  name: string
+  /** Absent for a tagged machine, which has `tags` instead. */
+  owner?: string
+  tags: string[]
+}
+
+/** `GET /dashboard/hub/check?url=` (hub-link-protocol §8.2): the URL rule, nothing started. */
+export type HubLinkCheck = {
+  /** The hub URL as Connect would store it. */
+  hubUrl: string
+  /** Absent when tailscaled could not be asked, and at the test origin. */
+  machine?: HubLinkMachine
+  testOrigin: boolean
+}
+
+/**
+ * This server's link to a Just Hub. Mirrors `GET /dashboard/hub` and the 200 answers of the
+ * routes beside it (hub-link-protocol §8.2). Optional fields are left out, never `null`; `admin`
+ * is sent only to `system.admin`, and with the link switched off only `enabled` and `state`.
+ */
+export type HubLinkStatus = {
+  /** JD_HUB_LINK. */
+  enabled: boolean
+  state: "unlinked" | "pending" | "linked"
+  hubUrl?: string
+  hubName?: string
+  scope?: HubLinkScope
+  /** The last heartbeat succeeded, none has failed since, and it is younger than three intervals. */
+  reachable?: boolean
+  lastHeartbeatAt?: string
+  /** While linked: how often this server reports, the hub's interval clamped to 10–600 (§4.8). */
+  heartbeatSeconds?: number
+  /**
+   * Present, as true, only while a stored link is idle, and to every reader; why is
+   * `admin.link.lastError`. No page offers the hub's address as a link while it is set.
+   */
+  idle?: true
+  fleet?: HubLinkServer[]
+  notices?: HubLinkNotice[]
+  /** Hub sign-in (§9); typed so a strict reader keeps it, and drawn by nothing yet. */
+  signIn?: {
+    enabled: boolean
+    offered: boolean
+    users: string[]
+    mine?: { hubUser: string; since: string }
+  }
+  admin?: {
+    /** This server's hub link key, "21fe:31df:a154:a261". Absent until the identity exists. */
+    fingerprint?: string
+    /** JD_HUB_LINK_TEST_ORIGIN, which is for tests and never for production. */
+    testOrigin?: string
+    request?: {
+      hubUrl: string
+      userCode: string
+      approveUrl: string
+      expiresAt: string
+      scope: HubLinkScope
+      /** The hub's machine as Connect found it; absent when it was not checked. */
+      hubMachine?: HubLinkMachine
+    }
+    link?: {
+      serverId: string
+      linkedAt: string
+      /** Dashboard username, or "cli". */
+      linkedBy: string
+      /** The pinned hub machine (§2.4); absent until one is recorded. */
+      hubMachine?: HubLinkMachine
+      /** The last failed exchange with the hub; cleared by the next success. */
+      lastError?: string
+      lastCommand?: {
+        id: string
+        kind: string
+        status: "succeeded" | "failed" | "refused"
+        /** Who the hub says asked: a hub user, or "rollout". Recorded, not trusted. */
+        issuedBy: string
+        at: string
+      }
+      hubKeys: { kid: string; fingerprint: string; notAfter?: string }[]
+      updatePolicy?: { auto: "off" | "patch" | "all"; window: { start: string; end: string } }
+      /** The exact body of the last heartbeat sent, so the page shows what is shared. */
+      lastSnapshot?: Record<string, unknown>
+    }
+    /** Why this server is not linked: the last request's end, or `removed` in the hub (§8.9). */
+    lastOutcome?: {
+      result: "denied" | "expired" | "failed" | "removed"
+      at: string
+      message?: string
+    }
+    grants?: { userId: number; username: string; hubUser: string; since: string }[]
+  }
 }
 
 /**

@@ -3,6 +3,7 @@ export const SEARCH_SCOPES = [
   ["page", "Pages"],
   ["command", "Commands"],
   ["recent", "Recent"],
+  ["server", "Servers"],
   ["project", "Projects"],
   ["site", "Domains & sites"],
   ["database", "Databases"],
@@ -17,6 +18,16 @@ export const SEARCH_SCOPES = [
 
 export type SearchScope = (typeof SEARCH_SCOPES)[number][0]
 export type SearchKind = Exclude<SearchScope, "all">
+export type SearchScopes = readonly (readonly [SearchScope, string])[]
+
+/**
+ * The scopes a palette offers. Servers are the other dashboards a Just Hub
+ * holds, so a server with no hub link has no such scope — not an empty one —
+ * and its strip, its counts and what `server:` means are what they were.
+ */
+export function searchScopes(hubLinked: boolean): SearchScopes {
+  return hubLinked ? SEARCH_SCOPES : SEARCH_SCOPES.filter(([id]) => id !== "server")
+}
 export type SearchItem = {
   id: string
   kind: SearchKind
@@ -26,13 +37,7 @@ export type SearchItem = {
   href?: string
 }
 
-const aliases: Record<string, SearchScope> = {
-  ...Object.fromEntries(
-    SEARCH_SCOPES.flatMap(([id]) => [
-      [id, id],
-      [`${id}s`, id],
-    ]),
-  ),
+const ALIASES: Record<string, SearchScope> = {
   db: "database",
   domain: "site",
   domains: "site",
@@ -46,14 +51,39 @@ const aliases: Record<string, SearchScope> = {
   actions: "command",
 }
 
-export function parseSearch(query: string): { scope: SearchScope; text: string } {
+const aliasCache = new WeakMap<SearchScopes, Record<string, SearchScope>>()
+
+/** Each scope's id and its plural, then the other words people type for one. */
+function aliasesFor(scopes: SearchScopes): Record<string, SearchScope> {
+  const cached = aliasCache.get(scopes)
+  if (cached) return cached
+  const offered = new Set(scopes.map(([id]) => id))
+  const aliases = Object.fromEntries([
+    ...scopes.flatMap(([id]) => [
+      [id, id],
+      [`${id}s`, id],
+    ]),
+    ...Object.entries(ALIASES).filter(([, id]) => offered.has(id)),
+  ]) as Record<string, SearchScope>
+  aliasCache.set(scopes, aliases)
+  return aliases
+}
+
+export function parseSearch(
+  query: string,
+  scopes: SearchScopes = SEARCH_SCOPES,
+): { scope: SearchScope; text: string } {
   const match = query.match(/^\s*([a-z][a-z0-9]*):\s*(.*)$/i)
-  const scope = match && aliases[match[1].toLowerCase()]
+  const scope = match && aliasesFor(scopes)[match[1].toLowerCase()]
   return scope ? { scope, text: match[2] } : { scope: "all", text: query.trim() }
 }
 
-export function scopeQuery(query: string, scope: SearchScope): string {
-  const { text } = parseSearch(query)
+export function scopeQuery(
+  query: string,
+  scope: SearchScope,
+  scopes: SearchScopes = SEARCH_SCOPES,
+): string {
+  const { text } = parseSearch(query, scopes)
   return scope === "all" ? text : `${scope}: ${text}`
 }
 
@@ -114,8 +144,13 @@ export function searchScore(item: SearchItem, query: string): number {
   return Math.min(800, score / tokens.length + (title.startsWith(needle) ? 100 : 0))
 }
 
-export function searchItems<T extends SearchItem>(items: T[], query: string, limit = 60) {
-  const { scope, text } = parseSearch(query)
+export function searchItems<T extends SearchItem>(
+  items: T[],
+  query: string,
+  limit = 60,
+  scopes: SearchScopes = SEARCH_SCOPES,
+) {
+  const { scope, text } = parseSearch(query, scopes)
   const ranked = items
     .filter((item) => scope === "all" || item.kind === scope)
     .filter((item) => text || scope !== "all" || ["recent", "command", "page"].includes(item.kind))
@@ -133,8 +168,12 @@ export function searchItems<T extends SearchItem>(items: T[], query: string, lim
  * letter of "shop-stacks" marks nothing anybody needed to see. A row that
  * matched on its detail or by a typo marks nothing in its title.
  */
-export function highlight(title: string, query: string): { text: string; hit: boolean }[] {
-  const tokens = words(normalise(parseSearch(query).text))
+export function highlight(
+  title: string,
+  query: string,
+  scopes: SearchScopes = SEARCH_SCOPES,
+): { text: string; hit: boolean }[] {
+  const tokens = words(normalise(parseSearch(query, scopes).text))
   const chars = [...title]
   const owner: number[] = []
   let folded = ""

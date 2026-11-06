@@ -54,10 +54,16 @@ is a full load rather than a router link back into what threw.
 
 ### The tab's title
 
-The dashboard's layout renders a React `<title>` from `tabTitle(pathname)` in `components/nav.ts`:
+The dashboard's layout renders a React `<title>` from `tabTitle(pathname, host)` in `components/nav.ts`:
 "Files · Just Dashboard", the section's name for a detail page, the product's alone for an address under no
-section. The root layout declares no title, and `login/` and `welcome/` have small layouts that do. Next's
-metadata writes over `document.title` when it resolves, and beside a second `<title>` it would come first.
+section. On a server linked to a Just Hub, `host` is this server's own host name (`useHostName` in
+`hooks/use-metrics.ts`, the Overview's title from `/system/host`) and goes after the page — "Docker · atlas · Just
+Dashboard" — so five dashboard tabs can be told apart; unlinked, or before the name is read, the title is exactly
+what it was. It is never the name the hub lists the server under: that is the hub's text, which a hub that is taken
+over could make read "Session expired - sign in", and a title has no room to say whose
+([protocol](../backend/hub-link-protocol.md) §8.10). The root layout declares no title, and `login/` and
+`welcome/` have small layouts that do. Next's metadata writes over `document.title` when it resolves, and
+beside a second `<title>` it would come first.
 
 ### The rail drills in
 
@@ -282,6 +288,71 @@ turns green with *See what's new*, or red with the updater's error and *See what
 then can it be dismissed. In the icon rail it is one tile in the same tone that links to the Version
 page.
 
+### A server linked to a Just Hub
+
+A dashboard linked to a Just Hub ([protocol](../backend/hub-link-protocol.md)) is one of several, and the
+shell says so in four places. All four are drawn from `HubLinkProvider` (`hooks/use-hub-link.tsx`), which
+the dashboard layout puts above the tab's title and the shell, and **only while `/auth/session` carries a
+`hub` field** (§8.3) — present only for a fully signed-in session on a server with a stored hub link. With
+no field the provider asks nothing and `useShellHub()` is `null`, so an unlinked server's rail, strip,
+palette and title are what they were, request for request. Linked, it reads `GET /dashboard/hub` every
+fifteen seconds (the hub's default heartbeat) for the fleet, the notices and the freshest reachability, and a
+status that says the link is gone (a disconnect from the terminal, a removal in the hub) takes the hub away
+again. The browser never talks to the hub: everything is this server's cached copy of the hub's last
+reply, so the CSP is unchanged. `lib/hub-link.ts` holds the pure half and its Bun tests.
+
+An **idle** link (the session's or the status's `idle`, §8.2, §8.3) keeps the hub's name, fleet and notices, but
+`shellHub` drops the hub's address and every notice's link: after "the hub's machine changed" that address answers
+on a machine this server refused, and a look-alike there could ask for the hub's password. So the switcher has no
+**Open Just Hub** and says *Link idle* with a red dot, the palette's hub opens nothing and says why, and no notice
+offers *Open in Just Hub*.
+
+- **The server switcher** (`components/hub-link/server-switcher.tsx`) takes the logo row's place: the J,
+  this server's own host name where the wordmark was (as in the tab's title, never the hub's name for it,
+  which the menu shows under its attribution), and a chevron. Its menu says under its label who named the
+  servers, *Listed by Just Hub (hub)*, since every name in it is the hub's text
+  ([protocol](../backend/hub-link-protocol.md) §8.10), then lists every server the hub holds, this one
+  first with the installed version the wordmark carried and marked *this one* (a link to the Overview),
+  the rest by name with a `StatusDot` in the hub's state (online green, late amber, offline red,
+  updating grey; the word is in the row's accessible name) and an arrow (the hub sends no version for
+  another server, §6.1), then **Open Just Hub**. Another server is a real link to its origin, and it and
+  the hub open **in a new tab** with `noopener noreferrer` (§8.10): the address is one the hub handed
+  over, so it never takes this dashboard's tab and nothing of this dashboard's goes with it. A server
+  with no reported address is listed, disabled, as *no address*. While the hub cannot be reached the
+  trigger carries an amber dot, the menu says *Hub unreachable*, and the others' dots go grey
+  (*Unknown*), since what the hub said last may be minutes old. A link just approved whose first report
+  has not gone yet is not unreachable, though the backend's `reachable` is `false` until one has: for an
+  administrator with nothing failed (`firstReportDue`, `ShellHub.due`) there is no amber dot, this
+  server's row reads *First report due*, and the shell reads the status every three seconds until the
+  report has gone rather than every fifteen. Every address is checked again in the
+  browser (`openable`: `https`, or loopback `http` for the test origin) before it becomes a link. On a
+  phone the strip's wordmark is the same trigger and menu.
+- **Servers in the palette** — a scope after Recent, offered only on a linked server
+  (`searchScopes(hubLinked)`; unlinked, `server:` is plain text again). Each server is a result with its
+  state and where it opens, found by name or address, its preview saying who listed it (*Just Hub
+  (hub)*) and that it opens in a new tab; this one opens the Overview, another is opened with
+  `window.open(…, "_blank", "noopener,noreferrer")` (the palette's own navigation refuses another
+  origin, `localDestination`), and **Just Hub (hub)** is the last entry.
+- **The host in the tab's title**, above.
+- **The hub notice** (`components/hub-link/hub-notice.tsx`), between the update notice and the account
+  card, built the way the update notice is and rendering nothing when there is nothing to say: the newest
+  notice this browser has not dismissed: who says it, *Just Hub (hub) says*, and when, then its title and
+  its body as plain text (it came from another machine, so it is never markup and never reads as the
+  dashboard's own words, [protocol](../backend/hub-link-protocol.md) §8.10), *Open in Just Hub* with the
+  host it opens on a line of its own, in a new tab with `noopener noreferrer`, when its link is on the hub's
+  own origin, and
+  *N more from Just Hub* leading to Settings → Hub's `#notices`. The account card's container, tinted
+  amber or red only for a warning or critical notice. The rail is narrow and a hub's name may be 64
+  characters, so the attribution wraps, the time going to a second line, and only the name is ever cut,
+  with the whole name as its title: *says* is what marks the words below as the hub's and is never the
+  part that is lost. Dismissals are kept in `localStorage` per browser and forgotten once the hub stops
+  carrying the notice.
+
+Settings → Hub (`/dashboard/hub`) is a `hubLink` entry in `nav.ts`: `shownFor` draws it only while the
+server is linked, or while you are on it, and the palette lists it once a word is typed either way. A page's
+preview in the palette lists its neighbours as the rail does, so an unlinked server's Settings pages do not name
+Hub beside Connect, except in Hub's own preview.
+
 `PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys, Workspace
 and, for `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
 panel the rail drills into once you are inside `/account`; the palette's Account group; and the menu on
@@ -344,7 +415,8 @@ shortcut for it: the shell has no registry of global keys beyond the palette's o
 `model.ts` supplies scope aliases, AND matching of query terms, accent/punctuation normalization,
 ranking (exact name/address, prefix, substring, one-edit typo), result limits and recent-history
 logic. `domain:`/`site:`, `db:`/`database:`, `container:`, `stack:`, `project:`, `repo:`, `service:`,
-`pm2:`/`app:`, `backup:`, `board:`, `page:`, `command:` and `recent:` narrow the same input; a
+`pm2:`/`app:`, `backup:`, `board:`, `page:`, `command:`, `recent:` and — on a server linked to a Just Hub
+only — `server:` narrow the same input; a
 strip of scopes under the input — words on the Files search's underlined strip (`tabClasses`), no
 glyphs, `role="group"`, one tab stop with arrow keys between them — makes the types discoverable,
 presses the scope a typed prefix names, and counts each kind's matches for the words typed. Global searches omit duplicate recent

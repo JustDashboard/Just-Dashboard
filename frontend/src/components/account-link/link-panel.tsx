@@ -203,7 +203,7 @@ function Waiting({
   )
 }
 
-function CopyButton({ label, text }: { label: string; text: string }) {
+export function CopyButton({ label, text }: { label: string; text: string }) {
   const { copy, copied } = useCopy()
   return (
     <Button size="xs" variant="outline" onClick={() => void copy(text)} aria-label={label}>
