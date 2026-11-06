@@ -14,6 +14,11 @@
         },
         {
           "kind": "added",
+          "text": "A tip to turn off Tailscale key expiry",
+          "detail": "Tailscale gives every new machine a key that expires after 180 days by default, and a server whose key expires drops off the tailnet, and out of a hub. Settings, Hub and Network, VPN, Tailscale now suggest turning key expiry off for this machine, with a link to the Tailscale admin console."
+        },
+        {
+          "kind": "added",
           "text": "Sign in from the hub, if you turn it on",
           "detail": "With JD_HUB_SIGNIN=true, an account that opted in can be opened from the linked hub without signing in again. It is off by default."
         },

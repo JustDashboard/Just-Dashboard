@@ -168,6 +168,20 @@ export function ConnectPanel({
           )}
         </div>
       </form>
+      <p className="text-xs text-muted-foreground">
+        Tip: turn off key expiry for this server&apos;s machine{" "}
+        <a
+          href="https://login.tailscale.com/admin/machines"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline"
+        >
+          in the Tailscale admin console
+          <External aria-hidden className="size-3" />
+        </a>
+        . Tailscale gives every new machine a key that expires, 180 days later by default, and a
+        server whose key has expired drops off the tailnet and out of the hub.
+      </p>
       {refusal && (
         <div role="alert">
           <Notice tone="danger" icon={Warning} title="Could not connect">

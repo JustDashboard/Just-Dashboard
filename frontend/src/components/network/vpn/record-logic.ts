@@ -226,6 +226,23 @@ export function resolversProblem(raw: string) {
   if (bad) return `${bad} is not an IPv4 or IPv6 address.`
 }
 
+/**
+ * Whether this server's Tailscale key expiry is worth a tip rather than a warning: the key expires,
+ * but not yet, and the backend has not warned about it (it does within 14 days, netx/tailscale.go).
+ * Tailscale starts every new machine so, which is why it is a tip and not a fault.
+ */
+export function keyExpiryTip(
+  view: {
+    self?: { keyExpiry?: number } | null
+    warnings: string[]
+  },
+  now = Date.now(),
+) {
+  const at = view.self?.keyExpiry
+  if (!at || keyExpiry(at, now).expired) return false
+  return !view.warnings.some((w) => /key expire/.test(w))
+}
+
 /** A key's expiry as words, read against the clock when it is drawn, as relativeTime is. */
 export function keyExpiry(unix: number, now = Date.now()) {
   const when = relativeTime(new Date(unix * 1000).toISOString())
