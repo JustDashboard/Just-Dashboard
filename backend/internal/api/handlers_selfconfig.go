@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 )
 
 // The dashboard's own settings: where it listens, who may reach it, and the
@@ -129,6 +130,8 @@ func mapSelfConfigError(err error) error {
 		return httpx.BadRequest("%v", err)
 	case errors.Is(err, selfcfg.ErrNoLocation):
 		return httpx.Err(http.StatusServiceUnavailable, "config_unsupported", err.Error())
+	case errors.Is(err, selfupdate.ErrDockerUnreachable):
+		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable", err.Error())
 	default:
 		// Everything else reaching here is a validation failure with a
 		// sentence written for the person reading it, so it is passed through

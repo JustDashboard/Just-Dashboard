@@ -397,6 +397,25 @@ The private server uses an empty config and stays alive until package cleanup, a
 last-session exit racing the next test's connection.
 Startup-timeout failures include bounded PTY output to distinguish launch failures from slow discovery.
 
+**A line can be run to its end, with nobody at the keyboard.** The assistant's `run_command`
+(`term.Manager.RunCommand`, `command.go`) is the terminal's way of running one line rather than a window: the
+same account and shell (`JD_TERMINAL_USER`, `JD_TERMINAL_SHELL` or the account's), `<shell> -l -c <line>`, through
+`su -s <shell> -l -c <line> <user>` when the account is not the process's own, in the account's home on the host
+(`hostexec.CommandOnHostInDir`). It is refused while the terminal is turned off. Its environment is built, never
+inherited — this process's carries the dashboard's secrets — and says there is nobody to ask (`TERM=dumb`,
+`DEBIAN_FRONTEND=noninteractive`, pagers off); standard input is empty, so a prompt reads end of file. It runs
+as its own process group (`hostexec.RunGroup`), so a deadline stops everything it started, and keeps the last
+64 KiB of what it wrote, output and errors as they came. The API checks the terminal capability for every line
+(`api/handlers_assistant_command.go`); [the deployment assistant](../deployments/operator.md#the-tools) says the
+rest. For what runs long or asks something, the assistant has a window of its own instead — an ordinary window,
+created for the person and named `assistant-<chat id>`, that it types into and reads (`Session.Write`,
+`Session.Subscribe`) and whose foreground job (`Session.Foreground`, the same kernel answer the activity line
+reads) says when what it typed has finished; see [the terminal](../deployments/operator.md#the-terminal).
+A line run to its end is a child of the dashboard's process, in its container, so it stops when Docker restarts
+that container — which upgrading Docker's own packages does — while a window is held outside it; so
+`run_command` types a line that changes packages or restarts Docker, or a `sudo` that may ask for a password,
+into the window instead wherever windows are held.
+
 ## GitHub sign-in
 
 `internal/ghx` exists because the honest answer to "why did my push ask for a password" used to be an ssh
@@ -462,6 +481,22 @@ deploy pages use for the repository a project deploys.
   each account for an hour (an absence for ten minutes) in a map bounded at 32 entries. The picture is
   served with `nosniff`, a sandboxing CSP and private caching; `404 avatar_unavailable` means the page
   keeps the initials. A host with no route to GitHub loses the pictures and nothing else.
+- **What a pull request embeds is read here too.** `GET /git/github/media?url=` serves the images and
+  videos in a description or comment through this server, for the avatar's reason: the page policy stays
+  `img-src 'self'`, so a comment cannot make the operator's browser fetch from anywhere. It differs from
+  the avatar route in that the browser names the address, so `isForgeMedia` is the boundary: HTTPS with
+  no credentials and no port, on `*.githubusercontent.com` or GitHub's upload and repository-file paths
+  on `github.com`. `markdown.ts` holds the same rule so a refused address is never requested, but only
+  the server's decides. Redirects stay on GitHub and its `github-production-*` S3 buckets, no credential
+  is sent, and only `image/*` or `video/*` comes back, inert (`nosniff`, a sandboxing CSP). A file is at
+  most 25 MB, four reads run at once, and the cache is 64 MB, emptied when full, an hour per file and five
+  minutes per absence. Because nothing is sent signed in, a private repository's file answers
+  `404 media_unavailable` and the page keeps the link.
+- **A commit's face comes from GitHub's own matching.** `GET /git/github/authors?path=` maps the emails on
+  the default branch's last 100 commits to accounts, once per workspace visit. Git only records a name
+  and an email; GitHub has already resolved them, and an email does not change between commits. GitHub's
+  web-flow address and bots are left out. `AuthorMark` reads the map from context and, without one,
+  still reads a login out of a `users.noreply.github.com` address; otherwise it draws initials.
 - **`gh auth status` is parsed, because it has no `--json` and never will.** It is written for a person,
   so the wording is the contract; `parseAuthStatus` matches both wordings gh has shipped and `ghx_test.go`
   pins them. Every field is optional, so a rewording costs a scope list rather than the page.

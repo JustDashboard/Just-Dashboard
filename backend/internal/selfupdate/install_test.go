@@ -2,11 +2,14 @@ package selfupdate
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate/selfupdatetest"
 )
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -96,9 +99,76 @@ func TestStartRefusesWhatItCannotDo(t *testing.T) {
 	}
 }
 
+// The updater is started, replaced and tidied away on the daemon JD_DOCKER_HOST
+// names. The CLI used to inherit the process environment and reach
+// /var/run/docker.sock whatever the setting said, where the fixed container
+// name may be another dashboard's.
+func TestStartAndReconcileUseTheConfiguredDaemon(t *testing.T) {
+	calls := selfupdatetest.Docker(t)
+	dir := t.TempDir()
+	const host = "unix:///srv/jd/docker.sock"
+	i := NewInstaller(NewStore(dir), dir, host, quiet())
+	loc := &Location{Dir: "/opt/jd", Image: "img", Compose: "docker-compose.yml"}
+
+	if _, err := i.Start(context.Background(), loc, StartRequest{From: "0.5", To: "0.6"}); err != nil {
+		t.Fatal(err)
+	}
+	i.Reconcile(context.Background(), "0.6", lister())
+
+	if diff := selfupdatetest.AimedAt(calls(), host,
+		"version ", "rm -f "+UpdaterContainer, "run --detach", "rm -f "+UpdaterContainer); diff != "" {
+		t.Fatal(diff)
+	}
+}
+
+// dashboard.update.install against a daemon that does not answer is refused
+// with that reason, before anything is written: the previous update's record
+// and transcript are what the page keeps showing, and no `docker rm` or
+// `docker run` is tried on any daemon.
+func TestStartAgainstADaemonThatDoesNotAnswerWritesNothing(t *testing.T) {
+	calls := selfupdatetest.Docker(t)
+	dir := t.TempDir()
+	store := NewStore(dir)
+	done := time.Now().UTC()
+	if err := store.Save(&Run{ID: "previous", Status: StatusSuccess, Phase: PhaseFinished, ToVersion: "0.5", FinishedAt: &done}); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := store.OpenLog(); err != nil {
+		t.Fatal(err)
+	} else {
+		f.WriteString("the 0.5 update\n")
+		f.Close()
+	}
+
+	missing := selfupdatetest.MissingHost(t)
+	i := NewInstaller(store, dir, missing, quiet())
+	_, err := i.Start(context.Background(), &Location{Dir: "/opt/jd", Image: "img"}, StartRequest{From: "0.5", To: "0.6"})
+	if !errors.Is(err, ErrDockerUnreachable) {
+		t.Fatalf("err = %v, want ErrDockerUnreachable", err)
+	}
+	if !strings.Contains(err.Error(), "the update was not started") || !strings.Contains(err.Error(), missing) {
+		t.Errorf("error %q does not say the update never began, or which daemon did not answer", err)
+	}
+	if diff := selfupdatetest.AimedAt(calls(), missing, "version "); diff != "" {
+		t.Fatal(diff)
+	}
+	if run, _ := store.Load(); run == nil || run.ID != "previous" || run.Status != StatusSuccess {
+		t.Fatalf("record = %+v, want the previous update's", run)
+	}
+	if log := store.Transcript(); log != "the 0.5 update\n" {
+		t.Fatalf("transcript = %q, want the previous update's", log)
+	}
+	if err := CheckLifecycleIdle(dir); err != nil {
+		t.Fatalf("a refused update holds the lifecycle: %v", err)
+	}
+}
+
 // Reconcile is the half of the design that runs *after* the restart, and its
 // job is to turn "the record still says running" into a verdict.
 func TestReconcile(t *testing.T) {
+	// A settled success removes the updater; the fake stands in for the daemon
+	// so the test never asks the one on this machine to remove anything.
+	selfupdatetest.Docker(t)
 	newRun := func(t *testing.T) (*Store, *Installer) {
 		t.Helper()
 		dir := t.TempDir()

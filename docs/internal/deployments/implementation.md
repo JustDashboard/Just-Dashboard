@@ -2139,7 +2139,11 @@ only renderer/executor/validation authority for their feature.
   Domains settings and the public-address step offer **Ask visitors for a password**; the overview tags a
   protected domain. Previews inherit the plan's protection. A password typed in Domains settings stays
   in memory beside the form's draft and joins the list only in the save, so a reload loses it and keeps
-  the rest of the draft.
+  the rest of the draft. The credentials are the route's, so a password set on one name is asked on every
+  name the route serves, and the row's tooltip and field say so; the route keeps one password per user
+  name, the first name's in list order, so two names with one user name and different passwords get a
+  warning. An empty protection is read as none by `canonicalDomainProtection`, so the form holds its Save
+  until the user name and password are there rather than saying Saved over an open site.
 - Domain redirects and route rules. `domains[].redirectTo` names another of the plan's hostnames
   (`redirectCode` 301, 302, 307 or 308; empty is 308) that this one sends visitors to, with the path and
   query kept, instead of serving the application: the www. a bare domain keeps for old links, or the
@@ -2188,8 +2192,8 @@ only renderer/executor/validation authority for their feature.
   ones do not, and warns when no served domain is HTTPS, since then nobody does. The release comparison
   lists `hsts` as the header's value or `off`. The Domains settings offer **HSTS** under Access and headers
   while a served domain is HTTPS, or while a policy is saved so it stays removable, with the lifetimes,
-  subdomains and preload confirmation the Proxy site form has, and each served domain's row says whether
-  plain HTTP is redirected to HTTPS or served as asked. Previews copy the policy with the other rules.
+  subdomains and preload confirmation the Proxy site form has, and a plain name's row says it is served
+  plain, while the HTTPS switch's tooltip says what an HTTPS name does with plain visitors. Previews copy the policy with the other rules.
 - Route sign-in. `runtime.forwardAuth` (`provider` authelia, authentik, oauth2-proxy or custom;
   `verify`, the auth server's check address; `signIn`, the page a visitor without a session is sent to;
   `previewsOnly`) has the public route ask an auth server about every request before the application
@@ -2615,7 +2619,9 @@ product names keeps its workload glyph.
 Deployments carries delivery insights as two charts over the same days: success rate and weekly
 frequency over releases per day, and median release time and recovery time over release time per
 day — a bar for each day a release succeeded, the window's median as a dashed rule and the slowest
-day naming the scale's top. It is not drawn for a window in which nothing succeeded. These replace
+day naming the scale's top. It is not drawn for a window in which nothing succeeded. Every day of
+both charts, empty ones included, answers with a tooltip naming the date and what it holds: under the
+pointer, on a tap, and with the arrow keys from the chart's one tab stop. These replace
 the history page's four tiles; the Overview keeps its delivery tiles. Why releases failed runs under
 both charts, counting the failed releases and when the last one was; each cause's bar is its share
 of every failed release, and a single cause is a line with its count and no bar. A failure reason

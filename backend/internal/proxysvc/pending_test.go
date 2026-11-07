@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -760,20 +761,20 @@ func TestParseGeneration(t *testing.T) {
 // A process's start, read from /proc, lands on the wall clock within the
 // kernel's tick of when it really started.
 func TestProcNginxProcessesPlacesAStartOnTheWallClock(t *testing.T) {
-	sleep, err := exec.LookPath("sleep")
-	if err != nil {
-		t.Skip("no sleep binary")
-	}
-	b, err := os.ReadFile(sleep)
+	// This test binary, under the name nginx, which is what the reader looks
+	// for: the kernel names a process after the file it was run from. A copy of
+	// sleep is not one on Ubuntu 26.04, whose coreutils are one program that
+	// refuses to run under any name but its own.
+	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Named nginx, which is what the reader looks for.
 	binary := filepath.Join(t.TempDir(), "nginx")
-	if err := os.WriteFile(binary, b, 0o755); err != nil {
+	if err := os.Symlink(self, binary); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(binary, "30")
+	cmd := exec.Command(binary, "-test.run=^TestNginxStandIn$")
+	cmd.Env = append(os.Environ(), nginxStandIn+"=1")
 	before := time.Now()
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -783,23 +784,44 @@ func TestProcNginxProcessesPlacesAStartOnTheWallClock(t *testing.T) {
 		cmd.Process.Kill()
 		cmd.Wait()
 	})
-	procs, err := procNginxProcesses("/proc")
-	if err != nil {
-		t.Fatal(err)
+	// Start returns once the exec has begun; the kernel sets the new command
+	// line a moment after, so a read straight away can find it empty.
+	var procs []nginxProcess
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		procs, err = procNginxProcesses("/proc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.IndexFunc(procs, func(p nginxProcess) bool { return p.PID == cmd.Process.Pid })
+		if i >= 0 && (procs[i].Title != "" || time.Now().After(deadline)) {
+			p := procs[i]
+			if p.PPID != os.Getpid() || p.Title != binary+" -test.run=^TestNginxStandIn$" {
+				t.Errorf("read as %+v", p)
+			}
+			if p.Start.Before(before) || p.Start.After(after.Add(20*time.Millisecond)) {
+				t.Errorf("started %v, between %v and %v", p.Start, before, after)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pid %d not among %+v", cmd.Process.Pid, procs)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	for _, p := range procs {
-		if p.PID != cmd.Process.Pid {
-			continue
-		}
-		if p.PPID != os.Getpid() || p.Title != binary+" 30" {
-			t.Errorf("read as %+v", p)
-		}
-		if p.Start.Before(before) || p.Start.After(after.Add(20*time.Millisecond)) {
-			t.Errorf("started %v, between %v and %v", p.Start, before, after)
-		}
+}
+
+// nginxStandIn asks TestNginxStandIn to wait, as the process
+// TestProcNginxProcessesPlacesAStartOnTheWallClock reads.
+const nginxStandIn = "JD_PROXYSVC_NGINX_STAND_IN"
+
+// TestNginxStandIn is a process named nginx when the test above runs this
+// binary under that name; on its own it does nothing.
+func TestNginxStandIn(t *testing.T) {
+	if os.Getenv(nginxStandIn) == "" {
 		return
 	}
-	t.Fatalf("pid %d not among %+v", cmd.Process.Pid, procs)
+	time.Sleep(30 * time.Second)
 }
 
 // Against the real nginx, run in a private prefix: an edit nginx has not read

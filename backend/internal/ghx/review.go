@@ -299,3 +299,36 @@ func (s *Service) RunLog(ctx context.Context, dir string, id, jobID int64, step 
 	}
 	return out, nil
 }
+
+// CommitAuthors maps the emails on the default branch's recent commits to the
+// GitHub accounts they belong to. An account GitHub could not match is absent,
+// and so is GitHub's own web-flow address, which signs merges for everybody.
+func (s *Service) CommitAuthors(ctx context.Context, dir string) (map[string]string, error) {
+	host, repository, err := s.repoAPI(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	var commits []struct {
+		Commit struct {
+			Author struct {
+				Email string `json:"email"`
+			} `json:"author"`
+		} `json:"commit"`
+		Author *struct {
+			Login string `json:"login"`
+			Type  string `json:"type"`
+		} `json:"author"`
+	}
+	if err := s.apiJSON(ctx, dir, host, repository+"/commits?per_page=100", nil, &commits); err != nil {
+		return nil, err
+	}
+	authors := map[string]string{}
+	for _, commit := range commits {
+		email := strings.ToLower(strings.TrimSpace(commit.Commit.Author.Email))
+		if email == "" || email == "noreply@github.com" || commit.Author == nil || commit.Author.Login == "" || commit.Author.Type == "Bot" {
+			continue
+		}
+		authors[email] = commit.Author.Login
+	}
+	return authors, nil
+}

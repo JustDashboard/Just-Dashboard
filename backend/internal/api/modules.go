@@ -27,6 +27,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hublink"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/imagescan"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
@@ -91,6 +92,10 @@ type moduleSet struct {
 	// accountLink links this dashboard to a just-dashboard.com account. Nil in
 	// agent mode, where the only caller is the hub and nothing here applies.
 	accountLink *accountlink.Service
+	// hubLink connects this dashboard to a Just Hub on its tailnet: a second
+	// instance of the account link's engine that shares none of its state.
+	// Nil in agent mode, whose mTLS hub is a different thing.
+	hubLink *hublink.Service
 	// usagePing is the optional daily count of servers. Nil in agent mode, for
 	// the reason accountLink is: an agent answers only to its hub.
 	usagePing *usageping.Service
@@ -529,6 +534,7 @@ func (s *Server) initModules() {
 	s.initProxyExtras()
 	s.initUninstall()
 	s.initAccountLink()
+	s.initHubLink()
 	s.initUsagePing()
 }
 

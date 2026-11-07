@@ -39,6 +39,7 @@ import { SourceImage } from "@/components/deploy/new-project/source-image"
 import { SourceTemplate } from "@/components/deploy/new-project/source-template"
 import { SourceDatabase } from "@/components/deploy/new-project/source-database"
 import { Configure } from "@/components/deploy/new-project/configure"
+import { AssistSwitch } from "@/components/deploy/new-project/assist-switch"
 
 // The mark is wayfinding, not decoration: four words set in one line are four
 // words to read, and the reader is choosing between four *kinds* of thing.
@@ -178,6 +179,9 @@ export function NewProject({
     null,
   )
   const flow = liveFlow ?? savedFlow
+  // Handing the settings to the assistant, chosen before there is anything to
+  // configure or from the plan beside the form; it stays chosen for the tab.
+  const [assist, setAssist] = useSessionState<boolean>("deploy.new.assist", false)
   const setFlow = useCallback(
     (update: FlowUpdate) =>
       setSavedFlow((persisted) => {
@@ -248,7 +252,7 @@ export function NewProject({
     // visit: a repository it read completely opens on Review with the plan
     // read back and Deploy under it, which is the two-press import the page
     // had before it had steps at all.
-    setStep(landingStep(next, mode === "advanced"))
+    setStep(assist ? "review" : landingStep(next, mode === "advanced"))
     requestAnimationFrame(() => {
       const header = document.querySelector<HTMLElement>("[data-slot='flow-header']")
       const heading = header?.querySelector("h1")
@@ -432,6 +436,7 @@ export function NewProject({
                 </button>
               ))}
             </div>
+            {tab !== "database" && <AssistSwitch checked={assist} onCheckedChange={setAssist} />}
             <div className="min-w-0 xl:min-h-0 xl:flex-1">
               {tab === "git" && (
                 <SourceGit
@@ -470,6 +475,8 @@ export function NewProject({
                 initialAdvanced={mode === "advanced"}
                 step={step}
                 onStepChange={setStep}
+                assist={assist}
+                onAssistChange={setAssist}
               />
             </div>
           </>

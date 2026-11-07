@@ -2,14 +2,14 @@
 
 See what the server is doing right now, what it did this week, and what is about to run out.
 
-<a href="../readme/overview.png"><img src="../readme/overview.png" alt="The server overview: the machine, shortcuts to every section, live resources and the deployed projects"></a>
+<a href="../readme/overview.png"><img src="../readme/overview.png" alt="The server overview: the machine, shortcuts to what a visit starts, live resources and the deployed projects"></a>
 
-<p align="center"><sub><b>Overview</b> — the machine, its readings, and a shortcut to every section</sub></p>
+<p align="center"><sub><b>Overview</b> — the machine, its readings, and a shortcut to what you came to start</sub></p>
 
 ## The whole machine at a glance
 
 - A live overview of the machine: CPU, memory, load, network, storage and disk I/O
-- Shortcuts to every section, with the open shells, the drawings edited last, the databases and every backup job one press away
+- Shortcuts to a new project, a new terminal, a new drawing and the files, with the open shells, the drawings edited last, the databases and every backup job one press away
 - Notable moments, top processes and the day's activity at a glance
 
 ## A map of the server

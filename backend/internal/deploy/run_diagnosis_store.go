@@ -89,6 +89,47 @@ func (s *OrchestrationStore) SaveRunDiagnosis(ctx context.Context, d RunDiagnosi
 // A variable that cannot be opened fails the read, so nothing is sent rather
 // than something unmasked.
 func (s *PlanningStore) DiagnosisSecrets(ctx context.Context, run EngineRun) ([]string, error) {
+	return s.secretsFrom(ctx, `
+		SELECT sensitivity, value_enc, value_mode FROM deploy_variable_revisions
+		 WHERE environment_id = ?
+		   AND (active = 1 OR id IN (SELECT variable_revision_id FROM deploy_run_variable_revisions WHERE run_id = ?))`,
+		[]any{run.EnvironmentID, run.ID},
+		`SELECT secret_enc FROM deploy_triggers WHERE environment_id = ? AND secret_enc != ''`, []any{run.EnvironmentID},
+		run.ProjectID)
+}
+
+// DeploymentSecrets is the same for all of one deployment, for what reads across it
+// rather than about one run: every environment's values, the ones since rotated too
+// because a container or a log line may still hold them, and the shared variables its
+// references can read. It is a set of strings to take out of text, so more is safer.
+//
+// A value a secret store holds is not here: the dashboard reads it at the run and
+// keeps no copy to compare with.
+func (s *PlanningStore) DeploymentSecrets(ctx context.Context, projectID int64) ([]string, error) {
+	values, err := s.secretsFrom(ctx, `
+		SELECT sensitivity, value_enc, value_mode FROM deploy_variable_revisions
+		 WHERE environment_id IN (SELECT id FROM deploy_environments WHERE project_id = ?)`,
+		[]any{projectID},
+		`SELECT secret_enc FROM deploy_triggers WHERE secret_enc != ''
+		   AND environment_id IN (SELECT id FROM deploy_environments WHERE project_id = ?)`, []any{projectID},
+		projectID)
+	if err != nil {
+		return nil, err
+	}
+	shared, err := s.sealedColumn(ctx,
+		`SELECT value_enc FROM deploy_shared_variables WHERE value_enc != '' AND (project_id = ? OR project_id IS NULL)`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for _, sealed := range shared {
+		if opened, err := s.sealer.Open(sealed); err == nil && strings.TrimSpace(opened) != "" {
+			values = append(values, strings.TrimSpace(opened))
+		}
+	}
+	return values, nil
+}
+
+func (s *PlanningStore) secretsFrom(ctx context.Context, revisionQuery string, revisionArgs []any, triggerQuery string, triggerArgs []any, projectID int64) ([]string, error) {
 	values := []string{}
 	add := func(value string) {
 		if value = strings.TrimSpace(value); value != "" {
@@ -108,11 +149,7 @@ func (s *PlanningStore) DiagnosisSecrets(ctx context.Context, run EngineRun) ([]
 		add(urlPassword(value))
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT sensitivity, value_enc, value_mode FROM deploy_variable_revisions
-		 WHERE environment_id = ?
-		   AND (active = 1 OR id IN (SELECT variable_revision_id FROM deploy_run_variable_revisions WHERE run_id = ?))`,
-		run.EnvironmentID, run.ID)
+	rows, err := s.db.QueryContext(ctx, revisionQuery, revisionArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -148,8 +185,8 @@ func (s *PlanningStore) DiagnosisSecrets(ctx context.Context, run EngineRun) ([]
 		args []any
 	}{
 		{`SELECT secret_enc FROM deploy_credentials WHERE secret_enc != ''`, nil},
-		{`SELECT secret_enc FROM deploy_triggers WHERE environment_id = ? AND secret_enc != ''`, []any{run.EnvironmentID}},
-		{`SELECT value_enc FROM deploy_env WHERE project_id = ?`, []any{run.ProjectID}},
+		{triggerQuery, triggerArgs},
+		{`SELECT value_enc FROM deploy_env WHERE project_id = ?`, []any{projectID}},
 	} {
 		sealed, err := s.sealedColumn(ctx, query.sql, query.args...)
 		if err != nil {

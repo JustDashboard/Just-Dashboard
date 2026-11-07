@@ -15,8 +15,8 @@ import { Notice } from "@/components/state"
 import { TranscriptRow } from "@/components/transcript-line"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { AssistantSettingsSheet } from "@/components/database/query/assistant/settings-sheet"
-import { useAssistantSettings } from "@/components/database/query/assistant/use-assistant"
+import { AssistantSettingsSheet } from "@/components/assistant/settings-sheet"
+import { assistantProduct, useAssistantSettings } from "@/components/assistant/settings"
 import type { ConsoleRow } from "@/components/deploy/build-console"
 import {
   diagnosisGlyph,
@@ -125,7 +125,7 @@ export function RunDiagnosis({
                 <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-body font-medium">
                   Ask{" "}
                   <span className="inline-flex min-w-0 items-center gap-1.5">
-                    <ProductGlyph id={diagnosisGlyph(view.provider)} />
+                    <ProductGlyph id={assistantProduct(view)} />
                     <span className="truncate">{view.modelLabel}</span>
                   </span>{" "}
                   why this run failed

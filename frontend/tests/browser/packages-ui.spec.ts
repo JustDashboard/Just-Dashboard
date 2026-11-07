@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { mockHostLogs } from "./host-logs-fixture"
 import { mockHost, installed, inventory, report, user } from "./packages-fixture"
+import { risen } from "./risen"
 
 test("software filters include dependencies and Escape clears the selection", async ({ page }) => {
   await mockHost(page)
@@ -64,7 +65,9 @@ test("missing sizes and advisory data are stated without made-up readings", asyn
   )
   await page.goto("/packages")
   await expect(page.getByText("Size not reported")).toBeVisible()
-  await expect(page.getByText("pacman publishes no security advisory data.")).toBeVisible()
+  await expect(
+    page.locator("[title='pacman publishes no security advisory data.']").first(),
+  ).toBeVisible()
   await expect(page.getByRole("button", { name: /^Installed by hand/ })).toHaveCount(0)
   await expect(page.getByRole("row", { name: /libc6/ })).toBeVisible()
   await expect(page.getByRole("button", { name: "Install security updates" })).toHaveCount(0)
@@ -247,13 +250,15 @@ test("the page opens on software and updates without summary cards", async ({ pa
   const band = page.locator("[data-slot='software-band']")
   await expect(band.getByRole("heading", { name: "On disk" })).toBeVisible()
   await expect(band.getByRole("heading", { name: "Updates waiting" })).toBeVisible()
-  await expect(band.getByRole("img", { name: /^Installed size:/ })).toBeVisible()
+  await expect(band.getByRole("img", { name: /^On disk:/ })).toBeVisible()
   await expect(band.getByRole("button", { name: "Only Linux packages" })).toBeVisible()
   await expect(band.locator("img[src='/logos/docker.svg']")).toHaveCount(1)
-  await expect(band.getByRole("button", { name: "Inspect update for openssl" })).toContainText(
-    "security",
-  )
-  await expect(band.getByRole("button", { name: "Inspect update for openssl" })).toBeVisible()
+  const updates = band.getByLabel("Updates waiting")
+  await updates.getByRole("button", { name: "Inspect update for openssl" }).hover()
+  const line = updates.locator("[data-slot=reading-line]")
+  await expect(line).toContainText("openssl")
+  await expect(line).toContainText("security")
+  await page.mouse.move(0, 0)
 
   // The decision, above the fold, with its own button.
   await expect(page.getByRole("button", { name: "Install security updates" })).toBeVisible()
@@ -263,6 +268,30 @@ test("the page opens on software and updates without summary cards", async ({ pa
   expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
   // The pill-shaped tab list is gone; the strip is the product's underlined one.
   expect(await page.locator("[data-slot='tabs-list']").count()).toBe(0)
+})
+
+test("the band is there before the inventory, and keeps its height when it lands", async ({
+  page,
+}) => {
+  await mockHost(page)
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route(/\/api\/v1\/packages\/$/, async (route) => {
+    await held
+    await route.fallback()
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/packages")
+  const band = page.locator("[data-slot='software-band']")
+  await expect(band.getByText("Reading the installed packages…")).toBeVisible()
+  await risen(page)
+  const before = await band.boundingBox()
+  release()
+  await expect(band.getByRole("button", { name: "Only Linux packages" })).toBeVisible()
+  await risen(page)
+  const after = await band.boundingBox()
+  expect(after?.height).toBe(before?.height)
+  expect(after?.y).toBe(before?.y)
 })
 
 test("each package is drawn as the software it is", async ({ page }) => {

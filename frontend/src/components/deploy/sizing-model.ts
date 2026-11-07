@@ -153,20 +153,56 @@ export function historyLine(window: SizingWindow) {
 }
 
 /**
- * The readings behind one limit, after the suggestion they produced: the
- * limit it is measured against first, then what was used.
+ * What was used and the limit it was used under, in words: "most of the time"
+ * is the 95th percentile the suggestion is taken from, which the ⓘ states.
  */
 export function memoryReadings(memory: MemorySizing) {
-  const limit = memory.limitMb > 0 ? `limit ${mib(memory.limitMb)}` : "no limit"
-  return `${limit} · p95 ${mib(memory.p95Mb)} · peak ${mib(memory.peakMb)}`
+  const limit = memory.limitMb > 0 ? `limit ${mib(memory.limitMb)}` : "no limit yet"
+  return `${mib(memory.p95Mb)} most of the time · ${mib(memory.peakMb)} at its peak · ${limit}`
 }
 
 export function cpuReadings(cpu: CpuSizing) {
-  const limit = cpu.limit > 0 ? `limit ${cores(cpu.limit)}` : "no limit"
-  const parts = [limit, `p95 ${cores(cpu.p95)}`, `peak ${cores(cpu.peak)}`]
+  const limit = cpu.limit > 0 ? `limit ${cores(cpu.limit)}` : "no limit yet"
+  const parts = [`${cores(cpu.p95)} most of the time`, `${cores(cpu.peak)} at its peak`, limit]
   if (cpu.throttledShare !== null && cpu.throttledShare > 0)
     parts.push(`throttled ${Math.round(cpu.throttledShare * 100)}%`)
   return parts.join(" · ")
+}
+
+/** What the page tells the reader to do with one limit, before the figure. */
+export function suggestionVerb(verdict: SizingVerdict) {
+  switch (verdict) {
+    case "too_tight":
+      return "Raise to"
+    case "oversized":
+      return "Lower to"
+    case "unlimited":
+      return "Limit to"
+    default:
+      return undefined
+  }
+}
+
+/** The card's sentence, naming the container when the page knows it. */
+export function sizingLead(verdict: SizingVerdict, name?: string) {
+  const it = name ?? "This container"
+  switch (verdict) {
+    case "too_tight":
+      return `${it} is hitting its limits`
+    case "oversized":
+      return `${it} has far more room than it uses`
+    case "unlimited":
+      return `${it} can use the whole server`
+    case "right":
+      return `${it} fits its limits`
+    default:
+      return `${it} is still being measured`
+  }
+}
+
+/** Where a value sits on a gauge scaled to what the limit has to show. */
+export function gaugeScale(values: number[]) {
+  return Math.max(...values, 0) * 1.04 || 1
 }
 
 /** "512 MiB → 640 MiB" for the limits an apply would change. */

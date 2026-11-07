@@ -9,11 +9,14 @@ import (
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate/selfupdatetest"
 )
 
 func TestConfigurationRestoredWhenRestartCannotBeRecorded(t *testing.T) {
 	for _, existed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("existing=%v", existed), func(t *testing.T) {
+			// The daemon answers, so the failure is the record's.
+			selfupdatetest.Docker(t)
 			dir, checkout := t.TempDir(), t.TempDir()
 			path := filepath.Join(checkout, ".env")
 			const original = "# preserve these exact bytes\nJD_SITE=localhost\n"
@@ -25,7 +28,8 @@ func TestConfigurationRestoredWhenRestartCannotBeRecorded(t *testing.T) {
 			s := New(Options{DataDir: dir, Locate: func(context.Context) (*selfupdate.Location, error) {
 				return &selfupdate.Location{Dir: "/host-only/checkout", Visible: checkout}, nil
 			}})
-			// A directory at the temp-record path fails Save before Docker is run.
+			// A directory at the temp-record path fails Save before the sibling
+			// is started.
 			if err := os.Mkdir(s.store.Path()+".tmp", 0o700); err != nil {
 				t.Fatal(err)
 			}

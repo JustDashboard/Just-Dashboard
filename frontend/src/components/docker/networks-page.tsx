@@ -227,9 +227,10 @@ export function Networks() {
   }, [networks, traffic.series])
   // Docker's built-in pools are an answer only once `docker info` has said
   // no others are set; before that, or when it fails, the pools are unknown.
+  // Nor is every block free before the list has said which networks hold them.
   const plan = useMemo(
-    () => (info.data ? addressPlan(info.data, networks) : undefined),
-    [info.data, networks],
+    () => (info.data && list.data ? addressPlan(info.data, networks) : undefined),
+    [info.data, list.data, networks],
   )
   const changes = useMemo(() => networkChanges(events, containers), [events, containers])
 
@@ -317,25 +318,6 @@ export function Networks() {
     containersPanel.current?.scrollIntoView({ block: "start", behavior: "smooth" })
   }
 
-  const header = <PageContext eyebrow="Docker" title="Networks" />
-
-  if (list.loading && !list.data) {
-    return (
-      <Page>
-        {header}
-        <LoadingPanel />
-      </Page>
-    )
-  }
-  if (list.error && !list.data) {
-    return (
-      <Page>
-        {header}
-        <ErrorState error={list.error} />
-      </Page>
-    )
-  }
-
   const attached = new Set(networks.flatMap((n) => (n.endpoints ?? []).map((e) => e.container)))
   // A failed container listing leaves members unread, which is not none.
   const unread = networks.filter((n) => !membersKnown(n))
@@ -374,14 +356,16 @@ export function Networks() {
       ]}
     >
       <Page className="animate-rise">
-        {header}
+        <PageContext eyebrow="Docker" title="Networks" />
 
-        <NetworkReadWarning
-          error={list.error}
-          refresh={list.refresh}
-          lastSuccess={list.lastSuccess}
-          reading="Docker networks"
-        />
+        {list.data && (
+          <NetworkReadWarning
+            error={list.error}
+            refresh={list.refresh}
+            lastSuccess={list.lastSuccess}
+            reading="Docker networks"
+          />
+        )}
         {unread.length > 0 && (
           <Notice title="Which containers use each network could not be read" tone="warning">
             Docker listed the networks but not the containers on them, so no network is shown as
@@ -400,19 +384,26 @@ export function Networks() {
                   <HostFact product={platformProduct(host?.platform)}>
                     {host?.hostname || info.data?.Name}
                   </HostFact>
-                  <FactDot />
+                  {list.data && <FactDot />}
                 </>
               )}
-              <span className="numeric">
-                {plural(networks.length, "network")}, {networks.length - (counts.docker ?? 0)} made
-                here
-              </span>
-              <FactDot />
-              <span className="numeric">
-                {unread.length > 0
-                  ? "members unread"
-                  : `${plural(attached.size, "container")} on them`}
-              </span>
+              {list.data ? (
+                <>
+                  <span className="numeric">
+                    {plural(networks.length, "network")}, {networks.length - (counts.docker ?? 0)}{" "}
+                    made here
+                  </span>
+                  <FactDot />
+                  <span className="numeric">
+                    {unread.length > 0
+                      ? "members unread"
+                      : `${plural(attached.size, "container")} on them`}
+                  </span>
+                </>
+              ) : (
+                // Holds the line open, so the band under it does not move when the list lands.
+                <span aria-hidden>&nbsp;</span>
+              )}
               {lensCounts.several > 0 && (
                 <>
                   <FactDot />
@@ -423,13 +414,15 @@ export function Networks() {
           }
           aside={
             <div className="flex flex-wrap items-center gap-3">
-              <Verdict
-                plan={plan}
-                unused={unused.length}
-                unread={unread.length}
-                pressed={shelf === "unused"}
-                onUnused={() => setShelf(shelf === "unused" ? "" : "unused")}
-              />
+              {list.data && (
+                <Verdict
+                  plan={plan}
+                  unused={unused.length}
+                  unread={unread.length}
+                  pressed={shelf === "unused"}
+                  onUnused={() => setShelf(shelf === "unused" ? "" : "unused")}
+                />
+              )}
               <div className="flex items-center gap-1">
                 <WorkspaceHelp compact />
               </div>
@@ -439,10 +432,12 @@ export function Networks() {
 
         <NetworkBand
           rates={[...rates.values()]}
-          trafficReady={traffic.now > 0}
+          // A bridge's rate is found through its network, so none is read before the list is.
+          trafficReady={traffic.now > 0 && list.data !== undefined}
           trafficFailed={traffic.error !== undefined && traffic.now === 0}
           plan={plan}
           poolsFailed={info.error !== undefined && !info.data}
+          failed={list.error !== undefined && !list.data}
           changes={changes}
           networkIds={new Set(networks.map((n) => n.id))}
           containersReady={listed !== undefined}
@@ -451,252 +446,262 @@ export function Networks() {
           onOpen={(network) => select(typeof network === "string" ? network : network.id)}
         />
 
-        {/* Framed, because it is a table: the grid owns a scroll region and
+        {list.loading && !list.data ? (
+          <LoadingPanel />
+        ) : list.error && !list.data ? (
+          <ErrorState error={list.error} />
+        ) : (
+          <>
+            {/* Framed, because it is a table: the grid owns a scroll region and
             the edge is what says so (§2). Everything above it stays plain. */}
-        <Panel>
-          <PanelHeader
-            title={
-              <>
-                Networks
-                <span className="numeric ml-2 text-body font-normal text-muted-foreground">
-                  {networks.length}
-                </span>
-              </>
-            }
-          >
-            <ChipStrip aria-label="Made by" className="mr-auto">
-              {OWNER_KINDS.map(({ kind, label, title }) => {
-                const count = counts[kind] ?? 0
-                if (count === 0 && shelf !== kind) return null
-                return (
-                  <FilterChip
-                    key={kind}
-                    selected={shelf === kind}
-                    title={title}
-                    onClick={() => setShelf(shelf === kind ? "" : kind)}
-                  >
-                    {label}
-                    <ChipCount>{count}</ChipCount>
-                  </FilterChip>
-                )
-              })}
-              {(counts.unused > 0 || shelf === "unused") && (
-                <FilterChip
-                  selected={shelf === "unused"}
-                  title="Nothing attached: each holds a block of the address pool"
-                  onClick={() => setShelf(shelf === "unused" ? "" : "unused")}
-                >
-                  <span aria-hidden className="size-1.5 rounded-full bg-warning" />
-                  Unused
-                  <ChipCount className="text-warning opacity-100">{counts.unused}</ChipCount>
-                </FilterChip>
-              )}
-            </ChipStrip>
-          </PanelHeader>
-          <PanelToolbar>
-            <SearchInput
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Network, subnet, container or address"
-              containerClassName="sm:w-72"
-            />
-            {shelf && (
-              <FilterChip selected aria-label="Show every network" onClick={() => setShelf("")}>
-                {shelf === "unused" ? "Unused" : OWNER_KINDS.find((k) => k.kind === shelf)?.label}
-                <Cross aria-hidden className="size-3" />
-              </FilterChip>
-            )}
-            <div className="ml-auto flex items-center gap-1.5">
-              {can("destructive") && unused.length > 0 && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  title="docker network prune: remove every network nothing is attached to"
-                  onClick={() => setPruning(true)}
-                >
-                  <Trash className="size-3.5" />
-                  Remove unused
-                </Button>
-              )}
-              {can("service.control") && (
-                <Button size="sm" onClick={() => setCreating(true)}>
-                  <Plus className="size-3.5" />
-                  Create network
-                </Button>
-              )}
-            </div>
-          </PanelToolbar>
-          <PanelBody flush>
-            {networks.length === 0 ? (
-              <EmptyState
-                icon={NetworkDevice}
-                title="No networks"
-                description="Docker has not reported even its own three."
-                className="my-4"
-              />
-            ) : visibleNetworks.length === 0 ? (
-              <EmptyState
-                icon={NetworkDevice}
-                title="No networks match"
-                description="Clear the search, or pick a different kind."
-                className="my-4"
-                action={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setQuery("")
-                      setShelf("")
-                    }}
-                  >
-                    Clear filters
-                  </Button>
+            <Panel>
+              <PanelHeader
+                title={
+                  <>
+                    Networks
+                    <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                      {networks.length}
+                    </span>
+                  </>
                 }
-              />
-            ) : (
-              <NetworkRows
-                key={`${shelf}\u0000${query}`}
-                rows={visibleNetworks}
-                rates={rates}
-                containers={byContainer}
-                onOpen={(network) => select(network.id)}
-                onAttach={setAttachTo}
-                onRemove={setRemoving}
-              />
-            )}
-          </PanelBody>
-          <PanelFooter className="text-hint text-muted-foreground">
-            <span className="numeric">{plural(visibleNetworks.length, "network")}</span>
-            <span className="text-muted-foreground/40">·</span>
-            <span>in use first, then unused, then Docker&apos;s own</span>
-            {traffic.now > 0 && (
-              <>
-                <span className="text-muted-foreground/40">·</span>
-                <span>traffic is each bridge&apos;s, every two seconds</span>
-              </>
-            )}
-          </PanelFooter>
-        </Panel>
-
-        <Panel ref={containersPanel} className="scroll-mt-4">
-          <PanelHeader
-            title={
-              <>
-                Containers
-                <span className="numeric ml-2 text-body font-normal text-muted-foreground">
-                  {containers.length}
-                </span>
-              </>
-            }
-          >
-            <ChipStrip aria-label="Which containers" className="mr-auto">
-              {LENSES.map(({ value, label, title, tone }) => {
-                const count = lensCounts[value]
-                if (count === 0 && lens !== value) return null
-                return (
-                  <FilterChip
-                    key={value}
-                    selected={lens === value}
-                    title={title}
-                    onClick={() => setLens(lens === value ? "" : value)}
-                  >
-                    {tone && <span aria-hidden className="size-1.5 rounded-full bg-warning" />}
-                    {label}
-                    <ChipCount className={cn(tone && "text-warning opacity-100")}>
-                      {count}
-                    </ChipCount>
-                  </FilterChip>
-                )
-              })}
-            </ChipStrip>
-            {focused && (
-              <FilterChip
-                selected
-                aria-label={`Show containers on every network, not only ${focused.name}`}
-                onClick={() => setOnNetwork("")}
               >
-                <HueKey color={networkHue(focused.name)} />
-                on {focused.name}
-                <Cross aria-hidden className="size-3" />
-              </FilterChip>
-            )}
-          </PanelHeader>
-          <PanelBody flush>
-            {containers.length === 0 ? (
-              <EmptyState
-                icon={Box}
-                title={listed ? "No containers" : "Reading the containers…"}
-                description={
-                  listed
-                    ? "Nothing on this host is on any network yet."
-                    : "They arrive over the same socket as the Containers page."
-                }
-                className="my-4"
-              />
-            ) : visibleContainers.length === 0 ? (
-              <EmptyState
-                icon={Box}
-                title="No containers match"
-                description="Clear the network, the chip or the search."
-                className="my-4"
-              />
-            ) : (
-              <ContainerNetworkRows
-                key={`${onNetwork}\u0000${lens}\u0000${query}`}
-                rows={visibleContainers}
-                focused={onNetwork || undefined}
-                placements={placements}
-                traffic={containerTraffic}
-                onNetwork={showOn}
-                onOpen={(container) =>
-                  router.push(`/docker/containers/${encodeURIComponent(container.id)}`)
-                }
-              />
-            )}
-          </PanelBody>
-          <PanelFooter className="text-hint text-muted-foreground">
-            <span className="numeric">{plural(visibleContainers.length, "container")}</span>
-            <span className="text-muted-foreground/40">·</span>
-            <span>a network&apos;s name narrows the table to it</span>
-          </PanelFooter>
-        </Panel>
+                <ChipStrip aria-label="Made by" className="mr-auto">
+                  {OWNER_KINDS.map(({ kind, label, title }) => {
+                    const count = counts[kind] ?? 0
+                    if (count === 0 && shelf !== kind) return null
+                    return (
+                      <FilterChip
+                        key={kind}
+                        selected={shelf === kind}
+                        title={title}
+                        onClick={() => setShelf(shelf === kind ? "" : kind)}
+                      >
+                        {label}
+                        <ChipCount>{count}</ChipCount>
+                      </FilterChip>
+                    )
+                  })}
+                  {(counts.unused > 0 || shelf === "unused") && (
+                    <FilterChip
+                      selected={shelf === "unused"}
+                      title="Nothing attached: each holds a block of the address pool"
+                      onClick={() => setShelf(shelf === "unused" ? "" : "unused")}
+                    >
+                      <span aria-hidden className="size-1.5 rounded-full bg-warning" />
+                      Unused
+                      <ChipCount className="text-warning opacity-100">{counts.unused}</ChipCount>
+                    </FilterChip>
+                  )}
+                </ChipStrip>
+              </PanelHeader>
+              <PanelToolbar>
+                <SearchInput
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Network, subnet, container or address"
+                  containerClassName="sm:w-72"
+                />
+                {shelf && (
+                  <FilterChip selected aria-label="Show every network" onClick={() => setShelf("")}>
+                    {shelf === "unused"
+                      ? "Unused"
+                      : OWNER_KINDS.find((k) => k.kind === shelf)?.label}
+                    <Cross aria-hidden className="size-3" />
+                  </FilterChip>
+                )}
+                <div className="ml-auto flex items-center gap-1.5">
+                  {can("destructive") && unused.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      title="docker network prune: remove every network nothing is attached to"
+                      onClick={() => setPruning(true)}
+                    >
+                      <Trash className="size-3.5" />
+                      Remove unused
+                    </Button>
+                  )}
+                  {can("service.control") && (
+                    <Button size="sm" onClick={() => setCreating(true)}>
+                      <Plus className="size-3.5" />
+                      Create network
+                    </Button>
+                  )}
+                </div>
+              </PanelToolbar>
+              <PanelBody flush>
+                {networks.length === 0 ? (
+                  <EmptyState
+                    icon={NetworkDevice}
+                    title="No networks"
+                    description="Docker has not reported even its own three."
+                    className="my-4"
+                  />
+                ) : visibleNetworks.length === 0 ? (
+                  <EmptyState
+                    icon={NetworkDevice}
+                    title="No networks match"
+                    description="Clear the search, or pick a different kind."
+                    className="my-4"
+                    action={
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setQuery("")
+                          setShelf("")
+                        }}
+                      >
+                        Clear filters
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <NetworkRows
+                    key={`${shelf}\u0000${query}`}
+                    rows={visibleNetworks}
+                    rates={rates}
+                    containers={byContainer}
+                    onOpen={(network) => select(network.id)}
+                    onAttach={setAttachTo}
+                    onRemove={setRemoving}
+                  />
+                )}
+              </PanelBody>
+              <PanelFooter className="text-hint text-muted-foreground">
+                <span className="numeric">{plural(visibleNetworks.length, "network")}</span>
+                <span className="text-muted-foreground/40">·</span>
+                <span>in use first, then unused, then Docker&apos;s own</span>
+                {traffic.now > 0 && (
+                  <>
+                    <span className="text-muted-foreground/40">·</span>
+                    <span>traffic is each bridge&apos;s, every two seconds</span>
+                  </>
+                )}
+              </PanelFooter>
+            </Panel>
 
-        <NetworkSheet
-          id={selected}
-          listed={selectedNetwork}
-          rate={selectedNetwork ? rates.get(selectedNetwork.id) : undefined}
-          traffic={containerTraffic}
-          containers={byContainer}
-          onOpenChange={(open) => !open && select(null)}
-          onChanged={list.refresh}
-          onRemove={setRemoving}
-        />
-        <AttachDialog
-          open={attachTo !== null}
-          networkId={attachTo?.id ?? null}
-          networkName={attachTo?.name}
-          onOpenChange={(open) => !open && setAttachTo(null)}
-          onAttached={list.refresh}
-          attached={new Set((attachTo?.endpoints ?? []).map((e) => e.container))}
-        />
-        <RemoveNetworkDialog
-          network={removing}
-          onOpenChange={(open) => !open && setRemoving(null)}
-          onRemoved={(network) => {
-            if (network.id === selected) select(null)
-            list.refresh()
-          }}
-        />
-        <PruneDialog open={pruning} onOpenChange={setPruning} onPruned={list.refresh} />
-        <NewNetworkDialog
-          open={creating || initialReservationId !== ""}
-          onOpenChange={onCreatingChange}
-          onCreated={list.refresh}
-          networks={networks}
-          inventoryError={list.error}
-          refreshInventory={list.refresh}
-          initialReservationId={initialReservationId}
-        />
+            <Panel ref={containersPanel} className="scroll-mt-4">
+              <PanelHeader
+                title={
+                  <>
+                    Containers
+                    <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                      {containers.length}
+                    </span>
+                  </>
+                }
+              >
+                <ChipStrip aria-label="Which containers" className="mr-auto">
+                  {LENSES.map(({ value, label, title, tone }) => {
+                    const count = lensCounts[value]
+                    if (count === 0 && lens !== value) return null
+                    return (
+                      <FilterChip
+                        key={value}
+                        selected={lens === value}
+                        title={title}
+                        onClick={() => setLens(lens === value ? "" : value)}
+                      >
+                        {tone && <span aria-hidden className="size-1.5 rounded-full bg-warning" />}
+                        {label}
+                        <ChipCount className={cn(tone && "text-warning opacity-100")}>
+                          {count}
+                        </ChipCount>
+                      </FilterChip>
+                    )
+                  })}
+                </ChipStrip>
+                {focused && (
+                  <FilterChip
+                    selected
+                    aria-label={`Show containers on every network, not only ${focused.name}`}
+                    onClick={() => setOnNetwork("")}
+                  >
+                    <HueKey color={networkHue(focused.name)} />
+                    on {focused.name}
+                    <Cross aria-hidden className="size-3" />
+                  </FilterChip>
+                )}
+              </PanelHeader>
+              <PanelBody flush>
+                {containers.length === 0 ? (
+                  <EmptyState
+                    icon={Box}
+                    title={listed ? "No containers" : "Reading the containers…"}
+                    description={
+                      listed
+                        ? "Nothing on this host is on any network yet."
+                        : "They arrive over the same socket as the Containers page."
+                    }
+                    className="my-4"
+                  />
+                ) : visibleContainers.length === 0 ? (
+                  <EmptyState
+                    icon={Box}
+                    title="No containers match"
+                    description="Clear the network, the chip or the search."
+                    className="my-4"
+                  />
+                ) : (
+                  <ContainerNetworkRows
+                    key={`${onNetwork}\u0000${lens}\u0000${query}`}
+                    rows={visibleContainers}
+                    focused={onNetwork || undefined}
+                    placements={placements}
+                    traffic={containerTraffic}
+                    onNetwork={showOn}
+                    onOpen={(container) =>
+                      router.push(`/docker/containers/${encodeURIComponent(container.id)}`)
+                    }
+                  />
+                )}
+              </PanelBody>
+              <PanelFooter className="text-hint text-muted-foreground">
+                <span className="numeric">{plural(visibleContainers.length, "container")}</span>
+                <span className="text-muted-foreground/40">·</span>
+                <span>a network&apos;s name narrows the table to it</span>
+              </PanelFooter>
+            </Panel>
+
+            <NetworkSheet
+              id={selected}
+              listed={selectedNetwork}
+              rate={selectedNetwork ? rates.get(selectedNetwork.id) : undefined}
+              traffic={containerTraffic}
+              containers={byContainer}
+              onOpenChange={(open) => !open && select(null)}
+              onChanged={list.refresh}
+              onRemove={setRemoving}
+            />
+            <AttachDialog
+              open={attachTo !== null}
+              networkId={attachTo?.id ?? null}
+              networkName={attachTo?.name}
+              onOpenChange={(open) => !open && setAttachTo(null)}
+              onAttached={list.refresh}
+              attached={new Set((attachTo?.endpoints ?? []).map((e) => e.container))}
+            />
+            <RemoveNetworkDialog
+              network={removing}
+              onOpenChange={(open) => !open && setRemoving(null)}
+              onRemoved={(network) => {
+                if (network.id === selected) select(null)
+                list.refresh()
+              }}
+            />
+            <PruneDialog open={pruning} onOpenChange={setPruning} onPruned={list.refresh} />
+            <NewNetworkDialog
+              open={creating || initialReservationId !== ""}
+              onOpenChange={onCreatingChange}
+              onCreated={list.refresh}
+              networks={networks}
+              inventoryError={list.error}
+              refreshInventory={list.refresh}
+              initialReservationId={initialReservationId}
+            />
+          </>
+        )}
       </Page>
     </Workspace>
   )

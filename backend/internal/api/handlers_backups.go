@@ -38,8 +38,8 @@ func (s *Server) mountBackupRoutes(r chi.Router) {
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
-			r.Method(http.MethodPost, "/", s.handle(s.handleBackupJobCreate))
-			r.Method(http.MethodPut, "/{id}", s.handle(s.handleBackupJobUpdate))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/", s.handle(s.handleBackupJobCreate))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/{id}", s.handle(s.handleBackupJobUpdate))
 			r.Method(http.MethodPost, "/{id}/enabled", s.handle(s.handleBackupJobEnabled))
 			r.Method(http.MethodPost, "/{id}/database-dumps", s.handle(s.handleBackupJobAddDatabaseDump))
 			r.Method(http.MethodPost, "/{id}/test", s.handle(s.handleBackupTestTarget))
@@ -53,13 +53,13 @@ func (s *Server) mountBackupRoutes(r chi.Router) {
 			// server sealed. POSTs, because each carries a destination's keys
 			// or a backup key, never in a URL.
 			r.Method(http.MethodPost, "/catalogue", s.handle(s.handleBackupCatalogue))
-			r.Method(http.MethodPost, "/import", s.handle(s.handleBackupImport))
-			r.Method(http.MethodPost, "/key/import", s.handle(s.handleBackupKeyImport))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/import", s.handle(s.handleBackupImport))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/key/import", s.handle(s.handleBackupKeyImport))
 			// The key opens every encrypted archive this server wrote, wherever
 			// they are copied to, and nothing here can take an exported copy
 			// back: an irreversible act, so the destructive budget too.
 			s.destructive(r, func(r chi.Router) {
-				r.Method(http.MethodPost, "/key/export", s.handle(s.handleBackupKeyExport))
+				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/key/export", s.handle(s.handleBackupKeyExport))
 			})
 		})
 		r.Group(func(r chi.Router) {
@@ -510,8 +510,11 @@ func (s *Server) startBackupRun(ctx context.Context, actor string, id int64) (*b
 		return nil, httpx.Err(http.StatusConflict, "already_running", backups.ErrAlreadyRunning.Error())
 	}
 	trigger, failure := "manual", "manual backup failed"
-	if strings.HasPrefix(actor, "account:") {
+	switch {
+	case strings.HasPrefix(actor, "account:"):
 		trigger, failure = "account_link", "backup started by a linked account failed"
+	case strings.HasPrefix(actor, "hub:"):
+		trigger, failure = "hub_link", "backup started by Just Hub failed"
 	}
 	go func() {
 		ctx, cancel := detachedContext(12 * 60 * 60)

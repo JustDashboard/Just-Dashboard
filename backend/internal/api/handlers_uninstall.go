@@ -13,6 +13,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/uninstall"
 	"github.com/go-chi/chi/v5"
 )
@@ -186,6 +187,8 @@ func mapUninstallError(err error) error {
 		return httpx.Err(http.StatusServiceUnavailable, "uninstall_unsupported", err.Error())
 	case errors.Is(err, uninstall.ErrMode):
 		return httpx.BadRequest("%v", err)
+	case errors.Is(err, selfupdate.ErrDockerUnreachable):
+		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable", err.Error())
 	default:
 		return httpx.Internal(err)
 	}

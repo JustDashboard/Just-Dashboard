@@ -1,0 +1,13 @@
+The components in this directory, and the conversation pieces drawn from them in
+../agent/ and ../model-picker.tsx, are adapted from AI Elements
+(https://github.com/vercel/ai-elements), from its registry at
+https://registry.ai-sdk.dev: conversation, prompt-input, suggestion, tool,
+chain-of-thought, confirmation, reasoning and model-selector.
+
+Copyright 2023 Vercel, Inc. Licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0).
+
+Changed from the originals: they are redrawn in this product's tokens, icons and
+marks; the dependency on the AI SDK's message types is gone, because the
+conversation here is the dashboard's own stream; and prompt-input is reduced to one
+question with no attachments.

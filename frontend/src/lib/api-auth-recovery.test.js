@@ -1,5 +1,14 @@
 import { afterEach, expect, test } from "bun:test"
-import { errorFromResponse, fetchResponse, get, post, postForm, getText, postFile } from "./api"
+import {
+  HUB_SESSION_REFUSED,
+  errorFromResponse,
+  fetchResponse,
+  get,
+  post,
+  postForm,
+  getText,
+  postFile,
+} from "./api"
 
 const originalFetch = globalThis.fetch
 const originalWindow = globalThis.window
@@ -162,4 +171,20 @@ test("XHR uploads use the same recognized authentication failures and error deta
     "proxy unavailable",
   )
   expect(events).toEqual([])
+})
+
+test("a session opened through Just Hub is told to sign in on the server itself", () => {
+  const err = errorFromResponse(
+    403,
+    JSON.stringify({
+      error: {
+        code: "hub_session_not_allowed",
+        message: "sign in on this server itself to do this",
+      },
+    }),
+    "/tokens/",
+  )
+  expect(err).toMatchObject({ status: 403, code: "hub_session_not_allowed" })
+  expect(err.message).toBe(HUB_SESSION_REFUSED)
+  expect(err.message.startsWith("Sign in on this server itself to do this")).toBe(true)
 })

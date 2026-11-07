@@ -8,6 +8,7 @@ import {
   Database,
   GitBranch,
   Globe,
+  Hub,
   Layers,
   Lightning,
   MagnifyingGlass,
@@ -35,6 +36,7 @@ import type { SearchKind } from "./model"
  */
 export const KINDS: Record<SearchKind, { icon: Icon; noun: string }> = {
   recent: { icon: Clock, noun: "Visited" },
+  server: { icon: Hub, noun: "Server" },
   command: { icon: Lightning, noun: "Command" },
   page: { icon: Layers, noun: "Page" },
   project: { icon: Rocket, noun: "Project" },

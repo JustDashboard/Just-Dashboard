@@ -17,6 +17,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate/selfupdatetest"
 )
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -400,9 +401,47 @@ func TestFailedStopStartsTheDashboardAgain(t *testing.T) {
 	}
 }
 
+// The uninstall sibling is replaced and started on the daemon JD_DOCKER_HOST
+// names, not on whichever one the process environment would reach.
+func TestSiblingIsStartedOnTheConfiguredDaemon(t *testing.T) {
+	cli := selfupdatetest.Docker(t)
+	const host = "unix:///srv/jd/docker.sock"
+	s := New(Options{DataDir: t.TempDir(), DockerHost: host, Log: quiet()})
+	if err := s.startSibling(context.Background(), &Run{Dir: "/opt/jd", Image: "img"}); err != nil {
+		t.Fatal(err)
+	}
+	if diff := selfupdatetest.AimedAt(cli(), host, "rm -f "+SiblingContainer, "run --detach --rm"); diff != "" {
+		t.Fatal(diff)
+	}
+}
+
+// An uninstall whose sibling could never start is refused before it pauses
+// anything: found at the hand-over, it would leave the deployments paused
+// behind a resume that needs the same daemon.
+func TestBeginRefusesWhenTheDaemonDoesNotAnswer(t *testing.T) {
+	s, c := service(t, func(context.Context, *Run) error { return nil })
+	missing := selfupdatetest.MissingHost(t)
+	s.o.DockerHost = missing
+
+	_, err := s.Begin(context.Background(), Request{Mode: ModeKeep}, "admin")
+	if !errors.Is(err, selfupdate.ErrDockerUnreachable) || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("err = %v, want ErrDockerUnreachable naming %s", err, missing)
+	}
+	if got := c.String(); got != "" {
+		t.Fatalf("a refused uninstall still ran %s", got)
+	}
+	if run, _ := s.store.Load(); run != nil {
+		t.Fatalf("a refused uninstall was recorded: %+v", run)
+	}
+	if exists(s.o.DurableLog) {
+		t.Fatal("a refused uninstall wrote the durable transcript")
+	}
+}
+
 // service is a Service with every outside dependency replaced.
 func service(t *testing.T, launch func(context.Context, *Run) error) (*Service, *calls) {
 	t.Helper()
+	selfupdatetest.Docker(t)
 	dir := t.TempDir()
 	c := &calls{}
 	s := New(Options{

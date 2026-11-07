@@ -478,10 +478,13 @@ test.describe("Traffic", () => {
     await expect(page.getByRole("heading", { name: "Bandwidth by device" })).toBeVisible()
     await expect(page.getByRole("radio", { name: "24h" })).toBeVisible()
     const programs = page.getByRole("region", { name: "Traffic by program" })
-    await expect(programs.getByText("caddy")).toBeVisible()
-    await expect(programs.getByText("postgres")).toBeVisible()
+    const line = programs.locator("[data-slot=reading-line]")
+    await expect(line).toContainText("caddy")
+    await programs.getByRole("button", { name: "Who postgres talks to" }).hover()
+    await expect(line).toContainText("postgres")
     const containers = page.getByRole("region", { name: "Traffic by container" })
-    await expect(containers.getByText("adguardhome")).toBeVisible()
+    await containers.getByRole("button", { name: "Open adguardhome's traffic" }).hover()
+    await expect(containers.locator("[data-slot=reading-line]")).toContainText("adguardhome")
   })
 
   test("pressing a program opens the peers it talks to", async ({ page }) => {

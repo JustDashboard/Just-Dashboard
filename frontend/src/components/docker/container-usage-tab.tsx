@@ -30,23 +30,23 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { TrafficBar } from "@/components/metrics/hardware-panels"
-import { SeriesKey } from "@/components/overview/readings"
+import { HUE, SeriesKey } from "@/components/overview/readings"
 import { RuntimeUsage } from "@/components/deploy/runtime-usage"
 import { Hint, Term } from "@/components/docker/explain"
 import { usageMarkers } from "@/components/docker/usage-markers"
 
 /** The charts' own hues (`deploy/runtime-usage.tsx`), so a breakdown reads as its chart. */
-const MEMORY = "var(--chart-4)"
-const RECEIVED = "var(--chart-2)"
-const SENT = "var(--chart-5)"
+const MEMORY = HUE.mem
+const RECEIVED = HUE.net
+const SENT = "var(--chart-2)"
 
 type Rates = ReturnType<typeof containerRates>
 
 /**
  * What the container is using, as a project's Runtime page reads a release:
- * each chart headed by its reading now, the Live range off Docker's stats
- * socket and the recorded ranges behind it, the processes, and what it has
- * done since it started (`RuntimeUsage`) — with the container's own exits,
+ * the Metrics page's row of readings over its charts, the Live range off
+ * Docker's stats socket and the recorded ranges behind it, the processes, and
+ * the data it has moved since it started (`RuntimeUsage`) — with the container's own exits,
  * kills and restart loops marked where they fell on the charts.
  *
  * Under them, what the figures in those heads are made of, the way the

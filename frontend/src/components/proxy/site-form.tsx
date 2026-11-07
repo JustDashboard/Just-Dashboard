@@ -1859,8 +1859,10 @@ export function ListField({
 }) {
   const [draft, setDraft] = useState("")
   const add = () => {
-    if (!draft.trim()) return
-    onChange([...values, draft.trim()])
+    const entry = draft.trim()
+    if (!entry) return
+    // The server refuses an entry listed twice, so one typed again is just done.
+    if (!values.includes(entry)) onChange([...values, entry])
     setDraft("")
   }
   return (
@@ -3602,6 +3604,14 @@ export function HeaderListField({
               aria-label={`${label}: name`}
               value={name}
               onChange={(e) => setName(e.target.value)}
+              // Enter in a field submits the form around it, which would save
+              // the page with this header half typed.
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  add()
+                }
+              }}
               placeholder="X-Robots-Tag"
               className="font-mono text-xs"
             />

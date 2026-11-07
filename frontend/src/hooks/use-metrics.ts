@@ -23,6 +23,27 @@ export function useMetrics(): MetricsState {
 }
 
 /**
+ * This server's host name, as the dashboard reads it for its own pages (`/system/host`, the
+ * Overview's title): `undefined` until the shell's metrics stream has it, `null` once its first
+ * read failed with nothing to show. It re-renders on a new name, not on every frame.
+ *
+ * It is this server's own word for itself, which is why the shell names the server with it rather
+ * than with the name a hub lists it under: that one is the hub's text (hub-link-protocol §8.10).
+ */
+export function useHostName(): string | null | undefined {
+  return useSyncExternalStore(subscribe, hostNameSnapshot, noHostName)
+}
+
+function hostNameSnapshot(): string | null | undefined {
+  const { host, error } = getState()
+  return host?.hostname?.trim() || (error ? null : undefined)
+}
+
+function noHostName(): undefined {
+  return undefined
+}
+
+/**
  * Runs the metrics stream for as long as it is mounted.
  *
  * Mounted once in the dashboard shell rather than on the Overview page, which

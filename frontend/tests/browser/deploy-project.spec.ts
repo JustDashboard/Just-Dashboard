@@ -240,18 +240,35 @@ test("the overview says how much of the time the deployment was up, and over wha
   const delivery = page.getByRole("heading", { name: "Delivery" })
   await expect(delivery).toBeVisible()
   expect((await availability.boundingBox())!.y).toBeLessThan((await delivery.boundingBox())!.y)
-  // A steady day, six minutes over the week, and a month the record only
-  // reaches nine days into — said rather than left to read as a steady month.
+  // The sentence says how far the record really reaches, so nine days never
+  // read as a steady month; a day is a mark on the ribbon where it happened.
+  await expect(page.getByText("Up 99.95% of the last 9 days", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText("6 min down across 2 incidents, none in the last 24 hours", { exact: true }),
+  ).toBeVisible()
   await expect(page.getByText("100%", { exact: true })).toBeVisible()
   await expect(page.getByText("99.94%", { exact: true })).toBeVisible()
   await expect(page.getByText("99.95%", { exact: true })).toBeVisible()
-  await expect(page.getByText("no downtime recorded", { exact: true })).toBeVisible()
-  await expect(page.getByText("6 min down · 2 incidents", { exact: true })).toBeVisible()
-  await expect(
-    page.getByText("6 min down · 2 incidents · record covers 9 of 30 days", { exact: true }),
-  ).toBeVisible()
   await expect(page.getByText(/record since/)).toBeVisible()
-  await expect(page.getByText(/counts as down until the container comes back/)).toBeVisible()
+
+  const days = page.getByTestId("availability-days").locator("li")
+  await expect(days).toHaveCount(30)
+  await expect(page.getByTestId("availability-days").locator('[data-tone="unknown"]')).toHaveCount(
+    21,
+  )
+  // Pointing at a day puts it on the line the windows were on, and the block
+  // holds its height while it does.
+  const ribbon = page.getByTestId("availability-days").locator("..")
+  const before = (await ribbon.boundingBox())!.height
+  await days.nth(27).hover()
+  await expect(ribbon.getByText(/· 6 min down · 2 incidents$/)).toBeVisible()
+  expect((await ribbon.boundingBox())!.height).toBe(before)
+  await page.mouse.move(0, 0)
+
+  await page.getByRole("button", { name: "How availability is worked out" }).hover()
+  await expect(
+    page.getByText(/counts as down until the container comes back/).first(),
+  ).toBeVisible()
 
   for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 900 })
@@ -284,7 +301,19 @@ test("an availability the server cannot read says why, in place of a figure", as
       "Docker is unavailable on this host, so container lifecycle cannot be observed.",
     ),
   ).toBeVisible()
-  await expect(page.getByText("Last 7 days", { exact: true })).toHaveCount(0)
+  await expect(page.getByTestId("availability-days")).toHaveCount(0)
+})
+
+test("the overview reads in sentences, with no metric tile anywhere in it", async ({ page }) => {
+  await mockProject(page, { showcase: true })
+  await page.goto("/deploy/7")
+  await expect(page.getByRole("heading", { name: "Delivery" })).toBeVisible()
+  await expect(page.locator('[data-slot="reading-line"]')).toHaveCount(4)
+  await expect(page.getByRole("link", { name: "CPU on Runtime" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Requests on Logs", exact: true })).toBeVisible()
+  await expect(page.getByTestId("insights-daily")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Release history" })).toHaveCount(0)
+  await expect(page.locator('[data-slot="stat-tile"]')).toHaveCount(0)
 })
 
 test("the deployments tab reports delivery figures with their basis and window", async ({
@@ -305,14 +334,25 @@ test("the deployments tab reports delivery figures with their basis and window",
   const durations = page.getByTestId("insights-durations")
   await expect(durations.locator("li")).toHaveCount(31)
   await expect(page.getByText("median 1m 35s", { exact: true })).toBeVisible()
-  await expect(durations.locator("li").first()).toHaveAttribute(
-    "title",
-    "2026-08-04: 1m 35s, median of 1 successful release",
-  )
-  await expect(durations.locator("li").nth(1)).toHaveAttribute(
-    "title",
-    "2026-08-05: no successful release",
-  )
+  // Each day answers under the pointer, the empty ones too, in both charts.
+  const tooltip = page.getByRole("tooltip")
+  await durations.locator("li").first().hover()
+  await expect(tooltip).toHaveText(/Aug 4.*1m 35s, median of 1 successful release/)
+  await durations.locator("li").nth(1).hover()
+  await expect(tooltip).toHaveText(/Aug 5.*No successful release/)
+  const releases = page.getByTestId("insights-daily")
+  await releases.locator("li").first().hover()
+  await expect(tooltip).toHaveText(/Aug 4.*1 succeeded.*1 failed/)
+  await releases.locator("li").nth(1).hover()
+  await expect(tooltip).toHaveText(/Aug 5.*No releases/)
+  // One tab stop for a chart of 31 days, and the arrows walk them.
+  await expect(releases.locator('li[tabindex="0"]')).toHaveCount(1)
+  await releases.locator("li").nth(1).focus()
+  await page.keyboard.press("ArrowLeft")
+  await expect(tooltip).toHaveText(/Aug 4.*1 succeeded/)
+  await page.mouse.move(0, 0)
+  await page.keyboard.press("Escape")
+  await expect(tooltip).toHaveCount(0)
   await expect(page.getByText(/^3 failed releases · last /)).toBeVisible()
 
   // A reason for failing narrows the list below to the failed runs, and each
@@ -1942,4 +1982,40 @@ test("a pull-request listing the server cannot answer hides the panel, and an un
   await answered
   await expect(page.getByRole("heading", { name: "Recent deployments" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Pull requests", exact: true })).toHaveCount(0)
+})
+
+test("a project's usage reads as the Metrics page does", async ({ page }) => {
+  await mockProject(page, { showcase: true })
+  await page.goto("/deploy/7/runtime")
+  const resources = page.locator("section", {
+    has: page.getByRole("heading", { name: "Resources", exact: true }),
+  })
+  const readings = resources.locator("[data-slot=stat-tile]")
+  await expect(readings).toHaveCount(5)
+  for (const name of ["CPU", "Memory", "Processes", "Network", "Disk I/O"]) {
+    await expect(readings.filter({ hasText: name })).toBeVisible()
+  }
+  for (const name of ["Processor and memory", "Network and disk", "Processes and data moved"]) {
+    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible()
+  }
+  await expect(page.getByRole("heading", { name: "Data moved", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Since it started", exact: true })).toHaveCount(0)
+  await expect(page.getByText(/Recorded every|Live from Docker's stats stream/)).toHaveCount(0)
+})
+
+test.describe("delivery charts on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+
+  test("a tap on a day holds its reading until the next tap", async ({ page }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/deployments")
+    const days = page.getByTestId("insights-daily").locator("li")
+    const tooltip = page.getByRole("tooltip")
+    await days.first().tap()
+    await expect(tooltip).toHaveText(/Aug 4.*1 succeeded.*1 failed/)
+    await days.nth(1).tap()
+    await expect(tooltip).toHaveText(/Aug 5.*No releases/)
+    await page.getByRole("heading", { name: "Delivery", exact: true }).tap()
+    await expect(tooltip).toHaveCount(0)
+  })
 })

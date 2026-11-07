@@ -20,7 +20,11 @@ is now one bootstrap script: it puts `.dark` on the root element before first pa
 shadcn primitives' `dark:` variants resolve, sets `color-scheme`, and clears the stored preference
 from anyone upgrading. `hooks/use-theme.tsx` and `/appearance` are gone.
 
-Colours live on `:root` in `app/globals.css`. That is the only place a colour is named.
+Colours live on `:root` in `app/globals.css`. That is the only place a colour is named. One page
+holds a copy: `/hub/enter` (`lib/hub-enter.ts`) is a document written by hand that loads no
+stylesheet, because its first script must run before anything else the app would load, so it repeats
+the few tokens it draws with (its `--muted` is `--muted-foreground`). `hub-enter.test.js` reads both
+and fails when a value drifts.
 
 ## 2. Nothing lifts
 
@@ -185,9 +189,10 @@ taking a frame:
   sidebar's ground with a switch on each row it may hide; and the four views on
   Packages — the installed and updates tables, the software search and the package Log (its `Pane`
   on the page's ground, no panel around it), under one underlined strip
-  (`tabClasses`) rather than a filled tab list, beneath the host's identity and the software-size
-  band beside its update queue — each a toolbar and a hairline over a framed table or, for the
-  catalogue, lit choices on the page's own edge. Security updates carry their command in the queue;
+  (`tabClasses`) rather than a filled tab list, beneath the host's identity and the band of software
+  size and updates waiting — each a toolbar and a hairline over a framed table or, for the
+  catalogue, lit choices on the page's own edge. Security updates carry their command at the end of
+  the Updates waiting block's strip;
   a reboot owed and a stale index remain notices, and the Git page's repository list under its four readings (its workspace is one framed
   workbench of three `Pane flush` columns with a strip across the top, the way the terminal page is
   drawn);
@@ -426,6 +431,8 @@ rail's headings end on.
 | `ChoiceCard` | One thing you pick out of several, in a `ChoiceGrid` — a source, a template, a database engine | Not a `Panel`: a panel is content that happens to be framed, this is a button that happens to be large |
 | `ChoiceRow` | One instance among many of one kind, in a `ChoiceList` — a repository, an image tag, an unfinished setup | Not a `Row`: a `Row` is read, a `ChoiceRow` is taken |
 | `BarList` | A ranked list with the meter's track behind each name and the figure at the right — the top ten of something, with a signal segment for the share that is wrong | Not a chart, and not a `RowList`: nothing here has a second line worth a row |
+| `RankList` | A ranked list read rather than measured: name, figure and share in columns, with `SplitBar` for one strip of a whole over it. Insights uses it | Not a `BarList`: no bar per row, so nothing grows from row to row |
+| `BarReading` | One block of a band: a head, a bar, one line and one strip of marks, the same height in every state (§10) | Not a `BarList`: nothing is listed under the bar, and it is the only thing a band's bar is drawn with |
 
 **Reach for `Panel`/`Pane`/`Page`, and add a variant there rather than a one-off in a feature page.**
 Before these existed, fourteen pages read as fourteen products.
@@ -434,15 +441,78 @@ Before these existed, fourteen pages read as fourteen products.
 `no-restricted-imports` enforces it. A page never opens one itself.
 
 **A conversation is a column of the workbench, not a window over it.** The SQL editor's assistant
-(`database/query/assistant/`) is the editor's third column, on its right with a hairline and a resize
-handle, and lies over the editor like the rail where the frame cannot hold three columns. A question is
-a recessed block on `--surface-header` with what it carried as `Tag`s (*statement*, *result · 20
-rows*), never their values; an answer is the product's Markdown on the pane's own ground, and a
-statement in it is a sunken block with its verbs in words — *Open in a tab*, *Insert*, *Copy* —
-drawn only once the answer has finished, because a statement still arriving may not be whole. A
-request the model makes of the reader is a fence with the two answers as buttons (*Allow*, *Don't
-allow*) that becomes one word once answered. Where the question is written, one line says who it goes
-to and what of the database goes with it, and turns amber while rows are attached.
+(`database/query/query-assistant.tsx`) is the editor's third column, on its right with a hairline and a
+resize handle, and lies over the editor like the rail where the frame cannot hold three columns. It is
+not a second assistant: it draws `AgentChat` compact on the connection's own session, so a chat begun
+there is the one in front on the connection's Assistant page, and the dock stays off both. What the tab
+holds goes with a question only by the reader's press, as toggles over the box — *Statement*, *Result ·
+3 rows*, *Error*, *Plan* (`query/attachments.ts`, a result as a small text table) — and the question
+carries them as `Tag`s (*statement*, *result · 20 rows*), never their values. A statement in an answer is
+a sunken block with its verbs in words — *Open in a tab*, *Insert*, *Copy* — drawn only once the answer
+has finished, because a statement still arriving may not be whole; `AgentChat`'s `codeBlock` is where a
+place gives a fenced block its verbs, rather than forking the chat. The line under the box says who it
+goes to and what of the database goes with it, and turns amber while rows are attached.
+
+**The deployment's assistant is the same conversation given a page, because it works.**
+(`components/assistant/agent/`, drawn from AI Elements' registry components, `elements/NOTICE`.) A database's
+is the same page (`agent/subject-page.tsx`, `SubjectAssistant`): each subject passes only its scope, its words,
+its suggestions and what refuses it — an archived project, a protected connection, which says *Nothing about
+<name> is sent to the assistant while it is protected* in place of the chat. What it did stands
+in the answer as steps, each the product it touched on a tile (§14's argument for a logo: Docker's whale is read
+before its label), with a word lit while it runs (`TextShimmer`) and a badge that turns from a spinner to a tick or a
+cross as it ends. A route it called itself (`api_request`) is drawn as the request log draws one — the method on a
+recessed chip, a read muted and a write in the method hue, and the path in the path hue (`MethodWord`,
+`RequestPath`) — so `GET /databases/connections` reads as a request before it reads as words; looking routes up
+(`find_routes`) is a muted line with no badge. A command it runs on the host (`run_command`) is drawn as the
+command itself in mono, on the terminal's mark, with its exit beside it and what it printed in the step's well;
+waiting on the person, the card shows it whole in a sunken mono block after a `$`, because the command, not a
+sentence about it, is what a person reads to decide. A call into the chat's own terminal window — a terminal call, or a `run_command` the server typed into the window (a package change, a Docker restart, a `sudo`) — draws its command in mono like a shell line, and only the newest
+one says what the window is doing under it when that is worth a line — *Still running in its terminal* or what it
+is asking, on the header surface, with **Open Terminal →** — and, for a password, a card on the warning wash with
+a password field and **Send**, saying the text goes straight to the window and never to the assistant; its tile
+shows the waiting dot rather than a tick while it waits. What it changed is a card on the success wash with **Open Runtime →**
+beside it, and what is different in mono, so a change is the loudest thing in the column. What it wants to do is a card
+on the warning or danger wash with each call's own *Allow* and *Decline*, its values as `path value` lines rather than
+JSON, since a person reads it to decide. Full access is amber on the toolbar for as long as it is on, and the mode
+menu says what each mode does in plain words: full access runs everything without asking; asking before changes holds
+every change. A question is right-aligned on `--surface-header`, the answer has the provider's real logo beside it,
+and `BorderBeam` (§11: work is happening inside this frame) runs round the logo's tile and the composer while it works.
+
+The chat is not in a frame. On a deployment's page, a connection's and `/assistant` it is the page's own ground from the
+header's hairline to the window's foot (`ProjectShell` and the server page draw a `fill` page there, and a connection's
+Assistant is a workbench section under its strip): the column of messages is
+the one thing that scrolls, the composer sits at the foot with a small margin and nothing under it but the line that
+says what is sent, and the rail is a column after a hairline, never a card. An empty chat centres its mark, title and
+suggestions in the column. The composer draws no focus at all — no ring, no lit border, no glow — because it is the
+page's one place to type and the blinking caret is the whole answer to "is it ready"; a press anywhere on its frame puts
+the caret in it, and the buttons in its toolbar keep the ring for the keyboard. Its send is one round button
+at the box's corner, as the chat apps people know draw it: an arrow up on the command's blue to ask, turning in
+place into a square on the text's own colour to stop while it answers, its name the word since there is none. An image waiting in it, or asked with a
+question, is a thumbnail that opens large on a press (`ImageLightbox`, `components/image-lightbox.tsx`, which README
+and pull request pictures open in too): the picture as large as the window allows over a dark ground, room made for it
+from its size with the thumbnail drawn there until it lands, so nothing jumps; arrows, keys or a swipe for the rest, a
+click for pixel for pixel, Escape back to the thumbnail. A tile pops in when an image is pasted and out when removed.
+
+The rail holds the chats and what the open one has done. **Chats** are the person's saved chats (`agent/chats.ts`,
+`agent/chat-list.tsx`), newest first, each a row of one height in every state: its title, how long ago it moved, a
+lit `signal` dot that breathes while a tab is answering it, and a warning `Tag` while calls in it wait on the person.
+Rename turns the row's own line into the field; delete asks first through `useConfirm`; nothing unfolds under a row.
+The deployment's page lists that deployment's chats and a connection's page that connection's; `/assistant` is a
+chat about the whole server and lists every chat under what each is about, and a deployment's or a connection's chat
+opens on its own page (`?chat=`). A server chat begun by **Ask** from another page carries that page
+(`AgentTranscript.about`): a small square chip at the head of the column, *About shop · Logs*, is the way back to it,
+the empty chat offers questions about the page rather than the server, and the server is told the page with the press
+that begins the chat and never again. A chat opened
+from the history is read back from the server and folded through the same reducer the stream feeds, so it looks
+exactly as it did and can be carried on. One another tab is answering is followed and says so in a calm bar over the
+box — a breathing dot, *This chat is running in another tab*, and **Take over** — and the tab it was taken from says
+*Continued somewhere else* and stops. Below the chats, what it has changed with a shortcut to each, and what it has
+read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot.
+
+A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a transition
+on an outline, not a fifth animation. The floating **Back to chat** is the same surface as Remote Desktop's dock, in
+the same corner, and sits above it when both are up. `/assistant`'s second tab is the install's settings: who
+answers, what a conversation starts on, and where it works.
 
 **What goes inside a task surface is `components/form.tsx`.** A `Field` is a label at `text-body`,
 a control, and one line under it — a hint, or the error while there is one; `FieldRow` puts two or
@@ -602,6 +672,12 @@ is one step of ground the reader has to compare against its neighbours rather th
 empty value is ignored, because Radix lets a second press clear the choice and here there is always
 an answer. Two binaries that belong to one row — a domain's HTTPS and its password, a variable's
 Secret or Config — are one outline `ToggleGroup`, not two switches.
+
+**A value the operator stores is not a password field.** Chrome ignores `autocomplete="off"` on a form
+with a `type="password"` field: it offers saved sign-ins there and reads the text field before it as
+the username. The three variable editors take `secretValueField` and `NOT_A_SIGN_IN` from
+`lib/secret-field.ts`, a text field drawn as dots with `-webkit-text-security`, and it stays a text
+field while masked because Chrome remembers a field that has ever been a password one.
 
 **A rule a value has to meet is lit as it is met.** `FieldCheck` (`form.tsx`) sits under the field
 it belongs to — a credential's name rules, a Telegram channel's token and chat id, a password's
@@ -920,18 +996,16 @@ rather than assembling its own recharts tree — adding a measurement should mea
   `yTicks` on `MetricChart` and `ChartPanel` names the ticks. A container's memory chart is scaled to
   its limit and ticks at the limit's quarters, so the top tick names the limit — on Docker's
   container page and on a project's Runtime alike, since both take `useContainerScales`.
-- **A series' hue is the measurement's, not the chart's position.** A project's Runtime draws
-  processor in `--chart-1`, memory in `--chart-4`, received and read in `--chart-2`, sent in
-  `--chart-5`, written in `--chart-4` and processes in `--chart-5`, so five charts that were all one
-  blue read apart at a glance; a chart's reading now in its head carries the same 2×10 key the
-  legend does. The host pages take the five readings' hues from one map (`HUE` in
-  `components/overview/readings.tsx`) — processor `--chart-1`, memory `--chart-2`, load
-  `--chart-3`, network `--chart-5`, disks `--chart-4` — and Metrics draws every line of a
-  measurement in it, so Pressure's CPU, memory and I/O lines are the three tiles' colours; a
-  chart's second line takes the hue furthest from its first (out `--chart-2` against in, write
-  `--chart-3` against read).
-- **A reading's last hour in a deployment page's `StatTile` is `TileTrend`** (`sparkline.tsx`), the
-  one shape for it: the tile's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
+- **A series' hue is the measurement's, not the chart's position.** The five readings' hues come from
+  one map (`HUE` in `components/overview/readings.tsx`) — processor `--chart-1`, memory `--chart-2`,
+  load `--chart-3`, network `--chart-5`, disks `--chart-4` — and Metrics draws every line of a
+  measurement in it, so Pressure's CPU, memory and I/O lines are the three tiles' colours; a chart's
+  second line takes the hue furthest from its first (out `--chart-2` against in, write `--chart-3`
+  against read). A project's Runtime and a container's Usage tab take the same map and the same
+  second lines, with processes in load's hue, because the operator asked that a container's
+  metrics read the same as the host's: its network is the line the host's network is.
+- **A reading's last hour in a deployment page's `StatTile` or an Overview reading line is `TileTrend`**
+  (`sparkline.tsx`), the one shape for it: its slot's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
   below two points, which is not yet a shape, nor for a series that never moves on a scale of its
   own — scaled to its own maximum a flat line fills the band and reads as a full meter — and the
   tile's trend band then collapses rather than leave a gap. With a fixed `max` a flat line sits at
@@ -944,6 +1018,51 @@ rather than assembling its own recharts tree — adding a measurement should mea
   plan add up to the whole. The figure beside it is the step's own, which is what "slowest first"
   orders by.
 
+### The bar reading
+
+A band, the blocks between a page's identity line and its table, draws each block as one `BarReading`
+(`components/bar-reading.tsx`; its logic and tests are `bar-reading-model.ts` and
+`bar-reading-model.test.js`): a head, a bar, one fixed-height readout line and one strip of marks,
+the same height in every state. **No rows under a bar in a band.** The bands over the Docker,
+Processes, Packages, Proxy and Database pages were a bar with a list under it, the five heaviest
+things as rows and a sentence where there were none yet. Each poll reordered the rows; a block grew
+from a sentence to five lines when its first reading landed, which pushed the table under it down the
+page; and the rows repeated that table's columns. Any new band takes this component, and what it
+would have listed is the table's. Scheduled's lanes and the Overview's Storage are not shares of one
+bar and keep their own shapes.
+
+- **The line holds one part.** At rest that is the heaviest, or the part the table is narrowed to, or
+  the first given on a `ticks` or `fixed` reading, so those lead with the one worth reading: Recent's
+  newest, Certificates' soonest to end, the worst standing. Hovering a span or a mark, or focusing a
+  mark, puts that part on the line and fades the other spans; off the block it returns. A sliver too
+  narrow to point at is still reached by its mark, which is also how a keyboard reaches any part. A
+  touch press previews first and acts on the second, because a tap has no hover. The line rises when
+  its part changes (§11), and its figures have landed already, so reading another part shows its
+  value rather than counting up to it (`LandedFigures`).
+- **A press is the part's.** `press` narrows the table, and `pressed` keeps that part on the line and
+  lit; `press.opens` or `href` opens its page, from the span, the mark or the line alike. `control` is
+  a part's own verb, drawn on the line while it is the part there, as a kind's Reclaim is on Images.
+- **Order holds between polls** (`settleOrder`): a part must pass the one above it by 25% before they
+  change places, so neighbours within a rounding of each other stop swapping and a mark stays where
+  it was pointed at. `fixed` keeps the order given: standings, kinds, newest first.
+- **`trail`** draws the part's readings since the page opened as a sparkline on the line, only for
+  readings that move. A flat trail or one under three readings draws nothing, for the reason
+  `TileTrend` does not.
+- **`live` is reserved for socket-fed figures** (§11's rule) and draws a breathing cap at the end of
+  the filled bar. The container socket's bands carry it; a polled reading has a trail and no cap, even
+  beside a head figure that is live.
+- **`ticks`** makes the bar an axis, each part a tick at its `at`: Recent is a day (`timeAt`, anything
+  older on the far end where it can still be reached), the proxy overview's Certificates ninety days.
+- **`hatch`** draws the share of a span a prune would take, hatched inside it. **`working`** sweeps the
+  bar while work on what it draws runs, a registry check or a prune.
+- **`message`** fills the line and the strip, two lines at most: no reading yet, nothing to say, a
+  failed read. What needs more goes under the block. **`note`**, at the strip's end, holds what the
+  strip leaves out or a control for the whole block. **At most six marks**; a part past them keeps its
+  span and is read under the pointer.
+- **A band must not mount, unmount or change columns as data lands, and its page renders it during
+  load.** Whether a block is drawn is decided by what the host is, never by what a read has said so
+  far, so a page whose readings land does not move.
+
 ## 11. Motion says one of four things
 
 Before 0.6.7 the only shared motion in the product was whatever Radix and `tw-animate-css` happened
@@ -954,7 +1073,7 @@ levels rather than between pages:
 
 | Token | Says | Spent on |
 | --- | --- | --- |
-| `animate-breathe` | this reading is live | A halo breathing out of a `StatusDot`, at an amplitude low enough to read as "still arriving" and never as an alarm. |
+| `animate-breathe` | this reading is live | A halo breathing out of a `StatusDot`, at an amplitude low enough to read as "still arriving" and never as an alarm, and the cap on a live bar reading (§10). |
 | `animate-rise` | this was not here a moment ago | Opacity and four pixels, once, on arrival: a panel that appears, a disclosure that opens, a sparkline whose data landed. |
 | `animate-sweep` | this is working, and cannot say how far along | An indeterminate bar for a pull or a prune, where a spinner in the corner of a wide panel is too small to be the answer. |
 | `animate-drill` | you crossed a level | `rise` turned sideways, for the one place where a list is replaced by a list: the sidebar going into a section and back out. The direction *is* the message — in arrives from the right, out from the left — so the distance is `--drill-from` at the call site, not in the keyframe, and a panel that merely re-rendered does not move at all. |
@@ -969,7 +1088,8 @@ take the footer's first line. With no measured total the track spends `animate-s
 item or byte count fills it instead. An upload reaching its total switches to an indeterminate
 processing reading until the server answers. Elapsed time is not a completion estimate or a server
 heartbeat. The timer is excluded from the live region, the track has a named `progressbar` role, and
-reduced motion leaves a static full track. Pages, workbenches and job consoles draw no working bar.
+reduced motion leaves a static full track. Pages, workbenches and job consoles draw no working bar of
+their own; a bar reading already on the page sweeps its own bar while work on what it draws runs (§10).
 
 **`rise` is expected wherever a fetch settles**, not reserved for special occasions. The Overview is
 the reference: the page rises once when its first snapshot lands; each sparkline when its hour of
@@ -977,15 +1097,17 @@ history arrives; the activity list when its events arrive; each service figure w
 settles (swap the figure's `key` between skeleton and value so it remounts). Hover is colour only —
 `transition-colors` on a wash or a border — and a meter eases its width. Nothing translates, scales,
 glows or casts a shadow to say it was hovered or pressed; the one `group-hover:translate` the product
-had was removed from the Overview's service arrow in 0.6.7.
+had was removed from the Overview's service arrow in 0.6.7. A bar reading's line (§10) rises when
+pointing changes its part, because that part was not on the line a moment ago, and the spans it fades
+are the reading answering, not a hover's wash.
 
 `animate-pulse` is not one of them. It dims the element itself, which on a table of twenty running
 containers reads as twenty things blinking for attention — `breathe` leaves the dot constant and
 moves only the air around it, so the column still scans as "all green" at a glance.
 
 **Live is a claim about the data, not a decoration.** `StatusDot`'s `live` prop belongs to a row fed
-by an open socket. A polled figure is not live, and marking it so is the interface lying about how
-fresh its numbers are.
+by an open socket, and `BarReading`'s to a bar fed by one. A polled figure is not live, and marking it
+so is the interface lying about how fresh its numbers are.
 
 Nothing here needs a `motion-reduce:` guard. The rule lives once at the root of `globals.css` and
 collapses every animation's *duration* rather than cancelling it, so a keyframe that would otherwise
@@ -1107,6 +1229,23 @@ beam, the fade, and wire marks that draw the products they connect.
 Every one of them honours `prefers-reduced-motion` in JavaScript, because the root CSS rule cannot
 reach a JavaScript-driven animation.
 
+The assistant's chat is the one surface that spends `motion` itself at the scale of a word or a row, because an
+answer arriving is a sequence of small arrivals and a person watches every one. Each is still one of the four
+meanings, each runs 150–250ms on the product's rise curve with nothing springing, and a subtree under
+`MotionConfig reducedMotion="user"` drops every transform for a reader who asked for less: a turn rises in as it
+is asked (one read back from the history does not); the suggestions of an empty chat arrive a beat apart; a step's
+badge crosses from the spinner to a tick or a cross; a step and a long run of steps unfold to their height
+(`animate-collapsible-*`), and opening one lets go of the bottom first, so the row stays under the pointer instead of
+being pushed up by the column following the newest line; a call waiting on the person rises and lights its edge once
+in its tone (`.agent-attention`, the arrival highlight's outline run once on arrival), and so does a change's
+shortcut, in green; *Ask* becomes *Stop* in place — the face eases from the command's blue to a control's while the
+word and glyph cross — rather than one button replacing another; the composer's and the logo's `BorderBeam` fade up
+and away; the answer still arriving ends in a soft caret that breathes (`.agent-streaming`, drawn by the column
+after the last word, never typed into the Markdown); *Thinking* is the shimmer with the seconds counted beside it;
+**Jump to latest** rises in once the reader has scrolled up and sinks away when they are back; the rail's changes
+slide in; and the dock rises in and sinks away, its rows easing their height as they join and leave.
+
+
 Database creation on `/databases/new` and `/deploy/new?source=database` uses one shared catalogue,
 settings `FlowPanel`, and startup sequence (`database/connect/start.tsx`). While a container is being
 provisioned, adopted or verified, the panel carries `BorderBeam` and `DatabaseProgress` draws the
@@ -1200,11 +1339,23 @@ measures its own width because it is drawn on /backups as well); a runtime servi
 both lines spent, traffic joining at `xl`), the runs in flight (from `sm`) and the archive (from `sm`).
 Narrow, each keeps one short second line, as the channel card does on a phone; a fact that fitted
 neither line and is not needed to recognise or judge the card went to the page or sheet it opens.
-A revealed variable value and an isolation note on a preview keep their line, because one is a
-control and the other is the thing to do. A row that
+An isolation note on a preview keeps its line, because it is the thing to do. A row that
 only reflows rather than rearranging, a domain or a mount editor, uses a container query
 (`@container`, `@min-[40rem]` for a domain and `@min-[36rem]` for a mount) and draws nothing twice
 by construction.
+
+**A variable is read down its columns, and a value is revealed in place.** At the operator's request
+in 0.8.5 an environment's and a shared variable's card is `ChoiceRow columns`, one 44px line from
+600px: the name, the value, then an edge of one width on every row, with a state in the value's
+column so it cannot move the columns. Reveal swaps the mask for `RevealedValue` in the same cell, one
+line that scrolls sideways however long the value is. It was a framed band under the row, which
+pushed the rest of the list down for the length of a look. Nothing hangs under the row at any width:
+a shared variable's readers open from its *Read by N*, and on a phone the row is its name over its
+value, where a variable reaches being on the filter chips and in its editor. A band left empty room
+under the mark. Reveal and copy are inline in both states,
+when a variable was set is on the face and in its editor, and no strip of the variables' products
+stands under the section's title: each row wears its own mark, and one logo there read as a stray
+icon.
 
 A row drawn this way is a **click target, not a control**. `role="button"` on the wrapper is the
 obvious way to make a whole card pressable and is wrong: an ARIA button takes its accessible name
@@ -2071,7 +2222,9 @@ The passes, in order. Each one is a diff you can review on its own.
    rest of what the host reports in use one muted span, every span easing to the next poll and
    every figure gliding to it. A workload is a supervisor's processes or the copies of one program
    started by hand, summed by the backend over the whole snapshot with shared pages counted once,
-   so forty Chrome renderers are one row rather than forty; a press narrows the table to it. The
+   so forty Chrome renderers are one span rather than forty rows; a press narrows the table to it.
+   The five were rows under the bar (`ShareBar`) until 0.8.5, and are a bar reading now (§10): one on
+   the line, the marks of all five under it. The
    line of two buttons that stood above the identity line went into it, as Metrics' shortcuts did.
    The table took fixed columns — sized to their content, a long command line had pushed Memory
    and every row's menu past the panel's edge at 1280 — and draws CPU and memory as a figure beside
@@ -2110,10 +2263,11 @@ The passes, in order. Each one is a diff you can review on its own.
    failed count, a press of which narrows the table to them — beside Reload unit files and the
    shortcuts, where a button stood alone over the table. Under it `components/procs/
    service-band.tsx` answers what the tiles never did: the five services using the most processor
-   and the most memory on Live's bar the size of the machine (`ShareBar`), and a third block of
-   what happened — the last units to start, stop, finish or fail since the boot settled, each with
-   its time, a failure saying why in the same line and a restart in progress shimmering. A row
-   there opens the unit. The figures are systemd's own, read from each unit's cgroup by the list
+   and the most memory on Live's bar the size of the machine, and a third block of what happened —
+   the last units to start, stop, finish or fail since the boot settled, each a tick on the last day,
+   with its time, a failure saying why on the line and a restart in progress shimmering. Each is a
+   bar reading (§10), where they were rows under a `ShareBar` until 0.8.5. A press opens the unit.
+   The figures are systemd's own, read from each unit's cgroup by the list
    route, so a service's share is every process it started. The table took Live's fixed columns
    and its figure-beside-a-bar readings, and its state column says how long a unit has been in its
    state — up for, failed since and why, the restarts it has taken. Only a newly listed unit rises
@@ -2136,11 +2290,13 @@ The passes, in order. Each one is a diff you can review on its own.
    second line, where "no health check" is still said out loud. The line opens on the engine as
    Services' opens on the host: Docker as its mark and version, the host with its distribution, the
    storage driver, the running count, the stacks and images, and at its right end the verdict — the
-   failing count, a press of which narrows the table. Under it `components/docker/container-band.tsx`
-   answers what the bar never did: the five containers using the most processor and memory on Live's
-   bar the size of the machine (`ShareBar`), figures gliding to each two-second frame of the
-   container socket, and **Recent**, Docker's event log followed live — a restart loop one line ("×14
-   in 9 min · exit 1"), an OOM kill said on the exit it caused, a failing health check in red. Failing
+   failing count, a press of which narrows the table. Under it `components/docker/containers-band.tsx`
+   answers what the bar never did, in bar readings (§10) that were rows under a `ShareBar` until 0.8.5:
+   the five containers using the most processor and memory on Live's bar the size of the machine,
+   its cap breathing and its figures gliding to each two-second frame of the container socket, and
+   **Recent**, Docker's event log followed live as ticks on the last day — a restart loop one tick
+   ("×14 in 9 min · exit 1" on the line), an OOM kill said on the exit it caused, a failing health
+   check in red. Failing
    is read from the state, the health check, the exit status and that log together
    (`components/docker/containers.ts`): a 137 is `docker stop`'s as often as the OOM killer's, so only
    the event log turns it red. The table took Live's fixed columns and figure-beside-a-bar readings —
@@ -2153,14 +2309,15 @@ The passes, in order. Each one is a diff you can review on its own.
 
    Packages took the same exit in 0.7.1 at the operator's request. Installed is a fact in the
    identity and a count on its view; by-hand and dependencies are scope chips; Updates is its view's
-   count, the security chip and a security-first queue; On disk heads the software band. The band
-   (`components/packages/software-band.tsx`) is Processes' question applied to installed software:
-   the five largest products, or archive sections for packages no product names, as spans of one
-   bar of the installed size in the disk measurement's hue, with every other package in one muted
-   span. Its figures glide on arrival and to a new inventory; a press narrows Installed to that
-   group, including its dependencies. The queue beside it opens a package's readout and carries
-   the security/all-upgrade decisions; no advisory data is said rather than counted as no security
-   updates. The sheet is one scroll, with version changes and size over commands, registered services,
+   count, the security chip and the band's Updates waiting; On disk heads the software band. The band
+   (`components/packages/software-band.tsx`) is two bar readings (§10). On disk is Processes' question
+   applied to installed software: the five largest products, or archive sections for packages no
+   product names, as spans of one bar of the installed size in the disk measurement's hue, with every
+   other package in one muted span. Its figures glide on arrival and to a new inventory; a press
+   narrows Installed to that group, including its dependencies. Updates waiting, a queue of rows until
+   0.8.5, is one bar with a span per pending package, security first in amber, the first five named
+   and each opening its package's readout; the strip's end carries the security/all-upgrade decisions.
+   No advisory data is said rather than counted as no security updates. The sheet is one scroll, with version changes and size over commands, registered services,
    file links, the manual, inspectable dependencies and metadata. Catalogue suggestions and results,
    and the sheet's service/file destinations, take the lit choice edge (pass 3). Tables retain
    their frame and gain fixed responsive columns and a measured size bar per installed row.
@@ -2181,10 +2338,10 @@ The passes, in order. Each one is a diff you can review on its own.
    services as one strip of their states. The line opens on Docker drawn as itself, its version,
    the host, the storage driver and cgroup version, and the images with what their layers hold
    (`GET /docker/info` and the disk read). Under it `components/docker/container-band.tsx` answers
-   what the tiles never did, in Services' shape: the five containers using the most processor and
-   memory on Live's bar the size of the machine (`ShareBar`), fed by the containers socket so every
-   span eases and every figure glides with each frame, and a Recent block of the last thing that
-   happened to each container, live off the daemon's events (`components/docker/overview.ts`: an
+   what the tiles never did, in Services' shape, as bar readings (§10): the five containers using the
+   most processor and memory on Live's bar the size of the machine, fed by the containers socket so
+   every span eases and every figure glides with each frame, and a Recent block of the last thing that
+   happened to each container, a tick on the last day, live off the daemon's events (`components/docker/overview.ts`: an
    OOM kill and its exit read as one line, a stop's kill, die and stop as one, and a container that
    came back after crashing says how many times it did in the hour). Then every container as a
    framed table rather than `/docker/containers`' cards (§16 says why): fixed columns from `xl`, each
@@ -2246,15 +2403,18 @@ The passes, in order. Each one is a diff you can review on its own.
    more than a request a minute, quicker the busier (`requestPulse`, the Network section's curve
    over requests), red where it fails or the upstream refuses (dashed then), amber in plain HTTP
    or where the upstream times out; pointing at a domain lights the application it reaches and the
-   other way round. The band under it (`overview-band.tsx`) is three blocks: Traffic, the hour's
-   requests as one `ShareBar` of the busiest five, each rank a `LANES` hue, over rows with what
-   each reaches and its 5xx share, each opening the site's traffic; Certificates, every
-   certificate as a dot on one ninety-day runway in the colour of its state with certbot's renewal
-   stretch marked, over the five soonest as the expiry `BarList`; and Recent errors, the hour's 5xx by site from the
-   same access records over nginx's error-log groups where nginx is on the host. Each block opens on
-   its one figure at the 24px reading size (requests this hour, days to the next expiry or how many
-   need attention, server errors this hour), and a site's row opens its traffic, or for an ingress
-   route, its site page, which reads the deployment's record. The
+   other way round. The band under it (`overview-band.tsx`) is three bar readings (§10): Traffic, the
+   hour's requests shared out over the busiest five, each rank a `LANES` hue, its 5xx share and its
+   trail on the line; Certificates, the five that run out first as ticks in the colour of their state
+   on one ninety-day axis, the rest counted at the strip's end, each opening its certificate; and Recent
+   errors, the hour's 5xx by site from the same access records over nginx's error-log groups where
+   nginx is on the host, each opening the site's requests or the error log. Until 0.8.5 these were
+   rows under each bar: Traffic's a `ShareBar` over what each site reaches, Certificates every
+   certificate as a dot on a runway with certbot's renewal stretch marked over the five soonest as the
+   expiry `BarList`, each block opening on its figure at the 24px reading size. Each head holds its
+   one figure now (requests this hour, days to the next expiry or how many need attention, server
+   errors this hour), and a site opens its traffic, or for an ingress route, its site page, which reads
+   the deployment's record. The
    route cards lead with the application's own mark and the engine in the tile's corner
    (`RouteMark`), and are one line: what serves the route and the way a request goes (its names,
    only where they differ from the route's own, then the upstream or folder) under the name, and
@@ -2271,11 +2431,13 @@ The passes, in order. Each one is a diff you can review on its own.
    a rail of what the page draws once nginx runs. It was two `xs` outline buttons over an empty
    Certificates block, an empty Routes list and a Recent changes rail; none of those are drawn
    without an engine, and the identity line drops its zero counts (the open ports stay). Where a
-   block has nothing to read it says so in one shape, `OverviewEmpty` (an icon, what is missing,
+   block had nothing to read it said so in one shape, `OverviewEmpty` (an icon, what is missing,
    why, and the one way forward as an outline button where there is one), rather than a grey
-   sentence at whichever size each block had chosen. With no access log read anywhere, Live
-   traffic says why and opens the site (or Sites), the band drops its Traffic block rather than
-   saying it a second time, and Recent errors leads on nginx's error-log lines, since a 5xx count
+   sentence at whichever size each block had chosen; the band's blocks say it in their own `message`
+   since 0.8.5 (§10), and the card is Live traffic's. With no access log read anywhere, Live
+   traffic says why and opens the site (or Sites), the band's Traffic block says so on its one line,
+   where it used to drop out and move the routes under it (only a host whose engines keep no access
+   records draws neither it nor Recent errors), and Recent errors leads on nginx's error-log lines, since a 5xx count
    with no log to count from is unknown, not zero; an error log whose every group is a notice no
    longer draws an empty finding list's "No problems found" under the block's own all-clear.
 
@@ -2299,8 +2461,9 @@ The passes, in order. Each one is a diff you can review on its own.
    *open* (`frontDoorLine(doors, self)`) rather than "nginx" a third time. Live traffic leads on
    the server's reason where it gives one instead of a sentence of ours it contradicted, and its
    button says it opens a site; the stub_status strip is *nginx counters* and drops the "On"/"Off"
-   word where the switch beside it already says it; the empty Certificates block draws the open
-   lock the picture uses for plain HTTP rather than a shield with a tick; and Recent errors,
+   word where the switch beside it already says it; the empty Certificates block drew the open
+   lock the picture uses for plain HTTP rather than a shield with a tick, until its card became the
+   block's `message` in 0.8.5; and Recent errors,
    without an access log, gives the error log's zero for the hour once rather than again under it.
 
    A fourth pass on 2026-10-24, at the operator's request, made the page read as one product with
@@ -2308,16 +2471,18 @@ The passes, in order. Each one is a diff you can review on its own.
    40px tile on a framed `bg-card` bar rather than a 48px tile over a hairline) now carries the
    page's own controls — how old the page is, Refresh as an icon button, and **Alerts** as a link
    whose firing count stands beside it in red (holding in amber) — before the engine's commands,
-   where they had been a row of their own over a band of empty ground. Every quiet block is
-   `OverviewEmpty`'s card now, the Routes row's shape: a tile drawn as the product the block is
+   where they had been a row of their own over a band of empty ground. Every quiet block became
+   `OverviewEmpty`'s card, the Routes row's shape: a tile drawn as the product the block is
    about with what is missing in its corner (`EmptyMark` — nginx with a log for no access log,
    Let's Encrypt with an open lock for no certificates), the title and its reason beside it
    on one line, and the way forward at the card's far end where the card is wide enough
-   (a container query, since it stands full-width under Live traffic and in half the band). The
+   (a container query, since it stood full-width under Live traffic and in half the band). The
    16px glyph in a column of its own over 12px grey text left a gutter down each block. No
-   certificates is amber-edged, with **Issue a certificate** at its end for an administrator; an hour in which nothing failed is a green-edged card with a tick on nginx —
-   *Nothing failed in the last hour* where an access log counts 5xx, *nginx logged no errors this
-   hour* where none does, since a 5xx count with no log is still unknown, not zero. The nginx
+   certificates was amber-edged, with **Issue a certificate** at its end for an administrator; an hour in which nothing failed a green-edged card with a tick on nginx. The band's blocks gave those
+   cards up in 0.8.5, because a block keeps one height (§10): they are its `message` now, *Nothing
+   failed in the last hour* where an access log counts 5xx, *nginx logged no errors this hour* where
+   none does, since a 5xx count with no log is still unknown, not zero, and Issue a certificate
+   stands in the block's head. Live traffic's empty is still the card. The nginx
    counters are a card the same shape whose whole surface is the switch's `<label>`, so a press
    anywhere flips it, with the readings at the body size; Live traffic's requests draw in
    `--chart-2` rather than the near-white brand. Alerts left the sheet for a page of its own,
@@ -2332,7 +2497,7 @@ The passes, in order. Each one is a diff you can review on its own.
    notification channel's card, because the operator found them too big with their verb not part
    of them: a 12px inset and a 56px floor, the title over a hint-sized reason, and the verb a small
    outline button at the far end (under the words, never the tile, where the card is narrow), the
-   amber edge rather than a filled button carrying that no certificate is a problem. The alerts
+   amber edge rather than a filled button carrying that no certificate was a problem. The alerts
    page's all-clear and firing cards take the same size. The host's Alerts page under Metrics
    (`/metrics/alerts`, 2026-10-25) is the same page over the machine's own readings — CPU, memory
    and filesystems as their glyphs, containers as Docker, backups as an archive — and draws its
@@ -2346,13 +2511,14 @@ The passes, in order. Each one is a diff you can review on its own.
    network — a compose project, this dashboard, standalone or Docker — with Unused in amber beside
    them. It opens on Docker's identity line, the overview's, whose verdict is the address pool nearly
    or wholly spent, else the unused networks (a press narrows the table to them), else every network
-   in use. Under it `components/docker/network-band.tsx` answers what the cards never did: which
-   networks carry the traffic, read off their bridges every two seconds and drawn as spans of one bar
-   in each network's colour; how much of the address pool Docker carves networks from is taken, as
-   blocks in the colour of the network holding each — the pool every `compose up` takes a subnet from
-   runs out at thirty-one with the built-in pools; and who joined or left which network, from
-   Docker's events. A network's colour is a lane hue (`networkHue`, slate for Docker's own) and is the
-   same on its row's edge, its span, its blocks and its chips in the containers table, which lists
+   in use. Under it `components/docker/network-band.tsx` answers what the cards never did, in three bar
+   readings (§10): which networks carry the traffic, read off their bridges every two seconds and
+   drawn as spans of one bar in each network's colour; how much of the address pool Docker carves
+   networks from is taken, one span per network sized by the blocks it holds and the first free block
+   at the strip's end — the pool every `compose up` takes a subnet from runs out at thirty-one with
+   the built-in pools; and who joined or left which network, from Docker's events, as ticks on the
+   last day. A network's colour is a lane hue (`networkHue`, slate for Docker's own) and is the
+   same on its row's edge, its spans, its ticks and its chips in the containers table, which lists
    every container with each network it is on, its address there and the names it answers to, so
    "can the API reach the database" is whether two rows share a colour. The sheet became a live
    readout: four readings over the bridge's two minutes, the bridge wired to each member in the
@@ -2365,12 +2531,13 @@ The passes, in order. Each one is a diff you can review on its own.
    the server's identity line — the Compose mark, Docker's version, stacks deployed, services running,
    ports published — with the attention verdict at its right end, red where a service fails its check
    or exited on an error and amber for the rest, a press of which narrows the table as the chip does.
-   Under it `components/docker/stack-band.tsx` is Services' band for applications: the five stacks
-   using the most processor and memory on Live's bar the size of the machine (`ShareBar`), each a sum
-   over the stack's containers from the containers socket, a press narrowing the table to that stack;
-   and Recent, the daemon's last starts, exits with their codes, out-of-memory kills folded into the
-   exit they caused and failed checks, each with its time and its stack's name in that stack's lane
-   hue, opening the stack. The stacks themselves are one framed table of their containers
+   Under it `components/docker/stack-band.tsx` is Services' band for applications, in bar readings (§10)
+   that were rows under a `ShareBar` until 0.8.5: the five stacks using the most processor and memory
+   on Live's bar the size of the machine, each a sum over the stack's containers from the containers
+   socket, a press narrowing the table to that stack; and Recent, the daemon's last starts, exits with
+   their codes, out-of-memory kills folded into the exit they caused and failed checks, each a tick on
+   the last day with its time and its stack's name in that stack's lane hue on the line, opening the
+   stack. The stacks themselves are one framed table of their containers
    (`stack-table.tsx`) — a stack is still a destination, but its containers are rows of readings, and
    a stack's row is where they add up. A stack's row carries its products, state, how many declared
    services are up (a service its file dropped is counted as an orphan, not as a fourth of three), the
@@ -2390,17 +2557,18 @@ The passes, in order. Each one is a diff you can review on its own.
    told apart by anything but its words. It opens on Docker's identity line (the engine's version,
    how many images, the layers' size, how many are in use and untagged as facts; the registry's
    verdict at its right end, a press of which narrows the table to what is behind, beside Pull and
-   Build). Under it `components/docker/image-band.tsx` asks Packages' two questions of Docker. On
-   disk is one bar of what Docker holds — images, build cache, containers, volumes, each in the
-   colour the Docker overview's `DiskSummary` gives that kind — with the part a prune would give
-   back hatched inside each span, so the reclaimable share is seen before a figure is read; each
-   line keeps its own Reclaim, which now calls that kind's own route rather than the sweep (the
-   sweep also removes stopped containers and networks, which the Images and Build cache lines'
+   Build). Under it `components/docker/image-band.tsx` asks Packages' two questions of Docker, as two
+   bar readings (§10). On disk is one bar of what Docker holds — images, build cache, containers,
+   volumes, each in the colour the Docker overview's `DiskSummary` gives that kind — with the part a
+   prune would give back hatched inside each span, so the reclaimable share is seen before a figure is
+   read; each kind keeps its own Reclaim, on the line while that kind is there and on its mark in the
+   strip, which now calls that kind's own route rather than the sweep (the sweep, Reclaim in the
+   block's head, also removes stopped containers and networks, which the Images and Build cache lines'
    confirmations never said). Registry is one bar of every image by what its registry says —
    update available in amber, current in green, pinned and built here in `--tag-cyan` and
    `--tag-violet` because they are choices rather than states, unanswered and unused muted — with a
-   line per answer drawn as the products in it, each narrowing the table; a check the reader asked
-   for sweeps the bar. The images are a framed table again (§12): the image as its product, its
+   part per answer whose line draws the products in it, each narrowing the table; a check the reader
+   asked for sweeps the bar. The images are a framed table again (§12): the image as its product, its
    registry and tag a step back from the repository; the containers running it by name with their
    state's dot, each a link to its page; the registry's answer in the band's colours; its age; and
    its size over a bar against the largest, in the Images span's colour. Below `xl` the containers
@@ -2430,14 +2598,14 @@ The passes, in order. Each one is a diff you can review on its own.
    how many are mounted and how many a backup job covers as facts), with the verdict at its right
    end — how many volumes a prune would delete, a press of which narrows the table to them — beside
    Create volume. Under it `components/docker/volume-band.tsx` asks two questions the cards left to be
-   added up. Held by is the Processes band asked of storage: the stacks and lone containers holding
+   added up, as two bar readings (§10). Held by is the Processes band asked of storage: the stacks and lone containers holding
    the most, as spans of one bar the size of every volume, each in the lane hue (`hueFor(name,
    LANES)`) the Stacks and Containers pages give that name, a stack taken down saying so in amber.
    Mounts is every volume by where it stands — in use in green, held by stopped containers in
    `--tag-cyan`, left by a stack in amber, not mounted in `--tag-violet`, anonymous muted — with the
    part a prune would take hatched inside each span, as the Images band hatches what a prune gives
-   back, and the Prune command beside it naming the bytes; a prune in flight sweeps the bar. A line in
-   either narrows the table. The table's widest column is the containers that mount each volume, by
+   back, and the Prune command in the block's head naming the bytes; a prune in flight sweeps the bar.
+   A press in either narrows the table. The table's widest column is the containers that mount each volume, by
    name with their state's dot and the path they see it at, `ro` where they cannot write, each a
    link to its page; then the volume's state in the band's colour over whether a backup covers it,
    and its size over a bar against the largest in the Volumes span's colour (`--chart-5`, the Docker
@@ -2598,12 +2766,14 @@ The passes, in order. Each one is a diff you can review on its own.
    application refusing connections red, plain HTTP, a parked site or a change not live amber), a
    press of which narrows the cards to exactly them through a *Needs attention* chip — beside
    Export all, Import and New site. Under it `components/proxy/site-band.tsx` answers what the
-   tiles never did: **Traffic**, the hour's requests as spans of one bar in each site's hue with the
-   busiest five as rows and a 5xx share in amber from 1% and red from 5%; **Certificates**, the
-   enabled TLS sites' certificates counted valid, due for renewal and expired on one `StandingBar`
-   (`components/standing-bar.tsx`), over the five soonest to end with their days left, amber in
-   the last fortnight; and **Applications**, what the sites stand in front of drawn as itself, each with
-   the health check's answer. A row opens its site. What a site fronts is read off the Ports page's
+   tiles never did, in three bar readings (§10): **Traffic**, the hour's requests as spans of one bar
+   in each site's hue with the busiest five named, a 5xx share on the line in amber from 1% and red
+   from 5%; **Certificates**, the enabled TLS sites' certificates counted expired, due for renewal and
+   valid on one bar, worst first, the line naming the soonest to end in that standing with its days
+   left; and **Applications**, what the sites stand in front of drawn as itself, those refusing
+   connections first, the line carrying the health check's answer. A press opens its site. Until
+   0.8.5 Traffic's five and Certificates' five soonest were rows under their bars, the second on a
+   `StandingBar`. What a site fronts is read off the Ports page's
    sockets (`components/proxy/site-apps.ts`, unit-tested): the container's image, else the program,
    else its unit — never the port alone, so an upstream nothing on the list names keeps the
    engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else"; the
@@ -2640,19 +2810,20 @@ The passes, in order. Each one is a diff you can review on its own.
    verdict — how many do not answer, else how many are stopped, else *All N answering* — beside
    Scan and Add a database, which left the page's own row. Under it
    `components/database/fleet/fleet-band.tsx`, over the unit-tested `fleet/band.ts`, reads the fleet
-   three ways the cards cannot: **Storage**, what each database holds as spans of one bar with the
-   five largest as rows; **Sessions**, the open sessions — a key–value store's clients — as one
-   bar, a server that did not answer counted apart rather than drawn as zero, the busiest beside
-   the products that read them; and **Backups**, every database the dashboard can dump counted
-   backed up today, this week, over a week ago — the age every other reading of the section calls
-   stale — and never, on one `StandingBar`, over the worst five, never-dumped first, each with its
-   newest dump's age. A row opens the database, or under Backups its Backups page. This block and
-   the Sites page's Certificates drew a track under every row with a dot on it until 0.7.5, which
+   three ways the cards cannot, in three bar readings (§10): **Storage**, what each database holds as
+   spans of one bar with the five largest named; **Sessions**, the open sessions — a key–value store's
+   clients — as one bar, a server that did not answer counted at the strip's end rather than drawn
+   as zero, the line giving the products that read each; and **Backups**, every database the dashboard
+   can dump counted never, over a week ago — the age every other reading of the section calls stale —
+   this week and today on one bar, worst first, the line naming the worst database in that standing
+   with its newest dump's age. A press opens the database, or under Backups its Backups page. Until
+   0.8.5 each block's five were rows under its bar, Backups' on a `StandingBar`. Backups and
+   the Sites page's Certificates had also drawn a track under every row with a dot on it until 0.7.5, which
    went at the operator's request: the track had no scale, so the dot said less than the age beside
    it, a database never backed up was drawn at a place it did not have, and the track's hairline
    under each row's own rule read as a double line. Each database keeps one hue (`fleetHues`, a
    lane hue without slate dealt in the order the connections were saved, so five databases are
-   five hues and a new one moves nobody's) on its span, its key in a row and its table row; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
+   five hues and a new one moves nobody's) on its span, its mark's rule in the strip and its table row; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
    the operator's request), and its Stored figure carries a short bar in that hue
    against the largest database, as the table's Size cell does. The picture of what the databases
    feed moved above *Found on this server*, so the page's moving thing is not under a list of rows.
@@ -2685,7 +2856,7 @@ The passes, in order. Each one is a diff you can review on its own.
    card went beside the control that sets it, and the page's doc comment names where. Variables took the
    `/git` exit exactly — every count (all, pending, secret, config, reaching the build, the runtime
    or a release task, holding a reference) is a filter chip over the list, where it also narrows
-   to what it counts, and the products the environment talks to sit under the section's head. And a
+   to what it counts. And a
    project's Runtime page carries each count in the header of the block it counts. Its five moving
    readings stood as tiles over the charts they move on until the operator asked for the tiles to
    go; each now heads its own chart as the chart's reading now — the processor's share of a core
@@ -2745,6 +2916,28 @@ The passes, in order. Each one is a diff you can review on its own.
    text in tabular figures, mono kept for the fingerprints compared character by character, and
    the sections stand at the deploy settings pages' `py-8`. At 1440 the linked page went from
    3,387px to 2,112px.
+
+   Settings → Hub (`/dashboard/hub`, 0.8.5) is Connect pointed at a Just Hub and takes the same
+   exit for the same reason, with Connect as its reference rather than a new design. Its register
+   was the one real question: the hub's Connect button lands on it with `?connect=<hub host>`, which
+   is a sequence with an outcome, and the §16 test asks what the reader came to do. It stays in the
+   reading register because the sequence is one section of a page that reads the link before and
+   after it — exactly Connect's shape — and a page that flips register when the link changes state
+   would be half in each. So the connect form is a section under a hairline, not a `FlowPanel`;
+   **Connect** is its one brand face; the scopes are Connect's lit cards, none of them chosen when
+   a link from the hub filled the address in; the hub's machine and owner read under the address
+   before Connect; the code and this server's fingerprint sit side by side because the code is
+   what the owner types into the hub and the fingerprint is what its approval screen shows. The picture is Connect's (`LinkPicture`, which both pages now draw through)
+   with the hub's J and address at its end. Hub notices on the page are `Notice`s in the notice's
+   own tone, because each is a sentence the hub chose to say, not a reading, and each is headed
+   *Just Hub (hub) says* so it never reads as the dashboard's own. A link this server has stopped
+   using is the one state that is a verdict rather than a reading: *Idle* in red at the identity
+   line's far end, and the reason once, as a danger `Notice` above the picture, not again as the
+   Activity section's failed exchange; Sync now leaves the identity line, since it would be refused,
+   and the hub's address stops being a link anywhere, the title included, since it may now answer on
+   the machine this server refused. The linked page's *Sign in from Just Hub* section keeps Connect
+   the page's one brand face: **Let Just Hub sign me in** is a choice with a cost, so it is an outline
+   button, as stopping is, and every account's choice is a `RowList`, not a framed list.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed
@@ -2800,7 +2993,7 @@ The passes, in order. Each one is a diff you can review on its own.
 
 **What the Overview looks like after these passes**, as a checklist for the page you are on: the
 machine's identity line first (`HostIdentity` — its distribution drawn as itself, the processor and
-hypervisor as bare marks among its facts); Shortcuts, a run of `ProductCard`s; a Resources `Section`
+hypervisor as bare marks among its facts); Shortcuts, a run of four `ShortcutCard`s; a Resources `Section`
 whose head carries the socket's `Status live` and the way on to Metrics, holding a four-tile
 `StatGrid` of the readings that move — each carrying its last hour in the tile's `trend` slot where a
 meter would be, keyed before its name by its line's colour, its figure gliding to every frame — over
@@ -2815,14 +3008,25 @@ which is not one. Everything that arrived, rose.
 product does: Terminal, Excalidraw, Files and Remote Desktop were nowhere on it, Databases
 and Backups were one figure each, and the only thing it offered to *start* was a project. Nothing
 above was taken back; what the page gained is the answer to "what was I doing, and how do I start the
-next thing". **Shortcuts** opens the page under the identity line: a `ProductCard` per thing a visit
+next thing". **Shortcuts** opens the page under the identity line: a card per thing a visit
 starts, each counting what it adds to (*6 projects*, *3 open · operator*) so it is data rather than a
-caption (pass 8), two to a row on a phone and four across from `xl`, and gated
+caption (pass 8), and gated
 on the section and on the capability its destination checks — a shortcut that opens a refusal is a
 dead button. New drawing makes the drawing where it is pressed, as the list's own New does, and
-opens it. When Stickyboard left in 0.8 its card went with it, and Add a site took the place,
-after New project as the Proxy section follows Deploy in the sidebar: the next thing an app needs
-is a name in front of it, and it opens the Sites form from `?new=1`. Under Deployments, three
+opens it.
+
+The run grew to eight and in 0.8.5 was cut, at the operator's request, to the four that are started
+from here rather than from their own pages: New project, New terminal, New drawing and Browse files.
+Add a site, Add a database, Add a computer and Back up each have a section one press away that opens
+on the same verb; the list of sites, read only to count on its card, went with it. Four took a card
+of their own, `ShortcutCard` in `overview/shortcuts.tsx`, rather than `ProductCard`: that is a button
+you pick one of in a form, and these go somewhere, so each is a link across its whole face that opens
+in a new tab like any other. The run is laid out against the content's width by a container query, two
+by two until 42rem and four across after it, because the sidebar makes the window's width no guide to
+what a card has. A card stays about 56px tall on a phone and 60px beside a wide run, and its end glyph
+— `Plus` to make, `ArrowRight` to go — gives way wherever the label needs the room.
+
+Under Deployments, three
 **pairs**: the shells open on the server (`workspace.tsx`
 — working first, each drawn as the program in it, a row opening `/terminal?session=` on that session)
 beside the drawings edited last, each its own preview; the databases (the
@@ -2975,8 +3179,7 @@ identity line and no tiles (the Databases rule above); what changed, block by bl
   while the newest is under a day old, amber past a week, dashed when there is none, and pulses while
   one is taken. Below `lg` the lanes stack and each node says in words how it is wired.
 - **Activity** draws every view the engine fills as a chart of its own, two to a row, each headed
-  by its newest reading through `ChartReading` (`metrics/chart-reading.tsx`, the Runtime page's head,
-  shared now) with a meter where the server states a ceiling — open sessions against the most it
+  by its newest reading through `ChartReading` (`metrics/chart-reading.tsx`) with a meter where the server states a ceiling — open sessions against the most it
   accepts. Each line takes its measurement's hue (§10): sessions blue, transactions violet, rows read
   green against written magenta, the cache hit rate a line in the brand's pale blue rather than an
   area, which at 99% was one grey slab. The range is one row of presses (1h, 6h, 24h, 7d) over all
@@ -3221,8 +3424,8 @@ is a framed table with a filter that does not search a hidden value. The page dr
 container has — it used to draw only the inline three, so pausing or removing it meant the list.
 
 Each of its other views then took the pass of the page it stands in for, so a reader who has learned
-that page has learned the tab. Usage is a project Runtime's (`deploy/runtime-usage.tsx`): every chart
-headed by its reading now, with the container's own crashes and folded restart loops as its markers,
+that page has learned the tab. Usage is a project Runtime's (`deploy/runtime-usage.tsx`): the Metrics
+page's five readings over its chart panels, with the container's own crashes and folded restart loops as its markers,
 then the Metrics page's breakdowns of the same frame — memory as one allocation bar, quota, share,
 throttling and tasks as tiles, the limits beside the change that sets them, interfaces as a framed
 table with an in/out bar per row. Storage is the file manager's workbench, a rail of mounts drawn as
@@ -3257,11 +3460,12 @@ strip's figures went, and what took their place (`docker/stack-detail.tsx`):
   stack's log) as a stripe down its row, and its compose verbs are declared once per service —
   Restart and Stop inline, Recreate service and Pull & redeploy in its menu with Logs and Open a
   shell, each confirmation carrying the command as compose runs it.
-- **The band** (`docker/stack-usage-band.tsx`): Processor and Memory as the Services page's
-  `ShareBar`, the stack's services as spans of one bar the size of the server beside everything
-  else in use, figures gliding to each frame; and Recent, the stack's events with a restart loop on
-  one line, an OOM kill on the exit it caused and a passing health check only after a failing one,
-  each service named in its lane.
+- **The band** (`docker/stack-usage-band.tsx`), bar readings (§10) like the Services page's:
+  Processor and Memory, the stack's five heaviest services as spans of one bar the size of the
+  server beside everything else in use, figures gliding to each frame and the rest counted at the
+  strip's end; and Recent, the stack's events as ticks on the last day, a restart loop one tick, an
+  OOM kill on the exit it caused and a passing health check only after a failing one, each service
+  named in its lane.
 - **A picture of how it is reached** (`docker/stack-map.tsx`), the deployment Runtime map's shape
   under a plain head: the ports it publishes on this server, its services as their products with
   their state in the tile's corner, and the Docker networks they are on. A wire pulses while its
@@ -3346,7 +3550,7 @@ the reader through it.
 | Databases — the control center, the map, a database's home, Search, Compare, Generate, Performance, Advisor, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
 | `/databases/[id]/import` — bring a database over from another server | **Flow** | A sequence with an outcome: which server it is on now, how it should come over, and — for a replication — when to cut over, ending in a database here. The spine is taken from the import the server keeps, so a reload, or the next day, finds it where it was. |
 | A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
-| The server map (`/map`) | Reading, as a workbench | The reader arrives to find out what each thing the server runs is made of and wired to. One frame held to the window (`<Page fill>`) around the rail of systems, a canvas and its inspector, the way a database's Diagram is. Each system is its own diagram in a hairlined frame on a ground a step up from the canvas's, and its boxes are the product's own vocabulary — a `ProductLogo` tile, the name, a `Status` dot and word, the eyebrow voice for the kind — given, at the operator's request in 0.8.2, a workflow editor's wiring and an outline per kind: the deployment is the large card, where traffic arrives is rounded on its left like a trigger, a database is a cylinder, a volume a disk, a web container wears a browser's bar, a proxy is cut to a gateway's point, and what hangs under a box (its checkout, its logs, a certificate) is a round sub-node on a dashed line from a labelled port. No shadow, glow or gradient comes with them: the outline is a border and a step of ground, a state is a `rule-*` edge and the dot, and the chosen box's lines are the brand's blue with the §2 pulse travelling them where both ends are up. *Open* in the inspector is the surface's one command face, and *Deploy a project* on a server with nothing to draw. |
+| The server map (`/map`) | Reading, as a workbench | The reader arrives to find out what each thing the server runs is made of and wired to. One frame held to the window (`<Page fill>`) around the rail of systems, a canvas and its inspector, the way a database's Diagram is. Each system is its own diagram in a hairlined frame on a ground a step up from the canvas's, and its boxes are the product's own vocabulary — a `ProductLogo` tile, the name, a `Status` dot and word, the eyebrow voice for the kind — given, at the operator's request in 0.8.2, a workflow editor's wiring and an outline per kind: the deployment is the large card, where traffic arrives is rounded on its left like a trigger, a database is a cylinder, a volume a disk, a web container wears a browser's bar, a proxy is cut to a gateway's point, and what hangs under a box (its checkout, its logs, a certificate) is a round sub-node on a dashed line from a labelled port. No shadow, glow or gradient comes with them: the outline is a border and a step of ground, a state is a `rule-*` edge and the dot, and the chosen box's lines are the brand's blue with the §2 pulse travelling them where both ends are up. *Open* in the inspector is the surface's one command face, as is the button a tap floats on a phone, where the canvas is alone and edge to edge, and *Deploy a project* on a server with nothing to draw. No toolbar or minimap: the inspector's toggle and full screen float on the canvas, beside the panel they work. |
 | `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's other flow page is Import. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with a picker on it — the generators on a database's Generate page — gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. Each of its four screens is the run page's rail and inspector before the run: the plan read down a rail beside the one focused surface holding the step's fields. |
@@ -3457,7 +3661,8 @@ reading page is revamped:
   the operator's request, and that is the other side of the same line: there the containers are read
   down their columns before any one is taken, so the overview's table keeps hairlines and a wash and
   its rows open by a press anywhere on them;
-- a **figure** is still a `StatTile` (§15 pass 2) in either register.
+- a **figure** is still a `StatTile` (§15 pass 2) in either register, with one page excepted: a
+  project's Overview, below.
 
 A page that is mostly readings with one run of choices in it takes the edge on that one run. That is
 the honest answer to "use it everywhere": everywhere something is picked.
@@ -3472,6 +3677,28 @@ from, whether a database is created or an existing one used, the saved connectio
 traffic-alert rules on Automation are the counter-example on the same page: a rule is read against
 its threshold, with a `Meter` carrying a tick where the line is, and opens nothing, so its rows stay
 rows you read.
+
+### A project's Overview reads in sentences
+
+At the operator's request in 0.8.5 the Overview carries no `StatTile`: "I don't like them", "clean text
+and easy to understand", and sections added later that "feel like they don't belong". The top of that
+page already says everything in the wiring's words, so what follows it now takes the wiring's shape, and
+a new block on this page takes it too:
+
+- **A block opens on a `WireNode`:** a real mark (`WireMark tone="logo"` and a `ProductGlyph`, with the
+  block's state as the `StatusDot` in its corner, as Runtime's node has it), then the reading as a sentence
+  and its detail. What the runtime is on Right-size, Trivy on Vulnerabilities, Docker on Availability and
+  the source's forge on Delivery: each mark is where the block's evidence comes from.
+- **Then its one coloured picture:** each limit's gauge, the severities' bar, the ribbon of days, the
+  releases per day. The hues are the existing ones (§3, §10), and the reading it replaces is said in the
+  words beside it, so nothing is colour alone.
+- **The live readings are lines,** `ReadingLine` in `deploy/live-readings.tsx`: a measurement's glyph on
+  its own tint (`WireMark hue`, the `HUE` map's colours), a name, the reading as words ("0.1% of one core"),
+  a detail and its last hour at the line's end. Each is one height in every state and opens the page that
+  has the rest.
+
+The Deployments tab's history and every other page keep `StatTile`: this is the Overview's register of
+speech, not a retirement of the figure.
 
 ### What register B does not get
 
@@ -3498,6 +3725,9 @@ back off at the operator's request: in the shell the washes read as the sign-in 
 dashboard. It is the account card's own container (`border-sidebar-border`, `bg-card`), tinted with
 `bg-wash-success` or `bg-wash-danger` only once a run has finished, and its life is the wire, the
 kind band and the beam (§11) rather than a ground. Arrival's light stays on arrival's screens.
+The hub notice beside it (`hub-link/hub-notice.tsx`) is the same container, tinted with
+`bg-wash-warning` or `bg-wash-danger` only for a notice the hub marked as a warning or critical, and
+has no motion of its own beyond arriving: it reports what another machine said.
 
 ## 17. Redesigning a flow page
 

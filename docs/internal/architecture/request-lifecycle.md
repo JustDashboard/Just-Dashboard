@@ -53,6 +53,16 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   layers, and the feature group's `AuthenticateFeatures` admits it only as the deploy key gate admits
   a deploy key, marking it `Principal.ViaMCP` (every other group refuses it); see
   [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
+- The dashboard's assistant makes its calls the same way, through the root router from inside the process, but as
+  the person: their own session principal, read again for the call, is carried in the context
+  (`httpx.WithAssistant`), and every group's authentication takes it in place of a credential, marked
+  `Principal.Assistant` so the route's audit entry records actor `assistant`. It is not a key and the deploy key gate
+  never sees it: the route's capability check, handler rules and rate limit decide as they do for the person, and
+  the request carries the CSRF header a page sends. A WebSocket or a stream is not made this way, nor the short list
+  in `agentExclusion`, nor a route into a protected database connection (`agentProtected`). A command it runs on the
+  host (`run_command`) is not a request at all: it is the terminal's own way of running a line
+  (`term.Manager.RunCommand`), checked against the terminal capability on every call; see
+  [the deployment assistant](../deployments/operator.md).
 - **A deploy key** (`api_tokens.scope = 'deploy'`, minted on `POST /tokens/deploy` by an administrator
   in a session, or from Account → API keys) is what `jd` and CI use, and it **deliberately reopens
   part of the session-only surface**: the deployment writes that were a session's alone — drafts,
@@ -81,7 +91,11 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   variable at a credential, database or secret store is refused with `session_required` (see
   [invariant 4](../security/invariants.md)).
 - **`httpx.AuditMutations`** records every state-changing request, with the API key's id and name
-  (`audit_log.key_id`, `key_name`) when the request carried one. WebSocket routes are GET and
+  (`audit_log.key_id`, `key_name`) when the request carried one, and, for a session a Just Hub sign-in
+  ticket opened, actor `hub-session` with its hub user and session id (`audit_log.hub_user`,
+  `session_id`). Who acted is filled in by one builder (`httpx.principalEntry`; `httpx.AuditEntry` for a
+  handler writing an entry of its own), so `AuditRead`, `s.recordAudit` and the handlers' own entries
+  record the same. WebSocket routes are GET and
   long-lived, so they call `s.recordAudit(...)` at open time — the event is "a terminal was opened".
 - **`httpx.RequireCSRF`** requires `X-JD-CSRF: 1` on every browser-session mutation, including login
   and partial 2FA sessions. The header makes a same-site sibling origin preflight, and this application
@@ -97,6 +111,18 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   through `UpgradeProtocol`, which answers with it only when it was offered — Remote Desktop's
   Guacamole tunnel asks for `guacamole`, and a browser drops a handshake that does not name it.
 
+A session made by a Just Hub sign-in ticket (`auth_method = 'hub'`, only with `JD_HUB_SIGNIN=true`) is
+complete from the start and resolves like any other, with two differences: `ResolveSession` checks again on
+every use that the switches, the link and the account's grant still hold, deleting the session if not, and
+`httpx.RefuseHubSession` refuses it (`403 hub_session_not_allowed`) on every route that makes, changes or
+reveals a credential, or makes or changes a link. A socket is authenticated once, at the upgrade, so every
+socket `wsx.Upgrader` opens is handed to the API's guard (`wsx.Guard`, `hub_session_sockets.go`), which watches
+the ones a hub session opened, as it watches the Remote Desktop stream bridge's proxied sockets: each closes at
+the session's expiry, at once when a revocation of hub sessions commits, and at the next check (every 15 seconds,
+`auth.Service.CheckSession`, which does not count as use) when anything else ended the session. Its redeem, `POST /api/v1/auth/hub/enter`, sits with `POST /auth/login`: no session, the
+sign-in budget per address, the CSRF header and its own audit entry; the ticket is the credential
+([invariants.md](../security/invariants.md#the-exception-hub-sign-in)).
+
 After completing any required second factor, an account marked `must_change_pw` may use only
 the session-only `POST /account/password` mutation and authentication status/logout routes. Feature
 routes and API tokens return `password_change_required`. Changing the password requires the current
@@ -104,7 +130,10 @@ password and revokes existing sessions; the sign-in page then signs straight bac
 password, through any required second factor. Password change has its own
 authentication middleware so it cannot bypass an outstanding second factor.
 
-Three deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname),
+Four deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname),
+`GET /api/v1/hub/hello` (the Just Hub discovery probe: unauthenticated, but behind the allowlist and the
+per-address API limit, a fixed body naming only the product, the protocol and whether this server can be
+connected, and not mounted with `JD_HUB_LINK=false` or in agent mode; [hub-link.md](../backend/hub-link.md#local-api)),
 `/api/v1/hooks/deploy/{hookID}` (HMAC over the raw body, still allowlisted, still audited so
 enumerating hook ids is not silent), and `GET /api/v1/tailnet/whois`, which a tailnet-only
 deployment's gate asks about every request: still behind the allowlist, outside the API rate limit,
@@ -383,8 +412,8 @@ What the list lets through is of three kinds:
 
 Everything else is refused: rows, structure, imports, a restore, a copy, the drop, a major-version
 upgrade and its revert, accounts and privileges, settings, extensions, keys, documents, collections and
-indexes — and the SQL editor's assistant, which changes nothing but would send the connection's
-structure to a model. Two things reach a
+indexes — and the connection's assistant, which would send what is in it to a model; every other
+chat's call into a protected connection is answered with why and reads nothing (`agentProtected`). Two things reach a
 protected connection from outside its own path and are held to the same answer: restoring a backup
 run into it (`POST /backups/runs/{runID}/restore-database`), and a request addressed to a
 neighbouring connection on the same server that would reset the account it signs in with, or

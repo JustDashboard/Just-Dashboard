@@ -42,6 +42,10 @@ type Peer struct {
 	Name string
 	// Node is the machine's MagicDNS name without the trailing dot.
 	Node string
+	// StableID is the machine's StableNodeID, which stays the machine's when
+	// its name or address changes. The hub link pins its hub's machine by
+	// it, and hub sign-in binds a ticket's device to it.
+	StableID string
 	// Tags are the machine's ACL tags, tag:ci.
 	Tags []string
 }
@@ -57,6 +61,12 @@ var (
 	// that cannot be read. It is never a refusal: the gate answers 503, so a
 	// daemon restarting reads as an outage rather than as "you may not".
 	ErrUnavailable = errors.New("tailscaled could not be asked who that is")
+	// ErrNoIdentity is tailscaled answering, but with no device or no login
+	// for the address: it was asked and said nothing a check could match.
+	// It is not ErrUnavailable, so a check that may be skipped only when
+	// tailscaled cannot be asked (hub sign-in's device check) refuses it; the
+	// gate answers it as it answers an outage.
+	ErrNoIdentity = errors.New("tailscaled named no device or login for that address")
 )
 
 // WhoIs is the one question the gate asks of tailscaled.
@@ -126,6 +136,7 @@ func newLocalAPI(client *http.Client, base string) *LocalAPI {
 // that holds the address, and 404 when no node does.
 type whoIsResponse struct {
 	Node *struct {
+		StableID  string   `json:"StableID"`
 		Name      string   `json:"Name"`
 		Tags      []string `json:"Tags"`
 		Addresses []string `json:"Addresses"`
@@ -171,9 +182,9 @@ func (c *LocalAPI) WhoIs(ctx context.Context, address netip.Addr) (Peer, error) 
 	}
 	var who whoIsResponse
 	if err := json.Unmarshal(body, &who); err != nil || who.Node == nil || who.UserProfile == nil {
-		return Peer{}, fmt.Errorf("%w: the local API's answer could not be read", ErrUnavailable)
+		return Peer{}, fmt.Errorf("%w: the local API's answer could not be read", ErrNoIdentity)
 	}
-	peer := Peer{Address: address, Node: strings.TrimSuffix(who.Node.Name, ".")}
+	peer := Peer{Address: address, Node: strings.TrimSuffix(who.Node.Name, "."), StableID: strings.TrimSpace(who.Node.StableID)}
 	for _, tag := range who.Node.Tags {
 		if tag = strings.TrimSpace(tag); tag != "" {
 			peer.Tags = append(peer.Tags, tag)
@@ -189,7 +200,7 @@ func (c *LocalAPI) WhoIs(ctx context.Context, address netip.Addr) (Peer, error) 
 		peer.Name = firstNonEmpty(strings.TrimSpace(who.UserProfile.DisplayName), peer.Login)
 	}
 	if !peer.Tagged() && peer.Login == "" {
-		return Peer{}, fmt.Errorf("%w: the local API named neither a login nor a tag", ErrUnavailable)
+		return Peer{}, fmt.Errorf("%w: the local API named neither a login nor a tag", ErrNoIdentity)
 	}
 	return peer, nil
 }

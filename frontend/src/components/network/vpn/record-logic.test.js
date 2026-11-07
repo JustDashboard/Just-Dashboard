@@ -4,6 +4,7 @@ import {
   eventLabel,
   handshakeReading,
   keyExpiry,
+  keyExpiryTip,
   killSwitchOffered,
   mtuProblem,
   networkProblem,
@@ -138,4 +139,18 @@ test("a key's expiry reads as past or coming against the clock it is given", () 
   expect(keyExpiry(now / 1000 - 3600, now).expired).toBe(true)
   expect(keyExpiry(now / 1000 + 86400 * 5, now)).toMatchObject({ expired: false })
   expect(keyExpiry(now / 1000 + 86400 * 5, now).label).toStartWith("key expires")
+})
+
+test("a key that expires later is a tip, until the backend warns or there is no expiry", () => {
+  const now = Date.UTC(2026, 10, 6)
+  const later = now / 1000 + 86400 * 180
+  expect(keyExpiryTip({ self: { keyExpiry: later }, warnings: [] }, now)).toBe(true)
+  expect(keyExpiryTip({ self: { keyExpiry: 0 }, warnings: [] }, now)).toBe(false)
+  expect(keyExpiryTip({ self: {}, warnings: [] }, now)).toBe(false)
+  expect(keyExpiryTip({ self: null, warnings: [] }, now)).toBe(false)
+  expect(keyExpiryTip({ self: { keyExpiry: now / 1000 - 60 }, warnings: [] }, now)).toBe(false)
+  const warned = ["This server's Tailscale key expires on 12 November 2026. When it does…"]
+  expect(keyExpiryTip({ self: { keyExpiry: now / 1000 + 86400 * 6 }, warnings: warned }, now)).toBe(
+    false,
+  )
 })

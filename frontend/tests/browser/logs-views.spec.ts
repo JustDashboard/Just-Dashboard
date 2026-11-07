@@ -466,7 +466,7 @@ test("/logs lists the request records, and reads a deployment's in the workbench
     "aria-pressed",
     "true",
   )
-  await expect(page.getByRole("heading", { name: "Output" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Pages", exact: true })).toBeVisible()
 })
 
 test("/logs reads a site's record, and its access log's Requests view, with nginx's errors beside a failure", async ({

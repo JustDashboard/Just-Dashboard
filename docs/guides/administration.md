@@ -19,6 +19,9 @@ while the backend is stopped.
 | `sudo ./scripts/manage.sh link [observe\|operate\|maintain]` | Link this server to your just-dashboard.com account (prints a code to approve there) |
 | `sudo ./scripts/manage.sh unlink` | Unlink it |
 | `sudo ./scripts/manage.sh link-status` | Say whether it is linked |
+| `sudo ./scripts/manage.sh hub connect hub.example.ts.net` | [Connect this server to a Just Hub](linking-and-usage.md#connecting-to-just-hub) on its tailnet (prints a code to approve in the hub; `--scope`, `--token-stdin`, `--wait`) |
+| `sudo ./scripts/manage.sh hub disconnect` | Disconnect it |
+| `sudo ./scripts/manage.sh hub status` | Say whether it is connected |
 | `sudo ./scripts/manage.sh status` | Show the containers and their health |
 | `sudo ./scripts/manage.sh logs [backend\|frontend\|proxy]` | Follow logs (Ctrl+C exits) |
 | `sudo ./scripts/manage.sh restart` | Recreate the stack to apply `.env` edits |
@@ -30,8 +33,10 @@ password a script sets is the one the account signs in with — the dashboard do
 at sign-in. An account an admin creates from Account → Users, and a bootstrap password the backend
 generated, are the ones replaced on first sign-in, after any required two-factor step. A reset
 clears failed-login and failed-code lockouts and revokes that account's sessions, API tokens and passkeys, while keeping
-two-factor enrolment, recovery codes, role and disabled state. Account changes are audited as local
-root; `revoke-sessions` leaves API tokens unchanged.
+two-factor enrolment, recovery codes, role and disabled state. A reset and `revoke-sessions` also end the
+account's choice to be [signed in from Just Hub](linking-and-usage.md#signing-in-from-just-hub), with every
+session the hub opened. Account changes are audited as local root; `revoke-sessions` leaves API tokens
+unchanged.
 
 For automation, append `--password-stdin` to either password command and pipe one password line from
 a trusted source — never put passwords in arguments or shell history. The scripts find the checkout

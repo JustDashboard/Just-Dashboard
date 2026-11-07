@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Cross, Plus } from "@/components/icons"
+import { Cross, External, Key, Plus } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -12,7 +12,7 @@ import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
-import { keyExpiry } from "./record-logic"
+import { keyExpiry, keyExpiryTip } from "./record-logic"
 import { HostFact, FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -165,6 +165,27 @@ export function TailscaleBlock({
           {w}
         </Notice>
       ))}
+      {keyExpiryTip(tailscale) && (
+        <Notice icon={Key} title="Tip: disable key expiry for this machine">
+          Tailscale gives every new machine a key that expires, 180 days later by default. When this
+          server&apos;s does, the server drops off the tailnet, and a dashboard or Just Hub reached
+          through it goes with it. Turn off key expiry for it{" "}
+          {tailscale.controlServer === "tailscale" ? (
+            <a
+              href="https://login.tailscale.com/admin/machines"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline"
+            >
+              in the Tailscale admin console
+              <External aria-hidden className="size-3" />
+            </a>
+          ) : (
+            "on the control server"
+          )}
+          , and it never will. This page warns two weeks before it expires.
+        </Notice>
+      )}
       {tailscale.health.length > 0 && (
         <Notice title="Tailscale reports">
           <ul className="space-y-1" aria-label="Tailscale health">

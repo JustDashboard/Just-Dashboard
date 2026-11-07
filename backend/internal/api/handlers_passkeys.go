@@ -37,10 +37,10 @@ func (s *Server) mountPasskeySignInFinish(r chi.Router) {
 
 func (s *Server) mountAccountPasskeys(r chi.Router) {
 	r.Method(http.MethodGet, "/passkeys", s.handle(s.handlePasskeyList))
-	r.Method(http.MethodPost, "/passkeys/register/begin", s.handle(s.handlePasskeyRegisterBegin))
-	r.Method(http.MethodPost, "/passkeys/register/finish", s.handle(s.handlePasskeyRegisterFinish))
-	r.Method(http.MethodPatch, "/passkeys/{id}", s.handle(s.handlePasskeyRename))
-	r.Method(http.MethodDelete, "/passkeys/{id}", s.handle(s.handlePasskeyRemove))
+	r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/passkeys/register/begin", s.handle(s.handlePasskeyRegisterBegin))
+	r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/passkeys/register/finish", s.handle(s.handlePasskeyRegisterFinish))
+	r.With(httpx.RefuseHubSession).Method(http.MethodPatch, "/passkeys/{id}", s.handle(s.handlePasskeyRename))
+	r.With(httpx.RefuseHubSession).Method(http.MethodDelete, "/passkeys/{id}", s.handle(s.handlePasskeyRemove))
 }
 
 // passkeyParty is the relying party a request's ceremony is for: the

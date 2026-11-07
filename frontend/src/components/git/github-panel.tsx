@@ -5,13 +5,10 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import {
-  ArrowRight,
   CheckCircle,
   Clock,
   CrossCircle,
   External,
-  Globe,
-  LockClosed,
   PaperAirplane,
   Play,
   Plus,
@@ -46,8 +43,8 @@ import { usePoll, type PollState } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { CommentDialog } from "@/components/git/comment-dialog"
 import { IssueMark, SourceBranch, SourceMerge, SourcePull } from "@/components/git/glyphs"
-import { BranchChip, ForgeFace, ShortSha } from "@/components/git/marks"
-import { ChecksMark, CommentCount, PullStateMark, ReviewMark } from "@/components/git/pull-state"
+import { ForgeFace } from "@/components/git/marks"
+import { ChecksMark, CommentCount, PullStateMark } from "@/components/git/pull-state"
 import { MergePullDialog } from "@/components/git/merge-pull-dialog"
 import type { GitPreview } from "@/components/git/preview-panel"
 import { openPreview } from "@/components/git/pull-request-row"
@@ -59,7 +56,7 @@ import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FormFacts, FormFact, OptionList, OptionRow } from "@/components/form"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -71,10 +68,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { rowReveal } from "@/components/icon-action"
 import { VerbActions, type Verb } from "@/components/verbs"
 
 type PullState = "open" | "merged" | "closed"
+type Section = "pulls" | "issues" | "runs"
 type Deployment = GitPullRequestSummary["repos"][number]["deployments"][number]
 
 /**
@@ -89,6 +86,12 @@ type Deployment = GitPullRequestSummary["repos"][number]["deployments"][number]
  * work actually takes — stage, commit, push, propose, merge — and the last
  * steps used to be the ones that sent you to a browser tab and a different
  * mental model.
+ *
+ * The three lists are views of one tab rather than three sections down one
+ * scroll: stacked, the runs were below however many pull requests there were,
+ * and every row spoke at the same volume. A row says what it is and who, and
+ * only says more when more is not the expected answer: a target that is not
+ * the default branch, checks that did not pass. The rest is in the preview.
  *
  * The previews come from the pull-request summary rather than from gh's
  * listing: gh knows nothing of deploy projects, and the summary is the one
@@ -135,6 +138,11 @@ export function GitHubPanel({
   // A cleanup retry in flight, so no row offers a second one until it answers.
   const [retrying, setRetrying] = useState(false)
   const [state, setState] = useSessionState<PullState>("git.github.pulls", "open")
+  const [storedSection, setSection] = useSessionState<Section>("git.github.section", "pulls")
+  const [leftPull, setLeftPull] = useState(false)
+  // A pull request named in the address is on the list that holds it, until
+  // the reader goes elsewhere.
+  const section = activePull && !leftPull ? "pulls" : storedSection
   const signedIn = Boolean(github?.available && github.account?.loggedIn)
   const listRef = useRef<HTMLUListElement>(null)
 
@@ -350,40 +358,75 @@ export function GitHubPanel({
     return verbs
   }
 
-  const owner = repo.data?.nameWithOwner.split("/")[0]
+  const defaultBranch = repo.data?.defaultBranch
+  const lastRun = runs.data?.[0]
+  const runsFailing =
+    lastRun?.status === "completed" &&
+    ["failure", "timed_out", "startup_failure"].includes(lastRun.conclusion ?? "")
+  const pickSection = (next: Section) => {
+    setLeftPull(true)
+    setSection(next)
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* The repository on GitHub, as GitHub heads it: its owner's face and
-          its name, whether the world can see it, what it merges into, and
-          what this account may do there. */}
-      {repo.data && (
-        <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline px-3 py-2 text-hint text-muted-foreground">
-          <ForgeFace login={owner} provider="github" size="xs" />
-          <a
-            href={repo.data.url}
-            target="_blank"
-            rel="noreferrer"
-            className="min-w-0 truncate text-body font-medium text-foreground hover:underline"
-          >
-            {repo.data.nameWithOwner}
-          </a>
-          <span className="inline-flex items-center gap-1">
-            {repo.data.private ? (
-              <LockClosed aria-hidden className="size-3" />
-            ) : (
-              <Globe aria-hidden className="size-3" />
+      <div role="tablist" className="flex h-9 shrink-0 items-center border-b border-hairline px-1">
+        <SectionTab selected={section === "pulls"} onClick={() => pickSection("pulls")}>
+          Pull requests
+        </SectionTab>
+        <SectionTab selected={section === "issues"} onClick={() => pickSection("issues")}>
+          Issues
+          {issues.data && issues.data.length > 0 && <ChipCount>{issues.data.length}</ChipCount>}
+        </SectionTab>
+        {branch && (
+          <SectionTab selected={section === "runs"} onClick={() => pickSection("runs")}>
+            Actions
+            {runsFailing && (
+              <CrossCircle role="img" aria-label="failing" className="size-3.5 text-destructive" />
             )}
-            {repo.data.private ? "private" : "public"}
-          </span>
-          {repo.data.permission && <Tag>{repo.data.permission.toLowerCase()}</Tag>}
-          <span className="basis-full" />
-          <span className="inline-flex min-w-0 items-center gap-1">
-            default
-            <BranchChip branch={repo.data.defaultBranch} />
-          </span>
-          {/* The projects built from this repository, as the way across to
-              them: the Overview links back here the same way. */}
+          </SectionTab>
+        )}
+      </div>
+
+      {section === "pulls" && (
+        <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-hairline px-2 py-1.5">
+          {(["open", "merged", "closed"] as const).map((key) => (
+            <FilterChip key={key} selected={state === key} onClick={() => setState(key)}>
+              {key === "open" ? "Open" : key === "merged" ? "Merged" : "Closed"}
+              {key === state && pulls.data && <ChipCount>{pulls.data.length}</ChipCount>}
+            </FilterChip>
+          ))}
+          <span className="flex-1" />
+          {canControl &&
+            (mine ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => onSelect({ kind: "pull", number: mine.number, title: mine.title })}
+              >
+                Yours is #{mine.number}
+              </Button>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="xs" variant="outline" onClick={() => setCreating(true)}>
+                    <Plus className="size-3" />
+                    New
+                    <span className="sr-only"> pull request</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Propose <span className="font-mono">{branch}</span> for review and merging
+                </TooltipContent>
+              </Tooltip>
+            ))}
+        </div>
+      )}
+
+      {/* The projects built from this repository, as the way across to them:
+          the Overview links back here the same way. */}
+      {section === "pulls" && deployments.length > 0 && (
+        <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-hairline px-3 py-1.5">
           {deployments.map((d) => (
             <Tag key={d.projectId} asChild>
               <Link href={`/deploy/${d.projectId}`} className="hover:text-foreground">
@@ -394,214 +437,176 @@ export function GitHubPanel({
         </div>
       )}
 
-      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-hairline px-2 py-1.5">
-        {(["open", "merged", "closed"] as const).map((key) => (
-          <FilterChip key={key} selected={state === key} onClick={() => setState(key)}>
-            <PullStateMark
-              pull={{ state: key, draft: false, merged: key === "merged" }}
-              className="size-3.5"
-            />
-            {key === "open" ? "Open" : key === "merged" ? "Merged" : "Closed"}
-            {key === state && pulls.data && <ChipCount>{pulls.data.length}</ChipCount>}
-          </FilterChip>
-        ))}
-        <span className="flex-1" />
-        {canControl &&
-          (mine ? (
-            <Button size="xs" variant="outline" asChild>
-              <a href={mine.url} target="_blank" rel="noreferrer">
-                <External className="size-3" />
-                Open #{mine.number}
-              </a>
-            </Button>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button size="xs" variant="outline" onClick={() => setCreating(true)}>
-                  <Plus className="size-3" />
-                  New pull request
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                Propose <span className="font-mono">{branch}</span> for review and merging
-              </TooltipContent>
-            </Tooltip>
-          ))}
-      </div>
-
       <div className="min-h-0 flex-1 overflow-auto">
-        {pulls.error && <ErrorState error={pulls.error} className="m-3" />}
-        {pulls.loading && !pulls.data && <LoadingRows className="p-3" rows={4} />}
-        {pulls.data && list.length === 0 && (
-          <EmptyState
-            className="m-3"
-            icon={SourcePull}
-            title={`No ${state} pull requests`}
-            description={
-              state === "open"
-                ? "Push a branch and open one to get it reviewed and merged."
-                : undefined
-            }
-          />
-        )}
-        {list.length > 0 && (
-          <ul ref={listRef} className="animate-rise divide-y divide-hairline">
-            {list.map((p) => {
-              const reading = previewStatus(previewOf(p.number))
-              const selected = active === `pull:${p.number}`
-              const when = p.updatedAt ?? p.createdAt
-              return (
-                <li
-                  key={p.number}
-                  data-pull={p.number}
-                  className={cn(
-                    "group flex min-w-0 items-start gap-2.5 py-2 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
-                    selected && "bg-accent",
-                  )}
-                >
-                  <PullStateMark pull={p} className="mt-px" />
-                  <button
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => onSelect({ kind: "pull", number: p.number, title: p.title })}
-                    className="min-w-0 flex-1 space-y-1 text-left focus-ring-inset"
-                  >
-                    <span className="flex min-w-0 items-start gap-1.5">
-                      <span className="line-clamp-2 text-body leading-snug font-medium">
-                        {p.title}
-                      </span>
-                      {p.head === branch && (
-                        <Tag tone="warning" className="mt-0.5">
-                          this branch
-                        </Tag>
-                      )}
-                    </span>
-                    <span className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-                      <span className="numeric shrink-0">#{p.number}</span>
-                      <BranchChip branch={p.head} className="max-w-[45%]" />
-                      <ArrowRight aria-hidden className="size-3 shrink-0" />
-                      <BranchChip branch={p.base} className="max-w-[35%]" />
-                    </span>
-                    <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-hint text-muted-foreground">
-                      {p.author && (
-                        <span className="inline-flex min-w-0 items-center gap-1">
-                          <ForgeFace login={p.author} provider="github" size="xs" />
-                          <span className="truncate">{p.author}</span>
-                        </span>
-                      )}
-                      {when && <span className="shrink-0">{relativeTime(when)}</span>}
-                      <ChecksMark checks={p.checks} label />
-                      <ReviewMark review={p.review} />
-                      <CommentCount count={p.comments} />
-                      {reading && (
-                        <Status
-                          className="text-hint"
-                          tone={reading.tone}
-                          label={`preview ${reading.label.toLowerCase()}`}
-                        />
-                      )}
-                      {p.labels?.slice(0, 3).map((label) => (
-                        <Tag key={label}>{label}</Tag>
-                      ))}
-                    </span>
-                  </button>
-                  <VerbActions verbs={verbsFor(p)} reveal className="mt-0.5" />
-                </li>
-              )
-            })}
-          </ul>
-        )}
-
-        {/* What is open against the repository besides the pull requests.
-            A reading with two verbs, not a choice: there is no issue preview
-            to open, and its page on GitHub is one press away. */}
-        <SectionStrip
-          icon={<IssueMark className="size-3.5 text-(--pull-open)" />}
-          label="Issues"
-          count={issues.data?.length}
-        />
-        {issues.error && (
-          <p className="px-3 py-2 text-hint text-muted-foreground">
-            Could not list issues: {errorMessage(issues.error)}
-          </p>
-        )}
-        {issues.loading && !issues.data && <LoadingRows className="p-3" rows={2} />}
-        {issues.data && issues.data.length === 0 && (
-          <p className="px-3 py-3 text-hint text-muted-foreground">No open issues.</p>
-        )}
-        {issues.data && issues.data.length > 0 && (
-          <ul className="animate-rise divide-y divide-hairline">
-            {issues.data.map((issue) => (
-              <li
-                key={issue.number}
-                className="group flex min-w-0 items-start gap-2.5 py-2 pr-1.5 pl-3 transition-colors hover:bg-row-hover"
-              >
-                <IssueMark aria-hidden className="mt-px size-4 shrink-0 text-(--pull-open)" />
-                <div className="min-w-0 flex-1 space-y-1">
-                  <span className="line-clamp-2 text-body leading-snug font-medium">
-                    {issue.title}
-                  </span>
-                  <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-hint text-muted-foreground">
-                    <span className="numeric">#{issue.number}</span>
-                    {issue.author && (
-                      <span className="inline-flex min-w-0 items-center gap-1">
-                        <ForgeFace login={issue.author} provider="github" size="xs" />
-                        <span className="truncate">{issue.author}</span>
-                      </span>
-                    )}
-                    {issue.updatedAt && <span>{relativeTime(issue.updatedAt)}</span>}
-                    <CommentCount count={issue.comments} />
-                    {issue.labels?.slice(0, 3).map((label) => (
-                      <Tag key={label}>{label}</Tag>
-                    ))}
-                  </span>
-                </div>
-                <VerbActions
-                  verbs={[
-                    ...(canControl
-                      ? [
-                          {
-                            key: "comment",
-                            label: "Comment",
-                            icon: PaperAirplane,
-                            inline: true,
-                            run: () => setCommenting({ number: issue.number, title: issue.title }),
-                          } satisfies Verb,
-                        ]
-                      : []),
-                    {
-                      key: "open",
-                      label: "Open on GitHub",
-                      icon: External,
-                      inline: true,
-                      run: () => window.open(issue.url, "_blank", "noopener"),
-                    },
-                  ]}
-                  reveal
-                  className="mt-0.5"
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {branch && (
+        {section === "pulls" && (
           <>
-            <SectionStrip
-              icon={<Play className="size-3.5 text-muted-foreground" />}
-              label="Workflow runs"
-              detail={<BranchChip branch={branch} className="max-w-[60%]" />}
-            />
+            {pulls.error && <ErrorState error={pulls.error} className="m-3" />}
+            {pulls.loading && !pulls.data && <LoadingRows className="p-3" rows={4} />}
+            {pulls.data && list.length === 0 && (
+              <EmptyState
+                className="m-3"
+                icon={SourcePull}
+                title={`No ${state} pull requests`}
+                description={
+                  state === "open"
+                    ? "Push a branch and open one to get it reviewed and merged."
+                    : undefined
+                }
+              />
+            )}
+            {list.length > 0 && (
+              <ul ref={listRef} className="animate-rise divide-y divide-hairline">
+                {list.map((p) => {
+                  const reading = previewStatus(previewOf(p.number))
+                  const selected = active === `pull:${p.number}`
+                  const when = p.updatedAt ?? p.createdAt
+                  return (
+                    <li
+                      key={p.number}
+                      data-pull={p.number}
+                      className={cn(
+                        "group flex min-w-0 items-start gap-2.5 py-2.5 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
+                        selected && "bg-accent",
+                      )}
+                    >
+                      <PullStateMark pull={p} className="mt-px" />
+                      <button
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => onSelect({ kind: "pull", number: p.number, title: p.title })}
+                        className="min-w-0 flex-1 text-left focus-ring-inset"
+                      >
+                        <span className="line-clamp-2 text-body leading-snug font-medium">
+                          {p.title}
+                        </span>
+                        <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-hint text-muted-foreground">
+                          <ForgeFace login={p.author} provider="github" size="xs" />
+                          <span className="min-w-0 truncate">{p.author}</span>
+                          {when && (
+                            <>
+                              <span aria-hidden>·</span>
+                              <span className="shrink-0">{relativeTime(when)}</span>
+                            </>
+                          )}
+                          <span aria-hidden>·</span>
+                          <span className="numeric shrink-0">#{p.number}</span>
+                          {p.head === branch && <Tag>this branch</Tag>}
+                          {defaultBranch && p.base !== defaultBranch && (
+                            <span
+                              className="min-w-0 truncate font-mono text-micro"
+                              title={`Merges into ${p.base}`}
+                            >
+                              → {p.base}
+                            </span>
+                          )}
+                          {p.review === "approved" && (
+                            <span className="text-success">approved</span>
+                          )}
+                          {p.review === "changes_requested" && (
+                            <span className="text-destructive">changes requested</span>
+                          )}
+                          {reading && (
+                            <Status
+                              className="text-hint"
+                              tone={reading.tone}
+                              label={`preview ${reading.label.toLowerCase()}`}
+                            />
+                          )}
+                        </span>
+                      </button>
+                      <span className="mt-px flex shrink-0 items-center gap-2 pl-1">
+                        <CommentCount count={p.comments} />
+                        <ChecksMark checks={p.checks} />
+                      </span>
+                      <VerbActions verbs={verbsFor(p)} reveal />
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </>
+        )}
+
+        {section === "issues" && (
+          <>
+            {issues.error && (
+              <p className="px-3 py-3 text-hint text-muted-foreground">
+                Could not list issues: {errorMessage(issues.error)}
+              </p>
+            )}
+            {issues.loading && !issues.data && <LoadingRows className="p-3" rows={2} />}
+            {issues.data && issues.data.length === 0 && (
+              <EmptyState className="m-3" icon={IssueMark} title="No open issues" />
+            )}
+            {issues.data && issues.data.length > 0 && (
+              <ul className="animate-rise divide-y divide-hairline">
+                {issues.data.map((issue) => (
+                  <li
+                    key={issue.number}
+                    className="group flex min-w-0 items-start gap-2.5 py-2.5 pr-1.5 pl-3 transition-colors hover:bg-row-hover"
+                  >
+                    <IssueMark aria-hidden className="mt-px size-4 shrink-0 text-(--pull-open)" />
+                    <div className="min-w-0 flex-1">
+                      <span className="line-clamp-2 text-body leading-snug font-medium">
+                        {issue.title}
+                      </span>
+                      <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-hint text-muted-foreground">
+                        <ForgeFace login={issue.author} provider="github" size="xs" />
+                        <span className="min-w-0 truncate">{issue.author}</span>
+                        {issue.updatedAt && (
+                          <>
+                            <span aria-hidden>·</span>
+                            <span>{relativeTime(issue.updatedAt)}</span>
+                          </>
+                        )}
+                        <span aria-hidden>·</span>
+                        <span className="numeric">#{issue.number}</span>
+                      </span>
+                    </div>
+                    <span className="mt-px shrink-0">
+                      <CommentCount count={issue.comments} />
+                    </span>
+                    <VerbActions
+                      verbs={[
+                        ...(canControl
+                          ? [
+                              {
+                                key: "comment",
+                                label: "Comment",
+                                icon: PaperAirplane,
+                                inline: true,
+                                run: () =>
+                                  setCommenting({ number: issue.number, title: issue.title }),
+                              } satisfies Verb,
+                            ]
+                          : []),
+                        {
+                          key: "open",
+                          label: "Open on GitHub",
+                          icon: External,
+                          inline: true,
+                          run: () => window.open(issue.url, "_blank", "noopener"),
+                        },
+                      ]}
+                      reveal
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+
+        {section === "runs" && branch && (
+          <>
             {runs.error && (
-              <p className="px-3 py-2 text-hint text-muted-foreground">
+              <p className="px-3 py-3 text-hint text-muted-foreground">
                 Could not list workflow runs: {errorMessage(runs.error)}
               </p>
             )}
             {runs.loading && !runs.data && <LoadingRows className="p-3" rows={2} />}
             {runs.data && runs.data.length === 0 && (
-              <p className="px-3 py-3 text-hint text-muted-foreground">
-                No Actions runs on this branch.
-              </p>
+              <EmptyState className="m-3" icon={Play} title={`No Actions runs on ${branch}`} />
             )}
             {runs.data && runs.data.length > 0 && (
               <ul className="animate-rise divide-y divide-hairline">
@@ -612,31 +617,27 @@ export function GitHubPanel({
                       onClick={() => onSelect({ kind: "workflow", id: r.id })}
                       aria-pressed={active === `workflow:${r.id}`}
                       className={cn(
-                        "group flex w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left focus-ring-inset transition-colors hover:bg-row-hover",
+                        "flex w-full min-w-0 items-start gap-2.5 px-3 py-2.5 text-left focus-ring-inset transition-colors hover:bg-row-hover",
                         active === `workflow:${r.id}` && "bg-accent",
                       )}
                     >
                       <RunMark run={r} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-medium">
+                        <span className="block truncate text-body leading-snug font-medium">
                           {r.workflow || r.name}
                         </span>
-                        <span className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
-                          <span className="truncate">
-                            {r.status !== "completed"
-                              ? r.status.replace("_", " ")
-                              : r.conclusion || "completed"}
-                            {r.event ? ` · ${r.event}` : ""}
-                          </span>
-                          <ShortSha sha={r.sha} />
+                        <span className="mt-1 flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
+                          {r.event && <span className="truncate">{r.event}</span>}
+                          {r.event && <span aria-hidden>·</span>}
                           {r.createdAt && (
                             <span className="shrink-0">{relativeTime(r.createdAt)}</span>
                           )}
+                          {r.createdAt && <span aria-hidden>·</span>}
+                          <span className="shrink-0 font-mono text-micro">
+                            {r.sha?.slice(0, 7)}
+                          </span>
                         </span>
                       </span>
-                      <External
-                        className={cn("size-3.5 shrink-0 text-muted-foreground", rowReveal())}
-                      />
                     </button>
                   </li>
                 ))}
@@ -932,27 +933,25 @@ function CreatePullDialog({
   )
 }
 
-/** A sticky strip naming a section of the tab, with its glyph and its count. */
-function SectionStrip({
-  icon,
-  label,
-  count,
-  detail,
+function SectionTab({
+  selected,
+  onClick,
+  children,
 }: {
-  icon: React.ReactNode
-  label: string
-  count?: number
-  detail?: React.ReactNode
+  selected: boolean
+  onClick: () => void
+  children: React.ReactNode
 }) {
   return (
-    <div className="sticky top-0 z-10 flex h-8 items-center gap-1.5 border-y border-hairline bg-card px-3">
-      {icon}
-      <span className="eyebrow">{label}</span>
-      {count !== undefined && (
-        <span className="numeric text-hint text-muted-foreground">{count}</span>
-      )}
-      {detail}
-    </div>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      onClick={onClick}
+      className={tabClasses(selected, "h-9 px-2.5")}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -968,27 +967,35 @@ function RunMark({ run }: { run: GitHubWorkflowRun }) {
       <Clock
         role="img"
         aria-label="running"
-        className="size-4 shrink-0 animate-pulse text-warning"
+        className="mt-px size-4 shrink-0 animate-pulse text-warning"
       />
     )
   }
   switch (run.conclusion) {
     case "success":
       return (
-        <CheckCircle role="img" aria-label="succeeded" className="size-4 shrink-0 text-success" />
+        <CheckCircle
+          role="img"
+          aria-label="succeeded"
+          className="mt-px size-4 shrink-0 text-success"
+        />
       )
     case "failure":
     case "timed_out":
     case "startup_failure":
       return (
-        <CrossCircle role="img" aria-label="failed" className="size-4 shrink-0 text-destructive" />
+        <CrossCircle
+          role="img"
+          aria-label="failed"
+          className="mt-px size-4 shrink-0 text-destructive"
+        />
       )
     default:
       return (
         <Slash
           role="img"
           aria-label={run.conclusion || "completed"}
-          className="size-4 shrink-0 text-muted-foreground"
+          className="mt-px size-4 shrink-0 text-muted-foreground"
         />
       )
   }

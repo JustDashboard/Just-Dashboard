@@ -25,6 +25,9 @@ type authStatus struct {
 	NeedsTOTP           bool              `json:"needsTotp"`
 	NeedsEnroll         bool              `json:"needsEnrollment"`
 	Require2FA          bool              `json:"require2fa"`
+	// Hub is present only for a fully signed-in session, with JD_HUB_LINK on
+	// and a hub link stored. The shell renders hub features only when it is.
+	Hub *hubLinkSession `json:"hub,omitempty"`
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
@@ -114,6 +117,9 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) error {
 		st.NeedsPasswordChange = true
 	default:
 		st.Authenticated = true
+		if s.modules.hubLink != nil {
+			st.Hub = s.modules.hubLink.Session(r.Context())
+		}
 	}
 	httpx.JSON(w, http.StatusOK, st)
 	return nil

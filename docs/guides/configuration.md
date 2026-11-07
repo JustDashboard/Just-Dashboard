@@ -29,14 +29,14 @@ The installer writes the settings that matter, and **Settings → Configuration*
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `JD_REQUIRE_2FA` | `false` | Whether an account with no authenticator may sign in. An account that *has* enrolled is always asked for its code, whatever this says. |
+| `JD_REQUIRE_2FA` | `false` | Whether an account with no authenticator may sign in. An account that *has* enrolled is always asked for its code, whatever this says; the one exception is [hub sign-in](linking-and-usage.md#signing-in-from-just-hub), where `JD_HUB_SIGNIN` is on and the account opted in. |
 | `JD_TERMINAL_ENABLED` | `true` | The web terminal. |
 | `JD_TERMINAL_SHELL` | account's shell | The shell the web terminal opens. Empty honours `chsh`. `install.sh` sets it to the host's zsh, which the bundled startup gives inline history suggestions and command colouring; ssh is unaffected. The account's own login shell still reads its profile first, so a window finds the commands ssh finds. |
 | `JD_TERMINAL_USER` | lowest regular account | Host account a terminal session logs in as. |
 | `JD_REMOTE_DESKTOP_BRIDGE` | none | A Moonlight Web stream bridge on another tailnet machine, as `host:port`, used in place of the container this server would run. Remote Desktop's picture always passes through the bridge; one near you and your computers spares it the trip to this server and back. The bridge must trust the dashboard's account header from this server only. |
 | `JD_SESSION_TTL` | `12h` | Absolute session lifetime. |
 | `JD_SESSION_IDLE_TTL` | `60m` | Idle timeout. |
-| `JD_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker Engine endpoint. |
+| `JD_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker Engine endpoint. The containers that update, restart and uninstall the dashboard are started on it too, and those operations are refused, with nothing changed, while it does not answer. |
 | `JD_DEPLOY_HEAVY_SLOTS` | `1` | Concurrent deployment build/activation workers. Valid range: 1–8. |
 | `JD_DEPLOY_LIGHT_SLOTS` | `2` | Concurrent validation/metadata deployment workers. Valid range: 1–8. |
 | `JD_DEPLOY_LEASE_TTL` | `30s` | Time before a silent deployment worker claim is reconciled after a crash. Valid range: 5s–5m. |
@@ -49,6 +49,8 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | `JD_UPDATE_BRANCH` | `main` | The branch whose changelog decides what "newest" means, and which an in-app update fast-forwards to, unless the announced version has a tag `v<version>`, which is then installed exactly. |
 | `JD_ACCOUNT_LINK` | `true` | Whether this server may be linked to a just-dashboard.com account. Linking is always something an administrator does; `false` removes the Settings page's controls, the installer's question and the terminal command, and silences a link that already exists, so nothing is ever sent. |
 | `JD_ACCOUNT_URL` | `https://just-dashboard.com` | The site this install may link to: an origin only, with no path, query or credentials. `https://` everywhere; `http://` only for `localhost`, `127.0.0.1` or `[::1]`, to develop the site beside the dashboard. Anything else refuses to start. |
+| `JD_HUB_LINK` | `true` | Whether this server may be [connected to a Just Hub](linking-and-usage.md#connecting-to-just-hub) on its own tailnet. Connecting is always something an administrator does; `false` removes the hub's discovery answer, the Settings page's controls and the terminal command, and silences a connection that already exists, so nothing is ever sent. Independent of `JD_ACCOUNT_LINK`. |
+| `JD_HUB_SIGNIN` | `false` | Whether the Just Hub this server is connected to may [sign people in](linking-and-usage.md#signing-in-from-just-hub): open this server for an account that chose "Let Just Hub sign me in" in **Settings → Hub**, without this server asking for its own code. Anyone who takes over the hub could then sign in as those accounts, with what each may do (the Files page and, for an administrator, the terminal included), so a session opened this way lasts at most two hours, the dashboard's own forms refuse it keys, accounts, passwords, revealed secrets, links and **Settings → Configuration**, and the audit log marks what it does. Counts as off while `JD_HUB_LINK` is `false`; found off at a start, every such choice and session is ended before anything is served. |
 | `JD_USAGE_PING` | `true` | Whether an administrator may be asked to [count this server](linking-and-usage.md#the-usage-count) in the public install numbers. Nothing is sent until one says yes. `false` means nobody is asked and nothing is ever sent; `JD_ACCOUNT_LINK=false` does the same. |
 | `JD_UPDATE_DIR` | discovered | The directory you cloned into. Normally empty: the dashboard asks Docker where its own stack was deployed from. Set it only if the Updates page says that failed. |
 | `JD_AGENT_MODE` | `false` | Run as an agent managed by a hub: no login, mutual TLS only. Not useful on its own yet. |

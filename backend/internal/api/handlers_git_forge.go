@@ -16,7 +16,7 @@ func (s *Server) mountForgeRoutes(r chi.Router) {
 		r.Method("GET", "/requests/{number}", s.handle(s.handleForgeRequest))
 		r.Method("GET", "/requests/{number}/files", s.handle(s.handleForgeFiles))
 		r.Method("GET", "/requests/{number}/conversation", s.handle(s.handleForgeConversation))
-		r.With(httpx.RequireCapability(auth.CapSystemAdmin)).Method("POST", "/account", s.handle(s.handleForgeAccount))
+		r.With(httpx.RequireCapability(auth.CapSystemAdmin), httpx.RefuseHubSession).Method("POST", "/account", s.handle(s.handleForgeAccount))
 		r.With(httpx.RequireCapability(auth.CapSystemAdmin)).Method("POST", "/disconnect", s.handle(s.handleForgeDisconnect))
 		r.With(httpx.RequireCapability(auth.CapServiceControl)).Method("POST", "/requests", s.handle(s.handleForgeCreate))
 		r.With(httpx.RequireCapability(auth.CapServiceControl)).Method("POST", "/requests/{number}/action", s.handle(s.handleForgeAction))

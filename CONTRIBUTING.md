@@ -272,6 +272,11 @@ never into `docs/audits/`.
   what the API suite spent, and a hash carries its own parameters, so verification is unchanged. A
   test that names a MongoDB nothing listens on puts `serverSelectionTimeoutMS` in the connection
   string, or it waits eight seconds to find out.
+- A test that reaches an update, restart or uninstall puts the recording `docker` of
+  `selfupdatetest.Docker` (`internal/selfupdate/selfupdatetest`) on `PATH` first. Those operations run
+  the docker CLI, and without it the test would ask the daemon of the machine running it to remove and
+  start the dashboard's own fixed-name sibling containers. The fake records the `DOCKER_HOST` and
+  arguments of each call, and fails like the real CLI for a socket named by `selfupdatetest.MissingHost`.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
   Recipe/detection/default changes also run
@@ -771,7 +776,8 @@ never into `docs/audits/`.
   starts an isolated backend and deploys real nginx, busybox and PostgreSQL-blueprint releases through
   the public API, including generated-password authentication over TCP and paused backup automation.
 - Keep the security posture intact. The network allowlist runs before
-  authentication, enrolled accounts always require their second factor, every destructive route sits behind
+  authentication, enrolled accounts always require their second factor (hub sign-in, off by default, is the one
+  documented exception, within the limits of invariant 2), every destructive route sits behind
   the destructive capability with an audit entry, and deletion of deployment projects, entire databases,
   Docker stacks and a host account's home with no archive requires a typed confirmation phrase enforced
   server-side. A change that
@@ -941,7 +947,8 @@ Docker): `database-shell.spec.ts`, `database-control-center.spec.ts`,
 the databases and deployments each reaches), `database-home.spec.ts`, `database-data.spec.ts`,
 `database-query.spec.ts`, `database-query-bodies.spec.ts` (stored programs and script separators in
 the editor), `database-explain.spec.ts` (the Plan tree's measured, estimated and printed plans),
-`database-assistant.spec.ts` (the editor's assistant, its answers streamed by the mock),
+`database-assistant.spec.ts` (a connection's Assistant page and the same chat beside the SQL
+editor, its answers streamed by the mock, and Ask from another page),
 `database-schema.spec.ts`, `database-programs.spec.ts` (functions, procedures and triggers), `database-rls.spec.ts` (row-level
 security, the role test, and function and column grants), `database-redis.spec.ts`, `database-mongo.spec.ts`,
 `database-performance.spec.ts` and `database-logos.spec.ts`.

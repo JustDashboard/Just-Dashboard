@@ -209,7 +209,10 @@ test("Insights ranks the window's values and a press narrows it in place", async
   // Insights opens on what the window adds up to, in words: its lines, the
   // errors and warnings among them, its busiest minute and the measure's
   // tail. The lens's own readings stay the chips' counts.
-  const tiles = page.locator("[data-slot=stat-tile]")
+  const tiles = page
+    .locator("[data-slot=stat-grid]")
+    .filter({ hasText: "Errors" })
+    .locator("[data-slot=stat-tile]")
   await expect(tiles).toHaveCount(5)
   await expect(tiles.filter({ hasText: "Errors" })).toContainText("2")
   await expect(tiles.filter({ hasText: "Warnings" })).toContainText("None")

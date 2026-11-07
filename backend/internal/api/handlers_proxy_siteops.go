@@ -145,9 +145,10 @@ func (s *Server) mountSiteFileRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/site-backups", s.handle(s.handleSiteBackups))
 		r.Method(http.MethodPost, "/site-backups/{dir}/{file}/restore", s.handle(s.handleSiteBackupRestore))
 		// Admin: the upload is a whole NPM database, passwords included,
-		// and the apply writes sites, streams and password files.
-		r.Method(http.MethodPost, "/import/npm", s.handle(s.handleNPMImportPreview))
-		r.Method(http.MethodPost, "/import/npm/apply", s.handle(s.handleNPMImportApply))
+		// and the apply writes sites, streams and password files: basic-auth
+		// users a session opened through Just Hub may not import.
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/import/npm", s.handle(s.handleNPMImportPreview))
+		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/import/npm/apply", s.handle(s.handleNPMImportApply))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/site-backups/{dir}/{file}", s.handle(s.handleSiteBackupPurge))
 		})

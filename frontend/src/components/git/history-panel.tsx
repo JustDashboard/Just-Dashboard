@@ -7,6 +7,7 @@ import {
   Copy,
   CornerUpLeft,
   Cross,
+  Filter,
   GitTag,
   RotateCounterClockwise,
   Warning,
@@ -14,10 +15,11 @@ import {
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { copyText } from "@/lib/clipboard"
+import { commitHeadline } from "@/lib/commit-faces"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { SourceBranch, SourceCommit, SourceMerge } from "@/components/git/glyphs"
-import { AuthorMark, ShortSha } from "@/components/git/marks"
+import { SourceBranch } from "@/components/git/glyphs"
+import { AuthorMark } from "@/components/git/marks"
 import type { GitCommit, GitResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
@@ -25,6 +27,7 @@ import { NameDialog } from "@/components/git/name-dialog"
 import type { GitPreview } from "@/components/git/preview-panel"
 import { RefTags } from "@/components/git/ref-tags"
 import type { GitRun } from "@/components/git/run"
+import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -76,6 +79,9 @@ export function HistoryPanel({
   const [term, setTerm] = useState("")
   const [author, setAuthor] = useSessionState("git.history.author", "")
   const [authorTerm, setAuthorTerm] = useState("")
+  // A filter somebody is using stays open whatever the button says.
+  const [authorOpen, setAuthorOpen] = useState(false)
+  const showAuthor = authorOpen || author.length > 0
   const [loadingMore, setLoadingMore] = useState(false)
   const [naming, setNaming] = useState<{ kind: "branch" | "tag"; commit: GitCommit } | null>(null)
 
@@ -262,21 +268,32 @@ export function HistoryPanel({
           data-workspace-search
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search commit messages…"
+          placeholder="Search commits…"
           aria-label="Search commit messages"
           containerClassName="min-w-0 flex-1 sm:w-auto"
         />
+        <IconAction
+          label="Filter by author"
+          aria-pressed={showAuthor}
+          className={cn(showAuthor && "bg-accent text-foreground")}
+          onClick={() => setAuthorOpen((open) => !open)}
+        >
+          <Filter />
+        </IconAction>
       </div>
-      <div className="flex shrink-0 items-center border-b border-hairline px-2 py-1.5">
-        <SearchInput
-          dense
-          value={author}
-          onChange={(e) => setAuthor(e.target.value)}
-          placeholder="Filter by author name or email…"
-          aria-label="Filter commits by author"
-          containerClassName="min-w-0 flex-1 sm:w-auto"
-        />
-      </div>
+      {showAuthor && (
+        <div className="flex shrink-0 items-center border-b border-hairline px-2 py-1.5">
+          <SearchInput
+            dense
+            autoFocus={authorOpen}
+            value={author}
+            onChange={(e) => setAuthor(e.target.value)}
+            placeholder="Author name or email…"
+            aria-label="Filter commits by author"
+            containerClassName="min-w-0 flex-1 sm:w-auto"
+          />
+        </div>
+      )}
       {file && (
         <div className="flex shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-header/60 px-3 py-1.5 text-hint text-muted-foreground">
           <span className="shrink-0">History of</span>
@@ -317,53 +334,41 @@ export function HistoryPanel({
               <li
                 key={c.sha}
                 className={cn(
-                  "group flex min-w-0 items-start gap-2 py-2 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
+                  "group flex min-w-0 items-start gap-2.5 py-2.5 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
                   active === `commit:${c.sha}` && "bg-accent",
                 )}
               >
-                {/* The commit as a node on its line, a merge in the merged
-                    hue, so a run of merged pull requests is seen as one
-                    before a subject is read. */}
-                {c.isMerge ? (
-                  <SourceMerge
-                    aria-label="merge commit"
-                    className="mt-0.5 size-4 shrink-0 text-(--pull-merged)"
-                  />
-                ) : (
-                  <SourceCommit
-                    aria-hidden
-                    className="mt-0.5 size-4 shrink-0 text-muted-foreground/70"
-                  />
-                )}
+                {/* Who, by the face GitHub shows for them, then what. The rest of a
+                    commit (its files, its size, its full id) is one press away in
+                    the preview, and a row is read for these two. */}
+                <AuthorMark name={c.author} email={c.email} size="md" className="mt-px" />
                 <button
                   type="button"
                   aria-pressed={active === `commit:${c.sha}`}
                   onClick={() => onSelect({ kind: "commit", sha: c.sha, subject: c.subject, file })}
                   className="min-w-0 flex-1 text-left focus-ring-inset"
                 >
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="truncate text-body">{c.subject}</span>
+                  <span
+                    className={cn(
+                      "block truncate text-body leading-snug",
+                      c.isMerge ? "text-muted-foreground" : "font-medium",
+                    )}
+                    title={c.subject}
+                  >
+                    {commitHeadline(c.subject)}
                   </span>
                   <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-                    <AuthorMark name={c.author} />
-                    <span className="max-w-[8rem] min-w-0 truncate text-foreground/75">
-                      {c.author}
-                    </span>
+                    <span className="max-w-[9rem] min-w-0 truncate">{c.author}</span>
+                    <span aria-hidden>·</span>
                     <span className="shrink-0 whitespace-nowrap">{relativeTime(c.at)}</span>
-                    <ShortSha sha={c.short} />
                     <RefTags
                       refs={c.refs}
+                      landmarks
                       max={2}
-                      className="hidden min-w-0 shrink items-center gap-1 overflow-hidden sm:flex"
+                      className="ml-auto flex min-w-0 shrink items-center gap-1 overflow-hidden"
                     />
                   </span>
                 </button>
-                {(c.insertions > 0 || c.deletions > 0) && (
-                  <span className="numeric mt-0.5 shrink-0 font-mono text-hint">
-                    <span className="text-(--git-added)">+{c.insertions}</span>{" "}
-                    <span className="text-(--git-deleted)">−{c.deletions}</span>
-                  </span>
-                )}
                 <VerbActions verbs={verbsFor(c, i)} reveal className="mt-0.5" />
               </li>
             ))}

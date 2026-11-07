@@ -11,7 +11,10 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate/selfupdatetest"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/uninstall"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -29,6 +32,13 @@ const publishedManifest = `{"releases":[
 // could rebuild.
 func selfUpdateRouter(t *testing.T, role auth.Role) http.Handler {
 	t.Helper()
+	return lifecycleRouter(t, role, "")
+}
+
+// lifecycleRouter is selfUpdateRouter with the update, the restart and the
+// uninstall all aimed at the Docker daemon at dockerHost.
+func lifecycleRouter(t *testing.T, role auth.Role, dockerHost string) http.Handler {
+	t.Helper()
 	s := testServer(t)
 
 	repo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -44,10 +54,18 @@ func selfUpdateRouter(t *testing.T, role auth.Role) http.Handler {
 		t.Fatal(err)
 	}
 
+	dataDir := t.TempDir()
 	s.modules.selfUpdate = selfupdate.New(selfupdate.Options{
-		Current: "0.5", DataDir: t.TempDir(), UpdateDir: dir,
+		Current: "0.5", DataDir: dataDir, UpdateDir: dir,
 		Repo: "owner/repo", Ref: "main", CheckOnline: true,
-		BaseURL: repo.URL, Log: s.Log,
+		BaseURL: repo.URL, DockerHost: dockerHost, Log: s.Log,
+	})
+	s.modules.selfConfig = selfcfg.New(selfcfg.Options{
+		DataDir: dataDir, DockerHost: dockerHost, Locate: s.modules.selfUpdate.Location, Log: s.Log,
+	})
+	s.modules.uninstall = uninstall.New(uninstall.Options{
+		DataDir: dataDir, DurableLog: filepath.Join(dataDir, "durable.log"), DockerHost: dockerHost,
+		Locate: s.modules.selfUpdate.Location, Log: s.Log,
 	})
 	// Prime the cache, so the handler is answering about a real published
 	// version rather than about an install that has never checked.
@@ -94,6 +112,25 @@ func TestInstallingAnUpdateDoesNotRequireAPhrase(t *testing.T) {
 	rec := drive(t, router, http.MethodPost, "/dashboard/update/install", `{}`, "")
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("update without a phrase answered %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A daemon that does not answer is a service that is unavailable, not a bad
+// request, a bad gateway or an internal error: the update, the restart and the
+// uninstall answer docker_unavailable, which the pages already show as an
+// absent subsystem, with the host in the message.
+func TestLifecycleRoutesAnswerUnavailableWhenDockerIsNotThere(t *testing.T) {
+	selfupdatetest.Docker(t)
+	missing := selfupdatetest.MissingHost(t)
+	router := lifecycleRouter(t, auth.RoleAdmin, missing)
+	for path, body := range map[string]string{
+		"/dashboard/update/install": `{}`, "/dashboard/restart": `{}`, "/dashboard/uninstall": `{"mode":"keep"}`,
+	} {
+		rec := drive(t, router, http.MethodPost, path, body, "")
+		if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "docker_unavailable") ||
+			!strings.Contains(rec.Body.String(), missing) {
+			t.Errorf("%s against a daemon that is not there answered %d: %s", path, rec.Code, rec.Body.String())
+		}
 	}
 }
 
@@ -202,5 +239,24 @@ func TestHealthURLIsSomethingTheUpdaterCanActuallyAsk(t *testing.T) {
 	s.Cfg.Addr = "not-an-address"
 	if got := s.healthURL(); got != "" {
 		t.Errorf("an unparseable bind address produced %q", got)
+	}
+}
+
+// The dashboard's own settings are the perimeter and the sign-in policy, and
+// a change to them outlives whoever made it: an API key, which a person did
+// not sign in for, is refused them, as a session Just Hub opened is
+// (hub_session_routes_test.go). Restarting changes nothing that outlives it
+// and is left to the role.
+func TestOnlyASessionChangesTheDashboardsOwnSettings(t *testing.T) {
+	s := testServer(t)
+	signInAs(t, s, "settings-admin", auth.RoleAdmin)
+	key := &client{t: t, h: s.Routes()}
+	bearer := map[string]string{"Authorization": "Bearer " + apiTokenFor(t, s, "settings-admin")}
+	w := key.do(http.MethodPut, "/api/v1/dashboard/config", `{"allowedCidrs":"0.0.0.0/0","require2fa":false}`, bearer)
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "session_required") {
+		t.Fatalf("an admin key changing the settings = %d %s", w.Code, w.Body)
+	}
+	if w := key.do(http.MethodPost, "/api/v1/dashboard/restart", `{}`, bearer); w.Code == http.StatusForbidden {
+		t.Fatalf("an admin key restarting = %d %s", w.Code, w.Body)
 	}
 }

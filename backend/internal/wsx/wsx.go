@@ -30,7 +30,19 @@ type Upgrader struct {
 	up             websocket.Upgrader
 	expectedScheme string
 	allowedOrigins []origin
+	guard          Guard
 }
+
+// Guard is told of every socket the Upgrader opens, with the request that
+// opened it, a way to end it, and a channel closed once it has ended. The API
+// uses it to tie a socket to the life of the session behind it: a socket is
+// authenticated once, at the upgrade, and nothing in the request path looks
+// at it again.
+type Guard func(r *http.Request, end func(), ended <-chan struct{})
+
+// SetGuard installs the Guard every socket from this Upgrader is given, so a
+// route added later inherits it without asking.
+func (u *Upgrader) SetGuard(g Guard) { u.guard = g }
 
 type origin struct {
 	scheme string
@@ -158,7 +170,11 @@ func (u *Upgrader) upgrade(w http.ResponseWriter, r *http.Request, header http.H
 	c.SetPongHandler(func(string) error {
 		return c.SetReadDeadline(time.Now().Add(pongWait))
 	})
-	return &Conn{ws: c}, nil
+	conn := &Conn{ws: c, done: make(chan struct{})}
+	if u.guard != nil {
+		u.guard(r, func() { conn.Close() }, conn.done)
+	}
+	return conn, nil
 }
 
 // Conn serialises writes, which gorilla requires and which several of our
@@ -168,6 +184,8 @@ type Conn struct {
 	ws     *websocket.Conn
 	mu     sync.Mutex
 	closed bool
+	// done is closed with the socket, for the Guard.
+	done chan struct{}
 }
 
 func (c *Conn) WriteJSON(v any) error {
@@ -205,6 +223,9 @@ func (c *Conn) Close() error {
 		return nil
 	}
 	c.closed = true
+	if c.done != nil {
+		close(c.done)
+	}
 	c.ws.SetWriteDeadline(time.Now().Add(writeWait))
 	c.ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	return c.ws.Close()

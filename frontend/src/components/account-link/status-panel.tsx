@@ -162,14 +162,19 @@ export function ScopeSection({
   )
 }
 
-/** This server's key and the site keys it has pinned, so a person can compare them with the site's. */
+/**
+ * This server's key and the peer's keys it has pinned, so a person can compare them with what the
+ * site — or the hub, on Settings → Hub — shows.
+ */
 export function Keys({
   fingerprint,
   siteKeys,
+  keyLabel = "Site key",
   className,
 }: {
   fingerprint?: string
   siteKeys: Link["siteKeys"]
+  keyLabel?: string
   className?: string
 }) {
   return (
@@ -181,7 +186,7 @@ export function Keys({
           </Reading>
         )}
         {siteKeys.map((key) => (
-          <Reading key={key.kid} label="Site key" mono>
+          <Reading key={key.kid} label={keyLabel} mono>
             {key.fingerprint}
             <span className="block text-hint text-muted-foreground">
               {key.notAfter ? `${key.kid} · valid until ${calendarDate(key.notAfter)}` : key.kid}

@@ -322,12 +322,16 @@ func TestLiveNginxServesAReplacedCertificateOnlyOnceReloaded(t *testing.T) {
 		t.Fatal(err)
 	}
 	certificate := filepath.Join(ssl, "fullchain.pem")
+	// Each version is a new file put in place, as certbot and this package write
+	// them: nginx 1.27.4 and later keep a certificate across a reload while its
+	// file has the same inode and the same mtime to the second, so one
+	// overwritten in place within the second is served as it was.
 	install := func(certText, keyText string) {
 		t.Helper()
-		if err := os.WriteFile(certificate, []byte(certText), 0o644); err != nil {
+		if err := writeAtomicMode(certificate, certText, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(ssl, "privkey.pem"), []byte(keyText), 0o600); err != nil {
+		if err := writeAtomicMode(filepath.Join(ssl, "privkey.pem"), keyText, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}

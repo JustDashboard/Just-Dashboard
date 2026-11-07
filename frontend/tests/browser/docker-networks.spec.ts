@@ -1,5 +1,6 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { NETS, mockNetworks } from "./docker-networks-fixture"
+import { risen } from "./risen"
 
 /**
  * The Networks page against a host with eleven networks: Docker's own three,
@@ -51,15 +52,59 @@ test("the band says which networks are busy, how much of the pool is taken and w
   // (the macvlan's LAN subnet holds a 192.168 block of its own).
   const addresses = band.getByRole("region", { name: "Address space" })
   await expect(addresses.getByText("of 31 blocks taken")).toBeVisible()
-  await expect(addresses.getByRole("img")).toHaveAttribute(
+  // At rest it says the block the next network would get.
+  await expect(addresses.getByText("First free")).toContainText("172.25.0.0/16")
+  await expect(addresses.getByRole("img", { name: /^Addresses: / })).toHaveAttribute(
     "aria-label",
-    "9 of 31 address blocks taken; the first free is 172.25.0.0/16",
+    /shop_backend 1 block/,
   )
 
-  // Docker names the container by id; the page names it.
+  // Docker names the container by id; the page names it. Newest first.
   const recent = band.getByRole("region", { name: "Recent network changes" })
-  await expect(recent.getByText("shop-web-1").first()).toBeVisible()
-  await expect(recent.getByText("joined").first()).toBeVisible()
+  const line = recent.locator("[data-slot=reading-line]")
+  await expect(line).toContainText("shop-web-1")
+  await expect(line).toContainText("joined")
+  await recent.getByRole("button", { name: "Open monitoring_default" }).hover()
+  await expect(line).toContainText("monitoring-alertmanager-1 left monitoring_default")
+
+  // A press opens its network.
+  await traffic.getByRole("button", { name: "Open shop_backend" }).click()
+  await expect(page).toHaveURL(new RegExp(`network=${id("shop_backend")}`))
+})
+
+test("the band is there before anything lands, and does not move when it does", async ({
+  page,
+}) => {
+  await mockNetworks(page)
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/docker/networks/", async (route) => {
+    await held
+    return route.fallback()
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker/networks")
+
+  const band = page.locator("[data-slot=network-band]")
+  const blocks = band.locator("[data-slot=bar-reading]")
+  await expect(blocks).toHaveCount(3)
+  await expect(band.getByRole("region", { name: "Traffic by network" })).toContainText(
+    "Reading the bridges…",
+  )
+  // Without the list no block is known to be free, so none is called free yet.
+  await expect(band.getByText("First free")).toHaveCount(0)
+  const heights = await blocks.evaluateAll((all) =>
+    all.map((block) => block.getBoundingClientRect().height),
+  )
+  expect(new Set(heights).size).toBe(1)
+  await risen(page)
+  const before = await band.boundingBox()
+
+  release()
+  await expect(page.getByRole("table").first()).toBeVisible()
+  await expect(band.getByText("First free")).toBeVisible()
+  await risen(page)
+  expect(await band.boundingBox()).toEqual(before)
 })
 
 test("the networks table reads who made each network, its subnet and its members", async ({

@@ -119,6 +119,13 @@ services:
       JD_ACCOUNT_LINK: ${JD_ACCOUNT_LINK:-true}
       JD_ACCOUNT_URL: ${JD_ACCOUNT_URL:-https://just-dashboard.com}
       JD_USAGE_PING: ${JD_USAGE_PING:-true}
+      # Connecting this server to a Just Hub on its own tailnet. Nothing is
+      # sent until an administrator connects it (Settings, or
+      # scripts/manage.sh hub connect); false switches the feature off outright.
+      JD_HUB_LINK: ${JD_HUB_LINK:-true}
+      # Hub sign-in: the connected hub may open this server for an account
+      # that opted in, without this server's own code. Off unless set.
+      JD_HUB_SIGNIN: ${JD_HUB_SIGNIN:-false}
       JD_LOG_LEVEL: ${JD_LOG_LEVEL:-info}
     volumes:
       # Root-equivalent access. Everything that reaches it is authenticated,

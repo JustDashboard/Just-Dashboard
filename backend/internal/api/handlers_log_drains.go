@@ -141,8 +141,8 @@ func (s *Server) mountLogDrainReads(r chi.Router) {
 }
 
 func (s *Server) mountLogDrainWrites(r chi.Router) {
-	r.Method(http.MethodPost, "/log-drains", s.handle(s.handleLogDrainCreate))
-	r.Method(http.MethodPut, "/log-drains/{drain}", s.handle(s.handleLogDrainUpdate))
+	r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/log-drains", s.handle(s.handleLogDrainCreate))
+	r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/log-drains/{drain}", s.handle(s.handleLogDrainUpdate))
 	r.Method(http.MethodPut, "/log-drains/{drain}/enabled", s.handle(s.handleLogDrainEnabled))
 	r.Method(http.MethodPost, "/log-drains/{drain}/test", s.handle(s.handleLogDrainTest))
 	r.Method(http.MethodDelete, "/log-drains/{drain}", s.handle(s.handleLogDrainDelete))

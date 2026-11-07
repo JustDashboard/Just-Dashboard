@@ -36,53 +36,27 @@ export function censusLine(system: System, most = 3) {
 /**
  * Every system on the server, a row each, grouped by what anchors it: the
  * contents of the canvas in the order a reader looks for them. A row flies the
- * canvas to its system; the one being read is marked. A search keeps the
- * systems that hold what it found.
+ * canvas to its system; the one being read is marked.
  */
 export function SystemRail({
   systems,
   focus,
-  kept,
   onFocus,
-  onAll,
 }: {
   systems: System[]
   focus: string | null
-  /** The systems a search keeps, or null with no search. */
-  kept: Set<string> | null
   onFocus: (id: string) => void
-  onAll: () => void
 }) {
-  const shown = kept ? systems.filter((s) => kept.has(s.id)) : systems
   return (
-    <nav
-      aria-label="Systems"
-      className="flex min-h-0 min-w-0 flex-col border-r border-hairline max-lg:hidden"
-    >
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline px-4">
-        <span className="eyebrow">Systems</span>
-        <span className="numeric text-hint text-muted-foreground">{shown.length}</span>
-        <span className="flex-1" />
-        <button
-          type="button"
-          onClick={onAll}
-          aria-pressed={focus === null}
-          className={cn(
-            "rounded-md px-2 py-1 text-hint focus-ring transition-colors hover:bg-row-hover",
-            focus === null ? "text-foreground" : "text-muted-foreground",
-          )}
-        >
-          Show all
-        </button>
-      </div>
+    <nav aria-label="Systems" className="flex min-h-0 min-w-0 flex-col border-r border-hairline">
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-        {shown.length === 0 && (
+        {systems.length === 0 && (
           <p className="px-2 py-3 text-hint text-muted-foreground">
-            {kept ? "No system holds that." : "Nothing on this server makes a system yet."}
+            Nothing on this server makes a system yet.
           </p>
         )}
         {GROUPS.map((group) => {
-          const here = shown.filter((s) => group.kinds.includes(s.kind))
+          const here = systems.filter((s) => group.kinds.includes(s.kind))
           if (here.length === 0) return null
           return (
             <section key={group.label} className="mb-3">

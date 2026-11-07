@@ -6,19 +6,23 @@ import { Reading, ReadingList } from "@/components/account-link/reading"
 import { Section } from "@/components/page"
 
 /**
- * The automatic-update policy, read-only. The site stores and edits it and this server runs it
- * from its own update checker, so a site outage never blocks or triggers an update; the page
- * only mirrors what was last set, and says where to change it.
+ * The automatic-update policy, read-only. The site — or, on Settings → Hub, the hub — stores and
+ * edits it and this server runs it from its own update checker, so a peer's outage never blocks
+ * or triggers an update; the page only mirrors what was last set, and says where to change it.
  */
 export function Policy({
   policy,
   scope,
   site,
+  peer = "site",
   className,
 }: {
   policy: NonNullable<AccountLinkStatus["link"]>["updatePolicy"]
   scope: AccountLinkScope
+  /** Where it is set, by name: "just-dashboard.com", "hub.tailed39ba.ts.net". */
   site: string
+  /** What that is, in the sentence about who may change it. */
+  peer?: "site" | "hub"
   className?: string
 }) {
   const words = policyWords(policy)
@@ -32,7 +36,7 @@ export function Policy({
         Set from {site}.{" "}
         {scope === "maintain"
           ? "This server applies it itself."
-          : `The site can change it only at the ${scopeName("maintain")} scope.`}
+          : `The ${peer} can change it only at the ${scopeName("maintain")} scope.`}
       </p>
     </Section>
   )

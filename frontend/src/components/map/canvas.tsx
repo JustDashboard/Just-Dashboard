@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
-  MiniMap,
   ReactFlow,
   useReactFlow,
   useStore,
@@ -16,35 +15,19 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import {
-  Cross,
+  ArrowUpRight,
   Fullscreen,
   FullscreenClose,
   Minus,
   Plus,
-  RefreshClockwise,
   RotateCounterClockwise,
-  SettingsSliders,
   SidebarRightClose,
   SidebarRightOpen,
-  Trash,
   Warning,
 } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
-import { SearchInput } from "@/components/page"
-import { PaneHeader } from "@/components/panel"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { useConfirm } from "@/components/confirm-dialog"
-import { Saved } from "@/components/database/diagram/chrome"
-import { plural, relativeTime } from "@/lib/format"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { isArranged, kindOf, type MapDocument, type Point } from "@/lib/server-map"
 import {
   FRAME,
@@ -52,8 +35,6 @@ import {
   detectSystems,
   layoutAtlas,
   neighbours,
-  searchNodes,
-  searchSystems,
   settle,
   systemTitle,
   type Placed,
@@ -66,7 +47,6 @@ import type { ServerMap } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { edgeTypes, type WireData } from "@/components/map/edges"
 import { MapInspector } from "@/components/map/inspector"
-import type { MemoryStatus } from "@/components/map/memory"
 import {
   nodeTypes,
   type FaceData,
@@ -97,6 +77,17 @@ const MOVE = {
   panOnDrag: [0, 1],
 }
 
+/**
+ * Where the map is nothing but the map: below the width the rail and the
+ * inspector fit beside a canvas, there is no chrome at all. A tap on a box or
+ * a system's head offers one way on, to its page.
+ */
+const BARE = "(max-width: 1023px)"
+
+/** The ground of a control that floats on the canvas. */
+const FLOAT =
+  "absolute flex items-center gap-0.5 rounded-md border border-hairline bg-popover p-0.5"
+
 const clampZoom = (z: number) => Math.min(ZOOM.max, Math.max(ZOOM.min, z))
 
 type Seat = { system: System; placed: Placed; origin: Point }
@@ -126,7 +117,9 @@ function faceData(node: SystemNode, state: NodeState, ports: Port[], sides: Face
 
 /**
  * The map's canvas: every system's diagram in its own frame, side by side,
- * with the rail of systems down its left and the inspector down its right.
+ * with the rail of systems down its left and the inspector down its right, and
+ * nothing over it but the few controls that float on it. On a phone it is the
+ * canvas alone.
  *
  * Choosing a box lights what it is wired to inside its system, draws those
  * lines in the brand's blue with how each is known written on them, and steps
@@ -137,22 +130,14 @@ function faceData(node: SystemNode, state: NodeState, ports: Port[], sides: Face
 export function MapCanvas({
   map,
   doc,
-  status,
-  updatedAt,
   update,
-  reset,
-  refresh,
   full,
   onFullscreen,
   initialSystem,
 }: {
   map: ServerMap
   doc: MapDocument
-  status: MemoryStatus
-  updatedAt?: string
   update: (next: Partial<MapDocument> | ((doc: MapDocument) => MapDocument)) => void
-  reset: () => Promise<void>
-  refresh: () => void
   full: boolean
   onFullscreen: () => void
   /** A system asked for by the address (`?system=`), flown to on arrival. */
@@ -160,10 +145,9 @@ export function MapCanvas({
 }) {
   const flow = useReactFlow()
   const router = useRouter()
-  const { confirm, dialog } = useConfirm()
   const canvasRef = useRef<HTMLDivElement>(null)
-  const searchRef = useRef<HTMLInputElement>(null)
   const store = useStoreApi()
+  const bare = useMediaQuery(BARE)
 
   const systems = useMemo(() => detectSystems(map), [map])
   const placed = useMemo(() => layoutAtlas(systems), [systems])
@@ -202,9 +186,10 @@ export function MapCanvas({
   const [chosen, setChosen] = useState<string | null>(null)
   const [focus, setFocus] = useState<string | null>(initialSystem ?? doc.focus ?? null)
   const [hovered, setHovered] = useState<string | null>(null)
-  const [query, setQuery] = useState("")
+  // The system whose head was tapped on a phone, for the way on to its page.
+  const [tapped, setTapped] = useState<string | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(true)
-  const inspecting = inspectorOpen
+  const inspecting = inspectorOpen && !bare
 
   const chosenSeat = chosen ? seats.get(chosen) : undefined
   const chosenNode = chosenSeat?.system.nodes.find((n) => n.id === chosen)
@@ -213,14 +198,6 @@ export function MapCanvas({
     () => (chosenSeat && chosen ? neighbours(chosenSeat.system, chosen) : null),
     [chosenSeat, chosen],
   )
-  const kept = useMemo(() => searchSystems(systems, query), [systems, query])
-  const hits = useMemo(() => {
-    if (!query.trim()) return null
-    const out = new Set<string>()
-    for (const s of systems) for (const id of searchNodes(s, query)) out.add(id)
-    return out
-  }, [systems, query])
-
   const frameRect = useCallback(
     (id: string) => {
       const p = bySystem.get(id)
@@ -371,18 +348,33 @@ export function MapCanvas({
   }, [flow, store])
 
   // The first view: the system the address or the last visit named, else
-  // where the reader left the canvas, else every system at once.
+  // where the reader left the canvas, else every system at once. A phone opens
+  // on a system whatever the desk left behind: every system at once is too
+  // small there to read or to tap.
   const restored = useRef(false)
   useEffect(() => {
     if (restored.current || placed.length === 0) return
     restored.current = true
     window.setTimeout(() => {
       const wanted = initialSystem ?? doc.focus
-      if (wanted && bySystem.has(wanted)) flyTo(wanted, 0)
+      const width = canvasRef.current?.clientWidth
+      const rect = bare
+        ? frameRect(wanted && bySystem.has(wanted) ? wanted : placed[0].system.id)
+        : null
+      if (rect && width) {
+        // Its width across the phone and its head at the top: a wide diagram
+        // centred on a tall screen leaves half of it empty above.
+        const zoom = clampZoom(Math.min(1, (width - 16) / rect.width))
+        void flow.setViewport({
+          x: (width - rect.width * zoom) / 2 - rect.x * zoom,
+          y: 8 - rect.y * zoom,
+          zoom,
+        })
+      } else if (wanted && bySystem.has(wanted)) flyTo(wanted, 0)
       else if (doc.viewport) void flow.setViewport(doc.viewport)
       else void flow.fitView({ padding: 0.06 })
     }, 0)
-  }, [placed.length, initialSystem, doc.focus, doc.viewport, bySystem, flyTo, flow])
+  }, [placed, bare, frameRect, initialSystem, doc.focus, doc.viewport, bySystem, flyTo, flow])
 
   // Carrying a system: its head is pressed, and the whole diagram follows the
   // pointer once it has gone a few pixels — less is a click, which the frame
@@ -444,7 +436,6 @@ export function MapCanvas({
       const rect = frameRect(sid)!
       const base = corner(p)
       const origin = { x: base.x + FRAME.pad, y: base.y + FRAME.head + FRAME.pad }
-      const dimmed = kept !== null && !kept.has(sid)
       out.push({
         id: `frame:${sid}`,
         type: "systemFrame",
@@ -462,7 +453,7 @@ export function MapCanvas({
           anchorKind: p.system.anchorKind,
           census: censusLine(p.system),
           chosen: focus === sid,
-          dimmed,
+          fixed: bare,
         } satisfies FrameData,
       })
       for (const f of s.frames) {
@@ -504,9 +495,8 @@ export function MapCanvas({
           }))
         let state: NodeState
         if (chosen === n.id) state = "chosen"
-        else if (hovered === n.id || hits?.has(n.id)) state = "hit"
+        else if (hovered === n.id) state = "hit"
         else if (lit && chosenSeat?.system.id === sid) state = lit.has(n.id) ? "lit" : "dim"
-        else if (dimmed) state = "dim"
         out.push({
           id: n.id,
           type: n.face,
@@ -520,7 +510,7 @@ export function MapCanvas({
       }
     }
     return out
-  }, [placed, settled, frameRect, corner, kept, focus, lit, chosenSeat, chosen, hovered, hits])
+  }, [placed, settled, frameRect, corner, bare, focus, lit, chosenSeat, chosen, hovered])
 
   const edges = useMemo(() => {
     const out: Edge[] = []
@@ -546,7 +536,7 @@ export function MapCanvas({
             also: e.also,
             shape: e.shape,
             lit: on,
-            dimmed: (inSystem && lit !== null && !on) || (kept !== null && !kept.has(sid)),
+            dimmed: inSystem && lit !== null && !on,
             // A stack's frame stands in for its containers; it carries while they run.
             carries: (s?.item.tone ?? "ok") === "ok" && (t?.item.tone ?? "ok") === "ok",
           } satisfies WireData,
@@ -554,7 +544,7 @@ export function MapCanvas({
       }
     }
     return out
-  }, [placed, chosenSeat, chosen, lit, kept])
+  }, [placed, chosenSeat, chosen, lit])
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -589,30 +579,12 @@ export function MapCanvas({
     })
   }, [doc.positions, doc.frames, update])
 
-  const forget = useCallback(() => {
-    confirm({
-      title: "Forget this layout",
-      confirmLabel: "Forget layout",
-      description: (
-        <p>
-          Where you put each box, and the system you were last reading, are thrown away. Your map is
-          laid out fresh; nobody else&rsquo;s changes, and nothing on the server does.
-        </p>
-      ),
-      action: async () => {
-        await reset()
-        setChosen(null)
-        setFocus(null)
-        window.setTimeout(() => void flow.fitView({ padding: 0.06, duration: 300 }), 0)
-      },
-    })
-  }, [confirm, reset, flow])
-
   const choose = useCallback(
     (id: string) => {
       const seat = seats.get(id)
       if (!seat) return
       setChosen(id)
+      setTapped(null)
       setFocus(seat.system.id)
     },
     [seats],
@@ -621,10 +593,7 @@ export function MapCanvas({
   const onKey = (e: React.KeyboardEvent) => {
     const target = e.target as HTMLElement
     if (target.closest("input, textarea, [role=menu], [role=dialog]")) return
-    if (e.key === "/") {
-      e.preventDefault()
-      searchRef.current?.focus()
-    } else if (e.key === "f") {
+    if (e.key === "f") {
       if (focus) flyTo(focus)
       else void flow.fitView({ padding: 0.06, duration: 300 })
     } else if (e.key === "i") {
@@ -632,142 +601,36 @@ export function MapCanvas({
     } else if (e.key === "Enter" && chosenNode) {
       router.push(chosenNode.item.href)
     } else if (e.key === "Escape") {
-      if (chosen) setChosen(null)
-      else if (query) setQuery("")
+      setChosen(null)
     }
   }
 
-  const things = systems.reduce((n, s) => n + s.nodes.filter((x) => x.kind !== "logs").length, 0)
+  const tappedSystem = tapped ? bySystem.get(tapped)?.system : undefined
+  // What a phone's one button opens: nothing draws "Everything else" a page of its own.
+  const wayOn = chosenNode
+    ? { name: chosenNode.item.name, href: chosenNode.item.href }
+    : tappedSystem && tappedSystem.kind !== "loose"
+      ? { name: systemTitle(tappedSystem), href: tappedSystem.anchor.href }
+      : null
   const unread = map.kinds.filter((k) => SYSTEM_KINDS.has(k.key) && k.state === "unread")
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" onKeyDown={onKey}>
-      <PaneHeader className="min-h-11 flex-wrap gap-x-1.5 gap-y-1">
-        <SearchInput
-          ref={searchRef}
-          dense
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setChosen(null)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && hits && hits.size > 0) {
-              const first = hits.values().next().value as string
-              choose(first)
-              frameNode(first)
-            }
-            if (e.key === "Escape") {
-              setQuery("")
-              ;(e.target as HTMLInputElement).blur()
-            }
-          }}
-          placeholder="Find a system or anything in one"
-          aria-label="Find a system or anything in one"
-          containerClassName="w-60 sm:w-72"
-          trailing={
-            query ? (
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Clear the search"
-                onClick={() => setQuery("")}
-              >
-                <Cross />
-              </Button>
-            ) : undefined
-          }
-        />
-        {hits !== null && (
-          <span aria-live="polite" className="numeric text-hint text-muted-foreground">
-            {hits.size === 0 ? "no match" : plural(hits.size, "match", "matches")}
-          </span>
-        )}
-        <span className="ml-1 hidden items-center gap-1.5 text-hint text-muted-foreground md:flex">
-          <span className="numeric text-foreground">{systems.length}</span>
-          {systems.length === 1 ? "system" : "systems"}
-          <span aria-hidden>·</span>
-          <span className="numeric text-foreground">{things.toLocaleString("en-US")}</span>
-          things
-          <span aria-hidden>·</span>
-          <span title={map.checkedAt}>read {relativeTime(map.checkedAt)}</span>
-        </span>
-
-        <span className="flex-1" />
-
-        <Saved status={status} updatedAt={updatedAt} arranged={isArranged(doc)} />
-
-        <IconAction
-          label="Tidy up: put every system and every box back where the map puts it"
-          className="size-7"
-          onClick={tidy}
-          disabled={!isArranged(doc)}
-        >
-          <RotateCounterClockwise />
-        </IconAction>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="xs" variant="ghost" className="h-7" aria-label="Map options">
-              <SettingsSliders />
-              <span className="max-md:sr-only">Options</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64">
-            <DropdownMenuLabel>Canvas</DropdownMenuLabel>
-            <DropdownMenuCheckboxItem
-              checked={doc.minimap}
-              onCheckedChange={(v) => update({ minimap: v })}
-            >
-              Minimap
-            </DropdownMenuCheckboxItem>
-            <DropdownMenuItem onSelect={refresh}>
-              <RefreshClockwise />
-              Read the server again
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              disabled={!isArranged(doc) && !doc.focus}
-              onSelect={forget}
-            >
-              <Trash />
-              Forget this layout…
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <IconAction
-          label={inspecting ? "Hide the inspector (I)" : "Show the inspector (I)"}
-          aria-pressed={inspecting}
-          className="size-7"
-          onClick={() => setInspectorOpen((open) => !open)}
-        >
-          {inspecting ? <SidebarRightClose /> : <SidebarRightOpen />}
-        </IconAction>
-        <IconAction
-          label={full ? "Leave full screen" : "Full screen"}
-          aria-pressed={full}
-          className="size-7"
-          onClick={onFullscreen}
-        >
-          {full ? <FullscreenClose /> : <Fullscreen />}
-        </IconAction>
-      </PaneHeader>
-
       <div
         className={cn(
           "grid min-h-0 flex-1",
-          inspecting
-            ? "grid-cols-1 max-lg:grid-rows-[minmax(0,1fr)_minmax(0,45%)] lg:grid-cols-[15rem_minmax(0,1fr)_20rem]"
-            : "grid-cols-1 lg:grid-cols-[15rem_minmax(0,1fr)]",
+          bare
+            ? "grid-cols-1"
+            : inspecting
+              ? "grid-cols-[15rem_minmax(0,1fr)_20rem]"
+              : "grid-cols-[15rem_minmax(0,1fr)]",
         )}
       >
-        <SystemRail systems={systems} focus={focus} kept={kept} onFocus={focusOn} onAll={showAll} />
+        {!bare && <SystemRail systems={systems} focus={focus} onFocus={focusOn} />}
         <div
           ref={canvasRef}
           data-slot="server-map"
-          onPointerDown={carry}
+          onPointerDown={bare ? undefined : carry}
           className="group/map relative min-h-0 min-w-0"
         >
           {systems.length === 0 ? (
@@ -781,8 +644,15 @@ export function MapCanvas({
               edgeTypes={edgeTypes}
               onNodeClick={(_, n) => {
                 if (n.type === "systemFrame") {
+                  // A phone only looks: where it last was stays the desk's to remember.
+                  if (bare) {
+                    const sid = n.id.slice("frame:".length)
+                    setChosen(null)
+                    setFocus(sid)
+                    setTapped(sid)
+                  }
                   // Put down after a carry: not a click.
-                  if (carried.current) carried.current = false
+                  else if (carried.current) carried.current = false
                   else focusOn(n.id.slice("frame:".length), false)
                 } else if (n.type !== "stackFrame") choose(n.id)
               }}
@@ -796,42 +666,65 @@ export function MapCanvas({
                 if (href) router.push(href)
               }}
               onNodeDragStop={onNodeDragStop}
-              onPaneClick={() => setChosen(null)}
+              onPaneClick={() => {
+                setChosen(null)
+                setTapped(null)
+              }}
               onMoveEnd={(event, viewport: Viewport) => {
-                if (event && restored.current) update({ viewport })
+                if (event && restored.current && !bare) update({ viewport })
               }}
               minZoom={ZOOM.min}
               maxZoom={ZOOM.max}
               {...MOVE}
               proOptions={{ hideAttribution: true }}
               nodesConnectable={false}
+              nodesDraggable={!bare}
               elementsSelectable
               onlyRenderVisibleElements
               deleteKeyCode={null}
               selectionKeyCode={null}
               multiSelectionKeyCode={null}
               aria-label="Map of the server's systems"
-            >
-              {doc.minimap && (
-                <MiniMap
-                  pannable
-                  zoomable
-                  ariaLabel="Minimap"
-                  className="!right-3 !bottom-3 !h-28 !w-44 overflow-hidden !rounded-md !border !bg-card max-sm:!hidden"
-                  maskColor="color-mix(in oklab, var(--color-background) 70%, transparent)"
-                  nodeColor={minimapColor}
-                  nodeStrokeWidth={0}
-                />
-              )}
-            </ReactFlow>
+            />
           )}
-          {systems.length > 0 && (
+          {systems.length > 0 && !bare && (
             <ZoomButtons
               onFit={() =>
                 focus ? flyTo(focus) : void flow.fitView({ padding: 0.06, duration: 300 })
               }
               onAll={showAll}
+              onTidy={isArranged(doc) ? tidy : undefined}
             />
+          )}
+          {!bare && (
+            <div className={cn(FLOAT, "top-3 right-3")}>
+              <IconAction
+                label={inspecting ? "Hide the inspector (I)" : "Show the inspector (I)"}
+                aria-pressed={inspecting}
+                className="size-7"
+                onClick={() => setInspectorOpen((open) => !open)}
+              >
+                {inspecting ? <SidebarRightClose /> : <SidebarRightOpen />}
+              </IconAction>
+              <IconAction
+                label={full ? "Leave full screen" : "Full screen"}
+                aria-pressed={full}
+                className="size-7"
+                onClick={onFullscreen}
+              >
+                {full ? <FullscreenClose /> : <Fullscreen />}
+              </IconAction>
+            </div>
+          )}
+          {bare && wayOn && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] flex justify-center px-4">
+              <Button asChild className="pointer-events-auto max-w-full min-w-0">
+                <Link href={wayOn.href}>
+                  <span className="truncate">Open {wayOn.name}</span>
+                  <ArrowUpRight />
+                </Link>
+              </Button>
+            </div>
           )}
           {unread.length > 0 && (
             <div className="pointer-events-none absolute top-3 left-3 max-w-[min(28rem,80%)] space-y-1">
@@ -863,20 +756,27 @@ export function MapCanvas({
             onHover={setHovered}
             onFocus={focusOn}
             onFrame={frameNode}
-            onClose={() => setInspectorOpen(false)}
           />
         )}
       </div>
-      {dialog}
     </div>
   )
 }
 
-function ZoomButtons({ onFit, onAll }: { onFit: () => void; onAll: () => void }) {
+function ZoomButtons({
+  onFit,
+  onAll,
+  onTidy,
+}: {
+  onFit: () => void
+  onAll: () => void
+  /** Only while something has been moved: with nothing to put back it would be noise. */
+  onTidy?: () => void
+}) {
   const flow = useReactFlow()
   const percent = useStore((s) => Math.round(s.transform[2] * 100))
   return (
-    <div className="absolute bottom-3 left-3 flex items-center gap-0.5 rounded-md border border-hairline bg-popover p-0.5">
+    <div className={cn(FLOAT, "bottom-3 left-3")}>
       <IconAction
         label="Zoom out"
         className="size-7"
@@ -906,6 +806,15 @@ function ZoomButtons({ onFit, onAll }: { onFit: () => void; onAll: () => void })
       <Button size="xs" variant="ghost" className="h-7 px-2 text-hint" onClick={onAll}>
         All
       </Button>
+      {onTidy && (
+        <IconAction
+          label="Tidy up: put every system and every box back where the map puts it"
+          className="size-7"
+          onClick={onTidy}
+        >
+          <RotateCounterClockwise />
+        </IconAction>
+      )}
     </div>
   )
 }
@@ -926,14 +835,4 @@ function EmptyMap() {
       </div>
     </div>
   )
-}
-
-function minimapColor(node: Node) {
-  if (node.type === "systemFrame") return "color-mix(in oklab, var(--color-muted) 55%, transparent)"
-  if (node.type === "stackFrame") return "transparent"
-  const tone = (node.data as Partial<FaceData>).node?.item.tone
-  if (tone === "danger") return "var(--color-destructive)"
-  if (tone === "warning") return "var(--color-warning)"
-  if (node.type === "hero") return "var(--color-chart-1)"
-  return "color-mix(in oklab, var(--color-muted-foreground) 55%, var(--color-muted))"
 }

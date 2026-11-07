@@ -58,9 +58,9 @@ export type RequestQuery = {
   referer: string
   /** Exact codes, from the Status codes list — "every 404", not "every 4xx". */
   statuses: number[]
-  /** At least this slow, from a mark on the response-time ladder. */
+  /** At least this slow, from a figure under Response times. */
   minMs?: number
-  /** At most this slow: with `minMs`, one band of the ladder. */
+  /** At most this slow: with `minMs`, one band of response times. */
   maxMs?: number
   classes: StatusClass[]
   methods: string[]

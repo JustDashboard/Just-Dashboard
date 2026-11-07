@@ -4,8 +4,8 @@ import { groupSections, type Engine, type SectionId } from "@/components/databas
 import { settingsPageHref, settingsPages } from "@/components/database/shell/settings-pages"
 
 /**
- * One database's pages as the rail's panel: Home alone, then Work, Schema,
- * Insights and Operate, each holding only what the engine has, in the
+ * One database's pages as the rail's panel: Home and its Assistant, then Work,
+ * Schema, Insights and Operate, each holding only what the engine has, in the
  * engine's own words — and Settings, a group of its own pages under them, the
  * way a project's settings sit under its pages.
  *
@@ -25,6 +25,8 @@ export function databaseNavGroups(
         title: section.title,
         href: hrefOf(section.id),
         icon: section.icon,
+        // Asking it is controlling services; a role that only reads is not offered it.
+        ...(section.id === "assistant" && { capability: "service.control" as const }),
       })),
   }))
   if (!engine.has("settings")) return groups.filter((group) => group.items.length > 0)

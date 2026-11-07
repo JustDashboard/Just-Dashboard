@@ -25,6 +25,7 @@ import { StreamState } from "@/components/overview/readings"
 import { Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
@@ -253,39 +254,11 @@ export function StacksTab() {
     />
   )
 
-  if (list.loading && !list.data) {
-    return (
-      <Page>
-        {header}
-        <LoadingPanel />
-      </Page>
-    )
-  }
   if (list.error && !list.data) {
     return (
       <Page>
         {header}
         <ErrorState error={list.error} />
-      </Page>
-    )
-  }
-  if (stacks.length === 0) {
-    return (
-      <Page>
-        {header}
-        <EmptyState
-          icon={Layers}
-          title="No compose stacks found"
-          description={
-            <>
-              A <Term name="stack">stack</Term> is a directory with a compose file in it. The
-              dashboard finds them by the labels compose puts on the containers it creates, and by
-              looking under the configured compose directories.
-            </>
-          }
-          action={createButton}
-        />
-        {newStackDialog}
       </Page>
     )
   }
@@ -341,27 +314,37 @@ export function StacksTab() {
                   <FactDot />
                 </>
               )}
-              <span className="numeric">
-                {deployed} of {plural(stacks.length, "stack")} deployed
-              </span>
-              <FactDot />
-              <span className="numeric">
-                {running} of {plural(services, "service")} running
-              </span>
-              {published > 0 && (
+              {!list.data ? (
+                <TextShimmer>Reading the stacks…</TextShimmer>
+              ) : stacks.length === 0 ? (
+                <span>No stacks deployed</span>
+              ) : (
                 <>
+                  <span className="numeric">
+                    {deployed} of {plural(stacks.length, "stack")} deployed
+                  </span>
                   <FactDot />
-                  <span className="numeric">{plural(published, "port")} published</span>
+                  <span className="numeric">
+                    {running} of {plural(services, "service")} running
+                  </span>
+                  {published > 0 && (
+                    <>
+                      <FactDot />
+                      <span className="numeric">{plural(published, "port")} published</span>
+                    </>
+                  )}
                 </>
               )}
             </>
           }
           aside={
             <div className="flex flex-wrap items-center gap-3">
-              <Status
-                tone={counts.running > 0 ? "running" : "stopped"}
-                label={`${plural(counts.running, "stack")} running`}
-              />
+              {stacks.length > 0 && (
+                <Status
+                  tone={counts.running > 0 ? "running" : "stopped"}
+                  label={`${plural(counts.running, "stack")} running`}
+                />
+              )}
               <WorkspaceHelp compact />
             </div>
           }
@@ -371,128 +354,149 @@ export function StacksTab() {
           lines={lines}
           snapshot={snapshot}
           changes={changes}
-          listening={feed.data?.listening ?? true}
+          loaded={list.data !== undefined}
+          eventsRead={feed.data !== undefined || feed.error !== undefined}
+          listening={feed.data?.listening ?? feed.error === undefined}
           selected={focus}
           onSelect={setFocus}
           onOpen={openStack}
         />
 
         {/* Framed, because it is a table: the grid owns a scroll region and
-            the edge is what says so (§2). Everything above it stays plain. */}
-        <Panel>
-          <PanelHeader
-            title={
-              <span className="inline-flex items-center gap-1.5">
-                Stacks
-                <span className="numeric ml-0.5 text-body font-normal text-muted-foreground">
-                  {stacks.length}
-                </span>
-                <ExplainIcon name="stack" />
-              </span>
-            }
-            actions={
+            the edge is what says so (§2). Everything above it stays plain. The
+            line and the band stay up while the list is read, and on a server
+            with no stacks, so nothing above this moves when the answer lands. */}
+        {!list.data ? (
+          <LoadingPanel />
+        ) : stacks.length === 0 ? (
+          <EmptyState
+            icon={Layers}
+            title="No compose stacks found"
+            description={
               <>
-                <StreamState connection={socket.state} />
-                {createButton}
+                A <Term name="stack">stack</Term> is a directory with a compose file in it. The
+                dashboard finds them by the labels compose puts on the containers it creates, and by
+                looking under the configured compose directories.
               </>
             }
-          >
-            <ChipStrip aria-label="State" className="mr-auto">
-              {STATES.map(({ value, label, dot, title }) => {
-                const count = counts[value]
-                if (value !== "running" && count === 0 && state !== value) return null
-                return (
-                  <FilterChip
-                    key={value}
-                    selected={state === value}
-                    title={title}
-                    onClick={() => toggleState(value)}
-                  >
-                    <span aria-hidden className={cn("size-1.5 rounded-full", dot)} />
-                    {label}
-                    <ChipCount>{count}</ChipCount>
-                  </FilterChip>
-                )
-              })}
-            </ChipStrip>
-          </PanelHeader>
-          <PanelToolbar>
-            <SearchInput
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Stack, service or image"
-              containerClassName="sm:w-64"
-            />
-            {focus && (
-              <FilterChip
-                selected
-                aria-label={`Showing ${focus}; press to show every stack`}
-                onClick={() => setFocus("")}
-              >
-                {focus}
-                <Cross aria-hidden className="size-3" />
-              </FilterChip>
-            )}
-            {state && (
-              <FilterChip
-                selected
-                className="ml-auto"
-                aria-label="Show stacks in every state"
-                onClick={() => setState("")}
-              >
-                {STATES.find((s) => s.value === state)?.label}
-                <Cross aria-hidden className="size-3" />
-              </FilterChip>
-            )}
-          </PanelToolbar>
-          <PanelBody flush>
-            {visible.length === 0 ? (
-              <EmptyState
-                icon={Warning}
-                title="Nothing matches those filters"
-                description="Clear the search, or look under a different state."
-                className="my-4"
-                action={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setQuery("")
-                      setFocus("")
-                      setState("")
-                    }}
-                  >
-                    Clear filters
-                  </Button>
-                }
+            action={createButton}
+          />
+        ) : (
+          <Panel>
+            <PanelHeader
+              title={
+                <span className="inline-flex items-center gap-1.5">
+                  Stacks
+                  <span className="numeric ml-0.5 text-body font-normal text-muted-foreground">
+                    {stacks.length}
+                  </span>
+                  <ExplainIcon name="stack" />
+                </span>
+              }
+              actions={
+                <>
+                  <StreamState connection={socket.state} />
+                  {createButton}
+                </>
+              }
+            >
+              <ChipStrip aria-label="State" className="mr-auto">
+                {STATES.map(({ value, label, dot, title }) => {
+                  const count = counts[value]
+                  if (value !== "running" && count === 0 && state !== value) return null
+                  return (
+                    <FilterChip
+                      key={value}
+                      selected={state === value}
+                      title={title}
+                      onClick={() => toggleState(value)}
+                    >
+                      <span aria-hidden className={cn("size-1.5 rounded-full", dot)} />
+                      {label}
+                      <ChipCount>{count}</ChipCount>
+                    </FilterChip>
+                  )
+                })}
+              </ChipStrip>
+            </PanelHeader>
+            <PanelToolbar>
+              <SearchInput
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Stack, service or image"
+                containerClassName="sm:w-64"
               />
-            ) : (
-              <StackRows
-                lines={visible}
-                wide={wide}
-                pending={pending}
-                confirm={confirm}
-                act={act}
-                trends={trendByName}
-                deploying={deploying}
-                collapsed={collapsed}
-                onToggle={toggleCollapsed}
-                onOpenStack={openStack}
-                onOpenContainer={openContainer}
-                onDeploy={(name) => void deploy(name)}
-              />
-            )}
-          </PanelBody>
-          <PanelFooter className="text-hint text-muted-foreground">
-            <span className="numeric">
-              {filtered
-                ? `${plural(visible.length, "stack")} of ${stacks.length} · ${plural(shown, "container")}`
-                : `${plural(stacks.length, "stack")} · ${plural(services, "container")}`}
-            </span>
-            <span className="text-muted-foreground/40">·</span>
-            <span>running first, then by name</span>
-          </PanelFooter>
-        </Panel>
+              {focus && (
+                <FilterChip
+                  selected
+                  aria-label={`Showing ${focus}; press to show every stack`}
+                  onClick={() => setFocus("")}
+                >
+                  {focus}
+                  <Cross aria-hidden className="size-3" />
+                </FilterChip>
+              )}
+              {state && (
+                <FilterChip
+                  selected
+                  className="ml-auto"
+                  aria-label="Show stacks in every state"
+                  onClick={() => setState("")}
+                >
+                  {STATES.find((s) => s.value === state)?.label}
+                  <Cross aria-hidden className="size-3" />
+                </FilterChip>
+              )}
+            </PanelToolbar>
+            <PanelBody flush>
+              {visible.length === 0 ? (
+                <EmptyState
+                  icon={Warning}
+                  title="Nothing matches those filters"
+                  description="Clear the search, or look under a different state."
+                  className="my-4"
+                  action={
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setQuery("")
+                        setFocus("")
+                        setState("")
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  }
+                />
+              ) : (
+                <StackRows
+                  lines={visible}
+                  wide={wide}
+                  pending={pending}
+                  confirm={confirm}
+                  act={act}
+                  trends={trendByName}
+                  deploying={deploying}
+                  collapsed={collapsed}
+                  onToggle={toggleCollapsed}
+                  onOpenStack={openStack}
+                  onOpenContainer={openContainer}
+                  onDeploy={(name) => void deploy(name)}
+                />
+              )}
+            </PanelBody>
+            <PanelFooter className="text-hint text-muted-foreground">
+              <span className="numeric">
+                {filtered
+                  ? `${plural(visible.length, "stack")} of ${stacks.length} · ${plural(shown, "container")}`
+                  : `${plural(stacks.length, "stack")} · ${plural(services, "container")}`}
+              </span>
+              <span className="text-muted-foreground/40">·</span>
+              <span>running first, then by name</span>
+            </PanelFooter>
+          </Panel>
+        )}
 
         {newStackDialog}
         {dialog}

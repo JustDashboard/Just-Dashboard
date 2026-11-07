@@ -1,13 +1,12 @@
 "use client"
 
-import { ArrowRight, Box } from "@/components/icons"
-import { rowReveal } from "@/components/icon-action"
+import { Box } from "@/components/icons"
+import { BarReading, type ReadingPart } from "@/components/bar-reading"
+import { timeAt } from "@/components/bar-reading-model"
 import { HUE, LiveBytes, LiveFigure } from "@/components/overview/readings"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, containerProduct, imageProduct } from "@/components/product-logo"
-import { Status, StatusDot, type DotTone } from "@/components/status-dot"
+import { DOT_COLOR, Status, type DotTone } from "@/components/status-dot"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { ShareBar, shade } from "@/components/procs/workloads"
 import { cores } from "@/components/procs/shared"
 import { ago } from "@/components/procs/units"
 import { spanWords, type EventEntry } from "@/lib/docker-events"
@@ -19,10 +18,13 @@ import { exitWords } from "@/components/docker/containers"
 /** How many containers each block names; the rest of the host is one muted span. */
 const SHOWN = 5
 
+/** Recent's axis: older events sit at its far end, where they can still be reached. */
+const DAY = 86_400_000
+
 /**
  * What the containers are doing: the five using the most processor and the
  * most memory, each a span of one bar as wide as the machine, and the last
- * things that happened to them.
+ * things that happened to them, placed on the last day.
  *
  * It replaced the runtime health bar, which said how many containers were up
  * and checked and nothing about which of them was busy or what had just gone
@@ -31,7 +33,8 @@ const SHOWN = 5
  * and a figure glides every two seconds; the host's readings size the bars,
  * with everything the host has in use beyond these five drawn muted. Recent
  * is Docker's event log, the one Events reads, with a restart loop folded to
- * one line and an OOM kill on the exit it caused. A row opens its container.
+ * one mark and an OOM kill on the exit it caused. A press opens its container,
+ * and an event about a container that no longer exists opens nothing.
  */
 export function ContainerBand({
   containers,
@@ -39,6 +42,7 @@ export function ContainerBand({
   snapshot,
   entries,
   listening,
+  loaded,
   now,
   onOpen,
 }: {
@@ -48,23 +52,26 @@ export function ContainerBand({
   entries: EventEntry[]
   /** Whether the event socket is open, so an empty Recent means nothing happened. */
   listening: boolean
+  /** Whether the container list has been read, so none running means none rather than not yet. */
+  loaded: boolean
   now: number
   onOpen: (id: string) => void
 }) {
   const byId = new Map(containers.map((c) => [c.id, c]))
+  const up = containers.some((c) => c.state === "running")
   const measured = containers.flatMap((c) => {
     const stat = stats[c.id]
     return stat && c.state === "running" ? [{ container: c, stat }] : []
   })
-  const byCPU = measured
-    .filter(({ stat }) => stat.cpuReady !== false && stat.cpuPercent > 0)
+  const ready = measured.filter(({ stat }) => stat.cpuReady !== false)
+  const byCPU = ready
+    .filter(({ stat }) => stat.cpuPercent > 0)
     .sort((a, b) => b.stat.cpuPercent - a.stat.cpuPercent)
     .slice(0, SHOWN)
   const byMemory = measured
     .filter(({ stat }) => stat.memUsage > 0)
     .sort((a, b) => b.stat.memUsage - a.stat.memUsage)
     .slice(0, SHOWN)
-  const waiting = measured.length > 0 && measured.every(({ stat }) => stat.cpuReady === false)
 
   const coreCount =
     snapshot?.cpu?.cores || snapshot?.cpu?.perCore?.length || measured[0]?.stat.hostCpus || 0
@@ -75,179 +82,188 @@ export function ContainerBand({
   const memSum = sum(byMemory, ({ stat }) => stat.memUsage)
   // Everything the containers hold, which the header says against the host:
   // the five named are the bar, the sum is how much of the machine is Docker.
-  const allCPU = sum(measured, ({ stat }) => (stat.cpuReady === false ? 0 : stat.cpuPercent))
+  const allCPU = sum(ready, ({ stat }) => stat.cpuPercent)
   const allMemory = sum(measured, ({ stat }) => stat.memUsage)
+
+  const nothing = loaded ? (
+    "Nothing is running."
+  ) : (
+    <TextShimmer>Reading the containers…</TextShimmer>
+  )
+
+  const line = (c: Container): Pick<ReadingPart, "key" | "mark" | "name" | "press"> => ({
+    key: c.id,
+    mark: <Mark product={containerProduct(c)} />,
+    name: c.name,
+    press: { label: `Open ${c.name}`, opens: true, onPress: () => onOpen(c.id) },
+  })
 
   return (
     <div
       data-slot="container-band"
       className="grid min-w-0 gap-x-10 gap-y-6 lg:grid-cols-2 xl:grid-cols-3"
     >
-      <Panel plain aria-label="Processor by container">
-        <PanelHeader
-          title="Processor"
-          actions={
-            measured.length > 0 && (
-              <span className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground">
-                <span className="font-medium text-foreground">
-                  <LiveFigure value={allCPU / 100} decimals={allCPU >= 995 ? 1 : 2} />
-                </span>
-                {coreCount > 0 ? `of ${plural(coreCount, "core")}` : "cores"}
+      <BarReading
+        title="Processor"
+        label="Processor by container"
+        list="Busiest containers"
+        hue={HUE.cpu}
+        trail
+        live
+        capacity={coreCount > 0 ? coreCount * 100 : cpuSum}
+        rest={busy !== undefined ? Math.max(busy * 100 - cpuSum, 0) : 0}
+        format={cores}
+        figure={
+          measured.length > 0 && (
+            <span className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground">
+              <span className="font-medium text-foreground">
+                <LiveFigure value={allCPU / 100} decimals={allCPU >= 995 ? 1 : 2} />
               </span>
-            )
-          }
-        />
-        <PanelBody className="space-y-3 pt-4">
-          <ShareBar
-            label="Processor"
-            capacity={coreCount > 0 ? coreCount * 100 : cpuSum}
-            rest={busy !== undefined ? Math.max(busy * 100 - cpuSum, 0) : 0}
-            parts={byCPU.map(({ container, stat }, rank) => ({
-              key: container.id,
-              value: stat.cpuPercent,
-              color: shade(HUE.cpu, rank),
-              label: `${container.name} ${cores(stat.cpuPercent)}`,
-            }))}
-            format={cores}
-          />
-          {measured.length === 0 ? (
-            <p className="py-2 text-body text-muted-foreground">Nothing is running.</p>
-          ) : waiting ? (
-            <p className="py-2 text-body">
-              <TextShimmer>Measuring the first interval…</TextShimmer>
-            </p>
-          ) : byCPU.length === 0 ? (
-            <p className="py-2 text-body text-muted-foreground">
-              No container is using the processor.
-            </p>
-          ) : (
-            <ul className="-mx-2">
-              {byCPU.map(({ container, stat }, rank) => (
-                <ContainerLine
-                  key={container.id}
-                  container={container}
-                  onOpen={onOpen}
-                  lead={<RankKey color={shade(HUE.cpu, rank)} />}
-                  detail={
-                    container.cpuLimit
-                      ? `of ${plural(container.cpuLimit, "core")}`
-                      : stat.pids > 0
-                        ? plural(stat.pids, "process", "processes")
-                        : undefined
-                  }
-                  title={`${percent(stat.cpuPercent)} of one core`}
-                  figure={
-                    stat.cpuPercent / 100 >= 0.005 ? (
-                      <LiveFigure
-                        value={stat.cpuPercent / 100}
-                        decimals={stat.cpuPercent >= 99.5 ? 1 : 2}
-                        unit=" cores"
-                      />
-                    ) : (
-                      "idle"
-                    )
-                  }
-                />
-              ))}
-            </ul>
-          )}
-        </PanelBody>
-      </Panel>
-
-      <Panel plain aria-label="Memory by container">
-        <PanelHeader
-          title="Memory"
-          actions={
-            measured.length > 0 && (
-              <span className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground">
-                <span className="font-medium text-foreground">
-                  <LiveBytes value={allMemory} />
-                </span>
-                {memTotal > 0 ? `of ${bytes(memTotal, 0)}` : "in use"}
-              </span>
-            )
-          }
-        />
-        <PanelBody className="space-y-3 pt-4">
-          <ShareBar
-            label="Memory"
-            capacity={memTotal > 0 ? memTotal : memSum}
-            rest={Math.max(memUsed - memSum, 0)}
-            parts={byMemory.map(({ container, stat }, rank) => ({
-              key: container.id,
-              value: stat.memUsage,
-              color: shade(HUE.mem, rank),
-              label: `${container.name} ${bytes(stat.memUsage)}`,
-            }))}
-            format={(v) => bytes(v)}
-          />
-          {byMemory.length === 0 ? (
-            <p className="py-2 text-body text-muted-foreground">
-              {measured.length === 0 ? "Nothing is running." : "No memory is reported."}
-            </p>
-          ) : (
-            <ul className="-mx-2">
-              {byMemory.map(({ container, stat }, rank) => {
-                const limited = stat.memLimited || (container.memoryLimit ?? 0) > 0
-                const limit = container.memoryLimit || stat.memLimit
-                return (
-                  <ContainerLine
-                    key={container.id}
-                    container={container}
-                    onOpen={onOpen}
-                    lead={<RankKey color={shade(HUE.mem, rank)} />}
-                    // The limit where there is one; "no limit" is the table's to say.
-                    detail={
-                      limited && (
-                        <span className={cn(stat.memPercent >= 85 && "text-warning")}>
-                          of {bytes(limit, 0)}
-                        </span>
-                      )
-                    }
-                    title={
-                      `${bytes(stat.memUsage)} in use${limited ? "" : ", no limit"}` +
-                      (memTotal > 0
-                        ? ` — ${percent((stat.memUsage / memTotal) * 100)} of the host`
-                        : "")
-                    }
-                    figure={<LiveBytes value={stat.memUsage} />}
-                  />
-                )
-              })}
-            </ul>
-          )}
-        </PanelBody>
-      </Panel>
-
-      <Panel plain aria-label="Recent container events" className="lg:col-span-2 xl:col-span-1">
-        <PanelHeader
-          title="Recent"
-          actions={
-            <span className="flex h-7 items-center">
-              {listening ? (
-                <Status live tone="running" label="Live" />
-              ) : (
-                <Status tone="notice" label="Connecting…" />
-              )}
+              {coreCount > 0 ? `of ${plural(coreCount, "core")}` : "cores"}
             </span>
+          )
+        }
+        message={
+          !up ? (
+            nothing
+          ) : ready.length === 0 ? (
+            <TextShimmer>Measuring the first interval…</TextShimmer>
+          ) : byCPU.length === 0 ? (
+            "No container is using the processor."
+          ) : undefined
+        }
+        parts={byCPU.map(({ container, stat }) => ({
+          ...line(container),
+          value: stat.cpuPercent,
+          figure:
+            stat.cpuPercent / 100 >= 0.005 ? (
+              <LiveFigure
+                value={stat.cpuPercent / 100}
+                decimals={stat.cpuPercent >= 99.5 ? 1 : 2}
+                unit=" cores"
+              />
+            ) : (
+              "idle"
+            ),
+          label: `${container.name} ${cores(stat.cpuPercent)}`,
+          title: `${percent(stat.cpuPercent)} of one core`,
+        }))}
+      />
+
+      <BarReading
+        title="Memory"
+        label="Memory by container"
+        list="Containers using the most memory"
+        hue={HUE.mem}
+        trail
+        live
+        capacity={memTotal > 0 ? memTotal : memSum}
+        rest={Math.max(memUsed - memSum, 0)}
+        free="Free"
+        format={(v) => bytes(v)}
+        figure={
+          measured.length > 0 && (
+            <span className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground">
+              <span className="font-medium text-foreground">
+                <LiveBytes value={allMemory} />
+              </span>
+              {memTotal > 0 ? `of ${bytes(memTotal, 0)}` : "in use"}
+            </span>
+          )
+        }
+        message={
+          !up ? (
+            nothing
+          ) : measured.length === 0 ? (
+            <TextShimmer>Waiting for the first reading…</TextShimmer>
+          ) : byMemory.length === 0 ? (
+            "No memory is reported."
+          ) : undefined
+        }
+        parts={byMemory.map(({ container, stat }) => {
+          const limited = stat.memLimited || (container.memoryLimit ?? 0) > 0
+          const limit = container.memoryLimit || stat.memLimit
+          return {
+            ...line(container),
+            value: stat.memUsage,
+            figure: <LiveBytes value={stat.memUsage} />,
+            // The limit where there is one; "no limit" is the table's to say.
+            detail: limited ? (
+              <span className={cn(stat.memPercent >= 85 && "text-warning")}>
+                of {bytes(limit, 0)}
+              </span>
+            ) : undefined,
+            label: `${container.name} ${bytes(stat.memUsage)}`,
+            title:
+              `${bytes(stat.memUsage)} in use${limited ? "" : ", no limit"}` +
+              (memTotal > 0 ? ` — ${percent((stat.memUsage / memTotal) * 100)} of the host` : ""),
           }
-        />
-        <PanelBody className="pt-3">
-          {entries.length === 0 ? (
-            <p className="py-2 text-body text-muted-foreground">
-              {listening
-                ? "Nothing has started, stopped or failed since the dashboard began listening."
-                : "Waiting for Docker's event log."}
-            </p>
+        })}
+      />
+
+      <BarReading
+        title="Recent"
+        label="Recent container events"
+        list="Latest events"
+        className="lg:col-span-2 xl:col-span-1"
+        ticks
+        figure={
+          <span className="flex h-7 items-center">
+            {listening ? (
+              <Status live tone="running" label="Live" />
+            ) : (
+              <Status tone="notice" label="Connecting…" />
+            )}
+          </span>
+        }
+        message={
+          entries.length > 0 ? undefined : listening ? (
+            "Nothing has started, stopped or failed since the dashboard began listening."
           ) : (
-            <ul className="-mx-2">
-              {entries.slice(0, SHOWN + 1).map((entry) => (
-                <EventLine key={entry.key} entry={entry} byId={byId} now={now} onOpen={onOpen} />
-              ))}
-            </ul>
-          )}
-        </PanelBody>
-      </Panel>
+            <TextShimmer>Waiting for Docker&apos;s event log.</TextShimmer>
+          )
+        }
+        parts={entries.slice(0, SHOWN + 1).map((entry): ReadingPart => {
+          const event: DockerEvent = entry.kind === "loop" ? entry.exit : entry.event
+          const container = event.id ? byId.get(event.id) : undefined
+          const { words, tone } = describe(entry)
+          const time = Date.parse(entry.kind === "loop" ? entry.until : event.time)
+          const product = container
+            ? containerProduct(container)
+            : event.image
+              ? imageProduct(event.image)
+              : "docker"
+          const name = container?.name ?? event.name ?? ""
+          return {
+            key: entry.key,
+            value: 1,
+            at: timeAt(time, now, DAY),
+            color: DOT_COLOR[tone],
+            mark: <Mark product={product} />,
+            name,
+            detail: (
+              <span
+                className={cn(
+                  tone === "danger" && "text-destructive",
+                  tone === "warning" && "text-warning",
+                )}
+              >
+                {words}
+              </span>
+            ),
+            figure: (
+              <span className="text-hint font-normal text-muted-foreground">
+                {ago(time / 1000, now)}
+              </span>
+            ),
+            label: `${name} ${words} ${ago(time / 1000, now)}`,
+            title: new Date(time).toLocaleString(),
+            press: container
+              ? { label: `Open ${name}`, opens: true, onPress: () => onOpen(container.id) }
+              : undefined,
+          }
+        })}
+      />
     </div>
   )
 }
@@ -256,92 +272,12 @@ function sum<T>(list: T[], value: (item: T) => number) {
   return list.reduce((total, item) => total + value(item), 0)
 }
 
-/** The span's key: the rank's step of its measurement's hue, so a row finds itself on the bar. */
-function RankKey({ color }: { color: string }) {
-  return (
-    <span aria-hidden className="h-2.5 w-0.5 shrink-0 rounded-full" style={{ background: color }} />
-  )
-}
-
-/** The container as its image's product, at the line's height. */
+/** The container as its image's product. */
 function Mark({ product }: { product: string }) {
-  return (
-    <span className="flex size-4 shrink-0 items-center justify-center">
-      {product !== "docker" ? (
-        <ProductGlyph id={product} className="size-3.5" />
-      ) : (
-        <Box aria-hidden className="size-3.5 text-muted-foreground" />
-      )}
-    </span>
-  )
-}
-
-/**
- * One container on a line: what finds it on the bar or in time, its mark and
- * name, a detail, and its figure. A press opens the container; the arrow is
- * what says so, revealed under the pointer and always drawn on a touch screen.
- * A line about a container that no longer exists opens nothing and has no
- * arrow.
- */
-function ContainerLine({
-  container,
-  name,
-  product,
-  lead,
-  detail,
-  figure,
-  title,
-  onOpen,
-}: {
-  container?: Container
-  name?: string
-  product?: string
-  lead: React.ReactNode
-  detail?: React.ReactNode
-  figure: React.ReactNode
-  title?: string
-  onOpen: (id: string) => void
-}) {
-  const label = container?.name ?? name ?? ""
-  const body = (
-    <>
-      {lead}
-      <Mark product={product ?? (container ? containerProduct(container) : "docker")} />
-      {/* The name keeps its width before the detail gives up any of its own. */}
-      <span className="max-w-[70%] shrink-0 truncate font-medium">{label}</span>
-      {detail && (
-        <span className="numeric min-w-0 shrink truncate text-hint text-muted-foreground">
-          {detail}
-        </span>
-      )}
-      <span className="numeric ml-auto shrink-0 font-medium text-foreground">{figure}</span>
-    </>
-  )
-  const line = "flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body"
-  if (!container) {
-    return (
-      <li className={line} title={title}>
-        {body}
-        <span aria-hidden className="size-3.5 shrink-0" />
-      </li>
-    )
-  }
-  return (
-    <li>
-      <button
-        type="button"
-        aria-label={`Open ${label}`}
-        title={title}
-        onClick={() => onOpen(container.id)}
-        className={cn("group focus-ring-inset transition-colors hover:bg-row-hover", line)}
-      >
-        {body}
-        <ArrowRight
-          aria-hidden
-          className={cn("size-3.5 shrink-0 text-muted-foreground", rowReveal())}
-        />
-      </button>
-    </li>
+  return product !== "docker" ? (
+    <ProductGlyph id={product} className="size-3.5" />
+  ) : (
+    <Box aria-hidden className="size-3.5 text-muted-foreground" />
   )
 }
 
@@ -386,51 +322,4 @@ function describe(entry: EventEntry): { words: string; tone: DotTone } {
     default:
       return { words: event.action, tone: "notice" }
   }
-}
-
-/**
- * A recent event: the state's dot, the container, what happened and when. A
- * failure is drawn in its tone, and a loop says how many times and for how
- * long in the same line.
- */
-function EventLine({
-  entry,
-  byId,
-  now,
-  onOpen,
-}: {
-  entry: EventEntry
-  byId: Map<string, Container>
-  now: number
-  onOpen: (id: string) => void
-}) {
-  const event: DockerEvent = entry.kind === "loop" ? entry.exit : entry.event
-  const container = event.id ? byId.get(event.id) : undefined
-  const { words, tone } = describe(entry)
-  const time = entry.kind === "loop" ? entry.until : event.time
-  return (
-    <ContainerLine
-      container={container}
-      name={event.name}
-      product={container ? undefined : event.image ? imageProduct(event.image) : "docker"}
-      onOpen={onOpen}
-      lead={<StatusDot tone={tone} className="mx-px" />}
-      title={new Date(time).toLocaleString()}
-      detail={
-        <span
-          className={cn(
-            tone === "danger" && "text-destructive",
-            tone === "warning" && "text-warning",
-          )}
-        >
-          {words}
-        </span>
-      }
-      figure={
-        <span className="text-hint font-normal text-muted-foreground">
-          {ago(Date.parse(time) / 1000, now)}
-        </span>
-      }
-    />
-  )
 }

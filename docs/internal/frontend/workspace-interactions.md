@@ -76,6 +76,12 @@ stays active even while these editors are closed or their pages are unmounted. E
 successful save/deletion and `jd-working-state-cleared` clear retained contents. Cleanup increments
 a generation so an old request cannot recreate or remove a new account's draft. These buffers are
 never persisted in Web Storage and a confirmed reload discards them.
+Below `lg` the Git workspace shows one pane at a time, the full height of the screen. A bottom bar picks
+Changes, History, Branches, GitHub or Files; pressing a row opens its preview as a full page with the strip
+and the bar hidden and a back arrow in `PreviewHeader`. `pick` closes an open preview there, so anything
+that asks for a list shows it. The branch graph has no tab strip to live in on a phone and is also in the
+More menu. The hardware back button still leaves the page rather than closing a preview.
+
 Git file drafts stay in memory per checkout/path across SPA previews, with an unload guard across
 repositories; cron builder drafts keep their captured crontab revision in memory per account. Their
 explicit Close/discard and sign-out paths clear the retained content. File Cut clipboard entries are

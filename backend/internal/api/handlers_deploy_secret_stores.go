@@ -27,8 +27,8 @@ func (s *Server) mountSecretStoreReads(r chi.Router) {
 }
 
 func (s *Server) mountSecretStoreWrites(r chi.Router) {
-	r.Method(http.MethodPost, "/secret-stores", s.handle(s.handleSecretStoreCreate))
-	r.Method(http.MethodPut, "/secret-stores/{store}", s.handle(s.handleSecretStoreUpdate))
+	r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/secret-stores", s.handle(s.handleSecretStoreCreate))
+	r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/secret-stores/{store}", s.handle(s.handleSecretStoreUpdate))
 	r.Method(http.MethodPost, "/secret-stores/{store}/test", s.handle(s.handleSecretStoreTest))
 }
 

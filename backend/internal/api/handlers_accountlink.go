@@ -25,9 +25,9 @@ func (s *Server) mountAccountLinkRoutes(r chi.Router) {
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireSession)
-			r.Method(http.MethodPost, "/", s.handle(s.handleAccountLinkBegin))
-			r.Method(http.MethodDelete, "/request", s.handle(s.handleAccountLinkCancel))
-			r.Method(http.MethodPut, "/scope", s.handle(s.handleAccountLinkScope))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/", s.handle(s.handleAccountLinkBegin))
+			r.With(httpx.RefuseHubSession).Method(http.MethodDelete, "/request", s.handle(s.handleAccountLinkCancel))
+			r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/scope", s.handle(s.handleAccountLinkScope))
 			// Ending a link stops everything the site could do, which is a
 			// service interruption of a kind: it is in the destructive budget.
 			s.destructive(r, func(r chi.Router) {
