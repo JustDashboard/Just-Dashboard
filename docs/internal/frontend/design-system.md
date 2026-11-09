@@ -3286,8 +3286,10 @@ the end of the field that read as the `/` shortcut and a letter "B". Now:
   is a blue field with amber and red where they happened, not a grey wall. The histogram is taller,
   reads a column out by series under the pointer, and takes a drag as well as a press.
 - **Insights says the window in words first.** A log's opens on its lines, errors, warnings (each
-  narrowing to itself), busiest minute and its measure's p95 or distinct addresses, every figure with
-  its line across the window. A request record's opens on who came: **Visitors** (distinct people —
+  narrowing to itself), busiest minute and its distinct addresses, every figure with its picture on
+  one line across the row. Since 2026-11-09 it is drawn as the request record's is: `RankList` and
+  `SplitBar` rather than a `BarList` per key, group tables of one-line rows, the chart under a block's
+  head, and level chips for the levels present only. A request record's opens on who came: **Visitors** (distinct people —
   an address and a browser that opened a page; never a crawler, a script or a probe), page views, bots
   and scripts, the site that sent them as itself and the devices as one bar in their colours, then
   the people as a list — the browser on its system, the device, the address, their trail of pages —

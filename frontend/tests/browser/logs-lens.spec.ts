@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import { json, mockProject, now } from "./deploy-fixture"
 import { PG, mockLensLogs, type LensMocks } from "./logs-lens-fixture"
+import { risen } from "./risen"
 
 /**
  * `/logs` reading a source through its lens: the lines by what they record,
@@ -200,15 +201,20 @@ test("Insights ranks the window's values and a press narrows it in place", async
   // clients, applications, codes — but not the query shape, which is read
   // through its group's sample.
   await expect(page.getByRole("heading", { name: "Events", exact: true })).toBeVisible()
-  await expect(page.locator("[data-slot=bar-list]")).toHaveCount(7)
+  // Each as figures and shares rather than a bar per row, as the request
+  // record's lists are; the events and the levels each a whole, in one strip.
+  await expect(page.locator("[data-slot=rank-list]")).toHaveCount(7)
+  await expect(page.locator("[data-slot=bar-list]")).toHaveCount(0)
+  await expect(page.locator("[data-slot=split-bar]")).toHaveCount(3)
   await expect(page.getByRole("heading", { name: "Query shape" })).toHaveCount(0)
   await expect(page.getByRole("heading", { name: "Statement time" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Slow statements" })).toBeVisible()
   await expect(page.getByText(/JOIN customers c ON/)).toBeVisible()
   await expect(page.getByRole("heading", { name: "Patterns" })).toBeVisible()
   // Insights opens on what the window adds up to, in words: its lines, the
-  // errors and warnings among them, its busiest minute and the measure's
-  // tail. The lens's own readings stay the chips' counts.
+  // errors and warnings among them, its busiest minute and the clients that
+  // spoke. The measure's tail is the block under the chart, not a tile that
+  // said its p95 a second time. The lens's own readings stay the chips' counts.
   const tiles = page
     .locator("[data-slot=stat-grid]")
     .filter({ hasText: "Errors" })
@@ -216,7 +222,8 @@ test("Insights ranks the window's values and a press narrows it in place", async
   await expect(tiles).toHaveCount(5)
   await expect(tiles.filter({ hasText: "Errors" })).toContainText("2")
   await expect(tiles.filter({ hasText: "Warnings" })).toContainText("None")
-  await expect(tiles.filter({ hasText: "Statement time p95" })).toContainText("1.84s")
+  await expect(tiles.filter({ hasText: "Client" })).toContainText("busiest 172.18.0.5")
+  await expect(tiles.filter({ hasText: "p95" })).toHaveCount(0)
 
   const overview = mocks.searches.find((s) => s.get("facets")?.includes("pattern"))!
   expect(overview.get("limit")).toBe("1")
@@ -240,6 +247,106 @@ test("Insights ranks the window's values and a press narrows it in place", async
   await expect(insights).toHaveAttribute("aria-pressed", "true")
   await expect(page).toHaveURL(/mode=insights/)
   await expect(page.getByRole("button", { name: "Clear the user filter" })).toBeVisible()
+})
+
+test("a filter changes Insights' figures in place, and its tiles keep their lines in a row", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await mockLensLogs(page)
+  let hold: (() => void) | undefined
+  await page.route("**/api/v1/logs/search?**", async (route) => {
+    const params = new URL(route.request().url()).searchParams
+    const overview = (params.get("facets") ?? "").split(",").includes("pattern")
+    if (overview && params.getAll("f").includes("user:postgres")) {
+      await new Promise<void>((resolve) => (hold = resolve))
+    }
+    await route.fallback()
+  })
+  await page.goto(`${pgLog}&mode=insights`)
+  const tiles = page
+    .locator("[data-slot=stat-grid]")
+    .filter({ hasText: "Errors" })
+    .locator("[data-slot=stat-tile]")
+  await expect(tiles).toHaveCount(5)
+  await risen(page)
+  // Every tile's name and hint stand in one row: each keeps its picture line,
+  // a flat one where there is nothing to draw, as the request record's do.
+  const lines = await tiles.evaluateAll((all) =>
+    all.map((tile) => [
+      tile.firstElementChild!.getBoundingClientRect().top,
+      tile.lastElementChild!.getBoundingClientRect().bottom,
+    ]),
+  )
+  for (const [top, bottom] of lines) {
+    expect(Math.abs(top - lines[0][0])).toBeLessThanOrEqual(0.5)
+    expect(Math.abs(bottom - lines[0][1])).toBeLessThanOrEqual(0.5)
+  }
+  // A list's figures end on its head's right edge.
+  const events = page.getByRole("heading", { name: "Events", exact: true }).locator("../..")
+  const head = await events.locator("h3").locator("..").boundingBox()
+  const share = await events.locator("[data-slot=rank-share]").first().boundingBox()
+  expect(Math.abs(share!.x + share!.width - (head!.x + head!.width))).toBeLessThanOrEqual(1)
+
+  // Only the levels the window holds are chips, as the record's classes are.
+  const levels = page.getByRole("group", { name: "Levels" })
+  await expect(levels.getByRole("button")).toHaveText([/^error/, /^info/])
+
+  const lead = tiles.first()
+  await lead.evaluate((node) => node.setAttribute("data-kept", ""))
+  await page.getByRole("button", { name: "Only lines where user is postgres" }).click()
+  await expect.poll(() => Boolean(hold)).toBe(true)
+  // While the answer is on its way the last one stays, a little quieter: no
+  // skeleton, and the very same elements rather than new ones.
+  await expect(page.locator("[data-slot=skeleton]")).toHaveCount(0)
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(1)
+  await expect(page.locator("[data-kept]")).toContainText("22")
+  hold!()
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(0)
+  await expect(page.locator("[data-kept]")).toHaveCount(1)
+
+  // A response time pressed is a floor, said as the figure it is.
+  await page.getByRole("button", { name: /^19 in 20: 1\.84s/ }).click()
+  await expect(page.getByRole("button", { name: "Clear the duration filter" })).toContainText(
+    "≥ 1.84s",
+  )
+})
+
+test("a log whose lines carry no time or level says so rather than nothing", async ({ page }) => {
+  await mockLensLogs(page)
+  await page.route("**/api/v1/logs/search?**", (route) => {
+    const params = new URL(route.request().url()).searchParams
+    if (!(params.get("facets") ?? "").split(",").includes("pattern")) return route.fallback()
+    const value = (v: string, count: number) => ({ value: v, count, errors: 0 })
+    return route.fulfill({
+      json: {
+        lines: [],
+        scanned: 17,
+        matched: 3,
+        truncated: false,
+        complete: true,
+        files: [],
+        histogram: [],
+        tookMillis: 0,
+        facets: {
+          level: { values: [value("unknown", 3)], distinct: 1, other: 0, missing: 0 },
+          user: { values: [value("postgres", 3)], distinct: 1, other: 0, missing: 0 },
+        },
+      },
+    })
+  })
+  await page.goto(`${pgLog}&mode=insights`)
+  const busiest = page.locator("[data-slot=stat-tile]").filter({ hasText: "Busiest" })
+  // Matched lines with no time have no column to be busiest: that is not
+  // "nothing in the window".
+  await expect(busiest).toContainText("these lines carry no time")
+  // No tile has a picture to draw, so none keeps a line for one.
+  await expect(page.locator("[data-slot=stat-tile] .h-9")).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Events over time" })).toHaveCount(0)
+  // A level list of one "other" said nothing, and so did a chip of it.
+  await expect(page.getByRole("heading", { name: "Levels", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("group", { name: "Levels" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "User", exact: true })).toBeVisible()
 })
 
 test("the source is named over the workbench, and the strip is its views", async ({ page }) => {
