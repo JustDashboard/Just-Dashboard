@@ -5,10 +5,12 @@ import { LineChart, MagnifyingGlassMinus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { errorMessage, get } from "@/lib/api"
 import { bytes, clock, plural, relativeTime, timestamp } from "@/lib/format"
-import { latency } from "@/lib/requests"
+import { hueFor, LANES } from "@/lib/hue"
+import { latency, type StatusClass } from "@/lib/requests"
 import type { LogBucket, LogFacet, LogFacetValue, LogSearchResult } from "@/lib/types"
 import type { LogFilterState, LogTimeRange } from "@/components/logs/types"
 import {
+  LEVEL_LABEL,
   fieldPredicates,
   fieldsOf,
   filterQuery,
@@ -19,15 +21,15 @@ import {
 } from "@/lib/log-filter"
 import { fieldOf, isFilterable } from "@/lib/log-fields"
 import { groupScope, overviewFacets, overviewSplit, patternRegex } from "@/lib/log-insights"
-import { eventMeta, type LensGroup, type LogLens } from "@/lib/log-lenses"
-import { BarList, type BarListItem } from "@/components/bar-list"
-import { Facet } from "@/components/deploy/traffic-facets"
+import { eventLabel, eventMeta, type LensGroup, type LogLens } from "@/lib/log-lenses"
+import { RankList, SplitBar, percent, type RankItem } from "@/components/rank-list"
+import { FAMILY_HUE, Facet } from "@/components/deploy/traffic-facets"
 import { LatencyReadings } from "@/components/deploy/latency-readings"
 import { FieldMark, FieldValue } from "@/components/logs/field-value"
-import { Histogram } from "@/components/logs/histogram"
+import { Histogram, SERIES_HUES } from "@/components/logs/histogram"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
+import { StatButton, StatGrid, StatTile, TileBand } from "@/components/stat-tile"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import {
   Table,
@@ -50,6 +52,29 @@ const GROUP_ROWS = 20
  * strings, so the overview ranks it and the lists leave it to the groups.
  */
 const BY_SAMPLE_ONLY = new Set(["fp"])
+
+/**
+ * The keys every line has exactly one of, so their values are parts of one
+ * whole: drawn as one strip over the list, in the colours the chart above
+ * draws them in, the way the request record draws its status codes.
+ */
+const WHOLE = new Set(["level", "event", "class"])
+
+/** Each level in the chart's swatch (`LEVEL_DOT`), as a colour a strip can take. */
+const LEVEL_HUE: Record<LogLevel, string> = {
+  critical: "var(--destructive)",
+  error: "color-mix(in oklab, var(--destructive) 70%, transparent)",
+  warn: "var(--warning)",
+  info: "var(--chart-2)",
+  debug: "color-mix(in oklab, var(--muted-foreground) 60%, transparent)",
+  unknown: "color-mix(in oklab, var(--muted-foreground) 30%, transparent)",
+}
+
+const TONE_HUE = {
+  danger: "var(--destructive)",
+  warning: "var(--warning)",
+  success: "var(--success)",
+} as const
 
 type InsightsProps = {
   /** False leaves out the row of figures over the chart. */
@@ -80,6 +105,8 @@ type InsightsProps = {
 }
 
 type Answer = {
+  /** The source the answer is about: another source's never stands in for this one's. */
+  source: string
   overview: LogSearchResult
   /** Each group's answer, or null for a group the reader's filter rules out. */
   groups: Record<string, LogSearchResult | null>
@@ -88,20 +115,27 @@ type Answer = {
 /**
  * What the log adds up to over the window and the filter on screen.
  *
- * The request log's Insights, for any log a lens reads: the events over time, each of the lens's keys ranked (a press narrows to
- * the value and stays here, as the request lists do), the measure's
- * distribution where there is one, each of the lens's groups as a ranked
- * table — the slow statements by their shape, the attackers by address —
- * and the patterns every line falls into, which a log with no lens has too.
+ * The request log's Insights, for any log a lens reads, and drawn the way the
+ * request record's is: the window's figures, the events over time, the
+ * measure's figures where there is one, each of the lens's keys as a ranked
+ * list of figures and shares (a press narrows to the value and stays here,
+ * as the request lists do), each of the lens's groups as a ranked table — the
+ * slow statements by their shape, the attackers by address — and the patterns
+ * every line falls into, which a log with no lens has too.
  *
  * One search for the overview and one per group, in parallel: the groups
  * each rank one key under their own predicates and measure, which one search
  * cannot. They run when the view opens and again when a chip, a field or the
  * window changes; the words in the search box wait for Enter, as History's do.
+ * While a new question is being answered the last answer stays, slightly
+ * dimmed, and only its figures move when the new one lands: nothing remounts
+ * and nothing drops to a skeleton, the rule the request record keeps.
  */
 export function Insights(props: InsightsProps) {
   const { lens, lensId, filter, onFilterChange } = props
-  const { answer, error, loading, runId } = useInsights(props)
+  const { answer: held, error, loading } = useInsights(props)
+  // Held over a change of question, never over a change of source.
+  const answer = held?.source === props.sourceId ? held : null
   const overview = answer?.overview
 
   const narrow = (key: string, value: string) => {
@@ -119,15 +153,18 @@ export function Insights(props: InsightsProps) {
   }
 
   const measure = lens?.measure
-  const timed = measure?.format === "ms" && overview?.measure && overview.measure.count > 0
-  const lists = overviewFacets(lens).filter(
-    (key) =>
-      key !== "pattern" &&
-      !BY_SAMPLE_ONLY.has(key) &&
-      (overview?.facets?.[key]?.values.length ?? 0),
+  const timed = Boolean(measure?.format === "ms" && overview?.measure && overview.measure.count > 0)
+  const ranks = overviewFacets(lens).filter(
+    (key) => key !== "pattern" && !BY_SAMPLE_ONLY.has(key) && telling(key, overview?.facets?.[key]),
   )
+  // The levels on their own are what the tiles, the chart's legend and the
+  // level chips already count, three times over; as the only list they were a
+  // fourth saying of it, in half the pane beside a hole.
+  const lists = ranks.length === 1 && ranks[0] === "level" ? [] : ranks
   const columns = [lists.filter((_, i) => i % 2 === 0), lists.filter((_, i) => i % 2 === 1)]
   const patterns = overview?.facets?.pattern
+  const groups = lens?.groups ?? []
+  const ranked = lists.length > 0 || groups.length > 0 || (patterns?.values.length ?? 0) > 0
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -147,8 +184,8 @@ export function Insights(props: InsightsProps) {
         </div>
       ) : (
         <div
-          key={runId}
-          className={cn("flex flex-col transition-opacity", loading && "opacity-60")}
+          aria-busy={loading}
+          className={cn("flex flex-col transition-opacity duration-150", loading && "opacity-70")}
         >
           {props.tiles !== false && (
             <Readings
@@ -162,8 +199,9 @@ export function Insights(props: InsightsProps) {
           )}
           {answer.overview.histogram.length > 0 && (
             <Histogram
+              heading
               className="animate-rise"
-              title={lens ? "Events over time" : "Matches over time"}
+              title={lens ? "Events over time" : "Lines over time"}
               buckets={answer.overview.histogram}
               bucketSeconds={answer.overview.bucketSeconds ?? 60}
               by={answer.overview.histogramBy}
@@ -176,7 +214,7 @@ export function Insights(props: InsightsProps) {
             {timed && measure && (
               <Facet
                 title={measure.label}
-                reading={plural(answer.overview.measure!.count, "timed line")}
+                reading={`${plural(answer.overview.measure!.count, "timed line")} · press a figure to see those lines`}
                 index={0}
               >
                 <LatencyReadings
@@ -202,8 +240,12 @@ export function Insights(props: InsightsProps) {
                         reading={tallyOf(answer.overview.facets![key])}
                         index={i * 2 + c + 1}
                       >
-                        <BarList
-                          items={facetItems(key, answer.overview.facets![key], lensId, narrow)}
+                        <FacetList
+                          name={key}
+                          facet={answer.overview.facets![key]}
+                          matched={answer.overview.matched}
+                          lensId={lensId}
+                          narrow={narrow}
                         />
                       </Facet>
                     ))}
@@ -212,12 +254,12 @@ export function Insights(props: InsightsProps) {
               </div>
             )}
 
-            {lens?.groups?.map((group, i) => (
+            {groups.map((group, i) => (
               <Facet
                 key={group.id}
                 title={group.label}
                 reading={
-                  answer.groups[group.id]?.facets?.[group.by]
+                  answer.groups[group.id]?.facets?.[group.by]?.values.length
                     ? tallyOf(answer.groups[group.id]!.facets![group.by], GROUP_ROWS)
                     : undefined
                 }
@@ -243,7 +285,7 @@ export function Insights(props: InsightsProps) {
               <Facet
                 title="Patterns"
                 reading={tallyOf(patterns)}
-                index={lists.length + (lens?.groups?.length ?? 0) + 1}
+                index={lists.length + groups.length + 1}
               >
                 <PatternTable
                   facet={patterns}
@@ -254,11 +296,15 @@ export function Insights(props: InsightsProps) {
               </Facet>
             )}
 
-            {!lens && lists.length <= 1 && (!patterns || patterns.values.length === 0) && (
+            {!ranked && !timed && (
               <EmptyState
                 icon={LineChart}
                 title="Nothing to rank here"
-                description="This log is read as plain text, so its lines carry no fields to rank. Read it through a lens under Options to rank its events and values."
+                description={
+                  lens
+                    ? `These lines carry none of the values a ${lens.label} log is ranked by. History has them as they were written.`
+                    : "This log is read as plain text, so its lines carry no fields to rank. Read it through a lens under Options to rank its events and values."
+                }
               />
             )}
           </div>
@@ -266,6 +312,18 @@ export function Insights(props: InsightsProps) {
       )}
     </div>
   )
+}
+
+/**
+ * Whether a key's list says anything. A level list of one level is every line
+ * at that level, which the tiles and the level chips already say — and on a
+ * log that writes no levels at all it was one bar the width of the pane
+ * reading "other".
+ */
+function telling(key: string, facet: LogFacet | undefined) {
+  const values = facet?.values.length ?? 0
+  if (key === "level") return values > 1
+  return values > 0
 }
 
 const ERROR_LEVELS: LogLevel[] = ["critical", "error"]
@@ -300,15 +358,25 @@ function toneSeries(
   )
 }
 
+/** A trend on its own peak, so a quiet window still draws its line rather than a hole. */
+function Trend({ values, label, color }: { values: number[]; label: string; color: string }) {
+  return <TileTrend values={values} label={label} color={color} max={Math.max(...values, 1)} />
+}
+
 /**
  * What the window adds up to, before any list: how many lines, how many of
  * them failed or warned, when it was busiest, and — where the lens reads one
- * — how many distinct clients spoke. Insights used to open on a strip of level
- * chips and a chart with "one column is 30s" over it, and nothing said in
- * words what the window held until the lists a screen down. Each figure
- * counts up as it lands and carries its own shape across the window; the
- * errors and the warnings narrow the lines to themselves, as the level chips
- * do, and press again to let go.
+ * — how many distinct clients spoke. Each figure counts up as it lands and
+ * keeps one picture line, as the request record's tiles do, so the names, the
+ * figures and the hints stand in rows: the lines' shape across the window,
+ * the errors' and the warnings' (flat when there were none), where the
+ * busiest column fell, and how the clients split. The errors and the warnings
+ * narrow the lines to themselves, as the level chips do, and press again to
+ * let go.
+ *
+ * The measure's p95 used to be a fifth tile here, with the same figure in the
+ * block of four under the chart; the block says it in words and narrows on a
+ * press, so the tile went.
  */
 function Readings({
   overview,
@@ -332,6 +400,10 @@ function Readings({
   const warnings = levels.warn ?? 0
   const buckets = overview.histogram
   const totals = buckets.map((b) => b.total)
+  // A figure of none draws none: by event, the chart's amber is the lens's
+  // warning-toned events (a slow statement), which a level count of no
+  // warnings would otherwise sit over as a rising line.
+  const quiet = buckets.map(() => 0)
   const peakAt = totals.indexOf(Math.max(0, ...totals))
   const peak = peakAt >= 0 ? buckets[peakAt] : undefined
   const width = overview.bucketSeconds ?? 60
@@ -343,7 +415,10 @@ function Readings({
   // The lens's own "who": the first key it reads as an address, counted.
   const who = lens?.facets.find((key) => fieldOf(key).kind === "address")
   const whoFacet = who ? overview.facets?.[who] : undefined
-  const measure = lens?.measure?.format === "ms" ? overview.measure : undefined
+  // Every tile keeps a picture line while any of them has a picture to draw;
+  // over lines that carry no time none does, and five empty bands were a
+  // row of tiles a band taller than anything in them.
+  const banded = buckets.length > 1 || Boolean(whoFacet)
   const press = (wanted: LogLevel[]) =>
     onFilterChange({ ...filter, levels: sameLevels(filter.levels, wanted) ? [] : wanted })
   // The overview is asked with the level chips on screen, so a level they
@@ -355,15 +430,17 @@ function Readings({
   const warningsOut = leftOut(WARN_LEVELS)
 
   return (
-    <StatGrid
-      columns={whoFacet || measure ? 5 : 4}
-      dense
-      className="shrink-0 border-b border-hairline"
-    >
+    <StatGrid columns={whoFacet ? 5 : 4} dense className="shrink-0 border-b border-hairline">
       <StatTile
         label="Lines"
         value={<NumberTicker value={overview.matched} />}
-        trend={<TileTrend values={totals} label="Lines across the window" color="var(--chart-2)" />}
+        trend={
+          banded && (
+            <TileBand>
+              <Trend values={totals} label="Lines across the window" color="var(--chart-2)" />
+            </TileBand>
+          )
+        }
         hint={
           loading
             ? "Reading the window…"
@@ -380,12 +457,20 @@ function Readings({
           tone={errorsOut ? "default" : errors > 0 ? "danger" : "success"}
           value={errorsOut ? "—" : errors > 0 ? <NumberTicker value={errors} /> : "None"}
           trend={
-            errors > 0 && (
-              <TileTrend
-                values={toneSeries(buckets, overview.histogramBy, lensId, ERROR_LEVELS, "danger")}
-                label="Errors across the window"
-                color="var(--destructive)"
-              />
+            banded && (
+              <TileBand>
+                {!errorsOut && (
+                  <Trend
+                    values={
+                      errors > 0
+                        ? toneSeries(buckets, overview.histogramBy, lensId, ERROR_LEVELS, "danger")
+                        : quiet
+                    }
+                    label="Errors across the window"
+                    color={errors > 0 ? "var(--destructive)" : "var(--success)"}
+                  />
+                )}
+              </TileBand>
             )
           }
           hint={
@@ -395,7 +480,7 @@ function Readings({
                 ? share(errors)
                 : "nothing failed in this window"
           }
-          className="group-hover:bg-row-hover"
+          className="h-full group-hover:bg-row-hover"
         />
       </StatButton>
       <StatButton
@@ -408,12 +493,20 @@ function Readings({
           tone={!warningsOut && warnings > 0 ? "warning" : "default"}
           value={warningsOut ? "—" : warnings > 0 ? <NumberTicker value={warnings} /> : "None"}
           trend={
-            warnings > 0 && (
-              <TileTrend
-                values={toneSeries(buckets, overview.histogramBy, lensId, WARN_LEVELS, "warning")}
-                label="Warnings across the window"
-                color="var(--warning)"
-              />
+            banded && (
+              <TileBand>
+                {!warningsOut && (
+                  <Trend
+                    values={
+                      warnings > 0
+                        ? toneSeries(buckets, overview.histogramBy, lensId, WARN_LEVELS, "warning")
+                        : quiet
+                    }
+                    label="Warnings across the window"
+                    color={warnings > 0 ? "var(--warning)" : "var(--muted-foreground)"}
+                  />
+                )}
+              </TileBand>
             )
           }
           hint={
@@ -423,42 +516,105 @@ function Readings({
                 ? share(warnings)
                 : "nothing to look at"
           }
-          className="group-hover:bg-row-hover"
+          className="h-full group-hover:bg-row-hover"
         />
       </StatButton>
       <StatTile
         label="Busiest"
         value={peak && peak.total > 0 ? <NumberTicker value={perMinute} /> : "—"}
         trailing={peak && peak.total > 0 ? "a minute" : undefined}
-        hint={peak && peak.total > 0 ? `at ${clock(peak.start)}` : "nothing in the window"}
+        trend={
+          banded && (
+            <TileBand>
+              {peak && peak.total > 0 && buckets.length > 1 && (
+                <PeakStrip buckets={buckets} at={peakAt} />
+              )}
+            </TileBand>
+          )
+        }
+        hint={
+          peak && peak.total > 0
+            ? `at ${clock(peak.start)}`
+            : // The chart counts the lines that carry a time; a log whose lines
+              // carry none has matches and no column to be busiest.
+              overview.matched > 0
+              ? "these lines carry no time"
+              : "nothing in the window"
+        }
       />
-      {measure ? (
+      {whoFacet && who && (
         <StatTile
-          label={`${lens?.measure?.label ?? "Duration"} p95`}
-          tone={measure.p95 >= 1000 ? "warning" : "default"}
-          value={latency(measure.p95)}
-          hint={`median ${latency(measure.p50)} · slowest ${latency(measure.max)}`}
+          label={titleOf(who)}
+          value={
+            <>
+              <NumberTicker value={whoFacet.distinct} />
+              {whoFacet.distinctCapped ? "+" : ""}
+            </>
+          }
+          trend={
+            <TileBand center>
+              <SplitBar
+                parts={[
+                  ...whoFacet.values.slice(0, 5).map((v) => ({
+                    key: v.value,
+                    count: v.count,
+                    color: hueFor(v.value, LANES),
+                  })),
+                  {
+                    key: "rest",
+                    count:
+                      whoFacet.other + whoFacet.values.slice(5).reduce((n, v) => n + v.count, 0),
+                    color: "var(--tag-slate)",
+                  },
+                ]}
+                label={whoFacet.values
+                  .slice(0, 5)
+                  .map((v) => `${v.value} ${plural(v.count, "line")}`)
+                  .join(", ")}
+              />
+            </TileBand>
+          }
+          hint={
+            whoFacet.values[0]
+              ? `busiest ${whoFacet.values[0].value} · ${plural(whoFacet.values[0].count, "line")}`
+              : `no ${fieldOf(who).label} in these lines`
+          }
         />
-      ) : (
-        whoFacet &&
-        who && (
-          <StatTile
-            label={titleOf(who)}
-            value={
-              <>
-                <NumberTicker value={whoFacet.distinct} />
-                {whoFacet.distinctCapped ? "+" : ""}
-              </>
-            }
-            hint={
-              whoFacet.values[0]
-                ? `busiest ${whoFacet.values[0].value} · ${plural(whoFacet.values[0].count, "line")}`
-                : undefined
-            }
-          />
-        )
       )}
     </StatGrid>
+  )
+}
+
+/**
+ * Where in the window the busiest column fell: one cell per column of the
+ * chart below, as bright as it was busy, the busiest lit whole and a column
+ * with no lines the empty track — the request record's strip of the hour,
+ * the pattern rather than a second line chart beside the Lines tile's.
+ */
+function PeakStrip({ buckets, at }: { buckets: LogBucket[]; at: number }) {
+  const peak = Math.max(buckets[at]?.total ?? 0, 1)
+  return (
+    <div
+      role="img"
+      aria-label={`Busiest at ${clock(buckets[at].start)}, ${plural(buckets[at].total, "line")}`}
+      className="flex h-9 min-w-0 items-end gap-px overflow-hidden pb-0.5"
+    >
+      {buckets.map((bucket, i) => (
+        <span
+          key={bucket.start}
+          title={`${clock(bucket.start)} · ${plural(bucket.total, "line")}`}
+          className={cn(
+            "h-5 min-w-px flex-1 rounded-sm",
+            bucket.total === 0 ? "bg-meter-track" : "bg-chart-2",
+          )}
+          style={
+            bucket.total === 0 || i === at
+              ? undefined
+              : { opacity: 0.2 + 0.5 * (bucket.total / peak) }
+          }
+        />
+      ))}
+    </div>
   )
 }
 
@@ -471,7 +627,6 @@ function useInsights(props: InsightsProps) {
   const [answer, setAnswer] = useState<Answer | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [runId, setRunId] = useState(0)
   const latest = useRef(props)
   useEffect(() => {
     latest.current = props
@@ -547,10 +702,10 @@ function useInsights(props: InsightsProps) {
       ])
       if (id !== seq.current) return
       setAnswer({
+        source: p.sourceId,
         overview,
         groups: Object.fromEntries(groups.map((group, i) => [group.id, ranked[i]])),
       })
-      setRunId(id)
       p.onOverview?.(overview)
     } catch (err) {
       if (id !== seq.current || signal.aborted) return
@@ -567,7 +722,7 @@ function useInsights(props: InsightsProps) {
     return () => controller.abort()
   }, [key, run])
 
-  return { answer, error, loading, runId }
+  return { answer, error, loading }
 }
 
 /** The measure's floor replaced, so "at least this slow" is one condition, not a pile of them. */
@@ -595,41 +750,99 @@ function tallyOf(facet: LogFacet, shown = SHOWN) {
     : plural(facet.distinct, "value")
 }
 
-function facetItems(
-  key: string,
-  facet: LogFacet,
-  lensId: string | undefined,
-  narrow: (key: string, value: string) => void,
-): BarListItem[] {
+/**
+ * Each value of a whole in the colour the chart draws it in: a level in its
+ * chip's swatch, a status class in its family's, an event in its tone or —
+ * one with no verdict — in the chart's hues by rank, busiest first.
+ */
+function swatchesOf(name: string, values: LogFacetValue[], lensId: string | undefined) {
+  let neutral = 0
+  return Object.fromEntries(
+    values.map((v) => {
+      if (name === "level") return [v.value, LEVEL_HUE[(v.value || "unknown") as LogLevel]]
+      if (name === "class") {
+        return [v.value, FAMILY_HUE[v.value as StatusClass] ?? FAMILY_HUE.other]
+      }
+      const tone = eventMeta(lensId, v.value)?.tone
+      if (tone && tone !== "default") return [v.value, TONE_HUE[tone]]
+      return [v.value, SERIES_HUES[neutral++ % SERIES_HUES.length]]
+    }),
+  )
+}
+
+/**
+ * One key's values, ranked: the name drawn as what it is, the lines it is on
+ * and its share of the window's, in columns that end on the head's edge —
+ * the request record's lists, which dropped a bar per row because a page of
+ * bars of different lengths left every figure floating away from its name.
+ * A key every line has one of is a whole, so it gets one strip over the list
+ * in the chart's colours, and each row its swatch as the strip's legend.
+ */
+function FacetList({
+  name,
+  facet,
+  matched,
+  lensId,
+  narrow,
+}: {
+  name: string
+  facet: LogFacet
+  matched: number
+  lensId: string | undefined
+  narrow: (key: string, value: string) => void
+}) {
   const values = facet.values.slice(0, SHOWN)
-  const peak = Math.max(...values.map((v) => v.count), 1)
-  const field = fieldOf(key)
-  const verdict = key === "event" || key === "level"
+  const field = fieldOf(name)
+  const verdict = name === "event" || name === "level"
+  const whole = WHOLE.has(name)
+  const swatches = whole ? swatchesOf(name, values, lensId) : undefined
   const marked = field.kind === "address" || field.kind === "product"
-  const pressable = key === "level" || isFilterable(key)
-  return values.map((v) => ({
+  const pressable = name === "level" || isFilterable(name)
+  const named = (value: string) =>
+    name === "level"
+      ? (LEVEL_LABEL[(value || "unknown") as LogLevel] ?? value)
+      : name === "event"
+        ? eventLabel(lensId, value)
+        : value
+
+  const items: RankItem[] = values.map((v) => ({
     key: v.value,
-    mark: marked ? <FieldMark name={key} value={v.value} /> : undefined,
+    mark: marked ? <FieldMark name={name} value={v.value} /> : undefined,
+    swatch: swatches?.[v.value],
     mono: !(verdict || field.kind === "product" || field.kind === "lane"),
-    label: <FieldValue name={key} value={v.value} lens={lensId} glyph={false} />,
+    label: <FieldValue name={name} value={v.value} lens={lensId} glyph={false} />,
     value: v.count.toLocaleString(),
-    share: v.count / peak,
+    share: matched > 0 ? v.count / matched : undefined,
     // An event and a level are the verdict already, in their own colour; a
     // client or a path is where the share of errors is the news.
-    signal: !verdict && v.count ? v.errors / v.count : undefined,
     hint:
       !verdict && v.errors > 0 ? (
         <span className="text-destructive">{plural(v.errors, "error")}</span>
-      ) : v.sum !== undefined && v.count > 0 && key !== "level" ? (
+      ) : v.sum !== undefined && v.count > 0 && name !== "level" ? (
         `mean ${latency(v.sum / v.count)}`
       ) : undefined,
     title: pressable
-      ? key === "level"
-        ? `Only ${v.value} lines`
+      ? name === "level"
+        ? `Only ${named(v.value)} lines`
         : `Only lines where ${field.label} is ${v.value}`
       : undefined,
-    onClick: pressable ? () => narrow(key, v.value) : undefined,
+    onClick: pressable ? () => narrow(name, v.value) : undefined,
   }))
+
+  return (
+    <>
+      {swatches && (
+        <SplitBar
+          className="mb-1.5"
+          parts={values.map((v) => ({ key: v.value, count: v.count, color: swatches[v.value] }))}
+          label={values
+            .map((v) => `${percent(matched > 0 ? v.count / matched : 0)} ${named(v.value)}`)
+            .join(", ")}
+        />
+      )}
+      <RankList items={items} />
+    </>
+  )
 }
 
 function measured(key: string | undefined) {
@@ -639,12 +852,24 @@ function measured(key: string | undefined) {
 }
 
 /**
+ * A table's head and cells, the request record's Slowest table's: a quiet
+ * row of names over rows of one height, the figures in columns at the right.
+ */
+const HEAD = "h-6 px-2 text-micro font-normal"
+const CELL = "h-8 px-2 py-0"
+const FIGURE = cn(CELL, "numeric text-right text-muted-foreground")
+
+/**
  * A group, ranked: what its key's values add up to under the group's own
  * predicates — how many lines, how many of them errors, how long they took
  * in all and at worst, when they were last seen — with the last value of the
  * group's sample keys beside each, so a statement's shape reads as the
  * statement and an attacking address as the usernames it tried. A press
  * narrows everything above to that value.
+ *
+ * Every row is one line. The sample used to be a second line under the
+ * value, so a row with one stood taller than a row without, and the samples
+ * now sit beside the value and give way before it does.
  */
 function GroupTable({
   group,
@@ -673,24 +898,22 @@ function GroupTable({
   const timed = Boolean(group.measure) && values.some((v) => v.sum !== undefined)
   const format = measured(group.measure)
   const byQuery = group.by === "fp" && values.some((v) => v.samples?.query)
-  const cell = "px-2 py-1.5"
-  const figure = cn(cell, "numeric text-right text-muted-foreground")
 
   return (
     <Table containerClassName="-mx-2 w-auto">
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead className="h-8 px-2">{byQuery ? "Query" : titleOf(group.by)}</TableHead>
-          <TableHead className="h-8 px-2 text-right">Lines</TableHead>
-          {errors && <TableHead className="h-8 px-2 text-right">Errors</TableHead>}
+          <TableHead className={HEAD}>{byQuery ? "Query" : titleOf(group.by)}</TableHead>
+          <TableHead className={cn(HEAD, "text-right")}>Lines</TableHead>
+          {errors && <TableHead className={cn(HEAD, "text-right")}>Errors</TableHead>}
           {timed && (
             <>
-              <TableHead className="h-8 px-2 text-right max-sm:hidden">Total</TableHead>
-              <TableHead className="h-8 px-2 text-right max-md:hidden">Mean</TableHead>
-              <TableHead className="h-8 px-2 text-right">Max</TableHead>
+              <TableHead className={cn(HEAD, "text-right max-sm:hidden")}>Total</TableHead>
+              <TableHead className={cn(HEAD, "text-right max-md:hidden")}>Mean</TableHead>
+              <TableHead className={cn(HEAD, "text-right")}>Max</TableHead>
             </>
           )}
-          <TableHead className="h-8 px-2 text-right max-sm:hidden">Last seen</TableHead>
+          <TableHead className={cn(HEAD, "text-right max-sm:hidden")}>Last seen</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -700,29 +923,31 @@ function GroupTable({
             onActivate={() => onPick(v.value)}
             title={`Only lines where ${fieldOf(group.by).label} is ${v.value}`}
           >
-            <TableCell className={cn(cell, "w-full max-w-0")}>
+            <TableCell className={cn(CELL, "w-full max-w-0")}>
               <GroupValue value={v} by={group.by} byQuery={byQuery} lensId={lensId} />
             </TableCell>
-            <TableCell className={figure}>{v.count.toLocaleString()}</TableCell>
+            <TableCell className={cn(FIGURE, "font-medium text-foreground")}>
+              {v.count.toLocaleString()}
+            </TableCell>
             {errors && (
-              <TableCell className={cn(figure, v.errors > 0 && "text-destructive")}>
+              <TableCell className={cn(FIGURE, v.errors > 0 && "text-destructive")}>
                 {v.errors > 0 ? v.errors.toLocaleString() : "—"}
               </TableCell>
             )}
             {timed && (
               <>
-                <TableCell className={cn(figure, "max-sm:hidden")}>
+                <TableCell className={cn(FIGURE, "max-sm:hidden")}>
                   {v.sum !== undefined ? format(v.sum) : "—"}
                 </TableCell>
-                <TableCell className={cn(figure, "max-md:hidden")}>
+                <TableCell className={cn(FIGURE, "max-md:hidden")}>
                   {v.sum !== undefined && v.count > 0 ? format(v.sum / v.count) : "—"}
                 </TableCell>
-                <TableCell className={figure}>
+                <TableCell className={FIGURE}>
                   {v.max !== undefined ? format(v.max) : "—"}
                 </TableCell>
               </>
             )}
-            <TableCell className={cn(figure, "max-sm:hidden")} title={seenTitle(v)}>
+            <TableCell className={cn(FIGURE, "max-sm:hidden")} title={seenTitle(v)}>
               {v.last ? relativeTime(v.last) : "—"}
             </TableCell>
           </TableRow>
@@ -739,6 +964,12 @@ function seenTitle(v: LogFacetValue) {
     .join(" · ")
 }
 
+/**
+ * A group's value and its samples on one line. The value keeps its width and
+ * the samples give way first, all of them, before the value loses a
+ * character: they wrap onto a line the row does not show rather than
+ * standing as a stub, as `RankList`'s hints do.
+ */
 function GroupValue({
   value,
   by,
@@ -754,20 +985,20 @@ function GroupValue({
     ([key, sample]) => sample !== "" && !(byQuery && key === "query"),
   )
   return (
-    <span className="flex min-w-0 flex-col gap-0.5">
+    <span className="flex h-4 min-w-0 flex-wrap items-baseline gap-x-3 overflow-hidden text-xs leading-4">
       {byQuery ? (
-        <span className="truncate font-mono text-xs" title={value.samples?.query}>
+        <span className="max-w-full min-w-0 shrink truncate font-mono" title={value.samples?.query}>
           {value.samples?.query ?? value.value}
         </span>
       ) : (
-        <span className="flex min-w-0 items-center text-xs">
+        <span className="flex max-w-full min-w-0 shrink-0 items-center">
           <FieldValue name={by} value={value.value} lens={lensId} />
         </span>
       )}
       {samples.length > 0 && (
-        <span className="flex min-w-0 items-center gap-3 text-hint text-muted-foreground">
+        <span className="flex min-w-[6ch] flex-[1_1_6ch] items-baseline gap-3 overflow-hidden text-micro leading-4 text-muted-foreground">
           {samples.map(([key, sample]) => (
-            <span key={key} className="flex min-w-0 items-center gap-1.5">
+            <span key={key} className="flex min-w-0 items-baseline gap-1.5">
               <span className="shrink-0">{fieldOf(key).label}</span>
               <FieldValue name={key} value={sample} compact lens={lensId} className="min-w-0" />
             </span>
@@ -786,16 +1017,14 @@ function GroupValue({
 function PatternTable({ facet, onPick }: { facet: LogFacet; onPick: (pattern: string) => void }) {
   const values = facet.values.slice(0, GROUP_ROWS)
   const errors = values.some((v) => v.errors > 0)
-  const cell = "px-2 py-1.5"
-  const figure = cn(cell, "numeric text-right text-muted-foreground")
   return (
     <Table containerClassName="-mx-2 w-auto">
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead className="h-8 px-2">Pattern</TableHead>
-          <TableHead className="h-8 px-2 text-right">Lines</TableHead>
-          {errors && <TableHead className="h-8 px-2 text-right">Errors</TableHead>}
-          <TableHead className="h-8 px-2 text-right max-sm:hidden">Last seen</TableHead>
+          <TableHead className={HEAD}>Pattern</TableHead>
+          <TableHead className={cn(HEAD, "text-right")}>Lines</TableHead>
+          {errors && <TableHead className={cn(HEAD, "text-right")}>Errors</TableHead>}
+          <TableHead className={cn(HEAD, "text-right max-sm:hidden")}>Last seen</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -805,7 +1034,7 @@ function PatternTable({ facet, onPick }: { facet: LogFacet; onPick: (pattern: st
             onActivate={() => onPick(v.value)}
             title="Show the lines of this pattern in History"
           >
-            <TableCell className={cn(cell, "w-full max-w-0")}>
+            <TableCell className={cn(CELL, "w-full max-w-0")}>
               <span className="block truncate font-mono text-xs" title={v.value}>
                 {v.value.split("<*>").map((part, i) => (
                   <span key={i}>
@@ -815,13 +1044,15 @@ function PatternTable({ facet, onPick }: { facet: LogFacet; onPick: (pattern: st
                 ))}
               </span>
             </TableCell>
-            <TableCell className={figure}>{v.count.toLocaleString()}</TableCell>
+            <TableCell className={cn(FIGURE, "font-medium text-foreground")}>
+              {v.count.toLocaleString()}
+            </TableCell>
             {errors && (
-              <TableCell className={cn(figure, v.errors > 0 && "text-destructive")}>
+              <TableCell className={cn(FIGURE, v.errors > 0 && "text-destructive")}>
                 {v.errors > 0 ? v.errors.toLocaleString() : "—"}
               </TableCell>
             )}
-            <TableCell className={cn(figure, "max-sm:hidden")} title={seenTitle(v)}>
+            <TableCell className={cn(FIGURE, "max-sm:hidden")} title={seenTitle(v)}>
               {v.last ? relativeTime(v.last) : "—"}
             </TableCell>
           </TableRow>

@@ -11,7 +11,7 @@ import { Meter } from "@/components/meter"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { ProductGlyph } from "@/components/product-logo"
 import { RankList, SplitBar, percent } from "@/components/rank-list"
-import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
+import { StatButton, StatGrid, StatTile, TileBand as Band } from "@/components/stat-tile"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { Address, RequestPath } from "@/components/deploy/request-marks"
 import { Facet } from "@/components/deploy/traffic-facets"
@@ -197,20 +197,6 @@ export function AudienceReadings({
         }
       />
     </StatGrid>
-  )
-}
-
-/**
- * Each tile's picture, on the one line all five keep for it. Two tiles had
- * none and a third a thin meter tight under its figure, so their lines stopped
- * being a row and they ended on a band of nothing. The line stays when a
- * trend has nothing to draw, for the same reason.
- */
-function Band({ center, children }: { center?: boolean; children: React.ReactNode }) {
-  return (
-    <div className={cn("h-full min-w-0", center && "flex items-center [&>*]:w-full")}>
-      {children}
-    </div>
   )
 }
 

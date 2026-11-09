@@ -99,6 +99,21 @@ export function StatTile({
 }
 
 /**
+ * A tile's picture, on the one line every tile in a row keeps for it. A tile
+ * with no picture beside tiles with one ended its hint half a band higher, so
+ * the hints stopped being a row; the line stays when there is nothing to draw,
+ * for the same reason. `center` sets a strip or a meter on the band's middle
+ * rather than at its foot, where a trend's line sits.
+ */
+export function TileBand({ center, children }: { center?: boolean; children?: React.ReactNode }) {
+  return (
+    <div className={cn("h-full min-w-0", center && "flex items-center [&>*]:w-full")}>
+      {children}
+    </div>
+  )
+}
+
+/**
  * A stat tile that is also a destination.
  *
  * The arrow is the whole point: a tile with a hover wash and nothing else is a
