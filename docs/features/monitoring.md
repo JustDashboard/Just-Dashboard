@@ -46,9 +46,9 @@ See what the server is doing right now, what it did this week, and what is about
 </tr>
 </table>
 
-<a href="../readme/processes.png"><img src="../readme/processes.png" alt="Scheduled work drawn over the next day, with cron jobs and systemd timers below"></a>
+<a href="../readme/processes.png"><img src="../readme/processes.png" alt="The next 24 hours of scheduled work as an hour-by-hour chart, with what runs next listed under it"></a>
 
-<p align="center"><sub><b>Scheduled jobs</b> — the next 24 hours of cron and timers, with their verbs</sub></p>
+<p align="center"><sub><b>Scheduled jobs</b> — the next 24 hours of cron and timers hour by hour, and what runs next in plain words</sub></p>
 
 ---
 

@@ -23,6 +23,15 @@ type Timer struct {
 	Enabled     bool       `json:"enabled"`
 	Next        *time.Time `json:"next,omitempty"`
 	Last        *time.Time `json:"last,omitempty"`
+	// What the timer is for and what it fires on, read with one
+	// `systemctl show` across every timer, so the Scheduled page can say
+	// "every day at 06:00 and 18:00, up to 12h later" in its list rather
+	// than only when one timer is opened. A host whose systemctl will not
+	// answer leaves them empty, and the list is still the list.
+	Description string   `json:"description,omitempty"`
+	Calendar    []string `json:"calendar,omitempty"`
+	Monotonic   []string `json:"monotonic,omitempty"`
+	RandomDelay string   `json:"randomDelay,omitempty"`
 }
 
 // Timers lists every timer, active or not, with when it fires next and when
@@ -68,7 +77,25 @@ func (s *Systemd) Timers(ctx context.Context) ([]Timer, error) {
 			}
 		}
 	}
+	schedules := map[string]timerSchedule{}
+	if len(timers) > 0 {
+		args := []string{"show", "--no-pager",
+			"-p", "Id", "-p", "Description", "-p", "TimersCalendar",
+			"-p", "TimersMonotonic", "-p", "RandomizedDelayUSec", "--"}
+		for _, t := range timers {
+			args = append(args, t.Unit)
+		}
+		if shown, err := run(ctx, 30*time.Second, "systemctl", args...); err == nil {
+			schedules = parseTimerShow(shown.Stdout)
+		}
+	}
 	for i := range timers {
+		if sc, ok := schedules[timers[i].Unit]; ok {
+			timers[i].Description = sc.Description
+			timers[i].Calendar = sc.Calendar
+			timers[i].Monotonic = sc.Monotonic
+			timers[i].RandomDelay = sc.RandomDelay
+		}
 		if st, ok := states[timers[i].Unit]; ok {
 			timers[i].ActiveState, timers[i].SubState = st[0], st[1]
 		}
@@ -131,4 +158,75 @@ func journalMicros(v any) *time.Time {
 	}
 	t := time.UnixMicro(int64(f)).UTC()
 	return &t
+}
+
+type timerSchedule struct {
+	Description string
+	Calendar    []string
+	Monotonic   []string
+	RandomDelay string
+}
+
+// parseTimerShow reads `systemctl show -p Id -p Description -p
+// TimersCalendar -p TimersMonotonic -p RandomizedDelayUSec` over several
+// timers: one block per unit, separated by a blank line, with `Id` wherever
+// systemd puts it in the block. A calendar or an interval is one line per
+// trigger, each `{ OnCalendar=*-*-* 06,18:00:00 ; next_elapse=… }`; only the
+// trigger is kept, since the list already carries the next elapse. Recent
+// systemd names the intervals `OnBootUSec` and `OnUnitActiveUSec`, older
+// releases `OnBootSec`; both are given back as the unit file spells them.
+func parseTimerShow(out string) map[string]timerSchedule {
+	result := map[string]timerSchedule{}
+	for _, block := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n\n") {
+		var id string
+		var sc timerSchedule
+		for _, line := range strings.Split(block, "\n") {
+			key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+			if !ok {
+				continue
+			}
+			switch key {
+			case "Id":
+				id = value
+			case "Description":
+				sc.Description = value
+			case "RandomizedDelayUSec":
+				if value != "" && value != "0" && value != "infinity" {
+					sc.RandomDelay = value
+				}
+			case "TimersCalendar":
+				if spec := timerTrigger(value); spec != "" {
+					if name, rest, ok := strings.Cut(spec, "="); ok && name == "OnCalendar" {
+						sc.Calendar = append(sc.Calendar, rest)
+					}
+				}
+			case "TimersMonotonic":
+				if spec := timerTrigger(value); spec != "" {
+					name, rest, _ := strings.Cut(spec, "=")
+					if strings.HasSuffix(name, "USec") {
+						name = strings.TrimSuffix(name, "USec") + "Sec"
+					}
+					sc.Monotonic = append(sc.Monotonic, name+"="+rest)
+				}
+			}
+		}
+		if id != "" {
+			result[id] = sc
+		}
+	}
+	return result
+}
+
+// timerTrigger takes `{ OnCalendar=Mon *-*-* 00:00:00 ; next_elapse=… }` to
+// `OnCalendar=Mon *-*-* 00:00:00`.
+func timerTrigger(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "{")
+	value = strings.TrimSuffix(value, "}")
+	first, _, _ := strings.Cut(value, ";")
+	first = strings.TrimSpace(first)
+	if !strings.Contains(first, "=") {
+		return ""
+	}
+	return first
 }

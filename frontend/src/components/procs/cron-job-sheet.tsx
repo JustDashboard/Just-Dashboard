@@ -5,149 +5,49 @@ import Link from "next/link"
 import { Clock, Copy } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { describeCron, nextCronRun, supportsCronTimeZone } from "@/lib/cron"
-import { timestamp } from "@/lib/format"
 import { exactValue } from "@/lib/log-filter"
-import { countdown, cronProgram, cronRunsBetween, RUN_CAP } from "@/lib/schedule"
+import {
+  countdown,
+  cronLineName,
+  cronProgram,
+  cronRunsBetween,
+  longClock,
+  LANE_CAP,
+} from "@/lib/schedule"
 import type { CronJob } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ShellWords } from "@/components/deploy/run-evidence"
 import { useNow } from "@/components/deploy/vocabulary"
 import { IconAction } from "@/components/icon-action"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
-import { FactDot } from "@/components/metrics/host-identity"
-import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { Detail, DetailList } from "@/components/page"
+import { Well } from "@/components/panel"
 import { ProductLogo, programProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
+import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbBar, type Verb } from "@/components/verbs"
 import { KIND } from "@/components/procs/schedule-band"
+import {
+  ScheduleSummary,
+  SheetSection,
+  WeekStrip,
+  WhenItRuns,
+} from "@/components/procs/schedule-sheet"
 
-const HOUR = 3600_000
-const DAY = 24 * HOUR
-
-const WEEKDAY = new Intl.DateTimeFormat(undefined, { weekday: "short" })
-
-function startOfDay(at: number) {
-  const day = new Date(at)
-  day.setHours(0, 0, 0, 0)
-  return day.getTime()
-}
+const DAY = 24 * 3600_000
 
 /**
- * A schedule's next seven days as seven lines of a day each, midnight to
- * midnight, a tick at every run: the shape a five-field expression has and
- * its sentence cannot carry — "15 2 * * 1-5" is five ticks and two empty
- * lines, "*\/15 8-18 * * *" a block across each working day. Today's line
- * has a hairline at this minute, the runs before it dimmed.
+ * One cron line, opened from its row or from "Up next": the schedule in a
+ * sentence, when it runs next and how often in a week, the next runs listed
+ * beside the week drawn, the command coloured as a command, where the line
+ * lives, and the runs cron logged for it — cron's log narrowed to this
+ * line's command, which is how cron names a job in its log.
  *
- * The job sheet draws a job's; the job editor draws the one being written,
- * so the picture changes as the fields do.
- */
-export function WeekStrip({
-  schedule,
-  color = KIND.cron.color,
-  className,
-  timeZone,
-}: {
-  schedule: string
-  color?: string
-  className?: string
-  timeZone?: string
-}) {
-  const now = useNow(60_000)
-  const today = startOfDay(now)
-  const days = useMemo(
-    () =>
-      Array.from({ length: 7 }, (_, i) => {
-        const from = startOfDay(today + i * DAY + 12 * HOUR)
-        const until = startOfDay(from + DAY + 12 * HOUR)
-        return { from, until, ...cronRunsBetween(schedule, from - 1, until - 1, RUN_CAP, timeZone) }
-      }),
-    [schedule, today, timeZone],
-  )
-  const place = (at: number, from: number, until: number) => ((at - from) / (until - from)) * 100
-
-  return (
-    <div
-      role="img"
-      aria-label={`${describeCron(schedule)}, over the next seven days`}
-      className={cn("space-y-1", className)}
-    >
-      <div aria-hidden className="ml-12 flex justify-between text-micro text-muted-foreground">
-        <span>00</span>
-        <span>06</span>
-        <span>12</span>
-        <span>18</span>
-        <span>24</span>
-      </div>
-      {days.map((day, i) => (
-        <div key={day.from} className="flex items-center gap-3">
-          <span
-            className={cn(
-              "w-9 shrink-0 text-hint",
-              i === 0 ? "font-medium text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {i === 0 ? "Today" : WEEKDAY.format(day.from)}
-          </span>
-          <div className="relative h-4 flex-1 rounded-sm bg-surface-header">
-            {[25, 50, 75].map((left) => (
-              <span
-                key={left}
-                aria-hidden
-                className="absolute inset-y-0 w-px bg-hairline"
-                style={{ left: `${left}%` }}
-              />
-            ))}
-            {day.dense ? (
-              <span
-                aria-hidden
-                className="absolute inset-y-1 rounded-full"
-                style={{
-                  left: `${place(day.times[0], day.from, day.until)}%`,
-                  right: 0,
-                  background: `color-mix(in oklab, ${color} 55%, transparent)`,
-                }}
-              />
-            ) : (
-              day.times.map((at) => (
-                <span
-                  key={at}
-                  aria-hidden
-                  title={timestamp(new Date(at).toISOString())}
-                  className="absolute inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full"
-                  style={{
-                    left: `${place(at, day.from, day.until)}%`,
-                    background: color,
-                    opacity: at < now ? 0.35 : 1,
-                  }}
-                />
-              ))
-            )}
-            {i === 0 && (
-              <span
-                aria-hidden
-                className="absolute -inset-y-0.5 w-px bg-foreground"
-                style={{ left: `${place(now, day.from, day.until)}%` }}
-              />
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/**
- * One cron line, opened from its row or its lane on the band: when it runs
- * next and how often, the week it makes as a picture, the command coloured
- * as a command, and the runs cron logged for it — the cron log narrowed to
- * this line's command, which is how cron names a job in its log.
- *
- * It replaced nothing: a job was a row and its menu, and "when did this last
- * run" meant reading cron's whole log for it two panels down. The package
- * files' lines open here too, without verbs, since their package owns them.
+ * The package files' lines open here too, without verbs, since their package
+ * owns them; one that steps aside for systemd (`deferredToSystemd`) says so
+ * first and links the timer that does its work.
  */
 export function CronJobSheet({
   job,
@@ -156,6 +56,9 @@ export function CronJobSheet({
   kind = "cron",
   verbs,
   cron,
+  zone,
+  skipped,
+  instead,
   onOpenChange,
 }: {
   job: CronJob | undefined
@@ -167,6 +70,12 @@ export function CronJobSheet({
   verbs: Verb[]
   /** cron's own log, when the host keeps one. */
   cron?: ServiceLogSource
+  /** The host's zone, which times are written in. */
+  zone?: string
+  /** The line steps aside on this host because systemd runs its work. */
+  skipped?: boolean
+  /** The timer that does a skipped line's work. */
+  instead?: string
   onOpenChange: (open: boolean) => void
 }) {
   const program = job ? cronProgram(job.command) : undefined
@@ -177,7 +86,7 @@ export function CronJobSheet({
       title={
         <>
           <ProductLogo id={programProduct(program?.segment)} size="sm" fallback={Clock} />
-          <span className="min-w-0 truncate">{job?.comment || program?.name}</span>
+          <span className="min-w-0 truncate">{job ? cronLineName(job) : "Cron job"}</span>
         </>
       }
       description={job ? `${describeCron(job.schedule)} · ${job.command}` : "Cron job"}
@@ -187,8 +96,8 @@ export function CronJobSheet({
         job && (
           <>
             <Status
-              state={job.disabled ? "inactive" : "active"}
-              label={job.disabled ? "disabled" : "enabled"}
+              state={job.disabled ? "inactive" : skipped ? "inactive" : "active"}
+              label={job.disabled ? "switched off" : skipped ? "left to systemd" : "enabled"}
             />
             <VerbBar verbs={verbs} />
           </>
@@ -204,6 +113,9 @@ export function CronJobSheet({
           source={source}
           kind={kind}
           cron={cron}
+          zone={zone}
+          skipped={skipped}
+          instead={instead}
         />
       )}
     </SidePanel>
@@ -216,36 +128,35 @@ function CronJobDetail({
   source,
   kind,
   cron,
+  zone,
+  skipped,
+  instead,
 }: {
   job: CronJob
   owner: string
   source?: string
   kind: "cron" | "system"
   cron?: ServiceLogSource
+  zone?: string
+  skipped?: boolean
+  instead?: string
 }) {
   const now = useNow(1000)
   const minute = Math.floor(now / 60_000) * 60_000
   const reboot = job.schedule.trim().toLowerCase() === "@reboot"
+  const quiet = job.disabled || skipped
+  // What the schedule says, whether or not it runs: a switched-off line is
+  // drawn as it would run, dimmed.
+  const week = useMemo(
+    () => cronRunsBetween(job.schedule, minute, minute + 7 * DAY, 7 * LANE_CAP, job.timeZone),
+    [job, minute],
+  )
   const next = useMemo(
     () =>
-      job.disabled
+      quiet
         ? undefined
-        : nextCronRun(job.schedule, new Date(minute), job.timeZone)?.getTime(),
-    [job, minute],
-  )
-  const day = useMemo(
-    () =>
-      job.disabled
-        ? undefined
-        : cronRunsBetween(job.schedule, minute, minute + DAY, RUN_CAP, job.timeZone),
-    [job, minute],
-  )
-  const week = useMemo(
-    () =>
-      job.disabled
-        ? undefined
-        : cronRunsBetween(job.schedule, minute, minute + 7 * DAY, 7 * RUN_CAP, job.timeZone),
-    [job, minute],
+        : (week.times[0] ?? nextCronRun(job.schedule, new Date(minute), job.timeZone)?.getTime()),
+    [job, minute, quiet, week],
   )
   const sources = useMemo(() => (cron ? [cron] : []), [cron])
   // How cron names a job in its log is the command as written in the line,
@@ -255,127 +166,161 @@ function CronJobDetail({
     [job.command],
   )
   const color = KIND[kind].color
+  const unreadableZone = Boolean(job.timeZone && !supportsCronTimeZone(job.timeZone))
+  const perDay = week.times.length / 7
+
+  const notice = skipped ? (
+    <Notice title="systemd does this work here">
+      The line starts with a test of <code className="font-mono">/run/systemd/system</code>, so on a
+      server running systemd it stops there and does nothing.{" "}
+      {instead ? (
+        <>
+          <Link
+            href={`/processes/scheduled?timer=${encodeURIComponent(instead)}`}
+            className="font-medium text-foreground underline-offset-2 hover:underline"
+          >
+            {instead}
+          </Link>{" "}
+          runs the same job on its own schedule.
+        </>
+      ) : (
+        "A systemd timer runs the same job."
+      )}
+    </Notice>
+  ) : job.disabled ? (
+    <Notice title="Switched off">
+      The line is commented out, so cron never runs it. The times below are when it would run.
+    </Notice>
+  ) : undefined
 
   return (
-    <div className="flex animate-rise flex-col gap-6 px-5 pt-4 pb-6">
-      <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        {source ? (
-          <Link
-            href={`/files?path=${encodeURIComponent(source)}`}
-            className="font-mono hover:text-foreground hover:underline"
-          >
-            {source}
-          </Link>
-        ) : (
-          <span>{owner}</span>
-        )}
-        <FactDot />
-        <span className="numeric">line {job.line}</span>
-        {job.user && (
-          <>
-            <FactDot />
-            <span>as {job.user}</span>
-          </>
-        )}
-        <FactDot />
-        <span className="font-mono">{job.schedule}</span>
-      </p>
-
-      <StatGrid columns={3} dense className="-mx-5 border-y border-hairline">
-        <StatTile
-          className="px-5"
-          label="Next run"
-          value={
-            next !== undefined ? (
-              <span className="numeric">{countdown(next - now)}</span>
-            ) : (
-              <span className="text-muted-foreground">{reboot ? "at boot" : "—"}</span>
-            )
-          }
-          hint={
-            next !== undefined
-              ? timestamp(new Date(next).toISOString())
-              : job.disabled
-                ? "the line is commented out"
-                : reboot
-                  ? "only when the server starts"
-                  : job.timeZone && !supportsCronTimeZone(job.timeZone)
-                    ? "forecast unavailable for this time zone"
-                    : "never matches a date"
-          }
-        />
-        <StatTile
-          className="px-5"
-          label="In the next day"
-          value={
-            <span className="numeric">
-              {day ? `${day.times.length}${day.dense ? "+" : ""}` : "0"}
-            </span>
-          }
-          trailing={day && day.times.length === 1 ? "run" : "runs"}
-          hint={describeCron(job.schedule)}
-        />
-        <StatTile
-          className="px-5"
-          label="In the next week"
-          value={
-            <span className="numeric">
-              {week ? `${week.times.length}${week.dense ? "+" : ""}` : "0"}
-            </span>
-          }
-          trailing={week && week.times.length === 1 ? "run" : "runs"}
-          hint={
-            week && week.times.length > 0
-              ? `last ${timestamp(new Date(week.times.at(-1)!).toISOString())}`
-              : undefined
-          }
-        />
-      </StatGrid>
+    <div className="flex animate-rise flex-col pb-2">
+      <ScheduleSummary
+        sentence={reboot ? "Every time the server starts" : describeCron(job.schedule)}
+        expression={job.schedule}
+        facts={[job.user && `runs as ${job.user}`, zone && `${zone} time`]}
+        notice={notice}
+      />
 
       {!reboot && (
-        <Panel plain>
-          <PanelHeader
-            title="This week"
-            actions={
-              job.disabled && (
-                <span className="text-hint text-muted-foreground">were it enabled</span>
+        <StatGrid columns={2} dense className="border-t border-hairline">
+          <StatTile
+            className="px-6"
+            label="Next run"
+            value={
+              next !== undefined ? (
+                <span className="numeric">in {countdown(next - now)}</span>
+              ) : (
+                <span className="text-muted-foreground">—</span>
               )
             }
+            hint={
+              next !== undefined
+                ? longClock(next, zone)
+                : skipped
+                  ? "systemd runs this work"
+                  : job.disabled
+                    ? "switched off"
+                    : unreadableZone
+                      ? `this browser cannot read ${job.timeZone}`
+                      : "the schedule never matches a date"
+            }
           />
-          <PanelBody className="pt-3">
-            <WeekStrip
-              schedule={job.schedule}
-              timeZone={job.timeZone}
-              color={color}
-              className={cn(job.disabled && "opacity-40")}
-            />
-          </PanelBody>
-        </Panel>
+          <StatTile
+            className="px-6"
+            label="This week"
+            value={
+              <span className={cn("numeric", quiet && "text-muted-foreground")}>
+                {week.times.length}
+                {week.dense ? "+" : ""}
+              </span>
+            }
+            trailing={week.times.length === 1 ? "run" : "runs"}
+            hint={
+              quiet
+                ? "if it were running"
+                : perDay >= 1
+                  ? `about ${Math.round(perDay).toLocaleString()} a day`
+                  : week.times.length === 0
+                    ? "none in the next seven days"
+                    : undefined
+            }
+          />
+        </StatGrid>
       )}
 
-      <Panel plain>
-        <PanelHeader
-          title="Command"
+      {!reboot && (
+        <SheetSection
+          title="When it runs"
           actions={
-            <IconAction
-              label="Copy command"
-              onClick={() => void copyText(job.command, "Command copied")}
-            >
-              <Copy />
-            </IconAction>
+            quiet && <span className="text-hint text-muted-foreground">if it were running</span>
           }
-        />
-        <PanelBody className="space-y-2 pt-3">
-          <Well className="max-h-40 text-xs leading-relaxed break-all whitespace-pre-wrap">
-            <ShellWords command={job.command} />
-          </Well>
-          {job.comment && <p className="text-hint text-muted-foreground"># {job.comment}</p>}
-        </PanelBody>
-      </Panel>
+        >
+          <WhenItRuns
+            times={week.times}
+            dense={week.dense}
+            zone={zone}
+            empty={
+              unreadableZone ? "This browser cannot read its time zone." : "Not in the next week."
+            }
+            week={
+              <WeekStrip
+                schedule={job.schedule}
+                timeZone={job.timeZone}
+                color={color}
+                className={cn(quiet && "opacity-50")}
+              />
+            }
+          />
+        </SheetSection>
+      )}
 
-      {cron && (
-        <Panel plain>
-          <PanelHeader title="Runs" />
+      <SheetSection
+        title="Command"
+        actions={
+          <IconAction
+            label="Copy command"
+            onClick={() => void copyText(job.command, "Command copied")}
+          >
+            <Copy />
+          </IconAction>
+        }
+      >
+        <Well className="max-h-48 text-xs leading-relaxed break-all whitespace-pre-wrap">
+          <ShellWords command={job.command} />
+        </Well>
+        {job.comment && cronLineName(job) !== job.comment && (
+          <p className="mt-2 text-hint text-muted-foreground"># {job.comment}</p>
+        )}
+      </SheetSection>
+
+      <SheetSection title="Details">
+        <DetailList className="gap-y-2.5">
+          <Detail label="Defined in">
+            {source ? (
+              <Link
+                href={`/files?path=${encodeURIComponent(source)}`}
+                className="font-mono hover:underline"
+              >
+                {source}
+              </Link>
+            ) : (
+              owner
+            )}
+            <span className="text-muted-foreground">, line {job.line}</span>
+          </Detail>
+          {job.user && <Detail label="Runs as">{job.user}</Detail>}
+          <Detail label="Clock">
+            {job.timeZone ?? "This browser's, since the server's zone is unknown"}
+          </Detail>
+          <Detail label="Program">
+            <span className="font-mono">{cronProgram(job.command).name}</span>
+          </Detail>
+        </DetailList>
+      </SheetSection>
+
+      <SheetSection title="Runs">
+        {cron ? (
           <ServiceLogs
             sources={sources}
             ask={ask}
@@ -384,8 +329,12 @@ function CronJobDetail({
             className="[contain:inline-size]"
             paneClassName="h-[22rem]"
           />
-        </Panel>
-      )}
+        ) : (
+          <p className="text-body text-muted-foreground">
+            This server keeps no cron log the dashboard can read, so its runs are not recorded.
+          </p>
+        )}
+      </SheetSection>
     </div>
   )
 }

@@ -1262,6 +1262,14 @@ export type SystemdTimer = {
   enabled: boolean
   next?: string
   last?: string
+  /** What the timer's unit says it is for. */
+  description?: string
+  /** Each `OnCalendar=` it fires on, as systemd normalises it. */
+  calendar?: string[]
+  /** Each interval it fires on, as the unit file spells it: `OnBootSec=15min`. */
+  monotonic?: string[]
+  /** `RandomizedDelaySec`, as systemd writes the span; absent for none. */
+  randomDelay?: string
 }
 
 export type SystemdUnit = {
