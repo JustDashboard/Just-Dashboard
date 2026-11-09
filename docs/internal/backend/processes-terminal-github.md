@@ -56,8 +56,8 @@ socket-activated service's port.
   kernel thread is refused as `409 kernel_thread` and a signal or priority to a zombie as
   `409 process_zombie` naming its parent (`procs.Controllable`): the kernel ignores the first and the
   second has already exited, and both used to answer a Kill with success.
-- The detail sheet exposes identity, cwd/executable links, resource counters and controls without returning
-  environment variables (process environments routinely contain secrets). `Detail` also reads what the
+- The live detail (`GET /processes/{pid}`, polled every two seconds by the process page) carries identity,
+  cwd/executable, resource counters and controls and never the environment. `Detail` also reads what the
   process listens on and how many connections it holds (`sockets` in `detail.go`, from gopsutil's
   per-process connection list) and its soft `NOFILE` limit, so an open-file count is a warning rather
   than a number; a snapshot leaves those empty because reading every process's sockets on each poll
@@ -65,11 +65,39 @@ socket-activated service's port.
   and direct children from one pass over the table, because the remedy for a runaway worker is
   usually its supervisor; each link's CPU is the sampler's last measured window for that process
   (`cpuReady` false where there is none), not gopsutil's average over the process's whole life.
-  Signals are the existing `POST /processes/{pid}/signal`; the page offers SIGTERM, SIGKILL,
-  SIGSTOP/SIGCONT, SIGHUP, SIGINT, SIGUSR1 and SIGUSR2 as words with a sentence each, and none of them
-  to a kernel thread or a zombie, whose menu opens its parent instead. The detail sheet polls every two
-  seconds while open and stops, keeping the last reading, when the PID answers 404 or its creation
-  time changes. PM2 can gracefully reload and
+  Signals are `POST /processes/{pid}/signal`; the route accepts SIGTERM, SIGKILL, SIGSTOP/SIGCONT,
+  SIGHUP, SIGINT, SIGQUIT, SIGUSR1/SIGUSR2, SIGWINCH and SIGTTIN/SIGTTOU (the last four are what Go
+  and Java stack dumps, nginx's graceful worker stop and gunicorn's worker count use), and the page
+  offers them as words with a sentence each and none of them to a kernel thread or a zombie, whose
+  menu opens its parent instead. With `"tree": true` the signal goes to the process and then to every
+  descendant read before the first signal (`SignalTree` in `control.go`): the process first, so a
+  supervisor told to stop does not start new workers in place of the ones being ended; kernel threads,
+  zombies and any child whose start time changed since the tree was read (a reused PID) are passed
+  over; a tree holding the dashboard's own process is refused whole as
+  `409 own_tree`; the answer and the audit record list every PID reached. The process page polls the
+  live detail every two seconds and stops, keeping the last reading, when the PID answers 404 or its
+  creation time changes.
+- `GET /processes/{pid}/inspect` (`inspect.go`) is the process page's slower read, every eight seconds:
+  argv, the executable and whether it was replaced on disk since the process started, its root and wait
+  channel, the PID inside its own namespace; real/effective/saved user and group by name, its groups,
+  terminal, session and process group; the scheduler policy, nice, allowed CPUs, processor time (its
+  own and reaped children's), block-I/O wait, context switches and faults; memory from `status` and
+  `smaps_rollup` (anonymous, file-backed, shared, swap, peak, PSS and USS) with the OOM score and bias;
+  `/proc/<pid>/io`; effective capabilities, the bounding set, no_new_privs, seccomp and the LSM label;
+  the caught, ignored, blocked and pending signal masks by name, which is how the page says whether a
+  hang-up reloads a daemon or ends it; which namespaces differ from PID 1's; the unified cgroup path
+  and its `memory.max`, `cpu.max` and `pids.max` where readable; every rlimit; every descriptor counted
+  by kind with the first 500 listed (deleted files flagged); the shared libraries mapped, replaced ones
+  first; the non-listening sockets (the first 200); its threads by processor time (the first 200); and
+  its environment. **The environment carries credentials, so the route masks credential-shaped values
+  (`dockerx.RedactEnv`, the container rule) for anybody without `system.admin`, and always for the
+  dashboard's own process**, whose environment holds the master key. Every block carries `ready` false
+  where the account cannot read it, and every list is a list. `InspectAt` reads under any root, so
+  `inspect_test.go` runs it over a directory laid out as `/proc`.
+- `PUT /processes/{pid}/oom` sets the out-of-memory killer's bias (−1000…1000) by writing
+  `/proc/<pid>/oom_score_adj`, a path built from the PID alone. It is `system.admin`, guarded by the
+  create timestamp like a priority change, refused for PID 1, the dashboard itself, kernel threads and
+  zombies, and audited as `process.oom` with the previous bias. PM2 can gracefully reload and
   `pm2 save` persists the current list for an existing startup hook; it does not install or rewrite that
   platform-specific hook. The systemd sheet reads effective runtime properties beside the journal and
   links to the unit file; static units do not get an enable/disable control they cannot use. Its

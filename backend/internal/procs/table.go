@@ -952,6 +952,14 @@ var allowedSignals = map[string]syscall.Signal{
 	"SIGUSR2": syscall.SIGUSR2,
 	"SIGSTOP": syscall.SIGSTOP,
 	"SIGCONT": syscall.SIGCONT,
+	// The signals daemons define for themselves beyond the usual four: a
+	// Go or Java program prints every goroutine's or thread's stack on
+	// SIGQUIT, nginx and Apache stop their workers gracefully on SIGWINCH,
+	// and gunicorn adds and removes a worker on SIGTTIN and SIGTTOU.
+	"SIGQUIT":  syscall.SIGQUIT,
+	"SIGWINCH": syscall.SIGWINCH,
+	"SIGTTIN":  syscall.SIGTTIN,
+	"SIGTTOU":  syscall.SIGTTOU,
 }
 
 // Signal delivers a signal to one process. PID 1 is refused outright: on a

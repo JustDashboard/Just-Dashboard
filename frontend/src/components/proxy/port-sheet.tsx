@@ -28,6 +28,7 @@ import { EmptyState, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { processHref } from "@/components/procs/process-facts"
 
 /** The backend sends a socket's busiest peers, at most this many. */
 const CLIENT_PEERS_SENT = 5
@@ -146,7 +147,7 @@ function SocketDetail({
                     {holders.map((pid) => (
                       <Link
                         key={pid}
-                        href={`/processes?pid=${pid}`}
+                        href={processHref(pid)}
                         className="numeric rounded-sm font-mono underline-offset-2 focus-ring hover:underline"
                       >
                         {pid}
@@ -175,7 +176,7 @@ function SocketDetail({
             <li>
               <span className="text-muted-foreground">started by </span>
               <Link
-                href={`/processes?pid=${socket.ppid}`}
+                href={processHref(socket.ppid)}
                 className="numeric rounded-sm font-mono underline-offset-2 focus-ring hover:underline"
               >
                 PID {socket.ppid}
