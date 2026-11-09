@@ -155,7 +155,8 @@ taking a frame:
   PM2 applications under their band of what PM2 takes of the machine, the systemd units
   under their band of busy services and recent changes, and the cron jobs, timers and
   system cron files on Scheduled, each a title, a toolbar and a hairline, Scheduled's
-  under its next day drawn as one plain band of lanes (what fires next counting down
+  under its next day drawn as one plain band, an hour chart over the schedules in the order they
+  run (what fires next counting down
   at the end of its identity line), whose Cron log is a plain panel holding the log's
   `Pane` and whose jobs and timers open sheets of their own — with a detail sheet built
   from plain panels that opens on the thing's own mark, the unit's journal, a PM2
@@ -1028,8 +1029,8 @@ Processes, Packages, Proxy and Database pages were a bar with a list under it, t
 things as rows and a sentence where there were none yet. Each poll reordered the rows; a block grew
 from a sentence to five lines when its first reading landed, which pushed the table under it down the
 page; and the rows repeated that table's columns. Any new band takes this component, and what it
-would have listed is the table's. Scheduled's lanes and the Overview's Storage are not shares of one
-bar and keep their own shapes.
+would have listed is the table's. Scheduled's hour chart and the Overview's Storage are not shares
+of one bar and keep their own shapes.
 
 - **The line holds one part.** At rest that is the heaviest, or the part the table is narrowed to, or
   the first given on a `ticks` or `fixed` reading, so those lead with the one worth reading: Recent's
@@ -2380,24 +2381,63 @@ The passes, in order. Each one is a diff you can review on its own.
    narrow the log to what they count; timers armed is the timers' head, armed, running now and
    stopped as chips with how many start on boot beside them; the package files' lines are a fact
    and their section's count. What took the tiles' place is the question they answered one figure
-   at a time: `components/procs/schedule-band.tsx`, the next 24 hours of all three on one axis
-   that starts now, a lane per schedule soonest first, each drawn as the program it runs. A lane's
-   next run is a dot in its kind's `--tag-*` hue (blue for the account's crontab, violet for the
-   timers, cyan for the package files — none red or amber, so no lane reads as one that failed),
-   the runs after it ticks, and a schedule that fires more often than the axis can draw a band; the
-   kinds are chips that count and narrow, and what the axis cannot draw — weekly work past it, what
-   runs only at boot, what is switched off — is a line under it. A cron line's runs are its
-   expression's (`lib/schedule.ts`); a timer's is the one systemd reports, since the packages'
-   timers add a random delay to their calendars and every later run drawn from the calendar would
-   be a time they do not fire at. Every countdown ticks, which is the page's motion, and nothing
-   else moves. A lane, a job's command and a timer's name open sheets addressed by `?job=` and
-   `?timer=`: a job's opens on its next run and its runs in the next day and week, the week as seven
-   lines of a day with a tick per run, the command coloured as a command, and the cron log narrowed
-   to that command; a timer's on its next and last run and how long that took, its calendar in
-   words beside the expression with the random delay said, the command its service runs, and the
-   service's Runs view, which used to open inside the timer's table row. The job editor is a sheet
-   as well, its frequency a row of toggles rather than a select, drawing the week the schedule
-   being written makes as the fields change.
+   at a time: `components/procs/schedule-band.tsx`, the next 24 hours of all three, said two
+   ways that agree.
+
+   The first shape of it was a lane per schedule on one axis that started now, the next run a dot,
+   the runs after it ticks, a schedule too frequent to draw a band. In 0.8.6 the operator could not
+   read it — "is it a calendar? a timeline? what does it show" — and they were right on every
+   count: nothing said what a dot, a tick or a band was; most lanes were one dot by the left edge of
+   an empty track, because systemd reports only a timer's next run; the hours were an axis three
+   lanes up; the times were the browser's while the schedules said the server's, so "every day at
+   03:30" forecast 22:30; and `/etc/crontab`'s braced daily line named a lane "}". It is now a
+   chart of the next 24 hours an hour to a column — each schedule that runs in an hour one block in
+   its kind's `--tag-*` hue (blue for the account's crontab, violet for the timers, cyan for the
+   package files, none red or amber so no block reads as a failure), stacked with the hourly ones at
+   the foot so the day's floor is level, the hours named under the columns from *Now* — and one
+   fixed line under it that says the day in a sentence at rest and reads out the hour or the block
+   pointed at (§10's readout, one height in every state). Under the chart, **Up next** lists the
+   schedules in the order they run: each row the clock time, the mark, the name, the schedule in
+   words, the kind and a countdown, one height; pointing at a row lights its blocks across the day
+   and dims the rest, so the list and the picture are read together. The kinds are chips that
+   count and narrow; what the chart cannot draw — work later in the week, what runs only at boot,
+   what is switched off, and the package cron lines left to systemd — is a line under the list.
+   The band renders during load in the same shape, so the tables under it do not move when it
+   lands. Every time on the page is on the server's clock, and the identity line names the zone
+   when it is not the reader's. A cron line's runs are its expression's (`lib/schedule.ts`); a
+   timer's are read off its calendar only where it adds no random delay (`timerRuns`), since a
+   package timer that adds twelve hours fires at none of its calendar's times, and are otherwise
+   the one run systemd reports. A package's cron line guarded on `/run/systemd/system` does nothing
+   on a host running systemd — Debian ships it beside a timer for the same work — so it draws no
+   run, and its row and its sheet say which timer does the work (`deferredToSystemd`).
+
+   The tables under the band took the same pass. A job is named the way the band names it — the
+   note above the line, `run-parts`' Hourly or Daily scripts, or the program — with the command
+   that does the work under the name, the schedule in words over its expression in its own column,
+   and the next run as a countdown over its clock time ("in 2h 23m" over "Tue 00:59") where the
+   column printed the date to the second. A state that is the expected answer is not drawn: the
+   cron jobs lost their *enabled* column, the timers their *Startup* tag, and a timer that will not
+   come back after a reboot says so under its state. The timers say when each fires in words with
+   the delay its package adds — the backend reads every timer's calendar, intervals and delay with
+   one `systemctl show` — and what its unit says it is for. The system cron files are one table
+   grouped under a row per file, where they were a table per file each repeating its header, with
+   `/etc/crontab`'s worked example (a commented `* * * * * user-name command to be executed` under
+   a ruler of pipes, which parsed as a switched-off job) left out.
+
+   Every schedule opens a sheet built from one set of parts (`components/procs/schedule-sheet.tsx`),
+   because the three sheets were tiles, a strip, a command and a log stacked at 20px with nothing
+   louder than another, and the schedule — what a schedule is opened for — was a line of mono under
+   the title. Each opens on the schedule as a sentence over the expression it was written as, then
+   its figures as tiles, then **When it runs**: the next five runs as a list beside the week drawn
+   as seven days of a mark per run and a count per day, a timer's random delay a wash after each
+   mark (why certbot ran at 06:41 when its calendar says midnight is the wash, not a sentence);
+   then Command, Details and Runs, each a title and a hairline on one 24px gutter. A job's figures
+   are its next run and its runs this week, and its Runs the cron log narrowed to its command; a
+   switched-off job, a stopped timer and a line left to systemd say which they are first, the last
+   linking the timer. A timer's figures are its next and last run and how long that took, and its
+   Runs the service's Runs view. The job editor asks what runs, then when — its frequency a grid
+   of toggles — over a preview card of the schedule in words, its week and its next three runs,
+   drawn as the fields change.
 
    The proxy overview took the exit in 0.7.1, at the operator's request, because it had no life:
    four grey tiles (sites, certificates, streams, internet-facing ports) over a column of route cards
@@ -3300,8 +3340,10 @@ the end of the field that read as the `/` shortcut and a letter "B". Now:
   is a blue field with amber and red where they happened, not a grey wall. The histogram is taller,
   reads a column out by series under the pointer, and takes a drag as well as a press.
 - **Insights says the window in words first.** A log's opens on its lines, errors, warnings (each
-  narrowing to itself), busiest minute and its measure's p95 or distinct addresses, every figure with
-  its line across the window. A request record's opens on who came: **Visitors** (distinct people —
+  narrowing to itself), busiest minute and its distinct addresses, every figure with its picture on
+  one line across the row. Since 2026-11-09 it is drawn as the request record's is: `RankList` and
+  `SplitBar` rather than a `BarList` per key, group tables of one-line rows, the chart under a block's
+  head, and level chips for the levels present only. A request record's opens on who came: **Visitors** (distinct people —
   an address and a browser that opened a page; never a crawler, a script or a probe), page views, bots
   and scripts, the site that sent them as itself and the devices as one bar in their colours, then
   the people as a list — the browser on its system, the device, the address, their trail of pages —

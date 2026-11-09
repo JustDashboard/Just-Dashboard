@@ -178,7 +178,12 @@ socket-activated service's port.
   without figures rather than failing it.
 - systemd grew `reset-failed` (`service.control`) and `POST /systemd/daemon-reload` (`system.admin`),
   and `GET /systemd/timers` joins `list-timers --all` (schedule) with `list-units --type=timer` (state)
-  and `list-unit-files --type=timer` (startup) on the unit name. `next` and `last` are read as
+  and `list-unit-files --type=timer` (startup) on the unit name, and reads every timer's
+  `Description`, `TimersCalendar`, `TimersMonotonic` and `RandomizedDelayUSec` with one
+  `systemctl show` over all of them, so the Scheduled page can say when each fires without a read
+  per timer (`description`, `calendar`, `monotonic` — spelled `OnBootSec=` as the unit file does,
+  where systemd 255 writes `OnBootUSec=` — and `randomDelay`; a `show` that fails leaves them
+  empty). `next` and `last` are read as
   microsecond timestamps; `left` and `passed` are ignored because across systemd versions they have
   been a string, a duration and — on some 257 builds — a copy of `next`. Timer control reuses the
   unit routes, and "run now" is `start` on the service the timer activates. The unit sheet offers

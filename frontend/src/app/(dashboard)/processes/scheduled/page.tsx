@@ -1,15 +1,18 @@
 "use client"
 
 import { Suspense, useEffect, useMemo } from "react"
-import Link from "next/link"
 import { Copy } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { describeCron } from "@/lib/cron"
 import { plural } from "@/lib/format"
-import { scheduleLanes, type ScheduleLane } from "@/lib/schedule"
+import {
+  deferredToSystemd,
+  isExampleLine,
+  scheduleLanes,
+  timerFor,
+  type ScheduleLane,
+} from "@/lib/schedule"
 import type { Crontab, LogSourceIndex } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
@@ -22,17 +25,10 @@ import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { platformProduct } from "@/components/product-logo"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { CronJobSheet } from "@/components/procs/cron-job-sheet"
-import { CommandCell, CronJobsPanel } from "@/components/procs/cron-jobs"
+import { CronJobsPanel } from "@/components/procs/cron-jobs"
 import { BAND_WINDOW, NextUp, ScheduleBand } from "@/components/procs/schedule-band"
+import { SystemCronPanel } from "@/components/procs/system-cron"
 import { TimerSheet } from "@/components/procs/timer-sheet"
 import { TimersPanel, type TimerList } from "@/components/procs/timers"
 import { cronLogSource } from "@/components/procs/shared"
@@ -107,11 +103,23 @@ function Scheduled() {
   const jobs = useMemo(() => crontab.data?.jobs ?? [], [crontab.data])
   const timerList = useMemo(() => timers.data?.timers ?? [], [timers.data])
   const systemJobs = useMemo(
-    () => (system.data ?? []).reduce((n, file) => n + file.jobs.length, 0),
+    () =>
+      (system.data ?? []).reduce(
+        (n, file) => n + file.jobs.filter((job) => !isExampleLine(job)).length,
+        0,
+      ),
     [system.data],
   )
   const disabled = jobs.filter((job) => job.disabled).length
   const armed = timerList.filter((timer) => timer.activeState === "active").length
+  // Every time on the page is on the host's clock, which is the one its
+  // schedules are written in: "every day at 03:00" and a next run of 22:00
+  // for the same line, because the browser was five hours behind the server,
+  // was the first thing that made the page unreadable. The zone is said in
+  // the identity line when it is not the reader's.
+  const zone = crontab.data?.timeZone ?? system.data?.find((file) => file.timeZone)?.timeZone
+  const browserZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
+  const systemd = Boolean(timers.data?.available)
 
   // The band is drawn from this minute: an expression's runs are computed
   // once a minute, and every countdown ticks from them in between.
@@ -125,8 +133,10 @@ function Scheduled() {
         system: system.data,
         from: minute,
         until: minute + BAND_WINDOW,
+        zone,
+        systemd,
       }),
-    [crontab.data, timers.data, system.data, minute],
+    [crontab.data, timers.data, system.data, minute, zone, systemd],
   )
   const settled = Boolean(crontab.data && timers.data)
 
@@ -171,16 +181,26 @@ function Scheduled() {
               {system.data && (
                 <>
                   <FactDot />
-                  <span className="numeric">{plural(systemJobs, "package cron line")}</span>
+                  <span className="numeric">{plural(systemJobs, "system cron line")}</span>
+                </>
+              )}
+              {zone && zone !== browserZone && (
+                <>
+                  <FactDot />
+                  <span
+                    title={`Times on this page are the server's (${zone}), not this browser's (${browserZone})`}
+                  >
+                    times in {zone}
+                  </span>
                 </>
               )}
             </>
           }
-          aside={settled && <NextUp lanes={lanes} />}
+          aside={settled && <NextUp lanes={lanes} zone={zone} />}
         />
       )}
 
-      {settled && <ScheduleBand lanes={lanes} onOpen={open} />}
+      <ScheduleBand lanes={lanes} zone={zone} settled={settled} onOpen={open} />
 
       <CronJobsPanel
         user={user}
@@ -193,6 +213,7 @@ function Scheduled() {
         open={job}
         onOpen={selectJob}
         cron={cron}
+        zone={zone}
       />
 
       <TimersPanel
@@ -200,6 +221,15 @@ function Scheduled() {
         confirm={confirm}
         onOpen={selectTimer}
         detailOpen={timer !== null}
+        zone={zone}
+      />
+
+      <SystemCronPanel
+        system={system}
+        zone={zone}
+        systemd={systemd}
+        timers={timerList}
+        onOpen={selectJob}
       />
 
       <Panel plain>
@@ -228,98 +258,20 @@ function Scheduled() {
         </PanelBody>
       </Panel>
 
-      <Panel>
-        <PanelHeader
-          title="System cron files"
-          advanced
-          actions={
-            system.data &&
-            system.data.length > 0 && (
-              <span className="numeric text-hint text-muted-foreground">
-                {plural(systemJobs, "line")} in {plural(system.data.length, "file")}
-              </span>
-            )
-          }
-        />
-        <PanelBody className="space-y-6">
-          {system.data?.map((file) => (
-            <section key={file.source} className="min-w-0 space-y-2">
-              <p className="eyebrow">
-                <Link
-                  href={`/files?path=${encodeURIComponent(file.source)}`}
-                  className="font-mono tracking-normal normal-case hover:underline"
-                >
-                  {file.source}
-                </Link>
-              </p>
-              {file.jobs.length === 0 ? (
-                <EmptyNote className="py-2 text-left">No jobs.</EmptyNote>
-              ) : (
-                <Table containerClassName="group-data-[plain]/panel:-mx-4 w-auto">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-52">Schedule</TableHead>
-                      <TableHead className="w-24">User</TableHead>
-                      <TableHead className="w-full">Command</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {file.jobs.map((line) => {
-                      const key = `system:${file.source}:${line.line}`
-                      return (
-                        <TableRow
-                          key={line.line}
-                          onActivate={() => selectJob(key)}
-                          // A commented-out schedule is real syntax, not a
-                          // running job — /etc/crontab ships one as its own
-                          // worked example. Dimming it keeps the two apart.
-                          className={cn(line.disabled && "opacity-55")}
-                        >
-                          <TableCell className="whitespace-normal">
-                            <div className="min-w-44">
-                              <p className="font-mono whitespace-nowrap">
-                                {line.disabled && (
-                                  <span className="mr-1 text-muted-foreground">#</span>
-                                )}
-                                {line.schedule}
-                              </p>
-                              <p className="text-hint text-muted-foreground">
-                                {describeCron(line.schedule)}
-                              </p>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {line.user || "—"}
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <CommandCell
-                              command={line.command}
-                              comment={line.comment}
-                              onOpen={() => selectJob(key)}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })}
-                  </TableBody>
-                </Table>
-              )}
-            </section>
-          ))}
-          {system.data && system.data.length === 0 && <EmptyNote>No system cron files.</EmptyNote>}
-        </PanelBody>
-      </Panel>
-
       <TimerSheet
         unit={timer}
         timer={timerList.find((t) => t.unit === timer)}
         confirm={confirm}
         onChanged={timers.refresh}
         onOpenChange={(next) => !next && selectTimer(null)}
+        zone={zone}
       />
       <CronJobSheet
         job={systemOpen?.line}
         kind="system"
+        zone={zone}
+        skipped={Boolean(systemOpen && systemd && deferredToSystemd(systemOpen.line.command))}
+        instead={systemOpen ? timerFor(systemOpen.line.command, timerList) : undefined}
         owner={systemOpen?.file.source ?? ""}
         source={systemOpen?.file.source}
         verbs={

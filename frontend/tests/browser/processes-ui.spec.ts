@@ -1423,17 +1423,27 @@ test("scheduled says what each schedule means and builds a new one in words", as
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity).toContainText("1 cron job for root, 1 disabled")
   await expect(identity).toContainText("1 of 2 timers armed")
-  await expect(identity).toContainText("1 package cron line")
+  await expect(identity).toContainText("1 system cron line")
   const next = page.locator("[data-slot='next-up']")
   await expect(next).toContainText("Next run")
   await expect(next).toContainText(/\d+[smhd]/)
 
-  // The next day of all three on one axis: a lane per schedule that fires in
-  // it, soonest first, each kind a chip that counts and narrows.
+  // The next day of all three as an hour-by-hour chart, and under it each
+  // schedule in the order it runs, with its clock time and its schedule in
+  // words; each kind a chip that counts and narrows.
+  const chart = page.getByRole("img", { name: /from 3 schedules over the next 24 hours/ })
+  await expect(chart).toBeVisible()
+  await expect(chart.locator("[data-hour]")).toHaveCount(24)
   const band = page.getByRole("list", { name: "Schedules" })
   await expect(band.locator(":scope > li")).toHaveCount(3)
+  // /etc/crontab's run-parts line is the hourly scripts, every hour at :17.
+  const hourly = band.locator(":scope > li").filter({ hasText: "Hourly scripts" })
+  await expect(hourly).toContainText("Every hour at :17")
+  await expect(hourly).toContainText(/:17/)
+  // Pointing at it says it on the chart's line.
+  await hourly.hover()
   await expect(
-    band.getByRole("img", { name: "run-parts: 24 runs in the next 24 hours" }),
+    page.locator("[aria-live=polite]").filter({ hasText: "Hourly scripts" }),
   ).toBeVisible()
   const kinds = page.locator("[aria-label='Kind']")
   await kinds.getByRole("button", { name: /Timers/ }).click()
@@ -1488,6 +1498,112 @@ test("scheduled says what each schedule means and builds a new one in words", as
   await expect(sheet.getByRole("button", { name: "Disable" })).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(page).not.toHaveURL(/job=/)
+})
+
+test("scheduled says what systemd runs instead and when each timer fires", async ({ page }) => {
+  await mockHost(page)
+  await page.route("**/api/v1/systemd/timers", (route) =>
+    json(route, {
+      ...timers,
+      timers: timers.timers.map((timer) =>
+        timer.unit === "certbot.timer"
+          ? {
+              ...timer,
+              description: "Run certbot twice daily",
+              calendar: ["*-*-* 00,12:00:00"],
+              randomDelay: "12h",
+            }
+          : timer,
+      ),
+    }),
+  )
+  await page.route("**/api/v1/cron/system", (route) =>
+    json(route, [
+      {
+        user: "",
+        source: "/etc/cron.d/certbot",
+        raw: "",
+        env: [],
+        comments: [],
+        timeZone: "UTC",
+        jobs: [
+          {
+            line: 12,
+            schedule: "0 */12 * * *",
+            user: "root",
+            command:
+              "test -x /usr/bin/certbot -a \\! -d /run/systemd/system && perl -e 'sleep int(rand(43200))' && certbot -q renew",
+            comment: "certbot.timer.",
+            raw: "",
+            disabled: false,
+            timeZone: "UTC",
+          },
+        ],
+      },
+      {
+        user: "",
+        source: "/etc/crontab",
+        raw: "",
+        env: [],
+        comments: [],
+        timeZone: "UTC",
+        jobs: [
+          {
+            line: 19,
+            schedule: "* * * * *",
+            user: "user-name",
+            command: "command to be executed",
+            comment: "|  |  |  |  |",
+            raw: "",
+            disabled: true,
+            timeZone: "UTC",
+          },
+          {
+            line: 20,
+            schedule: "25 6 * * *",
+            user: "root",
+            command: "test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.daily; }",
+            raw: "",
+            disabled: false,
+            timeZone: "UTC",
+          },
+        ],
+      },
+    ]),
+  )
+  await page.goto("/processes/scheduled")
+
+  // A timer's schedule is said in words in its row, with the delay its
+  // package adds.
+  const timer = page.locator("[data-process-row='certbot.timer']")
+  await expect(timer).toContainText("Twice a day, at 00:00 and 12:00, up to 12 hours later")
+  await expect(timer).toContainText("Run certbot twice daily")
+
+  // One table of the package files, grouped by file: /etc/crontab's worked
+  // example is no job, the daily line is the daily scripts, and certbot's
+  // line says the timer runs its work.
+  const files = page
+    .locator("[data-slot=panel]")
+    .filter({ has: page.getByRole("heading", { name: /^System cron files/ }) })
+  await expect(files.getByRole("table")).toHaveCount(1)
+  await expect(files).not.toContainText("command to be executed")
+  await expect(files.getByRole("row", { name: /Daily scripts/ })).toContainText(
+    "Every day at 06:25",
+  )
+  const certbot = files.getByRole("row", { name: /certbot:/ })
+  await expect(certbot).toContainText("left to systemd")
+  await expect(certbot).toContainText("certbot.timer")
+  // The band does not count it as a run: it is said under the list.
+  await expect(page.getByText("1 cron line left to systemd")).toBeVisible()
+
+  await certbot.getByRole("button", { name: /certbot:/ }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByText("systemd does this work here")).toBeVisible()
+  await sheet.getByRole("link", { name: "certbot.timer" }).click()
+  await expect(page).toHaveURL(/timer=certbot\.timer/)
+  await expect(page.getByRole("dialog")).toContainText(
+    "Twice a day, at 00:00 and 12:00, up to 12 hours later",
+  )
 })
 
 const RUN_PREDICATES = [

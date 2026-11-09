@@ -691,7 +691,7 @@ function sumOf(facets: RequestFacet[]) {
 }
 
 /** A status family's colour, as the status codes' own words are drawn in it. */
-const FAMILY_HUE: Record<StatusClass, string> = {
+export const FAMILY_HUE: Record<StatusClass, string> = {
   "2xx": "var(--success)",
   "3xx": "var(--tag-cyan)",
   "4xx": "var(--warning)",
