@@ -939,7 +939,7 @@ test("a row's owner opens its own page: the deployment, the unit, the PM2 app", 
 
   await page.goto("/proxy/ports")
   await rows.filter({ hasText: "nginx.service" }).getByRole("button", { name: "Process" }).click()
-  await expect(page).toHaveURL(/\/processes\?pid=812$/)
+  await expect(page).toHaveURL(/\/processes\/812$/)
 })
 
 test("a search finds a socket by its container, image, deployment, unit or the dashboard's tag", async ({

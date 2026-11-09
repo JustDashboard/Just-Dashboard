@@ -1,15 +1,19 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
+	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 )
 
@@ -241,5 +245,157 @@ esac
 	}
 	if len(detail.Unit.History) == 0 {
 		t.Fatalf("detail carried no history: %s", w.Body.String())
+	}
+}
+
+// startProbe starts a sleeping child with an environment of its own, for a
+// route to read or signal; it is ended when the test is.
+func startProbe(t *testing.T, name string, arg ...string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(name, arg...)
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "JD_PROBE_TOKEN=s3cret-probe"}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	return cmd
+}
+
+// The process page's slower read carries the environment, which carries
+// credentials: an administrator reads them, anybody else reads them masked,
+// as a container's are.
+func TestProcessInspectMasksCredentialsForAnyoneButAnAdministrator(t *testing.T) {
+	probe := startProbe(t, "sleep", "30")
+	path := "/api/v1/processes/" + strconv.Itoa(probe.Process.Pid) + "/inspect"
+	read := func(c *client) procs.ProcessInspect {
+		t.Helper()
+		var got procs.ProcessInspect
+		for range 50 {
+			w := c.do(http.MethodGet, path, "", nil)
+			if w.Code != http.StatusOK {
+				t.Fatalf("GET inspect: %d: %s", w.Code, w.Body.String())
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			// The child is a copy of the test until exec lands.
+			if len(got.Argv) > 0 && got.Argv[0] == "sleep" {
+				return got
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("argv = %q, want sleep's", got.Argv)
+		return got
+	}
+
+	admin, _ := newClient(t)
+	got := read(admin)
+	if !got.EnvironmentReadable || !slices.Contains(got.Environment, "JD_PROBE_TOKEN=s3cret-probe") {
+		t.Fatalf("administrator's environment = %v", got.Environment)
+	}
+	if !got.Identity.Ready || got.ThreadsTotal == 0 || !got.Files.Ready || got.CreateTime.IsZero() {
+		t.Fatalf("inspect = %+v", got)
+	}
+
+	s := testServer(t)
+	limited := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "limited-inspect", auth.RoleLimited)}
+	masked := read(limited)
+	if slices.Contains(masked.Environment, "JD_PROBE_TOKEN=s3cret-probe") || !slices.Contains(masked.Environment, "JD_PROBE_TOKEN="+dockerx.RedactedEnvValue) {
+		t.Fatalf("limited environment = %v, want the token masked", masked.Environment)
+	}
+	if w := admin.do(http.MethodGet, "/api/v1/processes/2147483000/inspect", "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("missing pid = %d, want 404", w.Code)
+	}
+}
+
+// A worker pool is ended in one press: the process first, then everything it
+// started, and the answer names every PID the signal reached.
+func TestASignalWithItsChildrenReachesTheWholeTree(t *testing.T) {
+	shell := startProbe(t, "sh", "-c", "sleep 30 & sleep 30 & wait")
+	pid := int32(shell.Process.Pid)
+	var below []int32
+	for range 100 {
+		below, _ = procs.Descendants(context.Background(), pid)
+		if len(below) == 2 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(below) != 2 {
+		t.Fatalf("descendants = %v, want the two sleeps", below)
+	}
+	c, _ := newClient(t)
+	w := c.do(http.MethodPost, "/api/v1/processes/"+strconv.Itoa(int(pid))+"/signal",
+		`{"signal":"SIGKILL","tree":true}`, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("tree signal = %d: %s", w.Code, w.Body.String())
+	}
+	var got struct {
+		Signalled []int32 `json:"signalled"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Signalled) != 3 || got.Signalled[0] != pid {
+		t.Fatalf("signalled = %v, want the shell first and both sleeps", got.Signalled)
+	}
+	for _, child := range below {
+		gone := false
+		for range 100 {
+			stat, err := os.ReadFile("/proc/" + strconv.Itoa(int(child)) + "/stat")
+			if err != nil || strings.Contains(string(stat), ") Z ") {
+				gone = true
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if !gone {
+			t.Errorf("child %d is still running", child)
+		}
+	}
+}
+
+// The dashboard's own process is below its parent, so ending the parent with
+// its children would end the page that asked; the route refuses it whole.
+func TestASignalWithItsChildrenRefusesTheDashboardsOwnTree(t *testing.T) {
+	c, _ := newClient(t)
+	w := c.do(http.MethodPost, "/api/v1/processes/"+strconv.Itoa(os.Getppid())+"/signal",
+		`{"signal":"SIGCONT","tree":true}`, nil)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "own_tree") {
+		t.Fatalf("own tree = %d %s, want 409 own_tree", w.Code, w.Body.String())
+	}
+}
+
+// The out-of-memory bias decides which process the kernel ends first when
+// memory runs out: a system administrator's setting, read back from the
+// kernel's own file.
+func TestTheOutOfMemoryBiasIsSetAndNeedsSystemAdmin(t *testing.T) {
+	probe := startProbe(t, "sleep", "30")
+	path := "/api/v1/processes/" + strconv.Itoa(probe.Process.Pid) + "/oom"
+
+	s := testServer(t)
+	limited := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "limited-oom", auth.RoleLimited)}
+	if w := limited.do(http.MethodPut, path, `{"adj":500}`, nil); w.Code != http.StatusForbidden {
+		t.Fatalf("limited oom = %d, want 403", w.Code)
+	}
+
+	c, _ := newClient(t)
+	if w := c.do(http.MethodPut, path, `{}`, nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("missing adj = %d, want 400", w.Code)
+	}
+	if w := c.do(http.MethodPut, path, `{"adj":1001}`, nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("adj out of range = %d, want 400", w.Code)
+	}
+	// Raising a process's own bias needs no privilege, so this runs as any
+	// account; lowering it below where it started would need CAP_SYS_RESOURCE.
+	if w := c.do(http.MethodPut, path, `{"adj":500}`, nil); w.Code != http.StatusNoContent {
+		t.Fatalf("set oom = %d: %s", w.Code, w.Body.String())
+	}
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(probe.Process.Pid) + "/oom_score_adj")
+	if err != nil || strings.TrimSpace(string(b)) != "500" {
+		t.Fatalf("oom_score_adj = %q %v, want 500", b, err)
 	}
 }

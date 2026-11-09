@@ -2239,6 +2239,20 @@ The passes, in order. Each one is a diff you can review on its own.
    which the sampler keeps for every process it measures, so a sheet opened from a table that has
    been open for minutes opens on those minutes.
 
+   The sheet became a page in 0.8.6, at the operator's request: "when I open a process it opens in
+   a side panel … the information just gets cluttered", with everything the kernel keeps about a
+   process — threads, descriptors, limits, environment, the signals it handles — left nowhere to go.
+   A process is a destination now, the way a container is: `/processes/[pid]`, its identity line and
+   its views as the underlined strip (`procs/process-page.tsx`). What the sheet did well, the table
+   beside the thing being read, is the rail from `xl` — the table's filters and ranking folded into a
+   column, the process on screen filled, Alt+↑/↓ to walk it and the view carried along — so checking
+   the next worker is one press rather than a trip back. The Overview keeps the sheet's four readings
+   and replaces its lineage path and child rows with the container page's wiring picture: what
+   supervises it and its parent on the left, the process as its product in the middle, what it started
+   (copies of one program as one node), its sockets and its open files on the right. Control says what
+   each signal will do to *this* process, read from the masks of the signals it handles, so a hang-up
+   that reloads nginx and a hang-up that ends a script stop looking like the same button.
+
    PM2 took the same exit in the same pass, at the operator's request, and for the same reason: four
    grey figures over a table, and nothing that moved. Online and Not running went to state chips in
    the table's head, Errored in its tone and drawn only while there is one; Restarts summed every
@@ -2284,7 +2298,7 @@ The passes, in order. Each one is a diff you can review on its own.
    its windows, tasks against theirs, automatic restarts with the policy), or the last run's
    counters when it is not running; a failure or a restart loop said first as a Notice with the
    way to its journal; the command coloured as a command rather than systemd's record of it; the
-   processes it holds now, each opening Live's sheet; and how it runs, with its type in words and
+   processes it holds now, each opening its own page; and how it runs, with its type in words and
    its overrides.
 
    Docker's Containers took the same exit in 0.7.1, at the operator's request, because it had no

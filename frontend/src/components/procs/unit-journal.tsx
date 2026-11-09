@@ -47,6 +47,7 @@ import {
   unitStateWord,
   unitTone,
 } from "@/components/procs/units"
+import { processHref } from "@/components/procs/process-facts"
 
 /**
  * An open sheet reads its unit this often. The read also measures it, so the
@@ -264,7 +265,7 @@ function UnitOverview({ detail, onJournal }: { detail: SystemdUnitDetail; onJour
             <>
               <Dot />
               <Link
-                href={`/processes?pid=${service.mainPid}`}
+                href={processHref(service.mainPid)}
                 className="numeric inline-flex items-center gap-1 text-foreground hover:underline"
               >
                 PID {service.mainPid}
@@ -676,7 +677,7 @@ function UnitProcesses({ unit }: { unit: string }) {
 function UnitProcessRow({ process, ratesReady }: { process: ProcessRow; ratesReady: boolean }) {
   return (
     <Row
-      href={`/processes?pid=${process.pid}`}
+      href={processHref(process.pid)}
       mono
       leading={<ProductLogo id={processProduct(process.name)} size="sm" fallback={Cpu} />}
       title={

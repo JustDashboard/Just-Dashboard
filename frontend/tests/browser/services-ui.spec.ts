@@ -150,7 +150,7 @@ test("a running unit's sheet is a live readout of it", async ({ page }) => {
   await expect(sheet).toContainText("starts on boot")
   await expect(sheet.getByRole("link", { name: /PID 812/ })).toHaveAttribute(
     "href",
-    "/processes?pid=812",
+    "/processes/812",
   )
   const tiles = sheet.locator("[data-slot='stat-tile']")
   await expect(tiles).toHaveCount(4)
@@ -167,14 +167,14 @@ test("a running unit's sheet is a live readout of it", async ({ page }) => {
   await expect(command).not.toContainText("ignore_errors")
   await expect(command).toContainText("-s reload")
 
-  // Its processes, from the table narrowed to its cgroup, each opening Live's sheet.
+  // Its processes, from the table narrowed to its cgroup, each opening its own page.
   await expect
     .poll(() => mocks.inventories.some((q) => q.get("group") === "systemd:nginx.service"))
     .toBe(true)
   const processes = sheet.locator("[data-slot='panel']").filter({ hasText: "Processes" })
   await expect(processes).toContainText("5 processes")
   await expect(processes.getByRole("link")).toHaveCount(5)
-  await expect(processes.getByRole("link").first()).toHaveAttribute("href", "/processes?pid=812")
+  await expect(processes.getByRole("link").first()).toHaveAttribute("href", "/processes/812")
 
   const how = sheet.locator("[data-slot='panel']").filter({ hasText: "How it runs" })
   await expect(how).toContainText("Started when its process forks and the parent exits")

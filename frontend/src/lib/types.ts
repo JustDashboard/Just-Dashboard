@@ -1414,6 +1414,141 @@ export type ProcessTree = {
   children: ProcessLink[]
 }
 
+export type InspectID = { id: number; name?: string }
+
+/**
+ * Everything else the kernel keeps about one process, from
+ * `GET /processes/{pid}/inspect` — the process page's slower read. Each block
+ * carries `ready: false` where this account could not read it.
+ */
+export type ProcessInspect = {
+  pid: number
+  createTime: string
+  argv: string[]
+  exe?: string
+  /** The file it was started from has been replaced since: a restart picks up the new one. */
+  exeDeleted?: boolean
+  root?: string
+  waitChannel?: string
+  namespacePid?: number
+  identity: {
+    ready: boolean
+    user: InspectID
+    effectiveUser: InspectID
+    savedUser: InspectID
+    group: InspectID
+    effectiveGroup: InspectID
+    groups: InspectID[]
+    terminal?: string
+    session: number
+    processGroup: number
+    foreground?: boolean
+  }
+  scheduling: {
+    ready: boolean
+    policy: string
+    realtimePriority?: number
+    nice: number
+    cpus?: string
+    cpuCount: number
+    hostCpus: number
+    lastCpu: number
+    userSeconds: number
+    systemSeconds: number
+    childrenUserSeconds: number
+    childrenSystemSeconds: number
+    ioWaitSeconds: number
+    voluntarySwitches: number
+    involuntarySwitches: number
+    minorFaults: number
+    majorFaults: number
+  }
+  memory: {
+    ready: boolean
+    resident: number
+    anonymous: number
+    fileBacked: number
+    sharedMemory: number
+    peak: number
+    virtual: number
+    virtualPeak: number
+    data: number
+    stack: number
+    text: number
+    libraries: number
+    locked: number
+    pageTables: number
+    swap: number
+    proportional: number
+    unique: number
+    rollupReady: boolean
+    oomScore: number
+    oomScoreAdj: number
+    oomReady: boolean
+  }
+  io: {
+    ready: boolean
+    charsRead: number
+    charsWritten: number
+    readCalls: number
+    writeCalls: number
+    readBytes: number
+    writeBytes: number
+    cancelledWriteBytes: number
+  }
+  security: {
+    ready: boolean
+    capabilities: string[]
+    allCapabilities: boolean
+    boundingAll: boolean
+    noNewPrivs: boolean
+    seccomp: "off" | "strict" | "filter"
+    seccompFilters?: number
+    label?: string
+  }
+  signals: {
+    ready: boolean
+    caught: string[]
+    ignored: string[]
+    blocked: string[]
+    pending: string[]
+  }
+  namespaces: { kind: string; own: boolean }[]
+  cgroup: {
+    path?: string
+    memoryLimit?: number
+    memoryCurrent?: number
+    cpuLimit?: number
+    pidsLimit?: number
+    pidsCurrent?: number
+  }
+  limits: { name: string; soft: string; hard: string; unit?: string }[]
+  files: {
+    ready: boolean
+    total: number
+    files: number
+    sockets: number
+    pipes: number
+    devices: number
+    other: number
+    deleted: number
+    entries: {
+      fd: number
+      kind: "file" | "socket" | "pipe" | "device" | "other"
+      target: string
+      deleted?: boolean
+    }[]
+    truncated?: boolean
+  }
+  libraries: { path: string; deleted?: boolean }[]
+  connections: { proto: string; local: string; remote?: string; state?: string }[]
+  connectionsTotal: number
+  environment: string[]
+  environmentReadable: boolean
+  threads: { tid: number; name: string; state: string; cpuSeconds: number; lastCpu: number }[]
+  threadsTotal: number
+}
+
 export type ProcessFacet = {
   value: string
   label: string

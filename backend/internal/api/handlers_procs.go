@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -82,9 +83,11 @@ func (s *Server) mountProcessRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/inventory", s.handle(s.handleProcessInventory))
 		r.Method(http.MethodGet, "/{pid}", s.handle(s.handleProcessDetail))
 		r.Method(http.MethodGet, "/{pid}/tree", s.handle(s.handleProcessTree))
+		r.Method(http.MethodGet, "/{pid}/inspect", s.handle(s.handleProcessInspect))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodPut, "/{pid}/priority", s.handle(s.handleProcessPriority))
+			r.Method(http.MethodPut, "/{pid}/oom", s.handle(s.handleProcessOOM))
 		})
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/{pid}/signal", s.handle(s.handleProcessSignal))
@@ -389,6 +392,72 @@ func (s *Server) handleProcessTree(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
+// handleProcessInspect reads everything else the kernel keeps about one
+// process — identity, scheduling, memory, limits, signals, descriptors,
+// threads and environment — for the process page's slower read. Its
+// environment carries credentials as a container's does, so credential-shaped
+// values are masked for anybody without system.admin, by the same rule.
+func (s *Server) handleProcessInspect(w http.ResponseWriter, r *http.Request) error {
+	pid, err := strconv.ParseInt(chi.URLParam(r, "pid"), 10, 32)
+	if err != nil {
+		return httpx.BadRequest("invalid pid")
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	inspect, err := s.modules.table.Inspect(ctx, int32(pid))
+	if err != nil {
+		return httpx.ErrNotFound
+	}
+	// The dashboard's own environment holds the key that decrypts every
+	// stored secret, and no page needs to show it: it is masked for
+	// administrators too.
+	if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) || inspect.PID == int32(os.Getpid()) {
+		inspect.Environment = dockerx.RedactEnv(inspect.Environment)
+	}
+	httpx.JSON(w, http.StatusOK, inspect)
+	return nil
+}
+
+type oomRequest struct {
+	Adj       *int   `json:"adj"`
+	StartedAt string `json:"startedAt,omitempty"`
+}
+
+// handleProcessOOM sets the bias the out-of-memory killer applies to one
+// process, guarded like a priority change against a PID reused since the
+// page read it.
+func (s *Server) handleProcessOOM(w http.ResponseWriter, r *http.Request) error {
+	pid64, err := strconv.ParseInt(chi.URLParam(r, "pid"), 10, 32)
+	if err != nil {
+		return httpx.BadRequest("invalid pid")
+	}
+	var req oomRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Adj == nil {
+		return httpx.BadRequest("adj is required")
+	}
+	p, err := s.modules.table.Detail(r.Context(), int32(pid64))
+	if err != nil {
+		return httpx.ErrNotFound
+	}
+	if err := requireSameProcess(p, req.StartedAt); err != nil {
+		return err
+	}
+	if err := procs.Controllable(p); err != nil {
+		return refusedControl(p, err)
+	}
+	previous, _ := procs.OOMScoreAdj(int32(pid64))
+	if err := s.modules.table.SetOOMScoreAdj(r.Context(), int32(pid64), *req.Adj); err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.SetAudit(r, "process.oom", p.Name,
+		map[string]any{"pid": pid64, "previous": previous, "adj": *req.Adj})
+	httpx.NoContent(w)
+	return nil
+}
+
 type priorityRequest struct {
 	Nice      *int   `json:"nice"`
 	StartedAt string `json:"startedAt,omitempty"`
@@ -428,6 +497,9 @@ func (s *Server) handleProcessPriority(w http.ResponseWriter, r *http.Request) e
 type signalRequest struct {
 	Signal    string `json:"signal"`
 	StartedAt string `json:"startedAt,omitempty"`
+	// Tree sends the signal to every process below this one as well, which is
+	// how a worker pool that respawns its workers is ended in one press.
+	Tree bool `json:"tree,omitempty"`
 }
 
 func (s *Server) handleProcessSignal(w http.ResponseWriter, r *http.Request) error {
@@ -456,6 +528,20 @@ func (s *Server) handleProcessSignal(w http.ResponseWriter, r *http.Request) err
 	// No typed phrase: signalling a process is the process table's whole
 	// purpose, and a supervised one comes straight back. The dialog carries the
 	// pid and the command line, which is what identifies the right row.
+	if req.Tree {
+		reached, err := s.modules.table.SignalTree(r.Context(), pid, req.Signal)
+		if errors.Is(err, procs.ErrOwnTree) {
+			return httpx.Err(http.StatusConflict, "own_tree",
+				fmt.Sprintf("The dashboard itself runs under %s (%d), so it cannot end that process with its children. Signal the process on its own, or stop what supervises it.", detail.Name, pid))
+		}
+		if err != nil {
+			return httpx.BadRequest("%v", err)
+		}
+		httpx.SetAudit(r, "process.signal", detail.Name,
+			map[string]any{"pid": pid, "signal": req.Signal, "cmdline": detail.Cmdline, "tree": true, "pids": reached})
+		httpx.JSON(w, http.StatusOK, map[string]any{"signalled": reached})
+		return nil
+	}
 	if err := s.modules.table.Signal(r.Context(), pid, req.Signal); err != nil {
 		return httpx.BadRequest("%v", err)
 	}

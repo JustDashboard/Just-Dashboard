@@ -129,6 +129,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { processHref } from "@/components/procs/process-facts"
 
 const POLL_MS = 15_000
 
@@ -356,7 +357,7 @@ function PortsView() {
         label: "Process",
         icon: ListOrdered,
         inline: !l.container,
-        run: () => router.push(`/processes?pid=${l.pid}`),
+        run: () => router.push(processHref(l.pid)),
       })
     }
     verbs.push({
