@@ -1059,6 +1059,11 @@ bar and keep their own shapes.
   failed read. What needs more goes under the block. **`note`**, at the strip's end, holds what the
   strip leaves out or a control for the whole block. **At most six marks**; a part past them keeps its
   span and is read under the pointer.
+- **A mark is bare**: the part's picture alone, drawn a little larger than the glyph a caller passes
+  (`scale-115`), with no rule under it. Until 0.8.6 each mark sat on a short rule in its part's
+  colour, which made the strip read as a row of tabs; it was removed at the operator's request. The
+  colour is the line's tick and the span's, and a pointed or pressed mark takes the row's hover or
+  accent ground.
 - **A band must not mount, unmount or change columns as data lands, and its page renders it during
   load.** Whether a block is drawn is decided by what the host is, never by what a read has said so
   far, so a page whose readings land does not move.
