@@ -15,8 +15,7 @@ import {
   type CronPreset,
 } from "@/lib/cron"
 import { appendJob, removeJob, replaceJob, toggleJob, type JobEdit } from "@/lib/crontab"
-import { timestamp } from "@/lib/format"
-import { cronProgram } from "@/lib/schedule"
+import { cronLineName, cronProgram, longClock } from "@/lib/schedule"
 import { notify } from "@/lib/toast"
 import type { CronJob, Crontab } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -54,8 +53,10 @@ import {
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { CronJobSheet, WeekStrip } from "@/components/procs/cron-job-sheet"
+import { CronJobSheet } from "@/components/procs/cron-job-sheet"
 import { Countdown } from "@/components/procs/schedule-band"
+import { WeekStrip } from "@/components/procs/schedule-sheet"
+import { RunAt } from "@/components/procs/timers"
 import { cronRowKeys } from "@/components/procs/row-identity"
 
 type ConfirmFn = (request: ConfirmRequest) => void
@@ -90,7 +91,10 @@ export function CronJobsPanel({
   open,
   onOpen,
   cron,
+  zone,
 }: {
+  /** The host's zone, which a run's clock time is written in. */
+  zone?: string
   user: string
   users: string[]
   crontab: PollState<Crontab>
@@ -187,7 +191,7 @@ export function CronJobsPanel({
           actions={
             <>
               <Select value={user} onValueChange={onUserChange}>
-                <SelectTrigger size="sm" className="w-40" aria-label="Crontab account">
+                <SelectTrigger size="sm" className="w-28 sm:w-40" aria-label="Crontab account">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -202,9 +206,16 @@ export function CronJobsPanel({
                 </SelectContent>
               </Select>
               {admin && draft === null && crontab.data && (
-                <Button size="sm" variant="ghost" onClick={() => setDraft(raw)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setDraft(raw)}
+                  aria-label="Edit as text"
+                >
                   <Pencil className="size-3.5" />
-                  Edit as text
+                  {/* A phone's head has room for the account and Add job;
+                      the pencil says the rest. */}
+                  <span className="max-sm:hidden">Edit as text</span>
                 </Button>
               )}
               {admin && (
@@ -252,21 +263,38 @@ export function CronJobsPanel({
           {crontab.data && draft === null && (
             <>
               {jobs.length === 0 ? (
-                <EmptyNote>
-                  No cron jobs for {user}.
-                  {admin && " Add one, or paste a crontab with Edit as text."}
-                </EmptyNote>
+                <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+                  <span className="flex size-10 items-center justify-center rounded-xl border border-hairline bg-surface-sunken">
+                    <Clock className="size-4 text-muted-foreground" />
+                  </span>
+                  <div className="space-y-1">
+                    <p className="text-body font-medium">{user} has no cron jobs</p>
+                    <p className="max-w-sm text-hint text-muted-foreground">
+                      A job here runs as {user} on a schedule you set — a nightly backup, a cleanup,
+                      a health check.
+                      {admin && " Add one, or paste a whole crontab as text."}
+                    </p>
+                  </div>
+                  {admin && crontab.data.revision && (
+                    <Button size="sm" variant="outline" onClick={() => onAddingChange(true)}>
+                      <Plus className="size-3.5" />
+                      Add a job
+                    </Button>
+                  )}
+                </div>
               ) : listed.length === 0 ? (
                 <EmptyNote>No {shown} jobs.</EmptyNote>
               ) : (
-                <Table containerClassName="group-data-[plain]/panel:-mx-4 max-h-[calc(100svh-22rem)] w-auto">
+                <Table
+                  className="table-fixed"
+                  containerClassName="group-data-[plain]/panel:-mx-4 max-h-[calc(100svh-22rem)] w-auto"
+                >
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>
-                      <TableHead className="w-56">Schedule</TableHead>
-                      <TableHead className="hidden w-40 md:table-cell">Next run</TableHead>
-                      <TableHead className="w-full">Command</TableHead>
-                      <TableHead>State</TableHead>
-                      <TableHead className="w-px" />
+                      <TableHead>Job</TableHead>
+                      <TableHead className="hidden w-[30%] lg:table-cell">Schedule</TableHead>
+                      <TableHead className="hidden w-36 md:table-cell">Next run</TableHead>
+                      <TableHead className="w-28 md:w-32" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -274,6 +302,7 @@ export function CronJobsPanel({
                       <CronJobRow
                         key={`${user}:${rowKeys.get(job)}`}
                         job={job}
+                        zone={zone}
                         arrived={arrived.has(rowKeys.get(job)!)}
                         admin={admin}
                         confirm={confirm}
@@ -329,30 +358,32 @@ export function CronJobsPanel({
             </div>
           )}
         </PanelBody>
-        {crontab.data && (crontab.data.env.length > 0 || jobs.length > 0) && draft === null && (
-          <PanelFooter className="text-hint text-muted-foreground">
-            {crontab.data.env.length > 0 ? (
-              <>
-                <span>Environment</span>
-                {crontab.data.env.map((line) => (
-                  <Tag mono key={line}>
-                    {line}
-                  </Tag>
-                ))}
-              </>
-            ) : null}
-            <span>
-              {crontab.data.timeZone
-                ? `Schedules use ${crontab.data.timeZone} unless a job names another CRON_TZ.`
-                : "Host time zone unavailable; forecasts are estimates in this browser's time zone."}{" "}
-              Forecast dates are displayed in this browser&apos;s time zone.
-            </span>
-          </PanelFooter>
-        )}
+        {crontab.data &&
+          (crontab.data.env.length > 0 || (jobs.length > 0 && !crontab.data.timeZone)) &&
+          draft === null && (
+            <PanelFooter className="text-hint text-muted-foreground">
+              {crontab.data.env.length > 0 ? (
+                <>
+                  <span>Environment</span>
+                  {crontab.data.env.map((line) => (
+                    <Tag mono key={line}>
+                      {line}
+                    </Tag>
+                  ))}
+                </>
+              ) : null}
+              {!crontab.data.timeZone && (
+                <span>
+                  The server&apos;s time zone is unknown, so times are this browser&apos;s.
+                </span>
+              )}
+            </PanelFooter>
+          )}
       </Panel>
 
       <CronJobSheet
         job={opened}
+        zone={zone}
         owner={`${user}'s crontab`}
         verbs={opened ? cronJobVerbs({ job: opened, admin, confirm, ...actions(opened) }) : []}
         cron={cron}
@@ -446,6 +477,7 @@ export function cronJobVerbs({
 
 function CronJobRow({
   job,
+  zone,
   arrived,
   admin,
   confirm,
@@ -455,6 +487,7 @@ function CronJobRow({
   onRemove,
 }: {
   job: CronJob
+  zone?: string
   arrived: boolean
   admin: boolean
   confirm: ConfirmFn
@@ -475,39 +508,25 @@ function CronJobRow({
   return (
     <TableRow className={cn("group", arrived && "animate-rise")} onActivate={onOpen}>
       <TableCell className="whitespace-normal">
-        <div className="min-w-44">
-          <p className="font-mono whitespace-nowrap">{job.schedule}</p>
-          <p className="text-hint text-muted-foreground">{describeCron(job.schedule)}</p>
-        </div>
+        <JobCell job={job} onOpen={onOpen} dim={job.disabled} />
+      </TableCell>
+      <TableCell className="hidden whitespace-normal lg:table-cell">
+        <ScheduleCell schedule={job.schedule} dim={job.disabled} />
       </TableCell>
       <TableCell className="hidden md:table-cell">
-        {next ? (
-          <>
-            <p className="numeric">
-              <Countdown at={next.getTime()} />
-            </p>
-            <p className="text-hint text-muted-foreground">{timestamp(next.toISOString())}</p>
-          </>
+        {job.disabled ? (
+          <Status state="inactive" label="switched off" />
+        ) : next ? (
+          <RunAt at={next.getTime()} zone={zone} />
         ) : (
           <span className="text-muted-foreground">
-            {job.disabled
-              ? "—"
-              : job.schedule.toLowerCase() === "@reboot"
-                ? "at boot"
-                : job.timeZone && !supportsCronTimeZone(job.timeZone)
-                  ? "forecast unavailable"
-                  : "never"}
+            {job.schedule.toLowerCase() === "@reboot"
+              ? "at boot"
+              : job.timeZone && !supportsCronTimeZone(job.timeZone)
+                ? "forecast unavailable"
+                : "never"}
           </span>
         )}
-      </TableCell>
-      <TableCell className="whitespace-normal">
-        <CommandCell command={job.command} comment={job.comment} onOpen={onOpen} />
-      </TableCell>
-      <TableCell>
-        <Status
-          state={job.disabled ? "inactive" : "active"}
-          label={job.disabled ? "disabled" : "enabled"}
-        />
       </TableCell>
       <TableCell>
         <VerbActions dim verbs={verbs} />
@@ -517,37 +536,54 @@ function CronJobRow({
 }
 
 /**
- * A cron line's command, drawn as the program it runs where that is a
- * product, with the note above the line under it. Shared with the system
- * cron files on the Scheduled page, so a job is one shape wherever it lives;
- * where it opens a sheet, the command is the button a keyboard reaches.
+ * A cron line as a reader names it: the program's mark, its name — the note
+ * above the line, the scripts `run-parts` runs, or the program — and under it
+ * the command that does the work, past its guards and assignments. Shared
+ * with the system cron files, so a job is one shape wherever it lives; where
+ * it opens a sheet, the name is the button a keyboard reaches and carries
+ * the whole command as its accessible name.
  */
-export function CommandCell({
-  command,
-  comment,
+export function JobCell({
+  job,
   onOpen,
+  dim,
 }: {
-  command: string
-  comment?: string
+  job: Pick<CronJob, "command" | "comment">
   onOpen?: () => void
+  dim?: boolean
 }) {
+  const program = cronProgram(job.command)
+  const name = cronLineName(job)
   return (
-    <div className="flex min-w-0 items-center gap-3">
-      <ProductLogo id={programProduct(cronProgram(command).segment)} size="sm" fallback={Clock} />
+    <div className={cn("flex min-w-0 items-center gap-3", dim && "opacity-55")}>
+      <ProductLogo id={programProduct(program.segment)} size="sm" fallback={Clock} />
       <div className="min-w-0">
         {onOpen ? (
           <button
             type="button"
             onClick={onOpen}
-            className="text-left font-mono text-xs break-all hover:underline"
+            aria-label={`${name}: ${job.command}`}
+            className="block max-w-full truncate text-left text-body font-medium hover:underline"
           >
-            {command}
+            {name}
           </button>
         ) : (
-          <p className="font-mono text-xs break-all">{command}</p>
+          <p className="truncate text-body font-medium">{name}</p>
         )}
-        {comment && <p className="text-hint text-muted-foreground">{comment}</p>}
+        <p className="truncate font-mono text-hint text-muted-foreground" title={job.command}>
+          {program.segment}
+        </p>
       </div>
+    </div>
+  )
+}
+
+/** A five-field schedule in words, with the expression it was written as under it. */
+export function ScheduleCell({ schedule, dim }: { schedule: string; dim?: boolean }) {
+  return (
+    <div className={cn("min-w-0", dim && "opacity-55")}>
+      <p className="truncate text-xs">{describeCron(schedule)}</p>
+      <p className="truncate font-mono text-hint text-muted-foreground">{schedule}</p>
     </div>
   )
 }
@@ -740,7 +776,44 @@ function CronJobForm({
           {saveError} Your draft is kept. Reload and review the current crontab before trying again.
         </Notice>
       )}
-      <FormSection title="When">
+      <FormSection title="What it runs">
+        <Field
+          label="Command"
+          htmlFor="cron-command"
+          hint={`Run by /bin/sh as ${user}, with cron's minimal PATH — use absolute paths.`}
+        >
+          <div className="flex items-center gap-2">
+            <ProductLogo
+              id={programProduct(program.segment)}
+              size="sm"
+              fallback={Clock}
+              className="size-9"
+            />
+            <Input
+              id="cron-command"
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              placeholder="/usr/local/bin/backup >> /var/log/backup.log 2>&1"
+              className="font-mono"
+              spellCheck={false}
+            />
+          </div>
+        </Field>
+        <Field
+          label="Note"
+          htmlFor="cron-comment"
+          hint="Its name on this page, written as a comment above the line."
+        >
+          <Input
+            id="cron-comment"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Nightly database backup"
+          />
+        </Field>
+      </FormSection>
+
+      <FormSection title="When it runs">
         <ToggleGroup
           type="single"
           value={preset}
@@ -748,10 +821,15 @@ function CronJobForm({
           variant="outline"
           size="sm"
           aria-label="Runs"
-          className="flex w-full flex-wrap justify-start gap-1 *:rounded-md! *:border-l!"
+          className="grid w-full grid-cols-3 gap-1.5 *:w-full *:rounded-md! *:border-l! sm:grid-cols-5"
         >
           {CRON_PRESETS.map((p) => (
-            <ToggleGroupItem key={p.key} value={p.key} title={p.label} className="px-2.5 text-hint">
+            <ToggleGroupItem
+              key={p.key}
+              value={p.key}
+              title={p.label}
+              className="h-8 px-2 text-xs text-muted-foreground data-[state=on]:border-brand data-[state=on]:bg-row-hover data-[state=on]:text-foreground"
+            >
               {PRESET_WORDS[p.key]}
             </ToggleGroupItem>
           ))}
@@ -761,11 +839,7 @@ function CronJobForm({
             <Field
               label="At"
               htmlFor="cron-time"
-              hint={
-                timeZone
-                  ? `Schedule time zone: ${timeZone}.`
-                  : "Server time; preview uses this browser's time zone as an estimate."
-              }
+              hint={timeZone ? `On the server's clock, ${timeZone}.` : "On the server's clock."}
             >
               <Input
                 id="cron-time"
@@ -825,66 +899,25 @@ function CronJobForm({
             />
           </Field>
         )}
-        <div data-slot="schedule-preview" className="space-y-3">
-          <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="font-mono text-xs">{expression || "—"}</span>
-            <span className="text-hint text-muted-foreground">
+        <div
+          data-slot="schedule-preview"
+          className="space-y-4 rounded-lg border border-hairline bg-surface-sunken p-4"
+        >
+          <div className="min-w-0 space-y-1">
+            <p className="text-body font-semibold first-letter:uppercase">
               {expression ? describeCron(expression) : "Choose how often it runs"}
-            </span>
+            </p>
+            <p className="font-mono text-hint text-muted-foreground">{expression || "—"}</p>
           </div>
           {validSchedule && preset !== "reboot" && (
-            <>
-              <WeekStrip schedule={expression} timeZone={timeZone} />
-              <FormNote>
-                {timeZone
-                  ? `Forecast uses ${timeZone}; displayed in this browser's time zone.`
-                  : "Approximate forecast in this browser's time zone; host time zone unavailable."}
-              </FormNote>
-            </>
+            <WeekStrip schedule={expression} timeZone={timeZone} />
           )}
           {previews.length > 0 && (
-            <p className="text-hint text-muted-foreground">
-              Next: {previews.map((d) => timestamp(d.toISOString())).join(" · ")}
+            <p className="numeric text-hint text-muted-foreground">
+              Next: {previews.map((d) => longClock(d.getTime(), timeZone)).join(" · ")}
             </p>
           )}
         </div>
-      </FormSection>
-
-      <FormSection title="What">
-        <Field
-          label="Command"
-          htmlFor="cron-command"
-          hint={`Run by /bin/sh as ${user}, with cron's minimal PATH. Use absolute paths.`}
-        >
-          <div className="flex items-center gap-2">
-            <ProductLogo
-              id={programProduct(program.segment)}
-              size="sm"
-              fallback={Clock}
-              className="size-9"
-            />
-            <Input
-              id="cron-command"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              placeholder="/usr/local/bin/backup >> /var/log/backup.log 2>&1"
-              className="font-mono"
-              spellCheck={false}
-            />
-          </div>
-        </Field>
-        <Field
-          label="Note"
-          htmlFor="cron-comment"
-          hint="A comment above the line, for whoever reads the crontab next."
-        >
-          <Input
-            id="cron-comment"
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            placeholder="Nightly database backup"
-          />
-        </Field>
         <OptionList>
           <OptionRow
             title="Enabled"

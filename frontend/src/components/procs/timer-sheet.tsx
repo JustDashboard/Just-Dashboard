@@ -5,9 +5,21 @@ import Link from "next/link"
 import { Copy, Stopwatch } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { duration, relativeTime, timestamp } from "@/lib/format"
+import { duration, relativeTime } from "@/lib/format"
 import { journalSource } from "@/lib/log-sources"
-import { countdown, execCommand, randomDelay, timerTriggers } from "@/lib/schedule"
+import {
+  calendarToCron,
+  countdown,
+  describeTimer,
+  execCommand,
+  longClock,
+  randomDelay,
+  spanMs,
+  spanWords,
+  timerRuns,
+  timerTriggers,
+} from "@/lib/schedule"
+import { cn } from "@/lib/utils"
 import type { SystemdTimer, SystemdUnit } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
@@ -15,17 +27,25 @@ import { ShellWords } from "@/components/deploy/run-evidence"
 import { useNow } from "@/components/deploy/vocabulary"
 import { IconAction } from "@/components/icon-action"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
-import { FactDot } from "@/components/metrics/host-identity"
 import { Detail, DetailList } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { Well } from "@/components/panel"
 import { ProductLogo, unitProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows, Notice } from "@/components/state"
 import { VerbBar } from "@/components/verbs"
 import { TimerState, useTimerVerbs } from "@/components/procs/timers"
 import { useUnitControl } from "@/components/procs/unit-actions"
 import { unitRunsView } from "@/components/procs/unit-runs"
+import { KIND } from "@/components/procs/schedule-band"
+import {
+  ScheduleSummary,
+  SheetSection,
+  WeekStrip,
+  WhenItRuns,
+} from "@/components/procs/schedule-sheet"
+
+const DAY = 24 * 3600_000
 
 type ConfirmFn = (request: ConfirmRequest) => void
 
@@ -71,7 +91,9 @@ export function TimerSheet({
   confirm,
   onOpenChange,
   onChanged,
+  zone,
 }: {
+  zone?: string
   timer: SystemdTimer | undefined
   /** The unit asked for, which may not be in the list yet — or any more. */
   unit: string | null
@@ -88,7 +110,7 @@ export function TimerSheet({
       title={
         <>
           <ProductLogo id={unitProduct(unit ?? "")} size="sm" fallback={Stopwatch} />
-          <span className="min-w-0 truncate">{unit}</span>
+          <span className="min-w-0 truncate">{unit?.replace(/\.timer$/, "")}</span>
         </>
       }
       description={timer ? `Runs ${timer.activates}` : "systemd timer"}
@@ -108,7 +130,7 @@ export function TimerSheet({
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-y-auto"
     >
       {timer ? (
-        <TimerDetail key={timer.unit} timer={timer} />
+        <TimerDetail key={timer.unit} timer={timer} zone={zone} />
       ) : (
         <LoadingRows rows={4} className="m-5" />
       )}
@@ -138,7 +160,7 @@ function TimerSheetActions({
   )
 }
 
-function TimerDetail({ timer }: { timer: SystemdTimer }) {
+function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
   const now = useNow(1000)
   const own = usePoll(
     (signal) => get<UnitShow>(`/systemd/${encodeURIComponent(timer.unit)}`, undefined, signal),
@@ -153,10 +175,27 @@ function TimerDetail({ timer }: { timer: SystemdTimer }) {
   )
   const props = own.data?.properties
   const run = service.data?.properties
+  // The list already carries the triggers on a host whose systemctl answers
+  // `show`; the unit's own read is the fallback, and the source of the rest.
   const triggers = props ? timerTriggers(props) : []
-  const delay = props ? randomDelay(props) : undefined
+  const delay = timer.randomDelay ?? (props ? randomDelay(props) : undefined)
+  const sentence =
+    describeTimer({
+      calendar: timer.calendar ?? triggers.filter((t) => !t.spec.includes("=")).map((t) => t.spec),
+      monotonic: timer.monotonic ?? triggers.filter((t) => t.spec.includes("=")).map((t) => t.spec),
+      randomDelay: delay,
+    }) ?? (props ? "Only when started by hand" : undefined)
   const command = run ? execCommand(run) : undefined
+  const calendars =
+    timer.calendar ?? triggers.filter((t) => !t.spec.includes("=")).map((t) => t.spec)
+  const weekly = calendars.length === 1 ? calendarToCron(calendars[0]) : undefined
+  const spread = delay ? spanMs(delay) : undefined
 
+  const minute = Math.floor(now / 60_000) * 60_000
+  const runs = useMemo(
+    () => timerRuns(timer, minute, minute + 7 * DAY, zone),
+    [timer, minute, zone],
+  )
   const next = timer.next ? new Date(timer.next).getTime() : undefined
   const started = micro(run, "ExecMainStartTimestampMonotonic")
   const exited = micro(run, "ExecMainExitTimestampMonotonic")
@@ -164,55 +203,45 @@ function TimerDetail({ timer }: { timer: SystemdTimer }) {
   const result = run?.Result
   const failed = Boolean(result && result !== "success")
   const status = run?.ExecMainStatus
+  const stopped = timer.activeState !== "active"
 
   return (
-    <div className="flex animate-rise flex-col gap-6 px-5 pt-4 pb-6">
-      <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        <span>runs {timer.activates || "nothing"}</span>
-        <FactDot />
-        <span>{timer.enabled ? "armed at boot" : "not armed at boot"}</span>
-        {props?.Persistent === "yes" && (
-          <>
-            <FactDot />
-            <span title="A run missed while the host was off is made up when it comes back">
-              catches up after downtime
-            </span>
-          </>
-        )}
-        {props?.FragmentPath && (
-          <>
-            <FactDot />
-            <Link
-              href={`/files?path=${encodeURIComponent(props.FragmentPath)}`}
-              className="truncate font-mono hover:text-foreground hover:underline"
-            >
-              {props.FragmentPath}
-            </Link>
-          </>
-        )}
-      </p>
+    <div className="flex animate-rise flex-col pb-2">
+      <ScheduleSummary
+        sentence={sentence ?? <span className="text-muted-foreground">Reading the timer…</span>}
+        expression={triggers.length > 0 ? triggers.map((t) => t.spec).join(" · ") : undefined}
+        facts={[zone && `${zone} time`]}
+        notice={
+          stopped ? (
+            <Notice title="Stopped">
+              The timer is not armed, so {timer.activates || "its service"} does not run on this
+              schedule until the timer is started.
+            </Notice>
+          ) : undefined
+        }
+      />
 
-      <StatGrid columns={3} dense className="-mx-5 border-y border-hairline">
+      <StatGrid columns={3} dense className="border-t border-hairline">
         <StatTile
-          className="px-5"
+          className="px-6"
           label="Next run"
           value={
             next !== undefined && next > now ? (
-              <span className="numeric">{countdown(next - now)}</span>
+              <span className="numeric">in {countdown(next - now)}</span>
             ) : (
               <span className="text-muted-foreground">—</span>
             )
           }
           hint={
             next !== undefined
-              ? timestamp(timer.next)
-              : timer.activeState === "active"
-                ? "nothing scheduled"
-                : "the timer is stopped"
+              ? longClock(next, zone)
+              : stopped
+                ? "the timer is stopped"
+                : "nothing scheduled"
           }
         />
         <StatTile
-          className="px-5"
+          className="px-6"
           label="Last run"
           tone={failed ? "danger" : "default"}
           value={
@@ -225,17 +254,17 @@ function TimerDetail({ timer }: { timer: SystemdTimer }) {
           hint={
             !run
               ? timer.last
-                ? timestamp(timer.last)
+                ? longClock(new Date(timer.last).getTime(), zone)
                 : "since the timer was installed"
               : started === 0
-                ? "not since boot"
+                ? "not since the server started"
                 : `${RESULT[result ?? ""] ?? result ?? "ended"}${
                     failed && status && status !== "0" ? ` · exit ${status}` : ""
                   }`
           }
         />
         <StatTile
-          className="px-5"
+          className="px-6"
           label="Took"
           value={
             took !== undefined ? (
@@ -249,78 +278,107 @@ function TimerDetail({ timer }: { timer: SystemdTimer }) {
           hint={
             run?.ActiveState === "activating" || run?.ActiveState === "active"
               ? "running now"
-              : run?.Type
-                ? `${run.Type} service`
-                : undefined
+              : "the last run"
           }
         />
       </StatGrid>
 
-      <Panel plain>
-        <PanelHeader title="Fires" />
-        <PanelBody className="space-y-3 pt-3">
-          {!props ? (
-            <LoadingRows rows={2} />
-          ) : triggers.length === 0 ? (
-            <p className="text-body text-muted-foreground">
-              No calendar or interval — only started by hand.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {triggers.map((trigger) => (
-                <li key={trigger.spec} className="min-w-0">
-                  <p className="text-body font-medium first-letter:uppercase">{trigger.words}</p>
-                  {trigger.words !== trigger.spec && (
-                    <p className="font-mono text-hint text-muted-foreground">{trigger.spec}</p>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-          {delay && (
-            <DetailList>
-              <Detail label="Random delay">
-                up to {delay} later, so every host with this package does not fire at once
-              </Detail>
-              {props?.AccuracyUSec && <Detail label="Accuracy">{props.AccuracyUSec}</Detail>}
-            </DetailList>
-          )}
-        </PanelBody>
-      </Panel>
+      <SheetSection title="When it runs">
+        <WhenItRuns
+          times={runs.times}
+          dense={runs.dense}
+          zone={zone}
+          empty={stopped ? "Not while the timer is stopped." : "systemd has nothing scheduled."}
+          week={
+            weekly ? (
+              <WeekStrip
+                schedule={weekly}
+                timeZone={zone}
+                color={KIND.timer.color}
+                spread={spread}
+                className={cn(stopped && "opacity-50")}
+              />
+            ) : undefined
+          }
+        />
+        {delay && (
+          <p className="mt-4 text-hint leading-relaxed text-muted-foreground">
+            systemd adds a random delay of up to {spanWords(delay)} to every run, so servers with
+            the same package do not all fire at once. The shaded part of each day is when it may
+            really start; only the next run is known for sure.
+          </p>
+        )}
+      </SheetSection>
 
       {timer.activates && (
-        <Panel plain>
-          <PanelHeader
-            title="Command"
-            actions={
-              command && (
-                <IconAction
-                  label="Copy command"
-                  onClick={() => void copyText(command, "Command copied")}
-                >
-                  <Copy />
-                </IconAction>
-              )
-            }
-          />
-          <PanelBody className="space-y-3 pt-3">
-            {run?.Description && <p className="text-body">{run.Description}</p>}
-            {command ? (
-              <Well className="max-h-40 text-xs leading-relaxed break-all whitespace-pre-wrap">
-                <ShellWords command={command} />
-              </Well>
-            ) : (
-              service.data && (
-                <p className="text-body text-muted-foreground">
-                  {timer.activates} has no command of its own.
-                </p>
-              )
-            )}
-          </PanelBody>
-        </Panel>
+        <SheetSection
+          title="Command"
+          actions={
+            command && (
+              <IconAction
+                label="Copy command"
+                onClick={() => void copyText(command, "Command copied")}
+              >
+                <Copy />
+              </IconAction>
+            )
+          }
+        >
+          {command ? (
+            <Well className="max-h-48 text-xs leading-relaxed break-all whitespace-pre-wrap">
+              <ShellWords command={command} />
+            </Well>
+          ) : service.data ? (
+            <p className="text-body text-muted-foreground">
+              {timer.activates} has no command of its own.
+            </p>
+          ) : (
+            <LoadingRows rows={1} />
+          )}
+        </SheetSection>
       )}
 
-      {timer.activates && <TimerRuns unit={timer.activates} />}
+      <SheetSection title="Details">
+        <DetailList className="gap-y-2.5">
+          {(timer.description || run?.Description) && (
+            <Detail label="What it is">{timer.description || run?.Description}</Detail>
+          )}
+          <Detail label="Starts">
+            {timer.activates ? (
+              <Link
+                href={`/processes/services?unit=${encodeURIComponent(timer.activates)}`}
+                className="font-mono hover:underline"
+              >
+                {timer.activates}
+              </Link>
+            ) : (
+              "nothing"
+            )}
+          </Detail>
+          <Detail label="After a reboot">
+            {timer.enabled ? "armed again" : "stays off until started"}
+          </Detail>
+          {props?.Persistent === "yes" && (
+            <Detail label="Missed runs">made up when the server comes back</Detail>
+          )}
+          {props?.FragmentPath && (
+            <Detail label="Unit file">
+              <Link
+                href={`/files?path=${encodeURIComponent(props.FragmentPath)}`}
+                className="font-mono break-all hover:underline"
+              >
+                {props.FragmentPath}
+              </Link>
+            </Detail>
+          )}
+        </DetailList>
+      </SheetSection>
+
+      {timer.activates && (
+        <SheetSection title="Runs">
+          <TimerRuns unit={timer.activates} />
+        </SheetSection>
+      )}
     </div>
   )
 }
