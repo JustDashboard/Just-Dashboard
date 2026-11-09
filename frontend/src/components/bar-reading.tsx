@@ -374,20 +374,18 @@ export function BarReading({
               >
                 {drawn.slice(0, MARKS).map((part) => {
                   const isActive = active?.key === part.key && hovered !== REST && hovered !== FREE
+                  // The mark alone. A rule in the part's colour under each one
+                  // read as a row of tabs; the line's tick already carries the
+                  // colour, and the span lights when its mark is pointed at.
+                  // Scaled rather than resized, so every caller's mark grows
+                  // alike, whether a 14px glyph, a count or a tile.
                   const face = (
-                    <>
-                      <span className="flex min-w-3.5 items-center justify-center">
-                        {part.mark}
-                      </span>
-                      <i
-                        aria-hidden
-                        className="absolute inset-x-1.5 bottom-0.5 h-0.5 rounded-full [transition:opacity_150ms_ease-out]"
-                        style={{ background: part.color, opacity: isActive ? 1 : 0.55 }}
-                      />
-                    </>
+                    <span className="flex min-w-3.5 scale-115 items-center justify-center">
+                      {part.mark}
+                    </span>
                   )
                   const cell = cn(
-                    "relative flex h-6.5 min-w-6.5 items-center justify-center rounded-md px-1 pb-0.5 focus-ring-inset transition-colors",
+                    "flex h-6.5 min-w-6.5 items-center justify-center rounded-md px-1 focus-ring-inset transition-colors",
                     part.press?.pressed
                       ? "bg-accent"
                       : isActive && lit !== undefined
