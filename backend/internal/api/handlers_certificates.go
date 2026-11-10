@@ -127,9 +127,13 @@ func (s *Server) handleCertServed(w http.ResponseWriter, r *http.Request) error 
 	if path == "" {
 		return httpx.BadRequest("path is required")
 	}
+	settle, err := httpx.QueryBool(r, "settle")
+	if err != nil {
+		return err
+	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	served, err := s.modules.proxy.ServedCertificates(ctx, path, r.URL.Query().Get("settle") == "1")
+	served, err := s.modules.proxy.ServedCertificates(ctx, path, settle)
 	if errors.Is(err, proxysvc.ErrCertificateNotListed) {
 		return httpx.Err(http.StatusNotFound, "not_found", "No listed certificate has that path.")
 	}
@@ -985,8 +989,11 @@ func (s *Server) handleCertDelete(w http.ResponseWriter, r *http.Request) error 
 // handleImportedDelete removes an imported certificate and its key.
 func (s *Server) handleImportedDelete(w http.ResponseWriter, r *http.Request) error {
 	name := chi.URLParam(r, "name")
-	force := r.URL.Query().Get("force") == "1"
-	err := s.modules.proxy.DeleteImportedCertificate(name, force)
+	force, err := httpx.QueryBool(r, "force")
+	if err != nil {
+		return err
+	}
+	err = s.modules.proxy.DeleteImportedCertificate(name, force)
 	var inUse *proxysvc.CertificateInUseError
 	switch {
 	case errors.As(err, &inUse):

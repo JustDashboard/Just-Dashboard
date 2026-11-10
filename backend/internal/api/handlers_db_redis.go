@@ -282,6 +282,10 @@ func (s *Server) handleRedisScan(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return httpx.BadRequest("invalid Redis cursor")
 	}
+	memory, err := httpx.QueryBool(r, "memory")
+	if err != nil {
+		return err
+	}
 	client, _, err := s.redisReader(r)
 	if err != nil {
 		return err
@@ -291,7 +295,7 @@ func (s *Server) handleRedisScan(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	page, err := dbx.RedisScanKeys(ctx, client, nil, dbx.RedisScanOptions{
 		Pattern: q.Get("pattern"), Cursor: cursor, Count: atoiDefault(q.Get("count"), 100),
-		Type: q.Get("type"), Memory: q.Get("memory") == "1" || q.Get("memory") == "true",
+		Type: q.Get("type"), Memory: memory,
 	})
 	if err != nil {
 		return redisFail(err, false)

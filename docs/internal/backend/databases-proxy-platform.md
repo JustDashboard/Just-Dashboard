@@ -1857,8 +1857,11 @@ are decided here, not by the page.
     grants on it regardless. Default privileges are written for the connection's account and, with
     `FOR ROLE`, for every other role that owns the schema or a table or sequence in it and that the
     account is a member of (`pgFutureOwners`); owners it cannot speak for come back in `notes`.
-    `?preview=1` returns the same body with `preview:true` and executes nothing. MySQL escapes `_`
-    and `%` in the database name, which is a pattern at that position.
+    `?preview=1` returns the same body with `preview:true` and executes nothing. The flag is `1`,
+    `0`, `true` or `false` on every route under `/databases`, and anything else (`?preview=yes`, an
+    empty value, the flag twice) is `400 bad_request` naming `preview` before a handler runs
+    (`requirePreviewFlag`): these two routes used to test for `1` alone, so `?preview=true` granted.
+    MySQL escapes `_` and `%` in the database name, which is a pattern at that position.
   - *Fine-grained privileges.* `GET …/server/privileges` publishes the closed set per engine and
     level (`PrivilegeLevels`: database, schema, table, sequence, function, column and role membership
     on PostgreSQL;

@@ -96,7 +96,11 @@ func (s *Server) handleNetworkLinks(w http.ResponseWriter, r *http.Request) erro
 func (s *Server) handleNetworkTrafficLive(w http.ResponseWriter, r *http.Request) error {
 	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 	view := s.modules.network.Sampler().LiveView(since, time.Now())
-	if r.URL.Query().Get("latency") == "1" {
+	latency, err := httpx.QueryBool(r, "latency")
+	if err != nil {
+		return err
+	}
+	if latency {
 		ctx, cancel := timeoutCtx(r, 5*time.Second)
 		defer cancel()
 		view.Latency = s.modules.network.TCPLatency(ctx)

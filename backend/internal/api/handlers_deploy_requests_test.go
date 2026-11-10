@@ -10,7 +10,10 @@ func TestRequestFilterReadsTheAgentAndTheSiteItCameFrom(t *testing.T) {
 	// Insights: a press sends the family or the site they rank, and the
 	// socket and the export read the same question as the window.
 	q := url.Values{"agent": {" Googlebot "}, "referer": {"www.google.com"}, "maxMs": {"250"}}
-	filter := requestFilterFrom(q)
+	filter, err := requestFilterFrom(q)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if filter.Agent != "Googlebot" || filter.Referer != "www.google.com" || filter.MaxMs != 250 {
 		t.Fatalf("filter = %+v", filter)
 	}

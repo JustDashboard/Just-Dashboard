@@ -116,11 +116,16 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 // reload a way of asking without making a reload wait. Neither parameter is
 // the ordinary poll, which asks for nothing.
 func (s *Server) handleSelfUpdateStatus(w http.ResponseWriter, r *http.Request) error {
+	query := httpx.Query(r)
+	refresh, nudge := query.Bool("refresh"), query.Bool("nudge")
+	if err := query.Err(); err != nil {
+		return err
+	}
 	freshness := selfupdate.Cached
 	switch {
-	case r.URL.Query().Get("refresh") == "true":
+	case refresh:
 		freshness = selfupdate.Forced
-	case r.URL.Query().Get("nudge") == "true":
+	case nudge:
 		freshness = selfupdate.OnLoad
 	}
 	rep := s.modules.selfUpdate.Report(r.Context(), freshness)

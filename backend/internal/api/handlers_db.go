@@ -50,6 +50,9 @@ type dbConnection struct {
 
 func (s *Server) mountDatabaseRoutes(r chi.Router) {
 	r.Route("/databases", func(r chi.Router) {
+		// Before anything reads ?preview=: a flag no handler can read is a
+		// 400 here, never a change that was meant to be shown.
+		r.Use(requirePreviewFlag)
 		r.Use(s.protectReadOnlyConnections)
 		r.Method(http.MethodGet, "/", s.handle(s.handleDBConnList))
 		r.Method(http.MethodGet, "/drivers", s.handle(s.handleDBDrivers))

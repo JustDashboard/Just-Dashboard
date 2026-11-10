@@ -494,7 +494,10 @@ func (s *Server) handleDBSettingsList(w http.ResponseWriter, r *http.Request) er
 		// shape; it is the same list under this address.
 		return s.handleDBSettings(w, r)
 	}
-	all := r.URL.Query().Get("all") == "1"
+	all, err := httpx.QueryBool(r, "all")
+	if err != nil {
+		return err
+	}
 	pool, _, err := s.dbPool(r.Context(), id)
 	if err != nil {
 		return err
@@ -815,7 +818,12 @@ func (s *Server) changePrivileges(w http.ResponseWriter, r *http.Request, revoke
 	if privilegeElsewhere(conn, change) && !dbNameRe.MatchString(change.Database) {
 		return httpx.BadRequest("a database name is letters, digits and underscores")
 	}
-	preview := r.URL.Query().Get("preview") == "1"
+	// Read strictly: a preview that failed to parse as one must never fall
+	// through to the grant or the revoke.
+	preview, err := httpx.QueryBool(r, "preview")
+	if err != nil {
+		return err
+	}
 	if preview {
 		// Nothing changes, whether it answers or fails.
 		httpx.SkipAudit(r)
@@ -940,10 +948,14 @@ func (s *Server) handleClickHouseParts(w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 	q := r.URL.Query()
+	inactive, err := httpx.QueryBool(r, "inactive")
+	if err != nil {
+		return err
+	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	parts, err := dbx.ClickHouseTableParts(ctx, pool, strings.TrimSpace(q.Get("database")),
-		strings.TrimSpace(q.Get("table")), q.Get("inactive") == "1")
+		strings.TrimSpace(q.Get("table")), inactive)
 	if err != nil {
 		return queryFailed(err)
 	}

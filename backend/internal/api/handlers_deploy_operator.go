@@ -172,7 +172,7 @@ func (s *Server) operatorRead(ctx context.Context, r *http.Request, p *httpx.Pri
 		if s.modules.dockerEvents == nil {
 			return refuse("Docker is unavailable on this host, so container lifecycle cannot be read")
 		}
-		events := s.deploymentLifecycleEvents(r, summary.EnvironmentID, 100)
+		events := s.deploymentLifecycleEvents(r, summary.EnvironmentID, lifecycleQuery{kinds: deploymentEventKinds}, 100)
 		since := time.Now().Add(-time.Duration(in.Hours) * time.Hour)
 		kept := []dockerx.Event{}
 		for _, event := range events {

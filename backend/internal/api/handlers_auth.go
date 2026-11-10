@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -560,26 +561,30 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) error
 
 // --- audit trail ---
 
+// auditPageMax is the most entries one page of the trail holds, which is
+// audit.Logger.List's own bound: a larger page is refused here rather than
+// answered with a hundred.
+const auditPageMax = 500
+
 func (s *Server) handleAuditList(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
+	// A filter that cannot be read is refused, never left out: an audit trail
+	// answered whole for ?since=tomorrow looks complete and is not the answer
+	// to the question that was asked.
+	query := httpx.Query(r)
 	f := audit.Filter{
 		Username: q.Get("username"),
 		Action:   q.Get("action"),
 		// Repeated: ?action_prefix=proxy.&action_prefix=certificates.
 		ActionPrefixes: q["action_prefix"],
-		OnlyFail:       q.Get("failed") == "true",
-		Limit:          atoiDefault(q.Get("limit"), 100),
-		Offset:         atoiDefault(q.Get("offset"), 0),
+		OnlyFail:       query.Bool("failed"),
+		Limit:          query.Int("limit", 100, 1, auditPageMax),
+		Offset:         query.Int("offset", 0, 0, math.MaxInt32),
+		Since:          query.Time("since"),
+		Until:          query.Time("until"),
 	}
-	if v := q.Get("since"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			f.Since = t
-		}
-	}
-	if v := q.Get("until"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			f.Until = t
-		}
+	if err := query.Err(); err != nil {
+		return err
 	}
 	entries, total, err := s.Audit.List(r.Context(), f)
 	if err != nil {

@@ -72,7 +72,10 @@ func (s *Server) handleAuthUserRemove(w http.ResponseWriter, r *http.Request) er
 // login.
 func (s *Server) handleAuthFileDelete(w http.ResponseWriter, r *http.Request) error {
 	file := chi.URLParam(r, "file")
-	force := r.URL.Query().Get("force") == "1"
+	force, err := httpx.QueryBool(r, "force")
+	if err != nil {
+		return err
+	}
 	usedBy := s.modules.proxy.AuthFileUsedBy(file)
 	if len(usedBy) > 0 && !force {
 		return httpx.Err(http.StatusConflict, "in_use", fmt.Sprintf(
@@ -81,7 +84,7 @@ func (s *Server) handleAuthFileDelete(w http.ResponseWriter, r *http.Request) er
 	}
 	// An access list naming the file is refused even when forced: the list
 	// would fail its next save, and nginx -t with it.
-	err := s.modules.proxy.DeleteAuthFile(file)
+	err = s.modules.proxy.DeleteAuthFile(file)
 	var listed *proxysvc.AuthFileListedError
 	switch {
 	case errors.As(err, &listed):

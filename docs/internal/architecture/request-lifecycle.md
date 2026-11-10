@@ -151,6 +151,17 @@ the mount site is only the conversion.
 - Decode with `httpx.DecodeJSON` (4 MB cap, `application/json` required, unknown fields and trailing
   values rejected). SQL row values use `DecodeJSONNumbers` with the same constraints, preserving exact
   numeric tokens until the database adapter binds them.
+- Read a query parameter that is a flag, a number or a time with `httpx.QueryBool`/`QueryBoolOr`,
+  `QueryInt` and `QueryTime`, or with a `httpx.Query(r)` reader when a handler fills a struct of
+  options (ask its `Err()` before using what it read). A flag is `1`, `0`, `true` or `false` in any
+  case on every route; a value that is there and cannot be read (`?preview=yes`, `?limit=abc`,
+  `?since=tomorrow`, a flag given twice) is `400 bad_request` with `error.field` naming the
+  parameter, never the default. The rule exists because the default was the change: a preview spelled
+  the way a handler did not expect ran what it was meant to show. `requirePreviewFlag` applies it to
+  `?preview=` in front of every route under `/databases`, and two tests in `api/query_strict_test.go`
+  keep a handler from comparing a flag with a string again and hold every reader to its `Err()`. An
+  empty number or time (`?limit=`) is read as absent, as a form that submits an unfilled box sends it;
+  an empty flag is refused.
 - `s.destructive(r, ...)` = capability check + `destrLim` + audit. It does **not** enforce confirmation;
   the typed-phrase subset calls `httpx.RequireTypedConfirmation(w, r, phrase)` **inside** the handler,
   where the phrase is known, and it reaches the client as `error.phrase`. See [invariant 3](../security/invariants.md#invariant-3-which-routes-take-a-typed-phrase).
@@ -428,4 +439,6 @@ cannot make them. The per-route answers, the neighbour rule and what it does not
 Files: `api/handlers_*.go`, one per feature, each with `mount<Feature>Routes` called from `Routes()`.
 `handlers_domains.go` and `handlers_docker_manage.go` own no mount function — they are mounted from the
 proxy and Docker mounts so those route maps stay in one place. Shared plumbing (`atoiDefault`,
-`timeoutCtx`, `recordAudit`, `detachedContext`) lives in `api/helpers.go`.
+`timeoutCtx`, `recordAudit`, `detachedContext`) lives in `api/helpers.go`. `atoiDefault` reads the
+default for a number that does not parse and is kept only for the routes not yet moved to
+`httpx.QueryInt`; a new handler uses the strict reader.

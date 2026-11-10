@@ -122,7 +122,14 @@ func mapLinuxUserError(err error) error {
 // operator's, and what must not happen to it is refused in linuxusers itself.
 func (s *Server) guardSystemAccount(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet || r.URL.Query().Get("allowSystem") == "true" {
+		// A flag that cannot be read is refused, not taken as off or on: this
+		// one is what stands between a form and a daemon's account.
+		allowSystem, err := httpx.QueryBool(r, "allowSystem")
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if r.Method == http.MethodGet || allowSystem {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -147,7 +154,11 @@ func (s *Server) handleSysUserList(w http.ResponseWriter, r *http.Request) error
 	// by its number and the most important account on the machine by every other
 	// measure: leaving it out is how the page could read "0 have sign-in routes"
 	// on a host where root signs in with a password.
-	if r.URL.Query().Get("system") != "true" {
+	system, err := httpx.QueryBool(r, "system")
+	if err != nil {
+		return err
+	}
+	if !system {
 		filtered := users[:0]
 		for _, u := range users {
 			if !u.System || u.UID == 0 {
@@ -486,15 +497,19 @@ func (s *Server) handleSysUserFailedReset(w http.ResponseWriter, r *http.Request
 // typed name, enforced here (invariant 3).
 func (s *Server) handleSysUserDelete(w http.ResponseWriter, r *http.Request) error {
 	name := chi.URLParam(r, "name")
-	query := r.URL.Query()
+	query := httpx.Query(r)
 	opts := linuxusers.RemovalOptions{
-		Home:        query.Get("home"),
-		EndSessions: query.Get("endSessions") == "true",
-		TransferTo:  query.Get("transferTo"),
+		Home:        query.String("home"),
+		EndSessions: query.Bool("endSessions"),
+		TransferTo:  query.String("transferTo"),
+	}
+	removeHome, allowSystem := query.Bool("removeHome"), query.Bool("allowSystem")
+	if err := query.Err(); err != nil {
+		return err
 	}
 	// The route's older spelling, still accepted, means the same destruction and
 	// so takes the same guard.
-	if query.Get("removeHome") == "true" && opts.Home == "" {
+	if removeHome && opts.Home == "" {
 		opts.Home = linuxusers.HomeDelete
 	}
 	if opts.Home == linuxusers.HomeDelete {
@@ -504,7 +519,7 @@ func (s *Server) handleSysUserDelete(w http.ResponseWriter, r *http.Request) err
 	}
 	// A daemon's account is held read-only everywhere else, and being handed
 	// another account's files is a change to it.
-	if opts.TransferTo != "" && query.Get("allowSystem") != "true" {
+	if opts.TransferTo != "" && !allowSystem {
 		if target, err := s.modules.linuxUsers.Lookup(opts.TransferTo); err == nil && target.System {
 			return httpx.Err(http.StatusForbidden, "system_account",
 				fmt.Sprintf("%s belongs to the system: turn on editing for it first", target.Username))
@@ -857,7 +872,10 @@ func (s *Server) handleSSHKeyCopy(w http.ResponseWriter, r *http.Request) error 
 	}
 	// The middleware read the account in the URL. Each target is a write to an
 	// account too, and is held to the same rule.
-	allowSystem := r.URL.Query().Get("allowSystem") == "true"
+	allowSystem, err := httpx.QueryBool(r, "allowSystem")
+	if err != nil {
+		return err
+	}
 	targets := make([]string, 0, len(req.To))
 	refused := map[string]string{}
 	for _, target := range req.To {
@@ -936,7 +954,11 @@ func (s *Server) handleSysGroupCreate(w http.ResponseWriter, r *http.Request) er
 // expects it to keep its name, number and existence. Who is in it is the operator's
 // to change, and adding somebody to a system group is most of what this route is for.
 func (s *Server) guardSystemGroup(r *http.Request, name string) error {
-	if r.URL.Query().Get("allowSystem") == "true" {
+	allowSystem, err := httpx.QueryBool(r, "allowSystem")
+	if err != nil {
+		return err
+	}
+	if allowSystem {
 		return nil
 	}
 	group, err := s.modules.linuxUsers.Group(r.Context(), name)

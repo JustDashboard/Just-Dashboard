@@ -154,7 +154,10 @@ func (s *Server) handlePackageUsage(w http.ResponseWriter, r *http.Request) erro
 // a job now: it survives the tab, and the transcript is there to read
 // afterwards whether or not anybody watched it happen.
 func (s *Server) handlePackageUpgrade(w http.ResponseWriter, r *http.Request) error {
-	securityOnly := r.URL.Query().Get("security") == "true"
+	securityOnly, err := httpx.QueryBool(r, "security")
+	if err != nil {
+		return err
+	}
 	name, args, env, err := s.modules.updates.UpgradeCommand(r.Context(), securityOnly)
 	if err != nil {
 		if e := notSupported(err); e != nil {
