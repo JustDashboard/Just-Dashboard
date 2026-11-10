@@ -1,6 +1,7 @@
 "use client"
 
 import type { RequestLatency } from "@/lib/types"
+import { LATENCY_SHARE } from "@/lib/latency-words"
 import { latency, latencyTone } from "@/lib/requests"
 import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
 
@@ -14,9 +15,9 @@ import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
  * window to what took at least that long, as the tick did (§15 pass 3).
  */
 const READINGS: { key: keyof RequestLatency; name: string; hint: string }[] = [
-  { key: "p50", name: "Half", hint: "finished within this" },
-  { key: "p95", name: "19 in 20", hint: "finished within this" },
-  { key: "p99", name: "99 in 100", hint: "finished within this" },
+  { key: "p50", name: LATENCY_SHARE.p50, hint: "finished within this" },
+  { key: "p95", name: LATENCY_SHARE.p95, hint: "finished within this" },
+  { key: "p99", name: LATENCY_SHARE.p99, hint: "finished within this" },
   { key: "max", name: "Slowest", hint: "the single longest" },
 ]
 

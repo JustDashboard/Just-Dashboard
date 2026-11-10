@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { ArrowRight } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { percent, relativeTime } from "@/lib/format"
+import { latencyHead } from "@/lib/latency-words"
 import { latency } from "@/lib/requests"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
@@ -194,7 +195,7 @@ function WatchReadings({ watch, remaining }: { watch: RollbackWatch; remaining: 
           }
         />
         <StatTile
-          label="p95"
+          label={latencyHead("p95")}
           value={noRoute ? "—" : latency(observed?.p95)}
           tone={latencyTone(watch)}
           hint={

@@ -292,7 +292,7 @@ test.describe("a deployment's traffic", () => {
     // 13 of 1284 is about 1%, and the reading is the share, not the count.
     await expect(page.getByText("13 of 1,284 answered 5xx")).toBeVisible()
     // The tail, not the mean: a p50 of 24ms hides a p99 of 2.8 seconds.
-    await expect(page.getByText("p95 · half answered inside 24ms")).toBeVisible()
+    await expect(page.getByText("19 in 20 inside this · half inside 24ms")).toBeVisible()
 
     // Each reading carries its hour: the failures as a strip of minutes, the
     // rate and the p95 as lines, and what asked drawn as itself after the name.
@@ -300,7 +300,9 @@ test.describe("a deployment's traffic", () => {
       page.getByRole("img", { name: /^Last hour by minute: 1 minute with server errors/ }),
     ).toBeVisible()
     await expect(page.getByRole("img", { name: "Requests over the last hour" })).toBeVisible()
-    await expect(page.getByRole("img", { name: "The p95 over the last hour" })).toBeVisible()
+    await expect(
+      page.getByRole("img", { name: "How long 19 in 20 responses took, over the last hour" }),
+    ).toBeVisible()
     await expect(page.locator('[data-slot="stat-tile"] img[src="/logos/chrome.svg"]')).toBeVisible()
     // Four readings, none of them the container: what it did is the Events
     // tab's, which counts the exit.
@@ -468,7 +470,7 @@ test.describe("a deployment's traffic", () => {
 
     // The failing path carries its own 5xx count and its own p95, so "p95 is
     // 412ms" becomes "p95 is 412ms because of /api/checkout".
-    await expect(page.getByText("13 × 5xx · p95 2.84s")).toBeVisible()
+    await expect(page.getByText("13 × 5xx · 19 in 20 inside 2.84s")).toBeVisible()
     // A client that tried a dozen doors is named as a scanner, not as a visitor.
     await expect(page.getByText("scanner · 12 probes")).toBeVisible()
     await expect(page.getByText("Scanners", { exact: true })).toBeVisible()

@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowLeft, Cross, Download, Globe } from "@/components/icons"
 import { downloadUrl, get } from "@/lib/api"
 import { bytes, minuteSpan } from "@/lib/format"
+import { latencyHead, latencyWords } from "@/lib/latency-words"
 import { latency, perMinute, REQUEST_RANGES, type RequestRange } from "@/lib/requests"
 import type { RequestEntry, SiteTraffic, SiteTrafficSummary, SiteTrafficTail } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
@@ -257,10 +258,13 @@ function SiteReadings({ data, loading }: { data: SiteTraffic | undefined; loadin
         tone={s ? errorRateTone(s.errorRate) : "default"}
       />
       <StatTile
-        label="p95"
+        label={latencyHead("p95")}
         value={figure(s && (s.latency ? latency(s.latency.p95) : undefined))}
         hint={
-          s && (s.latency ? `p50 ${latency(s.latency.p50)}` : "nginx's log format has no timing")
+          s &&
+          (s.latency
+            ? latencyWords("p50", latency(s.latency.p50))
+            : "nginx's log format has no timing")
         }
       />
       <StatTile

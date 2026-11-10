@@ -125,7 +125,7 @@ describe("words", () => {
   })
   test("the terms read as one sentence", () => {
     expect(policyLine(DEFAULT_ROLLBACK_POLICY)).toBe(
-      "The previous release is kept warm for 10 minutes. Traffic goes back to it when the 5xx share passes its own by 5 points or the p95 reaches 2× its own, over at least 20 requests.",
+      "The previous release is kept warm for 10 minutes. Traffic goes back to it when the 5xx share passes its own by 5 points or 19 in 20 requests take 2× as long as its own did, over at least 20 requests.",
     )
     expect(policyLine({ ...DEFAULT_ROLLBACK_POLICY, automatic: false, windowSeconds: 90 })).toBe(
       "The previous release is kept warm for 90 seconds, to switch back to by hand.",

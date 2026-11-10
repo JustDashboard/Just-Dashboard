@@ -361,6 +361,21 @@ that will change, and *Pinned* is a `Tag` with a pin, because somebody set it an
 because that is what the control does — but anything choosing a *colour* chooses from the shared
 union. A component that declares its own tone names is the drift this file exists to stop.
 
+**How long something took is said in words, never as `p50` / `p95` / `p99`.** The operator found the
+notation unclear ("notation asks the reader to learn it") and Insights' readings became *Half*,
+*19 in 20* and *99 in 100*; in 0.8.6 every other rendered label, legend, column head and sentence
+followed, so one figure has one name on every page. The words live in `lib/latency-words.ts`:
+`LATENCY_SHARE` names a figure, `latencyHead` is a column head, a legend or a tile's label
+("19 in 20 within"), `latencyWords` is the reading inside a sentence ("19 in 20 inside 180ms"), and
+`latencyTerm` is the `title` that keeps the term for a reader who looks for it. A threshold reads the
+other way round, by the share past it ("more than 1 in 20 requests slower than 800ms"), and a factor
+between two readings is a *slowdown*. The lint rule `design-system/latency-words` refuses the
+notation in JSX text, in a string with other words around it and in a `label`, `title`, `name` or
+`hint`; a bare `"p95"` elsewhere is a key of the server's answer and stays. The interface charts on
+`/network/traffic` are outside it: their percentiles are of throughput, not of how long anything
+took. Sentences the server writes (a rollback watch's verdict, a canary's, a replay's, a traffic
+alert's notification) still say p95 and are shown as the server wrote them.
+
 ## 5. No descriptions under titles
 
 **`PageContext`, `Section`, `PanelHeader` and `ChartPanel` have no `description`.** They have no `icon`

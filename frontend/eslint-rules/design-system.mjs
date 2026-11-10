@@ -40,9 +40,7 @@
 const TOKEN = /^[a-z0-9][\w:./[\]#%(),!*&>~+'"=-]*$/
 const classLike = (text) => {
   const tokens = text.trim().split(/\s+/)
-  return (
-    tokens.every((t) => TOKEN.test(t)) && tokens.some((t) => /[-:[]/.test(t))
-  )
+  return tokens.every((t) => TOKEN.test(t)) && tokens.some((t) => /[-:[]/.test(t))
 }
 
 /**
@@ -120,6 +118,69 @@ const rule = {
   },
 }
 
-const plugin = { rules: { tokens: rule } }
+/**
+ * How long things took is said in words ("19 in 20 within"), not as
+ * `p50 / p95 / p99`: the operator found the notation unclear, and the same
+ * figure had two names depending on the page. `src/lib/latency-words.ts` holds
+ * the words; this keeps the notation from being typed into a label again.
+ *
+ * It reads what a person would see: JSX text, a string or template with other
+ * words around the term ("p95 above", `p95 ${figure}`), and a bare term given
+ * as a `label`, `title`, `name` or `hint`. A bare `"p95"` anywhere else is a
+ * key — a series, a sort, a field of the server's answer — and is left alone.
+ *
+ * Two files are outside it: the words' own module, which names the term for
+ * tooltips, and the interface charts, whose percentiles are of throughput
+ * rather than of how long anything took.
+ */
+const NOTATION = /(?:^|[^\w.$])p(?:50|75|90|95|99)(?![\w(])/
+const NOTATION_BARE = /^\s*p(?:50|75|90|95|99)\s*$/
+const NOTATION_EXEMPT =
+  /(?:\.test\.[jt]sx?$|[\\/]tests[\\/]|[\\/]eslint-rules[\\/]|src[\\/]lib[\\/]latency-words\.ts$|network[\\/]traffic[\\/]interface-charts\.tsx$)/
+const WORDED_PROPS = new Set(["label", "title", "name", "hint", "info", "aria-label"])
+
+const latencyWords = {
+  meta: {
+    type: "problem",
+    docs: { description: "Say how long things took in words, not as p50 / p95 / p99." },
+    schema: [],
+  },
+  create(context) {
+    if (NOTATION_EXEMPT.test(context.filename ?? "")) return {}
+    const message =
+      'Percentile notation in rendered text. Say it in words from lib/latency-words.ts (latencyHead, latencyWords, LATENCY_SHARE): "19 in 20 within", not "p95".'
+    const worded = (node) => {
+      const parent = node.parent
+      if (parent?.type === "JSXAttribute") return WORDED_PROPS.has(parent.name?.name)
+      if (parent?.type === "Property" && parent.value === node)
+        return WORDED_PROPS.has(parent.key?.name ?? parent.key?.value)
+      return false
+    }
+    const check = (node, text) => {
+      if (typeof text !== "string" || !NOTATION.test(text)) return
+      if (NOTATION_BARE.test(text) && !worded(node)) return
+      context.report({ node, message })
+    }
+    return {
+      JSXText(node) {
+        if (NOTATION.test(node.value)) context.report({ node, message })
+      },
+      Literal(node) {
+        // A property's own key, an import's source and a type's literal are
+        // names, not words anyone reads.
+        const parent = node.parent
+        if (parent?.type === "Property" && parent.key === node) return
+        if (parent?.type === "TSLiteralType" || parent?.type === "ImportDeclaration") return
+        check(node, node.value)
+      },
+      TemplateElement(node) {
+        if (node.parent?.parent?.type === "TSLiteralType") return
+        check(node, node.value?.cooked)
+      },
+    }
+  },
+}
+
+const plugin = { rules: { tokens: rule, "latency-words": latencyWords } }
 
 export default plugin

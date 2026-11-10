@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useViewState } from "@/lib/view-state"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
+import { latencyWords } from "@/lib/latency-words"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentInsights } from "@/lib/types"
@@ -417,7 +418,7 @@ export function Insights({
               <dd className={figure}>{seconds(data.medianDurationSeconds)}</dd>
               <dd className="text-hint text-muted-foreground">
                 {data.medianDurationSeconds
-                  ? `p95 ${seconds(data.p95DurationSeconds)} · claim to finish`
+                  ? `${latencyWords("p95", seconds(data.p95DurationSeconds))} · claim to finish`
                   : "no release succeeded in this window"}
               </dd>
             </div>

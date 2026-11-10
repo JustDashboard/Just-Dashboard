@@ -1011,7 +1011,7 @@ function RuntimeForm({
               <Field
                 label="Share of requests"
                 htmlFor="runtime-canary-percent"
-                info="Each request picks a release at random, so the new release's share holds per request. Its 5xx share and p95 are compared with the live release's over the same minutes, on the rollback terms below."
+                info="Each request picks a release at random, so the new release's share holds per request. Its 5xx share and how long 19 in 20 of its requests take are compared with the live release's over the same minutes, on the rollback terms below."
                 error={errorFor("runtime-canary-percent")}
               >
                 <InputGroup>

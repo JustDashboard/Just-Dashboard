@@ -5,6 +5,7 @@ import { Connection, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { bytes, plural } from "@/lib/format"
+import { latencyHead } from "@/lib/latency-words"
 import type {
   StreamEntry,
   StreamResult,
@@ -283,8 +284,8 @@ function TrafficView({ traffic }: { traffic: StreamTraffic }) {
       </Panel>
       <StatGrid columns={4} dense>
         <StatTile label="Median session" value={sessionLength(traffic.duration.p50)} />
-        <StatTile label="p90" value={sessionLength(traffic.duration.p90)} />
-        <StatTile label="p99" value={sessionLength(traffic.duration.p99)} />
+        <StatTile label={latencyHead("p90")} value={sessionLength(traffic.duration.p90)} />
+        <StatTile label={latencyHead("p99")} value={sessionLength(traffic.duration.p99)} />
         <StatTile label="Longest" value={sessionLength(traffic.duration.max)} />
       </StatGrid>
     </>

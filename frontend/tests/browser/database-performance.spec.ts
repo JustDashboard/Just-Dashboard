@@ -2435,7 +2435,7 @@ test("statement history ranks a window's statements by the column pressed, each 
   await expect(history).toContainText("pg_stat_statements keeps running totals for each statement")
   await expect(history).toContainText("so there are no percentiles")
   // PostgreSQL keeps no run times and counts no rows read: neither column is drawn.
-  await expect(history.getByRole("columnheader", { name: "p95" })).toHaveCount(0)
+  await expect(history.getByRole("columnheader", { name: "19 in 20" })).toHaveCount(0)
   await expect(history.getByRole("columnheader", { name: "Examined" })).toHaveCount(0)
   await expect(history.getByRole("columnheader", { name: "Share" })).toHaveAttribute(
     "aria-sort",
@@ -2558,14 +2558,14 @@ test("an engine that keeps run times gives the history its percentiles and the r
   await visit(page, "/databases/2/performance?view=history")
   const history = historyView(page)
   await expect(history.getByRole("row")).toHaveCount(ANALYTICS_HISTORY.length + 1)
-  await expect(history.getByRole("columnheader", { name: "p95" })).toBeVisible()
+  await expect(history.getByRole("columnheader", { name: "19 in 20" })).toBeVisible()
   await expect(history.getByRole("columnheader", { name: "Examined" })).toBeVisible()
   await expect(history.getByRole("row").nth(1)).toContainText("212 ms")
   await expect(history).toContainText("ClickHouse's query log holds every finished query")
   await history.getByRole("row").nth(1).click()
   await settled(page)
   const panel = dialog(page)
-  await expect(panel.getByText("p99", { exact: true }).first()).toBeVisible()
+  await expect(panel.getByText("99 in 100 within", { exact: true }).first()).toBeVisible()
   await expect(panel).toContainText("487 ms")
   await expect(panel).toContainText("40K for each returned")
 })
@@ -2627,7 +2627,7 @@ test("statement history screenshots @shots", async ({ page }) => {
   await page.keyboard.press("Escape")
 
   await visit(page, "/databases/2/performance?view=history")
-  await expect(historyView(page).getByRole("columnheader", { name: "p95" })).toBeVisible()
+  await expect(historyView(page).getByRole("columnheader", { name: "19 in 20" })).toBeVisible()
   await page.waitForLoadState("networkidle")
   await shot("history-percentiles-1440")
   await historyView(page).getByRole("row").nth(1).click()

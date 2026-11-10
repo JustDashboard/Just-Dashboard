@@ -11,6 +11,7 @@ const eslintConfig = defineConfig([
     plugins: { "design-system": designSystem },
     rules: {
       "design-system/tokens": "error",
+      "design-system/latency-words": "error",
       // Reaching past a primitive to the thing it wraps is the other mechanical
       // failure. Each of these has exactly one legitimate assembler, listed in
       // the override below.

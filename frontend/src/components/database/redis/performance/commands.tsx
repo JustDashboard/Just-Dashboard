@@ -114,7 +114,7 @@ export function CommandsView({ redis }: { redis: Redis }) {
                   <TableHead className="text-right">Now</TableHead>
                   <TableHead className="text-right">Per call</TableHead>
                   {percentiles && <TableHead className="text-right">Median</TableHead>}
-                  {percentiles && <TableHead className="text-right">99th</TableHead>}
+                  {percentiles && <TableHead className="text-right">99 in 100</TableHead>}
                   <TableHead className="text-right">Failed</TableHead>
                 </TableRow>
               </TableHeader>

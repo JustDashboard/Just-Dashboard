@@ -62,7 +62,7 @@ function policyOf(draft: PolicyDraft): RollbackPolicy | string {
   if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60)
     return "The window is between 1 and 60 minutes."
   if (!(margin >= 0.5 && margin <= 50)) return "The 5xx margin is between 0.5 and 50 points."
-  if (!(factor >= 1.2 && factor <= 10)) return "The p95 factor is between 1.2 and 10."
+  if (!(factor >= 1.2 && factor <= 10)) return "The slowdown factor is between 1.2 and 10."
   if (!Number.isInteger(requests) || requests < 5 || requests > 100000)
     return "At least 5 requests decide."
   return {
@@ -242,9 +242,9 @@ export function RollbackWatchForm({
                 })}
               </Field>
               <Field
-                label="p95 against the previous release"
+                label="Slowdown against the previous release"
                 htmlFor="rollback-factor"
-                info="A multiple of the previous release's p95, and always at least a quarter of a second slower, so 4 ms becoming 9 ms is not a regression. An nginx ingress records no durations, so there only the 5xx share decides."
+                info="A multiple of the time 19 in 20 of the previous release's requests finished inside, and always at least a quarter of a second slower, so 4 ms becoming 9 ms is not a regression. An nginx ingress records no durations, so there only the 5xx share decides."
               >
                 {number("rollback-factor", "latencyFactor", "×", { min: 1.2, max: 10, step: 0.1 })}
               </Field>

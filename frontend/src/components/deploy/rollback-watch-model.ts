@@ -108,8 +108,9 @@ export function watchTitle(watch: RollbackWatch) {
 
 /**
  * The terms in one sentence, as the settings and the panel's tip say them:
- * "Rolls back when 5xx passes the previous release's by 5 points or p95
- * reaches 2× it, over at least 20 requests."
+ * "Traffic goes back to it when the 5xx share passes its own by 5 points or
+ * 19 in 20 requests take 2× as long as its own did, over at least 20
+ * requests."
  */
 export function policyLine(policy: RollbackPolicy) {
   if (!policy.keepWarm) return "The previous release is removed as soon as a new one is live."
@@ -120,7 +121,7 @@ export function policyLine(policy: RollbackPolicy) {
       : `${policy.windowSeconds} seconds`
   if (!policy.automatic)
     return `The previous release is kept warm for ${window}, to switch back to by hand.`
-  return `The previous release is kept warm for ${window}. Traffic goes back to it when the 5xx share passes its own by ${trim(policy.errorRateMargin)} points or the p95 reaches ${trim(policy.latencyFactor)}× its own, over at least ${policy.minRequests} requests.`
+  return `The previous release is kept warm for ${window}. Traffic goes back to it when the 5xx share passes its own by ${trim(policy.errorRateMargin)} points or 19 in 20 requests take ${trim(policy.latencyFactor)}× as long as its own did, over at least ${policy.minRequests} requests.`
 }
 
 function trim(value: number) {
