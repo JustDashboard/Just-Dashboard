@@ -7,7 +7,7 @@ import {
   waitingServers,
 } from "@/components/database/connect/inventory"
 import { useFound } from "@/components/database/connect/use-found"
-import { engineOf, type Engine } from "@/components/database/engine"
+import { type Engine } from "@/components/database/engine"
 import {
   fleetHues,
   fleetMarks,
@@ -19,15 +19,10 @@ import {
   fleetReadings,
   groupFleet,
   matchesQuery,
-  nextSort,
-  sortRows,
   type FleetGrouping,
-  type FleetSort,
-  type FleetSortKey,
 } from "@/components/database/fleet/fleet"
 import { FleetBand } from "@/components/database/fleet/fleet-band"
 import { FleetCard } from "@/components/database/fleet/fleet-card"
-import { FleetTable } from "@/components/database/fleet/fleet-table"
 import { McpServer } from "@/components/database/fleet/mcp-server-dialog"
 import { MetricsExport } from "@/components/database/fleet/metrics-export-dialog"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
@@ -36,21 +31,12 @@ import { useAddress, useTypedParam } from "@/components/database/fleet/use-addre
 import { useFleet, useInventory } from "@/components/database/fleet/use-fleet"
 import { useFleetConfirm } from "@/components/database/fleet/use-fleet-confirm"
 import { useFleetControl } from "@/components/database/fleet/use-fleet-control"
-import { Wiring } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASES_MAP_HREF } from "@/components/database/shell/routes"
-import { fleetStatus, statusTone } from "@/components/database/shell/status"
 import { Segments } from "@/components/deploy/settings/segments"
 import { IconAction } from "@/components/icon-action"
-import {
-  ArrowRight,
-  Database,
-  GridSquare,
-  Plus,
-  RefreshClockwise,
-  Table as TableGlyph,
-} from "@/components/icons"
+import { Database, Plus, RefreshClockwise } from "@/components/icons"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext, SearchInput, Section } from "@/components/page"
 import { ProductLogos } from "@/components/product-logo"
@@ -59,10 +45,9 @@ import { EmptyState } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useMetrics } from "@/hooks/use-metrics"
 import { bytes, plural, relativeTime } from "@/lib/format"
-import type { DbFleetEntry, DbTopoNode } from "@/lib/types"
+import type { DbFleetEntry } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import Link from "next/link"
 import { useCallback, useMemo } from "react"
@@ -87,11 +72,14 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  * who holds the bytes, who is connected, and how old every newest dump is,
  * each database in its own hue (`fleetHues`) from the bar to its card's
  * edge. Then the fleet itself: every saved connection as a card you open,
- * drawn as its engine with its own readings on it, shelved by where it runs —
- * or laid across as a table when there are many to compare. Under it the
- * picture of what the databases feed — the ones nothing is seen reading named
- * under it, each a way to its own page — and what discovery found on this
- * machine that is not connected yet.
+ * drawn as its engine with its own readings on it, shelved by where it runs.
+ * Under it, what discovery found on this machine that is not connected yet.
+ *
+ * Two things it drew are gone at the operator's word. The table the cards
+ * could be laid out as: the cards are the one way the fleet is drawn. And the
+ * picture of what the databases feed, with the line of the ones nothing reads
+ * under it: what feeds what is the map's (`map.tsx`), reached from the
+ * "read by" figure in the line at the top and from the section's own tabs.
  *
  * It opened on a "Needs attention" list until the operator asked for it to
  * go. Nothing it said was lost: every concern is still said, in its weight,
@@ -102,14 +90,14 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  * ordered worst first, so what needed a hand is still what is met first.
  *
  * Everything on it hangs off one read, `/databases/fleet`, which dials every
- * connection; the dump directories, the inventory and the map decorate it.
+ * connection; the dump directories, the inventory and the topology decorate it.
  * So the fleet alone decides the page's loading and error states, and once
  * it has answered, a failed poll of anything leaves what is drawn where it
  * is and says so beside the time of the last reading.
  *
- * Search and engine filters are in the address; how the fleet is arranged
- * (shelves, cards or table, the table's order) is the reader's own and kept
- * in view state. Legacy metric-card `show` parameters are ignored.
+ * Search and engine filters are in the address; how the cards are shelved is
+ * the reader's own and kept in view state. Legacy metric-card `show`
+ * parameters, and the table a reader once chose, are ignored.
  */
 export function ControlCenter() {
   const { admin, engineFor, newHref } = useDatabases()
@@ -132,12 +120,6 @@ export function ControlCenter() {
   const found = useFound({ inventory, onConnected: refreshFleet, onSynced: refreshFleet })
   const address = useAddress()
   const [grouping, setGrouping] = useViewState<FleetGrouping>("databases.fleet.group", "place")
-  const [view, setView] = useViewState<"cards" | "table">("databases.fleet.view", "cards")
-  const [sort, setSort] = useViewState<FleetSort>("databases.fleet.sort", null)
-  // A table of eleven columns needs the width of one; below it the cards are
-  // the same rows drawn down instead of across (§12), so the choice is not
-  // offered.
-  const roomy = useMediaQuery("(min-width: 1024px)")
 
   const engineFilter = address.read("engine")
   const [query, setQuery] = useTypedParam("q")
@@ -183,30 +165,6 @@ export function ControlCenter() {
   const refusals = useMemo(
     () => new Map((fleet.data?.unreachable ?? []).map((one) => [one.container, one.reason])),
     [fleet.data],
-  )
-
-  // A database node on the map is its connection: drawn as what answered,
-  // with the card's own dot in its corner.
-  const byId = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
-  const entryOf = (node: DbTopoNode) =>
-    node.connId === undefined ? undefined : byId.get(node.connId)
-  const engineOfNode = (node: DbTopoNode) => {
-    const entry = entryOf(node)
-    return entry ? engineFor(entry) : engineOf(node.product ?? "")
-  }
-  const stateOfNode = (node: DbTopoNode) => {
-    const entry = entryOf(node)
-    return entry ? statusTone(fleetStatus(entry).state) : undefined
-  }
-
-  // The page's picture is of what is wired: a database nothing reads is on
-  // the map in full, and here it is a name in the line under the picture.
-  const feeding = useCallback(
-    (node: DbTopoNode) => node.connId !== undefined && feeds.has(node.connId),
-    [feeds],
-  )
-  const unread = (topology.data?.nodes ?? []).filter(
-    (node) => node.kind === "database" && !feeding(node),
   )
 
   const add = admin && (
@@ -309,8 +267,6 @@ export function ControlCenter() {
   const narrowed = engineFilter !== "" || query !== ""
   const clear = () => address.set({ show: null, engine: null, q: null })
   const groups = groupFleet(shown, grouping, (entry) => engineFor(entry).label)
-  const table = roomy && view === "table"
-  const onSort = (key: FleetSortKey) => setSort((held) => nextSort(held, key))
   const position = new Map(shown.map((entry, index) => [entry.id, index]))
 
   // The server's databases as one line: their engines as the mark, then the
@@ -436,43 +392,13 @@ export function ControlCenter() {
               placeholder="Filter databases"
               aria-label="Filter databases"
             />
-            <span className="ml-auto flex max-w-full shrink-0 flex-wrap items-center gap-2">
-              {!table && (
-                <Segments
-                  label="Group by"
-                  value={grouping}
-                  options={GROUPINGS}
-                  onChange={setGrouping}
-                />
-              )}
-              {roomy && (
-                <Segments
-                  label="Draw as"
-                  value={view}
-                  onChange={setView}
-                  options={[
-                    {
-                      value: "cards",
-                      label: (
-                        <>
-                          <GridSquare aria-hidden className="size-3.5" />
-                          <span className="sr-only">Cards</span>
-                        </>
-                      ),
-                    },
-                    {
-                      value: "table",
-                      label: (
-                        <>
-                          <TableGlyph aria-hidden className="size-3.5" />
-                          <span className="sr-only">Table</span>
-                        </>
-                      ),
-                    },
-                  ]}
-                />
-              )}
-            </span>
+            <Segments
+              label="Group by"
+              value={grouping}
+              options={GROUPINGS}
+              onChange={setGrouping}
+              className="ml-auto shrink-0"
+            />
           </div>
           {engines.length > 1 && (
             <ChipStrip role="group" aria-label="Narrow the databases">
@@ -514,20 +440,6 @@ export function ControlCenter() {
               </Button>
             }
           />
-        ) : table ? (
-          <FleetTable
-            entries={sortRows(shown, sort, (entry) => backups.get(entry.id)?.newest, storedOf)}
-            engineOf={engineFor}
-            concernsOf={concernsOf}
-            backups={backups}
-            feeds={feeds}
-            storedOf={storedOf}
-            hueOf={hueOf}
-            largest={largest}
-            control={control}
-            sort={sort}
-            onSort={onSort}
-          />
         ) : (
           <Shelves
             groups={groups}
@@ -552,59 +464,6 @@ export function ControlCenter() {
               />
             )}
           />
-        )}
-      </Section>
-
-      <Section
-        title="What they feed"
-        className="animate-rise"
-        actions={
-          <Link
-            href={DATABASES_MAP_HREF}
-            className="flex items-center gap-1 rounded-sm text-body text-muted-foreground focus-ring transition-colors hover:text-foreground"
-          >
-            Open the map <ArrowRight aria-hidden className="size-3.5" />
-          </Link>
-        }
-      >
-        {topology.data ? (
-          topology.data.edges.length > 0 ? (
-            <>
-              <Wiring
-                topology={topology.data}
-                keep={feeding}
-                engineOf={engineOfNode}
-                stateOf={stateOfNode}
-              />
-              {unread.length > 0 && (
-                <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-hairline pt-4">
-                  <span className="text-hint text-muted-foreground">Nothing seen reading</span>
-                  <ul className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
-                    {unread.map((node) => (
-                      <li key={node.id} className="min-w-0">
-                        <Link
-                          href={node.href ?? DATABASES_MAP_HREF}
-                          className="flex min-w-0 items-center gap-2 rounded-sm text-body text-muted-foreground focus-ring transition-colors hover:text-foreground"
-                        >
-                          <EngineGlyph engine={engineOfNode(node)} className="size-4" />
-                          <span className="truncate">{node.name}</span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="text-body text-muted-foreground">
-              Nothing has been seen reading these databases yet. A deployment that links one, a
-              container whose environment names one, or an open session appears here.
-            </p>
-          )
-        ) : topology.error ? (
-          <ReadFailed error={topology.error} onRetry={topology.refresh} every="45 seconds" />
-        ) : (
-          <Skeleton className="h-40 rounded-xl" />
         )}
       </Section>
 

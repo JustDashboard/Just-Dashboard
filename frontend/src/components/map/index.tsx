@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { useSearchParams } from "next/navigation"
 import { ReactFlowProvider } from "@xyflow/react"
 import { Page, PageContext } from "@/components/page"
@@ -9,9 +9,11 @@ import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
-import type { ServerMap } from "@/lib/types"
+import { kindOf } from "@/lib/server-map"
+import { SYSTEM_KINDS, detectSystems } from "@/lib/server-systems"
+import type { MapKindReading, ServerMap } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { MapCanvas } from "@/components/map/canvas"
+import { MapCanvas, type Unread } from "@/components/map/canvas"
 import { useMapMemory } from "@/components/map/memory"
 
 /**
@@ -32,7 +34,11 @@ if (typeof window !== "undefined") {
   })
 }
 
-async function readMap(signal: AbortSignal) {
+/**
+ * The server map's reading, kept for the next page that draws from it: the
+ * server map and the databases map read the same one.
+ */
+export async function readServerMap(signal: AbortSignal) {
   const value = await get<ServerMap>("/map/", undefined, signal)
   if (!value || !Array.isArray(value.kinds) || !Array.isArray(value.links)) {
     throw new Error("The server answered the map with something the page cannot use.")
@@ -41,37 +47,36 @@ async function readMap(signal: AbortSignal) {
   return value
 }
 
-/**
- * The server map: every system the server runs — each deployment, Compose
- * stack and PM2 app, this dashboard itself — drawn as its own diagram of what
- * it is made of and wired to (`lib/server-systems.ts`, `canvas.tsx`).
- *
- * A reading page held to the window as a workbench (design system §16), one
- * frame around the rail of systems, a canvas and its inspector, the way a
- * database's Diagram is. Below the width those fit, the canvas alone, edge to
- * edge.
- */
-export function ServerMapPage() {
-  const asked = useSearchParams().get("system") ?? undefined
-  const [seed] = useState(() =>
-    lastMap && Date.now() - lastMap.at < 5 * 60_000 ? lastMap.value : undefined,
-  )
-  const [filling, setFilling] = useState(true)
-  const fetchMap = useCallback(async (signal: AbortSignal) => {
-    const value = await readMap(signal)
-    setFilling(value.kinds.some((k) => k.state === "unread" && k.reason === "Still being read"))
-    return value
-  }, [])
-  const read = usePoll(fetchMap, filling ? FILLING : EVERY, [], { seed })
-  const memory = useMapMemory()
-  const map = read.data
+/** The last reading while it is recent enough to draw at once, as a poll's seed. */
+export function lastServerMap() {
+  return lastMap && Date.now() - lastMap.at < 5 * 60_000 ? lastMap.value : undefined
+}
 
-  // Full screen: the browser's own where it is offered, and a fixed overlay
-  // where it is refused, as the diagram does.
-  const root = useRef<HTMLDivElement>(null)
+/**
+ * Whether a kind — any, or one of `kinds` — is still being read for the first
+ * time, so the map is asked again soon rather than a poll later.
+ */
+export function stillFilling(map: ServerMap, kinds?: ReadonlySet<string>) {
+  return map.kinds.some(
+    (k) => (!kinds || kinds.has(k.key)) && k.state === "unread" && k.reason === "Still being read",
+  )
+}
+
+/** The kinds the canvas draws whose source failed, each said over it. */
+export function unreadKinds(kinds: MapKindReading[], drawn: ReadonlySet<string>): Unread[] {
+  return kinds
+    .filter((k) => drawn.has(k.key) && k.state === "unread")
+    .map((k) => ({ key: k.key, label: `${kindOf(k.key)?.label ?? k.key}s`, reason: k.reason }))
+}
+
+/**
+ * Full screen for a canvas: the browser's own where it is offered, and a
+ * fixed overlay where it is refused, as the diagram does.
+ */
+export function useFullscreen(root: RefObject<HTMLDivElement | null>) {
   const [fullscreen, setFullscreen] = useState(false)
   const [immersive, setImmersive] = useState(false)
-  const toggleFullscreen = useCallback(() => {
+  const toggle = useCallback(() => {
     if (fullscreen || immersive) {
       if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
       setImmersive(false)
@@ -87,7 +92,7 @@ export function ServerMapPage() {
     } else {
       setImmersive(true)
     }
-  }, [fullscreen, immersive])
+  }, [fullscreen, immersive, root])
   useEffect(() => {
     const onChange = () => {
       setFullscreen(document.fullscreenElement === root.current && root.current !== null)
@@ -95,7 +100,36 @@ export function ServerMapPage() {
     }
     document.addEventListener("fullscreenchange", onChange)
     return () => document.removeEventListener("fullscreenchange", onChange)
+  }, [root])
+  return { full: fullscreen || immersive, immersive, toggle }
+}
+
+/**
+ * The server map: every system the server runs — each deployment, Compose
+ * stack and PM2 app, this dashboard itself — drawn as its own diagram of what
+ * it is made of and wired to (`lib/server-systems.ts`, `canvas.tsx`).
+ *
+ * A reading page held to the window as a workbench (design system §16), one
+ * frame around the rail of systems, a canvas and its inspector, the way a
+ * database's Diagram is. Below the width those fit, the canvas alone, edge to
+ * edge.
+ */
+export function ServerMapPage() {
+  const asked = useSearchParams().get("system") ?? undefined
+  const [seed] = useState(lastServerMap)
+  const [filling, setFilling] = useState(true)
+  const fetchMap = useCallback(async (signal: AbortSignal) => {
+    const value = await readServerMap(signal)
+    setFilling(stillFilling(value))
+    return value
   }, [])
+  const read = usePoll(fetchMap, filling ? FILLING : EVERY, [], { seed })
+  const memory = useMapMemory()
+  const map = read.data
+  const systems = useMemo(() => detectSystems(map), [map])
+
+  const root = useRef<HTMLDivElement>(null)
+  const screen = useFullscreen(root)
 
   const ready = map && memory.document
 
@@ -106,18 +140,19 @@ export function ServerMapPage() {
         ref={root}
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col bg-background [&:fullscreen]:p-3",
-          immersive && "fixed inset-0 z-50 p-3",
+          screen.immersive && "fixed inset-0 z-50 p-3",
         )}
       >
         <Pane className="min-h-0 flex-1 max-lg:rounded-none max-lg:border-0">
           {ready ? (
             <ReactFlowProvider>
               <MapCanvas
-                map={map}
+                systems={systems}
+                unread={unreadKinds(map.kinds, SYSTEM_KINDS)}
                 doc={memory.document!}
                 update={memory.update}
-                full={fullscreen || immersive}
-                onFullscreen={toggleFullscreen}
+                full={screen.full}
+                onFullscreen={screen.toggle}
                 initialSystem={asked}
               />
             </ReactFlowProvider>
@@ -135,9 +170,9 @@ export function ServerMapPage() {
 }
 
 /** The coming shape: the rail of systems, and a diagram's three columns. */
-function MapSkeleton() {
+export function MapSkeleton({ label = "Reading the server" }: { label?: string }) {
   return (
-    <div role="status" aria-label="Reading the server" className="flex min-h-0 flex-1 flex-col">
+    <div role="status" aria-label={label} className="flex min-h-0 flex-1 flex-col">
       <div className="grid min-h-0 flex-1 lg:grid-cols-[15rem_minmax(0,1fr)]">
         <div className="space-y-2 border-r border-hairline p-3 max-lg:hidden">
           {[0, 1, 2, 3, 4, 5].map((i) => (

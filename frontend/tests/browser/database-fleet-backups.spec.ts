@@ -20,11 +20,6 @@ const card = (page: Page, name: string) =>
     .filter({ has: page.getByRole("link", { name: `Open ${name}` }) })
 const band = (page: Page) => page.locator("[data-slot=fleet-band]")
 const backups = (page: Page) => band(page).getByRole("region", { name: "Backups" })
-const tableRow = (page: Page, name: string) =>
-  page
-    .getByRole("table")
-    .getByRole("row")
-    .filter({ has: page.getByRole("link", { name: `Open ${name}` }) })
 const scroller = (page: Page) => page.locator("[data-slot=page]").first().locator("xpath=..")
 /** An age as the page writes it: "5h ago", or "5h 12m ago" once the clock has moved on. */
 const backedUp = (hours: number) => new RegExp(`backed up ${hours}h(?: \\d+[ms])? ago`)
@@ -50,9 +45,7 @@ const NOTHING: FleetMock = {
 }
 
 test.describe("the last backup the control center reads", () => {
-  test("a backup job's run is a backup on the card, in the band and in the table", async ({
-    page,
-  }) => {
+  test("a backup job's run is a backup on the card and in the band", async ({ page }) => {
     await mockFleet(page, JOBS)
     await page.goto("/databases")
 
@@ -78,12 +71,6 @@ test.describe("the last backup the control center reads", () => {
         .getByRole("link")
         .evaluateAll((links) => links.map((link) => link.getAttribute("aria-label"))),
     ).toEqual(["Backups of app", "Backups of shop"])
-
-    await page.getByRole("radio", { name: "Table" }).click()
-    await expect(tableRow(page, "shop")).toContainText(/5h(?: \d+[ms])? ago/)
-    await expect(tableRow(page, "cache")).toContainText(/2h(?: \d+[ms])? ago/)
-    await expect(tableRow(page, "app")).toContainText("never")
-    await page.getByRole("radio", { name: "Cards" }).click()
   })
 
   test("a database neither dumped nor in a backup job is still never backed up", async ({
@@ -153,12 +140,6 @@ test.describe("the last backup the control center reads", () => {
       .evaluate((shelves) => shelves.scrollIntoView({ block: "start" }))
     await scroller(page).evaluate((el) => el.scrollBy(0, -16))
     await shot("fleet-cards-1440")
-
-    await page.getByRole("radio", { name: "Table" }).click()
-    await expect(tableRow(page, "shop")).toContainText(/5h(?: \d+[ms])? ago/)
-    await page.getByRole("table").scrollIntoViewIfNeeded()
-    await shot("fleet-table-1440")
-    await page.getByRole("radio", { name: "Cards" }).click()
 
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto("/databases")
