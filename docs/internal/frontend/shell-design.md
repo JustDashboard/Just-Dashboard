@@ -54,6 +54,21 @@ replaces it (`app/global-error.tsx`), which brings its own document, stylesheet 
 script, because a client component cannot read the CSP nonce. The two share `RenderFailure`, whose way out
 is a full load rather than a router link back into what threw.
 
+### The document proxy and the build configuration
+
+`src/proxy.ts` runs for every document request and nothing under `/api` or `/_next/static` (its
+`matcher`). It mints the per-request nonce and the Content-Security-Policy that goes with it, and it
+is where the build's routing choices in `next.config.ts` are completed.
+
+**A trailing slash costs an API call nothing, and a page still loses it.** About 140 calls spell a
+list endpoint with its slash (`/jobs/`, `/deploy/`), which the backend's router accepts. Next answers
+any such path with a 308 to the path without the slash before it consults a rewrite, so wherever Next
+fronts the API (`bun dev`, `next start` under the browser specs) each of those calls was two round
+trips. `skipTrailingSlashRedirect` turns that redirect off and the request reaches the `/api` rewrite as
+sent; `withoutTrailingSlash` in the proxy does the redirect for pages, so `/docker/` is still `/docker`
+and the rail's `pathname === href` still matches. In production Caddy routes `/api` to the backend and
+neither rule is met. The spelling of the calls is unchanged: the specs' mocks match it exactly.
+
 ### The tab's title
 
 The dashboard's layout renders a React `<title>` from `tabTitle(pathname, host)` in `components/nav.ts`:
