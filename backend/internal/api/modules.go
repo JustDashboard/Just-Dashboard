@@ -275,10 +275,14 @@ func (s *Server) initModules() {
 	s.modules.onHost = func(fn func()) {
 		if err := hostexec.InHostMounts(fn); err != nil {
 			hostMountsWarning.Do(func() {
-				s.Log.Warn("the Files page is showing this container's filesystem, not the server's", "error", err)
+				s.Log.Warn("the Files page and the filesystem sizes are showing this container's filesystem, not the server's", "error", err)
 			})
 		}
 	}
+	// Asked once now, not when somebody first opens the Files page: the
+	// metrics recorder measures every filesystem through the same namespace
+	// (sysinfo/mounts.go) from its first sample, and has no log of its own.
+	s.modules.onHost(func() {})
 	s.modules.hostFiles = s.modules.files.OnHost(s.modules.onHost)
 	s.modules.gameVersions = gameserver.New()
 	s.modules.git = gitx.New(s.Cfg.GitRoots)

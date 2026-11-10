@@ -150,7 +150,10 @@ prefix test, with the same hole. File-manager extraction additionally stops afte
 8 GiB of bytes actually written, reserves at least 1 GiB of free space, serialises extraction requests,
 removes the current partial file on failure, and obeys a ten-minute request deadline — compressed
 metadata is never trusted as the quota. `internal/sysinfo` reads the host through gopsutil rather than parsing
-`/proc`, so the same path works across kernels and inside a container with `/proc` bind-mounted.
+`/proc`, so the same path works across kernels and inside a container with `/proc` bind-mounted. The one
+reading `/proc` cannot give, each filesystem's size, is a `statfs` of the mount point, which `sysinfo`
+makes through `InHostMounts` with a two-second wait per pass
+([per-filesystem capacity](../backend/observability-security.md#metrics-and-saturation)).
 
 ## Auth, secrets, state
 

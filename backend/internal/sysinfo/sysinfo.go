@@ -1,6 +1,7 @@
 // Package sysinfo collects host metrics through gopsutil rather than parsing
 // /proc by hand, so the same code path works across kernels and inside a
-// container with the host's /proc bind-mounted.
+// container with the host's /proc bind-mounted. What /proc cannot answer, the
+// size of each filesystem, is asked in the host's mount namespace (mounts.go).
 package sysinfo
 
 import (
@@ -192,12 +193,15 @@ type Collector struct {
 	// lastTCP is the TCP MIB at the previous call, for the same reason.
 	lastTCP    TCPCounters
 	lastTCPSet bool
+	// probe measures the mount points; every Collector shares hostMounts.
+	probe *mountProbe
 }
 
 func NewCollector() *Collector {
 	return &Collector{
 		lastNet:  map[string]net.IOCountersStat{},
 		lastDisk: map[string]disk.IOCountersStat{},
+		probe:    hostMounts,
 	}
 }
 
@@ -381,6 +385,10 @@ func max0(f float64) float64 {
 // mounts reports real filesystems only. Pseudo filesystems (tmpfs, overlay
 // layers, cgroup mounts) would otherwise bury the handful of mounts an
 // operator actually cares about.
+//
+// The table is the host's (/proc/1/mountinfo), so each mount point is measured
+// in the host's mount namespace too, through the probe: see mountProbe for why
+// and for what a filesystem that does not answer costs.
 func (c *Collector) mounts(ctx context.Context, elapsed float64) []MountStats {
 	parts, err := disk.PartitionsWithContext(ctx, false)
 	if err != nil {
@@ -388,15 +396,23 @@ func (c *Collector) mounts(ctx context.Context, elapsed float64) []MountStats {
 	}
 	io, _ := disk.IOCountersWithContext(ctx)
 
-	out := make([]MountStats, 0, len(parts))
+	listed := make([]disk.PartitionStat, 0, len(parts))
+	points := make([]string, 0, len(parts))
 	seen := map[string]bool{}
 	for _, p := range parts {
 		if skipFS(p.Fstype) || seen[p.Mountpoint] {
 			continue
 		}
 		seen[p.Mountpoint] = true
-		u, err := disk.UsageWithContext(ctx, p.Mountpoint)
-		if err != nil {
+		listed = append(listed, p)
+		points = append(points, p.Mountpoint)
+	}
+	usage := c.probe.usages(ctx, points)
+
+	out := make([]MountStats, 0, len(listed))
+	for _, p := range listed {
+		u, ok := usage[p.Mountpoint]
+		if !ok {
 			continue
 		}
 		m := MountStats{
@@ -526,6 +542,11 @@ var pseudoFS = map[string]bool{
 	"fusectl": true, "configfs": true, "pstore": true, "bpf": true,
 	"binfmt_misc": true, "autofs": true, "securityfs": true, "efivarfs": true,
 	"ramfs": true, "nsfs": true, "rpc_pipefs": true,
+	// Images that are written once and so are always exactly full: a mounted
+	// ISO or a provider's configuration drive is not a disk about to fill.
+	// None of them was ever reported while mount points were measured inside
+	// the container, where their directories do not exist.
+	"iso9660": true, "udf": true, "cramfs": true, "romfs": true, "erofs": true,
 }
 
 func skipFS(fs string) bool { return pseudoFS[strings.ToLower(fs)] }
