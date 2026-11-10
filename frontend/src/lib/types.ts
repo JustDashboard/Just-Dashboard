@@ -8629,6 +8629,8 @@ export type UpdateRun = {
   tagged?: boolean
   /** Where the dashboard's database was copied before the update, if it was. */
   databaseCopy?: string
+  /** The images tagged `:previous` before the build replaced them. */
+  savedImages?: { current: string; previous: string }[]
   actor: string
   startedAt: string
   updatedAt: string

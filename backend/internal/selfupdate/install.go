@@ -271,13 +271,15 @@ func (i *Installer) updaterArgs(run *Run, loc *Location) []string {
 // leave it alone. If it is gone and this process is the version the run was
 // aiming at, the upgrade worked — the only way this code is running at all is
 // that the build succeeded and compose got as far as recreating the backend.
-// If it is gone and the version did not move, something stopped it.
+// If it is gone and the version did not move, something stopped it, and what
+// it had already changed is put back (putback.go).
 func (i *Installer) Reconcile(ctx context.Context, current string, list Lister) {
 	run, err := i.store.Load()
 	if err != nil || run == nil || !run.Status.Live() {
 		return
 	}
 	alive, err := i.updaterAlive(ctx, list)
+	asked := err == nil
 	switch {
 	case err == nil && alive:
 		// Still working. The phase is nudged so the UI stops saying
@@ -307,9 +309,18 @@ func (i *Installer) Reconcile(ctx context.Context, current string, list Lister) 
 		_ = DockerCommand(ctx, i.dockerHost, "rm", "-f", UpdaterContainer).Run()
 		return
 	}
-	_ = i.store.Finish(fmt.Errorf(
+	// Read again: an updater that failed and rolled back by itself may have
+	// closed the run between the first read and the listing, and its account
+	// of why is the one to keep.
+	latest, err := i.store.Load()
+	if err != nil || latest == nil || !latest.Status.Live() {
+		return
+	}
+	run = latest
+	cause := fmt.Errorf(
 		"the updater stopped before %s was running — this install is still on %s; the transcript below is what it managed",
-		run.ToVersion, current))
+		run.ToVersion, current)
+	_ = i.store.Finish(i.putBack(ctx, run, cause, asked))
 	i.log.Warn("self-update did not complete", "expected", run.ToVersion, "running", current)
 }
 

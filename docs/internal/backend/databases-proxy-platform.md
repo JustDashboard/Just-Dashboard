@@ -6125,7 +6125,7 @@ done by hand, and the UI refuses to fold it away.
   writes `self-update.json` + `self-update.log` into `JD_DATA_DIR` — mounted by both halves, so the *new*
   backend can read what the old one was doing. `Installer.Reconcile` at boot: alive → leave it; gone with
   the version moved → it worked (this process running is the proof); gone with the version unchanged → it
-  stopped.
+  stopped, and what it had changed is put back (below).
 - It **builds one service at a time** (`selfupdate.BuildEachService`, also used by Settings' rebuild,
   and the same loop in `install.sh`). Compose builds every service at once, so the frontend's Turbopack
   peak (2.5–3 GB) and the backend's Go compile (over 1 GB) used to land together; in turn the server
@@ -6167,6 +6167,24 @@ done by hand, and the UI refuses to fold it away.
   new backend may already have migrated; it does not put the database back. The `:previous` images stay
   until the next update replaces them, so a server holds one older generation on disk, and an uninstall
   removes them.
+- **A backend that finds the updater gone puts back what it changed** (`putback.go`). The rollback above
+  runs inside the updater, so an updater that is killed (the Docker daemon restarting under it, a reboot,
+  the kernel taking it when the frontend build runs out of memory) rolled nothing back: the checkout
+  stayed fast-forwarded and the images already built were `:latest`, while the old containers kept
+  running. The run was marked failed, which was true until the next thing recreated the stack (a restart
+  from Configuration, `manage.sh restart`) and brought up half of each version. Now `replaceStack` writes
+  the images it tagged into the record before the build (`Run.SavedImages`), and `Reconcile`, once it has
+  established the updater is gone and read the record again (an updater that rolled back by itself has
+  closed the run, and its account is the one to keep), retags each `:previous` over its `:latest` on the
+  configured daemon and runs the same `restoreCheckout` the rollback does: `reset --keep`, only when
+  `HEAD` is exactly `Run.ToCommit`. A checkout the update never recorded moving is left where it is.
+  **No container is recreated**: from inside one of them that is the manoeuvre the sibling exists to
+  avoid, and with the tags and the checkout back, whatever recreates the stack next gets the old version
+  whole. The run's error says what was put back and gives the one `compose up -d --no-build` to run if a
+  container is still on a new image; whatever could not be done (a local edit in the way, Docker not
+  answering) is listed with the commands, as a rollback's is. It all goes into the transcript after the
+  dead updater's last line. Not covered: an updater killed *after* the backend was recreated on the new
+  version is still settled as a success, though the frontend or proxy may not have been recreated yet.
 - **It copies the database first** (`dbcopy.go`). Additive columns keep the old binary able to open the
   store, but opening it is not only additive (`store.Open` rewrites archived project names in place and
   maps legacy deployments into new tables), and a release whose migration is wrong is not protected by

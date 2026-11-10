@@ -107,6 +107,10 @@ type Run struct {
 	// updater started, or "" when none could be made. A rollback names it and
 	// does not restore it; see dbcopy.go.
 	DatabaseCopy string `json:"databaseCopy,omitempty"`
+	// SavedImages are the images this run tagged :previous before building
+	// over them. They are in the record, and not only in the updater's memory,
+	// so that a backend which finds the updater gone can put them back.
+	SavedImages []SavedImage `json:"savedImages,omitempty"`
 
 	Actor      string     `json:"actor"`
 	StartedAt  time.Time  `json:"startedAt"`
