@@ -271,3 +271,23 @@ func TestFastForwardLeavesNothingRootOwnedBehind(t *testing.T) {
 		t.Fatalf("not the owner's after the update: %v\n%s", left, log.String())
 	}
 }
+
+// The updater is the old image, reading the changelog of the release it is
+// about to install. A field that release added is not a reason to refuse it.
+func TestAReleaseWithAChangelogThisVersionOnlyPartlyUnderstandsIsInstalled(t *testing.T) {
+	upstream, checkout := installed(t)
+	write(t, filepath.Join(upstream, ManifestPath), `{"latest":"0.7","schema":2,"releases":[
+		{"version":"0.7","date":"2026-01-01","title":"t","signedBy":"k","changes":[{"kind":"performance","text":"x"}]},
+		{"version":"0.5","date":"2026-01-01","title":"t","changes":[{"kind":"fixed","text":"x"}]}]}`)
+	git(t, upstream, "add", ".")
+	git(t, upstream, "commit", "-q", "-m", "0.7")
+
+	var log bytes.Buffer
+	_, version, err := fastForward(context.Background(), checkout, "main", "0.7", &log)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, log.String())
+	}
+	if version != "0.7" {
+		t.Fatalf("landed on %q", version)
+	}
+}

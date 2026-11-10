@@ -6011,16 +6011,35 @@ Nothing is tagged by hand; a manual run of the workflow on `main` retries a fail
 
 A changelog entry is written for the person deciding whether to upgrade a root-equivalent panel on their
 own server. Each change has a `kind` (`added`, `changed`, `fixed`, `removed`, `security`, `deprecated` —
-closed set, parser-enforced) and reads as what they can now do; `detail` is for a non-obvious
+closed set, enforced on the committed file) and reads as what they can now do; `detail` is for a non-obvious
 consequence, and most changes need none. `breaking: true` requires a `breakingNote` naming what must be
 done by hand, and the UI refuses to fold it away.
 
 **`internal/selfupdate`** manages the product rather than the server.
 
 - **The changelog is data, not prose**: embedded with `go:embed` *and* fetched from
-  `raw.githubusercontent.com`, parsed by the same function both times — so a malformed file fails the test
-  run before it can be a malformed file every install downloads. The compiled-in copy is what an install
-  with `JD_UPDATE_CHECK=false` still shows.
+  `raw.githubusercontent.com`. The compiled-in copy is read by `ParseManifest`, which refuses anything it
+  cannot render, so a malformed file fails the test run before it can be a malformed file every install
+  downloads. It is what an install with `JD_UPDATE_CHECK=false` still shows.
+- **The published changelog is read leniently** (`ParsePublishedManifest`): the file the check fetches,
+  and the one in the commit an update is about to install, which the *old* image reads. The reader is
+  always older than the file, so a field it does not know is ignored, a kind outside its six is shown as
+  `changed`, a day that grew a time of day is cut back to the day, and an entry it cannot make sense of
+  is left out while the rest are kept. Every release it keeps still has a comparable version, a title, a
+  day and a change with text. `Latest` is the newest release it could read; the versions named but not
+  read are in `Manifest.Unread`, and a check with nothing readable to offer and a newer one unread
+  reports that as its error instead of "up to date". Until 0.8.6 the strict parser read both, so one new
+  field would have made every install report that the published changelog could not be read, the release
+  carrying the fix included.
+- **The published file has a size every old install fixed.** Releases up to 0.8.5 read the first 1 MiB
+  (`FieldManifestCap`) and fail to parse what is cut off; from 0.8.6 the ceiling is 8 MiB and a longer
+  file is reported as too long. The file was 300 KB at 0.8.5 and grew about 4 KB a day, so
+  `TestTheChangelogStaysWhereInstallsInTheFieldCanReadIt` fails at 700 KB. When it does: keep the recent
+  releases in `changelog.json`, move the older ones to a file beside it that the build embeds and the
+  check never fetches (`Local()` joins the two; `CHANGELOG.md` stays complete), and raise the test's
+  number only once no install older than 0.8.6 is worth reaching. For the same reason a new field or kind
+  is only ever *added* to this file: what an old reader needs (`version`, `date`, `title`, `changes[].kind`
+  and `.text`) keeps its meaning, and a change of shape goes to a new path.
 - **Update discovery is independently controlled**: one unauthenticated
   GET, a user agent with product and version only, and a switch to turn it off. Automatic deployment
   branch monitoring uses separate outbound Git connections regardless of that switch. A failure keeps the

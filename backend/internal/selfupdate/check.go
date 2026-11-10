@@ -66,8 +66,19 @@ const (
 
 	fetchTimeout = 15 * time.Second
 	// maxManifest is a ceiling on what a redirect or a wrong URL can make this
-	// process read into memory. The real file is a few kilobytes.
-	maxManifest = 1 << 20
+	// process read into memory. The real file was 300 KB at 0.8.5 and grows by
+	// about 4 KB a day, so the ceiling is set where the file will not reach it
+	// for years rather than where it reaches it in months: a file one byte over
+	// is a check that fails on every install built with this number, with no
+	// way to tell them so.
+	maxManifest = 8 << 20
+	// FieldManifestCap is the same ceiling as it was compiled into every
+	// release up to 0.8.5, which read at most this much and then failed to
+	// parse what was cut off. Those installs are still out there, and the file
+	// they fetch is the one at ManifestPath on the tracked branch, so that file
+	// has to stay under this for as long as they are worth reaching. The test
+	// beside the changelog fails well before it does not.
+	FieldManifestCap = 1 << 20
 )
 
 // Check is the answer to "is there a newer version", as of the last time
@@ -265,6 +276,12 @@ func (c *Checker) Refresh(ctx context.Context) (Check, error) {
 	res.Latest = manifest.Latest
 	res.Releases = manifest.Since(c.current)
 	res.Available = len(res.Releases) > 0
+	if unread := manifest.NewerUnread(c.current); !res.Available && unread != "" {
+		// Nothing this build can read is newer, but something is. "Up to date"
+		// would be the one wrong answer.
+		res.Error = fmt.Sprintf("release %s is out, but this version cannot read its notes and so cannot install it from here; "+
+			"update from the server's shell instead", unread)
+	}
 
 	c.mu.Lock()
 	c.result = res
@@ -292,11 +309,17 @@ func (c *Checker) fetch(ctx context.Context) (Manifest, error) {
 	if resp.StatusCode != http.StatusOK {
 		return Manifest{}, fmt.Errorf("%s returned %s for %s/%s", hostOf(c.baseURL), resp.Status, c.repo, c.ref)
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxManifest))
+	// One byte past the ceiling, so a file that is too long is told apart from
+	// one that is exactly long enough, and is reported as that rather than as
+	// JSON that stops in the middle of a word.
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxManifest+1))
 	if err != nil {
 		return Manifest{}, err
 	}
-	m, err := ParseManifest(b)
+	if len(b) > maxManifest {
+		return Manifest{}, fmt.Errorf("the published changelog is larger than the %d MiB this version reads", maxManifest>>20)
+	}
+	m, err := ParsePublishedManifest(b)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("the published changelog could not be read: %w", err)
 	}

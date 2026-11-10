@@ -179,7 +179,7 @@ func updateTarget(ctx context.Context, dir, ref, to string, out io.Writer) (stri
 	if err != nil {
 		return "", fmt.Errorf("could not read the changelog at %s, so it cannot be confirmed as %s; nothing was changed: %w", target, to, err)
 	}
-	manifest, err := ParseManifest([]byte(raw))
+	manifest, err := ParsePublishedManifest([]byte(raw))
 	if err != nil {
 		return "", fmt.Errorf("the changelog at %s could not be read, so it cannot be confirmed as %s; nothing was changed: %w", target, to, err)
 	}
@@ -231,7 +231,7 @@ func installedVersion(ctx context.Context, dir string) string {
 	if err != nil {
 		return ""
 	}
-	manifest, err := ParseManifest([]byte(raw))
+	manifest, err := ParsePublishedManifest([]byte(raw))
 	if err != nil {
 		return ""
 	}

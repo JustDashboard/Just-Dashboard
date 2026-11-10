@@ -152,3 +152,64 @@ func TestCheckerURL(t *testing.T) {
 		t.Fatalf("default URL is %q", got)
 	}
 }
+
+// One field this version has never heard of, in a release it is not on yet.
+// The check used to answer "the published changelog could not be read" on every
+// install, and the release that taught them to read it was in that file.
+func TestCheckReadsAChangelogWrittenByANewerRelease(t *testing.T) {
+	srv, _ := serving(t, http.StatusOK, `{"schema":2,"releases":[
+		{"version":"0.6","date":"2026-09-01","title":"Six","summary":"s","signedBy":"release key",
+			"changes":[{"kind":"performance","text":"a thing"}]},
+		{"version":"0.5","date":"2026-08-01","title":"Five","summary":"s","changes":[{"kind":"added","text":"another"}]}]}`)
+	res, err := checkerAgainst(t, srv.URL, "0.5").Refresh(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Available || res.Latest != "0.6" || res.Error != "" {
+		t.Fatalf("check reported %+v", res)
+	}
+}
+
+// With nothing readable to offer and something unreadable published, "up to
+// date" is the one wrong answer.
+func TestCheckSaysWhenTheOnlyNewerReleaseCannotBeRead(t *testing.T) {
+	srv, _ := serving(t, http.StatusOK, `{"latest":"0.6","releases":[
+		{"version":"0.6","date":"2026-09-01","title":"Six","changes":{"added":["a thing"]}},
+		{"version":"0.5","date":"2026-08-01","title":"Five","summary":"s","changes":[{"kind":"added","text":"another"}]}]}`)
+	res, err := checkerAgainst(t, srv.URL, "0.5").Refresh(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Available {
+		t.Fatalf("offered %+v from an entry that could not be read", res.Releases)
+	}
+	if !strings.Contains(res.Error, "0.6") || !strings.Contains(res.Error, "shell") {
+		t.Fatalf("error %q does not say that 0.6 is out or where to install it from", res.Error)
+	}
+}
+
+// A file longer than this version reads is said to be too long. Cut off at the
+// ceiling it was JSON that stopped mid-word, reported as a file that "could not
+// be read".
+func TestCheckSaysWhenTheChangelogIsLongerThanItReads(t *testing.T) {
+	padding := strings.Repeat(" ", maxManifest)
+	srv, _ := serving(t, http.StatusOK, twoReleases+padding)
+	res, err := checkerAgainst(t, srv.URL, "0.5").Refresh(context.Background())
+	if err == nil || !strings.Contains(res.Error, "larger than") {
+		t.Fatalf("err %v, reported %q", err, res.Error)
+	}
+	if res.Available {
+		t.Fatal("offered an update from a file it did not finish reading")
+	}
+}
+
+func TestCheckReadsAChangelogPastTheOldCeiling(t *testing.T) {
+	if maxManifest <= FieldManifestCap {
+		t.Fatalf("this version reads %d bytes, no more than the %d the field already reads", maxManifest, FieldManifestCap)
+	}
+	srv, _ := serving(t, http.StatusOK, twoReleases+strings.Repeat(" ", FieldManifestCap))
+	res, err := checkerAgainst(t, srv.URL, "0.5").Refresh(context.Background())
+	if err != nil || !res.Available {
+		t.Fatalf("err %v, reported %+v", err, res)
+	}
+}
