@@ -486,6 +486,122 @@ export const TOPOLOGY = {
   ],
 }
 
+/**
+ * The server map's reading (`GET /map`) of the same machine, which the
+ * databases map draws each database's diagram from: each connection as the
+ * fleet reads it, the container serving each one, the volume the Postgres
+ * keeps its data in with the job that backs it up, the shop's nightly dump,
+ * the deployment bound to shop and naming cache, and the worker. What reads
+ * them now is the topology's to say.
+ */
+function serverMapOf(connections: ReturnType<typeof fleetEntry>[]) {
+  const item = (
+    id: string,
+    name: string,
+    tone: string,
+    state: string,
+    href: string,
+    extra: Record<string, unknown> = {},
+  ) => ({ id, name, tone, state, href, ...extra })
+  const facts = (...pairs: string[]) => {
+    const out: { label: string; value: string }[] = []
+    for (let i = 0; i < pairs.length; i += 2)
+      if (pairs[i + 1]) out.push({ label: pairs[i], value: pairs[i + 1] })
+    return out
+  }
+  const reading = (key: string, items: unknown[]) => ({
+    key,
+    total: items.length,
+    items,
+    state: "read",
+  })
+  const TONES: Record<string, [string, string]> = {
+    running: ["ok", "answers"],
+    stopped: ["idle", "stopped"],
+    paused: ["warning", "paused"],
+    unreachable: ["danger", "not answering"],
+    broken: ["danger", "broken"],
+  }
+  const databases = connections.map((entry) => {
+    const [tone, state] = TONES[String(entry.state)] ?? ["unknown", String(entry.state)]
+    const product = String(entry.flavor || entry.driver)
+    const where =
+      (entry as { container?: string }).container ??
+      (entry.port ? `${entry.host}:${entry.port}` : entry.database)
+    return item(`db:${entry.id}`, entry.name, tone, state, `/databases/${entry.id}`, {
+      product,
+      detail: entry.database,
+      facts: facts(
+        "Engine",
+        `${product} ${String((entry as { versionNumber?: string }).versionNumber ?? "")}`.trim(),
+        "Database",
+        entry.database,
+        "Runs in",
+        where,
+        "Answered in",
+        entry.ok ? "3 ms" : "",
+      ),
+    })
+  })
+  const container = (id: string, name: string, product: string, image: string) =>
+    item(`container:${id}`, name, "ok", "running", `/docker/containers/${id}`, {
+      product,
+      detail: image,
+      facts: facts("Image", image, "Up for", "3 days"),
+    })
+  const ids = new Set(connections.map((entry) => entry.id))
+  const links = [
+    { from: "container:c-shop", to: "db:1", via: "serves" },
+    { from: "container:c-blog", to: "db:2", via: "serves" },
+    { from: "container:c-cache", to: "db:4", via: "serves" },
+    { from: "container:c-shop", to: "volume:shop-pg-data", via: "mount" },
+    { from: "volume:shop-pg-data", to: "backup:2", via: "backup" },
+    { from: "db:1", to: "backup:1", via: "backup" },
+    { from: "project:7", to: "db:1", via: "binding" },
+    { from: "project:7", to: "db:4", via: "env" },
+  ].filter((link) => {
+    const db = [link.from, link.to].find((end) => end.startsWith("db:"))
+    return !db || ids.has(Number(db.slice(3)))
+  })
+  return {
+    host: { hostname: "box" },
+    checkedAt: new Date().toISOString(),
+    kinds: [
+      reading("databases", databases),
+      reading("projects", [
+        item("project:7", "storefront", "ok", "ready", "/deploy/7", {
+          product: "nextjs",
+          projectId: 7,
+          detail: "shop.example.com",
+          facts: facts("Address", "shop.example.com", "Environment", "production"),
+        }),
+      ]),
+      reading("containers", [
+        container("c-shop", "shop-db", "postgres", "postgres:16-alpine"),
+        container("c-blog", "blog-db-1", "mariadb", "mariadb:11.8"),
+        container("c-cache", "cache", "redis", "redis:7.4-alpine"),
+        container("c-worker", "worker", "python", "shop/worker:latest"),
+      ]),
+      reading("volumes", [
+        item("volume:shop-pg-data", "shop-pg-data", "ok", "in use", "/docker/volumes", {
+          detail: "412 MB",
+        }),
+      ]),
+      reading("backups", [
+        item("backup:1", "shop nightly", "ok", "succeeded", "/backups/1", {
+          detail: "every day at 03:00",
+          facts: facts("Destination", "s3://backups/shop"),
+        }),
+        item("backup:2", "volumes weekly", "ok", "succeeded", "/backups/2", {
+          detail: "every Sunday",
+        }),
+      ]),
+      reading("services", []),
+    ],
+    links,
+  }
+}
+
 const versions = (...list: [string, string][]) =>
   list.map(([version, image]) => ({ version, image }))
 
@@ -592,6 +708,8 @@ export type FleetMock = DatabaseMock & {
   /** The newest dump of a connection by id, as hours ago; `null` for none. Every one has a recent dump otherwise. */
   dumps?: Record<number, number | null>
   topology?: typeof TOPOLOGY
+  /** The databases map's arrangement as the account last kept it (`GET /map/layout`). */
+  layout?: unknown
   /**
    * The two lists the fleet itself carries of servers found running and not
    * connected: containers that state no usable password, and servers
@@ -632,6 +750,7 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
   const added: MockConnection[] = []
   const forgotten = new Set<number>()
   let nextId = 20
+  let layout: unknown = options.layout ?? null
 
   const list = () =>
     (options.empty ? [] : CONNECTIONS)
@@ -704,6 +823,19 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
         }
       case "GET /databases/topology":
         return { body: options.topology ?? TOPOLOGY }
+      case "GET /map/":
+        return {
+          body: serverMapOf(
+            list().map((conn) =>
+              fleetEntry(conn, { lastBackup: dumpOf(conn.id), ...options.fleet?.[conn.id] }),
+            ),
+          ),
+        }
+      case "GET /map/layout":
+        return { body: { layout } }
+      case "PUT /map/layout":
+        layout = body.layout
+        return { body: { layout, updatedAt: new Date().toISOString() } }
       case "GET /databases/inventory":
       case "POST /databases/inventory/scan":
         return { body: inventory }
@@ -842,7 +974,7 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
     } catch {
       // Not a JSON body: nothing these pages send.
     }
-    if (path.startsWith("/databases")) asked.push(call)
+    if (path.startsWith("/databases") || path.startsWith("/map")) asked.push(call)
     if (method !== "GET") sent.push({ call, body })
     url.searchParams.set("__method", method)
     const answer = (await handlers.get(call)?.({ body, url })) ?? (await builtin({ body, url }))
@@ -851,7 +983,7 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
   })
 
   return {
-    /** Every request under `/databases`, in order, with its method. */
+    /** Every request under `/databases` and `/map`, in order, with its method. */
     asked,
     /** Every mutation the page sent, in order, with its JSON body. */
     sent,
@@ -860,5 +992,7 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
     /** Answer one route (`"POST /databases/1/power"`) another way. Returning nothing leaves it as it was. */
     answer: (call: string, handler: Handler) => handlers.set(call, handler),
     inventory,
+    /** The arrangement the page last saved. */
+    layout: () => layout,
   }
 }

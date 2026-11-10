@@ -401,24 +401,36 @@ export const RuntimeNode = memo(function RuntimeNode({ data }: FaceProps) {
   )
 })
 
-/** A systemd service or a PM2 app: a process on the host, drawn as a terminal's window. */
+/** What a process box's bar and eyebrow say, by its kind. */
+const PROCESS_WORDS: Record<string, { bar: string; eyebrow: string }> = {
+  pm2: { bar: "pm2", eyebrow: "PM2 app" },
+  services: { bar: "systemd", eyebrow: "Service" },
+  host: { bar: "sessions", eyebrow: "Processes here" },
+  remote: { bar: "sessions", eyebrow: "Another machine" },
+}
+
+/**
+ * A systemd service or a PM2 app: a process on the host, drawn as a terminal's
+ * window. On the databases map, this server's own processes and another
+ * machine holding sessions open are drawn the same way.
+ */
 export const ProcessNode = memo(function ProcessNode({ data }: FaceProps) {
   const { node, state } = data
   const { item } = node
-  const pm2 = node.kind === "pm2"
+  const words = PROCESS_WORDS[node.kind] ?? PROCESS_WORDS.services
   return (
     <div className={cn(shell(state, item.tone), "flex flex-col rounded-xl")}>
       <Ports data={data} />
       <SharedMark node={node} />
       <span className="flex h-6 shrink-0 items-center gap-1.5 border-b border-hairline bg-background/60 px-3 font-mono text-micro text-muted-foreground">
         <Terminal className="size-3" />
-        {pm2 ? "pm2" : "systemd"}
+        {words.bar}
         {item.detail && <span className="truncate">· {item.detail}</span>}
       </span>
       <div className="flex min-h-0 flex-1 items-center gap-3 px-3">
         <ItemMark item={item} kind={node.kind} />
         <div className="min-w-0 flex-1">
-          <Eyebrow>{pm2 ? "PM2 app" : "Service"}</Eyebrow>
+          <Eyebrow>{words.eyebrow}</Eyebrow>
           <Name className="text-body">{item.name}</Name>
           <State item={item} />
         </div>

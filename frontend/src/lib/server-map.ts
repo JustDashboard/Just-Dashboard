@@ -31,6 +31,9 @@ export const KINDS: readonly KindDef[] = [
   { key: "pm2", label: "PM2 app", href: "/processes/pm2" },
   { key: "tunnels", label: "Private network", href: "/network/vpn" },
   { key: "logs", label: "Logs", href: "/logs" },
+  // Drawn only on the databases map, from the databases topology's sessions.
+  { key: "host", label: "Processes here", href: "/processes" },
+  { key: "remote", label: "Another machine", href: "/network/connections" },
 ]
 
 const KIND_BY_KEY = new Map(KINDS.map((kind) => [kind.key, kind]))
@@ -132,4 +135,28 @@ export function decodeDocument(raw: unknown): MapDocument {
 
 export function isArranged(doc: MapDocument) {
   return Object.keys(doc.positions).length > 0 || Object.keys(doc.frames).length > 0
+}
+
+/**
+ * Every canvas's arrangement is one document per account (`/map/layout`): the
+ * server map's at its top, as it always was, and each other board's under
+ * `boards` by name — the databases map's under `boards.databases` — so that
+ * arranging one never moves anything on another, and no table or route was
+ * added for a second picture of the same server.
+ */
+export function boardLayout(raw: unknown, board?: string): unknown {
+  if (!board) return raw
+  return isRecord(raw) && isRecord(raw.boards) ? raw.boards[board] : undefined
+}
+
+/** The whole document with one board's arrangement put in it, and every other kept. */
+export function composeLayout(
+  raw: unknown,
+  board: string | undefined,
+  doc: MapDocument,
+): Record<string, unknown> {
+  const base = isRecord(raw) ? raw : {}
+  const boards = isRecord(base.boards) ? base.boards : undefined
+  if (!board) return boards ? { ...doc, boards } : { ...doc }
+  return { ...base, boards: { ...boards, [board]: doc } }
 }

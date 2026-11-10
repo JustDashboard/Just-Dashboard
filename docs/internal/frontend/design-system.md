@@ -2882,20 +2882,16 @@ The passes, in order. Each one is a diff you can review on its own.
    it, a database never backed up was drawn at a place it did not have, and the track's hairline
    under each row's own rule read as a double line. Each database keeps one hue (`fleetHues`, a
    lane hue without slate dealt in the order the connections were saved, so five databases are
-   five hues and a new one moves nobody's) on its span, its mark's rule in the strip and its table row; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
+   five hues and a new one moves nobody's) on its span and its mark's rule in the strip; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
    the operator's request), and its Stored figure carries a short bar in that hue
-   against the largest database, as the table's Size cell does. The picture of what the databases
-   feed moved above *Found on this server*, so the page's moving thing is not under a list of rows.
-   In 0.7.5, at the operator's request, it and the map are drawn the way Configuration draws the path
-   a request takes (`config/request-path.tsx`): every mark at the wiring vocabulary's full size (the
-   control center's smaller `compact` version went), the two lanes centred on each other with a wide
-   empty lane between them, no lane headings — each node's eyebrow says what it is — and whether a
-   database answers or a reader runs as the dot in its mark's corner, as on Configuration's services.
-   The lanes are ordered for the wires (`wiredOrder`):
-   databases that feed something first, each reader across from the mean of the databases that feed
-   it. The control center's picture is of what is wired, and the databases nothing is seen reading
-   are a line of their engine marks and names under it, each a link to the database, where a
-   sentence listed their names. *Found on this server* lists its servers in the order they can be
+   against the largest database. Until 0.8.6 the cards could be laid across as a table and the page
+   carried a picture of what the databases feed — two lanes of marks drawn the way Configuration
+   draws the path a request takes, with a line of the databases nothing was seen reading under it —
+   and the map was the same picture with a list of readers beside it. In 0.8.6, at the operator's
+   request, the table and the control center's picture went (the cards are the one way the fleet is
+   drawn, and what feeds what is reached from the identity line's "read by" figure), and the map
+   became the server map's canvas with one diagram for each database
+   ([server map](../server-map.md#the-databases-map)). *Found on this server* lists its servers in the order they can be
    connected — one press, a password, a start, nothing this page can do — and a file row's second
    line is the folder it is in, cut from its start, where it repeated the file's whole path.
    In 0.8.2, at the operator's request, it lists only what there is to take: servers, and the files
@@ -3134,8 +3130,8 @@ pages and create command with the list filters; an empty fleet has its create co
 state.
 The Databases section omits the top metric-card sections on every page. The control center starts
 with the server's databases as an identity line — its commands at the line's end beside the verdict —
-then a band of storage, sessions and backups, then the saved databases with search, engine chips and
-layout controls. The attention findings it opened on were removed in 0.7.1; each fix they carried is a
+then a band of storage, sessions and backups, then the saved databases as cards with search, engine
+chips and how they are shelved. The attention findings it opened on were removed in 0.7.1; each fix they carried is a
 verb on the database's card. The former metric-card `?show=` filters no longer narrow the inventory.
 Individual database cards retain the facts needed to compare connections. A database home starts with its
 identity line, then a picture of how it is used, its recorded activity, its server log, its rankings
@@ -3608,10 +3604,10 @@ the reader through it.
 | Host Overview, metrics, Docker, Security, Network, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
 | Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
-| Databases — the control center, the map, a database's home, Search, Compare, Generate, Performance, Advisor, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
+| Databases — the control center, a database's home, Search, Compare, Generate, Performance, Advisor, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
 | `/databases/[id]/import` — bring a database over from another server | **Flow** | A sequence with an outcome: which server it is on now, how it should come over, and — for a replication — when to cut over, ending in a database here. The spine is taken from the import the server keeps, so a reload, or the next day, finds it where it was. |
 | A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
-| The server map (`/map`) | Reading, as a workbench | The reader arrives to find out what each thing the server runs is made of and wired to. One frame held to the window (`<Page fill>`) around the rail of systems, a canvas and its inspector, the way a database's Diagram is. Each system is its own diagram in a hairlined frame on a ground a step up from the canvas's, and its boxes are the product's own vocabulary — a `ProductLogo` tile, the name, a `Status` dot and word, the eyebrow voice for the kind — given, at the operator's request in 0.8.2, a workflow editor's wiring and an outline per kind: the deployment is the large card, where traffic arrives is rounded on its left like a trigger, a database is a cylinder, a volume a disk, a web container wears a browser's bar, a proxy is cut to a gateway's point, and what hangs under a box (its checkout, its logs, a certificate) is a round sub-node on a dashed line from a labelled port. No shadow, glow or gradient comes with them: the outline is a border and a step of ground, a state is a `rule-*` edge and the dot, and the chosen box's lines are the brand's blue with the §2 pulse travelling them where both ends are up. *Open* in the inspector is the surface's one command face, as is the button a tap floats on a phone, where the canvas is alone and edge to edge, and *Deploy a project* on a server with nothing to draw. No toolbar or minimap: the inspector's toggle and full screen float on the canvas, beside the panel they work. |
+| The server map (`/map`), and the databases map (`/databases/map`) on the same canvas with one diagram for each database | Reading, as a workbench | The reader arrives to find out what each thing the server runs is made of and wired to. One frame held to the window (`<Page fill>`) around the rail of systems, a canvas and its inspector, the way a database's Diagram is. Each system is its own diagram in a hairlined frame on a ground a step up from the canvas's, and its boxes are the product's own vocabulary — a `ProductLogo` tile, the name, a `Status` dot and word, the eyebrow voice for the kind — given, at the operator's request in 0.8.2, a workflow editor's wiring and an outline per kind: the deployment is the large card, where traffic arrives is rounded on its left like a trigger, a database is a cylinder, a volume a disk, a web container wears a browser's bar, a proxy is cut to a gateway's point, and what hangs under a box (its checkout, its logs, a certificate) is a round sub-node on a dashed line from a labelled port. No shadow, glow or gradient comes with them: the outline is a border and a step of ground, a state is a `rule-*` edge and the dot, and the chosen box's lines are the brand's blue with the §2 pulse travelling them where both ends are up. *Open* in the inspector is the surface's one command face, as is the button a tap floats on a phone, where the canvas is alone and edge to edge, and *Deploy a project* on a server with nothing to draw. No toolbar or minimap: the inspector's toggle and full screen float on the canvas, beside the panel they work. |
 | `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's other flow page is Import. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with a picker on it — the generators on a database's Generate page — gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. Each of its four screens is the run page's rail and inspector before the run: the plan read down a rail beside the one focused surface holding the step's fields. |

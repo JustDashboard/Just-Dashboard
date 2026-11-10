@@ -8,6 +8,7 @@ import {
   type Edge,
   type EdgeProps,
 } from "@xyflow/react"
+import type { MapTone } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 export type WireData = {
@@ -18,6 +19,12 @@ export type WireData = {
   dimmed: boolean
   /** Both ends are up, so the line carries: a pulse travels it while it is lit. */
   carries: boolean
+  /** Sessions are open on it now: a pulse travels it whether it is lit or not. */
+  live?: boolean
+  /** Known only as a way it could be reached — a stack or a network shared — and drawn dashed. */
+  maybe?: boolean
+  /** A link that broke or went stale, in its colour while it is not lit. */
+  tone?: MapTone
 }
 
 /**
@@ -27,6 +34,11 @@ export type WireData = {
  * brand's blue with how the server knows it written on it, and where both
  * ends are up a pulse travels it — the wiring pictures' sign that a line
  * carries (design system §2). What hangs under a box hangs by a dashed line.
+ *
+ * The databases map knows three things more of a line, and draws them the
+ * way its picture always did: a line with sessions open on it pulses lit or
+ * not, one known only as a stack or a network shared is dashed, and one that
+ * broke or went stale is in the danger or the warning colour.
  */
 export const Wire = memo(function Wire({
   id,
@@ -49,7 +61,14 @@ export const Wire = memo(function Wire({
     curvature: sub ? 0.2 : 0.32,
   })
   const lit = data?.lit ?? false
-  const label = data ? (VIA_LABEL[data.via] ?? data.via) : ""
+  const label = data ? wireLabel(data.via, data.tone) : ""
+  const quiet = sub
+    ? "var(--color-muted-foreground)"
+    : data?.tone === "danger"
+      ? "var(--color-destructive)"
+      : data?.tone === "warning"
+        ? "var(--color-warning)"
+        : "var(--color-border-strong)"
   return (
     <>
       <BaseEdge
@@ -57,18 +76,18 @@ export const Wire = memo(function Wire({
         path={path}
         className={cn("transition-[stroke,opacity] duration-150", data?.dimmed && "opacity-25")}
         style={{
-          stroke: lit
-            ? "var(--color-brand)"
-            : sub
-              ? "var(--color-muted-foreground)"
-              : "var(--color-border-strong)",
+          stroke: lit ? "var(--color-brand)" : quiet,
           strokeWidth: lit ? 2 : sub ? 1.25 : 1.75,
-          strokeDasharray: sub ? "4 4" : undefined,
+          strokeDasharray: sub ? "4 4" : data?.maybe ? "3 6" : undefined,
           strokeOpacity: sub && !lit ? 0.6 : 1,
         }}
       />
-      {lit && data?.carries && !sub && (
-        <circle r={3} fill="var(--color-signal)" className="map-pulse">
+      {((lit && data?.carries) || data?.live) && !sub && (
+        <circle
+          r={3}
+          fill="var(--color-signal)"
+          className={cn("map-pulse", data?.dimmed && "opacity-25")}
+        >
           <animateMotion dur="1.8s" repeatCount="indefinite" path={path} />
         </circle>
       )}
@@ -87,7 +106,14 @@ export const Wire = memo(function Wire({
                   ? `Also: ${data.also.map((v) => VIA_LABEL[v] ?? v).join(", ")}`
                   : undefined
               }
-              className="block rounded-sm border border-hairline bg-popover px-1.5 py-0.5 text-micro whitespace-nowrap text-muted-foreground"
+              className={cn(
+                "block rounded-sm border border-hairline bg-popover px-1.5 py-0.5 text-micro whitespace-nowrap",
+                data?.tone === "danger"
+                  ? "text-destructive"
+                  : data?.tone === "warning"
+                    ? "text-warning"
+                    : "text-muted-foreground",
+              )}
             >
               {label}
             </span>
@@ -99,6 +125,13 @@ export const Wire = memo(function Wire({
 })
 
 export const edgeTypes = { wire: Wire }
+
+/** A line's words: how it is known, or that it broke or went stale. */
+export function wireLabel(via: string, tone?: MapTone) {
+  if (tone === "danger") return "link broken"
+  if (tone === "warning") return "link stale"
+  return VIA_LABEL[via] ?? via
+}
 
 /** How a link is known, in the words the inspector and the line both use. */
 export const VIA_LABEL: Record<string, string> = {
@@ -117,6 +150,8 @@ export const VIA_LABEL: Record<string, string> = {
   source: "built from",
   workdir: "runs from",
   pooler: "pools for",
+  stack: "same stack",
+  network: "shares a network",
   self: "runs as",
   tailnet: "reached over",
   logs: "logs",
