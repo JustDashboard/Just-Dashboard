@@ -207,6 +207,28 @@ func TestEachEnableIsOneStatement(t *testing.T) {
 	}
 }
 
+// Turn on and the statement beside it are one change: every parameter the
+// button sets is one the statement names, with the value the statement gives
+// it, and the statement names nothing the button leaves out.
+func TestEnableChangesAreTheStatement(t *testing.T) {
+	for sql, changes := range map[string][]QueryLogChange{
+		postgresEnableSlow: postgresSlowChanges,
+		mysqlEnableSlowLog: mysqlSlowLogChanges,
+		mysqlEnableTable:   mysqlTableChanges,
+	} {
+		assignments := strings.Count(sql, "=")
+		if len(changes) != assignments {
+			t.Errorf("%q sets %d parameters, Turn on %d", sql, assignments, len(changes))
+		}
+		for _, c := range changes {
+			bare, quoted := c.Name+" = "+c.Value, c.Name+" = '"+c.Value+"'"
+			if !strings.Contains(sql, bare) && !strings.Contains(sql, quoted) {
+				t.Errorf("%q does not set %s", sql, bare)
+			}
+		}
+	}
+}
+
 // Against a real Postgres only when one is named: the setting is read, never
 // changed, and a server nobody pointed this at is not dialled.
 func TestLivePostgresSlowSetting(t *testing.T) {
@@ -219,7 +241,8 @@ func TestLivePostgresSlowSetting(t *testing.T) {
 		t.Fatal(err)
 	}
 	if enable != nil {
-		if current != "-1" || enable.Setting != "log_min_duration_statement" || enable.SQL != postgresEnableSlow {
+		if current != "-1" || enable.Setting != "log_min_duration_statement" || enable.SQL != postgresEnableSlow ||
+			(len(enable.Changes) == 1) == (enable.Blocked != "") {
 			t.Errorf("off = %q %+v", current, enable)
 		}
 	} else if current == "" || current == "-1" {
