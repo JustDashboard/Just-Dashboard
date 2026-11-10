@@ -270,6 +270,28 @@ test("opening a section replaces the rail with that section's pages", async ({ p
   await expectNoStrip(page)
 })
 
+// Network's nineteen pages are read under three headings rather than as one
+// flat list, with the overview above them, and every row of the panel is one
+// height at the rail's left edge whichever heading it is under.
+test("the Network panel groups its pages under headings", async ({ page }) => {
+  await mockShell(page)
+  await page.goto("/network/traffic")
+  const nav = rail(page)
+  await expect(nav.getByText("Setup", { exact: true })).toBeVisible()
+  await expect(nav.getByText("Activity", { exact: true })).toBeVisible()
+  await expect(nav.getByText("Diagnostics", { exact: true })).toBeVisible()
+  const links = nav.getByRole("link")
+  await expect(links).toHaveCount(19)
+  await expect(links.first()).toHaveText("Overview")
+  const order = await links.allTextContents()
+  expect(order.indexOf("Interfaces")).toBeLessThan(order.indexOf("Traffic"))
+  expect(order.indexOf("Drift")).toBeLessThan(order.indexOf("Tools"))
+  expect(order.at(-1)).toBe("Saved runs")
+  const boxes = await Promise.all((await links.all()).map((link) => link.boundingBox()))
+  expect(new Set(boxes.map((box) => box!.height)).size).toBe(1)
+  expect(new Set(boxes.map((box) => Math.round(box!.x))).size).toBe(1)
+})
+
 test("a deep link opens with the rail already inside the section", async ({ page }) => {
   await mockShell(page)
   await page.goto("/network/firewall")

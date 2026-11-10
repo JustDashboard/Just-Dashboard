@@ -5,8 +5,10 @@ import {
   Box,
   ChartActivity,
   Clock,
+  ClockRewind,
   CloudUpload,
   Cpu,
+  Crosshair,
   Database,
   DesktopDevice,
   FileText,
@@ -16,6 +18,7 @@ import {
   Globe,
   GridMasonry,
   GridSquare,
+  Hash,
   Home,
   Inspect,
   Key,
@@ -26,6 +29,7 @@ import {
   LineChart,
   Linked,
   ListOrdered,
+  Location,
   LockClosed,
   Logs,
   Monitoring,
@@ -85,6 +89,28 @@ export type NavChild = {
    * opens it directly.
    */
   hubLink?: boolean
+  /**
+   * The heading this page sits under in its section's panel, for a section
+   * with more pages than a reader scans as one list. Pages that share one
+   * stand together; a page with none opens the panel above every heading.
+   */
+  group?: string
+}
+
+/**
+ * A section's pages as the rail draws them: the ungrouped ones first under no
+ * heading, then each heading's in the order the section lists them.
+ */
+export function groupedChildren<T extends { group?: string }>(
+  children: T[],
+): { label?: string; items: T[] }[] {
+  const groups: { label?: string; items: T[] }[] = []
+  for (const child of children) {
+    const last = groups.at(-1)
+    if (last && last.label === child.group) last.items.push(child)
+    else groups.push({ label: child.group, items: [child] })
+  }
+  return groups
 }
 
 export type NavItem = {
@@ -267,55 +293,71 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         title: "Network",
         href: "/network",
         icon: Topology,
+        // Nineteen pages in one flat list was past what a reader scans, and
+        // four glyphs each stood for two of them. They fall into what the
+        // machine is set up as, what is happening on it and the tools that
+        // look into it, under headings as a project's rail has; within a
+        // heading the order is the one a packet meets them in.
         children: [
           { title: "Overview", href: "/network", icon: GridSquare },
-          { title: "Drift", href: "/network/drift", icon: Monitoring },
+          { title: "Interfaces", href: "/network/interfaces", icon: NetworkDevice, group: "Setup" },
+          { title: "Routing", href: "/network/routing", icon: Route, group: "Setup" },
+          { title: "Egress groups", href: "/network/egress", icon: Lifebuoy, group: "Setup" },
+          { title: "Firewall", href: "/network/firewall", icon: FirewallCheck, group: "Setup" },
+          { title: "Gateway", href: "/network/gateway", icon: ArrowLeftRight, group: "Setup" },
+          { title: "Protection", href: "/network/protection", icon: ShieldCheck, group: "Setup" },
+          { title: "VPN", href: "/network/vpn", icon: LockClosed, group: "Setup" },
+          { title: "DNS", href: "/network/dns", icon: Globe, group: "Setup" },
           {
             title: "Address planning",
             href: "/network/ipam",
-            icon: NetworkDevice,
+            icon: Hash,
             capability: "system.admin",
+            group: "Setup",
           },
-          {
-            title: "External checks",
-            href: "/network/external",
-            icon: Globe,
-            capability: "system.admin",
-          },
-          { title: "Interfaces", href: "/network/interfaces", icon: NetworkDevice },
-          { title: "Routing", href: "/network/routing", icon: Route },
-          { title: "Egress groups", href: "/network/egress", icon: Lifebuoy },
-          { title: "Firewall", href: "/network/firewall", icon: FirewallCheck },
-          { title: "Gateway", href: "/network/gateway", icon: ArrowLeftRight },
-          { title: "Protection", href: "/network/protection", icon: ShieldCheck },
-          { title: "VPN", href: "/network/vpn", icon: LockClosed },
-          { title: "DNS", href: "/network/dns", icon: Globe },
-          { title: "Traffic", href: "/network/traffic", icon: ChartActivity },
+          { title: "Traffic", href: "/network/traffic", icon: ChartActivity, group: "Activity" },
           {
             title: "Socket history",
             href: "/network/flows",
-            icon: ChartActivity,
+            icon: ClockRewind,
             capability: "system.admin",
+            group: "Activity",
           },
-          { title: "Connections", href: "/network/connections", icon: Connection },
+          {
+            title: "Connections",
+            href: "/network/connections",
+            icon: Connection,
+            group: "Activity",
+          },
+          { title: "Drift", href: "/network/drift", icon: Monitoring, group: "Activity" },
+          { title: "Tools", href: "/network/tools", icon: Wrench, group: "Diagnostics" },
           {
             title: "Connection path",
             href: "/network/investigate",
             icon: Inspect,
             capability: "system.admin",
+            group: "Diagnostics",
           },
-          { title: "Tools", href: "/network/tools", icon: Wrench },
           {
             title: "Packet captures",
             href: "/network/captures",
-            icon: Inspect,
+            icon: Crosshair,
             capability: "system.admin",
+            group: "Diagnostics",
+          },
+          {
+            title: "External checks",
+            href: "/network/external",
+            icon: Location,
+            capability: "system.admin",
+            group: "Diagnostics",
           },
           {
             title: "Saved runs",
             href: "/network/runs",
             icon: Notes,
             capability: "system.admin",
+            group: "Diagnostics",
           },
         ],
       },

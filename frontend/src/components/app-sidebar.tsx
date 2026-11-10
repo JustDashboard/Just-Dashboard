@@ -25,6 +25,7 @@ import {
   PERSONAL_NAV,
   PROJECT_NAV,
   PROJECT_SETTINGS_NAV,
+  groupedChildren,
   navMatches,
   navOwns,
   sectionEntry,
@@ -134,7 +135,12 @@ function fromSection(section: NavEntry): Panel {
   return {
     key: `section:${section.href ?? section.title}`,
     title: section.title,
-    groups: [{ items: rowsOf(section.children ?? []) }],
+    // A section whose pages name a heading is drawn under them; one that
+    // names none is the single unlabelled list it always was.
+    groups: groupedChildren(section.children ?? []).map((group) => ({
+      label: group.label,
+      items: rowsOf(group.items),
+    })),
   }
 }
 

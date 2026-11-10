@@ -94,6 +94,16 @@ shows** — "Browse", "Live", "Version", otherwise "Overview" — so every desti
 and "where am I" points at exactly one row. The palette skips the child whose href is the section's own,
 which is how one array serves both.
 
+A section with more pages than a reader scans as one list puts them under **headings**, as a project's
+rail does with *Settings*: a `NavChild` names its `group`, `groupedChildren` (`nav.ts`) turns the list
+into the panel's groups, and a section that names none is the single list it always was. Network is the
+one that does, since 0.8.6: Overview above every heading, then *Setup* (Interfaces, Routing, Egress
+groups, Firewall, Gateway, Protection, VPN, DNS, Address planning), *Activity* (Traffic, Socket history,
+Connections, Drift) and *Diagnostics* (Tools, Connection path, Packet captures, External checks, Saved
+runs). It was nineteen siblings with four glyphs each used twice. No two pages of one section share a
+glyph, which `nav.test.js` holds for every section: the glyph is what a row is found by before it is
+read.
+
 A **group** (`NavGroup`) is a row with a chevron and no page: Monitoring holds Metrics, its Alerts
 (administrators only), Processes and Logs, and Server configuration holds Proxy & TLS, Packages, System users and Audit log. There is nothing
 that is "Monitoring" as such, so pressing the row opens its panel over the page you are on rather than
