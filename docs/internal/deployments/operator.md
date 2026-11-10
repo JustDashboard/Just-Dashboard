@@ -107,15 +107,43 @@ what the card says and how Allow is drawn. An `api_request` is read by its metho
 database is asked about without an Allow for each query in "changes".
 
 A `run_command` line is read by `assistant.ClassifyCommand`, conservatively, so that a misreading costs an Allow
-rather than a write nobody saw: it is a `read` only when it is plain — nothing written by a redirection except to
-`/dev/null` or another stream, no `$( )` or backticks, no subshell, group, here-document or background job — and
-every command in it is a program that only reads (`readPrograms`), or one that both reads and writes used with a
-subcommand or flags that only read (`systemctl status`, `docker ps`, `git log`, `nginx -t`, `crontab -l`,
-`iptables -L`), with the flags that make a reader write (`find -exec`/`-delete`, `sort -o`, `date -s`,
-`dmesg -c`, `journalctl --vacuum-*`) read as a change. It is `destructive` when any part removes, stops, kills,
-wipes or reboots (`rm`, `dd`, `mkfs.*`, `kill`, `reboot`, `systemctl stop`, `docker rm`, `apt purge`,
-`git reset`, `iptables -F`, `crontab -r`), and a `change` otherwise — `sed`, `curl`, an interpreter, an unknown
-program, anything not plain.
+rather than a write nobody saw. It keeps that by listing what a read may be made of and asking about everything
+else, never by listing what to refuse. A line is a `read` only when all of this holds:
+
+- **It is plain** (`parseLine`): nothing written by a redirection except to `/dev/null` or to another stream
+  (`2>&1`, `>&2`, `>&-`, each a whole word: `>&file` writes a file in bash and zsh, and `/dev/null.txt` is one),
+  no `$( )`, backticks, `${ }`, `$'…'`, subshell, group, here-document, background job or comment, and no `!`
+  that a terminal window's history would expand. Where bash and zsh, run with `-c` or typed at a prompt, read a
+  line differently, the reading that asks is taken.
+- **Every command in it is a listed reader** (`readers`, `assistant/command_readers.go`), named bare or under a
+  system directory (`/usr/bin/ls`, never `./ls` or `/srv/app/bin/cat`). A few can only read whatever they are
+  given (`ls`, `cat`, `grep`, `ps`, `jq` and the like) and their arguments are not looked at. Every other is a
+  reader only with the flags listed for it and the subcommands that only read: `find` with its tests and prints
+  but not `-exec`, `-delete` or `-fprint`; `sort` without `-o` or `--compress-program`; `git log`, `status`,
+  `diff`, `show`, `branch` and `tag` listing, without `-c`, `-C`, `--output` or a remote; `docker ps`, `logs`,
+  `inspect` and `compose ps` without `-H`, `--config` or `-f`; `openssl x509` without `-out` or `-engine`;
+  `systemctl status`, `journalctl -u`, `crontab -l`, `iptables -L`, `nft list`, `nginx -t`. **A flag the table has
+  not heard of makes the line a change**, so a new flag, an abbreviated one or a letter in a run of short ones
+  costs an Allow rather than slipping through; a value is taken from the word after its flag only where the
+  program certainly takes it from there, and is read as an operand otherwise.
+- **Its arguments are what was typed**, wherever they decide what the program does: a variable (`$X`, `"$X"`)
+  or a pattern the shell matches file names against can turn out to be a flag or several words, so a reader
+  other than the first kind is not read past one, and neither is a wrapper.
+- **It runs under nothing but** `sudo`, `nice`, `ionice`, `stdbuf`, `timeout`, `time`, `command` or `builtin`
+  with the flags listed for them (`readWrappers`), and a variable set in front of it only when it is one of the
+  locale's, the zone's, the screen's width or a pager set to `cat` (`harmlessVariables`): any other is the
+  program's to obey (`GIT_SSH_COMMAND`, `LD_PRELOAD`, `PATH`), and a line that only sets one sets it for what
+  follows.
+
+It is `destructive` when any part removes, stops, kills, wipes or reboots (`rm`, `dd`, `mkfs.*`, `kill`, `reboot`,
+`systemctl stop`, `docker rm`, `apt purge`, `git reset`, `iptables -F`, `crontab -r`, `loginctl terminate-session`,
+`ss -K`), and a `change` otherwise — `sed`, `curl`, an interpreter, `cd`, an unknown program, anything not plain.
+`TestNothingThatWritesOrRunsIsReadAsARead` holds the lines that were once read as reads; a new reader or flag
+goes into the table with the lines that must still ask.
+
+It reads what a line says, not where it runs or what it opens. In the terminal window a read runs in the
+directory an earlier `cd` left, which the person allowed, and a program that takes configuration from its
+directory (git, npm, Docker Compose) takes it there; and reading a file is a read whatever the file is.
 
 ## The routes
 
@@ -273,7 +301,9 @@ windows are not held, runs on its own as before.
   print it, and the field says so. `terminal_send` refuses a masked value outright, so the model cannot send a
   `[REDACTED]` back as if it were the secret.
 - **Held like the shell.** A command line is read as `run_command`'s is (`ClassifyCommand`); whatever is typed
-  into a running program is a change, since an answer to a question is a decision; and a read is a read. The
+  into a running program is a change, since an answer to a question is a decision — a `terminal_run` line
+  included when a program holds the window in front of its shell (`terminalBusy`), because that program reads
+  it, not the shell; and a read is a read. The
   press's audit entry lists each line typed (`terminal: …`) and each answer (`typed: …`, keys by name), masked.
 - **What it changed is said as a change.** A shell line read as a change that succeeded — `run_command` with exit
   0, a terminal call once its window is back at the prompt — carries a `change` like a route's (`commandChange`),

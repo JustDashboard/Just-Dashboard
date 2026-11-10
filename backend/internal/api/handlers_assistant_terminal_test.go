@@ -227,6 +227,30 @@ func TestTheTerminalIsHeldLikeTheShell(t *testing.T) {
 	}
 }
 
+// A line typed while a program holds the window goes to that program, not to the
+// shell: w is a read at a prompt and fdisk's write inside fdisk. So it waits for
+// the person, as anything typed into a running program does.
+func TestALineTypedIntoARunningProgramWaits(t *testing.T) {
+	f := databaseAssistantAs(t, auth.RoleAdmin)
+	withHeldTerminal(t, f)
+	f.provider.queue(
+		claudeCalls("Reading.", terminalCall(assistant.ToolTerminalRun, map[string]any{"command": "cat", "wait": 2, "reason": "x"})),
+		claudeCalls("Again.", terminalCall(assistant.ToolTerminalRun, map[string]any{"command": "w", "wait": 2, "reason": "x"})),
+	)
+	events := lines(t, f.do(http.MethodPost, "/assistant/chat", `{"question":"x","mode":"changes"}`))
+	called := ofType(events, "called")
+	if len(called) != 1 || called[0]["terminal"].(map[string]any)["state"] != "running" {
+		t.Fatalf("cat was not left running: %v", called)
+	}
+	pending, _ := doneOf(t, events)["pending"].([]any)
+	if len(pending) != 1 {
+		t.Fatalf("a line typed into cat ran unasked: called = %v, pending = %v", called, pending)
+	}
+	if held := pending[0].(map[string]any); held["kind"] != "change" || held["tool"] != assistant.ToolTerminalRun {
+		t.Fatalf("held = %v", held)
+	}
+}
+
 // run_command types a line that changes packages into the chat's window rather
 // than running it on its own: on its own it is a child of the dashboard's
 // container, and an upgrade that restarts Docker restarts that container,

@@ -933,6 +933,10 @@ func (pr *agentPress) view(ctx context.Context, call assistant.ToolCall) agentCa
 		in := call.TerminalInput()
 		view.Reason, view.Input = in.Reason, call.Input
 		view.Kind = assistant.TerminalKind(call)
+		if call.Name == assistant.ToolTerminalRun && view.Kind == agentKindRead && pr.terminalBusy() {
+			// Typed now, it goes to what is running in the window.
+			view.Kind = agentKindChange
+		}
 		switch call.Name {
 		case assistant.ToolTerminalRun:
 			view.Label = "In the terminal: " + clipText(strings.Join(strings.Fields(in.Command), " "), 80)
