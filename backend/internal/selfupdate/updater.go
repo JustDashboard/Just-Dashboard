@@ -198,12 +198,22 @@ type landing struct {
 // must then name exactly the offered version. A branch that has moved on is
 // refused rather than installed: nobody was shown that release's notes, and
 // checking again offers it properly.
+//
+// Once this build carries a release key (SignaturesRequired), the tag from the
+// project's own repository must also be signed with it; see signing.go. A
+// fork's tags are not held to the project's key, which did not sign them.
 func updateTarget(ctx context.Context, dir string, want request, out io.Writer) (target string, tagged bool, err error) {
 	to := want.version
 	tag := "v" + Normalise(to)
-	target, tagged, asked := fetchReleaseTag(ctx, dir, tag, out)
+	fetched, tagged, asked := fetchReleaseTag(ctx, dir, tag, out)
+	target = fetched.commit
 	switch {
 	case tagged:
+		if want.tagOnly && SignaturesRequired() {
+			if err := verifyReleaseTag(ctx, dir, tag, fetched.object, releaseSigners, out); err != nil {
+				return "", false, err
+			}
+		}
 	case want.tagOnly && asked != nil:
 		return "", false, fmt.Errorf("could not confirm that %s has been released, because origin could not be asked for the tag %s (%v); "+
 			"nothing was changed. Only a tagged release is installed from this repository", to, tag, asked)
@@ -241,33 +251,51 @@ func updateTarget(ctx context.Context, dir string, want request, out io.Writer) 
 	return target, tagged, nil
 }
 
-// fetchReleaseTag fetches a tag from origin and reports the commit it names.
+// fetchedTag is a tag as origin has it.
+type fetchedTag struct {
+	// object is what the ref points at: a tag object for an annotated or
+	// signed tag, the commit itself for a lightweight one.
+	object string
+	// commit is the commit it names in the end.
+	commit string
+}
+
+// fetchReleaseTag fetches a tag from origin and reports what it names.
 //
 // found is false with a nil error when origin answered and has no such tag,
 // and false with an error when that could not be established. The difference
 // is the caller's to weigh: a fork falls back to its branch either way, and
 // the project's own repository installs nothing either way but says which.
-func fetchReleaseTag(ctx context.Context, dir, tag string, out io.Writer) (commit string, found bool, err error) {
+func fetchReleaseTag(ctx context.Context, dir, tag string, out io.Writer) (fetched fetchedTag, found bool, err error) {
 	var listed bytes.Buffer
 	if err := gitStream(ctx, dir, &listed, "ls-remote", "--tags", "origin", "refs/tags/"+tag); err != nil {
-		return "", false, fmt.Errorf("git ls-remote: %v", err)
+		return fetchedTag{}, false, fmt.Errorf("git ls-remote: %v", err)
 	}
 	// By whole lines, because ssh's own warnings arrive in the same stream.
 	for _, line := range strings.Split(listed.String(), "\n") {
 		found = found || strings.HasSuffix(line, "\trefs/tags/"+tag)
 	}
 	if !found {
-		return "", false, nil
+		return fetchedTag{}, false, nil
 	}
 	fmt.Fprintf(out, "\n$ git fetch --no-tags origin refs/tags/%s\n", tag)
 	if err := gitStream(ctx, dir, out, "fetch", "--no-tags", "origin", "refs/tags/"+tag); err != nil {
-		return "", false, fmt.Errorf("git fetch: %v", err)
+		return fetchedTag{}, false, fmt.Errorf("git fetch: %v", err)
 	}
-	resolved, err := gitOutput(ctx, dir, "rev-parse", "--verify", "FETCH_HEAD^{commit}")
+	// Both read now, by id: FETCH_HEAD is whatever the last fetch left, and
+	// the object a signature is checked on has to be the one that was fetched
+	// for this tag.
+	object, err := gitOutput(ctx, dir, "rev-parse", "--verify", "FETCH_HEAD")
 	if err != nil {
-		return "", false, fmt.Errorf("the tag does not name a commit: %v", err)
+		return fetchedTag{}, false, fmt.Errorf("the tag could not be read: %v", err)
 	}
-	return strings.TrimSpace(resolved), true, nil
+	fetched.object = strings.TrimSpace(object)
+	resolved, err := gitOutput(ctx, dir, "rev-parse", "--verify", fetched.object+"^{commit}")
+	if err != nil {
+		return fetchedTag{}, false, fmt.Errorf("the tag does not name a commit: %v", err)
+	}
+	fetched.commit = strings.TrimSpace(resolved)
+	return fetched, true, nil
 }
 
 // installedVersion is what the checkout's own changelog says it is on. HEAD can

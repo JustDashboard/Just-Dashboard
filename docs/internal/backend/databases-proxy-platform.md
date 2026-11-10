@@ -6013,6 +6013,55 @@ comes from the changelog, never from the branch name, so a merge whose version i
 publishes nothing.
 Nothing is tagged by hand; a manual run of the workflow on `main` retries a failed publish.
 
+### Signed releases
+
+A tag says a version was released, not by whom: whoever can push to the repository can push a tag, and an
+update builds and runs what it names as root. `internal/selfupdate/signing.go` can require the tag to be
+signed with a key the *running* release was built with, so a stolen token or a compromised workflow
+secret cannot ship code to installs by itself. **It ships switched off**: `allowed_signers` (embedded
+beside the changelog) names no key, `SignaturesRequired()` is false and nothing is verified. Making the
+key, guarding it and signing with it are the project owner's steps, and this is the order to do them in:
+
+1. Make a key that lives nowhere in the repository: `ssh-keygen -t ed25519 -C release@just-dashboard.com
+   -f jd-release`. Keep `jd-release` offline or in the one secret the release job reads; a second copy
+   in a safe is what makes losing it survivable.
+2. Have the release sign. `.github/workflows/release.yml` makes a lightweight tag today; it has to make a
+   signed one instead, with the key from a repository secret:
+   `git -c gpg.format=ssh -c user.signingkey=<path to the private key> tag -s v<version> -m "Just Dashboard <version>"`.
+   That is a change to CI, which is the operator's to ask for by name (`AGENTS.md`).
+3. Add the public half to `backend/internal/selfupdate/allowed_signers` as one line,
+   `release@just-dashboard.com namespaces="git" ssh-ed25519 AAAA…`, and release.
+   `TestTheShippedSignersFileIsWellFormed` holds the line to that form, because `ssh-keygen` stops at the
+   first line it cannot parse and a file it cannot parse verifies nothing.
+4. **Sign that release's own tag and every one after it.** Installs older than it check nothing and take
+   it either way. Installs *on* it refuse any later tag that is not signed, so one unsigned release after
+   the key ships leaves every install unable to update from the dashboard until a signed one follows.
+
+Do steps 2 and 3 in the same release, in that order of readiness: a key in the file before the workflow
+can sign is the outage in step 4.
+
+What is checked, once a key is there (`verifyReleaseTag`, from `updateTarget`, for the project's own
+repository only): the fetched ref is a tag object, not a lightweight tag; the tag object's own name is
+`v<ToVersion>`, since a signature covers the name and a real signed tag for an older release pushed again
+under a newer name would otherwise verify; and `git verify-tag` accepts it with every deciding setting
+given on the command line (`gpg.ssh.allowedSignersFile` set to the embedded file written to a temporary
+file, `gpg.ssh.program=ssh-keygen`, `gpg.minTrustLevel=fully`, and the OpenPGP and X.509 programs set to
+`false`), so nothing in the checkout's own `.git/config` can vouch for a tag. The verdict line goes into
+the transcript. A refusal changes nothing and says so. The image already carries what this needs: `git`
+and `openssh-client`'s `ssh-keygen`.
+
+A fork named with `JD_UPDATE_REPO` is not held to the project's key, which did not sign its tags; a fork
+that wants the same check replaces the file with its own key. The check that *offers* a version cannot
+see a signature (it reads one file over HTTPS), so an unsigned tag is still offered and then refused at
+install with the reason.
+
+To replace a key, add the new line in a release signed with the old key and remove the old line one
+release later; installs must pass through the release that carries both. If the key is lost with no
+successor shipped, installs cannot verify anything new and are updated by hand from the shell (a
+fast-forward of the checkout and `sudo ./install.sh`) to a release that ships the new key. The tests make their
+own key with `ssh-keygen` and sign real tags in a real repository (`signing_test.go`); there is no
+release key to test with until step 1 is done.
+
 A changelog entry is written for the person deciding whether to upgrade a root-equivalent panel on their
 own server. Each change has a `kind` (`added`, `changed`, `fixed`, `removed`, `security`, `deprecated` —
 closed set, enforced on the committed file) and reads as what they can now do; `detail` is for a non-obvious

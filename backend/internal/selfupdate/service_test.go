@@ -26,6 +26,13 @@ func serviceFor(t *testing.T, repo, url, current string) *Service {
 	})
 }
 
+// stubDocker stands in for the docker CLI, so starting an update here starts
+// nothing on this machine.
+func stubDocker(t *testing.T) func() []string {
+	t.Helper()
+	return selfupdatetest.Docker(t)
+}
+
 // What the page is told, which is all it has to go on: what is on offer,
 // whether that is a release, and what is on the branch and not released yet.
 func TestTheReportSaysWhetherWhatIsOfferedIsARelease(t *testing.T) {
@@ -56,7 +63,7 @@ func TestTheReportSaysWhetherWhatIsOfferedIsARelease(t *testing.T) {
 func TestAnUpdateFromTheProjectsOwnRepositoryIsRecordedAsTagOnly(t *testing.T) {
 	srv, _ := repository(t, threeReleases, "v0.6")
 	for repo, want := range map[string]bool{DefaultRepo: true, "someone/fork": false} {
-		calls := selfupdatetest.Docker(t)
+		calls := stubDocker(t)
 		service := serviceFor(t, repo, srv.URL, "0.5")
 		rep := service.Report(context.Background(), Forced)
 		run, err := service.Install(context.Background(), rep.Latest, "tester")

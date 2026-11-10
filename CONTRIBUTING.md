@@ -243,7 +243,10 @@ never into `docs/audits/`.
   `CHANGELOG.md` as its notes. The branch a release was cut on does not matter, and a merge whose
   version is already released publishes nothing. The tag is what installs wait for: a version on `main`
   with no `v<version>` tag is neither offered nor installed (`selfupdate.TagsOnly`), so a merge whose
-  Verify run fails ships to nobody until a later run is green. Never tag or publish a release by hand; a manual run of the
+  Verify run fails ships to nobody until a later run is green. Release tags can also be required to be
+  signed (`backend/internal/selfupdate/allowed_signers`, which names no key yet, so nothing is checked);
+  "Signed releases" in `docs/internal/backend/databases-proxy-platform.md` has the order to turn it on in.
+  Do not add a key to that file as part of other work. Never tag or publish a release by hand; a manual run of the
   workflow on `main` retries one that failed.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run. `TestLiveSiteControlsAreMeasured` instead writes its

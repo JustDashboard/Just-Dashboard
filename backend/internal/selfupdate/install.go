@@ -156,7 +156,10 @@ func (i *Installer) Start(ctx context.Context, loc *Location, req StartRequest) 
 	if f, err := i.store.OpenLog(); err == nil {
 		fmt.Fprintf(f, "Updating Just Dashboard %s → %s\n", run.FromVersion, run.ToVersion)
 		fmt.Fprintf(f, "checkout: %s (%s)\n", run.Dir, run.Ref)
-		if run.RequireTag {
+		switch {
+		case run.RequireTag && SignaturesRequired():
+			fmt.Fprintf(f, "release: origin's tag v%s, signed with a release key, or nothing\n", run.ToVersion)
+		case run.RequireTag:
 			fmt.Fprintf(f, "release: origin's tag v%s, or nothing\n", run.ToVersion)
 		}
 		fmt.Fprintln(f)
