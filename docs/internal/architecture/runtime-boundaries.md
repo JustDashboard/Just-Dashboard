@@ -83,6 +83,37 @@ themselves (docker-ce's maintainer script restarts Docker), so they run as trans
 systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
 [streaming and jobs](../backend/databases-proxy-platform.md#streaming-jobs-secrets-agent-mode).
 
+## The dashboard's own health
+
+`/healthz` is liveness and nothing else: a fixed `{"status":"ok"}` for as long as the process serves.
+It is what the image's `HEALTHCHECK` asks (`just-dashboard -healthcheck`), and through the container's
+health so do `docker compose up --wait` in the installer and the updater, and the updater's rollback. It
+must therefore not depend on the store: a liveness that turned red when SQLite cannot be written would
+restart-loop the stack on a full disk and roll an update back for a reason the previous version shares,
+at the moment the dashboard is the tool for finding what filled the disk.
+
+What liveness leaves out is `internal/storehealth`, started first in `Server.Start`. Every fifteen
+seconds it rewrites one `settings` row (`store_health_probe`), reads back if that fails, and measures
+the filesystem under `JD_DATA_DIR`. `GET /api/v1/dashboard/health` (every role, `handlers_self.go`)
+answers `{ok, store}` with the store's `code`: `disk_full` (SQLite or the kernel refused space, under
+4 MiB is free, or the reserve is spent), `store_unreadable` (not even `SELECT 1` answers), or
+`store_unwritable` (writes have failed for another reason for a full minute, so one busy answer during
+a migration is not a problem). The Overview draws a danger `Notice` from it
+(`components/overview/health-notice.tsx`, worded in `lib/dashboard-health.ts`), and the log says each
+change of state once.
+
+The monitor also keeps a **space reserve**: 32 MiB of random bytes at
+`JD_DATA_DIR/staging/disk-reserve`, written only while that leaves eight times its size free, and not at
+all under `JD_DEV`. When a write is refused for space, or free space falls under 4 MiB, the file is
+deleted, which hands SQLite room for the sign-in, the audit lines and the settings an operator needs
+while cleaning up; the status stays `disk_full` until there is room to write the reserve again. It is
+random rather than preallocated because a compressing filesystem would keep zeros in a few blocks, and
+it lives in `staging` because every backup of the data directory already excludes that folder. It is a
+margin, not a guarantee: whatever filled the disk can fill 32 MiB more. A request whose store write is
+still refused answers `507 disk_full` with a sentence saying so (`httpx.DiskFull`, applied in
+`WriteError` to any error that would otherwise be an unexplained `500 internal`), which is what the
+sign-in page shows.
+
 ## Reaching the host, and containing paths
 
 `internal/hostexec`:

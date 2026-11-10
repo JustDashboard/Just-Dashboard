@@ -47,6 +47,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/storehealth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
@@ -60,6 +61,11 @@ import (
 // Docker, systemd or PM2 still serves everything else, and the corresponding
 // routes report a precise "unavailable on this host" error instead.
 type moduleSet struct {
+	// storeHealth asks the dashboard's own store for a write every few
+	// seconds and holds the space reserve for a full disk; what it finds is
+	// read at GET /dashboard/health, never at /healthz (handlers_self.go).
+	storeHealth *storehealth.Monitor
+
 	sys          *sysinfo.Collector
 	metrics      *metrics.Recorder
 	docker       *dockerx.Client
@@ -232,6 +238,19 @@ type moduleSet struct {
 }
 
 func (s *Server) initModules() {
+	// No reserve in development: 32 MB of noise in a checkout's data
+	// directory guards nothing.
+	reserve := int64(storehealth.DefaultReserve)
+	if s.Cfg.Dev {
+		reserve = 0
+	}
+	s.modules.storeHealth = storehealth.New(storehealth.Options{
+		DB: s.Store.DB, Dir: s.Cfg.DataDir, Log: s.Log, Reserve: reserve,
+		// In staging, the scratch folder every backup of the data directory
+		// must already exclude (backups/runner.go refuses a job that does
+		// not), so no archive carries the reserve.
+		ReservePath: filepath.Join(s.Cfg.DataDir, "staging", storehealth.ReserveFile),
+	})
 	s.modules.sys = sysinfo.NewCollector()
 	s.modules.docker = dockerx.New(s.Cfg.DockerHost)
 	s.initFlowAccounting()

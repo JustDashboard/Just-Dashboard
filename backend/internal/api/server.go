@@ -191,6 +191,9 @@ func (s *Server) handle(fn httpx.Handler) http.Handler { return fn }
 // New so that a failure to schedule backups is reported by main rather than
 // swallowed during construction.
 func (s *Server) Start(ctx context.Context) error {
+	// First, and whatever else fails below: a store that cannot be written is
+	// the reason most of the rest would fail, and the one thing to say.
+	go s.modules.storeHealth.Run(ctx)
 	// Before anything is served: with hub sign-in off, no grant and no hub
 	// session may survive this start, and if that cannot be written the
 	// dashboard does not start (hub-link-protocol.md section 9.3).

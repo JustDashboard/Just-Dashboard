@@ -61,6 +61,17 @@ restarts from a container that outlives the restart. The update check is one una
 one file from GitHub, every two hours and at most every five minutes while pages are being opened;
 `JD_UPDATE_CHECK=false` turns it off.
 
+## When the server's disk fills
+
+The dashboard's own database lives on the server's disk, so a full disk used to mean nobody could sign
+in to find what filled it. It now keeps 32 MB back (`/var/lib/just-dashboard/staging/disk-reserve`) and
+gives that space up the moment its database is refused room, so signing in and deleting things keep
+working for a while. The Overview then opens with **The server's disk is full**, the free space and
+where; a save that still fails says the disk is full rather than "internal error". Free space (Files,
+Docker's image and build-cache cleanup, old backups) and the reserve is written back by itself once
+about 256 MB is free. The container stays "healthy" throughout on purpose: restarting the dashboard, or
+rolling back an update, would not empty a disk.
+
 ## Uninstalling
 
 **Settings → Configuration → Danger zone → Uninstall** takes the dashboard off the server and asks one

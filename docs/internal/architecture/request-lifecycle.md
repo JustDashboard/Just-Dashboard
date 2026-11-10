@@ -130,7 +130,8 @@ password and revokes existing sessions; the sign-in page then signs straight bac
 password, through any required second factor. Password change has its own
 authentication middleware so it cannot bypass an outstanding second factor.
 
-Four deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname),
+Four deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname, and
+deliberately blind to the store: [the dashboard's own health](runtime-boundaries.md#the-dashboards-own-health)),
 `GET /api/v1/hub/hello` (the Just Hub discovery probe: unauthenticated, but behind the allowlist and the
 per-address API limit, a fixed body naming only the product, the protocol and whether this server can be
 connected, and not mounted with `JD_HUB_LINK=false` or in agent mode; [hub-link.md](../backend/hub-link.md#local-api)),

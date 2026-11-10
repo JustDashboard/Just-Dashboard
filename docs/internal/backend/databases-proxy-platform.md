@@ -6102,6 +6102,10 @@ done by hand, and the UI refuses to fold it away.
   `/dashboard` reads it once when the tail says it was trimmed and extends it with each polled tail
   (`frontend/src/lib/transcript.ts`).
 
+`GET /api/v1/dashboard/health` is the dashboard's reading of itself for whoever is signed in, kept apart
+from `/healthz`, which the container's health check and the updater's rollback read:
+[the dashboard's own health](../architecture/runtime-boundaries.md#the-dashboards-own-health).
+
 ### The dashboard's own settings
 
 **`internal/selfcfg`** is the settings half of the same idea, and it borrows the same manoeuvre for the
