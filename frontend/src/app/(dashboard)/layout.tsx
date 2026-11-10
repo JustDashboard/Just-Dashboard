@@ -21,6 +21,7 @@ import { AgentDock } from "@/components/assistant/agent/dock"
 import { AskAboutPage } from "@/components/assistant/ask-about"
 import { HubLinkProvider, useShellHub } from "@/hooks/use-hub-link"
 import { signInAddress } from "@/lib/hub-link"
+import { waitingReason } from "@/lib/session-probe"
 import { ServerSwitcher } from "@/components/hub-link/server-switcher"
 
 /**
@@ -57,7 +58,7 @@ function TabTitle() {
 }
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
-  const { status, loading, sessionEnded } = useAuth()
+  const { status, loading, stalled, sessionEnded } = useAuth()
   const hub = useShellHub()
   const router = useRouter()
 
@@ -78,7 +79,8 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     else if (onboarding) router.replace("/welcome")
   }, [loading, status, sessionEnded, onboarding, router])
 
-  if (loading || !status?.authenticated || onboarding) return <ShellSplash />
+  if (loading || !status?.authenticated || onboarding)
+    return <ShellSplash waiting={stalled === undefined ? undefined : waitingReason(stalled)} />
 
   // A recovery probe can discover another tab's sign-in without leaving this
   // route. Recreate mounted editors before the new account can reuse their buffers.
@@ -173,8 +175,13 @@ function MobileSearch() {
  * A bare spinner on an empty background reads as a broken page; the name says
  * the app is starting, which is what is actually happening — and it is one
  * paint, not a layout that then reflows into the shell.
+ *
+ * A probe that has failed and is being asked again (a drained limiter, a
+ * backend restarting, no network yet) keeps this up rather than sending a
+ * signed-in person to sign in, and `waiting` says why it is still here: a
+ * splash with no word under it, for half a minute, is the broken page again.
  */
-function ShellSplash() {
+function ShellSplash({ waiting }: { waiting?: string }) {
   return (
     <div className="auth-backdrop flex min-h-svh flex-col items-center justify-center gap-4 bg-background">
       <div className="flex flex-col items-center gap-2.5">
@@ -183,6 +190,11 @@ function ShellSplash() {
           <div className="h-full w-1/3 animate-[loading_1.2s_ease-in-out_infinite] rounded-full bg-primary" />
         </div>
       </div>
+      {waiting && (
+        <p role="status" className="max-w-xs px-4 text-center text-sm text-muted-foreground">
+          {waiting}
+        </p>
+      )}
       <style>{`@keyframes loading{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}`}</style>
     </div>
   )

@@ -90,6 +90,36 @@ test("a temporarily unavailable session recheck preserves the current account", 
   await expect(page.getByText("Your session ended. Sign in again to continue.")).toHaveCount(0)
 })
 
+test("a first session probe that is refused or unanswered waits on the splash and keeps the page", async ({
+  page,
+}) => {
+  // What a restored window of tabs met: the limiter's 429, then a 502 from a
+  // backend still restarting. Neither says anybody is signed out.
+  const fixture = await authFixture(page, async (route, read) => {
+    if (read === 1)
+      return route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        headers: { "Retry-After": "1" },
+        body: JSON.stringify({
+          error: { code: "rate_limited", message: "too many requests, slow down" },
+        }),
+      })
+    if (read === 2)
+      return route.fulfill({ status: 502, contentType: "text/plain", body: "Bad Gateway" })
+    await route.fallback()
+  })
+  await page.goto("/account/sessions?tab=x")
+  await expect(page.getByRole("status").filter({ hasText: "Trying again" })).toBeVisible()
+  await expect(page).toHaveURL(/\/account\/sessions\?tab=x$/)
+  await expect(page.getByRole("button", { name: "Account menu for Ion", exact: true })).toBeVisible(
+    { timeout: 20_000 },
+  )
+  await expect(page).toHaveURL(/\/account\/sessions\?tab=x$/)
+  expect(fixture.reads()).toBe(3)
+  await expect(page.getByLabel("Username")).toHaveCount(0)
+})
+
 test("a delayed expired-session recheck cannot replace a later successful sign-in", async ({
   page,
 }) => {

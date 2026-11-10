@@ -43,7 +43,9 @@ sidebar header closes it; Ctrl/Cmd+B still toggles that sheet.
 An address no page claims goes through `(dashboard)/[...missing]` to `(dashboard)/not-found.tsx`, inside
 the shell with the rail still there, and someone signed out is sent to sign in first. It answers HTTP 200:
 the shell draws its splash until the session probe returns, so the server never renders the page that
-throws the 404. `app/not-found.tsx` is the same page without a shell, for what the login and welcome pages
+throws the 404. A probe that fails for any reason but the server saying nobody is signed in keeps the
+splash and is asked again; from the first such failure the splash carries one sentence saying why it is
+still there ([data layer](data-theming.md), "The first probe of a page load"). `app/not-found.tsx` is the same page without a shell, for what the login and welcome pages
 throw.
 
 A render that throws under `(dashboard)` keeps the shell (`(dashboard)/error.tsx`). One from the dashboard's

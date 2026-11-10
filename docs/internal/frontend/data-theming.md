@@ -472,8 +472,16 @@ All shared HTTP response readers emit `jd:authentication-lost` for an ordinary f
 recognized authentication failure. Authentication endpoints are excluded: an incorrect password or
 code is a form error. The auth provider coalesces recovery, rechecks `/auth/session`, and sends a
 confirmed ended session to `/login?reason=session` with a visible notice that survives a reload.
-An unavailable recheck retains the current identity for retry. Request generations prevent a stale
-session probe or recheck from replacing a newer sign-in. Sign-out requests are coalesced, clear working
+An unavailable recheck retains the current identity for retry. **The first probe of a page load holds
+to the same rule: only the server's own answer makes a browser signed out.** A 429, a 5xx, a refusal
+that is not about the session or no answer at all is waited out and asked again (`untilAnswered` in
+`lib/session-probe.ts`, by the waits in `lib/backoff.ts`: the answer's `Retry-After`, or one second
+doubling to thirty), with `loading` still true and the failure in `useAuth().stalled`; the shell keeps
+its splash, which then says why it is still there (`waitingReason`), and the address is untouched. It
+used to count any failure as signed out, so a restored window of tabs that drained the limiter, or a
+load during a restart, ended on the sign-in form with a session that was still good. Request
+generations prevent a stale session probe or recheck from replacing a newer sign-in, and end a probe
+that is still waiting. Sign-out requests are coalesced, clear working
 drafts immediately, and finish their cookie expiry before a new sign-in is allowed; pending sign-out
 never starts expiry recovery. Reauthentication by a different account clears the prior account's
 working drafts; the same account retains values held in the shared session/memory stores. The
