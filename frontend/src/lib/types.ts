@@ -1576,6 +1576,71 @@ export type SystemdUnitDetail = {
   properties: Record<string, string>
 }
 
+/**
+ * `GET /systemd/{name}/files` — the unit file and its drop-ins as systemd
+ * loaded them (`FragmentPath`, then `DropInPaths` in the order they apply).
+ * Credential-shaped `Environment=` values are masked for anyone below
+ * system.admin.
+ */
+export type SystemdUnitFiles = {
+  files: SystemdUnitFile[]
+  /** The files changed on disk since systemd last read them. */
+  needDaemonReload: boolean
+}
+
+export type SystemdUnitFile = {
+  path: string
+  dropIn: boolean
+  content: string
+  size: number
+  /** Cut at 256 KiB. */
+  truncated: boolean
+  /** Why it could not be read: missing, not a regular file, masked to /dev/null. */
+  error?: string
+}
+
+/**
+ * `GET /systemd/{name}/security` — `systemd-analyze security`: how much of
+ * the host a service can reach, 0 (locked down) to 10 (nothing applied),
+ * and each setting that counts toward it, most exposed first.
+ */
+export type SystemdSecurity = {
+  available: boolean
+  score?: number
+  /** SAFE, OK, MEDIUM, EXPOSED or UNSAFE. */
+  verdict?: string
+  checks: SystemdSecurityCheck[]
+  reason?: string
+}
+
+export type SystemdSecurityCheck = {
+  /** The setting, as systemd names it: `ProtectSystem=`, `CapabilityBoundingSet=~CAP_SYS_ADMIN`. */
+  name: string
+  field: string
+  /** What the setting's current value means, in systemd's words. */
+  description: string
+  /** Whether it is applied; null where it does not apply to this unit. */
+  set: boolean | null
+  /** What it adds to the score while unapplied; null where it counts for nothing. */
+  exposure: number | null
+}
+
+/** `GET /systemd/{name}/related` — every unit it names in a dependency, with its state. */
+export type SystemdRelated = {
+  units: SystemdRelatedUnit[]
+}
+
+export type SystemdRelatedUnit = {
+  name: string
+  description: string
+  loadState: string
+  activeState: string
+  subState: string
+  unitFileState: string
+  /** The dependency properties that named it: `Requires`, `After`… */
+  relations?: string[]
+}
+
 export type CronJob = {
   line: number
   schedule: string

@@ -132,7 +132,7 @@ export function EngineFailure({
             </Button>
           )}
           <Button size="xs" variant="ghost" asChild>
-            <Link href={`/processes/services?unit=${encodeURIComponent(unit.name)}`}>
+            <Link href={`/processes/services/${encodeURIComponent(unit.name)}`}>
               Service details
             </Link>
           </Button>

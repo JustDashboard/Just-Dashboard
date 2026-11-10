@@ -60,21 +60,39 @@ func (s *Server) mountProcessRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleUnitList))
 		r.Method(http.MethodGet, "/timers", s.handle(s.handleTimerList))
 		r.Method(http.MethodGet, "/{name}", s.handle(s.handleUnitShow))
+		r.Method(http.MethodGet, "/{name}/files", s.handle(s.handleUnitFiles))
+		r.Method(http.MethodGet, "/{name}/security", s.handle(s.handleUnitSecurity))
+		r.Method(http.MethodGet, "/{name}/related", s.handle(s.handleUnitRelated))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/{name}/start", s.handle(s.unitAction(procs.UnitStart)))
 			r.Method(http.MethodPost, "/{name}/reload", s.handle(s.unitAction(procs.UnitReload)))
 			r.Method(http.MethodPost, "/{name}/reset-failed", s.handle(s.unitAction(procs.UnitResetFailed)))
+			r.Method(http.MethodPost, "/{name}/thaw", s.handle(s.unitAction(procs.UnitThaw)))
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodPost, "/daemon-reload", s.handle(s.handleDaemonReload))
 			r.Method(http.MethodPost, "/{name}/enable", s.handle(s.unitAction(procs.UnitEnable)))
 			r.Method(http.MethodPost, "/{name}/disable", s.handle(s.unitAction(procs.UnitDisable)))
+			r.Method(http.MethodPost, "/{name}/unmask", s.handle(s.unitAction(procs.UnitUnmask)))
+			// Limits change what the running unit may use, and persistent
+			// ones write a drop-in: host configuration, not service control.
+			r.Method(http.MethodPut, "/{name}/limits", s.handle(s.handleUnitLimits))
+			s.destructive(r, func(r chi.Router) {
+				// Masking changes the unit files, so it is system.admin as
+				// enable is; and nothing starts the unit again until it is
+				// unmasked, so it is destructive as stop is.
+				r.Method(http.MethodPost, "/{name}/mask", s.handle(s.unitAction(procs.UnitMask)))
+			})
 		})
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/{name}/stop", s.handle(s.unitAction(procs.UnitStop)))
 			r.Method(http.MethodPost, "/{name}/restart", s.handle(s.unitAction(procs.UnitRestart)))
+			// A signal can end the unit's processes; a frozen unit serves
+			// nothing until it is thawed.
+			r.Method(http.MethodPost, "/{name}/kill", s.handle(s.handleUnitKill))
+			r.Method(http.MethodPost, "/{name}/freeze", s.handle(s.unitAction(procs.UnitFreeze)))
 		})
 	})
 
@@ -125,6 +143,8 @@ func mapProcsError(err error) error {
 		return httpx.Err(http.StatusServiceUnavailable, "not_installed", err.Error())
 	case errors.Is(err, procs.ErrInvalidName):
 		return httpx.Err(http.StatusBadRequest, "invalid_name", err.Error())
+	case errors.Is(err, procs.ErrInvalidValue):
+		return httpx.Err(http.StatusBadRequest, "invalid_value", err.Error())
 	default:
 		return httpx.Wrap(http.StatusBadGateway, "command_failed", err)
 	}
@@ -281,10 +301,17 @@ func (s *Server) handleDaemonReload(w http.ResponseWriter, r *http.Request) erro
 	return nil
 }
 
+// handleUnitShow is one unit's state and every property systemd reports.
+// The Environment property carries credentials as a container's environment
+// does, so credential-shaped values are masked for anybody without
+// system.admin, by the same rule, in the property's own format.
 func (s *Server) handleUnitShow(w http.ResponseWriter, r *http.Request) error {
 	unit, props, err := s.modules.systemd.Detail(r.Context(), chi.URLParam(r, "name"))
 	if err != nil {
 		return mapProcsError(err)
+	}
+	if env, ok := props["Environment"]; ok && !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+		props["Environment"] = procs.MaskEnvironment(env, dockerx.IsSecretEnvKey, dockerx.RedactedEnvValue)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"unit": unit, "properties": props})
 	return nil

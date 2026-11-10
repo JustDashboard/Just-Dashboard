@@ -299,9 +299,226 @@ export const NGINX_DETAIL = {
     FragmentPath: "/usr/lib/systemd/system/nginx.service",
     DropInPaths: "/etc/systemd/system/nginx.service.d/override.conf",
     WantedBy: "multi-user.target",
-    After: "network-online.target remote-fs.target nss-lookup.target",
+    After:
+      "network-online.target remote-fs.target nss-lookup.target system.slice sysinit.target basic.target",
+    Before: "shutdown.target",
+    Wants: "network-online.target",
+    Requires: "system.slice sysinit.target",
+    Conflicts: "shutdown.target",
     TriggeredBy: "",
+    Description: "A high performance web server and a reverse proxy server",
+    ExecStartPre:
+      "{ path=/usr/sbin/nginx ; argv[]=/usr/sbin/nginx -t -q -g daemon on; master_process on; ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }",
+    ExecStop:
+      "{ path=/sbin/start-stop-daemon ; argv[]=/sbin/start-stop-daemon --quiet --stop --retry QUIT/5 --pidfile /run/nginx.pid ; ignore_errors=yes ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }",
+    Environment: 'NGINX_WORKERS=4 "TZ=Europe/Paris" UPSTREAM_TOKEN=tk_live_7f3a9c21',
+    EnvironmentFiles: "/etc/default/nginx (ignore_errors=yes)",
+    PassEnvironment: "",
+    UnsetEnvironment: "",
+    StandardOutput: "journal",
+    StandardError: "inherit",
+    TimeoutStartUSec: "1min 30s",
+    TimeoutStopUSec: "5s",
+    KillMode: "mixed",
+    KillSignal: "15",
+    StartLimitBurst: "5",
+    StartLimitIntervalUSec: "10s",
+    Slice: "system.slice",
+    ControlGroup: "/system.slice/nginx.service",
+    CanFreeze: "yes",
+    FreezerState: "running",
+    NeedDaemonReload: "yes",
+    ConditionResult: "yes",
+    CPUUsageNSec: String(412 * 1e9),
+    CPUQuotaPerSecUSec: "infinity",
+    CPUWeight: "[not set]",
+    IOReadBytes: String(38 * MB),
+    IOWriteBytes: String(212 * MB),
+    IPIngressBytes: "[no data]",
+    IPEgressBytes: "[no data]",
+    MemorySwapCurrent: "0",
+    MemorySwapMax: "infinity",
+    MemoryHigh: "infinity",
+    MemoryLow: "0",
+    MemoryMin: "0",
+    LimitNOFILE: "524288",
+    LimitNPROC: "31503",
+    LimitCORE: "infinity",
+    LimitMEMLOCK: "8388608",
+    Nice: "0",
+    OOMScoreAdjust: "0",
+    UMask: "0022",
+    NoNewPrivileges: "no",
+    DynamicUser: "no",
+    InvocationID: "9f1c2a7be04d4b5c8f13d0a6e2b4c771",
   },
+}
+
+/** systemd's reading of nginx.service from disk: the packaged unit and the operator's drop-in. */
+export const NGINX_FILES = {
+  needDaemonReload: true,
+  files: [
+    {
+      path: "/usr/lib/systemd/system/nginx.service",
+      dropIn: false,
+      size: 621,
+      truncated: false,
+      content: `# Stop dance for nginx
+# =======================
+[Unit]
+Description=A high performance web server and a reverse proxy server
+Documentation=man:nginx(8)
+After=network-online.target remote-fs.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+PIDFile=/run/nginx.pid
+ExecStartPre=/usr/sbin/nginx -t -q -g 'daemon on; master_process on;'
+ExecStart=/usr/sbin/nginx -g 'daemon on; master_process on;'
+ExecReload=/usr/sbin/nginx -g 'daemon on; master_process on;' -s reload
+ExecStop=-/sbin/start-stop-daemon --quiet --stop --retry QUIT/5 --pidfile /run/nginx.pid
+TimeoutStopSec=5
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target
+`,
+    },
+    {
+      path: "/etc/systemd/system/nginx.service.d/override.conf",
+      dropIn: true,
+      size: 118,
+      truncated: false,
+      content: `[Service]
+Restart=on-failure
+RestartSec=5
+Environment=NGINX_WORKERS=4 "TZ=Europe/Paris" UPSTREAM_TOKEN=tk_live_7f3a9c21
+EnvironmentFile=-/etc/default/nginx
+`,
+    },
+  ],
+}
+
+/** `systemd-analyze security nginx.service`, most exposed first. */
+export const NGINX_SECURITY = {
+  available: true,
+  score: 9.2,
+  verdict: "UNSAFE",
+  checks: [
+    {
+      name: "PrivateNetwork=",
+      field: "PrivateNetwork",
+      description: "Service has access to the host's network",
+      set: false,
+      exposure: 0.5,
+    },
+    {
+      name: "User=/DynamicUser=",
+      field: "UserOrDynamicUser",
+      description: "Service runs as root user",
+      set: false,
+      exposure: 0.4,
+    },
+    {
+      name: "CapabilityBoundingSet=~CAP_SYS_ADMIN",
+      field: "CapabilityBoundingSet_CAP_SYS_ADMIN",
+      description: "Service has administrator privileges",
+      set: false,
+      exposure: 0.3,
+    },
+    {
+      name: "ProtectSystem=",
+      field: "ProtectSystem",
+      description: "Service has full access to the OS file hierarchy",
+      set: false,
+      exposure: 0.2,
+    },
+    {
+      name: "ProtectHome=",
+      field: "ProtectHome",
+      description: "Service has full access to home directories",
+      set: false,
+      exposure: 0.2,
+    },
+    {
+      name: "NoNewPrivileges=",
+      field: "NoNewPrivileges",
+      description: "Service processes may acquire new privileges",
+      set: false,
+      exposure: 0.2,
+    },
+    {
+      name: "PrivateTmp=",
+      field: "PrivateTmp",
+      description: "Service has access to other software's temporary files",
+      set: false,
+      exposure: 0.2,
+    },
+    {
+      name: "ProtectKernelModules=",
+      field: "ProtectKernelModules",
+      description: "Service may load or read kernel modules",
+      set: false,
+      exposure: 0.2,
+    },
+    {
+      name: "RestrictNamespaces=~user",
+      field: "RestrictNamespaces_user",
+      description: "Service may create user namespaces",
+      set: false,
+      exposure: 0.3,
+    },
+    {
+      name: "UMask=",
+      field: "UMask",
+      description: "Files created by service are world-readable by default",
+      set: false,
+      exposure: 0.1,
+    },
+    {
+      name: "AmbientCapabilities=",
+      field: "AmbientCapabilities",
+      description: "Service process does not receive ambient capabilities",
+      set: true,
+      exposure: null,
+    },
+    {
+      name: "Delegate=",
+      field: "Delegate",
+      description: "Service does not maintain its own delegated control group subtree",
+      set: true,
+      exposure: null,
+    },
+    {
+      name: "RemoveIPC=",
+      field: "RemoveIPC",
+      description: "Service runs as root, option does not apply",
+      set: null,
+      exposure: null,
+    },
+  ],
+}
+
+/** Every unit nginx names, as one `systemctl show` reads them. */
+export const NGINX_RELATED = {
+  units: [
+    ["multi-user.target", "Multi-User System", "active", "active"],
+    ["network-online.target", "Network is Online", "active", "active"],
+    ["remote-fs.target", "Remote File Systems", "active", "active"],
+    ["nss-lookup.target", "Host and Network Name Lookups", "active", "active"],
+    ["system.slice", "System Slice", "active", "active"],
+    ["sysinit.target", "System Initialization", "active", "active"],
+    ["basic.target", "Basic System", "active", "active"],
+    ["shutdown.target", "System Shutdown", "inactive", "dead"],
+  ].map(([name, description, activeState, subState]) => ({
+    name,
+    description,
+    loadState: "loaded",
+    activeState,
+    subState,
+    unitFileState: "static",
+  })),
 }
 
 const postgres = UNITS.find((u) => u.name === "postgresql.service")!
@@ -381,6 +598,30 @@ const NGINX_PROCESSES = [812, 813, 814, 815, 816].map((pid, i) => ({
   managerName: "nginx.service",
 }))
 
+/** nginx's master as its own reading answers: what it listens on and its connections. */
+const NGINX_MAIN = {
+  ...NGINX_PROCESSES[0],
+  listening: [
+    { proto: "tcp", address: "0.0.0.0", port: 80 },
+    { proto: "tcp", address: "0.0.0.0", port: 443 },
+    { proto: "tcp6", address: "::", port: 443 },
+  ],
+  connections: 14,
+  history: [],
+}
+
+/** Enough of nginx's inspection for Control to say what each signal does to it. */
+const NGINX_INSPECT = {
+  pid: 812,
+  signals: {
+    ready: true,
+    caught: ["SIGHUP", "SIGINT", "SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGTERM", "SIGCHLD", "SIGWINCH"],
+    ignored: ["SIGPIPE"],
+    blocked: [],
+    pending: [],
+  },
+}
+
 const user = {
   authenticated: true,
   needsTotp: false,
@@ -414,6 +655,8 @@ export type ServiceMocks = LogMocks & {
   inventories: URLSearchParams[]
   /** Every unit action posted, as `name/action`. */
   actions: string[]
+  /** The body of every action or limit change that carried one, by `name/action`. */
+  bodies: Record<string, unknown>
 }
 
 /**
@@ -422,7 +665,13 @@ export type ServiceMocks = LogMocks & {
  * log routes the sheet's journal reads.
  */
 export async function mockServices(page: Page, list: object = SYSTEMD_LIST): Promise<ServiceMocks> {
-  const mocks: ServiceMocks = { sockets: [], searches: [], inventories: [], actions: [] }
+  const mocks: ServiceMocks = {
+    sockets: [],
+    searches: [],
+    inventories: [],
+    actions: [],
+    bodies: {},
+  }
   await mockLogSockets(page, mocks)
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
@@ -474,7 +723,10 @@ export async function mockServices(page: Page, list: object = SYSTEMD_LIST): Pro
     }
     if (path === "/updates/self") return json(route, { current: "0.7.1", latest: "0.7.1" })
     if (path === "/systemd/") return json(route, list)
-    if (path === "/systemd/daemon-reload" && method === "POST") return json(route, { exitCode: 0 })
+    if (path === "/systemd/daemon-reload" && method === "POST") {
+      mocks.actions.push("daemon-reload")
+      return json(route, { exitCode: 0 })
+    }
     if (path === "/processes/inventory") {
       mocks.inventories.push(url.searchParams)
       const group = url.searchParams.get("group")
@@ -490,9 +742,39 @@ export async function mockServices(page: Page, list: object = SYSTEMD_LIST): Pro
         managers: [],
       })
     }
+    if (path === "/processes/812") return json(route, NGINX_MAIN)
+    if (path === "/processes/812/inspect") return json(route, NGINX_INSPECT)
+    const read = path.match(/^\/systemd\/([^/]+)\/(files|security|related)$/)
+    if (read && method === "GET") {
+      const name = decodeURIComponent(read[1])
+      if (read[2] === "files") {
+        return json(
+          route,
+          name === "nginx.service" ? NGINX_FILES : { files: [], needDaemonReload: false },
+        )
+      }
+      if (read[2] === "security") {
+        return json(
+          route,
+          name === "nginx.service"
+            ? NGINX_SECURITY
+            : { available: false, checks: [], reason: "systemd-analyze is not installed" },
+        )
+      }
+      // Every unit here is wanted by the boot's goal.
+      return json(
+        route,
+        name === "nginx.service"
+          ? NGINX_RELATED
+          : { units: NGINX_RELATED.units.filter((u) => u.name === "multi-user.target") },
+      )
+    }
     const action = path.match(/^\/systemd\/([^/]+)\/([a-z-]+)$/)
-    if (action && method === "POST") {
-      mocks.actions.push(`${decodeURIComponent(action[1])}/${action[2]}`)
+    if (action && (method === "POST" || method === "PUT")) {
+      const key = `${decodeURIComponent(action[1])}/${action[2]}`
+      mocks.actions.push(key)
+      const body = route.request().postData()
+      if (body) mocks.bodies[key] = JSON.parse(body)
       return json(route, { exitCode: 0, stdout: "", stderr: "", command: "systemctl" })
     }
     const detail = path.match(/^\/systemd\/([^/]+)$/)

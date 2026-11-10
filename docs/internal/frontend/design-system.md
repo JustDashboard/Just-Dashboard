@@ -2292,14 +2292,21 @@ The passes, in order. Each one is a diff you can review on its own.
    and its figure-beside-a-bar readings, and its state column says how long a unit has been in its
    state — up for, failed since and why, the restarts it has taken. Only a newly listed unit rises
    (`useArrivals` keyed on its name); starting or stopping an existing unit updates it in place.
-   The unit sheet kept
-   its Journal tab, whose pane needs the height, and its overview became the process sheet's
-   readout: four live tiles (CPU over the unit's recent windows, memory against its limit or over
-   its windows, tasks against theirs, automatic restarts with the policy), or the last run's
-   counters when it is not running; a failure or a restart loop said first as a Notice with the
-   way to its journal; the command coloured as a command rather than systemd's record of it; the
-   processes it holds now, each opening its own page; and how it runs, with its type in words and
-   its overrides.
+   The unit sheet became a page in 0.8.6, as the process sheet did and at the operator's request
+   ("can we do the same for the /services page"): `/processes/services/[unit]`
+   (`procs/service-page.tsx`), the table as a rail beside it from `xl`, failed first, with Alt+↑/↓
+   and the view carried to the next unit. Its Overview keeps the sheet's readout — four live tiles
+   (CPU over the unit's recent windows, memory against its limit or over its windows, tasks against
+   theirs, automatic restarts with the policy), or the last run's counters when it is not running;
+   a failure or a restart loop said first as a Notice with the way to its journal — and draws where
+   the unit sits with the process page's wiring picture (`procs/wiring-picture.tsx`, one component
+   for both): what starts it and what it needs on the left, a down requirement in the danger hue
+   because that is usually why a unit will not start, and its main process, its other processes by
+   program, its sockets and where it writes on the right. What a drawer had no room for became views:
+   its dependencies by the question each answers with every named unit's state, the unit file and
+   its drop-ins coloured as one, its `Environment=`, `systemd-analyze security`'s exposure with each
+   setting most exposed first, and Control, where every verb is a row that says what it does and
+   each signal says what it will do to the main process, read from that process's signal masks.
 
    Docker's Containers took the same exit in 0.7.1, at the operator's request, because it had no
    life: a runtime health bar and a list of findings over a column of grey cards, nothing on it that

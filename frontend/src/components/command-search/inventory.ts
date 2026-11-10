@@ -291,7 +291,7 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           "service",
           unit.name,
           unit.name,
-          `/processes/services?unit=${encodeURIComponent(unit.name)}`,
+          `/processes/services/${encodeURIComponent(unit.name)}`,
           unit.description,
           [unit.activeState],
         ),

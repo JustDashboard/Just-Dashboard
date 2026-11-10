@@ -493,7 +493,7 @@ export function EngineActions({
       key: "unit",
       label: "Service details",
       icon: ListOrdered,
-      run: () => router.push(`/processes/services?unit=${encodeURIComponent(unitName)}`),
+      run: () => router.push(`/processes/services/${encodeURIComponent(unitName)}`),
     })
   }
   // The ingress's lifecycle is its container's, so its restart and its log

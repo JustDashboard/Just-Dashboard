@@ -1144,7 +1144,7 @@ func mapUnit(u procs.Unit) mapItem {
 	name := strings.TrimSuffix(u.Name, ".service")
 	item := mapItem{
 		ID: "unit:" + u.Name, Name: name, Product: name, Detail: u.Description,
-		Href: "/processes/services?unit=" + url.QueryEscape(u.Name),
+		Href: "/processes/services/" + url.PathEscape(u.Name),
 	}
 	switch u.ActiveState {
 	case "failed":

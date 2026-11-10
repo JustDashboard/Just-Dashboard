@@ -931,7 +931,7 @@ test("a row's owner opens its own page: the deployment, the unit, the PM2 app", 
   await expect(page.getByRole("menuitem", { name: "Process" })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await ssh.getByRole("button", { name: "Open unit" }).click()
-  await expect(page).toHaveURL(/\/processes\/services\?unit=ssh\.service$/)
+  await expect(page).toHaveURL(/\/processes\/services\/ssh\.service$/)
 
   await page.goto("/proxy/ports")
   await rows.filter({ hasText: "PM2 · node" }).getByRole("button", { name: "Open app" }).click()

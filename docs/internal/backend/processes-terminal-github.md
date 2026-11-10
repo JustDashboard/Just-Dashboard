@@ -186,8 +186,66 @@ socket-activated service's port.
   empty). `next` and `last` are read as
   microsecond timestamps; `left` and `passed` are ignored because across systemd versions they have
   been a string, a duration and — on some 257 builds — a copy of `next`. Timer control reuses the
-  unit routes, and "run now" is `start` on the service the timer activates. The unit sheet offers
+  unit routes, and "run now" is `start` on the service the timer activates. The unit's page offers
   reload only when `systemctl show` reports `CanReload=yes`.
+- **A unit's environment is masked below `system.admin`.** `GET /systemd/{name}` rewrites the
+  `Environment` property for anybody without `system.admin`: each entry whose name
+  `dockerx.IsSecretEnvKey` matches has its value replaced with `dockerx.RedactedEnvValue`, the rule
+  a container's and a process's environment use. `procs.SplitEnvironment` reads systemd's format
+  (space-separated, an entry with a space, quote or control character double-quoted with C-style
+  escapes) and `JoinEnvironment` writes it back the same way, so the masked property still parses;
+  a list with nothing to hide is returned byte for byte. Commands (`ExecStart` and the rest) are not
+  masked.
+- The service page (`/processes/services/{unit}`, "Service" in the assistant's change links) reads
+  three more things, all `read`:
+  - `GET /systemd/{name}/files` (`Systemd.Files`) is `{files: [{path, dropIn, content, size,
+    truncated, error?}], needDaemonReload}`: the `FragmentPath` and every `DropInPaths` entry from one
+    `systemctl show`, each read straight from the host through `hostexec.HostPath("/")` with
+    `openat2(RESOLVE_IN_ROOT | RESOLVE_NO_MAGICLINKS)`, so an absolute link (`systemctl link`) is
+    followed in the host's tree, not the container's, and nothing can lead to `/proc/self` (before
+    Linux 5.6, `os.Root`, which refuses any link out of the root). A fragment linked to `/dev/null`
+    answers `error: "masked: linked to /dev/null"`; anything that is not a regular file once opened
+    is refused (a directory, a device, a FIFO — the open is non-blocking, so one cannot hold it);
+    each file is capped at 256 KiB (`truncated`, `size` the real size). A file that cannot be read
+    carries its `error` beside the others. Below `system.admin`, `procs.MaskUnitFileSecrets` masks `Environment=` lines by the same
+    rule (whitespace around `=`, quoting and backslash continuations as systemd reads them; a
+    continued line that had something hidden is written as one line and the lines it continued onto
+    left blank, so line numbers still match the host's) and hides every `SetCredential=` value,
+    which is a credential in plain text whatever its name; `EnvironmentFile=`, `PassEnvironment=`
+    and `LoadCredential=` name files and variables and are left alone. A file with nothing to hide
+    is unchanged.
+  - `GET /systemd/{name}/security` (`Systemd.Security`) is `{available, score?, verdict?, checks:
+    [{name, field, description, set, exposure}], reason?}`: `systemd-analyze security --json=short`
+    for the checks (`set` and `exposure` null where systemd gives null; most exposing first, nulls
+    last) and the text form's `Overall exposure level for …: 9.6 UNSAFE` line for `score` and
+    `verdict`. Both run through `hostexec.CommandOnHost` with `SYSTEMD_IGNORE_CHROOT=1`, 15 s each.
+    A unit systemd will not assess — not a service, not found, no `systemd-analyze`, a systemd
+    older than 250 (no `--json`), a timeout — answers 200 with `available: false` and a sentence in
+    `reason`, never an error; the text form failing only loses the score.
+  - `GET /systemd/{name}/related` (`Systemd.Related`) is `{units: [{name, description, loadState,
+    activeState, subState, unitFileState, relations}]}`: every unit the 23 dependency properties
+    (`Requires` … `JoinsNamespaceOf`, reverse ones included) name, once, without the unit itself and
+    without any name `ValidateName` refuses (escaped device names among them), at most 300, read in
+    one `systemctl show -p Id,Description,LoadState,ActiveState,SubState,UnitFileState -- …`.
+    `relations` is the properties that named it; an alias is answered as the unit it points at.
+- **The service page's controls** reach `systemctl` as argv of validated parts, are audited, and
+  answer the command's result (`{exitCode, stdout, stderr, command}`) as the other unit actions do:
+  - `POST /systemd/{name}/kill` (`{signal, whom}`, destructive) runs `systemctl kill --signal=<SIG>
+    --kill-who=<main|all> -- <name>`; the signal must pass `procs.AllowedSignal`, the process
+    table's list, and `whom` defaults to `all`. `--kill-who=` rather than `--kill-whom=`: 252 added
+    the second spelling and still takes the first, which is all older releases know. Audited
+    `systemd.kill` with the signal, whom and exit code.
+  - `POST /systemd/{name}/mask` (`system.admin` and destructive: nothing starts the unit again until
+    it is unmasked) and `/unmask` (`system.admin`) are `Control` actions and forget the cached
+    unit-file states as enable and disable do. `POST /systemd/{name}/freeze` (destructive: a frozen
+    unit serves nothing) and `/thaw` (`service.control`) use the cgroup freezer. All four are audited
+    `systemd.<action>` by `unitAction`.
+  - `PUT /systemd/{name}/limits` (`{memoryMax?, cpuQuota?, tasksMax?, persistent}`, `system.admin`)
+    runs `systemctl set-property [--runtime] -- <name> MemoryMax=… CPUQuota=… TasksMax=…` with only
+    the fields given; `UnitLimits.Assignments` validates them first (bytes or `infinity`, a
+    percentage or `""` to clear, a count or `infinity`) and at least one is required. Without
+    `persistent` the limits last until the next boot. Audited `systemd.set-property` with the fields
+    given, `persistent` and the exit code.
 - User cron inventory and edits run the host's `crontab` through `hostexec.CommandOnHost`.
   Per-job enable, disable, edit, add and remove are edits to the crontab's text made in the browser
   (`lib/crontab.ts`: only the job's own line and the comment the parser attached to it change) and
