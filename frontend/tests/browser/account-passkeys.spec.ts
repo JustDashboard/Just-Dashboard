@@ -17,7 +17,7 @@ const iso = (ms: number) => new Date(ms).toISOString()
 const me = {
   id: 1,
   username: "ion",
-  displayName: "Ion Moisei",
+  displayName: "Ion Popescu",
   avatarVersion: 0,
   role: "admin",
   totpEnabled: true,
@@ -143,7 +143,7 @@ test("adding a passkey asks for the password and the code, then the browser make
         publicKey: {
           challenge: b64(randomBytes(32)),
           rp: { name: "Just Dashboard", id: "localhost" },
-          user: { id: b64(Buffer.from("account-handle")), name: "ion", displayName: "Ion Moisei" },
+          user: { id: b64(Buffer.from("account-handle")), name: "ion", displayName: "Ion Popescu" },
           pubKeyCredParams: [{ type: "public-key", alg: -7 }],
           timeout: 60000,
           excludeCredentials: [],

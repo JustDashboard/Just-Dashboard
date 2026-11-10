@@ -8,7 +8,7 @@ const iso = (days: number) => new Date(now + days * DAY).toISOString()
 export const keyOwner: DashboardUser = {
   id: 1,
   username: "ion",
-  displayName: "Ion Moisei",
+  displayName: "Ion Popescu",
   avatarVersion: 0,
   role: "admin",
   totpEnabled: true,
