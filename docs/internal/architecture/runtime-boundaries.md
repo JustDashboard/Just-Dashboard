@@ -72,6 +72,23 @@ fences their old work. Its controller stops owned containers, disables restart, 
 and retries incomplete isolation every 30 seconds without preventing access to the dashboard. It stops
 before the deployment engine on shutdown; retained legacy data is never deleted by quarantine.
 
+**A stop has a budget, and the container is given longer than it.** `docker-compose.yml` sets the
+backend's `stop_grace_period` to 60 seconds, and `cmd/server/lifecycle.go` spends at most 50 of them
+(`shutdownBudget`; a test holds the two apart). On SIGTERM `drainHTTP` stops accepting requests and
+gives those under way three seconds to finish as they would have; then it cancels the base context every
+request's context descends from (`http.Server.BaseContext`), which is the only thing that ends a
+response held open on purpose (an assistant's answer, an export) or a hijacked socket, neither of which
+`http.Server.Shutdown` cancels by itself. Handlers have eight seconds in all to return. Then
+`api.Server.ShutdownContext(budget)` runs the module shutdown above with what is left: the deployment
+engine's 30-second grace and the three 10-second waits (socket history, captures, diagnostics) keep their
+own limits and are cut short by the budget. It ends by waiting for the goroutines `Start` launched itself
+(`Server.background`: the store's health, block expiry, the Remote Desktop and database upgrade
+recoveries), and `main` waits for the session janitor, so nothing is still writing when the store closes.
+`Shutdown` runs once; the deferred call after a signal's is a no-op. Before this the HTTP drain alone
+could take 15 seconds against Docker's default of 10, so a stop with a stream open was a kill and the
+engine's grace was never available. Compose reads the grace period on `stop` and on every recreate, an
+update's and a settings restart's included; the uninstaller's `down --timeout 30` is its own choice.
+
 `helpers.detachedContext` is the deliberate opposite: work that must outlive its request (a backup
 transfer, a `compose up --build`) descends from `context.Background()` and is not cancelled by shutdown
 — a deploy killed halfway is worse than one finishing into a dashboard that is gone. Its timeout is the

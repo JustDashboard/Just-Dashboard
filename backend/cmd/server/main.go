@@ -312,16 +312,12 @@ func run(agentFlag, agentReset bool) error {
 	scrubSecretEnv()
 
 	srv := api.New(cfg, log, st, svc, sealer, aud, identity)
+	// For the ways out that are not a signal; a stop by signal has already
+	// shut it down, within the budget, by the time this runs.
 	defer srv.Shutdown()
 
-	httpSrv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           srv.Routes(),
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		// No WriteTimeout: log tails, metric pushes and PTY sockets are
-		// long-lived by nature and would be severed by one.
-	}
+	httpSrv, endRequests := newHTTPServer(cfg.Addr, srv.Routes())
+	defer endRequests()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -329,7 +325,13 @@ func run(agentFlag, agentReset bool) error {
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("start background workers: %w", err)
 	}
-	go janitor(ctx, svc, log)
+	// Waited for at shutdown: the store is closed when run returns, and a
+	// purge still writing then is a write to a closed database.
+	janitorDone := make(chan struct{})
+	go func() {
+		defer close(janitorDone)
+		janitor(ctx, svc, log)
+	}()
 	refreshHostCLI(log)
 
 	if cfg.AgentMode {
@@ -363,9 +365,17 @@ func run(agentFlag, agentReset bool) error {
 		return err
 	case <-ctx.Done():
 		log.Info("shutting down")
-		shutCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		budget, cancel := context.WithTimeout(context.Background(), shutdownBudget)
 		defer cancel()
-		return httpSrv.Shutdown(shutCtx)
+		// Requests first, so nothing new reaches a module that is stopping;
+		// bounded, so they cannot spend the time the modules need.
+		drainHTTP(httpSrv, endRequests, requestGrace, httpDrain, log)
+		srv.ShutdownContext(budget)
+		if !waitFor(budget, janitorDone) {
+			log.Warn("the session janitor was still running when shutdown ended")
+		}
+		log.Info("stopped")
+		return nil
 	}
 }
 

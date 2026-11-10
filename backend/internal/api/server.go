@@ -144,6 +144,13 @@ type Server struct {
 	// The tool calls each MCP key has in flight (handlers_mcp.go).
 	mcp mcpState
 
+	// background is the goroutines Start launches itself rather than through
+	// a module: stopBackground ends them and Shutdown waits for them, so none
+	// is still writing when the store closes behind it.
+	background     sync.WaitGroup
+	stopBackground context.CancelFunc
+	shutdownOnce   sync.Once
+
 	modules moduleSet
 }
 
@@ -191,9 +198,11 @@ func (s *Server) handle(fn httpx.Handler) http.Handler { return fn }
 // New so that a failure to schedule backups is reported by main rather than
 // swallowed during construction.
 func (s *Server) Start(ctx context.Context) error {
+	background, stopBackground := context.WithCancel(ctx)
+	s.stopBackground = stopBackground
 	// First, and whatever else fails below: a store that cannot be written is
 	// the reason most of the rest would fail, and the one thing to say.
-	go s.modules.storeHealth.Run(ctx)
+	s.background.Go(func() { s.modules.storeHealth.Run(background) })
 	// Before anything is served: with hub sign-in off, no grant and no hub
 	// session may survive this start, and if that cannot be written the
 	// dashboard does not start (hub-link-protocol.md section 9.3).
@@ -219,8 +228,8 @@ func (s *Server) Start(ctx context.Context) error {
 	remoteCancel()
 	// An engine or a stream bridge made by an older dashboard is made again
 	// in the background, its volume kept; a current one is left alone.
-	go func() {
-		upgradeCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	s.background.Go(func() {
+		upgradeCtx, cancel := context.WithTimeout(background, 10*time.Minute)
 		defer cancel()
 		err := s.modules.remoteDesktop.UpgradeEngine(upgradeCtx, func(line string) {
 			s.Log.Info("remote desktop engine", "step", line)
@@ -234,7 +243,7 @@ func (s *Server) Start(ctx context.Context) error {
 		if err != nil {
 			s.Log.Warn("the remote desktop stream bridge could not be brought up to date", "err", err)
 		}
-	}()
+	})
 	if err := s.modules.flowAccounting.Start(ctx); err != nil && s.Log != nil {
 		s.Log.Warn("network socket history is unavailable", "err", err)
 	}
@@ -272,11 +281,11 @@ func (s *Server) Start(ctx context.Context) error {
 	// A database upgrade this process's predecessor was carrying out has
 	// nobody left to finish it or undo it: the old server is put back in the
 	// background, since it may have to be started and waited for.
-	go func() {
-		upgradeCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	s.background.Go(func() {
+		upgradeCtx, cancel := context.WithTimeout(background, 10*time.Minute)
 		defer cancel()
 		s.recoverDatabaseUpgrades(upgradeCtx)
-	}()
+	})
 	// The metrics recorder is started here rather than lazily on the first
 	// request precisely because nothing may ever request it: its whole
 	// purpose is to have been running while nobody was looking.
@@ -297,7 +306,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.modules.network.Start(ctx)
 	// A block made from the connection table with an end is lifted when it
 	// ends, whether or not anybody has the page open.
-	go s.expireBlocks(ctx)
+	s.background.Go(func() { s.expireBlocks(background) })
 	// Country and feed blocklists go stale; each is fetched again a day after
 	// its last refresh, whether or not anybody opens the Protection page.
 	s.modules.network.StartBlocklistRefresh(ctx)
@@ -425,9 +434,33 @@ func (s *Server) startDeployEngine(ctx context.Context) error {
 	return s.modules.deployEngine.Start(ctx)
 }
 
-// Shutdown releases the resources that outlive a request: database pools,
-// live PTY sessions, the metrics sampler and the backup scheduler.
+// shutdownDefault is what Shutdown allows itself where nobody gave it a budget:
+// the engine's grace and the three ten-second waits after it.
+const shutdownDefault = time.Minute
+
+// Shutdown is ShutdownContext with a budget of its own.
 func (s *Server) Shutdown() {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownDefault)
+	defer cancel()
+	s.ShutdownContext(ctx)
+}
+
+// ShutdownContext releases the resources that outlive a request: database
+// pools, live PTY sessions, the metrics sampler and the backup scheduler.
+//
+// ctx is the time left for all of it. Each wait below keeps its own limit and
+// is cut short by ctx, so the caller can hold the whole stop under the
+// container's stop_grace_period: a process killed halfway through leaves the
+// next start to clean up what these waits exist to finish. It runs once; a
+// second call returns at once.
+func (s *Server) ShutdownContext(ctx context.Context) {
+	s.shutdownOnce.Do(func() { s.shutdown(ctx) })
+}
+
+func (s *Server) shutdown(budget context.Context) {
+	if s.stopBackground != nil {
+		s.stopBackground()
+	}
 	s.modules.usagePing.Stop()
 	s.modules.accountLink.Stop()
 	s.modules.hubLink.Stop()
@@ -441,7 +474,7 @@ func (s *Server) Shutdown() {
 	// Stop fresh claims first. Active work is given a bounded grace to reach a
 	// persisted boundary; Engine.Shutdown never injects a cancellation into an
 	// activation or restoration.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(budget, 30*time.Second)
 	if err := s.modules.deployEngine.Shutdown(ctx); err != nil && s.Log != nil {
 		s.Log.Warn("deployment engine did not finish before shutdown", "err", err)
 	}
@@ -469,18 +502,18 @@ func (s *Server) Shutdown() {
 	s.modules.certKeeper.Stop()
 	s.modules.term.Shutdown()
 	s.modules.dbs.Shutdown()
-	flowCtx, flowCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	flowCtx, flowCancel := context.WithTimeout(budget, 10*time.Second)
 	if err := s.modules.flowAccounting.Shutdown(flowCtx); err != nil && s.Log != nil {
 		s.Log.Warn("network socket collector cleanup is unverified", "err", err)
 	}
 	flowCancel()
 	s.modules.docker.Close()
-	captureCtx, captureCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	captureCtx, captureCancel := context.WithTimeout(budget, 10*time.Second)
 	if err := s.modules.captures.Shutdown(captureCtx); err != nil && s.Log != nil {
 		s.Log.Warn("packet capture cleanup is unverified", "err", err)
 	}
 	captureCancel()
-	diagnosticCtx, diagnosticCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	diagnosticCtx, diagnosticCancel := context.WithTimeout(budget, 10*time.Second)
 	if err := s.modules.diagnostics.Shutdown(diagnosticCtx); err != nil && s.Log != nil {
 		s.Log.Warn("network diagnostics did not finish stopping before shutdown", "err", err)
 	}
@@ -489,4 +522,18 @@ func (s *Server) Shutdown() {
 	// upgrade interrupted halfway is worse than one that completes into a
 	// dashboard that has restarted. Only the subscribers are released.
 	s.modules.jobs.Shutdown()
+	// What Start launched itself was told to stop first and has had all of
+	// the above to do it.
+	done := make(chan struct{})
+	go func() {
+		s.background.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-budget.Done():
+		if s.Log != nil {
+			s.Log.Warn("background work was still running when shutdown ended")
+		}
+	}
 }
