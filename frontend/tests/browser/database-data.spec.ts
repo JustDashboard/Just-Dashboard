@@ -475,6 +475,16 @@ test("the rail lists what holds rows by kind, and a table is a link and a step o
     "/databases/1/data?schema=public&table=items",
   )
   await expect(page.getByText("Pick a table")).toBeVisible()
+  // The largest are figures in a column with their share of the schema, not a
+  // bar of a different length under every name, and every row is one height.
+  const largest = page.getByRole("region", { name: "Largest in public" })
+  await expect(largest.locator("[data-slot=rank-row]")).not.toHaveCount(0)
+  await expect(largest.locator("[data-slot=bar-list]")).toHaveCount(0)
+  await expect(largest.locator("[data-slot=rank-share]").first()).toHaveText(/%$/)
+  const heights = await largest
+    .locator("[data-slot=rank-row]")
+    .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height))
+  expect(new Set(heights).size).toBe(1)
 
   await rail.getByRole("link", { name: /^items/ }).click()
   await expect(cell(page, 0, 1)).toHaveText("Item 1")

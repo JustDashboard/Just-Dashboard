@@ -27,7 +27,7 @@ export type LargeObject = {
   group: DbCatalogGroup
   bytes: number | null
   rows: number | null
-  /** 0–1 against the largest. */
+  /** 0–1 of the schema's whole: its bytes, or its rows where it is ranked by rows. */
   share: number
 }
 
@@ -91,7 +91,8 @@ export function schemaFigures(
     .filter((entry) => (measure(entry) ?? 0) > 0)
     .sort((a, b) => (measure(b) ?? 0) - (measure(a) ?? 0))
     .slice(0, most)
-  const top = ranked.length > 0 ? (measure(ranked[0]) ?? 0) : 0
+  // The whole is every object the measure is known for, not only the few listed.
+  const whole = sum(all.map((entry) => measure(entry) ?? 0))
   const counted = (stats ?? []).filter((stat) => kept(stat.seqScans) && kept(stat.indexScans))
   const reads = {
     byIndex: sum(counted.map((stat) => stat.indexScans)),
@@ -113,7 +114,7 @@ export function schemaFigures(
       group: entry.group,
       bytes: entry.bytes,
       rows: entry.rows,
-      share: top > 0 ? (measure(entry) ?? 0) / top : 0,
+      share: whole > 0 ? (measure(entry) ?? 0) / whole : 0,
     })),
     rankedBy,
     measured: sizes.length,

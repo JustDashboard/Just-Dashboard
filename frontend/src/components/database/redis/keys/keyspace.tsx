@@ -1,6 +1,6 @@
 "use client"
 
-import { BarList, type BarListItem } from "@/components/bar-list"
+import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { EngineMark } from "@/components/database/kit"
 import { bytesId, bytesLabel } from "@/components/database/redis/bytes"
 import { TypeComposition, type TypeShare } from "@/components/database/redis/composition"
@@ -76,9 +76,11 @@ export function Keyspace({
     .sort((a, b) => b[1] - a[1])
     .map(([name, count]) => ({ type: name, weight: count, figure: count.toLocaleString() }))
   const folders = level?.folders ?? []
-  const largest = Math.max(...folders.map((folder) => folder.count), 1)
-  const bars = folders.slice(0, RANKED).map((folder) => {
-    const item = namespaceBar(folder, largest)
+  // A namespace's share is of the keys the walk found, which is what the
+  // "By type" strip above it is a picture of.
+  const found = level?.count ?? 0
+  const ranked = folders.slice(0, RANKED).map((folder) => {
+    const item = namespaceRow(folder, found)
     const to = typeof folder.pattern === "string" ? folder.pattern : undefined
     return to ? { ...item, onClick: () => onNamespace(to) } : item
   })
@@ -86,12 +88,11 @@ export function Keyspace({
   // are spread over them, and the way to each.
   const spaces = server.data?.features.databases ? server.data.keyspace : []
   const everywhere = spaces.reduce((sum, entry) => sum + entry.keys, 0)
-  const fullest = Math.max(...spaces.map((entry) => entry.keys), 1)
-  const databases: BarListItem[] = spaces.map((entry) => ({
+  const databases: RankItem[] = spaces.map((entry) => ({
     key: String(entry.db),
     label: `db${entry.db}`,
     value: entry.keys.toLocaleString(),
-    share: entry.keys / fullest,
+    share: everywhere > 0 ? entry.keys / everywhere : undefined,
     hint:
       entry.db === db
         ? "on screen"
@@ -105,7 +106,7 @@ export function Keyspace({
       <Heading id="redis-keyspace-databases" title="Databases on this server">
         {`${everywhere.toLocaleString()} keys in ${databases.length}`}
       </Heading>
-      <BarList items={databases} className="-ml-2" />
+      <RankList items={databases} />
     </section>
   )
 
@@ -167,11 +168,9 @@ export function Keyspace({
                 <Skeleton className="h-2 w-full" />
                 <Skeleton className="h-3 w-2/3" />
               </div>
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <Skeleton className="h-3.5 w-36" />
-                {Array.from({ length: 6 }, (_, i) => (
-                  <Skeleton key={i} className="h-5" style={{ width: `${92 - i * 11}%` }} />
-                ))}
+                <RankSkeleton rows={6} />
               </div>
             </div>
           ) : (
@@ -215,13 +214,13 @@ export function Keyspace({
               </section>
 
               <div className="grid items-start gap-x-10 gap-y-7 @3xl:grid-cols-2 [&>*]:min-w-0">
-                {bars.length > 0 && (
+                {ranked.length > 0 && (
                   <section aria-labelledby="redis-keyspace-namespaces" className="space-y-2">
                     <Heading id="redis-keyspace-namespaces" title="Largest namespaces">
-                      {folders.length + level.foldersOmitted > bars.length &&
-                        `${(folders.length + level.foldersOmitted - bars.length).toLocaleString()} smaller ones are in the tree`}
+                      {folders.length + level.foldersOmitted > ranked.length &&
+                        `${(folders.length + level.foldersOmitted - ranked.length).toLocaleString()} smaller ones are in the tree`}
                     </Heading>
-                    <BarList items={bars} className="-ml-2" />
+                    <RankList items={ranked} />
                   </section>
                 )}
                 {databases.length > 1 && elsewhere}
@@ -256,8 +255,8 @@ function Heading({
   )
 }
 
-/** A namespace as a ranked bar: its name in its own hue, its keys, and what types they are. */
-function namespaceBar(folder: RedisTreeFolder, largest: number): BarListItem {
+/** A namespace as a ranked row: its name in its own hue, its keys, their share, and what types they are. */
+function namespaceRow(folder: RedisTreeFolder, found: number): RankItem {
   const name = bytesLabel(folder.name)
   const mix = Object.entries(folder.types)
     .sort((a, b) => b[1] - a[1])
@@ -265,14 +264,9 @@ function namespaceBar(folder: RedisTreeFolder, largest: number): BarListItem {
   return {
     key: bytesId(folder.prefix),
     label: name || "(empty)",
-    mark: (
-      <span
-        className="size-1.5 rounded-full"
-        style={{ backgroundColor: hueFor(name.toLowerCase(), LANES) }}
-      />
-    ),
+    swatch: hueFor(name.toLowerCase(), LANES),
     value: folder.count.toLocaleString(),
-    share: folder.count / largest,
+    share: found > 0 ? folder.count / found : undefined,
     // Of one type, the type is the whole reading; of several, how many of each.
     hint:
       mix.length > 1

@@ -1,6 +1,6 @@
 "use client"
 
-import { BarList } from "@/components/bar-list"
+import { RankList, RankSkeleton } from "@/components/rank-list"
 import { compactCount, grouped } from "@/components/database/data/view"
 import { EngineMark } from "@/components/database/kit"
 import { objectParams, tableParams } from "@/components/database/schema/address"
@@ -14,7 +14,6 @@ import { IconAction } from "@/components/icon-action"
 import { SidebarLeftOpen } from "@/components/icons"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
@@ -182,10 +181,10 @@ export function SchemaLanding({
                   <h3 className="border-b border-hairline pb-2 text-title font-medium">
                     Largest in {name}
                   </h3>
-                  {/* Bled on the left only, so the names start under the title
-                      and the figures end on its hairline rather than past it. */}
-                  <BarList
-                    className="-ml-2 pt-1.5"
+                  {/* Figures in a column and each one's share of the schema,
+                      not a bar under every name. */}
+                  <RankList
+                    className="pt-1.5"
                     items={figures.largest.map(({ object, group, share, rows, bytes: size }) => ({
                       key: `${group}:${object.name}`,
                       label: object.name,
@@ -233,14 +232,7 @@ export function SchemaLanding({
                   )}
                 </section>
               ) : measuring ? (
-                <div aria-hidden className="space-y-4 pt-1">
-                  {["w-40", "w-28", "w-32", "w-24"].map((width) => (
-                    <div key={width} className="space-y-1.5">
-                      <Skeleton className={cn("h-3", width)} />
-                      <Skeleton className="h-1 w-full" />
-                    </div>
-                  ))}
-                </div>
+                <RankSkeleton rows={4} className="pt-1" />
               ) : null}
 
               {beside && (

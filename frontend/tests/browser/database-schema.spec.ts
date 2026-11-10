@@ -671,6 +671,9 @@ test("with nothing chosen the page shows the schema and its largest tables witho
   // The large ones are a press from open.
   const largest = page.getByRole("region", { name: "Largest in public" })
   await expect(largest.getByRole("button")).toHaveCount(3)
+  // Figures and their share of the schema in columns, with no bar under a name.
+  await expect(largest.locator("[data-slot=bar-list]")).toHaveCount(0)
+  await expect(largest.locator("[data-slot=rank-share]")).toHaveCount(3)
   await largest.getByRole("button", { name: "Open orders" }).click()
   await expect(page).toHaveURL(/schema=public&table=orders$/)
   await page.goBack()
