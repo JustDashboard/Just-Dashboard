@@ -319,6 +319,29 @@ dashboard ([network module](../backend/network.md#three-rules)). The schema bloc
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old
 columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
 
+### The store's connections
+
+`store.Open` hands out one pool of four connections (`Store.DB`), kept that small so SQLite's one
+writer does not queue behind itself.
+
+**Nothing queries the pool while it holds one of its connections.** An open `*sql.Rows` holds a
+connection until it is closed or read to its end, and a `*sql.Tx` until it commits or rolls back. A
+query made in between — directly, or through a method that looks harmless — takes a second connection.
+That works until as many such calls run at once as the pool has connections: each then holds one and
+waits for another, and every other database call in the process (session checks, audit rows, the
+metrics recorder, the deployment engine) waits behind them until the stuck requests' clients go away.
+The fleet read and the schedule list both did this, and four browser tabs on Deployments during a busy
+deploy were enough. So a list reads its cursor to the end and closes it before it looks anything up
+(better: selects it in the same statement, or reads it for all rows in one `IN` query), and a function
+that is handed a transaction runs every statement on that transaction, never on the pool beside it.
+
+Two things keep it that way. `storetest.OneConnection(st)` leaves a test's store one connection, on
+which such a call can never finish; `deploy/one_connection_test.go` calls every list read of the
+deployment stores that way, with rows present and a deadline, and a new list read belongs in its table.
+And `JD_STORE_ONE_CONNECTION=1` does the same to every store `storetest.Open` opens, which turns a
+package's whole suite into the hunt: `JD_STORE_ONE_CONNECTION=1 go test -timeout 5m ./internal/deploy`
+hangs in the test that makes the mistake and the timeout's stack names the line.
+
 `internal/audit` writes `audit_log` **and** mirrors every entry to the process log, so a trail survives
 the database being tampered with. The row is written with the request's values but not its
 cancellation (bounded at five seconds), so a client that disconnects once its mutation applied still

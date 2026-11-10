@@ -65,6 +65,18 @@ metadata_json`
 
 type scanner interface{ Scan(...any) error }
 
+// withColumns scans a row that carries more columns after the ones a scan
+// function reads, so a list can select what it would otherwise look up row by
+// row while its cursor is open.
+type withColumns struct {
+	row   scanner
+	extra []any
+}
+
+func (w withColumns) Scan(dest ...any) error {
+	return w.row.Scan(append(dest[:len(dest):len(dest)], w.extra...)...)
+}
+
 func scanEngineRun(row scanner) (*EngineRun, error) {
 	var (
 		r                                            EngineRun

@@ -371,8 +371,20 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 		summary.RecentRuns = recentRuns[summary.ID]
 	}
 
+	// One statement, with each run's names read beside it. This loop once
+	// loaded every run and its names with further queries while its cursor
+	// still held a connection, so a handful of concurrent reads each held one
+	// of the pool's connections and waited for another, and every other
+	// database call in the process waited behind them. Nothing in here may
+	// query: a cursor is read to its end and closed first. The names are two
+	// lookups by primary key for each run in flight, not a read of the fleet.
 	activeRows, err := s.db.QueryContext(ctx, `
-		SELECT id FROM deploy_runs WHERE `+activeRunWhere+`
+		SELECT `+engineRunColumns+`,
+		       (SELECT CASE WHEN owner.archived_name != '' THEN owner.archived_name ELSE owner.name END
+		          FROM deploy_projects owner WHERE owner.id = deploy_runs.project_id),
+		       (SELECT target.name FROM deploy_environments target
+		         WHERE target.id = deploy_runs.environment_id AND target.project_id = deploy_runs.project_id)
+		  FROM deploy_runs WHERE `+activeRunWhere+`
 		 ORDER BY CASE WHEN state = 'queued' THEN 1 ELSE 0 END,
 		          priority DESC, requested_at, id`)
 	if err != nil {
@@ -381,22 +393,17 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 	defer activeRows.Close()
 	queuePosition := 0
 	for activeRows.Next() {
-		var runID int64
-		if err := activeRows.Scan(&runID); err != nil {
-			return nil, err
-		}
-		run, err := s.Run(ctx, runID)
+		var projectName, environment sql.NullString
+		run, err := scanEngineRun(withColumns{activeRows, []any{&projectName, &environment}})
 		if err != nil {
 			return nil, err
 		}
-		work := ActiveWork{Run: *run}
-		if err := s.db.QueryRowContext(ctx, `
-			SELECT CASE WHEN p.archived_name != '' THEN p.archived_name ELSE p.name END, e.name FROM deploy_projects p
-			JOIN deploy_environments e ON e.project_id = p.id
-			WHERE p.id = ? AND e.id = ?`, run.ProjectID, run.EnvironmentID).
-			Scan(&work.ProjectName, &work.Environment); err != nil {
-			return nil, err
+		if !projectName.Valid || !environment.Valid {
+			// What the separate lookup answered for a run whose deployment
+			// or environment is gone.
+			return nil, sql.ErrNoRows
 		}
+		work := ActiveWork{Run: *run, ProjectName: projectName.String, Environment: environment.String}
 		if run.State == RunQueued {
 			queuePosition++
 			work.QueuePosition = queuePosition
@@ -404,6 +411,9 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 		result.ActiveWork = append(result.ActiveWork, work)
 	}
 	if err := activeRows.Err(); err != nil {
+		return nil, err
+	}
+	if err := activeRows.Close(); err != nil {
 		return nil, err
 	}
 	// Every run a card shows in flight is one of the host's active runs, so
