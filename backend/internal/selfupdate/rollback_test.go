@@ -240,7 +240,7 @@ func TestATagIsInstalledEvenWhenTheBranchHasMovedOn(t *testing.T) {
 	release(t, upstream, "0.7")
 
 	var log bytes.Buffer
-	commit, version, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
+	commit, version, err := forward(checkout, "0.6", &log)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, log.String())
 	}
@@ -256,7 +256,7 @@ func TestAnAnnotatedTagIsPeeled(t *testing.T) {
 	git(t, upstream, "tag", "-a", "v0.6", "-m", "0.6")
 	release(t, upstream, "0.7")
 	var log bytes.Buffer
-	commit, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
+	commit, _, err := forward(checkout, "0.6", &log)
 	if err != nil || commit != tagged {
 		t.Fatalf("commit %s, err %v\n%s", commit, err, log.String())
 	}
@@ -267,7 +267,7 @@ func TestABranchThatMovedOnWithoutATagIsRefused(t *testing.T) {
 	before := head(t, checkout, "HEAD")
 	release(t, upstream, "0.7")
 	var log bytes.Buffer
-	_, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
+	_, _, err := forward(checkout, "0.6", &log)
 	if err == nil || !strings.Contains(err.Error(), "has moved on to 0.7") {
 		t.Fatalf("error = %v", err)
 	}
@@ -280,7 +280,7 @@ func TestABranchThatIsNotTheAnnouncedReleaseIsRefused(t *testing.T) {
 	_, checkout := installed(t)
 	before := head(t, checkout, "HEAD")
 	var log bytes.Buffer
-	_, _, err := fastForward(context.Background(), checkout, "main", "0.7", &log)
+	_, _, err := forward(checkout, "0.7", &log)
 	if err == nil || !strings.Contains(err.Error(), "does not contain release 0.7") {
 		t.Fatalf("error = %v", err)
 	}
@@ -295,7 +295,7 @@ func TestATargetWithNoReadableChangelogIsRefused(t *testing.T) {
 	git(t, upstream, "add", ".")
 	git(t, upstream, "commit", "-q", "-m", "broken")
 	var log bytes.Buffer
-	if _, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log); err == nil {
+	if _, _, err := forward(checkout, "0.6", &log); err == nil {
 		t.Fatal("installed a commit whose version could not be confirmed")
 	}
 }
@@ -305,7 +305,7 @@ func TestALocalTagCannotStandInForTheRelease(t *testing.T) {
 	_, checkout := installed(t)
 	git(t, checkout, "tag", "v0.6")
 	var log bytes.Buffer
-	if _, version, err := fastForward(context.Background(), checkout, "main", "0.6", &log); err != nil || version != "0.6" {
+	if _, version, err := forward(checkout, "0.6", &log); err != nil || version != "0.6" {
 		t.Fatalf("version %q, err %v\n%s", version, err, log.String())
 	}
 	if head(t, checkout, "HEAD") == head(t, checkout, "v0.6") {
@@ -317,7 +317,7 @@ func TestRestoringTheCheckoutKeepsAnUnrelatedEdit(t *testing.T) {
 	_, checkout := installed(t)
 	from := head(t, checkout, "HEAD")
 	var log bytes.Buffer
-	commit, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
+	commit, _, err := forward(checkout, "0.6", &log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func TestRestoringTheCheckoutSeesThroughAStaleIndex(t *testing.T) {
 	_, checkout := installed(t)
 	from := head(t, checkout, "HEAD")
 	var log bytes.Buffer
-	commit, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
+	commit, _, err := forward(checkout, "0.6", &log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func TestRestoringTheCheckoutRefusesToOverwriteACollidingEdit(t *testing.T) {
 	_, checkout := installed(t)
 	from := head(t, checkout, "HEAD")
 	var log bytes.Buffer
-	commit, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
+	commit, _, err := forward(checkout, "0.6", &log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +388,7 @@ func TestRestoringLeavesACheckoutSomebodyElseMoved(t *testing.T) {
 	_, checkout := installed(t)
 	from := head(t, checkout, "HEAD")
 	var log bytes.Buffer
-	commit, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
+	commit, _, err := forward(checkout, "0.6", &log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,6 +410,79 @@ func TestRestoringWithNoRecordedCommitChangesNothing(t *testing.T) {
 	var log bytes.Buffer
 	if err := restoreCheckout(context.Background(), checkout, "", "", &log); err == nil {
 		t.Fatal("no error")
+	}
+	if head(t, checkout, "HEAD") != before {
+		t.Fatal("the checkout moved")
+	}
+}
+
+// The project's own repository tags a merge only after its checks pass, so a
+// version with no tag has not been released. The branch that names it used to
+// be installed in its place: 0.8.5 sat on offer for days with a failed run.
+func TestWithoutATagNothingIsInstalledFromTheProjectsOwnRepository(t *testing.T) {
+	_, checkout := installed(t)
+	before := head(t, checkout, "HEAD")
+	var log bytes.Buffer
+	_, err := fastForward(context.Background(), checkout, request{ref: "main", version: "0.6", tagOnly: true}, &log)
+	if err == nil {
+		t.Fatalf("installed the branch in place of a release:\n%s", log.String())
+	}
+	for _, want := range []string{"no tag v0.6", "has not been released", "nothing was changed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not say %q: %v", want, err)
+		}
+	}
+	if head(t, checkout, "HEAD") != before {
+		t.Fatal("the checkout moved")
+	}
+}
+
+func TestATaggedReleaseIsInstalledFromTheProjectsOwnRepository(t *testing.T) {
+	upstream, checkout := installed(t)
+	tagged := head(t, upstream, "HEAD")
+	git(t, upstream, "tag", "v0.6")
+	release(t, upstream, "0.7")
+	var log bytes.Buffer
+	landed, err := fastForward(context.Background(), checkout, request{ref: "main", version: "0.6", tagOnly: true}, &log)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, log.String())
+	}
+	if landed.commit != tagged || landed.version != "0.6" || !landed.tagged {
+		t.Fatalf("landed %+v, want the tagged commit %s as 0.6", landed, tagged)
+	}
+}
+
+// A fork still gets its branch, and the record says that is what it got.
+func TestTheBranchInstalledForAForkIsNotRecordedAsARelease(t *testing.T) {
+	_, checkout := installed(t)
+	var log bytes.Buffer
+	landed, err := fastForward(context.Background(), checkout, request{ref: "main", version: "0.6"}, &log)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, log.String())
+	}
+	if landed.tagged {
+		t.Fatal("a branch head was recorded as a tagged release")
+	}
+}
+
+// An origin that cannot be asked is not an origin without the tag. A fork
+// falls back to its branch either way; the project's own repository installs
+// nothing either way, and says which of the two it was.
+func TestAnOriginThatCannotBeAskedForTheTagIsNotInstalledFromWhenTagsAreRequired(t *testing.T) {
+	upstream, checkout := installed(t)
+	git(t, upstream, "tag", "v0.6")
+	git(t, checkout, "fetch", "-q", "--no-tags", "origin")
+	git(t, checkout, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone"))
+	before := head(t, checkout, "HEAD")
+
+	var log bytes.Buffer
+	_, _, err := updateTarget(context.Background(), checkout, request{ref: "main", version: "0.6", tagOnly: true}, &log)
+	if err == nil || !strings.Contains(err.Error(), "could not confirm that 0.6 has been released") {
+		t.Fatalf("error = %v\n%s", err, log.String())
+	}
+	target, tagged, err := updateTarget(context.Background(), checkout, request{ref: "main", version: "0.6"}, &log)
+	if err != nil || tagged || target != "origin/main" {
+		t.Fatalf("a fork was given %q (tagged %v): %v\n%s", target, tagged, err, log.String())
 	}
 	if head(t, checkout, "HEAD") != before {
 		t.Fatal("the checkout moved")

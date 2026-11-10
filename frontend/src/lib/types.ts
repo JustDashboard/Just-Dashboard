@@ -8621,8 +8621,12 @@ export type UpdateRun = {
   image: string
   container: string
   health?: string
+  /** Installed from the repository's tag `v<toVersion>` or not at all. */
+  requireTag?: boolean
   fromCommit?: string
   toCommit?: string
+  /** `toCommit` is the commit that tag names, not wherever the branch was. */
+  tagged?: boolean
   actor: string
   startedAt: string
   updatedAt: string
@@ -8634,6 +8638,10 @@ export type SelfUpdateReport = {
   version: string
   latest?: string
   available: boolean
+  /** The version on offer has a release tag; false is a fork's branch head. */
+  tagged: boolean
+  /** A newer version on the tracked branch with no tag yet. Not offered. */
+  pending?: string
   /** Releases newer than the installed version, newest first. */
   releases: Release[]
   /** Everything this build knows about its own past; needs no network. */
@@ -8646,6 +8654,8 @@ export type SelfUpdateReport = {
     source?: string
     repo: string
     ref: string
+    /** Only tagged versions are offered and installed: the project's own repository. */
+    tagsOnly: boolean
   }
   install: {
     supported: boolean

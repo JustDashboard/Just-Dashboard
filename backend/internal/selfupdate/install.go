@@ -87,6 +87,8 @@ type StartRequest struct {
 	From string
 	To   string
 	Ref  string
+	// RequireTag refuses to install To from anything but origin's tag v<To>.
+	RequireTag bool
 	// Health is the URL the updater probes once the stack is back up. It
 	// belongs in the request rather than being written to the record after the
 	// container has been created: the updater may read that record within
@@ -138,6 +140,7 @@ func (i *Installer) Start(ctx context.Context, loc *Location, req StartRequest) 
 		FromVersion: Normalise(req.From),
 		ToVersion:   Normalise(req.To),
 		Ref:         req.Ref,
+		RequireTag:  req.RequireTag,
 		Dir:         loc.Dir,
 		Compose:     loc.Compose,
 		Image:       loc.Image,
@@ -152,7 +155,11 @@ func (i *Installer) Start(ctx context.Context, loc *Location, req StartRequest) 
 	// reads is always this run's and never the tail of the last one.
 	if f, err := i.store.OpenLog(); err == nil {
 		fmt.Fprintf(f, "Updating Just Dashboard %s → %s\n", run.FromVersion, run.ToVersion)
-		fmt.Fprintf(f, "checkout: %s (%s)\n\n", run.Dir, run.Ref)
+		fmt.Fprintf(f, "checkout: %s (%s)\n", run.Dir, run.Ref)
+		if run.RequireTag {
+			fmt.Fprintf(f, "release: origin's tag v%s, or nothing\n", run.ToVersion)
+		}
+		fmt.Fprintln(f)
 		f.Close()
 	}
 	if err := i.store.Save(run); err != nil {

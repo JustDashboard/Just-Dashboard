@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,11 +87,19 @@ func installed(t *testing.T) (upstream, checkout string) {
 	return upstream, checkout
 }
 
+// forward is fastForward as a fork's update runs it: with no tag on origin the
+// branch stands in. The project's own repository passes tagOnly instead, and
+// the tests for that say so.
+func forward(checkout, version string, log io.Writer) (commit, landedOn string, err error) {
+	landed, err := fastForward(context.Background(), checkout, request{ref: "main", version: version}, log)
+	return landed.commit, landed.version, err
+}
+
 func TestFastForwardMovesTheCheckoutOn(t *testing.T) {
 	_, checkout := installed(t)
 	var log bytes.Buffer
 
-	commit, version, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
+	commit, version, err := forward(checkout, "0.6", &log)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, log.String())
 	}
@@ -125,7 +134,7 @@ func TestFastForwardKeepsALocalEditThatDoesNotCollide(t *testing.T) {
 	write(t, local, "name: just-dashboard\n# my own port mapping\n")
 
 	var log bytes.Buffer
-	if _, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log); err != nil {
+	if _, _, err := forward(checkout, "0.6", &log); err != nil {
 		t.Fatalf("an unrelated local edit blocked the upgrade: %v\n%s", err, log.String())
 	}
 	got, err := os.ReadFile(local)
@@ -145,7 +154,7 @@ func TestFastForwardRefusesToOverwriteACollidingEdit(t *testing.T) {
 	write(t, filepath.Join(checkout, "version.txt"), "mine\n")
 
 	var log bytes.Buffer
-	_, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
+	_, _, err := forward(checkout, "0.6", &log)
 	if err == nil {
 		t.Fatal("an upgrade overwrote a local edit to a file the release also changed")
 	}
@@ -168,7 +177,7 @@ func TestFastForwardRefusesADivergedCheckout(t *testing.T) {
 	git(t, checkout, "commit", "-q", "-m", "a change of my own")
 
 	var log bytes.Buffer
-	if _, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log); err == nil {
+	if _, _, err := forward(checkout, "0.6", &log); err == nil {
 		t.Fatal("a diverged checkout was fast-forwarded, which is not possible without losing a commit")
 	}
 	if _, err := os.Stat(filepath.Join(checkout, "local-only.txt")); err != nil {
@@ -181,11 +190,11 @@ func TestFastForwardRefusesADivergedCheckout(t *testing.T) {
 func TestFastForwardOnACurrentCheckoutIsFine(t *testing.T) {
 	_, checkout := installed(t)
 	var log bytes.Buffer
-	first, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
+	first, _, err := forward(checkout, "0.6", &log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
+	second, _, err := forward(checkout, "0.6", &log)
 	if err != nil {
 		t.Fatalf("re-running an upgrade on an already-current checkout failed: %v", err)
 	}
@@ -257,7 +266,7 @@ func TestFastForwardLeavesNothingRootOwnedBehind(t *testing.T) {
 	}
 
 	var log bytes.Buffer
-	if _, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log); err != nil {
+	if _, _, err := forward(checkout, "0.6", &log); err != nil {
 		t.Fatalf("%v\n%s", err, log.String())
 	}
 	var left []string
@@ -283,7 +292,7 @@ func TestAReleaseWithAChangelogThisVersionOnlyPartlyUnderstandsIsInstalled(t *te
 	git(t, upstream, "commit", "-q", "-m", "0.7")
 
 	var log bytes.Buffer
-	_, version, err := fastForward(context.Background(), checkout, "main", "0.7", &log)
+	_, version, err := forward(checkout, "0.7", &log)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, log.String())
 	}

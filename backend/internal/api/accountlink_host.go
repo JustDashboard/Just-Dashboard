@@ -174,7 +174,11 @@ func (h *accountHost) InstallUpdate(ctx context.Context, actor, want string) (st
 		if rep.Check.Error != "" {
 			return "", errors.New("the newest version could not be looked up: " + rep.Check.Error)
 		}
-		return "", fmt.Errorf("this dashboard is already on %s, which is the newest published version", rep.Version)
+		if rep.Pending != "" {
+			return "", fmt.Errorf("this dashboard is already on %s, the newest released version; %s is on %s but has no release tag yet",
+				rep.Version, rep.Pending, rep.Check.Ref)
+		}
+		return "", fmt.Errorf("this dashboard is already on %s, which is the newest released version", rep.Version)
 	}
 	target := rep.Latest
 	if want != "" && selfupdate.Compare(want, target) != 0 {

@@ -5,9 +5,9 @@
 #   scripts/release.sh 0.6
 #
 # A version of Just Dashboard lives in five files, and every install in the
-# world decides whether to offer itself an update by comparing two of them. So
-# this exists to make bumping a release one action rather than five, and the Go
-# test suite fails the build if any of them ever drift apart:
+# world decides whether it is behind by comparing two of them. So this exists
+# to make bumping a release one action rather than five, and the Go test suite
+# fails the build if any of them ever drift apart:
 #
 #   backend/internal/version/version.go          what the server logs and reports
 #   frontend/src/lib/version.ts                  what the wordmark shows
@@ -97,8 +97,11 @@ ${BOLD}Released $VERSION locally.${RESET} What is left:
   git commit -am "Release $VERSION"
   ${DIM}# push the release branch and open its pull request into main${RESET}
 
-Every install polling this repository sees $VERSION within six hours of the
-merge into main, because the changelog on the tracked branch *is* the
-announcement. Once Verify passes on that merge, .github/workflows/release.yml
-tags it v$VERSION and publishes the GitHub release from this changelog entry.
+Merging into main does not release $VERSION by itself. Once Verify passes on
+that merge, .github/workflows/release.yml tags it v$VERSION and publishes the
+GitHub release from this changelog entry, and the tag is what installs wait
+for: they are offered $VERSION, and install exactly that commit, only once
+v$VERSION exists. They look every two hours and whenever the dashboard is
+opened. If Verify fails, nothing is tagged and nothing is offered; fix main and
+the next green run tags it.
 EOF

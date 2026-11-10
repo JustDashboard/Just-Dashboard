@@ -57,9 +57,12 @@ metadata; the audit trail is kept. A key's secret is shown only once.
 
 The dashboard is not at 1.0 yet because the API is still moving. Every release is in
 [CHANGELOG.md](../../CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds and
-restarts from a container that outlives the restart. The update check is one unauthenticated GET of
-one file from GitHub, every two hours and at most every five minutes while pages are being opened;
-`JD_UPDATE_CHECK=false` turns it off.
+restarts from a container that outlives the restart. A version is offered only once it has a release
+tag (`v0.8.6`) on the project's repository, which is made after that version's checks have passed, and
+the update installs exactly the tagged commit. The Version page says so beside the offer, and names a
+version that is on `main` but not released yet. The update check is one unauthenticated GET of one file
+from GitHub and a second small request for the tag, every two hours and at most every five minutes
+while pages are being opened; `JD_UPDATE_CHECK=false` turns it off.
 
 ## Uninstalling
 

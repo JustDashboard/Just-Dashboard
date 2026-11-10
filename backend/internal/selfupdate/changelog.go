@@ -51,9 +51,11 @@ var changelogJSON []byte
 
 // ManifestPath is where the same file lives in the repository, which is what
 // the check fetches. It is a path within the tree rather than a release asset
-// on purpose: publishing a release becomes a commit, so there is no second
-// ceremony to forget, and an install started from a fork or a branch reads
-// whatever that fork or branch actually says.
+// on purpose: writing a release's notes is a commit, so there is no second
+// place to write them, and an install started from a fork or a branch reads
+// whatever that fork or branch actually says. What the file cannot say is
+// whether a version it names was released; that is the tag's to say (see
+// check.go).
 const ManifestPath = "backend/internal/selfupdate/changelog.json"
 
 // Kind classifies one line of a release. The set is closed because the UI

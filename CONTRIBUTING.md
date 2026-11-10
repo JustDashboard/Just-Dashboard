@@ -241,7 +241,9 @@ never into `docs/audits/`.
   to `main`, reads `latest` from `backend/internal/selfupdate/changelog.json`, and when no release
   `v<latest>` exists yet, tags that commit and publishes the release with the version's section of
   `CHANGELOG.md` as its notes. The branch a release was cut on does not matter, and a merge whose
-  version is already released publishes nothing. Never tag or publish a release by hand; a manual run of the
+  version is already released publishes nothing. The tag is what installs wait for: a version on `main`
+  with no `v<version>` tag is neither offered nor installed (`selfupdate.TagsOnly`), so a merge whose
+  Verify run fails ships to nobody until a later run is green. Never tag or publish a release by hand; a manual run of the
   workflow on `main` retries one that failed.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run. `TestLiveSiteControlsAreMeasured` instead writes its

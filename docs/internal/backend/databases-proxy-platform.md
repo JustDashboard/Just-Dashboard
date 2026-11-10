@@ -5971,8 +5971,10 @@ end-to-end harness's is (`hubsignin_test_build.go`).
 
 ### Cutting a release
 
-When the user names a version ("make this 0.6", "release 0.6.1"), that is the trigger. A release is a commit on the tracked branch, not a `git tag` — that is what every install
-compares itself against. Four files carry it and `scripts/release.sh <version>` writes all of them:
+When the user names a version ("make this 0.6", "release 0.6.1"), that is the trigger. Cutting a release is a
+commit: the changelog on the tracked branch is what every install compares itself against. *Releasing* it
+is the tag `v<version>`, which nobody makes by hand (below) and without which no install is offered the
+version. Four files carry it and `scripts/release.sh <version>` writes all of them:
 `backend/internal/version/version.go`, `frontend/src/lib/version.ts`, `frontend/package.json`, and
 `backend/internal/selfupdate/changelog.json`. Two tests fail the run if they drift (`version_test.go`,
 which skips when the frontend is absent, and `TestChangelogHeadIsTheProductVersion`).
@@ -6001,10 +6003,12 @@ changes is `CHANGELOG.md`. Its first step alone does the same without the tests:
 unless the changelog's newest release is the version named. Do it last before the branch is merged into
 `main`, because the GitHub release takes its notes from that section.
 
-A release is cut on its patch branch (`patch/0.7.2`) and reaches installs when that branch is merged into
-`main`. The GitHub release follows on its own: `.github/workflows/release.yml` runs after Verify passes on
-a push to `main`, reads `latest` from the changelog, and when no release `v<latest>` exists, tags that
-commit and publishes the release with the version's `CHANGELOG.md` section as its notes. The version
+A release is cut on its patch branch (`patch/0.7.2`), merged into `main`, and reaches installs when that
+merge is tagged. `.github/workflows/release.yml` runs after Verify passes on a push to `main`, reads
+`latest` from the changelog, and when no release `v<latest>` exists, tags that commit and publishes the
+release with the version's `CHANGELOG.md` section as its notes. Until 0.8.6 the merge itself was the
+announcement and the tag only decorated the Releases page: 0.8.5 was offered to every install for days
+with a failed Verify run and no tag. Now a failed run means nothing is tagged and nothing is offered. The version
 comes from the changelog, never from the branch name, so a merge whose version is already released
 publishes nothing.
 Nothing is tagged by hand; a manual run of the workflow on `main` retries a failed publish.
@@ -6040,8 +6044,21 @@ done by hand, and the UI refuses to fold it away.
   number only once no install older than 0.8.6 is worth reaching. For the same reason a new field or kind
   is only ever *added* to this file: what an old reader needs (`version`, `date`, `title`, `changes[].kind`
   and `.text`) keeps its meaning, and a change of shape goes to a new path.
+- **Only a released version is offered** (`Checker.released`, `TagsOnly`). The changelog on the tracked
+  branch says which versions exist; whether one was released is whether the same file answers at
+  `refs/tags/v<version>/` on the raw host (a `HEAD`, spelled with the full ref so a branch named `v0.9`
+  cannot answer for the tag). For the project's own repository, whatever branch is tracked, the check
+  walks the newer versions from the newest and offers the first tagged one and everything older; the
+  newest untagged one is reported as `pending` and not offered. A tag found is remembered for the life
+  of the process, a missing one is asked about again, at most `maxTagProbes` versions are asked about per
+  check, and a probe that cannot be answered fails the check (the previous answer is kept) rather than
+  guessing either way. A fork named with `JD_UPDATE_REPO` is offered every newer version as before, and
+  `tagged` says whether the newest has a tag. The report carries `tagged`, `pending` and
+  `check.tagsOnly`; the Version page's hint reads them through `frontend/src/lib/update-offer.ts`
+  ("tagged v0.8.6", "no release tag, installs main as it stands", "0.8.6 is on main, not released yet"),
+  and the update dialog says when what it installs is a branch head.
 - **Update discovery is independently controlled**: one unauthenticated
-  GET, a user agent with product and version only, and a switch to turn it off. Automatic deployment
+  GET and the tag's `HEAD`, a user agent with product and version only, and a switch to turn it off. Automatic deployment
   branch monitoring uses separate outbound Git connections regardless of that switch. A failure keeps the
   previous good answer rather than blanking the banner — a dropped tunnel is a normal Tuesday here.
 - Cadence is two floors, not a timer, because the moment somebody wants a current answer is the moment
@@ -6072,15 +6089,18 @@ done by hand, and the UI refuses to fold it away.
   and each file the update changed with the folders above it (`handBack`, through `hostexec.GiveBack`).
   Until 0.7.1 an update's new folders stayed root's, and the operator's own next pull stopped halfway in
   them.
-- **It installs the release that was announced** (`updateTarget`). After the fetch it prefers the tag
+- **It installs the release that was offered** (`updateTarget`). After the fetch it takes the tag
   `v<ToVersion>`, asked of `origin` with `ls-remote` and fetched without touching local tags, so a tag
-  the operator made cannot stand in for it and one that clashes cannot fail the fetch. With no tag, which
-  is normal for a fork and for the window before `release.yml` has tagged a merge, it uses
-  `origin/<ref>`. Either way the changelog at the target must name `ToVersion`, or nothing changes. A
-  branch that has moved past `ToVersion` with no tag to pin it is refused rather than installed, because
-  nobody was shown that release's notes and checking again offers it properly. The version it reports
+  the operator made cannot stand in for it and one that clashes cannot fail the fetch. With no tag there
+  are two answers, and the backend writes which into the record (`Run.RequireTag`, from `TagsOnly`)
+  because the updater has no configuration of its own. For the project's own repository nothing is
+  installed, and that includes an origin that could not be asked: an update that falls back to the
+  branch whenever origin is slow has no gate. For a fork it uses `origin/<ref>`. Either way the
+  changelog at the target must name `ToVersion`, or nothing changes. A branch that has moved past
+  `ToVersion` with no tag to pin it is refused rather than installed, because nobody was shown that
+  release's notes and checking again offers it properly. The version it reports
   (`Run.InstalledVersion`) is read from the changelog at `HEAD` after the merge and recorded only on
-  success.
+  success, and `Run.Tagged` says the commit it landed on is the one the tag names.
 - **It goes back if the new version does not come up** (`rollback.go`). Before the build it tags each image
   the compose file builds `<image>:previous`; one that cannot be tagged is a warning, not a stop. On a
   failed build, a failed `up --wait` or a failed health check it retags them, runs `up -d --no-build`,

@@ -115,6 +115,9 @@ type CheckMeta struct {
 	Source    string     `json:"source,omitempty"`
 	Repo      string     `json:"repo"`
 	Ref       string     `json:"ref"`
+	// TagsOnly says this install is offered, and installs, only versions with
+	// a release tag: true for the project's own repository, false for a fork.
+	TagsOnly bool `json:"tagsOnly"`
 }
 
 // Install is whether this particular install can upgrade itself, and if not,
@@ -137,6 +140,12 @@ type Report struct {
 	Version   string `json:"version"`
 	Latest    string `json:"latest,omitempty"`
 	Available bool   `json:"available"`
+	// Tagged says the version on offer has a release tag on the repository.
+	// False with Available set is a fork being offered the head of its branch.
+	Tagged bool `json:"tagged"`
+	// Pending is a newer version the tracked branch names that has no tag yet
+	// and so is not offered.
+	Pending string `json:"pending,omitempty"`
 	// Releases are the versions between the installed one and the newest,
 	// newest first. This is what "View changes" shows.
 	Releases []Release `json:"releases"`
@@ -193,6 +202,8 @@ func (s *Service) Report(ctx context.Context, freshness Freshness) Report {
 		Version:   s.current,
 		Latest:    check.Latest,
 		Available: check.Available,
+		Tagged:    check.Available && check.Tagged,
+		Pending:   check.Pending,
 		Releases:  check.Releases,
 		History:   local.Releases,
 		Breaking:  HasBreaking(check.Releases),
@@ -203,6 +214,7 @@ func (s *Service) Report(ctx context.Context, freshness Freshness) Report {
 			Source:    check.Source,
 			Repo:      s.checker.Repo(),
 			Ref:       s.checker.Ref(),
+			TagsOnly:  s.checker.TagsOnly(),
 		},
 	}
 	if rep.Releases == nil {
@@ -270,11 +282,12 @@ func (s *Service) Install(ctx context.Context, target, actor string) (*Run, erro
 		return nil, err
 	}
 	run, err := s.installer.Start(ctx, loc, StartRequest{
-		From:   s.current,
-		To:     Normalise(target),
-		Ref:    s.checker.Ref(),
-		Health: s.health,
-		Actor:  actor,
+		From:       s.current,
+		To:         Normalise(target),
+		Ref:        s.checker.Ref(),
+		RequireTag: s.checker.TagsOnly(),
+		Health:     s.health,
+		Actor:      actor,
 	})
 	if err != nil {
 		return nil, err
