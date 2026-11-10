@@ -148,6 +148,24 @@ the mount site is only the conversion.
 
 - Return `httpx.Err/BadRequest/Internal/Wrap`; never write an error body by hand. `httpx.WriteError` is
   the single renderer and is what keeps internal error strings off the wire.
+- The router's own refusals are in the same envelope (`api/route_methods.go`): a path nothing is
+  mounted at is `404 not_found`, and a method a path does not take is `405 method_not_allowed` with
+  the methods it does take in `Allow` (`HEAD` and `OPTIONS` included: no route serves either). Both
+  are set on the root router before anything is mounted, so every subrouter inherits them; under a
+  group they are still answered after that group's authentication. A WebSocket route asked for
+  without a handshake answers `400 websocket_upgrade_required` in the envelope too, a foreign origin
+  `403 origin_not_allowed` (`wsx.handshakeRefused`).
+- **A static path never answers for its `{param}` sibling.** chi tries the static node first and, when
+  it has no handler for the method, backtracks to the parameter node beside it, so `GET
+  /deploy/templates/import` (a `POST`) used to reach `GET /deploy/templates/{template}` as the
+  template named `import`, and `DELETE /pm2/save` would have removed a process named `save`.
+  `refuseShadowedMethods`, the last middleware of the feature group, asks the router which route the
+  request will reach (`Find`) and answers `405` when that is a parameter route and a static route is
+  registered at the very path without the method. The table is read off the finished router once
+  (`routeMethodTable`), and `TestAStaticPathNeverAnswersForItsParameterSibling` walks every such pair.
+  The cost is a reserved name: a resource called exactly what an action of its collection is called
+  (a volume named `prune`, a site named `bulk`, a PM2 process named `save`) cannot be addressed with
+  the methods that action lacks, as it never could with the methods it has.
 - Decode with `httpx.DecodeJSON` (4 MB cap, `application/json` required, unknown fields and trailing
   values rejected). SQL row values use `DecodeJSONNumbers` with the same constraints, preserving exact
   numeric tokens until the database adapter binds them.

@@ -24,6 +24,12 @@ func (s *Server) Routes() http.Handler {
 	// The deploy key gate asks this router which route a request will reach,
 	// so it is the whole tree, read at request time once it is built.
 	root := r
+	// The router's own refusals, an unknown path and a method a path does not
+	// take, are answered in the API's envelope (route_methods.go). Set before
+	// anything is mounted, so every subrouter inherits them.
+	methods := &routeMethodTable{root: root}
+	r.NotFound(routeNotFound)
+	r.MethodNotAllowed(methods.methodNotAllowed)
 	r.Use(middleware.RequestID)
 	r.Use(httpx.RealIP(s.Cfg.TrustedProxies))
 	r.Use(httpx.Recoverer(s.Log))
@@ -135,6 +141,11 @@ func (s *Server) Routes() http.Handler {
 			r.Use(s.apiLim.ByPrincipal)
 			r.Use(httpx.AuditMutations(s.Audit))
 			r.Use(httpx.RequireCSRF)
+			// A method a static path lacks is 405 there, never its {param}
+			// sibling's handler with the action's name as the parameter. Last
+			// in the chain, where the router's own 405 is answered from: after
+			// authentication, and on the audit trail like any refused write.
+			r.Use(methods.refuseShadowedMethods)
 
 			s.mountAccountRoutes(r)
 			s.mountSystemRoutes(r)
