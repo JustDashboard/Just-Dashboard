@@ -594,7 +594,7 @@ test("a failed engine says why, with its journal and a way to clear it", async (
 
   await expect(page.getByRole("link", { name: "Service details" })).toHaveAttribute(
     "href",
-    "/processes/services?unit=nginx.service",
+    "/processes/services/nginx.service",
   )
   await page.getByRole("button", { name: "Clear failed state" }).click()
   await expect(page.getByText("nginx's failed state cleared")).toBeVisible()

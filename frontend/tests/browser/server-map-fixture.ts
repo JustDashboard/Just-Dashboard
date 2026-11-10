@@ -364,7 +364,7 @@ const backups = [
 ]
 
 const services = [
-  item("unit:gitea.service", "gitea", "ok", "running", "/processes/services?unit=gitea.service", {
+  item("unit:gitea.service", "gitea", "ok", "running", "/processes/services/gitea.service", {
     product: "gitea",
     detail: "Gitea (Git with a cup of tea)",
   }),
@@ -373,16 +373,16 @@ const services = [
     "postgresql@14-main",
     "ok",
     "running",
-    "/processes/services?unit=postgresql@14-main.service",
+    "/processes/services/postgresql@14-main.service",
     {
       product: "postgresql",
       detail: "PostgreSQL Cluster 14-main",
     },
   ),
-  item("unit:cron.service", "cron", "ok", "running", "/processes/services?unit=cron.service", {
+  item("unit:cron.service", "cron", "ok", "running", "/processes/services/cron.service", {
     detail: "Regular background program processing daemon",
   }),
-  item("unit:ssh.service", "ssh", "ok", "running", "/processes/services?unit=ssh.service", {
+  item("unit:ssh.service", "ssh", "ok", "running", "/processes/services/ssh.service", {
     detail: "OpenBSD Secure Shell server",
   }),
 ]

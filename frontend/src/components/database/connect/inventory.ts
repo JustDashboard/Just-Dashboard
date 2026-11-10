@@ -44,7 +44,7 @@ export function instanceHref(instance: DbInstance): { href: string; label: strin
   }
   if (instance.host?.unit) {
     return {
-      href: `/processes/services?unit=${encodeURIComponent(instance.host.unit)}`,
+      href: `/processes/services/${encodeURIComponent(instance.host.unit)}`,
       label: "Open service",
     }
   }

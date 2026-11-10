@@ -639,6 +639,8 @@ var agentAPIPages = []struct {
 	{"/dashboard-users", "Users", "/account/users"},
 	{"/tokens", "API keys", "/account/keys"},
 	{"/packages", "Packages", "/packages"},
+	{"/systemd/daemon-reload", "Services", "/processes/services"},
+	{"/systemd/", "Service", "/processes/services/{1}"},
 	{"/systemd", "Services", "/processes/services"},
 	{"/cron", "Scheduled tasks", "/processes/scheduled"},
 	{"/pm2", "PM2", "/processes/pm2"},

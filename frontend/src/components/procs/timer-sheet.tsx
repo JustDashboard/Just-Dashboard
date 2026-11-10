@@ -346,7 +346,7 @@ function TimerDetail({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
           <Detail label="Starts">
             {timer.activates ? (
               <Link
-                href={`/processes/services?unit=${encodeURIComponent(timer.activates)}`}
+                href={`/processes/services/${encodeURIComponent(timer.activates)}`}
                 className="font-mono hover:underline"
               >
                 {timer.activates}

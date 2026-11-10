@@ -92,7 +92,7 @@ export function RunsAs() {
             </BlockLink>
           )}
           {!container && unit && (
-            <BlockLink href={`/processes/services?unit=${encodeURIComponent(unit.name)}`}>
+            <BlockLink href={`/processes/services/${encodeURIComponent(unit.name)}`}>
               Open unit
             </BlockLink>
           )}

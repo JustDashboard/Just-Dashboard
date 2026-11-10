@@ -279,6 +279,15 @@ const (
 	// ResetFailed clears a unit's failed state without starting it, so a
 	// service that was fixed by hand stops being counted as broken.
 	UnitResetFailed UnitAction = "reset-failed"
+	// Mask links the unit's file to /dev/null, so nothing starts it — not a
+	// dependency, a timer, a socket or an operator — until unmask removes
+	// the link. It does not stop a unit that is running.
+	UnitMask   UnitAction = "mask"
+	UnitUnmask UnitAction = "unmask"
+	// Freeze stops the unit's processes being scheduled without ending them
+	// (the cgroup freezer); thaw lets them run on from where they were.
+	UnitFreeze UnitAction = "freeze"
+	UnitThaw   UnitAction = "thaw"
 )
 
 func (s *Systemd) Control(ctx context.Context, name string, action UnitAction) (*CommandResult, error) {
@@ -286,11 +295,13 @@ func (s *Systemd) Control(ctx context.Context, name string, action UnitAction) (
 		return nil, err
 	}
 	switch action {
-	case UnitStart, UnitStop, UnitRestart, UnitReload, UnitEnable, UnitDisable, UnitResetFailed:
+	case UnitStart, UnitStop, UnitRestart, UnitReload, UnitEnable, UnitDisable, UnitResetFailed,
+		UnitMask, UnitUnmask, UnitFreeze, UnitThaw:
 	default:
 		return nil, fmt.Errorf("unknown systemd action %q", action)
 	}
-	if action == UnitEnable || action == UnitDisable {
+	switch action {
+	case UnitEnable, UnitDisable, UnitMask, UnitUnmask:
 		defer s.forgetUnitFiles()
 	}
 	return run(ctx, 90*time.Second, "systemctl", string(action), name)

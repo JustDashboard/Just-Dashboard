@@ -1628,9 +1628,8 @@ test("a unit's journal reads its runs, folds a loop and opens one run's own line
   page,
 }) => {
   const logs = await mockHost(page)
-  await page.goto("/processes/services?unit=postgresql.service")
-  const sheet = page.getByRole("dialog")
-  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  await page.goto("/processes/services/postgresql.service?tab=journal")
+  const sheet = page.getByRole("main")
   // The unit's own journal on the lens socket; the whole journal is the
   // logs page's, so there is no unit to pick here.
   await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("journal:postgresql.service")
@@ -1692,7 +1691,7 @@ test("a unit's journal reads its runs, folds a loop and opens one run's own line
   await expect(sheet.getByRole("button", { name: "Clear the invocation filter" })).toBeVisible()
 })
 
-test("sshd's journal is an administrator's, and the sheet says so rather than asking", async ({
+test("sshd's journal is an administrator's, and the page says so rather than asking", async ({
   page,
 }) => {
   const logs = await mockHost(page)
@@ -1710,9 +1709,8 @@ test("sshd's journal is an administrator's, and the sheet says so rather than as
       unit: { ...unitDetail.unit, name: "ssh.service", description: "OpenBSD Secure Shell server" },
     }),
   )
-  await page.goto("/processes/services?unit=ssh.service")
-  const sheet = page.getByRole("dialog")
-  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  await page.goto("/processes/services/ssh.service?tab=journal")
+  const sheet = page.getByRole("main")
   await expect(sheet.getByText("Login records need an administrator")).toBeVisible()
   // The server refuses the read before the socket upgrades: nothing is asked.
   expect(logs.sockets).toEqual([])
@@ -1735,23 +1733,21 @@ test("a journal the server refuses is said to be refused, in its words, and noth
         body: JSON.stringify({ error: { code: "forbidden", message: refusal } }),
       }),
   )
-  await page.goto("/processes/services?unit=postgresql.service")
-  const sheet = page.getByRole("dialog")
-  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  await page.goto("/processes/services/postgresql.service?tab=journal")
+  const sheet = page.getByRole("main")
   await expect(sheet.getByText(refusal)).toBeVisible()
   // A socket retrying a refusal would say the tunnel dropped.
   expect(logs.sockets).toEqual([])
   expect(logs.searches).toEqual([])
 })
 
-test("on a phone a unit's lines start at the sheet's edge and its controls stay in reach", async ({
+test("on a phone a unit's lines start at the pane's edge and its controls stay in reach", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const logs = await mockHost(page)
-  await page.goto("/processes/services?unit=postgresql.service")
-  const sheet = page.getByRole("dialog")
-  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  await page.goto("/processes/services/postgresql.service?tab=journal")
+  const sheet = page.getByRole("main")
   await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("journal:postgresql.service")
 
   const lines = sheet.getByLabel("Log lines")

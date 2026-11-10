@@ -160,7 +160,7 @@ test("the phone keeps identity controls and the installed table inside the scree
   const sheet = page.getByRole("dialog")
   await expect(
     sheet.getByRole("link", { name: "Open nginx.service", exact: true }),
-  ).toHaveAttribute("href", "/processes/services?unit=nginx.service")
+  ).toHaveAttribute("href", "/processes/services/nginx.service")
   await expect(
     sheet.getByRole("link", { name: "Open /etc/nginx/nginx.conf", exact: true }),
   ).toHaveAttribute("href", "/files?path=%2Fetc%2Fnginx%2Fnginx.conf")

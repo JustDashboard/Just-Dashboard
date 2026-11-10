@@ -1,6 +1,6 @@
 "use client"
 
-import { createRef, useMemo, useRef, useState, type RefObject } from "react"
+import { useMemo } from "react"
 import Link from "next/link"
 import {
   ArrowRight,
@@ -31,7 +31,6 @@ import { RankList, SplitBar } from "@/components/rank-list"
 import { RowList } from "@/components/row-list"
 import { Notice } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
-import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
 import { Counter, ProcessLinkRow, ProcessReadings } from "@/components/procs/process-detail"
 import {
@@ -51,6 +50,7 @@ import {
   reach,
   uncontrollable,
 } from "@/components/procs/shared"
+import { WiringPicture, type PictureNode } from "@/components/procs/wiring-picture"
 
 /** Kinds of child drawn in the picture before the rest fold into a count. */
 const CHILDREN_DRAWN = 4
@@ -231,21 +231,6 @@ function ProcessNotices({ process: row, gone, inspect, onOpen, onTab }: Overview
   return <div className="grid min-w-0 gap-3 lg:grid-cols-2">{notices}</div>
 }
 
-type Tone = "default" | "warning" | "danger"
-
-type PictureNode = {
-  id: string
-  mark: React.ReactNode
-  eyebrow: string
-  title: React.ReactNode
-  hint?: React.ReactNode
-  wire: { tone: Tone; dashed: boolean; carries: boolean }
-  /** Where a press on it goes. */
-  open?: () => void
-  href?: string
-  label?: string
-}
-
 /**
  * Where the process sits, drawn the way the container page draws how a
  * container is reached (`docker/container-picture`): on the left what
@@ -263,8 +248,6 @@ type PictureNode = {
  * not drawn, so each node says in words what it is.
  */
 function ProcessPicture({ process: row, gone, tree, inspect, onOpen, onTab }: OverviewProps) {
-  const container = useRef<HTMLDivElement>(null)
-  const [focus, setFocus] = useState<string | null>(null)
   const ancestors = useMemo(() => tree?.ancestors ?? [], [tree])
   const children = useMemo(() => tree?.children ?? [], [tree])
   const live = !gone && row.state !== "zombie"
@@ -470,244 +453,78 @@ function ProcessPicture({ process: row, gone, tree, inspect, onOpen, onTab }: Ov
     return nodes
   }, [children, row, live, inspect, onOpen, onTab])
 
-  const ids = ["c", ...above.map((n) => n.id), ...below.map((n) => n.id)].join("\n")
-  const refs = useMemo(() => {
-    const map = new Map<string, RefObject<HTMLSpanElement | null>>()
-    for (const id of ids.split("\n")) map.set(id, createRef<HTMLSpanElement>())
-    return map
-  }, [ids])
-  const center = refs.get("c")!
-  const watch = (id: string) => ({
-    onPointerEnter: () => setFocus(id),
-    onPointerLeave: () => setFocus((held) => (held === id ? null : held)),
-  })
-  const dim = (id: string) => focus !== null && focus !== id && focus !== "c"
-  const port = 26
   const product = processProduct(row.name)
   const kind = uncontrollable(row)
 
   return (
-    <Section title="Where it runs">
-      <div role="group" aria-label="Where it runs" className="relative animate-rise py-2">
-        <div ref={container} className="relative">
-          {above.map((node, index) => (
-            <AnimatedBeam
-              key={`${node.id}→c`}
-              containerRef={container}
-              fromRef={refs.get(node.id)!}
-              toRef={center}
-              shape="s"
-              startXOffset={port}
-              endXOffset={-port - 4}
-              still={!node.wire.carries}
-              dashed={node.wire.dashed}
-              tone={node.wire.tone}
-              duration={2.4}
-              delay={index * 0.35}
-              className={cn("transition-opacity max-lg:hidden", dim(node.id) && "opacity-15")}
-            />
-          ))}
-          {below.map((node, index) => (
-            <AnimatedBeam
-              key={`c→${node.id}`}
-              containerRef={container}
-              fromRef={center}
-              toRef={refs.get(node.id)!}
-              shape="s"
-              startXOffset={port + 4}
-              endXOffset={-port}
-              still={!node.wire.carries}
-              dashed={node.wire.dashed}
-              tone={node.wire.tone}
-              duration={2.8}
-              delay={(index % 6) * 0.35}
-              className={cn("transition-opacity max-lg:hidden", dim(node.id) && "opacity-15")}
-            />
-          ))}
-          <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(2.5rem,5vw,5rem)_minmax(0,0.8fr)_clamp(2.5rem,5vw,5rem)_minmax(0,1fr)] lg:items-center">
-            <Lane title="Above it" count={above.length} className="lg:text-right">
-              {above.length === 0 ? (
-                <li>
-                  <WireNode
-                    align="end"
-                    mark={
-                      <WirePlaceholder size="md">
-                        <Cpu />
-                      </WirePlaceholder>
-                    }
-                    title={<span className="text-muted-foreground">Reading its parents…</span>}
-                  />
-                </li>
+    <WiringPicture
+      title="Where it runs"
+      left={{
+        title: "Above it",
+        nodes: above,
+        empty: (
+          <WireNode
+            align="end"
+            mark={
+              <WirePlaceholder size="md">
+                <Cpu />
+              </WirePlaceholder>
+            }
+            title={<span className="text-muted-foreground">Reading its parents…</span>}
+          />
+        ),
+      }}
+      right={{
+        title: "Below and around it",
+        nodes: below,
+        empty: (
+          <WireNode
+            mark={
+              <WirePlaceholder size="md">
+                <Cpu />
+              </WirePlaceholder>
+            }
+            title={<span className="text-muted-foreground">Nothing under it</span>}
+            hint="It has started no process and listens on no port"
+          />
+        ),
+      }}
+      center={{
+        mark: (
+          <>
+            <WireMark tone="logo" size="lg">
+              {hasProductLogo(product) ? (
+                <ProductGlyph id={product} />
+              ) : kind === "kernel" ? (
+                <ProductGlyph id="linux" />
               ) : (
-                above.map((node) => (
-                  <PictureItem
-                    key={node.id}
-                    node={node}
-                    align="end"
-                    markRef={refs.get(node.id)!}
-                    dimmed={dim(node.id)}
-                    {...watch(node.id)}
-                  />
-                ))
+                <Cpu aria-hidden />
               )}
-            </Lane>
-            <div aria-hidden className="hidden lg:block" />
-            <div className="min-w-0 lg:flex lg:justify-center lg:pb-16">
-              <WireNode
-                align="center"
-                mark={
-                  <span ref={center} className="relative flex" {...watch("c")}>
-                    <WireMark tone="logo" size="lg">
-                      {hasProductLogo(product) ? (
-                        <ProductGlyph id={product} />
-                      ) : kind === "kernel" ? (
-                        <ProductGlyph id="linux" />
-                      ) : (
-                        <Cpu aria-hidden />
-                      )}
-                    </WireMark>
-                    <span
-                      aria-hidden
-                      className="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-background"
-                    >
-                      <StatusDot
-                        state={gone ? "stopped" : processStateTone(row.state)}
-                        live={!gone && row.state === "running"}
-                      />
-                    </span>
-                  </span>
-                }
-                eyebrow={`PID ${row.pid}`}
-                title={<span className="block truncate">{row.name}</span>}
-                hint={
-                  <span className="numeric">
-                    {gone
-                      ? gone
-                      : kind === "zombie"
-                        ? "exited"
-                        : `${row.cpuReady === false ? "measuring" : `${percent(row.cpuPercent)} CPU`} · ${bytes(row.rss)}`}
-                  </span>
-                }
+            </WireMark>
+            <span
+              aria-hidden
+              className="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-background"
+            >
+              <StatusDot
+                state={gone ? "stopped" : processStateTone(row.state)}
+                live={!gone && row.state === "running"}
               />
-            </div>
-            <div aria-hidden className="hidden lg:block" />
-            <Lane title="Below and around it" count={below.length}>
-              {below.length === 0 ? (
-                <li>
-                  <WireNode
-                    mark={
-                      <WirePlaceholder size="md">
-                        <Cpu />
-                      </WirePlaceholder>
-                    }
-                    title={<span className="text-muted-foreground">Nothing under it</span>}
-                    hint="It has started no process and listens on no port"
-                  />
-                </li>
-              ) : (
-                below.map((node) => (
-                  <PictureItem
-                    key={node.id}
-                    node={node}
-                    markRef={refs.get(node.id)!}
-                    dimmed={dim(node.id)}
-                    {...watch(node.id)}
-                  />
-                ))
-              )}
-            </Lane>
-          </div>
-        </div>
-      </div>
-    </Section>
-  )
-}
-
-function PictureItem({
-  node,
-  align,
-  markRef,
-  dimmed,
-  onPointerEnter,
-  onPointerLeave,
-}: {
-  node: PictureNode
-  align?: "start" | "end"
-  markRef: RefObject<HTMLSpanElement | null>
-  dimmed: boolean
-  onPointerEnter: () => void
-  onPointerLeave: () => void
-}) {
-  const body = (
-    <WireNode
-      align={align}
-      mark={
-        <span ref={markRef} className="flex">
-          {node.mark}
-        </span>
-      }
-      eyebrow={node.eyebrow}
-      title={node.title}
-      hint={node.hint}
-    />
-  )
-  const face =
-    "-m-1.5 block w-[calc(100%+0.75rem)] rounded-lg p-1.5 text-left focus-ring-inset transition-colors hover:bg-row-hover"
-  return (
-    <li
-      onPointerEnter={onPointerEnter}
-      onPointerLeave={onPointerLeave}
-      className={cn("min-w-0 transition-opacity", dimmed && "opacity-40")}
-    >
-      {node.href ? (
-        <Link
-          href={node.href}
-          aria-label={node.label}
-          className={cn(face, align === "end" && "lg:text-right")}
-        >
-          {body}
-        </Link>
-      ) : node.open ? (
-        <button
-          type="button"
-          onClick={node.open}
-          aria-label={node.label}
-          className={cn(face, align === "end" && "lg:text-right")}
-        >
-          {body}
-        </button>
-      ) : (
-        body
-      )}
-    </li>
-  )
-}
-
-function Lane({
-  title,
-  count,
-  className,
-  children,
-}: {
-  title: string
-  count: number
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center">
-      <p className={cn("eyebrow mb-4", className)}>
-        {title}
-        {count > 0 && (
-          <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-            {count}
+            </span>
+          </>
+        ),
+        eyebrow: `PID ${row.pid}`,
+        title: <span className="block truncate">{row.name}</span>,
+        hint: (
+          <span className="numeric">
+            {gone
+              ? gone
+              : kind === "zombie"
+                ? "exited"
+                : `${row.cpuReady === false ? "measuring" : `${percent(row.cpuPercent)} CPU`} · ${bytes(row.rss)}`}
           </span>
-        )}
-      </p>
-      <ol className="flex flex-col gap-5" aria-label={title}>
-        {children}
-      </ol>
-    </div>
+        ),
+      }}
+    />
   )
 }
 
