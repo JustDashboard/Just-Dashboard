@@ -103,11 +103,18 @@ systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
 ## The dashboard's own health
 
 `/healthz` is liveness and nothing else: a fixed `{"status":"ok"}` for as long as the process serves.
-It is what the image's `HEALTHCHECK` asks (`just-dashboard -healthcheck`), and through the container's
+It is what the image's `HEALTHCHECK` asks, and through the container's
 health so do `docker compose up --wait` in the installer and the updater, and the updater's rollback. It
 must therefore not depend on the store: a liveness that turned red when SQLite cannot be written would
 restart-loop the stack on a full disk and roll an update back for a reason the previous version shares,
 at the moment the dashboard is the tool for finding what filled the disk.
+
+The check itself is `jd-healthcheck` (`cmd/healthcheck`, `internal/healthprobe`): one GET of `/healthz`
+on `JD_ADDR`, over TLS without verification in agent mode. It is a program of its own on the standard
+library, which a test holds it to, because Docker starts it every thirty seconds: as a mode of the server
+binary each run initialised all 340 packages the server links, about 150 ms and 57 MB, against 1 ms and
+8 MB now. The server's `-healthcheck` flag runs the same probe and stays for a container still described
+by an older image.
 
 What liveness leaves out is `internal/storehealth`, started first in `Server.Start`. Every fifteen
 seconds it rewrites one `settings` row (`store_health_probe`), reads back if that fails, and measures

@@ -19,7 +19,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -31,6 +30,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/clihost"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/healthprobe"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
@@ -134,8 +134,9 @@ func main() {
 		}
 		return
 	}
-	// The container healthcheck re-executes this binary rather than shipping
-	// curl into the image, which keeps the runtime surface smaller.
+	// The container's health check is cmd/healthcheck, a program of its own
+	// that links none of this one. The flag runs the same probe and stays for
+	// a container still described by an older image's HEALTHCHECK.
 	healthcheck := flag.Bool("healthcheck", false, "probe the local server and exit non-zero if it is unhealthy")
 	agentMode := flag.Bool("agent", false, "run as an agent managed by a hub: no human login, mutual TLS only")
 	agentReset := flag.Bool("agent-reset", false, "forget the enrolled hub so this agent can be enrolled again, then exit")
@@ -182,10 +183,7 @@ func main() {
 		return
 	}
 	if *healthcheck {
-		if err := probe(); err != nil {
-			fmt.Fprintln(os.Stderr, "unhealthy:", err)
-			os.Exit(1)
-		}
+		healthprobe.Main()
 		return
 	}
 	if *selfUpdate {
@@ -388,44 +386,6 @@ func scrubSecretEnv() {
 		os.Unsetenv("JD_" + name)
 		os.Unsetenv("VPSD_" + name)
 	}
-}
-
-// probe asks the local server whether it is serving. It deliberately targets
-// the configured bind address so a healthcheck cannot pass against some other
-// process that happens to be listening.
-func probe() error {
-	addr := config.Env("JD_ADDR")
-	if addr == "" {
-		addr = "127.0.0.1:8080"
-	}
-	if strings.HasPrefix(addr, "0.0.0.0:") {
-		addr = "127.0.0.1:" + strings.TrimPrefix(addr, "0.0.0.0:")
-	}
-	// Agent mode serves TLS on this same address, so probing it with plain
-	// HTTP got a handshake error every time: the container went unhealthy
-	// after three attempts and stayed there while the agent was serving
-	// perfectly. The certificate is self-signed by design and the peer is
-	// loopback, so verifying it would be theatre.
-	//
-	// The environment variable is the only signal available here: the probe
-	// is a separate process from the server, so a server started with -agent
-	// rather than JD_AGENT_MODE=true is invisible to it. The compose file sets
-	// the variable, and the Dockerfile healthcheck inherits it.
-	scheme := "http://"
-	client := &http.Client{Timeout: 4 * time.Second}
-	if agent, err := strconv.ParseBool(config.Env("JD_AGENT_MODE")); err == nil && agent {
-		scheme = "https://"
-		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	}
-	resp, err := client.Get(scheme + addr + "/healthz")
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("healthz returned %s", resp.Status)
-	}
-	return nil
 }
 
 // janitor sweeps expired sessions so a stolen cookie cannot outlive its window
