@@ -1928,7 +1928,14 @@ are decided here, not by the page.
   capped at 20 000, and counts rows once joined) with `enable` the `ALTER SYSTEM` for
   `log_min_duration_statement` and its current value from `pg_settings`; MySQL's `mysql.slow_log` where
   `log_output` has `TABLE` and the slow log is on (the `minMs` floor in the SQL), else
-  `performance_schema.events_statements_history` from `long_query_time` up; MariaDB's `slow_log` only;
+  `performance_schema.events_statements_history` from `long_query_time` up, with `enable` the `SET GLOBAL`
+  that turns the slow log on or adds `TABLE`; MariaDB's `slow_log` only. Beside its one statement (the
+  query console runs one) `enable` carries `changes`, the same change as `{name, value}` parameters in the
+  order the page's Turn on sets them through `PUT /databases/{id}/settings` — the Parameters page's checked,
+  audited path, which on Postgres runs `ALTER SYSTEM` and `pg_reload_conf()` on one connection. The
+  statement alone had left that reload to a second statement, and a server told to log slow statements kept
+  logging none. A Postgres connecting role that is not a superuser gets `blocked` with why instead of
+  `changes`, since the settings route would refuse it;
   Redis's `SLOWLOG GET 128`; MongoDB's log through its lens, or `getLog global` over the connection when
   the server is elsewhere or its file is refused; ClickHouse's `system.query_log`, initial queries past
   `QueryStart` that took 250 ms or more (`minMs` raises the floor; `threshold` names it), since the log

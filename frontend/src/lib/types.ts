@@ -8454,8 +8454,19 @@ export type DbQueryLog = {
   supported: boolean
   reason?: string
   source: "log" | "slowlog" | "query_log" | "slow_log" | "statements_history" | ""
-  /** The setting that keeps the log empty, and the statement that changes it. */
-  enable?: { setting: string; current: string; sql: string }
+  /**
+   * The setting that keeps the log empty, the statement that changes it, and
+   * the same change as parameters for Turn on to set through
+   * `PUT /databases/{id}/settings`, in order.
+   */
+  enable?: {
+    setting: string
+    current: string
+    sql: string
+    changes?: { name: string; value: string }[]
+    /** Why the connecting account cannot make the change; Turn on is then not offered. */
+    blocked?: string
+  }
   /** How slow a statement has to be to be recorded, in the engine's words. */
   threshold?: string
   entries: DbQueryEntry[]
