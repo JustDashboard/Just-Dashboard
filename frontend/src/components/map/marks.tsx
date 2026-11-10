@@ -81,6 +81,8 @@ export const KIND_GLYPH: Record<string, Icon> = {
   security: Shield,
   tunnels: SecureConnection,
   logs: Logs,
+  host: Servers,
+  remote: Globe,
 }
 
 /** A measured state as the dot draws it. Idle is a thing that is off, not a fault. */

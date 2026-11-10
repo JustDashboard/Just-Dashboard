@@ -302,16 +302,16 @@ const CLAIMS: Record<string, [kinds: string[], vias: string[]][]> = {
   backups: [],
 }
 
-type Entry = { item: MapItem; kind: string }
+export type Entry = { item: MapItem; kind: string }
 type Adjacent = { other: string; link: MapLink }
 
-type Graph = {
+export type Graph = {
   items: Map<string, Entry>
   adjacent: Map<string, Adjacent[]>
   links: MapLink[]
 }
 
-const vias = (link: MapLink) => [link.via, ...(link.also ?? [])]
+export const vias = (link: MapLink) => [link.via, ...(link.also ?? [])]
 
 function graphOf(map: ServerMap): Graph {
   const items = new Map<string, Entry>()
@@ -319,9 +319,17 @@ function graphOf(map: ServerMap): Graph {
     if (!SYSTEM_KINDS.has(kind.key) || kind.state === "absent") continue
     for (const item of kind.items) items.set(item.id, { item, kind: kind.key })
   }
+  return graphFrom(items, map.links)
+}
+
+/**
+ * The things and the lines between them, each thing with what it touches. A
+ * line to something not on the reading, or from a thing to itself, is left out.
+ */
+export function graphFrom(items: Map<string, Entry>, all: MapLink[]): Graph {
   const adjacent = new Map<string, Adjacent[]>()
   const links: MapLink[] = []
-  for (const link of map.links) {
+  for (const link of all) {
     if (!items.has(link.from) || !items.has(link.to) || link.from === link.to) continue
     links.push(link)
     for (const [a, b] of [
@@ -364,11 +372,23 @@ function claim(graph: Graph, anchor: string, stop: ReadonlySet<string>): string[
 
 const TONE_RANK: Record<MapTone, number> = { danger: 0, warning: 1, ok: 2, unknown: 3, idle: 4 }
 
-function byWorstThenName(a: Entry, b: Entry) {
+export function byWorstThenName(a: Entry, b: Entry) {
   return TONE_RANK[a.item.tone] - TONE_RANK[b.item.tone] || a.item.name.localeCompare(b.item.name)
 }
 
-type Draft = { id: string; kind: SystemKind; anchor: Entry; members: string[] }
+/**
+ * A system before it is laid out: what anchors it and what it takes. `column`
+ * is for a page that draws its systems in another order than the server
+ * map's (`columnOf`) — the databases map puts what reads a database on its
+ * left and where it runs on its right.
+ */
+export type Draft = {
+  id: string
+  kind: SystemKind
+  anchor: Entry
+  members: string[]
+  column?: (itemId: string, kind: string) => number
+}
 
 /**
  * Which systems the server has, each with what it holds, in the order the
@@ -490,6 +510,13 @@ export type SystemEdge = {
   also: string[]
   /** `flow` runs right to left between columns; `sub` drops to a satellite; `down` joins one column. */
   shape: "flow" | "sub" | "down"
+  /**
+   * What a page that read the line some other way knows of it: a link that
+   * broke or went stale, and the sessions open on it now. The server map's
+   * own reading says neither.
+   */
+  tone?: MapTone
+  sessions?: number
 }
 
 /** A Compose stack drawn as the frame round its containers. */
@@ -602,6 +629,11 @@ function faceOf(kind: string, item: MapItem): { face: Face; role?: Role } {
       return { face: "process", role: containerRole(item) }
     case "databases":
       return { face: "datastore" }
+    // What the databases map adds: processes on this machine with a session
+    // open, and another machine that has one.
+    case "host":
+    case "remote":
+      return { face: "process" }
     case "volumes":
       return { face: "volume" }
     case "backups":
@@ -807,7 +839,8 @@ function buildSystem(graph: Graph, draft: Draft, sharedBy: Map<string, string[]>
     })
   }
 
-  const laid = place(sid, [...nodes.values()], satellites, edges, framed, graph, anchorId)
+  const column = draft.column ?? ((itemId: string, kind: string) => columnOf(kind, itemId))
+  const laid = place(sid, [...nodes.values()], satellites, edges, framed, graph, anchorId, column)
   // A line runs from the left column to the right; one inside a column drops
   // from the upper box to the lower.
   const at = new Map(laid.nodes.map((n) => [n.id, n]))
@@ -865,6 +898,7 @@ function place(
   framed: Map<string, string>,
   graph: Graph,
   anchorId: string,
+  columnFor: (itemId: string, kind: string) => number,
 ) {
   const satsOf = new Map<string, SystemNode[]>()
   for (const s of satellites) {
@@ -884,8 +918,8 @@ function place(
 
   // The columns that hold something, packed so no gap is left by a kind the
   // system does not have.
-  const used = [...new Set(main.map((n) => columnOf(n.kind, n.itemId)))].sort((a, b) => a - b)
-  const col = (n: SystemNode) => used.indexOf(columnOf(n.kind, n.itemId))
+  const used = [...new Set(main.map((n) => columnFor(n.itemId, n.kind)))].sort((a, b) => a - b)
+  const col = (n: SystemNode) => used.indexOf(columnFor(n.itemId, n.kind))
 
   const blocks: Block[] = []
   const blockOf = new Map<string, Block>()
@@ -1078,7 +1112,14 @@ function place(
 export function detectSystems(map: ServerMap | undefined): System[] {
   if (!map) return []
   const graph = graphOf(map)
-  const drafts = draftSystems(graph)
+  return systemsFrom(graph, draftSystems(graph))
+}
+
+/**
+ * Drafted systems laid out, each on its own, with what more than one of them
+ * draws marked as shared in each.
+ */
+export function systemsFrom(graph: Graph, drafts: Draft[]): System[] {
   const sharedBy = new Map<string, string[]>()
   for (const d of drafts) {
     for (const id of d.members) sharedBy.set(id, [...(sharedBy.get(id) ?? []), d.id])

@@ -79,8 +79,9 @@ are audited without connection strings. Cancellation stops reconciliation with t
 engine and database, hostname, network and last observation, scoped to that environment. A project's
 Settings → Databases page shows these observations (`components/deploy/settings/databases.tsx`; the
 Runtime and Variables pages read the same route), and each linked connection there opens its database's
-own home, `/databases/<id>`. From the other side, the database's home draws what reads it and
-`/databases/map` draws every such link (`GET /databases/{id}/consumers`, `GET /databases/topology`).
+own home, `/databases/<id>`. From the other side, the database's home draws what reads it
+(`GET /databases/{id}/consumers`) and `/databases/map` draws every such link in each database's
+diagram (`GET /databases/topology`, joined with the server map's reading).
 Connected means the network binding was observed; it does not prove database schema or application
 health. Observations older than 30 seconds are marked stale. The database name is read from the sealed
 DSN the way every other database route reads it; a connection whose DSN no longer resolves keeps its row

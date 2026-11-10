@@ -1,20 +1,11 @@
 "use client"
 
 import { StatusDot } from "@/components/status-dot"
-import { systemCensus, systemTitle, type System, type SystemKind } from "@/lib/server-systems"
+import { systemCensus, systemTitle, type System } from "@/lib/server-systems"
 import { cn } from "@/lib/utils"
+import type { MapBoard } from "@/components/map/board"
 import { SystemMark } from "@/components/map/inspector"
 import { TONE_DOT } from "@/components/map/marks"
-
-/** The rail's groups, in the order the systems are found. */
-const GROUPS: { label: string; kinds: SystemKind[] }[] = [
-  { label: "This dashboard", kinds: ["dashboard"] },
-  { label: "Deployments", kinds: ["project"] },
-  { label: "Compose stacks", kinds: ["stack"] },
-  { label: "Processes", kinds: ["pm2", "service"] },
-  { label: "On their own", kinds: ["container", "database"] },
-  { label: "Not wired", kinds: ["loose"] },
-]
 
 /** What a system holds, in a few words: "3 containers · 1 database · 2 domains". */
 export function censusLine(system: System, most = 3) {
@@ -34,29 +25,33 @@ export function censusLine(system: System, most = 3) {
 }
 
 /**
- * Every system on the server, a row each, grouped by what anchors it: the
+ * Every system on the canvas, a row each, grouped the board's way — the
+ * server map's by what anchors a system, the databases map's by engine: the
  * contents of the canvas in the order a reader looks for them. A row flies the
  * canvas to its system; the one being read is marked.
  */
 export function SystemRail({
+  board,
   systems,
   focus,
   onFocus,
 }: {
+  board: MapBoard
   systems: System[]
   focus: string | null
   onFocus: (id: string) => void
 }) {
   return (
-    <nav aria-label="Systems" className="flex min-h-0 min-w-0 flex-col border-r border-hairline">
+    <nav
+      aria-label={board.rail.label}
+      className="flex min-h-0 min-w-0 flex-col border-r border-hairline"
+    >
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {systems.length === 0 && (
-          <p className="px-2 py-3 text-hint text-muted-foreground">
-            Nothing on this server makes a system yet.
-          </p>
+          <p className="px-2 py-3 text-hint text-muted-foreground">{board.rail.empty}</p>
         )}
-        {GROUPS.map((group) => {
-          const here = systems.filter((s) => group.kinds.includes(s.kind))
+        {board.rail.group(systems).map((group) => {
+          const here = group.systems
           if (here.length === 0) return null
           return (
             <section key={group.label} className="mb-3">
@@ -85,7 +80,7 @@ export function SystemRail({
                           {systemTitle(s)}
                         </span>
                         <span className="block truncate text-hint text-muted-foreground">
-                          {censusLine(s, 2)}
+                          {board.census(s, 2)}
                         </span>
                       </span>
                       {s.kind !== "loose" && <StatusDot tone={TONE_DOT[s.anchor.tone]} />}

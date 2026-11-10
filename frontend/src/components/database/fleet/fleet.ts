@@ -1,4 +1,4 @@
-import type { DbFleet, DbFleetEntry, DbTopoEdge, DbTopoNode, DbTopology } from "@/lib/types"
+import type { DbFleet, DbFleetEntry, DbTopoEdge, DbTopology } from "@/lib/types"
 import type { DbBackupSummary, DbPowerAction } from "@/components/database/fleet/types"
 
 /**
@@ -173,54 +173,6 @@ export function matchesQuery(entry: DbFleetEntry, query: string, engineLabel = "
     .join(" ")
     .toLowerCase()
     .includes(q)
-}
-
-export type FleetSortKey = "name" | "size" | "objects" | "sessions" | "backup"
-export type FleetSort = { key: FleetSortKey; dir: "asc" | "desc" } | null
-
-/** The table's rows in the order a pressed heading asks for; unpressed, the order they came in. */
-export function sortRows(
-  entries: DbFleetEntry[],
-  sort: FleetSort,
-  backupOf: (entry: DbFleetEntry) => string | undefined,
-  storedOf: (entry: DbFleetEntry) => number | undefined = storedBytes,
-): DbFleetEntry[] {
-  if (!sort) return entries
-  const value = (entry: DbFleetEntry): number | string => {
-    switch (sort.key) {
-      case "name":
-        return entry.name.toLowerCase()
-      case "size":
-        // A size nobody reported sorts below every size that was.
-        return storedOf(entry) ?? -1
-      case "objects":
-        return entry.objects
-      case "sessions":
-        return entry.sessions
-      case "backup":
-        return Date.parse(backupOf(entry) ?? "") || 0
-    }
-  }
-  const sign = sort.dir === "asc" ? 1 : -1
-  return [...entries].sort((a, b) => {
-    const x = value(a)
-    const y = value(b)
-    const order =
-      typeof x === "string" && typeof y === "string" ? x.localeCompare(y) : Number(x) - Number(y)
-    return order * sign || a.name.localeCompare(b.name)
-  })
-}
-
-/**
- * What a press on a heading does to the order: sort by it the natural way
- * (names up, figures down), then the other way, then back to the page's own
- * order.
- */
-export function nextSort(held: FleetSort, key: FleetSortKey): FleetSort {
-  const natural = key === "name" ? "asc" : "desc"
-  if (held?.key !== key) return { key, dir: natural }
-  if (held.dir === natural) return { key, dir: natural === "asc" ? "desc" : "asc" }
-  return null
 }
 
 /** How the cards are shelved. */
@@ -417,45 +369,6 @@ export function feedsByConnection(
   return out
 }
 
-/**
- * The map's two lanes: the databases on one side and everything they feed on
- * the other, with each consumer knowing which databases reach it so a narrow
- * screen can say so in words where the lines cannot be drawn.
- *
- * `keep` narrows the picture to some of the databases: the others leave with
- * their links, and so does a consumer none of the kept ones feeds.
- */
-export function splitTopology(
-  topology: DbTopology | undefined,
-  keep?: (node: DbTopoNode) => boolean,
-) {
-  const nodes = topology?.nodes ?? []
-  const byId = new Map(nodes.map((n) => [n.id, n]))
-  const databases = nodes.filter((n) => n.kind === "database" && (keep?.(n) ?? true))
-  const kept = new Set(databases.map((n) => n.id))
-  const edges = (topology?.edges ?? []).filter((edge) => kept.has(edge.from) && byId.has(edge.to))
-  const feeds = new Map<string, DbTopoEdge[]>()
-  const fedBy = new Map<string, { from: DbTopoNode; edge: DbTopoEdge }[]>()
-  for (const edge of edges) {
-    const from = byId.get(edge.from)
-    if (!from) continue
-    feeds.set(edge.from, [...(feeds.get(edge.from) ?? []), edge])
-    fedBy.set(edge.to, [...(fedBy.get(edge.to) ?? []), { from, edge }])
-  }
-  const consumers = nodes.filter((n) => n.kind !== "database" && (!keep || fedBy.has(n.id)))
-  // A consumer with a broken link stands first; then the ones fed by the
-  // most; then by name — the order the eye should meet them in.
-  const worst = (id: string) =>
-    Math.max(0, ...(fedBy.get(id) ?? []).map((f) => edgeRank(f.edge.status)))
-  consumers.sort(
-    (a, b) =>
-      worst(b.id) - worst(a.id) ||
-      (fedBy.get(b.id)?.length ?? 0) - (fedBy.get(a.id)?.length ?? 0) ||
-      a.name.localeCompare(b.name),
-  )
-  return { databases, consumers, edges, feeds, fedBy }
-}
-
 export function edgeRank(status: string) {
   switch (status) {
     case "broken":
@@ -468,48 +381,6 @@ export function edgeRank(status: string) {
       return 1
   }
   return 0
-}
-
-/**
- * The lanes in the order that crosses fewest wires: databases that feed
- * something first, then each reader at the mean position of the databases
- * that reach it. Ties keep the order the split gave — the worst link first.
- */
-export function wiredOrder(split: ReturnType<typeof splitTopology>) {
-  const databases = [
-    ...split.databases.filter((node) => split.feeds.has(node.id)),
-    ...split.databases.filter((node) => !split.feeds.has(node.id)),
-  ]
-  const at = new Map(databases.map((node, index) => [node.id, index]))
-  const mean = (node: DbTopoNode) => {
-    const sources = split.fedBy.get(node.id) ?? []
-    if (sources.length === 0) return Number.POSITIVE_INFINITY
-    return sources.reduce((sum, source) => sum + (at.get(source.from.id) ?? 0), 0) / sources.length
-  }
-  const consumers = split.consumers
-    .map((node, index) => ({ node, index, mean: mean(node) }))
-    .sort((a, b) => a.mean - b.mean || a.index - b.index)
-    .map((one) => one.node)
-  return { ...split, databases, consumers }
-}
-
-/** The worst link among several, as the word the map says it with. */
-export function worstStatus(edges: DbTopoEdge[]): string {
-  return edges.reduce(
-    (worst, edge) => (edgeRank(edge.status) > edgeRank(worst) ? edge.status : worst),
-    "observed",
-  )
-}
-
-/** The map's own figures: how much is drawn, how much of it carries, how much is wrong. */
-export function topologyReadings(split: ReturnType<typeof splitTopology>) {
-  return {
-    databases: split.databases.length,
-    consumers: split.consumers.filter((node) => split.fedBy.has(node.id)).length,
-    links: split.edges.length,
-    sessions: split.edges.reduce((sum, edge) => sum + edge.sessions, 0),
-    wrong: split.edges.filter((edge) => edgeRank(edge.status) >= 2).length,
-  }
 }
 
 /** One line for how a link is known. */
