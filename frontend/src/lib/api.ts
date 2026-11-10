@@ -11,6 +11,7 @@
  *    phrase on the server and return the expected phrase in the error body.
  */
 
+import { retryAfterMs } from "@/lib/backoff"
 import { networkPendingHeaders } from "@/lib/network-pending"
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api/v1"
@@ -89,6 +90,12 @@ export class ApiError extends Error {
    * the error: a start the config test turned down carries the test beside it.
    */
   body?: unknown
+  /**
+   * How long the answer's `Retry-After` asked the caller to wait, in
+   * milliseconds: the limiter's 429 says thirty seconds. A poll and the
+   * session probe wait that long rather than ask again at their own pace.
+   */
+  retryAfterMs?: number
 
   constructor(
     status: number,
@@ -96,7 +103,17 @@ export class ApiError extends Error {
     message: string,
     phrase?: string,
     detail?: Partial<
-      Pick<ApiError, "resource" | "operation" | "reason" | "raw" | "retryable" | "field" | "body">
+      Pick<
+        ApiError,
+        | "resource"
+        | "operation"
+        | "reason"
+        | "raw"
+        | "retryable"
+        | "field"
+        | "body"
+        | "retryAfterMs"
+      >
     >,
   ) {
     super(message)
@@ -209,7 +226,13 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
  * Successful binary and streaming responses never pass through this reader.
  */
 export async function responseError(res: Response, path: string): Promise<ApiError> {
-  return errorFromResponse(res.status, await res.text(), path, res.statusText)
+  return errorFromResponse(
+    res.status,
+    await res.text(),
+    path,
+    res.statusText,
+    res.headers.get("Retry-After"),
+  )
 }
 
 /**
@@ -226,6 +249,7 @@ export function errorFromResponse(
   text: string,
   path: string,
   statusText = "",
+  retryAfter?: string | null,
 ): ApiError {
   let parsed: ApiErrorBody | undefined
   try {
@@ -262,6 +286,7 @@ export function errorFromResponse(
       retryable: body?.retryable,
       field: body?.field,
       body: parsed,
+      retryAfterMs: retryAfterMs(retryAfter),
     },
   )
 }

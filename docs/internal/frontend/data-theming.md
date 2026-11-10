@@ -200,7 +200,16 @@ are dated evidence, not proof of current attachment ownership.
 - `usePoll` schedules the next request only after the previous one settles and stops scheduling on
   hidden tabs. Coming back to the tab fetches at once, replacing any pending timer; a request still in
   flight stands as that refresh, and an interval of 0 ignores the tab. `pollLoop` is that schedule, with
-  `document` passed in so `bun test` can drive it. Each successful response records `lastSuccess`; failed refreshes retain
+  `document` passed in so `bun test` can drive it. **A poll does not keep its cadence against a server
+  that cannot answer.** After a 429, a 5xx, a body cut off or no answer at all (`isTransient` in
+  `lib/backoff.ts`), the next request waits what the answer's `Retry-After` asked for (`ApiError.retryAfterMs`,
+  read once in `responseError` and never trusted past five minutes; the limiter's 429 says 30 seconds), or a
+  wait that doubles from the cadence to a 30 second ceiling with half of each step random; the first success
+  puts the cadence back, a 4xx the server meant keeps it, and returning to the tab does not cut the wait
+  short. The three reads that watch the dashboard through its own restart (`use-self-update`,
+  `use-self-config`, `use-self-uninstall`) pass `steady` while a run is live: a 502 is the restart, and
+  they keep their two seconds so the page sees the moment it ends, while a 429's `Retry-After` is still
+  waited out. Each successful response records `lastSuccess`; failed refreshes retain
   that timestamp only for the same resource. Its fixed-length dependency list identifies the resource:
   changing it immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
   retain the same resource's data. Cleanup aborts the request and ignores late responses.

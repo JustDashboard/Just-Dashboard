@@ -131,3 +131,154 @@ test("a fetch that settles after stopping schedules nothing", async () => {
   jest.advanceTimersByTime(60_000)
   expect(fetches.started).toBe(1)
 })
+
+/** A fetch that settles at once with whatever `next` holds, and counts its starts. */
+function scriptedFetch() {
+  const fetches = { started: 0, next: undefined }
+  fetches.run = async () => {
+    fetches.started++
+    return fetches.next
+  }
+  return fetches
+}
+
+/** Lets the settled fetch reach its schedule. */
+async function settled() {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+/** A clock a test moves together with the timers. */
+function fakeClock() {
+  const clock = { at: 0 }
+  clock.now = () => clock.at
+  clock.advance = (ms) => {
+    clock.at += ms
+    jest.advanceTimersByTime(ms)
+  }
+  return clock
+}
+
+const limited = { failed: { status: 429, code: "rate_limited", retryAfterMs: 30_000 } }
+const down = { failed: { status: 502, code: "unknown" } }
+const missing = { failed: { status: 404, code: "not_found" } }
+
+test("a 429 is not asked again until the wait it named is over", async () => {
+  const page = fakePage()
+  const clock = fakeClock()
+  const fetches = scriptedFetch()
+  fetches.next = limited
+  const stop = pollLoop(fetches.run, 1000, page, { now: clock.now, random: () => 0 })
+  await settled()
+  clock.advance(29_999)
+  expect(fetches.started).toBe(1)
+  fetches.next = undefined
+  clock.advance(1)
+  expect(fetches.started).toBe(2)
+  await settled()
+  // An answer puts the cadence back.
+  clock.advance(1000)
+  expect(fetches.started).toBe(3)
+  stop()
+})
+
+test("failures in a row double the wait to its ceiling, and a success ends it", async () => {
+  const page = fakePage()
+  const clock = fakeClock()
+  const fetches = scriptedFetch()
+  fetches.next = down
+  const stop = pollLoop(fetches.run, 5000, page, { now: clock.now, random: () => 1 })
+  await settled()
+  for (const [wait, started] of [
+    [10_000, 2],
+    [20_000, 3],
+    [30_000, 4],
+    [30_000, 5],
+  ]) {
+    clock.advance(wait - 1)
+    expect(fetches.started).toBe(started - 1)
+    clock.advance(1)
+    expect(fetches.started).toBe(started)
+    await settled()
+  }
+  fetches.next = undefined
+  clock.advance(30_000)
+  await settled()
+  clock.advance(5000)
+  expect(fetches.started).toBe(7)
+  stop()
+})
+
+test("an answer the server meant, such as a 404, keeps the cadence", async () => {
+  const page = fakePage()
+  const clock = fakeClock()
+  const fetches = scriptedFetch()
+  fetches.next = missing
+  const stop = pollLoop(fetches.run, 1000, page, { now: clock.now, random: () => 1 })
+  await settled()
+  clock.advance(1000)
+  expect(fetches.started).toBe(2)
+  await settled()
+  clock.advance(1000)
+  expect(fetches.started).toBe(3)
+  stop()
+})
+
+test("a steady poll keeps its cadence against a 502 and still waits out a 429", async () => {
+  const page = fakePage()
+  const clock = fakeClock()
+  const fetches = scriptedFetch()
+  let steady = true
+  fetches.next = down
+  const stop = pollLoop(fetches.run, 2000, page, {
+    now: clock.now,
+    random: () => 1,
+    steady: () => steady,
+  })
+  await settled()
+  clock.advance(2000)
+  expect(fetches.started).toBe(2)
+  await settled()
+  clock.advance(2000)
+  expect(fetches.started).toBe(3)
+  fetches.next = limited
+  await settled()
+  clock.advance(2000)
+  await settled()
+  expect(fetches.started).toBe(4)
+  clock.advance(30_000)
+  expect(fetches.started).toBe(4)
+  clock.advance(6000)
+  expect(fetches.started).toBe(5)
+  // No longer watching a restart: the next failure backs off like any other.
+  steady = false
+  fetches.next = down
+  await settled()
+  clock.advance(2000)
+  expect(fetches.started).toBe(5)
+  stop()
+})
+
+test("coming back to the tab does not cut a wait the server asked for short", async () => {
+  const page = fakePage()
+  const clock = fakeClock()
+  const fetches = scriptedFetch()
+  fetches.next = limited
+  const stop = pollLoop(fetches.run, 1000, page, { now: clock.now, random: () => 0 })
+  await settled()
+  page.set("hidden")
+  clock.advance(10_000)
+  page.set("visible")
+  expect(fetches.started).toBe(1)
+  clock.advance(19_999)
+  expect(fetches.started).toBe(1)
+  clock.advance(1)
+  expect(fetches.started).toBe(2)
+  await settled()
+  // Once the wait is over, a return fetches at once as it always did.
+  page.set("hidden")
+  clock.advance(40_000)
+  page.set("visible")
+  expect(fetches.started).toBe(3)
+  stop()
+})

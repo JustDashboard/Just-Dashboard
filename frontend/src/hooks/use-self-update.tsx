@@ -109,7 +109,11 @@ export function SelfUpdateProvider({ children }: { children: React.ReactNode }) 
     return next
   }, [])
 
-  const poll = usePoll(fetchReport, live ? LIVE_POLL : settling ? SETTLE_POLL : IDLE_POLL)
+  // The poll is told the same thing (`steady`): while a run is live it keeps
+  // its two seconds against a 502 instead of backing off as other reads do.
+  const poll = usePoll(fetchReport, live ? LIVE_POLL : settling ? SETTLE_POLL : IDLE_POLL, [], {
+    steady: live,
+  })
   const { data: report, error, refresh } = poll
 
   const run = report?.run

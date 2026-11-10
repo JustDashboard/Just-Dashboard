@@ -188,3 +188,20 @@ test("a session opened through Just Hub is told to sign in on the server itself"
   expect(err.message).toBe(HUB_SESSION_REFUSED)
   expect(err.message.startsWith("Sign in on this server itself to do this")).toBe(true)
 })
+
+test("a refusal carries the wait its Retry-After asked for", async () => {
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({ error: { code: "rate_limited", message: "too many requests, slow down" } }),
+      { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "30" } },
+    )
+  await expect(get("/jobs")).rejects.toMatchObject({
+    status: 429,
+    code: "rate_limited",
+    retryAfterMs: 30_000,
+  })
+  globalThis.fetch = async () => new Response("Bad Gateway", { status: 502 })
+  const down = await get("/jobs").catch((err) => err)
+  expect(down.status).toBe(502)
+  expect(down.retryAfterMs).toBeUndefined()
+})
