@@ -2,24 +2,38 @@
 
 import { useState } from "react"
 import { get, post } from "@/lib/api"
-import { percent, relativeTime } from "@/lib/format"
+import { percent } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { SleepStatus, WakeOutcome } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Status } from "@/components/status-dot"
+import { ProductGlyph } from "@/components/product-logo"
+import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { asleepShare, lastWakeLine, sleepShown, spanLength } from "@/components/deploy/sleep-model"
+import { WireMark, WireNode } from "@/components/deploy/wire"
+import {
+  asleepShare,
+  sleepLead,
+  sleepShown,
+  sleepWeek,
+  spanLength,
+} from "@/components/deploy/sleep-model"
+
+/** A stretch asleep on the week's strip: the calm hue, never a state's. */
+const ASLEEP_HUE = "var(--tag-violet)"
 
 /**
  * An environment asleep by design (`deploy/sleep.go`): its container was
  * stopped because nobody had visited for the plan's idle minutes, and the
- * next request starts it. The panel says since when and why, how long a
- * visitor waits, and offers the one verb the state has: wake it now. Drawn
- * only while it is asleep or waking; an awake environment that sleeps says
- * so in its Runtime settings, not here.
+ * next request starts it. It takes the shape every block on the Overview does
+ * (§16): Docker's mark, since a stopped container is the evidence, with the
+ * state as one sentence — asleep on purpose, and for how long — over why, what
+ * the next visitor meets and what woke it last; then one picture, the last
+ * seven days as a strip with each stretch asleep on it. Its one verb is Wake
+ * now. It was four figures in a row on the page the operator asked to carry no
+ * metric cards. Drawn only while it is asleep or waking; an awake environment
+ * that sleeps says so in its Runtime settings, not here.
  */
 export function SleepPanel({
   projectId,
@@ -53,67 +67,78 @@ export function SleepPanel({
     }
   }
 
-  const last = lastWakeLine(status)
+  const lead = sleepLead(status, wakingNow)
+  const week = sleepWeek(status)
+  const share = `Asleep ${spanLength(status.asleepSeconds)} of the last 7 days, ${percent(asleepShare(status) * 100, 0)}`
   return (
-    <Panel plain>
+    <Panel plain data-testid="sleep-block">
       <PanelHeader
         title={wakingNow ? "Waking up" : "Asleep"}
         actions={
-          <>
-            <Status
-              tone="notice"
-              label={wakingNow ? "Starting" : "Asleep by design"}
-              live={wakingNow}
-              className="animate-rise"
-            />
-            {can("service.control") && (
-              <Button
-                variant="outline"
-                size="sm"
-                pending={wakingNow}
-                disabled={wakingNow}
-                onClick={() => void wake()}
-              >
-                Wake now
-              </Button>
-            )}
-          </>
+          can("service.control") && (
+            <Button
+              variant="outline"
+              size="sm"
+              pending={wakingNow}
+              disabled={wakingNow}
+              onClick={() => void wake()}
+            >
+              Wake now
+            </Button>
+          )
         }
       />
-      <PanelBody flush className="pt-1">
-        <StatGrid columns={4} dense>
-          <StatTile
-            label="Asleep since"
-            value={status.since ? relativeTime(status.since) : "—"}
-            hint="stopped, not removed"
-          />
-          <StatTile
-            label="Last request"
-            value={status.lastRequestAt ? relativeTime(status.lastRequestAt) : "None"}
-            hint={
-              status.lastRequestAt
-                ? `sleeps after ${status.idleMinutes} idle min`
-                : "since it went live"
-            }
-          />
-          <StatTile
-            label="A visitor waits"
-            value={`≤ ${status.holdSeconds} s`}
-            hint={`woken within ${status.wakeTimeoutSeconds} s`}
-          />
-          <StatTile
-            label="Asleep this week"
-            value={spanLength(status.asleepSeconds)}
-            hint={`${percent(asleepShare(status) * 100, 0)} of the last 7 days`}
-          />
-        </StatGrid>
-        <p
-          key={status.reason}
-          className="max-w-3xl animate-rise px-5 pt-1 pb-4 text-hint leading-relaxed text-muted-foreground"
-        >
-          {status.reason} The next request to its domain starts it and is answered by it.
-          {last && <> {last}.</>}
-        </p>
+      <PanelBody className="space-y-4 pt-4">
+        <WireNode
+          mark={
+            <span className="relative flex">
+              <WireMark tone="logo" size="md">
+                <ProductGlyph id="docker" />
+              </WireMark>
+              <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
+                <StatusDot tone="notice" live={wakingNow} />
+              </span>
+            </span>
+          }
+          title={lead.title}
+          hint={
+            <span key={lead.hint} className="block animate-rise">
+              {lead.hint}
+            </span>
+          }
+        />
+        <div className="min-w-0">
+          <div
+            role="img"
+            aria-label={share}
+            data-testid="sleep-week"
+            className="relative h-2.5 animate-rise overflow-hidden rounded-sm bg-meter-track"
+          >
+            {week.map((stretch) => (
+              <span
+                key={stretch.key}
+                className="absolute inset-y-0"
+                style={{
+                  left: `${stretch.left * 100}%`,
+                  width: `${stretch.width * 100}%`,
+                  minWidth: 3,
+                  background: ASLEEP_HUE,
+                }}
+              />
+            ))}
+          </div>
+          <div className="mt-2 flex min-h-5 min-w-0 items-baseline justify-between gap-x-4 text-hint text-muted-foreground">
+            <p className="numeric flex min-w-0 items-center gap-1.5">
+              <span
+                aria-hidden
+                className="size-2 shrink-0 rounded-full"
+                style={{ background: ASLEEP_HUE }}
+              />
+              <span className="truncate">{share}</span>
+            </p>
+            <span className="numeric shrink-0 text-micro max-sm:hidden">7 days ago to now</span>
+          </div>
+        </div>
       </PanelBody>
     </Panel>
   )

@@ -3776,6 +3776,18 @@ a new block on this page takes it too:
   a detail and its last hour at the line's end. Each is one height in every state and opens the page that
   has the rest.
 
+- **A block that shows only in one state takes the shape too.** The release watch and the sleeping
+  block were missed in 0.8.5 because each is drawn only while a release is on watch or the environment
+  is asleep, and stayed two rows of four tiles until 0.8.6. The watch opens on the proxy that wrote the
+  record (Caddy, or nginx where the readings carry no durations) with *Release #12 fails 0.4% of its
+  requests; 19 in 20 finish inside 180ms*, the judgement and the countdown under it, and its picture is
+  the release before and the release now as two strips of one length, what each answered and what it
+  failed, the figures in a column beside them. The sleeping block opens on Docker's mark with *Asleep
+  by design for 42 min*, and its picture is the last seven days as one strip with each stretch asleep on
+  it. Their verbs stay in the head: *Keep release #N* and *Roll back instantly*, *Wake now*. The rows
+  and strips keep one height and one place whether there is a reading or not
+  (`deploy-rollback-watch.spec.ts` and `deploy-sleep.spec.ts` measure both at 1280 and 390).
+
 The Deployments tab's history and every other page keep `StatTile`: this is the Overview's register of
 speech, not a retirement of the figure.
 

@@ -1,13 +1,15 @@
 import { expect, test } from "@playwright/test"
 import type { RollbackWatch } from "../../src/lib/types"
 import { expectSaved, mockProject, saveSettings } from "./deploy-fixture"
+import { risen } from "./risen"
 
 /**
  * Metric-gated rollback on the project's pages: the window after a cutover
- * is read on the overview as four figures with its two verbs, a rollback
- * that happened stays there with the reading that decided it, the release
- * list marks which release was taken back, and the terms are edited on
- * Runtime settings beside the release strategy.
+ * is read on the overview as one sentence on the proxy's mark over the two
+ * releases side by side, with its two verbs, a rollback that happened stays
+ * there with the reading that decided it, the release list marks which
+ * release was taken back, and the terms are edited on Runtime settings beside
+ * the release strategy.
  */
 function watch(overrides: Partial<RollbackWatch> = {}): RollbackWatch {
   const now = Date.now()
@@ -49,17 +51,36 @@ function watch(overrides: Partial<RollbackWatch> = {}): RollbackWatch {
 }
 
 test.describe("metric-gated rollback", () => {
-  test("an open window reads as four figures and rolls back instantly", async ({ page }) => {
+  test("an open window reads as one sentence over the two releases and rolls back instantly", async ({
+    page,
+  }) => {
     await mockProject(page, { rollbackWatch: watch() })
     await page.goto("/deploy/7")
-    const panel = page.locator("section", { hasText: "Release #2 on watch" }).first()
+    const panel = page.getByTestId("release-watch")
     await expect(page.getByText("Release #2 on watch")).toBeVisible()
-    await expect(panel.getByText("5xx since cutover")).toBeVisible()
-    await expect(panel.getByText("1.6%", { exact: true })).toBeVisible()
-    await expect(panel.getByText("0.5% before", { exact: true })).toBeVisible()
-    await expect(panel.getByText("131ms", { exact: true })).toBeVisible()
-    await expect(panel.getByText("release #1 paused")).toBeVisible()
-    await expect(panel.getByText(/Within the previous release's baseline/)).toBeVisible()
+    // The Overview carries no metric cards and no notation: the reading is a
+    // sentence, and how long things took is said in words.
+    await expect(
+      panel.getByText("Release #2 fails 1.6% of its requests; 19 in 20 finish inside 131ms"),
+    ).toBeVisible()
+    await expect(panel.getByText("No worse than release #1 was.")).toBeVisible()
+    await expect(panel.locator("[data-slot=stat-tile]")).toHaveCount(0)
+    await expect(panel).not.toContainText("p95")
+    await expect(panel.locator('img[src="/logos/caddy.svg"]')).toBeVisible()
+    await expect(panel.getByTestId("watch-window")).toContainText(
+      /^\d:\d\d left to decide · release #1 paused$/,
+    )
+    // The picture: each release one strip, with its figures beside it.
+    await expect(
+      panel.getByRole("img", {
+        name: "Release #1, before: 0.5% failed · 19 in 20 inside 118ms",
+      }),
+    ).toBeVisible()
+    await expect(
+      panel.getByRole("img", {
+        name: "Release #2, since: 1.6% failed · 19 in 20 inside 131ms",
+      }),
+    ).toBeVisible()
 
     await page.getByRole("button", { name: "Roll back instantly" }).click()
     const dialog = page.getByRole("dialog", { name: "Roll back instantly" })
@@ -98,6 +119,8 @@ test.describe("metric-gated rollback", () => {
     await page.goto("/deploy/7")
     await expect(page.getByText("Release #2 rolled back")).toBeVisible()
     await expect(page.getByText("Rolled back automatically")).toBeVisible()
+    // The reading that decided it stays as the picture.
+    await expect(page.getByTestId("watch-picture").getByRole("img")).toHaveCount(2)
     await expect(page.getByText(/5xx answers rose to 38\.3%/)).toBeVisible()
     await expect(page.getByRole("link", { name: /Open the rollback/ })).toHaveAttribute(
       "href",
@@ -105,6 +128,54 @@ test.describe("metric-gated rollback", () => {
     )
     await expect(page.getByRole("button", { name: "Roll back instantly" })).toHaveCount(0)
   })
+
+  // The block's two strips are one picture: the same left edge and length at
+  // either width, in rows of one height whether a release answered anything or
+  // not, and nothing wider than the phone.
+  for (const viewport of [
+    { width: 1280, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    test(`the two releases line up at ${viewport.width}`, async ({ page }) => {
+      await page.setViewportSize(viewport)
+      const measure = async () => {
+        await risen(page)
+        const rows = page.locator("[data-slot=watch-row]")
+        await expect(rows).toHaveCount(2)
+        const boxes = []
+        for (const row of await rows.all()) {
+          const strip = (await row.getByRole("img").boundingBox())!
+          boxes.push({ row: (await row.boundingBox())!, strip })
+        }
+        return boxes
+      }
+
+      await mockProject(page, { rollbackWatch: watch() })
+      await page.goto("/deploy/7")
+      await expect(page.getByText("Release #2 on watch")).toBeVisible()
+      const read = await measure()
+      expect(read[0].strip.x).toBe(read[1].strip.x)
+      expect(read[0].strip.width).toBe(read[1].strip.width)
+      expect(read[0].strip.height).toBe(read[1].strip.height)
+      expect(read[0].row.height).toBe(read[1].row.height)
+      expect(read[1].row.y).toBeGreaterThan(read[0].row.y)
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true)
+
+      // Nothing read yet: the same rows in the same places, only their words change.
+      await mockProject(page, {
+        rollbackWatch: watch({ observed: undefined, baseline: undefined, verdict: undefined }),
+      })
+      await page.goto("/deploy/7")
+      await expect(page.getByText("Release #2 has answered no requests yet")).toBeVisible()
+      const empty = await measure()
+      expect(empty.map((box) => box.row.height)).toEqual(read.map((box) => box.row.height))
+      expect(empty.map((box) => box.strip.x)).toEqual(read.map((box) => box.strip.x))
+      expect(empty.map((box) => box.strip.width)).toEqual(read.map((box) => box.strip.width))
+      expect(empty[1].row.y - empty[0].row.y).toBe(read[1].row.y - read[0].row.y)
+    })
+  }
 
   test("a clean window is the expected answer and is not drawn", async ({ page }) => {
     await mockProject(page, {
@@ -148,8 +219,10 @@ test.describe("metric-gated rollback", () => {
       }),
     })
     await page.goto("/deploy/7")
-    const panel = page.locator("section", { hasText: "Release #2 on watch" }).first()
-    await expect(panel.getByText("release #1 answered 37 of its visitors' requests")).toBeVisible()
+    const panel = page.getByTestId("release-watch")
+    await expect(panel.getByTestId("watch-window")).toContainText(
+      "release #1 answered 37 of its visitors' requests",
+    )
     await expect(panel.getByText("release #1 paused")).toHaveCount(0)
     await panel.screenshot({ path: testInfo.outputPath("skew-watch-1280.png") })
 

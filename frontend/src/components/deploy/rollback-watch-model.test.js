@@ -4,11 +4,15 @@ import {
   clock,
   latencyTone,
   policyLine,
+  readingLine,
   shareTone,
   skewLine,
   warmLine,
+  watchLead,
+  watchProxy,
   watchShown,
   watchTitle,
+  windowLine,
   windowRemaining,
 } from "./rollback-watch-model"
 
@@ -156,5 +160,128 @@ describe("words", () => {
     expect(skewLine(true, { ...DEFAULT_ROLLBACK_POLICY, keepWarm: false })).toMatch(
       /only while it drains/,
     )
+  })
+})
+
+describe("the Overview's block", () => {
+  const judged = watch({
+    baseline: { requests: 412, failures: 2, errorRate: 0.0049, p95: 118, from: "", until: "" },
+    observed: { requests: 63, failures: 1, errorRate: 0.0159, p95: 131, from: "", until: "" },
+  })
+  test("the reading is one sentence in words, never a p95", () => {
+    const lead = watchLead(judged)
+    expect(lead.title).toBe("Release #42 fails 1.6% of its requests; 19 in 20 finish inside 131ms")
+    expect(lead.hint).toBe("No worse than release #41 was.")
+    expect(lead.tone).toBe("running")
+    expect(`${lead.title} ${lead.hint}`).not.toMatch(/p95/)
+    expect(watchLead(watch()).title).toBe(
+      "Release #42 has failed none of its 50 requests; 19 in 20 finish inside 130ms",
+    )
+  })
+  test("too few requests, no route and an environment that only watches say so", () => {
+    const few = watchLead(
+      watch({
+        observed: { requests: 12, failures: 0, errorRate: 0, p95: 90, from: "", until: "" },
+        verdict: {
+          code: "not_enough_requests",
+          judged: false,
+          tripped: false,
+          latencyJudged: false,
+          reason: "Not enough to judge yet: 12 of the 20 requests a decision needs.",
+        },
+        policy: { ...DEFAULT_ROLLBACK_POLICY, automatic: false },
+      }),
+    )
+    expect(few.tone).toBe("unknown")
+    expect(few.hint).toBe(
+      "Not enough to judge yet: 12 of the 20 requests a decision needs. Nothing is rolled back automatically in this environment.",
+    )
+    expect(watchLead(watch({ observed: undefined, verdict: undefined }))).toEqual({
+      title: "Release #42 has answered no requests yet",
+      hint: "20 requests decide.",
+      tone: "unknown",
+    })
+    const noRoute = watchLead(
+      watch({
+        verdict: {
+          code: "no_route",
+          judged: false,
+          tripped: false,
+          latencyJudged: false,
+          reason: "Release #42 has no domain, so nothing is judged automatically.",
+        },
+      }),
+    )
+    expect(noRoute).toEqual({
+      title: "Release #42 has no domain, so nothing is judged automatically.",
+      tone: "unknown",
+    })
+  })
+  test("a slow release is said from its figures, and a failing one in the server's words", () => {
+    const slow = watchLead(
+      watch({
+        observed: { requests: 120, failures: 0, errorRate: 0, p95: 2310, from: "", until: "" },
+        verdict: {
+          code: "latency",
+          judged: true,
+          tripped: true,
+          latencyJudged: true,
+          reason: "p95 rose to 2.31 s from 120 ms before (120 requests).",
+        },
+      }),
+    )
+    expect(slow.hint).toBe("19 in 20 requests now take up to 2.31s, from 120ms on release #41.")
+    expect(slow.tone).toBe("danger")
+    const failing = watchLead(
+      watch({
+        observed: { requests: 120, failures: 46, errorRate: 0.383, p95: 140, from: "", until: "" },
+        verdict: {
+          code: "error_rate",
+          judged: true,
+          tripped: true,
+          latencyJudged: true,
+          reason: "5xx answers rose to 38.3% (46 of 120 requests) from 0.5% before.",
+        },
+      }),
+    )
+    expect(failing.title).toBe(
+      "Release #42 fails 38.3% of its requests; 19 in 20 finish inside 140ms",
+    )
+    expect(failing.hint).toBe("5xx answers rose to 38.3% (46 of 120 requests) from 0.5% before.")
+    expect(failing.tone).toBe("danger")
+  })
+  test("a rollback is said by who made it, with the message that decided it", () => {
+    expect(
+      watchLead(watch({ state: "rolled_back", endMessage: "Traffic went back to release #41." })),
+    ).toEqual({
+      title: "Rolled back automatically",
+      hint: "Traffic went back to release #41.",
+      tone: "danger",
+    })
+    expect(
+      watchLead(watch({ state: "rolled_back", endMessage: "Rolled back instantly by ana." })).title,
+    ).toBe("Rolled back by hand")
+  })
+  test("each release's row of the picture reads in the sentence's words", () => {
+    expect(readingLine(judged.baseline)).toBe("0.5% failed · 19 in 20 inside 118ms")
+    expect(readingLine(watch().observed)).toBe("none failed · 19 in 20 inside 130ms")
+    expect(readingLine({ requests: 9, failures: 1, errorRate: 1 / 9, from: "", until: "" })).toBe(
+      "11.1% failed",
+    )
+    expect(readingLine(undefined)).toBe("no requests")
+  })
+  test("the window's line counts down while it watches", () => {
+    expect(windowLine(watch(), 300)).toBe("5:00 left to decide · release #41 paused")
+    expect(windowLine(watch({ state: "closing" }), 0)).toBe("release #41 paused")
+  })
+  test("the mark is the proxy that wrote the record", () => {
+    expect(watchProxy(watch())).toBe("caddy")
+    // nginx records no durations: requests with no time among them are its.
+    expect(
+      watchProxy(
+        watch({ observed: { requests: 50, failures: 0, errorRate: 0, from: "", until: "" } }),
+      ),
+    ).toBe("nginx")
+    expect(watchProxy(watch({ observed: undefined, baseline: undefined }))).toBe("caddy")
   })
 })

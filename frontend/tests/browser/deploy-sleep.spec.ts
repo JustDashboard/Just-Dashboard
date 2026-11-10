@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { deployment, expectSaved, json, mockProject, project, saveSettings } from "./deploy-fixture"
+import { risen } from "./risen"
 import type { SleepStatus } from "../../src/lib/types"
 
 /**
@@ -97,10 +98,17 @@ test("an environment asleep by design says when and why, and wakes from Wake now
   await expect(
     page.getByText("No request reached it for 15 minutes; the last was at 11:02 UTC.").first(),
   ).toBeVisible()
-  await expect(page.getByText("≤ 30 s", { exact: true })).toBeVisible()
+  await expect(page.getByText(/held for up to 30 s/)).toBeVisible()
   await expect(
     page.getByText(/Last woken by a request to api\.example\.test in 1\.2 s/),
   ).toBeVisible()
+  // The Overview carries no metric cards: Docker's mark, a sentence, then the
+  // week as one strip with each stretch asleep on it.
+  const block = page.getByTestId("sleep-block")
+  await expect(block.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await expect(block.locator('img[src="/logos/docker.svg"]')).toBeVisible()
+  await expect(block.getByRole("img", { name: "Asleep 5 h of the last 7 days, 3%" })).toBeVisible()
+  await expect(block.getByTestId("sleep-week").locator("span")).toHaveCount(2)
   // The preview is not loaded: loading it would be a request that wakes it.
   await expect(
     page.getByText("The next visit wakes it; this preview does not, so it stays asleep"),
@@ -111,6 +119,35 @@ test("an environment asleep by design says when and why, and wakes from Wake now
   await expect.poll(() => mocked.woken()).toBe(1)
   await expect(page.getByText("Asleep by design")).toHaveCount(0)
 })
+
+// The block keeps one shape at either width: the week's strip runs the block's
+// width under the sentence, its legend sits under it, and nothing is wider
+// than a phone.
+for (const viewport of [
+  { width: 1280, height: 900 },
+  { width: 390, height: 844 },
+]) {
+  test(`the sleeping block is a sentence over one strip at ${viewport.width}`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await mockAsleep(page)
+    await page.goto("/deploy/7")
+    const block = page.getByTestId("sleep-block")
+    await expect(block.getByText(/^Asleep by design for \d+ min$/)).toBeVisible()
+    await risen(page)
+    const frame = (await block.boundingBox())!
+    const strip = (await block.getByTestId("sleep-week").boundingBox())!
+    const sentence = (await block.getByText(/^Asleep by design for/).boundingBox())!
+    const legend = (await block.getByText("Asleep 5 h of the last 7 days, 3%").boundingBox())!
+    expect(strip.height).toBe(10)
+    expect(Math.abs(strip.x - frame.x)).toBeLessThanOrEqual(1)
+    expect(Math.abs(strip.width - frame.width)).toBeLessThanOrEqual(1)
+    expect(strip.y).toBeGreaterThan(sentence.y + sentence.height)
+    expect(legend.y).toBeGreaterThan(strip.y + strip.height)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+  })
+}
 
 test("the sleep terms are saved with the runtime plan, and refused out of bounds", async ({
   page,

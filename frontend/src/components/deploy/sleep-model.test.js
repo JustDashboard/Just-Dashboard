@@ -5,11 +5,13 @@ import {
   idleSpan,
   lastWakeLine,
   sleepDraftOf,
+  sleepLead,
   sleepPlanOf,
   sleepPolicyLine,
   sleepRefusal,
   sleepShown,
   sleepTerms,
+  sleepWeek,
   spanLength,
   storedSleep,
   wakeCause,
@@ -103,4 +105,46 @@ test("a stretch says what woke it and how long it took", () => {
   expect(spanLength(45)).toBe("45 s")
   expect(spanLength(3 * 3600 + 20 * 60)).toBe("3 h 20 min")
   expect(spanLength(5 * 24 * 3600)).toBe("5 days")
+})
+
+test("the Overview's block says asleep on purpose, for how long, and what a visitor meets", () => {
+  const now = Date.parse("2026-11-10T12:00:00Z")
+  const status = {
+    enabled: true,
+    idleMinutes: 15,
+    wakeTimeoutSeconds: 60,
+    holdSeconds: 30,
+    state: "asleep",
+    since: "2026-11-10T11:18:00Z",
+    reason: "No request reached it for 15 minutes; the last was at 11:02 UTC.",
+    recent: [
+      { id: 2, sleptAt: "2026-11-10T11:18:00Z" },
+      {
+        id: 1,
+        sleptAt: "2026-11-09T12:00:00Z",
+        wokeAt: "2026-11-09T18:00:00Z",
+        wakeTrigger: "request",
+        wakeDetail: "api.example.test",
+        wakeSeconds: 1.2,
+      },
+      // Began before the week: cut at its edge.
+      { id: 0, sleptAt: "2026-11-01T00:00:00Z", wokeAt: "2026-11-04T00:00:00Z" },
+    ],
+    asleepSeconds: 5 * 3600,
+  }
+  expect(sleepLead(status, false, now)).toEqual({
+    title: "Asleep by design for 42 min",
+    hint: "No request reached it for 15 minutes; the last was at 11:02 UTC. The next request to its domain starts it and is answered by it, held for up to 30 s. Last woken by a request to api.example.test in 1.2 s.",
+  })
+  expect(sleepLead(status, true, now).title).toBe("Waking up: its container is starting")
+  expect(sleepLead({ ...status, since: undefined }, false, now).title).toBe("Asleep by design")
+
+  const week = sleepWeek(status, now)
+  expect(week.map((stretch) => stretch.key)).toEqual([0, 1, 2])
+  // The oldest starts on the strip's edge and the open one ends on now.
+  expect(week[0].left).toBe(0)
+  expect(week[0].width).toBeCloseTo(0.5 / 7, 5)
+  expect(week[1].width).toBeCloseTo(0.25 / 7, 5)
+  expect(week[2].left + week[2].width).toBeCloseTo(1, 5)
+  expect(sleepWeek({ ...status, recent: [] }, now)).toEqual([])
 })
