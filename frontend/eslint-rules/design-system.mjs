@@ -181,6 +181,43 @@ const latencyWords = {
   },
 }
 
-const plugin = { rules: { tokens: rule, "latency-words": latencyWords } }
+/**
+ * Primitives a page may not reach past or bring back.
+ *
+ * `BarList` draws a ranked list as bars of different lengths, which the
+ * operator asked to stop: figures sit in aligned columns (`RankList`) with one
+ * fixed strip for a whole (`SplitBar`). Insights left it first, the Databases
+ * pages next, and the deploy, proxy, security, network and Files lists last.
+ * It stays for the one place where the bars are the picture the reader asked
+ * for, the Query page's Chart tab. (The small size bars inside table cells,
+ * the other shape the operator kept, are their own few lines and never were a
+ * `BarList`.) A new ranked list is a `RankList`.
+ */
+const BAR_LIST_HOMES =
+  /src[\\/]components[\\/](?:bar-list\.tsx|database[\\/]query[\\/]chart-view\.tsx)$/
+
+const primitives = {
+  meta: {
+    type: "problem",
+    docs: { description: "Compose the design system's primitives rather than their predecessors." },
+    schema: [],
+  },
+  create(context) {
+    const filename = context.filename ?? ""
+    return {
+      ImportDeclaration(node) {
+        if (node.source.value !== "@/components/bar-list") return
+        if (BAR_LIST_HOMES.test(filename)) return
+        context.report({
+          node,
+          message:
+            "[bar-list] A ranked list is a RankList (components/rank-list.tsx): name, figure and share in columns, with SplitBar for one strip of a whole. BarList stays only on the Query page's Chart tab.",
+        })
+      },
+    }
+  },
+}
+
+const plugin = { rules: { tokens: rule, "latency-words": latencyWords, primitives } }
 
 export default plugin

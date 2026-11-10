@@ -590,7 +590,7 @@ format's colour, its kind and size, a folder's colour swatches, and its verbs: t
 want named and wide (Edit, View, Open folder, or Download for a binary or archive) beside glyphs for
 the rest (View, Crop, Download, Checksum). Under that, grouped sections: what is inside (the text
 head, the PDF, the archive, a folder's folder and file counts with Measure size and its largest
-entries as a `BarList`), Details (modified with the date, size with the byte count, lines, language,
+entries as a `RankList`, each with its share of the folder's total when the walk reached all of it), Details (modified with the date, size with the byte count, lines, language,
 owner and group, a link's target), Access (the mode as an owner/group/everyone grid and in one
 sentence, `access.ts`), and Location (the path as crumbs to walk up, with Copy path). It describes the
 folder being browsed while nothing in it is chosen. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a

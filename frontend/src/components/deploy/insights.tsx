@@ -10,7 +10,7 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentInsights } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
-import { BarList } from "@/components/bar-list"
+import { RankList } from "@/components/rank-list"
 import { Rocket } from "@/components/icons"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
@@ -269,7 +269,7 @@ export function Insights({
       <span>today</span>
     </p>
   )
-  // One cause has nothing to be compared with, so it is a line and no bar.
+  // One cause has nothing to be compared with, so it is a line and no list.
   const OnlyFailure = onFailureClick ? "button" : "p"
   const failureColumns = history ? "grid gap-x-10 sm:grid-cols-2 xl:grid-cols-3" : undefined
 
@@ -301,18 +301,17 @@ export function Insights({
           </OnlyFailure>
         </div>
       ) : (
-        <BarList
-          className={cn("-ml-2", failureColumns)}
+        // Figures in columns, not bars of different lengths: the count and
+        // its share of every failed release, which is a real whole whichever
+        // columns the causes land in.
+        <RankList
+          className={failureColumns}
           items={data.topFailures.map((failure) => ({
             key: failure.code,
             label: causeTitle(failure.code),
             mono: false,
             value: `×${failure.count}`,
-            // Of every failed release, not of the commonest cause: the bars
-            // then read as shares, whichever columns they land in.
-            share: failure.count / data.failed,
-            signal: 1,
-            tone: "danger",
+            share: data.failed > 0 ? failure.count / data.failed : undefined,
             title: onFailureClick ? "Show the failed deployments" : undefined,
             onClick: onFailureClick && (() => onFailureClick(failure.code)),
           }))}

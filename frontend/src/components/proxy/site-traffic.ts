@@ -1,7 +1,6 @@
 import { percent } from "@/lib/format"
 import type { Tone } from "@/components/tone"
 import type { SiteTrafficReading, SiteTrafficSummary, TrafficPoint } from "@/lib/types"
-import type { BarListItem } from "@/components/bar-list"
 
 const COMPACT = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 
@@ -70,27 +69,41 @@ export function edgeTraffic(sites: SiteTrafficReading[]): TrafficPoint[] {
   return [...byMinute.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
 }
 
-/** Every site's last hour, busiest first; a site that logs nothing says why. */
-export function busiestItems(
-  sites: SiteTrafficSummary["sites"],
-  onOpen: (href: string) => void,
-  limit?: number,
-): BarListItem[] {
+/** One site's row of the busiest list: its hour, and how much of it failed. */
+export type BusiestSite = {
+  key: string
+  label: string
+  value: string
+  /** 0–1 of every site's requests in the hour; absent when nothing was served. */
+  share?: number
+  hint: string
+  /** The failing share's tone, for the hint's colour. */
+  tone: Tone
+  title: string
+  href: string
+}
+
+/**
+ * Every site's last hour, busiest first; a site that logs nothing says why.
+ * A row's share is of the edge's whole hour, every site added up, so the
+ * column says how the traffic is split rather than how each compares with the
+ * busiest.
+ */
+export function busiestSites(sites: SiteTrafficSummary["sites"], limit?: number): BusiestSite[] {
   const ranked = [...sites].sort(
     (a, b) =>
       Number(b.status === "available") - Number(a.status === "available") ||
       b.requests - a.requests,
   )
-  const top = Math.max(...ranked.map((s) => s.requests), 1)
+  const whole = ranked.reduce((sum, s) => sum + (s.status === "available" ? s.requests : 0), 0)
   return ranked.slice(0, limit).map((s) => ({
     key: s.site,
     label: s.site,
     value: s.status === "available" ? `${compactCount(s.requests)}/h` : "—",
-    share: s.requests / top,
-    signal: s.errorRate,
-    tone: errorRateTone(s.errorRate) === "danger" ? "danger" : "warning",
+    share: s.status === "available" && whole > 0 ? s.requests / whole : undefined,
     hint: s.status === "available" ? `${share(s.errorRate)} 5xx` : "no log",
+    tone: s.status === "available" ? errorRateTone(s.errorRate) : "default",
     title: s.reason ?? `Open ${s.site}'s traffic`,
-    onClick: () => onOpen(readingHref(s)),
+    href: readingHref(s),
   }))
 }

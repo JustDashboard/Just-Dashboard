@@ -14,7 +14,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Pane } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { BarList } from "@/components/bar-list"
+import { RankList } from "@/components/rank-list"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { FilterChip, tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -31,7 +31,7 @@ import { RequestConsole } from "@/components/deploy/request-console"
 import { TrafficFacets } from "@/components/deploy/traffic-facets"
 import { SiteErrors } from "@/components/proxy/site-errors"
 import {
-  busiestItems,
+  busiestSites,
   compactCount,
   errorRateTone,
   share,
@@ -318,10 +318,29 @@ function BusiestSites({
   return (
     <Panel plain>
       <PanelHeader title="Busiest sites" />
+      {/* Figures in columns: each site's hour and its share of the edge's
+          whole, with the failing share in its tone beside the name. */}
       <PanelBody flush>
-        <BarList
+        <RankList
           className="animate-rise"
-          items={busiestItems(sites, onOpen)}
+          items={busiestSites(sites).map((site) => ({
+            key: site.key,
+            label: site.label,
+            value: site.value,
+            share: site.share,
+            hint: (
+              <span
+                className={cn(
+                  site.tone === "danger" && "text-destructive",
+                  site.tone === "warning" && "text-warning",
+                )}
+              >
+                {site.hint}
+              </span>
+            ),
+            title: site.title,
+            onClick: () => onOpen(site.href),
+          }))}
           emptyLabel="No sites on this host."
         />
       </PanelBody>
