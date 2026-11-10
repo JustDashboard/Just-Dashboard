@@ -148,6 +148,18 @@ the mount site is only the conversion.
 
 - Return `httpx.Err/BadRequest/Internal/Wrap`; never write an error body by hand. `httpx.WriteError` is
   the single renderer and is what keeps internal error strings off the wire.
+- **A body may keep the server waiting only so long** (`httpx.BodyDeadline`, on the root router). The
+  server has a header timeout and no read or write timeout, because either would sever log tails,
+  uploads and terminals; that left a body unbounded, and a client could send its headers and then a
+  byte now and then. Only time spent blocked on the client is counted: 60 seconds (`BodyGrace`) plus
+  one second for every 4 KB that has arrived (`BodyMinRate`), so a handler's own time is never
+  charged and an upload is never cut for being large. A body that runs out of it reads as
+  `408 body_timeout` (`DecodeJSON` answers exactly that; another reader answers its own refusal). The
+  connection's read deadline stands only while one of the body's reads is in progress, never between
+  them. `WriteError` reads what is left of a small unread body through the same allowance before it
+  writes a refusal, since `net/http` would otherwise do that read itself with no bound. What is not
+  bounded: a body under 256 KB that a handler never reads and then answers with a success, where
+  `net/http`'s own read before the response still waits on the client.
 - **Every request has an id** (`httpx.RequestID`, the first middleware): sixteen hex digits, or the
   caller's own `X-Request-Id` when it is 8 to 64 letters, digits, `.`, `_` or `-`. It is echoed as
   `X-Request-Id` on every answer, it is the `request` attribute of the `request failed`, panic and

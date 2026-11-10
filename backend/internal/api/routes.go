@@ -31,6 +31,9 @@ func (s *Server) Routes() http.Handler {
 	r.MethodNotAllowed(methods.methodNotAllowed)
 	// First, so the id is on every answer and every log line below it.
 	r.Use(httpx.RequestID)
+	// The server has a header timeout and, for the sake of its streams, no
+	// other: this is what keeps a body from being trickled in for ever.
+	r.Use(httpx.BodyDeadline(httpx.BodyGrace, httpx.BodyMinRate))
 	r.Use(httpx.RealIP(s.Cfg.TrustedProxies))
 	r.Use(httpx.Recoverer(s.Log))
 	r.Use(httpx.RequestLogger(s.Log))

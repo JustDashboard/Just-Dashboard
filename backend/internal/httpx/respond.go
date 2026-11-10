@@ -151,6 +151,10 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	if p, ok := PrincipalFrom(r.Context()); ok {
 		p.FailureReason = apiErr.Message
 	}
+	// A refusal is often written before the body was read. What is left of
+	// it is read here, within the client's allowance, so the server does not
+	// wait on it without one (drainBody).
+	drainBody(r)
 	JSON(w, apiErr.Status, map[string]any{"error": apiErr})
 }
 
@@ -209,7 +213,12 @@ func decodeJSON(r *http.Request, dst any, exactNumbers bool, limit int64) error 
 func decodeRefusal(err error, limit int64) *APIError {
 	var tooLarge *http.MaxBytesError
 	var wrongKind *json.UnmarshalTypeError
+	var said *APIError
 	switch {
+	case errors.As(err, &said):
+		// The body's own reader refused: a client that stopped sending is
+		// 408 body_timeout (BodyDeadline), not a malformed request.
+		return said
 	case errors.As(err, &tooLarge):
 		return Err(http.StatusRequestEntityTooLarge, "body_too_large",
 			"the request body is larger than the "+byteLimit(limit)+" this route accepts")
