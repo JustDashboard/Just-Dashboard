@@ -399,10 +399,7 @@ func (e *Engine) execute(ctx context.Context, lease QueueLease) error {
 		if err != nil {
 			return err
 		}
-		output := &storeStepOutput{
-			ctx: ctx, store: e.store, runID: lease.RunID, stepID: stepPtr.ID,
-			claimToken: lease.Token,
-		}
+		output := newStoreStepOutput(ctx, e.store, lease.RunID, stepPtr.ID, lease.Token)
 		if resumableWaits[key] {
 			e.mu.Lock()
 			e.waiting[lease.RunID] = true
@@ -414,6 +411,9 @@ func (e *Engine) execute(ctx context.Context, lease QueueLease) error {
 		e.mu.Lock()
 		delete(e.waiting, lease.RunID)
 		e.mu.Unlock()
+		// What the step printed is in the transcript before anything records
+		// how the step ended, so its last lines precede its own closing event.
+		_ = output.Flush()
 		if ctx.Err() != nil {
 			if errors.Is(context.Cause(ctx), ErrLeaseLost) {
 				return ErrLeaseLost
@@ -437,10 +437,10 @@ func (e *Engine) execute(ctx context.Context, lease QueueLease) error {
 			}
 			return e.finishCancellation(lease)
 		}
-		if output.err != nil {
+		if err := output.failure(); err != nil {
 			result = StepResult{
 				State: StepFailed, ErrorCode: "event_persist_failed",
-				ErrorMessage: output.err.Error(),
+				ErrorMessage: err.Error(),
 			}
 		}
 		if result.State == "" {
@@ -479,43 +479,165 @@ func (e *Engine) execute(ctx context.Context, lease QueueLease) error {
 	return e.store.CompactRunLogs(context.Background(), lease.RunID, e.config.HotLogLimit)
 }
 
+// A step's output is written to the transcript in batches: when this many
+// lines are waiting, when they weigh this much, or this long after the first
+// of them, whichever comes first. The delay is short enough that a page
+// following the run still reads as live.
+const (
+	stepOutputBatchLines = 64
+	stepOutputBatchBytes = 256 << 10
+	stepOutputBatchDelay = 100 * time.Millisecond
+)
+
+// storeStepOutput is a running step's way into the transcript. Log collects
+// lines and writes them a batch at a time; Event and Flush write what is
+// waiting first, so nothing reaches the transcript ahead of a line that was
+// printed before it.
+//
+// The zero batch size writes every line through as it arrives, which is what
+// a test that builds one by hand and then reads the table gets.
 type storeStepOutput struct {
 	ctx        context.Context
 	store      *OrchestrationStore
 	runID      int64
 	stepID     int64
 	claimToken string
-	err        error
-	// lastSeq is the sequence of the line Log last persisted, so a step can
-	// point at the one line of its output that proves why it failed.
-	lastSeq int64
+	batchLines int
+	batchDelay time.Duration
+
+	mu           sync.Mutex
+	err          error
+	pending      []LogLine
+	pendingBytes int
+	timer        *time.Timer
+	// logged counts the lines Log has taken. A line's mark is its count, and
+	// spans says which sequence each written line received, so a step can
+	// still point at the one line of its output that proves why it failed
+	// although the line has no sequence until its batch is written.
+	logged int64
+	spans  []outputSpan
 }
 
-func (o *storeStepOutput) LastSeq() int64 { return o.lastSeq }
+// outputSpan is a run of lines written together: marks first..first+count-1
+// received sequences seq..seq+count-1.
+type outputSpan struct {
+	first, seq, count int64
+}
+
+func newStoreStepOutput(ctx context.Context, store *OrchestrationStore, runID, stepID int64, claimToken string) *storeStepOutput {
+	return &storeStepOutput{
+		ctx: ctx, store: store, runID: runID, stepID: stepID, claimToken: claimToken,
+		batchLines: stepOutputBatchLines, batchDelay: stepOutputBatchDelay,
+	}
+}
+
+// LastMark names the line Log last took. SeqOf turns it into the line's
+// sequence in the transcript.
+func (o *storeStepOutput) LastMark() int64 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.logged
+}
+
+// SeqOf is the transcript sequence of the line a mark names, writing what is
+// still waiting if that line is among it. It is 0 for a line that was never
+// written.
+func (o *storeStepOutput) SeqOf(mark int64) int64 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if mark <= 0 || mark > o.logged {
+		return 0
+	}
+	o.flushLocked()
+	// Newest first: a failure is named from the end of the output.
+	for index := len(o.spans) - 1; index >= 0; index-- {
+		span := o.spans[index]
+		if mark >= span.first && mark < span.first+span.count {
+			return span.seq + (mark - span.first)
+		}
+	}
+	return 0
+}
 
 func (o *storeStepOutput) Log(stream, text string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	if o.err != nil {
 		return o.err
 	}
-	ctx := o.ctx
-	if ctx.Err() != nil {
-		ctx = context.WithoutCancel(ctx)
+	o.logged++
+	o.pending = append(o.pending, LogLine{Stream: stream, Text: text})
+	o.pendingBytes += len(text)
+	if len(o.pending) >= o.batchLines || o.pendingBytes >= stepOutputBatchBytes {
+		o.flushLocked()
+		return o.err
 	}
-	event, err := o.store.AppendLog(ctx, o.runID, o.stepID, o.claimToken, stream, text)
-	o.err, o.lastSeq = err, event.Seq
+	if o.timer == nil {
+		o.timer = time.AfterFunc(o.batchDelay, func() { _ = o.Flush() })
+	}
+	return nil
+}
+
+// Flush writes the lines that are waiting. The engine calls it when the step
+// returns; a line that could not be written fails the step, as it always did.
+func (o *storeStepOutput) Flush() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.flushLocked()
 	return o.err
 }
 
+func (o *storeStepOutput) flushLocked() {
+	if o.timer != nil {
+		o.timer.Stop()
+		o.timer = nil
+	}
+	if len(o.pending) == 0 || o.err != nil {
+		o.pending, o.pendingBytes = nil, 0
+		return
+	}
+	lines := o.pending
+	o.pending, o.pendingBytes = nil, 0
+	events, err := o.store.AppendLogs(o.writeContext(), o.runID, o.stepID, o.claimToken, lines)
+	if err != nil {
+		o.err = err
+		return
+	}
+	first := o.logged - int64(len(lines)) + 1
+	seq := events[0].Seq
+	if last := len(o.spans) - 1; last >= 0 &&
+		o.spans[last].first+o.spans[last].count == first && o.spans[last].seq+o.spans[last].count == seq {
+		o.spans[last].count += int64(len(lines))
+		return
+	}
+	o.spans = append(o.spans, outputSpan{first: first, seq: seq, count: int64(len(lines))})
+}
+
+// writeContext outlives a cancelled step: what it printed on its way out is
+// still its transcript.
+func (o *storeStepOutput) writeContext() context.Context {
+	if o.ctx.Err() != nil {
+		return context.WithoutCancel(o.ctx)
+	}
+	return o.ctx
+}
+
 func (o *storeStepOutput) Event(input EventInput) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.flushLocked()
 	if o.err != nil {
 		return o.err
 	}
 	input.StepID = o.stepID
-	ctx := o.ctx
-	if ctx.Err() != nil {
-		ctx = context.WithoutCancel(ctx)
-	}
-	_, o.err = o.store.AppendEvent(ctx, o.runID, o.claimToken, input)
+	_, o.err = o.store.AppendEvent(o.writeContext(), o.runID, o.claimToken, input)
+	return o.err
+}
+
+// failure is the first line or event the transcript refused.
+func (o *storeStepOutput) failure() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	return o.err
 }
 
