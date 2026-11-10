@@ -168,7 +168,12 @@ the mount site is only the conversion.
   the methods that action lacks, as it never could with the methods it has.
 - Decode with `httpx.DecodeJSON` (4 MB cap, `application/json` required, unknown fields and trailing
   values rejected). SQL row values use `DecodeJSONNumbers` with the same constraints, preserving exact
-  numeric tokens until the database adapter binds them.
+  numeric tokens until the database adapter binds them. Its refusals are in the request's terms, never
+  `encoding/json`'s (`httpx.decodeRefusal`): a value of the wrong kind is `displayName must be a
+  string, not a number` with `error.field` set to the JSON path (`runtime.internalPort`), an unknown
+  field names itself in `error.field`, a missing body is `a JSON body is required`, and a body past
+  the limit is `413 body_too_large` naming the limit rather than a `400`. No Go type or struct name
+  reaches the client.
 - Read a query parameter that is a flag, a number or a time with `httpx.QueryBool`/`QueryBoolOr`,
   `QueryInt` and `QueryTime`, or with a `httpx.Query(r)` reader when a handler fills a struct of
   options (ask its `Err()` before using what it read). A flag is `1`, `0`, `true` or `false` in any
