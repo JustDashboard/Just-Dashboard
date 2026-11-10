@@ -6,10 +6,9 @@ import { bytes, percent, plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { BarList, type BarListItem } from "@/components/bar-list"
+import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { Button } from "@/components/ui/button"
 import {
-  BarsSkeleton,
   Block,
   BlockLink,
   FactRow,
@@ -114,9 +113,8 @@ export function BusiestStatements() {
     }
   }
 
-  const items = useMemo<BarListItem[]>(() => {
+  const items = useMemo<RankItem[]>(() => {
     const list = statements.data?.statements ?? []
-    const longest = Math.max(...list.map((statement) => statement.share), 0)
     return list.map((statement) => {
       const share = percent(statement.share * 100, statement.share >= 0.1 ? 0 : 1)
       return {
@@ -125,11 +123,9 @@ export function BusiestStatements() {
         // Named by its opening and its share: the whole text is four hundred
         // characters a screen reader would read on every one of six rows.
         title: `${opening(statement.query)} — ${share} of runtime. Open Performance`,
+        // The share of the runtime is the figure the list is ranked by, so it
+        // is the row's figure rather than a column beside another one.
         value: share,
-        share: longest > 0 ? statement.share / longest : 0,
-        // The bar in the hue of what the statement does, so a list of reads
-        // with one heavy write in it shows the write before it is read.
-        color: statementVerb(statement.query)?.color,
         hint: `${calls(statement.calls)} · ${millis(statement.meanMs)} each`,
         onClick: () => goto("performance", { view: "statements" }),
       }
@@ -147,7 +143,7 @@ export function BusiestStatements() {
         )
       }
     >
-      <Read poll={statements} what={`the busiest ${words}`} skeleton={<BarsSkeleton rows={TOP} />}>
+      <Read poll={statements} what={`the busiest ${words}`} skeleton={<RankSkeleton rows={TOP} />}>
         {(data) =>
           data.supported && items.length === 0 ? (
             <Quiet>
@@ -155,8 +151,8 @@ export function BusiestStatements() {
             </Quiet>
           ) : data.supported ? (
             <>
-              <BarList items={items} />
-              <p className="mt-2 px-2 text-hint text-muted-foreground">
+              <RankList items={items} />
+              <p className="mt-2 text-hint text-muted-foreground">
                 Share of the runtime of every {engine.nouns.statement} counted
                 {data.since ? `, starting ${relativeTime(data.since)}` : ""}.
               </p>
@@ -233,10 +229,9 @@ export function BusiestCommands() {
     const count = work.reduce((total, entry) => total + entry.calls, 0)
     return { work, usec, count, apart: data.totalUsec - usec }
   }, [stats.data])
-  const items = useMemo<BarListItem[]>(() => {
+  const items = useMemo<RankItem[]>(() => {
     if (!ranked) return []
     const list = ranked.work.slice(0, TOP)
-    const longest = list[0]?.usec ?? 0
     return list.map((entry) => {
       const share = percent(ranked.usec > 0 ? (entry.usec / ranked.usec) * 100 : 0, 0)
       return {
@@ -244,7 +239,6 @@ export function BusiestCommands() {
         label: entry.command,
         title: `${entry.command} — ${share} of the time. Open Performance`,
         value: share,
-        share: longest > 0 ? entry.usec / longest : 0,
         hint: `${calls(entry.calls)} · ${entry.usecPerCall.toFixed(entry.usecPerCall >= 10 ? 0 : 1)} µs each`,
         onClick: () => goto("performance", { view: "commands" }),
       }
@@ -256,7 +250,7 @@ export function BusiestCommands() {
       stale={staleOf(stats)}
       actions={<BlockLink href={href("performance", { view: "commands" })}>Performance</BlockLink>}
     >
-      <Read poll={stats} what="the command statistics" skeleton={<BarsSkeleton rows={TOP} />}>
+      <Read poll={stats} what="the command statistics" skeleton={<RankSkeleton rows={TOP} />}>
         {(data) =>
           items.length === 0 ? (
             <Quiet>
@@ -264,8 +258,8 @@ export function BusiestCommands() {
             </Quiet>
           ) : (
             <>
-              <BarList items={items} />
-              <p className="mt-2 px-2 text-hint text-muted-foreground">
+              <RankList items={items} />
+              <p className="mt-2 text-hint text-muted-foreground">
                 Share of the time spent in {plural(ranked?.count ?? 0, "command")} on keys since the
                 server started.
                 {ranked && ranked.apart > 0 && data.totalUsec > 0
@@ -316,17 +310,15 @@ export function SlowOperations() {
     }
   }
 
-  const items = useMemo<BarListItem[]>(() => {
+  const items = useMemo<RankItem[]>(() => {
     const list = [...(profiler.data?.entries ?? [])]
       .sort((a, b) => b.millis - a.millis)
       .slice(0, TOP)
-    const longest = list[0]?.millis ?? 0
     return list.map((entry, index) => ({
       key: `${entry.time}:${index}`,
       label: `${entry.op} ${entry.ns}`,
       title: `${entry.op} ${entry.ns} — ${millis(entry.millis)}. Open Performance`,
       value: millis(entry.millis),
-      share: longest > 0 ? entry.millis / longest : 0,
       hint: [entry.planSummary, `${compact(entry.docsExamined)} examined`]
         .filter(Boolean)
         .join(" · "),
@@ -340,12 +332,12 @@ export function SlowOperations() {
       stale={staleOf(profiler)}
       actions={<BlockLink href={href("performance", { view: "slow" })}>Performance</BlockLink>}
     >
-      <Read poll={profiler} what="the profiler" skeleton={<BarsSkeleton rows={TOP} />}>
+      <Read poll={profiler} what="the profiler" skeleton={<RankSkeleton rows={TOP} />}>
         {(data) =>
           items.length > 0 ? (
             <>
-              <BarList items={items} />
-              <p className="mt-2 px-2 text-hint text-muted-foreground">
+              <RankList items={items} />
+              <p className="mt-2 text-hint text-muted-foreground">
                 The slowest of the last {data.entries.length} operations the profiler of{" "}
                 <span className="font-mono">{data.database}</span> kept
                 {data.level === 0 ? "; it is off now" : ` (slower than ${data.slowMs} ms)`}.

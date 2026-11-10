@@ -26,8 +26,12 @@ describe("what a schema amounts to", () => {
     expect(summary.size).toBe(8192 + (1 << 20) + 65536)
     expect(summary.rankedBy).toBe("size")
     expect(summary.largest.map((entry) => entry.object.name)).toEqual(["big", "mid", "small"])
-    expect(summary.largest[0].share).toBe(1)
-    expect(summary.largest[1].share).toBeCloseTo(0.0625)
+    // A share is of the schema's whole, not of the largest table: the
+    // list's percentages add up to the schema when every table is listed.
+    const whole = 8192 + (1 << 20) + 65536
+    expect(summary.largest[0].share).toBeCloseTo((1 << 20) / whole)
+    expect(summary.largest[1].share).toBeCloseTo(65536 / whole)
+    expect(summary.largest.reduce((sum, entry) => sum + entry.share, 0)).toBeCloseTo(1)
   })
   test("an engine that reports no sizes is ranked by its row estimates", () => {
     const summary = schemaSummary({
@@ -37,6 +41,7 @@ describe("what a schema amounts to", () => {
     expect(summary.size).toBeNull()
     expect(summary.rows).toBe(55)
     expect(summary.largest.map((entry) => entry.object.name)).toEqual(["b", "a"])
+    expect(summary.largest.map((entry) => entry.share)).toEqual([50 / 55, 5 / 55])
   })
   test("unknown is not zero: with nothing measured there is no figure and no ranking", () => {
     const summary = schemaSummary({ objects: { tables: [table("a", -1), table("b")] } })
@@ -54,5 +59,10 @@ describe("what a schema amounts to", () => {
       "t7",
     ])
     expect(schemaSummary({ objects: { tables: [table("empty", 0, 0)] } }).largest).toEqual([])
+  })
+  test("a share counts the tables left off the list, and not the ones with no size", () => {
+    const tables = Array.from({ length: 12 }, (_, i) => table(`t${i}`, i, i * 100))
+    const summary = schemaSummary({ objects: { tables: [...tables, table("unsized", 9)] } }, 5)
+    expect(summary.largest[0].share).toBeCloseTo(1100 / 6600)
   })
 })

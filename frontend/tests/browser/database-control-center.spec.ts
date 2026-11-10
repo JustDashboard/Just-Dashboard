@@ -256,25 +256,28 @@ test.describe("the control center", () => {
     await expect(reading).toContainText("3 today")
     await expect(reading).toContainText("blog")
 
-    // One database, one hue: its mark's key in the band is its card's size bar,
-    // and the card's edge carries none.
+    // One database, one hue: its span in the band is its card's size bar, and
+    // the card's edge carries none. The span holds the colour since the band's
+    // marks were drawn bare, without a rule in their part's colour under each.
     const hue = (el: Element) => getComputedStyle(el).backgroundColor
     const edge = async (name: string) =>
       card(page, name).locator("[data-slot=fleet-size]").evaluate(hue)
+    const fills = band
+      .getByRole("region", { name: "Storage" })
+      .locator("[data-slot=reading-span] > i > i")
     const key = (name: string) =>
       band
-        .getByRole("list", { name: "Largest databases" })
-        .getByRole("link", { name: `Open ${name}` })
-        .locator("i")
+        .getByRole("region", { name: "Storage" })
+        .locator(`[data-slot=reading-span][title^="${name} holds "] > i > i`)
         .evaluate(hue)
     expect(await key("shop")).toBe(await edge("shop"))
     expect(await key("cache")).toBe(await edge("cache"))
     await expect(page.locator("[data-slot=fleet-hue]")).toHaveCount(0)
     // Five databases are five hues.
-    const edges = await band
-      .getByRole("list", { name: "Largest databases" })
-      .locator("i")
-      .evaluateAll((spans) => spans.map((span) => getComputedStyle(span).backgroundColor))
+    const edges = await fills.evaluateAll((spans) =>
+      spans.map((span) => getComputedStyle(span).backgroundColor),
+    )
+    expect(edges).toHaveLength(5)
     expect(new Set(edges).size).toBe(5)
 
     await band.getByRole("list", { name: "Largest databases" }).getByRole("link").first().click()

@@ -540,7 +540,7 @@ const chart = (page: Page, name: string) =>
 
 const names = (scope: ReturnType<typeof block>) =>
   scope
-    .locator("[data-slot=bar-list] button")
+    .locator("[data-slot=rank-list] button")
     .evaluateAll((rows) => rows.map((row) => row.getAttribute("aria-label")))
 const where = (page: Page) => new URL(page.url()).pathname + new URL(page.url()).search
 const menu = (page: Page, name = "shop") =>

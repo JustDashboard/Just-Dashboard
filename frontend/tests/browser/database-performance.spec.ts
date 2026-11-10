@@ -2966,7 +2966,9 @@ test("the queries are named in the engine's words, from the registry and from wh
   await expect(page.getByText("1 statement", { exact: true })).toBeVisible()
   // The engine keeps statement statistics: the third reading is offered.
   await page.getByRole("button", { name: "Top statements" }).click()
-  await expect(region(page, "Top statements").locator("[data-slot=bar-list] button")).toHaveCount(3)
+  await expect(region(page, "Top statements").locator("[data-slot=rank-list] button")).toHaveCount(
+    3,
+  )
 
   // A list read from the server's own query table is a list of queries.
   await mockOps(page, {

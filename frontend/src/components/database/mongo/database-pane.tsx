@@ -1,6 +1,6 @@
 "use client"
 
-import { BarList, type BarListItem } from "@/components/bar-list"
+import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { grouped } from "@/components/database/data/view"
 import type { SectionId } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
@@ -72,14 +72,19 @@ export function DatabasePane({
     </div>
   )
 
-  const others = (databases.data ?? []).filter((entry) => entry.name !== database)
-  const largestDb = Math.max(...others.map((entry) => entry.dataSize), 1)
-  const elsewhere: BarListItem[] = others.map((entry) => ({
+  const all = databases.data ?? []
+  const others = all.filter((entry) => entry.name !== database)
+  // A database's share is of everything the server holds, this one included:
+  // of the others alone, it would change with the database on screen.
+  const serverData = all.every((entry) => entry.statsKnown)
+    ? all.reduce((sum, entry) => sum + entry.dataSize, 0)
+    : 0
+  const elsewhere: RankItem[] = others.map((entry) => ({
     key: entry.name,
     label: entry.name,
     mark: <DatabaseMark name={entry.name} />,
     value: entry.statsKnown ? bytes(entry.dataSize) : "—",
-    share: entry.statsKnown ? entry.dataSize / largestDb : 0,
+    share: serverData > 0 ? entry.dataSize / serverData : undefined,
     hint: entry.statsKnown
       ? `${grouped(entry.collections)} ${entry.collections === 1 ? engine.nouns.object : engine.nouns.objects}`
       : "not measured",
@@ -91,7 +96,7 @@ export function DatabasePane({
       <Heading id="mongo-pane-databases" title="Other databases on this server">
         {grouped(elsewhere.length)}
       </Heading>
-      <BarList items={elsewhere} className="-ml-2" />
+      <RankList items={elsewhere} />
     </section>
   )
 
@@ -202,13 +207,16 @@ export function DatabasePane({
   }
 
   const ranked = [...own].sort((a, b) => b.size - a.size || a.name.localeCompare(b.name))
-  const largest = Math.max(...ranked.map((entry) => entry.size), 1)
-  const bars: BarListItem[] = ranked.slice(0, RANKED).map((entry) => ({
+  // Of every collection's data, where each was measured; a view holds none.
+  const held = own.every((entry) => entry.statsKnown || entry.type === "view")
+    ? own.reduce((sum, entry) => sum + (entry.statsKnown ? entry.size : 0), 0)
+    : 0
+  const rows: RankItem[] = ranked.slice(0, RANKED).map((entry) => ({
     key: entry.name,
     label: entry.name,
     mark: <CollectionMark kind={collectionKind(entry)} />,
     value: entry.statsKnown ? bytes(entry.size) : "—",
-    share: entry.statsKnown ? entry.size / largest : 0,
+    share: entry.statsKnown && held > 0 ? entry.size / held : undefined,
     hint: entry.statsKnown
       ? `${grouped(entry.count)} ${entry.count === 1 ? engine.nouns.row : engine.nouns.rows}`
       : entry.type === "view"
@@ -224,20 +232,18 @@ export function DatabasePane({
       <div className="@container min-h-0 flex-1 overflow-auto">
         <div className="animate-rise space-y-7 px-5 pt-1 pb-6">
           {!data ? (
-            <div className="space-y-3" aria-hidden>
+            <div className="space-y-2" aria-hidden>
               <Skeleton className="h-3.5 w-36" />
-              {Array.from({ length: 6 }, (_, i) => (
-                <Skeleton key={i} className="h-5" style={{ width: `${92 - i * 11}%` }} />
-              ))}
+              <RankSkeleton rows={6} />
             </div>
           ) : (
             <div className="grid items-start gap-x-10 gap-y-7 @3xl:grid-cols-2 [&>*]:min-w-0">
               <section aria-labelledby="mongo-pane-collections" className="space-y-2">
                 <Heading id="mongo-pane-collections" title="By the data they hold">
-                  {own.length > bars.length &&
-                    `${grouped(own.length - bars.length)} smaller ones are in the list`}
+                  {own.length > rows.length &&
+                    `${grouped(own.length - rows.length)} smaller ones are in the list`}
                 </Heading>
-                <BarList items={bars} className="-ml-2" />
+                <RankList items={rows} />
               </section>
               {elsewhereBlock}
             </div>
