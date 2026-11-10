@@ -67,6 +67,8 @@ type Installer struct {
 	socket     string
 	dockerHost string
 	log        *slog.Logger
+	// database is copied before an update starts; nil where there is none.
+	database *Database
 }
 
 func NewInstaller(store *Store, dataDir, dockerHost string, log *slog.Logger) *Installer {
@@ -74,6 +76,12 @@ func NewInstaller(store *Store, dataDir, dockerHost string, log *slog.Logger) *I
 	if path, ok := strings.CutPrefix(dockerHost, "unix://"); ok {
 		i.socket = path
 	}
+	return i
+}
+
+// WithDatabase names the store an update copies before it starts.
+func (i *Installer) WithDatabase(db *Database) *Installer {
+	i.database = db
 	return i
 }
 
@@ -151,11 +159,25 @@ func (i *Installer) Start(ctx context.Context, loc *Location, req StartRequest) 
 		StartedAt:   time.Now().UTC(),
 	}
 
+	// Before the record replaces the last run's, so a copy that takes a
+	// minute is a minute in which the page still shows what it showed. From
+	// here on the store is only read by the version that wrote it until the
+	// new backend opens it, so this is the last moment the copy is sure to be
+	// of the database the running version made.
+	copied, copyErr := copyDatabase(ctx, i.dataDir, i.database, run)
+	run.DatabaseCopy = copied
+
 	// The transcript is opened first and truncated, so the log an operator
 	// reads is always this run's and never the tail of the last one.
 	if f, err := i.store.OpenLog(); err == nil {
 		fmt.Fprintf(f, "Updating Just Dashboard %s → %s\n", run.FromVersion, run.ToVersion)
 		fmt.Fprintf(f, "checkout: %s (%s)\n", run.Dir, run.Ref)
+		if copyErr != nil {
+			fmt.Fprintf(f, "! the database was not copied before the update: %v\n", copyErr)
+			fmt.Fprintf(f, "! if this update fails, the rollback restores the code and the images and not the data\n")
+		} else {
+			fmt.Fprintf(f, "database copy: %s\n", copied)
+		}
 		switch {
 		case run.RequireTag && SignaturesRequired():
 			fmt.Fprintf(f, "release: origin's tag v%s, signed with a release key, or nothing\n", run.ToVersion)

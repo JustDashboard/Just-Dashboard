@@ -6164,8 +6164,25 @@ done by hand, and the UI refuses to fold it away.
   error with the commands to finish by hand, and no step stops the ones after it. `.env` is not restored:
   a port a Reconcile moved was moved because something holds the old one, and the old version runs on the
   new one just as well. The rollback relies on database changes being additive (invariant 5), since the
-  new backend may already have migrated. The `:previous` images stay until the next update replaces them,
-  so a server holds one older generation on disk, and an uninstall removes them.
+  new backend may already have migrated; it does not put the database back. The `:previous` images stay
+  until the next update replaces them, so a server holds one older generation on disk, and an uninstall
+  removes them.
+- **It copies the database first** (`dbcopy.go`). Additive columns keep the old binary able to open the
+  store, but opening it is not only additive (`store.Open` rewrites archived project names in place and
+  maps legacy deployments into new tables), and a release whose migration is wrong is not protected by
+  the rule at all. So `Installer.Start`, before it writes the record or starts the updater, has the store
+  copy itself with `VACUUM INTO` (`Options.Database`, wired as `Server.updateDatabase`: the store's own
+  connection, one read transaction, a whole database as of one moment) into
+  `JD_DATA_DIR/pre-update/vpsd-<from>-<run id>.db`. The file is created empty and `0600` first, because
+  it holds every password hash and sealed secret and SQLite would create it with the umask. The newest
+  two are kept and only files of that name are ever removed. The copy is skipped when it would leave
+  less than 512 MB free, and given up after three minutes; either way the update still runs, as it does
+  when an image cannot be tagged, and the transcript's first lines say there is no copy and what that
+  costs. Its path is in the record (`Run.DatabaseCopy`), the transcript, and the message of every
+  rollback (`copyNote`). **It is never restored automatically**: going back to it discards everything
+  written since, which after a rollback that worked is an hour of audit log lost for nothing, so that is
+  left to a person, with the steps in the administration guide. The suggested "Dashboard data" backup job
+  excludes the directory.
 - A checkout cloned with sudo has no owner but root for `handBack` to return to, so at every start
   the backend gives the checkout's root-owned entries to the owner of the directory holding it
   (`Service.adoptCheckout`, through `hostexec.Adopt`), when that is not root: whoever owns `/home/ubuntu`

@@ -208,8 +208,8 @@ func rollBack(store *Store, run *Run, compose string, steps updateSteps, saved [
 
 func rollbackResult(run *Run, compose string, saved []savedImage, cause error, problems []string) error {
 	if len(problems) == 0 {
-		return fmt.Errorf("%w\n\nThe update was rolled back: %s is running and the checkout at %s is back on %s",
-			cause, run.FromVersion, run.Dir, run.FromCommit)
+		return fmt.Errorf("%w\n\nThe update was rolled back: %s is running and the checkout at %s is back on %s%s",
+			cause, run.FromVersion, run.Dir, run.FromCommit, copyNote(run))
 	}
 	var commands []string
 	for _, image := range saved {
@@ -219,8 +219,8 @@ func rollbackResult(run *Run, compose string, saved []savedImage, cause error, p
 		commands = append(commands, "git reset --keep "+run.FromCommit)
 	}
 	commands = append(commands, "docker compose -f "+compose+" up -d")
-	return fmt.Errorf("%w\n\nThe rollback did not finish:\n- %s\n\nTo finish it by hand, run these in %s:\n  %s",
-		cause, strings.Join(problems, "\n- "), run.Dir, strings.Join(commands, "\n  "))
+	return fmt.Errorf("%w\n\nThe rollback did not finish:\n- %s\n\nTo finish it by hand, run these in %s:\n  %s%s",
+		cause, strings.Join(problems, "\n- "), run.Dir, strings.Join(commands, "\n  "), copyNote(run))
 }
 
 // restoreCheckout takes the checkout back to the commit the update started from.

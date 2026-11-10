@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -191,6 +194,31 @@ func (s *Server) handleSelfUpdateInstall(w http.ResponseWriter, r *http.Request)
 	// 202: the work has been handed to a container that outlives this process.
 	httpx.JSON(w, http.StatusAccepted, run)
 	return nil
+}
+
+// updateDatabase is the dashboard's own store as the update module sees it:
+// where the file is, for its size, and how to copy it.
+func (s *Server) updateDatabase() *selfupdate.Database {
+	if s.Store == nil {
+		return nil
+	}
+	return &selfupdate.Database{
+		Path:   filepath.Join(s.Cfg.DataDir, store.DatabaseFile),
+		CopyTo: s.copyStore,
+	}
+}
+
+// copyStore writes a consistent copy of the dashboard's own database to path,
+// which exists and is empty. It is what an update takes before it starts.
+//
+// VACUUM INTO through the store's own pool rather than a copy of the file: the
+// database is in WAL mode and being written, so the file alone is not the
+// database, and a copy made of it mid-write may not open. This is one read
+// transaction, so the copy is the whole store as of one moment while
+// everything else keeps writing.
+func (s *Server) copyStore(ctx context.Context, path string) error {
+	_, err := s.Store.DB.ExecContext(ctx, "VACUUM INTO ?", path)
+	return err
 }
 
 // handleSelfUpdateLog answers the whole transcript of the last upgrade as

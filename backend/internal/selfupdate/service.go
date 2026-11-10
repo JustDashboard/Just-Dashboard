@@ -60,6 +60,9 @@ type Options struct {
 	// where the API carries the dashboard's GitHub login across, since the
 	// login it was using belonged to root.
 	Adopted func(ctx context.Context, dir string)
+	// Database is the dashboard's own store, copied before an update starts.
+	// Nil leaves an update with no copy, which its transcript says.
+	Database *Database
 	// BaseURL overrides the raw-content host the changelog is read from.
 	// Empty everywhere but the tests, and deliberately not reachable from the
 	// environment: JD_UPDATE_REPO covers running a fork, while an arbitrary
@@ -79,7 +82,7 @@ func New(o Options) *Service {
 		dataDir:   o.DataDir,
 		updateDir: o.UpdateDir,
 		checker:   checker,
-		installer: NewInstaller(store, o.DataDir, o.DockerHost, o.Log),
+		installer: NewInstaller(store, o.DataDir, o.DockerHost, o.Log).WithDatabase(o.Database),
 		store:     store,
 		list:      o.List,
 		health:    o.Health,

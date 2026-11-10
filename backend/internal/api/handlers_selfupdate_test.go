@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -195,6 +196,39 @@ func TestInstallRefusesAVersionThatHasNoReleaseTag(t *testing.T) {
 	}
 	if got := calls(); len(got) != 0 {
 		t.Fatalf("docker was reached for a version that is not released: %q", got)
+	}
+}
+
+// What an update copies first is the dashboard's real store, by the store's
+// own connection: the copy has to open as a database with the tables in it,
+// into the empty file the update module made for it.
+func TestTheStoreIsCopiedWholeBeforeAnUpdate(t *testing.T) {
+	s := testServer(t)
+	database := s.updateDatabase()
+	if database == nil || filepath.Base(database.Path) != "vpsd.db" {
+		t.Fatalf("the update module was given %+v", database)
+	}
+	if _, err := s.Store.DB.Exec(`INSERT INTO users (username, password_hash, role, created_at) VALUES ('kept', 'x', 'admin', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "copy.db")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CopyTo(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	copied, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copied.Close()
+	var kept int
+	if err := copied.QueryRow(`SELECT count(*) FROM users WHERE username = 'kept'`).Scan(&kept); err != nil || kept != 1 {
+		t.Fatalf("the copy holds %d of the account written before it: %v", kept, err)
+	}
+	if info, _ := os.Stat(path); info == nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("the copy's mode changed: %v", info)
 	}
 }
 

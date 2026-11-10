@@ -64,6 +64,30 @@ version that is on `main` but not released yet. The update check is one unauthen
 from GitHub and a second small request for the tag, every two hours and at most every five minutes
 while pages are being opened; `JD_UPDATE_CHECK=false` turns it off.
 
+Before an update builds anything, the dashboard copies its own database to
+`/var/lib/just-dashboard/pre-update/`, as `vpsd-<the version you were on>-<when>.db`, and keeps the
+newest two. If the new version does not come up the update goes back to the previous one by itself; it
+puts back the code and the images, and leaves the database as it is, because the previous version can
+read it. The copy is for the case where the data itself is wrong afterwards. The update's transcript and
+the message of a failed update both give its path. To put it back, from the directory you installed
+into:
+
+```bash
+sudo docker compose stop backend
+cd /var/lib/just-dashboard
+sudo mkdir -p set-aside
+sudo mv vpsd.db set-aside/
+sudo mv vpsd.db-wal vpsd.db-shm set-aside/ 2>/dev/null       # there only after an unclean stop
+sudo cp pre-update/vpsd-0.8.5-20261110T053000Z.db vpsd.db    # the copy you are going back to
+cd - && sudo docker compose start backend
+```
+
+Move the `-wal` and `-shm` files away with the database, never leave them beside the restored one:
+they belong to the file you set aside. Everything the dashboard recorded after the copy was taken is in
+`set-aside/` and not in what is now running. The copy opens with the same `JD_MASTER_KEY`, which has not
+changed. A copy uses as much disk as the database; delete the files in `pre-update/` if you need the
+room.
+
 ## Uninstalling
 
 **Settings → Configuration → Danger zone → Uninstall** takes the dashboard off the server and asks one

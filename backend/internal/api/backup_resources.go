@@ -12,6 +12,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/uninstall"
 )
@@ -104,7 +105,9 @@ func (s *Server) backupResources(ctx context.Context, all []*backups.Job) backup
 	// The dashboard itself: its SQLite file, sealed secrets and settings.
 	// The staging directory lives inside it and is what the archive is
 	// written to, so the suggestion excludes it; deployment workspaces are
-	// build scratch and are excluded for size.
+	// build scratch and are excluded for size, and so are the copies of the
+	// database an update takes before it starts, which would put the store
+	// in every archive three times.
 	dataDir := filepath.Clean(s.Cfg.DataDir)
 	add(backupResource{
 		Kind: "dashboard", ID: "dashboard", Name: "Just Dashboard",
@@ -116,7 +119,7 @@ func (s *Server) backupResources(ctx context.Context, all []*backups.Job) backup
 			// The key a kept uninstall leaves beside the data must not travel
 			// with an archive of that data.
 			Excludes: []string{filepath.Join(dataDir, "staging"), filepath.Join(dataDir, "deployment-workspaces"),
-				filepath.Join(dataDir, uninstall.KeptEnv)},
+				filepath.Join(dataDir, selfupdate.PreUpdateDir), filepath.Join(dataDir, uninstall.KeptEnv)},
 			SQLitePaths: []string{filepath.Join(dataDir, store.DatabaseFile)},
 		},
 	})

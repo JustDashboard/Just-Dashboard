@@ -103,6 +103,10 @@ type Run struct {
 	// InstalledVersion is what the changelog at ToCommit says, which is the
 	// version the update really landed on rather than the one it was asked for.
 	InstalledVersion string `json:"installedVersion,omitempty"`
+	// DatabaseCopy is the copy of the dashboard's database taken before the
+	// updater started, or "" when none could be made. A rollback names it and
+	// does not restore it; see dbcopy.go.
+	DatabaseCopy string `json:"databaseCopy,omitempty"`
 
 	Actor      string     `json:"actor"`
 	StartedAt  time.Time  `json:"startedAt"`

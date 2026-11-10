@@ -8627,6 +8627,8 @@ export type UpdateRun = {
   toCommit?: string
   /** `toCommit` is the commit that tag names, not wherever the branch was. */
   tagged?: boolean
+  /** Where the dashboard's database was copied before the update, if it was. */
+  databaseCopy?: string
   actor: string
   startedAt: string
   updatedAt: string
