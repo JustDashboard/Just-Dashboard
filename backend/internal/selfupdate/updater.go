@@ -150,6 +150,15 @@ func upgrade(ctx context.Context, store *Store, run *Run, out io.Writer) error {
 		restore: func(from string) error {
 			return restoreCheckout(ctx, run.Dir, from, commit, out)
 		},
+		tidy: func() {
+			PruneBuildCache(out, func(args ...string) ([]byte, error) {
+				ctx, cancel := context.WithTimeout(ctx, PruneTimeout)
+				defer cancel()
+				prune := exec.CommandContext(ctx, "docker", args...)
+				prune.Dir = run.Dir
+				return prune.CombinedOutput()
+			})
+		},
 	}, out)
 	if err != nil {
 		return err

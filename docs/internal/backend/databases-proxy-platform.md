@@ -6167,6 +6167,18 @@ done by hand, and the UI refuses to fold it away.
   new backend may already have migrated; it does not put the database back. The `:previous` images stay
   until the next update replaces them, so a server holds one older generation on disk, and an uninstall
   removes them.
+- **It prunes the build cache it has outgrown** (`PruneBuildCache`). Both images are built without cache
+  mounts, on purpose (`backend/Dockerfile` records why: the updater that builds a release is always one
+  release older than the file it builds, and a classic builder refuses `--mount` outright), so every
+  update leaves its layers in BuildKit's cache. Docker's own collector lets an entry sit for sixty days
+  and the cache grow until a fifth of the disk is left, which on a 20 GB server is updates failing for
+  room first. So once the new version answers (`updateSteps.tidy`, never after a failure), and at the end
+  of an uninstall, `docker builder prune --force --filter until=168h` runs with a two-minute bound and
+  its total goes into the transcript. It is not `--all`, and a week keeps the build that has just run.
+  The cache is the daemon's rather than this project's, so other builds' entries unused for a week go
+  too, which costs their next build time and nothing else. Cache mounts for `GOCACHE` and `.next/cache`
+  would cut a repeat update to tens of seconds; they stay out for the reason above, and would need the
+  updater to refuse cleanly when it is older than the first release that uses them.
 - **A backend that finds the updater gone puts back what it changed** (`putback.go`). The rollback above
   runs inside the updater, so an updater that is killed (the Docker daemon restarting under it, a reboot,
   the kernel taking it when the frontend build runs out of memory) rolled nothing back: the checkout
@@ -6350,7 +6362,8 @@ silently switching the initial configuration to plain HTTP.
 so it is built around the moment the page watching it loses its API.
 
 - **One question, two modes.** `keep` removes the stack — its three containers, the two images it builds
-  with the `:previous` tags an update keeps,
+  with the `:previous` tags an update keeps, the build cache unused for a week (`PruneBuildCache`, as an
+  update does),
   the lifecycle siblings, `/tmp/just-dashboard` and the held terminal sessions (`systemctl stop
   jd-terminal-*` on the host) — and leaves everything the dashboard made: deployments keep running, and
   `JD_DATA_DIR`, the backups and the checkout's `.env` stay, with a copy of the `.env` written to

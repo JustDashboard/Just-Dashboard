@@ -58,3 +58,47 @@ func TestBuildEachServiceFallsBackToOneBuild(t *testing.T) {
 		t.Fatalf("builds = %q, want %q", calls, want)
 	}
 }
+
+// What an update leaves in BuildKit's cache is removed once it is a week old,
+// and the transcript carries the one line of the prune that matters: a real
+// one prints a row for every cache entry first.
+func TestPruningTheBuildCacheSaysWhatWasFreed(t *testing.T) {
+	for name, tc := range map[string]struct {
+		output string
+		err    error
+		want   string
+	}{
+		"buildkit": {
+			output: "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\nq1w2e3*\t\t\t\ttrue\t\t1.1GB\t\t9 days ago\nTotal:\t3.482GB\n",
+			want:   "build cache unused for a week removed: 3.482GB\n",
+		},
+		"the older wording": {
+			output: "Deleted build cache objects:\nq1w2e3\n\nTotal reclaimed space: 912MB\n",
+			want:   "build cache unused for a week removed: 912MB\n",
+		},
+		"nothing old enough": {output: "", want: "build cache unused for a week removed: nothing\n"},
+		"a daemon that refuses": {
+			output: "ERROR: failed to solve\nCannot connect to the Docker daemon\n",
+			err:    os.ErrPermission,
+			want:   "the build cache was not pruned: Cannot connect to the Docker daemon\n",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var asked []string
+			var out strings.Builder
+			PruneBuildCache(&out, func(args ...string) ([]byte, error) {
+				asked = args
+				return []byte(tc.output), tc.err
+			})
+			// A week, and never --all: the build that has just finished, and
+			// whatever else was built here lately, keeps its cache.
+			if got := strings.Join(asked, " "); got != "builder prune --force --filter until=168h" {
+				t.Fatalf("ran docker %s", got)
+			}
+			want := "\n$ docker builder prune --force --filter until=168h\n" + tc.want
+			if out.String() != want {
+				t.Fatalf("transcript %q, want %q", out.String(), want)
+			}
+		})
+	}
+}

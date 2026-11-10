@@ -35,6 +35,9 @@ type updateSteps struct {
 	start   func() error
 	health  func(url string, window time.Duration) error
 	restore func(from string) error
+	// tidy runs once the new version is up, and never after a failure: a
+	// rollback's images are in the cache it would be pruning around.
+	tidy func()
 }
 
 // SavedImage is an image this update can put back: the tag it is run under,
@@ -141,14 +144,16 @@ func replaceStack(store *Store, run *Run, compose string, steps updateSteps, out
 	}
 
 	_ = store.Update(func(r *Run) { r.Phase = PhaseRestarting })
-	if run.Health == "" {
-		return nil
+	if run.Health != "" {
+		fmt.Fprintf(out, "\nwaiting for the dashboard to answer at %s\n", run.Health)
+		if err := steps.health(run.Health, probeWindow); err != nil {
+			return rollBack(store, run, compose, steps, saved, complete, true, err, out)
+		}
+		fmt.Fprintf(out, "the dashboard is answering again\n")
 	}
-	fmt.Fprintf(out, "\nwaiting for the dashboard to answer at %s\n", run.Health)
-	if err := steps.health(run.Health, probeWindow); err != nil {
-		return rollBack(store, run, compose, steps, saved, complete, true, err, out)
+	if steps.tidy != nil {
+		steps.tidy()
 	}
-	fmt.Fprintf(out, "the dashboard is answering again\n")
 	return nil
 }
 

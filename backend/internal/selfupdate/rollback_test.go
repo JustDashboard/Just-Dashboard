@@ -41,6 +41,7 @@ func (f *fakeUpdate) steps() updateSteps {
 			return f.step("health " + window.String())
 		},
 		restore: func(from string) error { return f.step("restore " + from) },
+		tidy:    func() { _ = f.step("tidy") },
 	}
 }
 
@@ -82,7 +83,18 @@ func TestASuccessfulUpdateSavesImagesAndGoesNoFurther(t *testing.T) {
 	if err := runFakeUpdate(t, f, "http://x/healthz"); err != nil {
 		t.Fatal(err)
 	}
-	checkCalls(t, f, saveBackend, saveFrontend, "build", "start", probeForward)
+	// Tidying comes last and only here: every failure below ends without it,
+	// because what a rollback restarts onto is what a prune would be near.
+	checkCalls(t, f, saveBackend, saveFrontend, "build", "start", probeForward, "tidy")
+}
+
+// An install with no health URL to probe has still updated.
+func TestAnUpdateWithNothingToProbeStillTidies(t *testing.T) {
+	f := &fakeUpdate{}
+	if err := runFakeUpdate(t, f, ""); err != nil {
+		t.Fatal(err)
+	}
+	checkCalls(t, f, saveBackend, saveFrontend, "build", "start", "tidy")
 }
 
 func TestAFailedHealthCheckGoesBack(t *testing.T) {
@@ -182,7 +194,7 @@ func TestImagesThatCannotBeSavedDoNotStopAnUpdate(t *testing.T) {
 	if err := runFakeUpdate(t, f, "http://x/healthz"); err != nil {
 		t.Fatal(err)
 	}
-	checkCalls(t, f, "build", "start", probeForward)
+	checkCalls(t, f, "build", "start", probeForward, "tidy")
 }
 
 func TestPreviousImage(t *testing.T) {

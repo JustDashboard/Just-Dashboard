@@ -93,8 +93,8 @@ room.
 **Settings → Configuration → Danger zone → Uninstall** takes the dashboard off the server and asks one
 question first:
 
-- **Keep for a reinstall** removes the dashboard's containers and images and closes its web-terminal
-  sessions. Deployments keep running, and the data in `/var/lib/just-dashboard`, the backups and the
+- **Keep for a reinstall** removes the dashboard's containers and images, with the build cache nothing
+  has used for a week, and closes its web-terminal sessions. Deployments keep running, and the data in `/var/lib/just-dashboard`, the backups and the
   `.env` (with a copy of it beside the data) stay where they are. `sudo ./install.sh` in the checkout —
   or in a fresh clone, which offers to restore the kept `.env` — brings everything back.
 - **Wipe everything** also removes every deployment with its containers, managed volumes and folders,
