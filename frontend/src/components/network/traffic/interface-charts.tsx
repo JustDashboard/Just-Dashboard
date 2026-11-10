@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { get } from "@/lib/api"
-import { bytes, rate } from "@/lib/format"
+import { bytes, dateFormatter, rate } from "@/lib/format"
 import type { NetworkHistory, NetworkLink, NetworkLivePoint } from "@/lib/types"
 import {
   localInput,
@@ -60,8 +60,8 @@ export function coveringWindow(span: TrafficSpan, now: number): Exclude<TrafficW
   return (["1h", "6h", "24h", "7d"] as const).find((w) => WINDOW_SECONDS[w] >= back) ?? "7d"
 }
 
-const rangeLabel = (r: TrafficRange) =>
-  `${new Date(r.from * 1000).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })} – ${new Date(r.to * 1000).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}`
+const rangeEnd = dateFormatter({ dateStyle: "short", timeStyle: "short" })
+const rangeLabel = (r: TrafficRange) => `${rangeEnd(r.from * 1000)} – ${rangeEnd(r.to * 1000)}`
 
 const LIVE_SERIES = [
   { key: "rx", label: "In", color: RX, kind: "area" as const },

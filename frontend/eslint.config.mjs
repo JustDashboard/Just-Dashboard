@@ -11,6 +11,27 @@ const eslintConfig = defineConfig([
     plugins: { "design-system": designSystem },
     rules: {
       "design-system/tokens": "error",
+      // A date printed with options builds a fresh Intl.DateTimeFormat on
+      // every call, which on a chart's axis was a quarter of what the Metrics
+      // page cost while it sat open. `dateFormatter` in lib/format.ts builds
+      // one and keeps it; the shared shapes are exported beside it. A named
+      // locale ("en-GB", for a schedule read in its own zone) is left alone:
+      // those are one label each, with a zone only known when they are drawn.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.property.name=/^toLocale(Date|Time)String$/][arguments.0.type='Identifier'][arguments.0.name='undefined'][arguments.length>1]",
+          message:
+            "Print a date through a format built once: clockAt, minuteAt, dayAt and the others in lib/format.ts, or dateFormatter(options) declared at the top of the module.",
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='toLocaleString'][arguments.0.type='Identifier'][arguments.0.name='undefined'] > ObjectExpression.arguments > Property[key.name=/^(era|year|month|day|weekday|hour|minute|second|hour12|hourCycle|dateStyle|timeStyle|timeZone|timeZoneName|fractionalSecondDigits)$/]",
+          message:
+            "Print a date through a format built once: clockAt, minuteAt, dayAt and the others in lib/format.ts, or dateFormatter(options) declared at the top of the module.",
+        },
+      ],
       // Reaching past a primitive to the thing it wraps is the other mechanical
       // failure. Each of these has exactly one legitimate assembler, listed in
       // the override below.
@@ -58,6 +79,11 @@ const eslintConfig = defineConfig([
       "src/components/ui/sidebar.tsx",
     ],
     rules: { "no-restricted-imports": "off" },
+  },
+  {
+    // A test prints a date the slow way to say what the built-once format must match.
+    files: ["src/**/*.test.js"],
+    rules: { "no-restricted-syntax": "off" },
   },
   {
     // Where a value is *defined* rather than consumed. The generated shadcn

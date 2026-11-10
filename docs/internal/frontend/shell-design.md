@@ -754,3 +754,15 @@ series.
 a pointer crossing a chart fires continuously, and a context above the router would re-render the terminal
 and the log tail on every mousemove. The value is a **timestamp**, not a row index — charts on a page do
 not share a row array.
+
+**A date is printed through a format built once**, on an axis and everywhere else. `toLocaleString`,
+`toLocaleDateString` and `toLocaleTimeString` build a fresh `Intl.DateTimeFormat` on every call that
+carries options (about 75 µs, against 2 µs to ask one that exists), and recharts asks for a label for
+every candidate tick of every render: on Metrics that construction was the largest single cost of the
+page while nobody touched it. `dateFormatter(options)` in `lib/format.ts` builds the format on first
+use and keeps it, rebuilding only when the zone's offset moves under an open tab; the shapes several
+modules print are exported beside it (`clockAt`, `minuteAt`, `dayAt`, `weekdayAt`, `dayMinuteAt`), and
+`timestamp`, `clock`, `clockMinute`, `calendarDate` and `minuteSpan` go through the same. A shape one
+module prints is declared at the top of that module. `eslint.config.mjs` refuses
+`toLocale…String(undefined, { … })` on a date (`no-restricted-syntax`); a named locale with a zone
+known only when it is drawn (a schedule's next run, read in the schedule's own zone) is left alone.

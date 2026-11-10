@@ -14,7 +14,7 @@ import {
   type Icon,
 } from "@/components/icons"
 import { ApiError } from "@/lib/api"
-import { timestamp } from "@/lib/format"
+import { dayAt, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useArrivals } from "@/hooks/use-arrivals"
@@ -353,7 +353,7 @@ function shortAgo(iso: string) {
   if (hours < 24) return `${hours}h`
   const days = Math.floor(hours / 24)
   if (days < 30) return `${days}d`
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+  return dayAt(new Date(iso))
 }
 
 /** The title in the row's own line, the same height, saved on Enter or on leaving it. */

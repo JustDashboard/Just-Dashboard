@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
-import { clock, percent, rate, relativeTime } from "@/lib/format"
+import { clockAt, dayMinuteAt, percent, rate, relativeTime } from "@/lib/format"
 import type { MetricEvent } from "@/lib/types"
 import type { ChartRow } from "@/lib/metrics-range"
 import { windowStat, type WindowStat } from "@/lib/metrics-summary"
@@ -350,14 +350,7 @@ function Key({ color, small }: { color: string; small?: boolean }) {
 }
 
 function instant(ts: number, multiDay: boolean): string {
-  if (!multiDay) return clock(new Date(ts).toISOString())
-  return new Date(ts).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  })
+  return multiDay ? dayMinuteAt(ts) : clockAt(ts)
 }
 
 function collect(

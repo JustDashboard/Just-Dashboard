@@ -21,7 +21,7 @@ import {
   YAxis,
 } from "recharts"
 import { cn } from "@/lib/utils"
-import { percent, timestamp } from "@/lib/format"
+import { clockAt, dateFormatter, dayAt, minuteAt, percent, timestamp } from "@/lib/format"
 import {
   clearCrosshair,
   getCrosshair,
@@ -679,6 +679,14 @@ function MetricTooltip({
   )
 }
 
+/** "Wed 11:46": a tick on a chart of two or three days. */
+const weekdayMinuteAt = dateFormatter({
+  weekday: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+})
+
 /**
  * How the x-axis labels itself, chosen from the span on screen.
  *
@@ -686,32 +694,19 @@ function MetricTooltip({
  * for a week and noise for a minute. Deciding per chart from the data it holds
  * is what lets the same component serve a two-second live feed and a
  * seven-day history without either being illegible.
+ *
+ * Each is a format built once (`dateFormatter`): recharts asks for a label
+ * for every candidate tick of every render, and a format built per label was
+ * a quarter of what this page cost while it sat open.
  */
 function tickFormatterFor(rows: ChartRowLike[]): (ts: number) => string {
-  if (rows.length < 2) return (ts) => new Date(ts).toLocaleTimeString(undefined, { hour12: false })
+  if (rows.length < 2) return clockAt
   const span = rows[rows.length - 1].ts - rows[0].ts
   const day = 86_400_000
-  if (span > 3 * day) {
-    return (ts) => new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })
-  }
-  if (span > day) {
-    return (ts) =>
-      new Date(ts).toLocaleString(undefined, {
-        weekday: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      })
-  }
-  if (span > 2 * 3_600_000) {
-    return (ts) =>
-      new Date(ts).toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      })
-  }
-  return (ts) => new Date(ts).toLocaleTimeString(undefined, { hour12: false })
+  if (span > 3 * day) return dayAt
+  if (span > day) return weekdayMinuteAt
+  if (span > 2 * 3_600_000) return minuteAt
+  return clockAt
 }
 
 export function eventColor(event: MetricEvent): string {
