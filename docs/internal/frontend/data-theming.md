@@ -212,7 +212,12 @@ are dated evidence, not proof of current attachment ownership.
   waited out. Each successful response records `lastSuccess`; failed refreshes retain
   that timestamp only for the same resource. Its fixed-length dependency list identifies the resource:
   changing it immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
-  retain the same resource's data. Cleanup aborts the request and ignores late responses.
+  retain the same resource's data. **A cadence change asks for nothing.** The interval is read from a ref
+  each time the loop schedules, and a new value only moves the next request to that long after the last
+  answer (`PollHandle.retime`; `pollLoop` lives in `hooks/poll-loop.ts`); a request in flight finishes. The
+  interval was an effect dependency, so every `busy ? 2_000 : 30_000` flip aborted the request and fetched
+  again what had just been read, and the update notice's single settling read was two, 36 ms apart.
+  Cleanup aborts the request and ignores late responses.
   Live Processes treats its search and filters as resource identity, and ranking/row-count
   changes as refreshes of that inventory. Automatic focus therefore keeps the table and scroll
   mounted while fetching its new ranking; response-local focus metadata keeps the footer truthful

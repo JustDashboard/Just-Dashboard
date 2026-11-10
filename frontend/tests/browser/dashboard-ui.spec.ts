@@ -243,6 +243,29 @@ async function scrollsSideways(page: Page) {
   )
 }
 
+test("the settling read after a load is one read, and the idle cadence it sets asks nothing", async ({
+  page,
+}) => {
+  // The load reads the cached answer, one read six seconds later picks up the
+  // check the load started, and that answer drops the poll to five minutes.
+  // The drop used to start the poll again, so the one read was two, 36 ms apart.
+  await page.clock.install()
+  await mockApi(page)
+  let reads = 0
+  await page.route("**/api/v1/dashboard/update**", (route) => {
+    if (new URL(route.request().url()).pathname.endsWith("/dashboard/update")) reads += 1
+    return route.fallback()
+  })
+  await page.goto("/dashboard")
+  await expect(page.getByRole("heading", { name: "Version", exact: true })).toBeVisible()
+  expect(reads).toBe(1)
+  await page.clock.fastForward(6_500)
+  await expect.poll(() => reads).toBe(2)
+  await page.clock.fastForward(60_000)
+  await page.waitForTimeout(500)
+  expect(reads).toBe(2)
+})
+
 test("the version page is the history, with the update in the header", async ({ page }) => {
   await mockApi(page)
   await page.goto("/dashboard")

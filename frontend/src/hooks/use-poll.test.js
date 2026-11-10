@@ -282,3 +282,91 @@ test("coming back to the tab does not cut a wait the server asked for short", as
   expect(fetches.started).toBe(3)
   stop()
 })
+
+test("a changed cadence moves the next fetch and asks for nothing itself", async () => {
+  const page = fakePage()
+  const clock = fakeClock()
+  const fetches = scriptedFetch()
+  let every = 6000
+  const loop = pollLoop(fetches.run, () => every, page, { now: clock.now })
+  await settled()
+  expect(fetches.started).toBe(1)
+  // The answer just read says nothing is running: drop to the idle cadence.
+  every = 300_000
+  loop.retime()
+  expect(fetches.started).toBe(1)
+  clock.advance(6000)
+  expect(fetches.started).toBe(1)
+  clock.advance(293_999)
+  expect(fetches.started).toBe(1)
+  clock.advance(1)
+  expect(fetches.started).toBe(2)
+  await settled()
+  // A faster cadence counts from the last answer too, not from the change.
+  clock.advance(1500)
+  every = 2000
+  loop.retime()
+  expect(fetches.started).toBe(2)
+  clock.advance(499)
+  expect(fetches.started).toBe(2)
+  clock.advance(1)
+  expect(fetches.started).toBe(3)
+  loop()
+})
+
+test("a cadence that changes while a fetch is in flight leaves that fetch alone", async () => {
+  const page = fakePage()
+  const fetches = fakeFetch()
+  let every = 1000
+  const loop = pollLoop(fetches.run, () => every, page)
+  every = 5000
+  loop.retime()
+  expect(fetches.started).toBe(1)
+  await fetches.settle()
+  jest.advanceTimersByTime(4999)
+  expect(fetches.started).toBe(1)
+  jest.advanceTimersByTime(1)
+  expect(fetches.started).toBe(2)
+  loop()
+})
+
+test("a cadence may start or stop, and the tab is watched only while there is one", async () => {
+  const page = fakePage()
+  const clock = fakeClock()
+  const fetches = scriptedFetch()
+  let every = 0
+  const loop = pollLoop(fetches.run, () => every, page, { now: clock.now })
+  await settled()
+  expect(page.listeners.size).toBe(0)
+  every = 1000
+  loop.retime()
+  expect(page.listeners.size).toBe(1)
+  clock.advance(1000)
+  expect(fetches.started).toBe(2)
+  await settled()
+  every = 0
+  loop.retime()
+  expect(page.listeners.size).toBe(0)
+  clock.advance(60_000)
+  expect(fetches.started).toBe(2)
+  loop()
+  loop.retime()
+  expect(page.listeners.size).toBe(0)
+})
+
+test("a changed cadence does not shorten a wait the server asked for", async () => {
+  const page = fakePage()
+  const clock = fakeClock()
+  const fetches = scriptedFetch()
+  fetches.next = limited
+  let every = 30_000
+  const loop = pollLoop(fetches.run, () => every, page, { now: clock.now, random: () => 0 })
+  await settled()
+  every = 2000
+  loop.retime()
+  clock.advance(29_999)
+  expect(fetches.started).toBe(1)
+  clock.advance(1)
+  expect(fetches.started).toBe(2)
+  loop()
+})
