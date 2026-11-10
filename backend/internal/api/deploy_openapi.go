@@ -201,6 +201,7 @@ var openapiErrorFields = map[string]string{
 	"reason":    "The likely reason it did not work.",
 	"raw":       "What the subsystem underneath reported, kept for the details rather than the headline.",
 	"retryable": "Whether the same request may succeed if tried again: a timeout or a daemon that was briefly unreachable.",
+	"requestId": "On a 5xx: the id of the request that failed, also in the X-Request-Id header of every answer. Quote it to whoever reads the dashboard's log, where the cause is on the line with the same id.",
 }
 
 // openapiErrorProperties is the error envelope's properties, read off

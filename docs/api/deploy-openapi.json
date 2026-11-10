@@ -36,6 +36,10 @@
                       "description": "The likely reason it did not work.",
                       "type": "string"
                     },
+                    "requestId": {
+                      "description": "On a 5xx: the id of the request that failed, also in the X-Request-Id header of every answer. Quote it to whoever reads the dashboard's log, where the cause is on the line with the same id.",
+                      "type": "string"
+                    },
                     "resource": {
                       "description": "What the request was acting on, when the handler names it.",
                       "type": "string"
@@ -16799,7 +16803,7 @@
     },
     "summary": "The deployment routes of a Just Dashboard, as its router mounts them.",
     "title": "Just Dashboard deployment API",
-    "version": "0.8.4"
+    "version": "0.8.5"
   },
   "openapi": "3.1.0",
   "paths": {

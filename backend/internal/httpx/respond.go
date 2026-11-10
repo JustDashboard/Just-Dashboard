@@ -46,6 +46,10 @@ type APIError struct {
 	// daemon that was briefly unreachable, as opposed to a request that will
 	// fail identically every time.
 	Retryable bool `json:"retryable,omitempty"`
+	// RequestID is the id of the request that failed, which is also in the
+	// X-Request-Id header and on the log line that holds the cause. WriteError
+	// sets it on a 5xx, where the message deliberately says nothing.
+	RequestID string `json:"requestId,omitempty"`
 
 	err error
 }
@@ -135,7 +139,14 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		apiErr = Internal(err)
 	}
 	if apiErr.Status >= 500 {
-		slog.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", apiErr.Error())
+		id := RequestIDFrom(r.Context())
+		slog.Error("request failed", "method", r.Method, "path", r.URL.Path, "request", id, "err", apiErr.Error())
+		if id != "" {
+			// A copy: the error may be one of the package's shared values.
+			named := *apiErr
+			named.RequestID = id
+			apiErr = &named
+		}
 	}
 	if p, ok := PrincipalFrom(r.Context()); ok {
 		p.FailureReason = apiErr.Message

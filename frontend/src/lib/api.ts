@@ -42,6 +42,11 @@ export type ApiErrorBody = {
      * form can attach the message to the control that caused it.
      */
     field?: string
+    /**
+     * On a 5xx: the id of the request that failed, which is also the
+     * `X-Request-Id` header and on the server's log line that has the cause.
+     */
+    requestId?: string
   }
 }
 
@@ -84,6 +89,8 @@ export class ApiError extends Error {
   raw?: string
   retryable?: boolean
   field?: string
+  /** The failed request's id on a 5xx, to quote to whoever reads the server's log. */
+  requestId?: string
   /**
    * The whole parsed body, for a route that answers a refusal with more than
    * the error: a start the config test turned down carries the test beside it.
@@ -96,7 +103,10 @@ export class ApiError extends Error {
     message: string,
     phrase?: string,
     detail?: Partial<
-      Pick<ApiError, "resource" | "operation" | "reason" | "raw" | "retryable" | "field" | "body">
+      Pick<
+        ApiError,
+        "resource" | "operation" | "reason" | "raw" | "retryable" | "field" | "requestId" | "body"
+      >
     >,
   ) {
     super(message)
@@ -234,6 +244,13 @@ export function errorFromResponse(
     // A proxy failure can be plain text; only recognized API codes trigger recovery.
   }
   const body = parsed?.error
+  // A 500 hides its cause on purpose ("internal error"), which leaves the
+  // reader nothing to report. The id is what the log line with the cause is
+  // filed under, so it is said wherever the message is.
+  const message =
+    body?.code === "internal" && body.requestId
+      ? `${body.message} (request ${body.requestId})`
+      : body?.message
   if (typeof window !== "undefined") {
     if (body?.code === "password_change_required") {
       window.dispatchEvent(new Event("jd:password-change-required"))
@@ -252,7 +269,7 @@ export function errorFromResponse(
     body?.code ?? "unknown",
     body?.code === "hub_session_not_allowed"
       ? HUB_SESSION_REFUSED
-      : (body?.message ?? (text.slice(0, 300) || statusText || `HTTP ${status}`)),
+      : (message ?? (text.slice(0, 300) || statusText || `HTTP ${status}`)),
     body?.phrase,
     {
       resource: body?.resource,
@@ -261,6 +278,7 @@ export function errorFromResponse(
       raw: body?.raw,
       retryable: body?.retryable,
       field: body?.field,
+      requestId: body?.requestId,
       body: parsed,
     },
   )

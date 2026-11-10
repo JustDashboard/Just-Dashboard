@@ -148,6 +148,15 @@ the mount site is only the conversion.
 
 - Return `httpx.Err/BadRequest/Internal/Wrap`; never write an error body by hand. `httpx.WriteError` is
   the single renderer and is what keeps internal error strings off the wire.
+- **Every request has an id** (`httpx.RequestID`, the first middleware): sixteen hex digits, or the
+  caller's own `X-Request-Id` when it is 8 to 64 letters, digits, `.`, `_` or `-`. It is echoed as
+  `X-Request-Id` on every answer, it is the `request` attribute of the `request failed`, panic and
+  debug request log lines, and `WriteError` puts it in the envelope of a 5xx as `error.requestId`.
+  `httpx.Internal` hides a 500's cause from the client on purpose, so the id is what the person
+  holding it can quote: the page appends it to `internal error`, `jd` prints it, both SDKs carry it,
+  and `grep <id>` in the backend's log finds the line with the cause. A request the dashboard makes
+  of itself through the root router (the assistant's calls, an MCP tool's) keeps the id of the
+  request that caused it.
 - The router's own refusals are in the same envelope (`api/route_methods.go`): a path nothing is
   mounted at is `404 not_found`, and a method a path does not take is `405 method_not_allowed` with
   the methods it does take in `Allow` (`HEAD` and `OPTIONS` included: no route serves either). Both

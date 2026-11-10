@@ -7,7 +7,6 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 )
 
 // Routes builds the whole API surface.
@@ -30,7 +29,8 @@ func (s *Server) Routes() http.Handler {
 	methods := &routeMethodTable{root: root}
 	r.NotFound(routeNotFound)
 	r.MethodNotAllowed(methods.methodNotAllowed)
-	r.Use(middleware.RequestID)
+	// First, so the id is on every answer and every log line below it.
+	r.Use(httpx.RequestID)
 	r.Use(httpx.RealIP(s.Cfg.TrustedProxies))
 	r.Use(httpx.Recoverer(s.Log))
 	r.Use(httpx.RequestLogger(s.Log))

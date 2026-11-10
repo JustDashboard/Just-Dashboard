@@ -188,3 +188,39 @@ test("a session opened through Just Hub is told to sign in on the server itself"
   expect(err.message).toBe(HUB_SESSION_REFUSED)
   expect(err.message.startsWith("Sign in on this server itself to do this")).toBe(true)
 })
+
+test("an internal error says which request failed, and other refusals keep their words", () => {
+  // A 500 hides its cause on purpose; the id is what the server's log line is filed under.
+  const hidden = errorFromResponse(
+    500,
+    JSON.stringify({
+      error: { code: "internal", message: "internal error", requestId: "7f3a9c1e2b4d5a60" },
+    }),
+    "/proxy/vhosts",
+  )
+  expect(hidden.message).toBe("internal error (request 7f3a9c1e2b4d5a60)")
+  expect(hidden.requestId).toBe("7f3a9c1e2b4d5a60")
+
+  // A 502 already says what the subsystem said: the id is carried, not appended.
+  const said = errorFromResponse(
+    502,
+    JSON.stringify({
+      error: {
+        code: "query_failed",
+        message: "relation does not exist",
+        requestId: "0123456789abcdef",
+      },
+    }),
+    "/databases/1/query",
+  )
+  expect(said.message).toBe("relation does not exist")
+  expect(said.requestId).toBe("0123456789abcdef")
+
+  const plain = errorFromResponse(
+    500,
+    JSON.stringify({ error: { code: "internal", message: "internal error" } }),
+    "/proxy/vhosts",
+  )
+  expect(plain.message).toBe("internal error")
+  expect(plain.requestId).toBeUndefined()
+})

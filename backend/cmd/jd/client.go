@@ -31,6 +31,9 @@ type apiError struct {
 	Code    string
 	Message string
 	Raw     bool
+	// RequestID is the id a 5xx answer carries: the dashboard's log has the
+	// cause on the line with the same id.
+	RequestID string
 }
 
 // Error says what a refusal means for the person holding the key, then the
@@ -56,6 +59,11 @@ func (e *apiError) Error() string {
 	}
 	if e.Raw {
 		return fmt.Sprintf("the dashboard answered %d %s: %s", e.Status, http.StatusText(e.Status), msg)
+	}
+	if e.RequestID != "" {
+		// A 500 says "internal error" and nothing else, on purpose. The id is
+		// what to quote to whoever can read the dashboard's log.
+		return fmt.Sprintf("%s (%d): %s (request %s)", e.Code, e.Status, msg, e.RequestID)
 	}
 	return fmt.Sprintf("%s (%d): %s", e.Code, e.Status, msg)
 }
@@ -180,12 +188,14 @@ func (c *client) do(method, path string, q url.Values, body any) ([]byte, error)
 func decodeError(status int, raw []byte) *apiError {
 	var envelope struct {
 		Error *struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
+			Code      string `json:"code"`
+			Message   string `json:"message"`
+			RequestID string `json:"requestId"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(raw, &envelope) == nil && envelope.Error != nil && envelope.Error.Code != "" {
-		return &apiError{Status: status, Code: envelope.Error.Code, Message: envelope.Error.Message}
+		return &apiError{Status: status, Code: envelope.Error.Code, Message: envelope.Error.Message,
+			RequestID: envelope.Error.RequestID}
 	}
 	text := strings.TrimSpace(string(raw))
 	if len(text) > 300 {

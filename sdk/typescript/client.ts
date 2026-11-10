@@ -242,6 +242,12 @@ export class ApiError extends Error {
   readonly raw?: string
   /** The likely reason it did not work. */
   readonly reason?: string
+  /**
+   * On a 5xx: the id of the request that failed, also in the X-Request-Id header of every answer.
+   * Quote it to whoever reads the dashboard's log, where the cause is on the line with the same
+   * id.
+   */
+  readonly requestId?: string
   /** What the request was acting on, when the handler names it. */
   readonly resource?: string
   /**
@@ -265,6 +271,7 @@ export class ApiError extends Error {
     this.phrase = envelope?.phrase as string | undefined
     this.raw = envelope?.raw as string | undefined
     this.reason = envelope?.reason as string | undefined
+    this.requestId = envelope?.requestId as string | undefined
     this.resource = envelope?.resource as string | undefined
     this.retryable = envelope?.retryable as boolean | undefined
   }
