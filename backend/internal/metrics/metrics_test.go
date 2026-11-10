@@ -459,3 +459,45 @@ func TestPruneDropsExpiredMountSamples(t *testing.T) {
 		t.Fatalf("kept %+v, want the single point inside retention", series.Mounts)
 	}
 }
+
+// Samples go through the store's bulk writer, which is a connection of its
+// own and does not sync the disk on every commit: a pile-up on the pool every
+// request shares does not leave a hole in the charts.
+func TestSamplesAreWrittenWhileThePoolIsExhausted(t *testing.T) {
+	r := testRecorder(t, time.Minute, 24*time.Hour)
+	hold, cancelHold := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelHold()
+	var held []interface{ Close() error }
+	for range r.db.Stats().MaxOpenConnections {
+		conn, err := r.db.Conn(hold)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, conn)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	at := time.Now().Truncate(time.Second)
+	if err := r.record(ctx, Sample{TS: at, CPUPercent: 12.5}); err != nil {
+		t.Fatalf("a sample behind an exhausted pool: %v", err)
+	}
+	if err := r.recordMounts(ctx, at, []sysinfo.MountStats{{Mountpoint: "/", UsedPercent: 40, Used: 4, Total: 10}}); err != nil {
+		t.Fatalf("mount samples behind an exhausted pool: %v", err)
+	}
+	if err := r.writeVolumes(ctx, at, []VolumeSize{{Name: "data", Size: 1024}}); err != nil {
+		t.Fatalf("volume sizes behind an exhausted pool: %v", err)
+	}
+	if err := r.writeContainers(ctx, at, []dockerx.ContainerStats{{Name: "web"}}); err != nil {
+		t.Fatalf("container samples behind an exhausted pool: %v", err)
+	}
+	if err := r.prune(ctx); err != nil {
+		t.Fatalf("pruning behind an exhausted pool: %v", err)
+	}
+	for _, conn := range held {
+		conn.Close()
+	}
+	var samples int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM metric_samples WHERE ts = ?`, at.Unix()).Scan(&samples); err != nil || samples != 1 {
+		t.Fatalf("samples read back through the pool = %d, %v", samples, err)
+	}
+}

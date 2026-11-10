@@ -40,6 +40,7 @@ const (
 // same stable deploy_projects and deploy_runs identities.
 type OrchestrationStore struct {
 	db     *sql.DB
+	st     *basestore.Store
 	now    func() time.Time
 	broker *eventBroker
 	// SQLite permits concurrent readers but one writer. Serializing this
@@ -52,7 +53,7 @@ type OrchestrationStore struct {
 }
 
 func NewOrchestrationStore(st *basestore.Store) *OrchestrationStore {
-	return &OrchestrationStore{db: st.DB, now: time.Now, broker: newEventBroker()}
+	return &OrchestrationStore{db: st.DB, st: st, now: time.Now, broker: newEventBroker()}
 }
 
 const engineRunColumns = `

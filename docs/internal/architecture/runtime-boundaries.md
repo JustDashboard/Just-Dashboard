@@ -321,8 +321,44 @@ columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
 
 ### The store's connections
 
-`store.Open` hands out one pool of four connections (`Store.DB`), kept that small so SQLite's one
-writer does not queue behind itself.
+`store.Open` opens the one database file through two handles, which differ in what a power cut may
+take:
+
+| Handle | Connections | `synchronous` | Carries |
+| --- | --- | --- | --- |
+| `Store.DB` | 4 | `FULL` | everything, unless it is named in the next row |
+| `Store.Bulk()` | 1 | `NORMAL` | metric samples and their pruning (`metrics.Recorder`), the lines a deployment step prints (`OrchestrationStore.AppendLogs`) |
+
+Both write with `_txlock=immediate` and a five-second busy timeout. `DB` is kept at four connections so
+SQLite's one writer does not queue behind itself.
+
+**Which writes survive a power cut is a decision, and this is it.** The database is in WAL mode. With
+`synchronous=FULL` a commit returns once the write-ahead log is on disk; with `NORMAL` it returns once
+the operating system has it, and the log is synced at the next checkpoint or the next `FULL` commit,
+whichever comes first. Neither can corrupt the database, and neither loses anything when the process
+is killed or crashes. The difference shows only after a power cut or a kernel crash: commits made
+under `NORMAL` since the log was last synced can be missing. That is the last seconds of them: any
+`FULL` commit syncs the log, and with none the kernel writes it out by itself within about thirty
+seconds.
+
+- **Kept durable (`DB`, the default):** every write the dashboard has acknowledged and somebody would
+  act on — audit entries, accounts, passwords, second factors, sessions and their revocation, API keys,
+  hub grants, settings, sealed secrets, a deployment's runs, steps, releases and leases, backups,
+  schedules, proxy and network records. A revoked key that works again after the power returns, or an
+  audit trail missing the last thing that was done to the host, is not a trade for speed. Anything
+  nobody has classified is here.
+- **Relaxed (`Bulk()`):** rows whose last seconds nobody would miss. A metric sample lost to a power
+  cut leaves a gap no wider than the outage draws anyway; the last lines of a build log are lost
+  together with the build that was printing them, and how each step and the run ended is written on
+  `DB`, whose commit makes every line before it durable. In return the recorder no longer costs the
+  disk three or four syncs every sampling interval, and a build's log does not wait on the disk for
+  every batch.
+
+A writer moves to `Bulk()` only when the answer to "if the server lost power the moment after this
+write, would anybody act differently for not having the row?" is no. It has one connection, because a
+second would only wait for the first inside SQLite; so a transaction on it never asks the store for
+anything else while it is open (the rule below, at its strictest). `Store.Bulk()` on a store that
+`Open` did not make (a test's own database) answers with `DB`.
 
 **Nothing queries the pool while it holds one of its connections.** An open `*sql.Rows` holds a
 connection until it is closed or read to its end, and a `*sql.Tx` until it commits or rolls back. A
@@ -335,8 +371,9 @@ deploy were enough. So a list reads its cursor to the end and closes it before i
 (better: selects it in the same statement, or reads it for all rows in one `IN` query), and a function
 that is handed a transaction runs every statement on that transaction, never on the pool beside it.
 
-Two things keep it that way. `storetest.OneConnection(st)` leaves a test's store one connection, on
-which such a call can never finish; `deploy/one_connection_test.go` calls every list read of the
+Two things keep it that way. `storetest.OneConnection(st)` leaves a test's store one connection for
+everything (`Store.SingleConnection`: every handle answers with `DB`, and `DB` keeps one), on which
+such a call can never finish; `deploy/one_connection_test.go` calls every list read of the
 deployment stores that way, with rows present and a deadline, and a new list read belongs in its table.
 And `JD_STORE_ONE_CONNECTION=1` does the same to every store `storetest.Open` opens, which turns a
 package's whole suite into the hunt: `JD_STORE_ONE_CONNECTION=1 go test -timeout 5m ./internal/deploy`

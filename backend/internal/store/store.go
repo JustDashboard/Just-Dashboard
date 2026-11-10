@@ -6,13 +6,44 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	DB    *sql.DB
-	guard *walGuard
+	// DB is the pool everything uses unless it has a reason not to: reads and
+	// writes, every commit synced to disk before it returns.
+	DB *sql.DB
+	// bulk is the writer for what a power cut may take; see Bulk. It is read
+	// on every use rather than kept by whoever asked, so SingleConnection can
+	// take it away under a running test.
+	bulk atomic.Pointer[sql.DB]
+	// handles are the pools Open made beside DB, to close with the store.
+	handles []*sql.DB
+	guard   *walGuard
+}
+
+// Bulk is the writer for rows nobody would miss the last seconds of: metric
+// samples and the lines a build prints. It is the same database through a
+// connection that does not sync the write-ahead log on every commit
+// (synchronous=NORMAL, where DB is FULL).
+//
+// What that gives up is narrow. Neither setting can corrupt the database, and
+// neither loses anything when the process is killed or crashes: the operating
+// system already has the write. After a power cut or a kernel crash, the
+// commits made here since the log was last synced can be missing: the last
+// seconds of them, since any commit on DB syncs the log and so makes
+// everything written before it durable too. Whether a write may go here is
+// therefore one question: if the server lost power the moment after it, would
+// anybody act differently for not having the row? An audit entry, a password,
+// a session's end, a revoked key, a deployment's state all answer yes, and
+// stay on DB. A store that was not opened by Open has only DB, and gets it.
+func (s *Store) Bulk() *sql.DB {
+	if db := s.bulk.Load(); db != nil {
+		return db
+	}
+	return s.DB
 }
 
 // DatabaseFile is the SQLite file inside the data directory. It keeps its
@@ -2022,7 +2053,13 @@ func Open(dataDir string) (*Store, error) {
 	// writer wait instead. A deployment worker's step transition racing a
 	// notification delivery or an operator's settings save is exactly that
 	// case, and a lost transition used to end the run as unrecoverable.
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate")
+	//
+	// synchronous is spelled out because it is a decision, not a default that
+	// happened: with FULL a commit returns once the write-ahead log is on
+	// disk, so what the dashboard has acknowledged (an audit entry, a changed
+	// password, a revoked key, a deployment's state) survives a power cut.
+	// The writes that do not need that go through Bulk instead.
+	db, err := sql.Open("sqlite", path+"?"+writerPragmas+"&_pragma=synchronous(FULL)")
 	if err != nil {
 		return nil, err
 	}
@@ -2080,12 +2117,56 @@ func Open(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{DB: db, guard: guard}, nil
+	st := &Store{DB: db, guard: guard}
+	// One connection: SQLite has one writer, and a second connection here
+	// would only wait for the first inside SQLite instead of in the pool.
+	bulk, err := st.openHandle(path, writerPragmas+"&_pragma=synchronous(NORMAL)", 1)
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("open the bulk writer: %w", err)
+	}
+	st.bulk.Store(bulk)
+	return st, nil
+}
+
+// writerPragmas are what every connection that writes is opened with. See
+// Open for why transactions begin IMMEDIATE.
+const writerPragmas = "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
+
+// openHandle opens one more pool on a database Open has already built, and
+// proves it connects: sql.Open alone reports nothing until first use.
+func (s *Store) openHandle(path, pragmas string, connections int) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", path+"?"+pragmas)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(connections)
+	if err := db.PingContext(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
+	s.handles = append(s.handles, db)
+	return db, nil
 }
 
 func (s *Store) Close() error {
+	// The other handles first: the guard is released only on the way to
+	// closing the last connection to the database.
+	for _, db := range s.handles {
+		db.Close()
+	}
 	s.guard.release()
 	return s.DB.Close()
+}
+
+// SingleConnection leaves the store one connection for everything: every
+// handle answers with DB from now on, and DB keeps a single connection. It
+// exists for tests (storetest.OneConnection): on a store like this, a call
+// that needs a second connection from any handle while it still holds one can
+// never finish.
+func (s *Store) SingleConnection() {
+	s.bulk.Store(nil)
+	s.DB.SetMaxOpenConns(1)
 }
 
 func (s *Store) Setting(ctx context.Context, key string) (string, bool, error) {

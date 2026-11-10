@@ -159,7 +159,11 @@ func (s *OrchestrationStore) AppendLogs(
 	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
+	// Through the store's bulk writer, which does not sync the disk on every
+	// commit: a power cut may take the last moment of what a build printed,
+	// and takes the build with it. How a step and its run ended is written
+	// on the durable pool, and that commit makes these lines durable too.
+	tx, err := s.st.Bulk().BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}

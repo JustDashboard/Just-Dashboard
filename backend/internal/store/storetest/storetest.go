@@ -68,5 +68,5 @@ const oneConnectionEnv = "JD_STORE_ONE_CONNECTION"
 // that calls a read with rows present, under a deadline, on a store this was
 // applied to turns that into a deadline error on the first call.
 func OneConnection(st *store.Store) {
-	st.DB.SetMaxOpenConns(1)
+	st.SingleConnection()
 }

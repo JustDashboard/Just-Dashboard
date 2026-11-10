@@ -295,3 +295,24 @@ func TestLegacyLogTailFollowsABatchAndStaysBounded(t *testing.T) {
 			len(got), string(got[:1]), string(got[len(got)-4:]))
 	}
 }
+
+// Build output is written through the store's bulk writer: a pile-up on the
+// pool every request shares does not stop a build's log, and the log's
+// commits do not each wait for the disk.
+func TestALogBatchIsWrittenWhileThePoolIsExhausted(t *testing.T) {
+	f := newOutputFixture(t, time.Hour)
+	hold, cancelHold := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelHold()
+	for range f.store.DB.Stats().MaxOpenConnections {
+		conn, err := f.store.DB.Conn(hold)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := f.runs.AppendLogs(ctx, f.run.ID, f.step.ID, f.lease.Token, []LogLine{{Stream: "stdout", Text: "still writing\n"}}); err != nil {
+		t.Fatalf("a log batch behind an exhausted pool: %v", err)
+	}
+}
