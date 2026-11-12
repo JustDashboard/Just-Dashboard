@@ -328,9 +328,10 @@ func (s *Server) handleContainerInspect(w http.ResponseWriter, r *http.Request) 
 	// system.admin the same values are still reachable through the compose
 	// file at /docker/stacks/{name}/config, through /files/read within
 	// JD_FILE_ROOTS, and through a deploy run's log. Every role sees
-	// everything on this box by design — see the roles table in the README —
-	// and narrowing that is a decision about the product, not about this
-	// handler.
+	// everything on this box by design — see Roles in SECURITY.md — and
+	// narrowing that is a decision about the product, not about this
+	// handler. The decision, and what narrowing it would take, are in
+	// docs/internal/security/invariants.md ("What a role is").
 	if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
 		detail.Env = dockerx.RedactEnv(detail.Env)
 	}

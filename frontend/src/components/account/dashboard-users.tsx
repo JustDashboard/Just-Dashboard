@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { ROLE_HUE, ROLE_MARK } from "@/components/account/capabilities"
+import { ROLE_HUE, ROLE_MARK, ROLE_SUMMARY } from "@/components/account/capabilities"
 import {
   ROLES,
   inUserScope,
@@ -52,7 +52,12 @@ export function useDashboardUsers(enabled = true) {
   )
 }
 
-/** The role, changed where it is read: each option drawn with its mark. */
+/**
+ * The role, changed where it is read. Each option carries the sentence the
+ * new-user form shows for it: this is where a role is handed to an account
+ * that already exists, at one press, and the word alone let "limited" read as
+ * less than root.
+ */
 function RolePicker({
   label,
   value,
@@ -69,9 +74,9 @@ function RolePicker({
         <Mark aria-hidden className="size-3.5" style={{ color: ROLE_HUE[value] }} />
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className="w-72">
         {ROLES.map((r) => (
-          <SelectItem key={r} value={r}>
+          <SelectItem key={r} value={r} hint={ROLE_SUMMARY[r]}>
             {r}
           </SelectItem>
         ))}

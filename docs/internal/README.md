@@ -19,8 +19,8 @@ strategy, and feature ownership behind those rules.
   capabilities, handler rules, destructive actions, and content-dependent authorization.
 - [`architecture/runtime-boundaries.md`](architecture/runtime-boundaries.md) — server/module lifecycle,
   optional degradation, host execution, path containment, authentication, encryption, audit, and SQLite.
-- [`security/invariants.md`](security/invariants.md) — the invariants that must not regress and the complete
-  typed-confirmation policy.
+- [`security/invariants.md`](security/invariants.md) — the invariants that must not regress, the complete
+  typed-confirmation policy, and what a role is and is not.
 
 ## Backend features
 
