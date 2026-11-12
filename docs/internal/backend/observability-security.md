@@ -27,6 +27,26 @@ since a tab was opened, and charts that start empty every visit cannot show last
 - Containers are sampled into `metric_container_samples`, keyed by **name, not id** — a compose redeploy
   replaces the container and seeing across the restart is the point. Docker being absent is logged once,
   not an error. `/docker/containers/stats/history` serves a sparkline per table row in one query.
+- A container's 64-character id is written once, in `metric_container_ids`, and a sample holds that
+  row's number in `container_ref` with `container_id` left empty (`metrics/container_ids.go`). Until
+  0.8.6 every sample spelled the id out, in the row and again in the `(container_id, ts)` index, which
+  was about half of the largest table in the store. Nothing was rewritten: a sample recorded before
+  still spells its id out and leaves with `JD_METRICS_RETENTION` like any other, so the saving arrives
+  over one retention and an install that is rolled back reads its old rows as before. Every read of a
+  sample's identity goes through three fragments — `containerIdentityJoin`, `containerIdentity`
+  (`COALESCE(i.container_id, s.container_id)`) and `containerIdentityIn`, whose two halves the
+  `(container_id, ts)` index and the partial `(container_ref, ts)` index serve — so a container whose
+  samples straddle the upgrade is one series; `TestTheChartsReadTheSameNumbersFromEitherSpellingOfAnId`
+  reads every container chart and the sizing figures from the same history spelled out, numbered and
+  mixed, and they are equal. A container that reports no id gets no number. The recorder remembers the
+  numbers (4,096 at most) and pruning deletes the ids no sample refers to, under the lock a write
+  holds, so a number is never used after its row has gone; ids are `AUTOINCREMENT`, so one is never
+  given to a second container. A reader outside `metrics` that needs a sample's container id must use
+  the fragments; the ones in `api` and `netx` key on `name`, which is still text in the row. That is
+  what is left of the audit's proposal: a name (and an interface's, a mount's) is short and three
+  packages read by it, so it stays until it is worth changing them all at once. The old
+  `(container_id, ts)` index holds only empty keys once the spelled-out rows have gone and can be
+  dropped then.
 - The sample carries `size_rw`, the writable layer, taken from the **cached** disk walk rather than by
   asking the daemon for sizes per container: a sampler running every fifteen seconds shares the bounded
   disk cache and its refresh instead of starting a separate walk per sample. It is what makes

@@ -278,7 +278,8 @@ func TestThrottledShareDifferencesTheCounters(t *testing.T) {
 		t.Fatalf("share = %v", share)
 	}
 	var periods, throttled *int64
-	if err := r.st.DB.QueryRow(`SELECT cpu_periods, cpu_throttled FROM metric_container_samples WHERE container_id = 'free' LIMIT 1`).Scan(&periods, &throttled); err != nil || periods != nil || throttled != nil {
+	if err := r.st.DB.QueryRow(`SELECT cpu_periods, cpu_throttled FROM metric_container_samples
+		WHERE container_ref = (SELECT id FROM metric_container_ids WHERE container_id = 'free') LIMIT 1`).Scan(&periods, &throttled); err != nil || periods != nil || throttled != nil {
 		t.Errorf("an unlimited container stored counters %v %v %v", periods, throttled, err)
 	}
 	if share := usage.ThrottledShare([]string{"free", "unknown"}); share != nil {

@@ -1519,6 +1519,17 @@ CREATE TABLE IF NOT EXISTS metric_container_samples (
 -- first) cannot serve.
 CREATE INDEX IF NOT EXISTS idx_container_samples_ts ON metric_container_samples(ts);
 
+-- A container's id, written once. A sample used to spell the sixty-four
+-- characters out in its row and again in the index on them, which was about
+-- half of the table above; it now holds this row's number (container_ref,
+-- with container_id left empty) and metrics/container_ids.go reads either
+-- spelling. AUTOINCREMENT, so a number is never given to a second container
+-- after the first one's row was pruned.
+CREATE TABLE IF NOT EXISTS metric_container_ids (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  container_id TEXT NOT NULL UNIQUE
+);
+
 -- Per-device traffic, recorded by the network module's sampler at the metrics
 -- interval (netx/sampler.go). Each row is the interval's mean and its busiest
 -- two seconds in each direction, and the errors and drops counted in it.
@@ -1682,6 +1693,10 @@ BEGIN
 END;
 CREATE INDEX IF NOT EXISTS idx_container_samples_identity_ts
   ON metric_container_samples(container_id, ts);
+-- The same lookup for a sample that holds its container's id as a number.
+-- Partial, so the rows that spell their id out cost it nothing.
+CREATE INDEX IF NOT EXISTS idx_container_samples_ref_ts
+  ON metric_container_samples(container_ref, ts) WHERE container_ref IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_deploy_runs_queue
   ON deploy_runs(state, priority, requested_at, id);
 -- Every fleet poll ranks each project's runs newest first; an index in that
@@ -1906,6 +1921,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Name continuity serves Docker charts; release attribution needs the exact
 	// observed container identity. Old samples deliberately remain unattributed.
 	{"metric_container_samples", "container_id", "TEXT NOT NULL DEFAULT ''"},
+	// The id as the number of its row in metric_container_ids, which is how
+	// a sample holds it since 0.8.6. NULL for a row from before, which keeps
+	// the id it spells out, and for a container that reported none.
+	{"metric_container_samples", "container_ref", "INTEGER DEFAULT NULL"},
 	// Unknown for pre-upgrade rows: an absent measurement must not become an
 	// idle interface or an operator-configured limit during migration.
 	{"metric_container_samples", "network_available", "INTEGER DEFAULT NULL"},
