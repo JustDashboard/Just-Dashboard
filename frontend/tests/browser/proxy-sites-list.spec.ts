@@ -251,7 +251,7 @@ test("an enable nginx refuses says why, shows nginx's output, and leaves the sit
     .locator("[data-sonner-toast]")
     .filter({ hasText: "Could not enable off.example.com" })
   await expect(toast).toContainText(
-    'unknown directive "foo" in /etc/nginx/sites-available/off.example.com:3',
+    'Unknown directive "foo" in /etc/nginx/sites-available/off.example.com:3',
   )
   expect(posted).toEqual({ enabled: true, reload: true })
   await toast.getByRole("button", { name: "Show nginx output" }).click()
@@ -770,7 +770,7 @@ test("a first read that failed with no reason still says what failed", async ({ 
   )
   await page.goto("/proxy/sites")
   const block = page.getByRole("alert").filter({ hasText: "Could not read the sites" })
-  await expect(block).toContainText("internal error (request 4f2a9c)")
+  await expect(block).toContainText("Internal error (request 4f2a9c)")
   await expect(block).toContainText("Its log has the cause on the line with that request id")
   await expect(block.getByText("What the server said")).toHaveCount(0)
 

@@ -860,6 +860,9 @@ test("a settings page's sections are the level under its title", async ({ page }
   ]) {
     await page.goto(path)
     await page.waitForLoadState("networkidle")
+    // The reads have landed; the sections are drawn a moment after, and a
+    // block still held under a loading one is not a heading yet.
+    await expect(page.locator("[data-slot=page] h2").first()).toBeVisible()
     const seen = await headings(page)
     expect(seen[0]?.level, `${path} does not open on an h1`).toBe(1)
     const skipped = seen.filter(

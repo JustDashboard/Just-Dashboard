@@ -522,7 +522,7 @@ test("archived list can be permanently deleted with confirmation and errors rema
   await expect(dialog.getByRole("button", { name: "Delete permanently" })).toBeDisabled()
   await dialog.getByRole("textbox").fill("retired-api")
   await dialog.getByRole("button", { name: "Delete permanently" }).click()
-  await expect(page.getByText("A deployment run is still active", { exact: true })).toBeVisible()
+  await expect(page.getByText("A deployment run is still active.", { exact: true })).toBeVisible()
   await expect(dialog).toBeVisible()
 
   refuse = false
