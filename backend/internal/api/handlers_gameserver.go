@@ -415,7 +415,7 @@ func (s *Server) handleGamePropertiesPut(w http.ResponseWriter, r *http.Request)
 	}
 	file, fileErr := propertiesFile(game.Definition)
 	if fileErr != nil {
-		return httpx.BadRequest("%s", fileErr.Error())
+		return httpx.Refused(fileErr)
 	}
 	if game.ContainerID == "" || s.modules.docker == nil {
 		return httpx.Err(http.StatusServiceUnavailable, "runtime_unavailable",

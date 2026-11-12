@@ -141,8 +141,8 @@ type hostAlertRule struct {
 	// every enabled one.
 	Channels  []int64   `json:"channels"`
 	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 	// Unjudged says why the last pass could not judge the rule at all — the
 	// metrics history is off, Docker did not answer — so a page can say it
 	// rather than show a rule that looks quiet and is blind.
@@ -944,7 +944,7 @@ type hostAlertEvent struct {
 	Failed    int       `json:"failed"`
 	Muted     bool      `json:"muted"`
 	Test      bool      `json:"test"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 }
 
 func (a *hostAlerts) History(ctx context.Context, limit int) ([]hostAlertEvent, error) {

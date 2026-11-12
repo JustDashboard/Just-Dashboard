@@ -165,7 +165,9 @@ export function sortSites(sites: VHost[], sort: SiteSort, traffic?: SitesTraffic
     case "name":
       return out.sort((a, b) => a.name.localeCompare(b.name) || byUrgency(a, b))
     case "modified":
-      return out.sort((a, b) => b.modified.localeCompare(a.modified) || byUrgency(a, b))
+      return out.sort(
+        (a, b) => (b.modified ?? "").localeCompare(a.modified ?? "") || byUrgency(a, b),
+      )
     case "traffic":
       return out.sort(
         (a, b) =>

@@ -25,8 +25,8 @@ type canaryWindow struct {
 	AutoPromote bool           `json:"autoPromote"`
 	Decision    string         `json:"decision"`
 	DecidedBy   string         `json:"decidedBy"`
-	StartedAt   time.Time      `json:"startedAt"`
-	EndsAt      time.Time      `json:"endsAt"`
+	StartedAt   time.Time      `json:"startedAt,omitzero"`
+	EndsAt      time.Time      `json:"endsAt,omitzero"`
 	Live        *canaryReading `json:"live"`
 	Candidate   *canaryReading `json:"candidate"`
 	Verdict     *struct {

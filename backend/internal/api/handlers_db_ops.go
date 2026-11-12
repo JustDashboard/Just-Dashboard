@@ -130,7 +130,7 @@ func (s *Server) handleDBCancel(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	if err := dbx.CancelQuery(ctx, pool, conn.Driver, req.PID); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "database.session.cancel", conn.Name, map[string]any{"pid": req.PID})
 	httpx.JSON(w, http.StatusOK, map[string]any{"cancelled": req.PID})
@@ -365,7 +365,7 @@ func (s *Server) handleDBStatementsReset(w http.ResponseWriter, r *http.Request)
 	}
 	if err != nil {
 		httpx.SetAudit(r, "database.statements.reset", conn.Name, map[string]any{"error": err.Error()})
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	s.dbStatements.noteReset(conn.ID)
 	httpx.SetAudit(r, "database.statements.reset", conn.Name, map[string]any{"statement": statement})
@@ -398,7 +398,7 @@ func (s *Server) handleDBStatementsPreload(w http.ResponseWriter, r *http.Reques
 	var refused dbx.ErrSettingRequest
 	if errors.As(err, &refused) {
 		httpx.SetAudit(r, "database.statements.preload", conn.Name, map[string]any{"refused": err.Error()})
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if err != nil {
 		httpx.SetAudit(r, "database.statements.preload", conn.Name, map[string]any{"error": err.Error()})
@@ -582,7 +582,7 @@ func (s *Server) handleDBSettingChange(w http.ResponseWriter, r *http.Request) e
 		}
 		// A refusal of ours and a refusal of the engine's are both about the
 		// value that was sent, and both are printed beside the field.
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	detail["persisted"], detail["restartRequired"] = change.Persisted, change.RestartRequired
 	if !sensitive {
@@ -886,7 +886,7 @@ func privilegeError(driver dbx.Driver, err error) error {
 	if errors.Is(err, dbx.ErrUnsupported) {
 		return httpx.BadRequest("%s privileges are not granted object by object from here", driver)
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 // privilegeElsewhere reports whether a change has to run on a connection to

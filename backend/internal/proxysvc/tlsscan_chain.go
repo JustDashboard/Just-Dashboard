@@ -48,7 +48,7 @@ type ChainAudit struct {
 // store did.
 type TrustLink struct {
 	Subject  string    `json:"subject"`
-	NotAfter time.Time `json:"notAfter"`
+	NotAfter time.Time `json:"notAfter,omitzero"`
 	Sent     bool      `json:"sent"`
 	Root     bool      `json:"root"`
 }

@@ -52,7 +52,8 @@ export type VHost = {
   package?: string
   /** The deployment environment that writes this route. */
   owner?: VHostOwner
-  modified: string
+  /** Absent for a file that could not be read. */
+  modified?: string
   size: number
   /** The site answers with its maintenance page now. */
   maintenance?: boolean

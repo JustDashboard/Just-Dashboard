@@ -730,7 +730,7 @@ func buildDeployOpenAPI(root chi.Routes) *openapiDocument {
 			"description": "Generated from the dashboard's own router and the Go types its handlers decode and encode, and checked against both by its tests, so it describes exactly what this build serves. " +
 				"Every route is under /api/v1/deploy and takes one of three credentials: the browser session (the " + httpx.SessionCookie + " cookie, " + sessioncookie.PlainName + " on a dashboard served over plain HTTP on loopback, with the X-JD-CSRF: 1 header on every request that is not a GET), " +
 				"an API key as a bearer token, or a deploy key as a bearer token, which reaches only the routes marked deployKey; x-deploy-key on each operation says what a deploy key gets there and why. " +
-				"A property is present in an answer whenever its Go field has no omitempty, and may be left out of a request, where it is its zero value; a property that is a pointer, list or map in Go may be null. " +
+				"A property is present in an answer whenever its Go field has no omitempty or omitzero (a time that was never set is left out, never sent as year one), and may be left out of a request, where it is its zero value; a property that is a pointer, list or map in Go may be null. " +
 				"Secrets are marked writeOnly: they are accepted by a write and read back by no route. Every refusal is the Error envelope under default.",
 			"license": map[string]any{"name": "AGPL-3.0-only", "identifier": "AGPL-3.0-only"},
 		},

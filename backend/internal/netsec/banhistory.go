@@ -24,7 +24,7 @@ type BanEvent struct {
 	Action string    `json:"action"`
 	Jail   string    `json:"jail"`
 	IP     string    `json:"ip"`
-	At     time.Time `json:"at"`
+	At     time.Time `json:"at,omitzero"`
 }
 
 // Where fail2ban writes by default. A host that logs only to the journal has
@@ -135,8 +135,8 @@ type Offender struct {
 	IP    string    `json:"ip"`
 	Bans  int       `json:"bans"`
 	Jails []string  `json:"jails"`
-	First time.Time `json:"first"`
-	Last  time.Time `json:"last"`
+	First time.Time `json:"first,omitzero"`
+	Last  time.Time `json:"last,omitzero"`
 }
 
 // BanSummary is the ban record turned into something to read.

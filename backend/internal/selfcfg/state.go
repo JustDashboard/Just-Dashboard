@@ -108,8 +108,8 @@ type Run struct {
 	Note string `json:"note,omitempty"`
 
 	Actor      string     `json:"actor"`
-	StartedAt  time.Time  `json:"startedAt"`
-	UpdatedAt  time.Time  `json:"updatedAt"`
+	StartedAt  time.Time  `json:"startedAt,omitzero"`
+	UpdatedAt  time.Time  `json:"updatedAt,omitzero"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	Error      string     `json:"error,omitempty"`
 }

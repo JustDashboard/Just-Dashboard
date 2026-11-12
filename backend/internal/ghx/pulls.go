@@ -31,7 +31,7 @@ type PullRequest struct {
 	Head      string    `json:"head"`
 	Base      string    `json:"base"`
 	Author    string    `json:"author,omitempty"`
-	CreatedAt time.Time `json:"createdAt,omitempty"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 	Comments  int       `json:"comments"`
 	// Review is GitHub's verdict on the reviews so far: approved,
 	// changes_requested, review_required, or empty where nobody is asked.
@@ -54,7 +54,7 @@ type PullRequest struct {
 	// are said rather than derived.
 	HeadRepository string    `json:"headRepository,omitempty"`
 	Fork           bool      `json:"fork,omitempty"`
-	UpdatedAt      time.Time `json:"updatedAt,omitempty"`
+	UpdatedAt      time.Time `json:"updatedAt,omitzero"`
 	Labels         []string  `json:"labels,omitempty"`
 	Merged         bool      `json:"merged,omitempty"`
 }
@@ -79,7 +79,7 @@ type ghPull struct {
 	Author  struct {
 		Login string `json:"login"`
 	} `json:"author"`
-	CreatedAt      time.Time  `json:"createdAt"`
+	CreatedAt      time.Time  `json:"createdAt,omitzero"`
 	Comments       []struct{} `json:"comments"`
 	ReviewDecision string     `json:"reviewDecision"`
 	Rollup         []struct {
@@ -103,7 +103,7 @@ type ghPull struct {
 		Login string `json:"login"`
 	} `json:"headRepositoryOwner"`
 	IsCrossRepository bool      `json:"isCrossRepository"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	UpdatedAt         time.Time `json:"updatedAt,omitzero"`
 	Labels            []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
@@ -380,7 +380,7 @@ type WorkflowRun struct {
 	Branch     string    `json:"branch,omitempty"`
 	SHA        string    `json:"sha,omitempty"`
 	Event      string    `json:"event,omitempty"`
-	CreatedAt  time.Time `json:"createdAt,omitempty"`
+	CreatedAt  time.Time `json:"createdAt,omitzero"`
 }
 
 // ListRuns lists recent Actions runs, for one branch when named.
@@ -413,7 +413,7 @@ func (s *Service) ListRuns(ctx context.Context, dir, branch string, limit int) (
 		Branch     string    `json:"headBranch"`
 		SHA        string    `json:"headSha"`
 		Event      string    `json:"event"`
-		CreatedAt  time.Time `json:"createdAt"`
+		CreatedAt  time.Time `json:"createdAt,omitzero"`
 	}
 	if err := json.Unmarshal([]byte(out), &body); err != nil {
 		return nil, fmt.Errorf("could not read gh's answer: %w", err)

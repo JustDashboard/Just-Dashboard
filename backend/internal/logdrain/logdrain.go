@@ -68,8 +68,8 @@ type Drain struct {
 	// request's trace. Empty draws none.
 	TraceURL    string    `json:"traceUrl,omitempty"`
 	HeaderNames []string  `json:"headerNames"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	CreatedAt   time.Time `json:"createdAt,omitzero"`
+	UpdatedAt   time.Time `json:"updatedAt,omitzero"`
 	Status      Status    `json:"status"`
 }
 

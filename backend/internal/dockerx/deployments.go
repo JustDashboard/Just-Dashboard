@@ -29,7 +29,7 @@ type StackDeployment struct {
 	ID         int64     `json:"id"`
 	Project    string    `json:"project"`
 	WorkingDir string    `json:"workingDir,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
+	CreatedAt  time.Time `json:"createdAt,omitzero"`
 
 	// ConfigHash identifies the compose file, so two deployments of identical
 	// configuration are visibly identical. Config is the file itself, which is

@@ -142,8 +142,7 @@ export function PasskeysSection({ className }: { className?: string }) {
 /** One passkey's line: added, last used, synced, and where it works if not here. */
 export function passkeyLine(key: Passkey, hostname: string) {
   const parts = [`added ${relativeTime(key.createdAt)}`]
-  const used = Date.parse(key.lastUsedAt)
-  parts.push(used > 0 ? `last signed in ${relativeTime(key.lastUsedAt)}` : "never used yet")
+  parts.push(key.lastUsedAt ? `last signed in ${relativeTime(key.lastUsedAt)}` : "never used yet")
   if (key.synced) parts.push("synced")
   if (hostname && key.rpId !== hostname) parts.push(`signs in at ${key.rpId}`)
   return parts.join(" · ")

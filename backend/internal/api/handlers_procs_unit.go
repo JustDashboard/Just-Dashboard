@@ -98,7 +98,7 @@ func (s *Server) handleUnitLimits(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	if _, err := req.Assignments(); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	res, err := s.modules.systemd.SetLimits(r.Context(), name, req)
 	if err != nil {

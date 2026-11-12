@@ -113,7 +113,7 @@ type fleetResponse struct {
 	// waiting for a password.
 	Unreachable      []unreachableServer `json:"unreachable"`
 	NeedsCredentials []credentialServer  `json:"needsCredentials"`
-	CheckedAt        time.Time           `json:"checkedAt"`
+	CheckedAt        time.Time           `json:"checkedAt,omitzero"`
 }
 
 func (s *Server) handleDBFleet(w http.ResponseWriter, r *http.Request) error {
@@ -626,7 +626,7 @@ type topoEdge struct {
 type topologyResponse struct {
 	Nodes     []topoNode `json:"nodes"`
 	Edges     []topoEdge `json:"edges"`
-	CheckedAt time.Time  `json:"checkedAt"`
+	CheckedAt time.Time  `json:"checkedAt,omitzero"`
 }
 
 func (s *Server) handleDBTopology(w http.ResponseWriter, r *http.Request) error {

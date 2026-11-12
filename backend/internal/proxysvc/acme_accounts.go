@@ -290,7 +290,7 @@ func readACMEAccounts(dir string) []ACMEAccountEntry {
 			}
 		}
 		var meta struct {
-			Created time.Time `json:"creation_dt"`
+			Created time.Time `json:"creation_dt,omitzero"`
 		}
 		if raw, err := os.ReadFile(filepath.Join(accountDir, "meta.json")); err == nil && json.Unmarshal(raw, &meta) == nil {
 			entry.Created = meta.Created

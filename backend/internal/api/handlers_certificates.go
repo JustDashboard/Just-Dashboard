@@ -138,7 +138,7 @@ func (s *Server) handleCertServed(w http.ResponseWriter, r *http.Request) error 
 		return httpx.Err(http.StatusNotFound, "not_found", "No listed certificate has that path.")
 	}
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, served)
 	return nil
@@ -165,7 +165,7 @@ func (s *Server) handleCertDetail(w http.ResponseWriter, r *http.Request) error 
 		return httpx.Err(http.StatusForbidden, "not_listed", "Only a certificate the list shows can be read.")
 	}
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, detail)
 	return nil
@@ -183,7 +183,7 @@ func (s *Server) handleCertDownload(w http.ResponseWriter, r *http.Request) erro
 		return httpx.Err(http.StatusForbidden, "not_listed", "Only a certificate the list shows can be downloaded.")
 	}
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	writeCertificateFile(w, file)
 	return nil
@@ -213,7 +213,7 @@ func (s *Server) handleCertExport(w http.ResponseWriter, r *http.Request) error 
 		return httpx.Err(http.StatusForbidden, "not_listed", "Only a certificate the list shows can be exported.")
 	}
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "certificates.export", part.Name,
 		map[string]any{"path": req.Path, "format": req.Format, "legacy": req.Format == "pfx" && req.Legacy})
@@ -232,7 +232,7 @@ func (s *Server) handleCertExport(w http.ResponseWriter, r *http.Request) error 
 		return httpx.Err(http.StatusNotFound, "no_key", "No private key is known for this certificate on this host.")
 	}
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	writeCertificateFile(w, file)
 	return nil
@@ -305,7 +305,7 @@ func (s *Server) handleCertDecode(w http.ResponseWriter, r *http.Request) error 
 	}
 	decoded, err := proxysvc.DecodePEM(req.PEM)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, decoded)
 	return nil
@@ -446,7 +446,7 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) planCertIssue(ctx context.Context, req proxysvc.IssueRequest) (proxysvc.IssuePlan, *proxysvc.DNSCredentials, issueBinding, error) {
 	plan, err := s.modules.proxy.PlanIssue(ctx, req)
 	if err != nil {
-		return plan, nil, issueBinding{}, httpx.BadRequest("%v", err)
+		return plan, nil, issueBinding{}, httpx.Refused(err)
 	}
 	binding, err := s.planIssueBinding(ctx, req, plan.Authority)
 	if err != nil {
@@ -457,7 +457,7 @@ func (s *Server) planCertIssue(ctx context.Context, req proxysvc.IssueRequest) (
 	}
 	checked, err := proxysvc.CheckDNSCredentials(req.DNSProvider, req.Credentials)
 	if err != nil {
-		return plan, nil, binding, httpx.BadRequest("%v", err)
+		return plan, nil, binding, httpx.Refused(err)
 	}
 	return plan, &checked, binding, nil
 }
@@ -497,7 +497,7 @@ func (s *Server) handleCertIssuePreflight(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	result, err := s.modules.proxy.IssuePreflight(ctx, req, s.failedIssues())
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, result)
 	return nil
@@ -679,7 +679,7 @@ func (s *Server) handleCertRenew(w http.ResponseWriter, r *http.Request) error {
 	}
 	args, err := s.modules.proxy.RenewArgs(req.Name, req.DryRun, req.Force)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	target := req.Name
 	if target == "" {
@@ -918,7 +918,7 @@ func (s *Server) handleCertRevoke(w http.ResponseWriter, r *http.Request) error 
 	}
 	args, err := s.modules.proxy.RevokeArgs(req.Name)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "certificates.revoke", req.Name, map[string]any{"streamed": true})
 	return s.startCertbotJob(w, r, jobs.Spec{
@@ -956,7 +956,7 @@ func (s *Server) handleCertDelete(w http.ResponseWriter, r *http.Request) error 
 	for _, name := range req.Names {
 		args, err := s.modules.proxy.DeleteArgs(name)
 		if err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		if err := s.modules.proxy.LineageInUse(name, req.Force); err != nil {
 			return certificateInUse(err)
@@ -1001,7 +1001,7 @@ func (s *Server) handleImportedDelete(w http.ResponseWriter, r *http.Request) er
 	case errors.Is(err, proxysvc.ErrImportNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case err != nil:
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "certificates.imported.delete", name, map[string]any{"force": force})
 	httpx.NoContent(w)
@@ -1041,7 +1041,7 @@ func (s *Server) handleDNSCredentials(w http.ResponseWriter, r *http.Request) er
 	}
 	path, err := proxysvc.WriteDNSCredentials(req.Provider, req.Credentials)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "certificates.dns.credentials", req.Provider, map[string]any{"file": path})
 	httpx.JSON(w, http.StatusOK, map[string]any{"provider": req.Provider, "saved": true})
@@ -1064,7 +1064,7 @@ func (s *Server) handleDNSCredentialsTest(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	args, err := proxysvc.DNSTestArgs(ctx, provider, req.Domain)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	name := provider
 	if p, ok := proxysvc.DNSProviderFor(provider); ok {
@@ -1104,14 +1104,14 @@ func (s *Server) handleCertbotInstall(w http.ResponseWriter, r *http.Request) er
 	manager := s.modules.updates.Manager()
 	pkg, err := proxysvc.CertbotPackage(ctx, manager, req.Plugin)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	name, args, env, err := s.modules.updates.InstallCommand([]string{pkg})
 	if err != nil {
 		if e := notSupported(err); e != nil {
 			return e
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	what := "certbot"
 	if req.Plugin != "" {
@@ -1138,7 +1138,7 @@ func (s *Server) handleCertbotInstall(w http.ResponseWriter, r *http.Request) er
 func (s *Server) handleDNSCredentialsRemove(w http.ResponseWriter, r *http.Request) error {
 	provider := chi.URLParam(r, "provider")
 	if err := proxysvc.RemoveDNSCredentials(provider); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "certificates.dns.credentials.remove", provider, nil)
 	httpx.NoContent(w)
@@ -1183,7 +1183,7 @@ func (s *Server) handleCertEvidencePrune(w http.ResponseWriter, r *http.Request)
 		"removed": result.Removed, "kept": result.Kept,
 	})
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, result)
 	return nil
@@ -1207,7 +1207,7 @@ func (s *Server) handleCertImport(w http.ResponseWriter, r *http.Request) error 
 		return httpx.Err(http.StatusConflict, "certificate_exists", err.Error())
 	}
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "certificates.import", res.Name,
 		map[string]any{"domains": res.Cert.Domains, "expires": res.Cert.NotAfter, "replaced": res.Replaced,
@@ -1227,7 +1227,7 @@ func (s *Server) handleCertImportInspect(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	res, err := s.modules.proxy.InspectImport(ctx, req)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, res)
 	return nil

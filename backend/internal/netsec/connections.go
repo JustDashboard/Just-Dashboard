@@ -85,7 +85,7 @@ type Connections struct {
 // table is a snapshot: whatever opened and closed between two reads was
 // never in it.
 type ConnectionQuality struct {
-	ReadAt time.Time `json:"readAt"`
+	ReadAt time.Time `json:"readAt,omitzero"`
 	// IntervalSeconds is the time since the previous read, zero for the
 	// first; a connection shorter than it may not have been seen.
 	IntervalSeconds float64 `json:"intervalSeconds"`
@@ -290,9 +290,9 @@ type ClosedConnection struct {
 	// FirstSeen and LastSeen are the first and last reads that held it;
 	// GoneBy is the read that no longer did. It closed between LastSeen and
 	// GoneBy, after being open at least ObservedSeconds.
-	FirstSeen       time.Time `json:"firstSeen"`
-	LastSeen        time.Time `json:"lastSeen"`
-	GoneBy          time.Time `json:"goneBy"`
+	FirstSeen       time.Time `json:"firstSeen,omitzero"`
+	LastSeen        time.Time `json:"lastSeen,omitzero"`
+	GoneBy          time.Time `json:"goneBy,omitzero"`
 	ObservedSeconds float64   `json:"observedSeconds"`
 }
 

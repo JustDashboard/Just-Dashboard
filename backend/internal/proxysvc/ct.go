@@ -61,9 +61,9 @@ type CTCertificate struct {
 	IssuerOrg string    `json:"issuerOrg"`
 	Names     []string  `json:"names"`
 	Serial    string    `json:"serial"`
-	NotBefore time.Time `json:"notBefore"`
-	NotAfter  time.Time `json:"notAfter"`
-	Logged    time.Time `json:"logged"`
+	NotBefore time.Time `json:"notBefore,omitzero"`
+	NotAfter  time.Time `json:"notAfter,omitzero"`
+	Logged    time.Time `json:"logged,omitzero"`
 	// Ours is a certificate whose serial is one this host holds: a live
 	// certificate, an imported one, or an earlier renewal in certbot's
 	// archive.

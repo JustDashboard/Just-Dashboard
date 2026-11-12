@@ -18,7 +18,7 @@ type Tag struct {
 	// Commit is the commit the tag points at — through the tag object, for an
 	// annotated one.
 	Commit    string    `json:"commit,omitempty"`
-	At        time.Time `json:"at,omitempty"`
+	At        time.Time `json:"at,omitzero"`
 	Message   string    `json:"message,omitempty"`
 	Annotated bool      `json:"annotated"`
 	Tagger    string    `json:"tagger,omitempty"`
@@ -61,7 +61,7 @@ type Stash struct {
 	// refuses.
 	Index   int       `json:"index"`
 	SHA     string    `json:"sha"`
-	At      time.Time `json:"at,omitempty"`
+	At      time.Time `json:"at,omitzero"`
 	Branch  string    `json:"branch,omitempty"`
 	Message string    `json:"message"`
 }
@@ -202,7 +202,7 @@ type CommitDetail struct {
 	Commit
 	Body        string        `json:"body,omitempty"`
 	Committer   string        `json:"committer,omitempty"`
-	CommittedAt time.Time     `json:"committedAt,omitempty"`
+	CommittedAt time.Time     `json:"committedAt,omitzero"`
 	ChangedFile []ChangedFile `json:"changes"`
 }
 

@@ -81,7 +81,7 @@ type AccessList struct {
 	// it leads to — a site's, a password file — and leave the link.
 	Link     string          `json:"link,omitempty"`
 	UsedBy   []AccessListUse `json:"usedBy"`
-	Modified time.Time       `json:"modified"`
+	Modified time.Time       `json:"modified,omitzero"`
 }
 
 // AccessListUse is a site whose file includes a list, directly or through a

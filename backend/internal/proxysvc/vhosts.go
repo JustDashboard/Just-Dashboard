@@ -94,7 +94,7 @@ type VHost struct {
 	// Owner is the deployment that writes this site, filled in by the API
 	// from the deploy store; the proxy knows only the file.
 	Owner    *VHostOwner `json:"owner,omitempty"`
-	Modified time.Time   `json:"modified"`
+	Modified time.Time   `json:"modified,omitzero"`
 	Size     int64       `json:"size"`
 	// Maintenance says the site answers with its maintenance page now.
 	Maintenance bool `json:"maintenance,omitempty"`

@@ -643,7 +643,7 @@ func (s *Server) handleCreateDeployToken(w http.ResponseWriter, r *http.Request)
 		return httpx.Err(http.StatusForbidden, "forbidden", err.Error())
 	}
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	detail := map[string]any{"role": tok.Role, "scope": tok.Scope, "ttlDays": req.TTLDays, "deployments": "every"}
 	if len(names) > 0 {

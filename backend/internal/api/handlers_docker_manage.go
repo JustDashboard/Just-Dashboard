@@ -287,7 +287,7 @@ func (s *Server) handleContainerResources(w http.ResponseWriter, r *http.Request
 		return err
 	}
 	if err := dockerx.ValidateResourceUpdate(limits); err != nil {
-		return httpx.BadRequest("%s", err)
+		return httpx.Refused(err)
 	}
 	detail, err := s.modules.docker.Inspect(r.Context(), id)
 	if err != nil {
@@ -1729,7 +1729,7 @@ func (s *Server) handleContainerRestartPolicy(w http.ResponseWriter, r *http.Req
 		return err
 	}
 	if err := dockerx.ValidateRestartPolicyUpdate(req.Policy, req.MaxRetries); err != nil {
-		return httpx.BadRequest("%s", err)
+		return httpx.Refused(err)
 	}
 	detail, err := s.modules.docker.Inspect(r.Context(), id)
 	if err != nil {

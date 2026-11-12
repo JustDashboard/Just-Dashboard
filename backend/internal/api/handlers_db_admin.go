@@ -219,7 +219,7 @@ func roleError(err error) error {
 	var attr dbx.ErrRoleAttribute
 	var inUse dbx.ErrRoleInUse
 	if errors.As(err, &attr) || errors.As(err, &inUse) {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 }
@@ -455,7 +455,7 @@ func (s *Server) handleDBRoleGrant(w http.ResponseWriter, r *http.Request) error
 		// Nothing was asked of the server and nothing failed there: the
 		// engine has no such operation, which is the request's mistake, as the
 		// privileges route beside this one answers it.
-		return httpx.BadRequest("%v", errRedisGrant)
+		return httpx.Refused(errRedisGrant)
 	}
 	database := strings.TrimSpace(req.Database)
 	if database == "" {
@@ -677,7 +677,7 @@ func (s *Server) saveSiblingConnection(w http.ResponseWriter, r *http.Request, c
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
 	defer cancel()
 	if err := s.probeConnection(ctx, conn.Driver, sibling); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	existing, err := s.existingConnections(ctx)
 	if err != nil {
@@ -837,7 +837,7 @@ func (s *Server) handleDBStatements(w http.ResponseWriter, r *http.Request) erro
 		dbx.StatementsOptions{Sort: strings.TrimSpace(q.Get("sort")), Limit: atoiDefault(q.Get("limit"), 0)})
 	var bad dbx.ErrBadStatementsOption
 	if errors.As(err, &bad) {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if err != nil {
 		return queryFailed(err)
@@ -851,7 +851,7 @@ func (s *Server) handleDBStatements(w http.ResponseWriter, r *http.Request) erro
 type dbBackupFile struct {
 	File    string    `json:"file"`
 	Size    int64     `json:"size"`
-	TakenAt time.Time `json:"takenAt"`
+	TakenAt time.Time `json:"takenAt,omitzero"`
 	// Format is what the file is, read from its first bytes: a pg_dump
 	// archive, SQL text, or the dashboard's own gzipped JSON Lines — a
 	// MongoDB collection's documents, or each Redis key's DUMP payload, which

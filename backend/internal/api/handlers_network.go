@@ -268,10 +268,9 @@ func mapNetworkError(err error) error {
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, netx.ErrExists):
 		return httpx.Err(http.StatusConflict, "exists", err.Error())
-	case errors.Is(err, context.DeadlineExceeded):
-		return httpx.Err(http.StatusGatewayTimeout, "timeout", "the host did not answer in time").Retry()
 	}
-	return httpx.Wrap(http.StatusBadRequest, "bad_request", err)
+	// A deadline is httpx.Timeout from here, as it is from every mapper.
+	return httpx.Refused(err)
 }
 
 // networkClient is the address the network guards protect for a request

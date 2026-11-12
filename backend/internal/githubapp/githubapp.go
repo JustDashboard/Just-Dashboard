@@ -82,7 +82,7 @@ type Credentials struct {
 	ClientSecret  string    `json:"-"`
 	WebhookSecret string    `json:"-"`
 	PrivateKey    string    `json:"-"`
-	CreatedAt     time.Time `json:"createdAt"`
+	CreatedAt     time.Time `json:"createdAt,omitzero"`
 }
 
 // Installation is one account that installed the App.
@@ -270,7 +270,7 @@ func (c *Client) InstallationToken(ctx context.Context, installationID int64) (s
 	}
 	var minted struct {
 		Token     string    `json:"token"`
-		ExpiresAt time.Time `json:"expires_at"`
+		ExpiresAt time.Time `json:"expires_at,omitzero"`
 	}
 	path := fmt.Sprintf("/app/installations/%d/access_tokens", installationID)
 	if _, err := c.do(ctx, http.MethodPost, path, jwt, map[string]any{}, &minted); err != nil {

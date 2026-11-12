@@ -19,7 +19,7 @@ type TestRecord struct {
 	Kind Kind `json:"kind"`
 	// CheckedAt is when the test began, which is when the engine read the
 	// files it judged.
-	CheckedAt  time.Time         `json:"checkedAt"`
+	CheckedAt  time.Time         `json:"checkedAt,omitzero"`
 	Validation *ValidationResult `json:"validation"`
 }
 

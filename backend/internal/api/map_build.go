@@ -104,7 +104,7 @@ type mapResponse struct {
 	Host      mapHost   `json:"host"`
 	Kinds     []mapKind `json:"kinds"`
 	Links     []mapLink `json:"links"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 }
 
 // mapItemCap is the most things one shelf is sent. A shelf draws its first

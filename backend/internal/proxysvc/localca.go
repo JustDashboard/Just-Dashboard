@@ -415,11 +415,11 @@ type LocalCALeaf struct {
 	Name      string    `json:"name"`
 	Path      string    `json:"path"`
 	Domains   []string  `json:"domains"`
-	NotBefore time.Time `json:"notBefore"`
-	NotAfter  time.Time `json:"notAfter"`
+	NotBefore time.Time `json:"notBefore,omitzero"`
+	NotAfter  time.Time `json:"notAfter,omitzero"`
 	DaysLeft  int       `json:"daysLeft"`
 	// RenewsAt is the first daily check that finds it due.
-	RenewsAt time.Time `json:"renewsAt"`
+	RenewsAt time.Time `json:"renewsAt,omitzero"`
 	UsedBy   []string  `json:"usedBy"`
 	// Error is why it cannot be renewed here.
 	Error string `json:"error,omitempty"`
@@ -747,7 +747,7 @@ func sitesNaming(vhosts []VHost, paths []string, enabledOnly bool) []string {
 
 // LocalCACheck is what one pass of the daily renewal did.
 type LocalCACheck struct {
-	At      time.Time `json:"at"`
+	At      time.Time `json:"at,omitzero"`
 	Renewed []string  `json:"renewed"`
 	// Reloaded names the enabled sites nginx was reloaded for.
 	Reloaded []string `json:"reloaded"`

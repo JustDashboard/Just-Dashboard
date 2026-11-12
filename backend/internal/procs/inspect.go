@@ -31,7 +31,7 @@ import (
 // page can say "not readable" rather than draw a zero.
 type ProcessInspect struct {
 	PID        int32     `json:"pid"`
-	CreateTime time.Time `json:"createTime"`
+	CreateTime time.Time `json:"createTime,omitzero"`
 	// Argv is the command line as the words the program was handed, which a
 	// joined string cannot tell apart from an argument holding a space.
 	Argv []string `json:"argv"`

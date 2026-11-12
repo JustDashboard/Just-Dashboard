@@ -337,7 +337,7 @@ func (s *Systemd) DaemonReload(ctx context.Context) (*CommandResult, error) {
 // JournalEntry is one record from journalctl's JSON output. The interesting
 // fields are normalised out of the __-prefixed noise the journal emits.
 type JournalEntry struct {
-	Timestamp time.Time `json:"timestamp"`
+	Timestamp time.Time `json:"timestamp,omitzero"`
 	Message   string    `json:"message"`
 	Priority  int       `json:"priority"`
 	Unit      string    `json:"unit,omitempty"`

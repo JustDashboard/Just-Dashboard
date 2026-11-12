@@ -44,7 +44,7 @@ type networkOverview struct {
 	// Observations say which readings above arrived, so a failed one is shown
 	// as failed rather than as an empty answer.
 	Observations []netx.Observation `json:"observations"`
-	ReadAt       time.Time          `json:"readAt"`
+	ReadAt       time.Time          `json:"readAt,omitzero"`
 }
 
 // overviewDockerNet is a Docker network as the topology draws it: its bridge

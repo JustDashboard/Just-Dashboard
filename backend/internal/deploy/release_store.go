@@ -85,7 +85,7 @@ type ReleaseArtifactInput struct {
 	Digest      string          `json:"digest"`
 	Metadata    json.RawMessage `json:"metadata"`
 	SizeBytes   int64           `json:"sizeBytes"`
-	RetainUntil time.Time       `json:"retainUntil,omitempty"`
+	RetainUntil time.Time       `json:"retainUntil"`
 }
 
 type StoredBuildEvidence struct {

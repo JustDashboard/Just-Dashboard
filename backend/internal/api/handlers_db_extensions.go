@@ -283,7 +283,7 @@ func (s *Server) handleDBPreload(w http.ResponseWriter, r *http.Request) error {
 	httpx.SetAudit(r, "database.extension.preload", conn.Name, map[string]any{
 		"library": plan.Library, "libraries": plan.Libraries, "statements": plan.Statements})
 	if err := plan.Exec(ctx, pool); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, reply)
 	return nil

@@ -24,7 +24,7 @@ const accountBaselineSetting = "system_account_baseline"
 const accountBaselineMaxAge = 24 * time.Hour
 
 type accountBaseline struct {
-	At       time.Time           `json:"at"`
+	At       time.Time           `json:"at,omitzero"`
 	Snapshot linuxusers.Snapshot `json:"snapshot"`
 }
 

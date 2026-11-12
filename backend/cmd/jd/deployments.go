@@ -21,7 +21,7 @@ type engineRun struct {
 	Operation      string     `json:"operation"`
 	Trigger        string     `json:"trigger"`
 	Actor          string     `json:"actor"`
-	RequestedAt    time.Time  `json:"requestedAt"`
+	RequestedAt    time.Time  `json:"requestedAt,omitzero"`
 	EndedAt        *time.Time `json:"endedAt"`
 	SourceRevision string     `json:"sourceRevision"`
 	ReleaseID      int64      `json:"releaseId"`
@@ -347,7 +347,7 @@ type transcriptLine struct {
 	Seq    int64     `json:"seq"`
 	Step   string    `json:"step"`
 	Stream string    `json:"stream"`
-	At     time.Time `json:"at"`
+	At     time.Time `json:"at,omitzero"`
 	Text   string    `json:"text"`
 }
 
@@ -530,7 +530,7 @@ type release struct {
 	State          string     `json:"state"`
 	SourceRevision string     `json:"sourceRevision"`
 	ImageDigest    string     `json:"imageDigest"`
-	CreatedAt      time.Time  `json:"createdAt"`
+	CreatedAt      time.Time  `json:"createdAt,omitzero"`
 	ActivatedAt    *time.Time `json:"activatedAt"`
 	Pinned         bool       `json:"pinned"`
 }

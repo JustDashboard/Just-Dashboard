@@ -104,7 +104,7 @@ type Check struct {
 	// Enabled is false when the operator turned the check off. The UI says so
 	// rather than reporting an install that is permanently up to date.
 	Enabled   bool      `json:"enabled"`
-	CheckedAt time.Time `json:"checkedAt,omitempty"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 	// Latest is the newest version this install is offered: for the project's
 	// own repository the newest one with a release tag, for a fork the newest
 	// one its branch names. Empty when the check has not succeeded yet, or when

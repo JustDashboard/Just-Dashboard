@@ -101,7 +101,7 @@ func mapDBAlertError(err error) error {
 	case errors.Is(err, errDBAlertNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, errDBAlertInvalid):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	return httpx.Internal(err)
 }

@@ -79,10 +79,7 @@ function Profile() {
           <>
             <span>member since {calendarDate(user.createdAt)}</span>
             <FactDot />
-            <span>
-              signed in{" "}
-              {user.lastLoginAt.startsWith("0001") ? "just now" : relativeTime(user.lastLoginAt)}
-            </span>
+            <span>signed in {user.lastLoginAt ? relativeTime(user.lastLoginAt) : "just now"}</span>
             {current && agent && (
               <>
                 <FactDot />

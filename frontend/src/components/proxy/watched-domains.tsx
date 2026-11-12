@@ -382,8 +382,8 @@ export function WatchedDomains({
                       : row.certificate &&
                         [
                           row.certificate.issuer,
-                          // A handshake that failed carries Go's zero time.
-                          new Date(row.certificate.notAfter).getUTCFullYear() > 1 &&
+                          // A handshake that failed has no date.
+                          row.certificate.notAfter &&
                             `until ${calendarDate(row.certificate.notAfter)}`,
                         ]
                           .filter(Boolean)

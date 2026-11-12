@@ -651,7 +651,7 @@ type DataCopyComparison struct {
 	Truncated bool            `json:"truncated"`
 	CopyError string          `json:"copyError,omitempty"`
 	LiveError string          `json:"liveError,omitempty"`
-	ReadAt    time.Time       `json:"readAt"`
+	ReadAt    time.Time       `json:"readAt,omitzero"`
 }
 
 // dataCopyTableLimit bounds a comparison: every table is counted on both

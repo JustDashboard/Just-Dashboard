@@ -14,7 +14,7 @@ import (
 // Changes made with ufw or firewall-cmd directly leave no event.
 type RuleEvent struct {
 	ID             int64           `json:"id"`
-	At             time.Time       `json:"at"`
+	At             time.Time       `json:"at,omitzero"`
 	Actor          string          `json:"actor"`
 	Backend        Backend         `json:"backend"`
 	Operation      string          `json:"operation"`

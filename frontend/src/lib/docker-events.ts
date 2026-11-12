@@ -304,7 +304,9 @@ export type ContainerHealth = {
 
 /**
  * Docker writes nanoseconds, and a date parser that follows the standard to
- * the letter reads three digits of a fraction and no more.
+ * the letter reads three digits of a fraction and no more. The year-one test
+ * is for Docker's own spelling of "not yet" in what it inspects, which this
+ * reads as Docker wrote it: the server's own answers leave an unset time out.
  */
 function isoMillis(value: unknown): string | undefined {
   if (typeof value !== "string" || value === "" || value.startsWith("0001-")) return undefined

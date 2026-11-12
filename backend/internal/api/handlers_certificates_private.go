@@ -63,7 +63,7 @@ func privateCertificateError(what string, err error) error {
 	case errors.Is(err, proxysvc.ErrRequestNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case errors.As(err, &input):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	return httpx.Err(http.StatusInternalServerError, "write_failed", what+": "+err.Error())
 }

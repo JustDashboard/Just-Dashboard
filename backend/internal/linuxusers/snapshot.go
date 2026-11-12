@@ -18,7 +18,7 @@ type Snapshot struct {
 	Accounts     []string  `json:"accounts"`
 	Keys         []string  `json:"keys"`
 	SudoRules    []string  `json:"sudoRules"`
-	RootSignIn   time.Time `json:"rootSignIn"`
+	RootSignIn   time.Time `json:"rootSignIn,omitzero"`
 	RootSignInIP string    `json:"rootSignInIp,omitempty"`
 }
 

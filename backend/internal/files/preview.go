@@ -51,7 +51,7 @@ type Preview struct {
 	Kind     string    `json:"kind"`
 	Mime     string    `json:"mime,omitempty"`
 	Size     int64     `json:"size"`
-	Modified time.Time `json:"modified"`
+	Modified time.Time `json:"modified,omitzero"`
 	Mode     string    `json:"modeOctal"`
 	Owner    string    `json:"owner,omitempty"`
 	Group    string    `json:"group,omitempty"`

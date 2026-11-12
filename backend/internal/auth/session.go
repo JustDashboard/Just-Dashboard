@@ -19,9 +19,9 @@ type Session struct {
 	TwoFAPassed bool      `json:"twoFactorPassed"`
 	IP          string    `json:"ip"`
 	UserAgent   string    `json:"userAgent"`
-	CreatedAt   time.Time `json:"createdAt"`
-	LastSeenAt  time.Time `json:"lastSeenAt"`
-	ExpiresAt   time.Time `json:"expiresAt"`
+	CreatedAt   time.Time `json:"createdAt,omitzero"`
+	LastSeenAt  time.Time `json:"lastSeenAt,omitzero"`
+	ExpiresAt   time.Time `json:"expiresAt,omitzero"`
 	Current     bool      `json:"current"`
 }
 

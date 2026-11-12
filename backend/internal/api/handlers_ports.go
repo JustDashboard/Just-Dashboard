@@ -363,7 +363,7 @@ func (s *Server) handlePortsFree(w http.ResponseWriter, r *http.Request) error {
 			if len(out.Ports) > 0 {
 				break
 			}
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		out.Ports = append(out.Ports, port)
 		passed[port] = true

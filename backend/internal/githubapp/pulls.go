@@ -49,8 +49,8 @@ type PullRequest struct {
 	// Mergeable is mergeable, conflicting, or unknown while GitHub is still
 	// computing it; empty on a listing, which never carries it.
 	Mergeable string    `json:"mergeable,omitempty"`
-	CreatedAt time.Time `json:"createdAt,omitempty"`
-	UpdatedAt time.Time `json:"updatedAt,omitempty"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 	Labels    []string  `json:"labels,omitempty"`
 	Comments  int       `json:"comments"`
 	Additions int       `json:"additions,omitempty"`
@@ -93,8 +93,8 @@ type rawPullRequest struct {
 		Login string `json:"login"`
 	} `json:"user"`
 	Mergeable json.RawMessage `json:"mergeable"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	CreatedAt time.Time       `json:"created_at,omitzero"`
+	UpdatedAt time.Time       `json:"updated_at,omitzero"`
 	Labels    []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
@@ -282,8 +282,8 @@ func (c *Client) CombinedStatus(ctx context.Context, installationID int64, nameW
 			State     string    `json:"state"`
 			Context   string    `json:"context"`
 			TargetURL string    `json:"target_url"`
-			CreatedAt time.Time `json:"created_at"`
-			UpdatedAt time.Time `json:"updated_at"`
+			CreatedAt time.Time `json:"created_at,omitzero"`
+			UpdatedAt time.Time `json:"updated_at,omitzero"`
 		} `json:"statuses"`
 	}
 	if _, err := c.do(ctx, http.MethodGet, "/repos/"+nameWithOwner+"/commits/"+sha+"/status?per_page=100", token, nil, &raw); err != nil {

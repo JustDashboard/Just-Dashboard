@@ -59,7 +59,7 @@ func (s *Server) redisConsole(r *http.Request) (*redisConsoleLine, error) {
 	}
 	args, err := dbx.RedisParseCommand(req.Command)
 	if err != nil {
-		return nil, httpx.BadRequest("%v", err)
+		return nil, httpx.Refused(err)
 	}
 	conn, dsn, err := s.redisRow(r)
 	if err != nil {

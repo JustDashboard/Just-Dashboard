@@ -12,7 +12,7 @@ var ErrContainerIdentityWindow = errors.New("container identity history requires
 // Identity history is deliberately separate from name-continuous Docker charts.
 // A replacement or a renamed container must not acquire another release's data.
 type ContainerIdentityPoint struct {
-	TS           time.Time `json:"ts"`
+	TS           time.Time `json:"ts,omitzero"`
 	Samples      int       `json:"samples"`
 	CPU          float64   `json:"cpu"`
 	CPUPeak      float64   `json:"cpuPeak"`

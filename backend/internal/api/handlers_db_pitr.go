@@ -292,7 +292,7 @@ func (s *Server) pitrDestination(ctx context.Context, req pitrSetupRequest) (bac
 		}
 		resolved, err := s.modules.files.Resolve(strings.TrimSpace(target.Path))
 		if err != nil {
-			return "", backups.TargetConfig{}, nil, httpx.BadRequest("%v", err)
+			return "", backups.TargetConfig{}, nil, httpx.Refused(err)
 		}
 		target = backups.TargetConfig{Path: resolved}
 	case backups.TargetS3, backups.TargetB2:
@@ -514,7 +514,7 @@ func (s *Server) handleDBPITRRestorePoint(w http.ResponseWriter, r *http.Request
 	}
 	name := strings.TrimSpace(req.Name)
 	if err := dbx.ValidRestorePointName(name); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	srv, err := s.pitrRequestServer(r)
 	if err != nil {
@@ -562,7 +562,7 @@ func (s *Server) handleDBPITRRestore(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 	if err := req.Target.Validate(); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	srv, err := s.pitrRequestServer(r)
 	if err != nil {
@@ -595,7 +595,7 @@ func (s *Server) handleDBPITRRestore(w http.ResponseWriter, r *http.Request) err
 	}
 	backup, err := s.pitrBaseFor(ctx, a, a.Reading, req.Target)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -612,7 +612,7 @@ func (s *Server) handleDBPITRRestore(w http.ResponseWriter, r *http.Request) err
 	}
 	port, err := s.pitrCopyPort(ctx)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	plan := pitrRestorePlan{
 		Container: name, Port: port, Backup: backup.Name, BackupAt: backup.FinishedAt,

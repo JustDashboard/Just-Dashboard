@@ -325,7 +325,7 @@ type ResolverView struct {
 // DNSReport is everything the TLS page's DNS panel shows.
 type DNSReport struct {
 	Domain    string    `json:"domain"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 	// Source is the resolver the records were read from.
 	Source             string         `json:"source"`
 	RCode              string         `json:"rcode,omitempty"`

@@ -211,7 +211,7 @@ function PeopleIdentity({
   const admins = active.filter((u) => u.role === "admin")
   const latest = users
     .filter((u) => !neverSignedIn(u))
-    .sort((a, b) => b.lastLoginAt.localeCompare(a.lastLoginAt))[0]
+    .sort((a, b) => (b.lastLoginAt ?? "").localeCompare(a.lastLoginAt ?? ""))[0]
   const verdict = peopleVerdict(users, require2fa)
   return (
     <HostIdentity

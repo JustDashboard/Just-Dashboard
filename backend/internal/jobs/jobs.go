@@ -59,7 +59,7 @@ type Line struct {
 	// command's output and should not be read as it.
 	Stream string    `json:"stream"`
 	Text   string    `json:"text"`
-	At     time.Time `json:"at"`
+	At     time.Time `json:"at,omitzero"`
 }
 
 // Job is one operation, past or present.
@@ -72,7 +72,7 @@ type Job struct {
 	Status    Status     `json:"status"`
 	ExitCode  int        `json:"exitCode"`
 	Error     string     `json:"error,omitempty"`
-	StartedAt time.Time  `json:"startedAt"`
+	StartedAt time.Time  `json:"startedAt,omitzero"`
 	EndedAt   *time.Time `json:"endedAt,omitempty"`
 	// StartedBy is the principal who asked for it. A job outlives its request,
 	// so the audit entry alone would not say who is responsible for something

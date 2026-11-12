@@ -113,7 +113,7 @@ func (s *Server) handlePackageSearch(w http.ResponseWriter, r *http.Request) err
 		if e := notSupported(err); e != nil {
 			return e
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, found)
 	return nil
@@ -128,7 +128,7 @@ func (s *Server) handlePackageDetail(w http.ResponseWriter, r *http.Request) err
 		if e := notSupported(err); e != nil {
 			return e
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, detail)
 	return nil
@@ -140,7 +140,7 @@ func (s *Server) handlePackageUsage(w http.ResponseWriter, r *http.Request) erro
 		if e := notSupported(err); e != nil {
 			return e
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, usage)
 	return nil
@@ -163,7 +163,7 @@ func (s *Server) handlePackageUpgrade(w http.ResponseWriter, r *http.Request) er
 		if e := notSupported(err); e != nil {
 			return e
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "system.updates.apply", name, map[string]any{
 		"securityOnly": securityOnly, "streamed": true,
@@ -208,7 +208,7 @@ func (s *Server) handlePackageRefresh(w http.ResponseWriter, r *http.Request) er
 		if e := notSupported(err); e != nil {
 			return e
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "system.packages.refresh", name, nil)
 
@@ -247,7 +247,7 @@ func (s *Server) handlePackageInstall(w http.ResponseWriter, r *http.Request) er
 		if e := notSupported(err); e != nil {
 			return e
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	target := strings.Join(body.Packages, ", ")
 	httpx.SetAudit(r, "system.packages.install", target, map[string]any{"manager": name})
@@ -298,7 +298,7 @@ func (s *Server) handlePackageRemove(w http.ResponseWriter, r *http.Request) err
 		if e := notSupported(err); e != nil {
 			return e
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "system.packages.remove", target, map[string]any{
 		"manager": name, "purge": body.Purge,

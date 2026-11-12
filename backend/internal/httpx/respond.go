@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -135,7 +136,7 @@ type Handler func(w http.ResponseWriter, r *http.Request) error
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := h(w, r); err != nil {
-		WriteError(w, r, err)
+		WriteError(w, r, mapped(r, err))
 	}
 }
 
@@ -154,16 +155,38 @@ func DiskFull(err error) *APIError {
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
-		apiErr = Internal(err)
+		// An error no handler named: the server's own failures have one
+		// answer each (failures.go), and what is left is hidden as before.
+		if apiErr = serverFailure(err); apiErr == nil {
+			apiErr = Internal(err)
+		}
 	}
 	// Whether a handler returned the store's error bare or wrapped it as
 	// Internal itself, a write refused for space is not an unexplained 500.
 	if apiErr.Status == http.StatusInternalServerError && apiErr.Code == "internal" && storehealth.IsDiskFull(err) {
 		apiErr = DiskFull(err)
 	}
+	// A handler's own deadline, on a request whose caller is still waiting,
+	// is 504 timeout whatever the mapper on the way made of the error: a
+	// process tree that could not be read in 30 seconds was a 404, a grant a
+	// 502 with "context deadline exceeded" for a sentence. Only an error that
+	// still carries its cause is read (Wrap, Internal, Refused, a bare one),
+	// and one a handler already marked as worth another try keeps its words.
+	if !apiErr.Retryable && errors.Is(err, context.DeadlineExceeded) && r.Context().Err() == nil {
+		late := Timeout(err)
+		late.Operation, late.Resource = apiErr.Operation, apiErr.Resource
+		apiErr = late
+	}
 	if apiErr.Status >= 500 {
 		id := RequestIDFrom(r.Context())
-		slog.Error("request failed", "method", r.Method, "path", r.URL.Path, "request", id, "err", apiErr.Error())
+		if requestGone(r, err) {
+			// The caller left and the work was stopped for it: not a failure
+			// of the server, and an ERROR for each closed tab buries the ones
+			// that are.
+			slog.Debug("request abandoned", "method", r.Method, "path", r.URL.Path, "request", id, "err", apiErr.Error())
+		} else {
+			slog.Error("request failed", "method", r.Method, "path", r.URL.Path, "request", id, "err", apiErr.Error())
+		}
 		if id != "" {
 			// A copy: the error may be one of the package's shared values.
 			named := *apiErr

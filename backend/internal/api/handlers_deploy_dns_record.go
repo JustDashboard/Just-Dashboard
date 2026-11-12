@@ -157,9 +157,9 @@ type dnsRecordManaged struct {
 	Provider  string          `json:"provider"`
 	Zone      string          `json:"zone"`
 	CreatedBy string          `json:"createdBy"`
-	CreatedAt time.Time       `json:"createdAt"`
+	CreatedAt time.Time       `json:"createdAt,omitzero"`
 	UpdatedBy string          `json:"updatedBy"`
-	UpdatedAt time.Time       `json:"updatedAt"`
+	UpdatedAt time.Time       `json:"updatedAt,omitzero"`
 	// Current says the zone still holds what was written.
 	Current bool `json:"current"`
 }

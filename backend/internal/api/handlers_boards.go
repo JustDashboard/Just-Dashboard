@@ -26,8 +26,8 @@ type boardSummary struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
 	Revision  int64     `json:"revision"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 	// Only the list fills this in; a board is opened for its scene.
 	Preview json.RawMessage `json:"preview,omitempty"`
 }

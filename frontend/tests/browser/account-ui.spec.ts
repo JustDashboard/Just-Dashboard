@@ -151,7 +151,7 @@ const users = [
     totpEnabled: false,
     disabled: false,
     mustChangePassword: true,
-    lastLoginAt: "0001-01-01T00:00:00Z",
+    // Never signed in: the server leaves the time out.
     createdAt: "2026-08-01T09:00:00Z",
   },
   {

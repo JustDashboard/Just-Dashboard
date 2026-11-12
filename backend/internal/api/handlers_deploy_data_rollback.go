@@ -35,7 +35,7 @@ func mapDataCopyError(err error) error {
 	case errors.Is(err, deploy.ErrDataCopyEnded):
 		return httpx.Err(http.StatusConflict, "data_copy_ended", err.Error())
 	case errors.Is(err, deploy.ErrInvalidPlan):
-		return httpx.BadRequest("%s", err.Error())
+		return httpx.Refused(err)
 	}
 	return mapDeployError(err)
 }

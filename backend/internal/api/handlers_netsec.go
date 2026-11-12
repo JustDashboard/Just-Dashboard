@@ -207,7 +207,7 @@ func (s *Server) handleFail2banUnban(w http.ResponseWriter, r *http.Request) err
 	jail := chi.URLParam(r, "jail")
 	out, err := s.modules.netsec.Unban(r.Context(), jail, req.IP)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "fail2ban.unban", jail, map[string]any{"ip": req.IP})
 	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
@@ -236,7 +236,7 @@ func (s *Server) handleFail2banBan(w http.ResponseWriter, r *http.Request) error
 			httpx.SetAudit(r, "fail2ban.ban", jail, map[string]any{"result": "refused_lockout"})
 			return httpx.Err(http.StatusConflict, "would_lock_you_out", err.Error())
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "fail2ban.ban", jail, map[string]any{"ip": req.IP})
 	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})

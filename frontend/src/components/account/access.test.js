@@ -141,7 +141,7 @@ test("the users verdict is amber only while an administrator is on a password al
 test("the user chips narrow by role and by what guards an account", () => {
   const users = [
     user({ id: 1 }),
-    user({ id: 2, role: "limited", totpEnabled: false, lastLoginAt: "0001-01-01T00:00:00Z" }),
+    user({ id: 2, role: "limited", totpEnabled: false, lastLoginAt: undefined }),
     user({ id: 3, role: "readonly", totpEnabled: false, disabled: true }),
   ]
   const ids = (scope) => users.filter((u) => inUserScope(u, scope)).map((u) => u.id)

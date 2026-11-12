@@ -163,7 +163,7 @@ export function inKeyScope(
 export const ROLES: Role[] = ["admin", "limited", "readonly"]
 
 export function neverSignedIn(user: Pick<DashboardUser, "lastLoginAt">) {
-  return !user.lastLoginAt || user.lastLoginAt.startsWith("0001")
+  return !user.lastLoginAt
 }
 
 /** The narrowings over the accounts: a role, or a question asked of all of them. */

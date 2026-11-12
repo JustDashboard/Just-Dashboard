@@ -686,7 +686,7 @@ type TmuxSession struct {
 	Folder    string    `json:"folder,omitempty"`
 	Favourite bool      `json:"favourite"`
 	Colour    string    `json:"colour,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 	// CWD is where the session's active pane is now, so a detached session can
 	// be identified by the work it is in the middle of.
 	CWD      string `json:"cwd,omitempty"`

@@ -131,7 +131,7 @@ func keyUses(lines []string, username string, now time.Time) map[string]keyUse {
 
 // SudoEvent is one use of sudo, or one refusal.
 type SudoEvent struct {
-	At      time.Time `json:"at"`
+	At      time.Time `json:"at,omitzero"`
 	RunAs   string    `json:"runAs"`
 	Command string    `json:"command"`
 	Failed  bool      `json:"failed"`

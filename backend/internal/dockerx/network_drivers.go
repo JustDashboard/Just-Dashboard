@@ -41,7 +41,7 @@ type NetworkDriverCatalogue struct {
 	Swarm       string          `json:"swarm"`
 	Manager     bool            `json:"manager"`
 	PluginsRead bool            `json:"pluginsRead"`
-	CheckedAt   time.Time       `json:"checkedAt"`
+	CheckedAt   time.Time       `json:"checkedAt,omitzero"`
 	Limitations []string        `json:"limitations"`
 }
 
