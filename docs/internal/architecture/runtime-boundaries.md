@@ -17,6 +17,24 @@ Databases and disposable application checks to a Docker adapter; Backups owns th
 else; affected routes return a precise "unavailable on this host" code the frontend renders as
 information (`ErrorState` in `components/state.tsx`), not an error.
 
+"There" means usable, not installed: the image ships the docker CLI whatever the host runs, so a
+program on `PATH` says nothing about the daemon behind it.
+
+- **Docker and the proxy.** The lookup of the Caddy ingress that deployments share answers one of
+  three things: an ingress, none, or a `*proxysvc.IngressProblem` (`ingress_problem.go`) that carries a
+  code, the sentence, what to do about it and what Docker said. `GET /proxy/vhosts` reads nginx's
+  sites and the host Caddyfile's from files, so a lookup that fails takes none of them away
+  (`Service.ReadVHosts`): the list answers 200 with them, and `GET /proxy/status` carries the problem
+  as `ingressProblem: {code, message, reason, raw, retryable}`, the names an API error uses.
+  `Service.ListVHosts` stays whole-or-error for callers that decide from the list (deploy preflight,
+  the TLS report). Where an ingress problem does fail a request, `mapProxyError` and `proxyReadError`
+  (`handlers_proxy.go`) answer it under its own code with `reason` and `raw`: 503 and retryable for
+  `ingress_unreachable` (Docker did not answer), `ingress_not_running` (the container
+  `JD_INGRESS_CONTAINER` names) and `ingress_unreadable` (found, but its routes could not be read,
+  which fails the list rather than showing an ingress with no routes); 409 for `ingress_ambiguous`
+  (more than one public Caddy) and `ingress_unusable` (no port 443, nothing persisted, not serving
+  `/etc/caddy/Caddyfile`). None of them is a 500.
+
 `Server.Start(ctx)` is separate from `New` so failing to schedule background work is reported by `main`
 rather than swallowed in construction. It starts the metrics recorder (here, not lazily — its whole
 purpose is to have been running while nobody was looking), the database activity recorder, the repair

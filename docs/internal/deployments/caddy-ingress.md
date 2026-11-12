@@ -37,6 +37,11 @@ needs a route fails rather than writing one somewhere else.
 - Discovery requires one running Caddy with wildcard public TCP 80 and 443 mappings, a bind-mounted
   `/etc/caddy/Caddyfile`, and writable persistent `/config` and `/data` mounts. Unsupported owners are
   left running. Docker inspection failures do not become permission to run standalone Certbot.
+  Every way the lookup can fail to name one Caddy is a `*proxysvc.IngressProblem` with its own code
+  (`ingress_unreachable`, `ingress_not_running`, `ingress_ambiguous`, `ingress_unusable`), sentence
+  and remedy, and what Docker said kept as its cause; a deployment step that needs the ingress
+  fails with that sentence, the proxy routes answer it as 503 or 409, and the Sites list goes on
+  listing what nginx serves ([runtime boundaries](../architecture/runtime-boundaries.md#server-modules-degradation)).
 - The fresh-host container has an explicit ownership label, restart policy, a persisted Caddyfile at
   `/etc/just-dashboard/ingress/Caddyfile`, and `just-dashboard-ingress-config` and
   `just-dashboard-ingress-data` volumes. Restart checks its label and exact persistent storage.

@@ -4669,7 +4669,13 @@ volume with the tunable, the label and its restart policy, and the fleet must th
   write. `Availability` names an ingress only once it runs (`ingressState:
   "running"`); one the first deployment would start is `ingressState: "provisionable"` with neither
   `caddy` nor `ingressContainer` set, and deploy preflight counts either state as a proxy that can
-  serve and certify the domain. A running ingress also carries `ingressId` and `ingressStartedAt` (Docker's
+  serve and certify the domain. A lookup that could not say either way sets neither state and
+  `ingressProblem: {code, message, reason, raw, retryable}` (`proxysvc.IngressNotice`): Docker not
+  answering, the named container not running, more than one public Caddy, or a Caddy that cannot be
+  shared as it runs. `GET /proxy/vhosts` still answers nginx's and the host Caddyfile's sites then
+  (`ReadVHosts`), so this field is where the Sites page learns that the deployment routes are missing
+  from its list and why; the codes and their statuses on the routes that do fail are in
+  [runtime boundaries](../architecture/runtime-boundaries.md#server-modules-degradation). A running ingress also carries `ingressId` and `ingressStartedAt` (Docker's
   `State.StartedAt`), so the overview reads "running as a container, up 3d" and offers Restart
   container (`POST /docker/containers/{id}/restart`, destructive, audited as
   `docker.container.restart`) and Container logs (the container page's logs tab) through the Docker

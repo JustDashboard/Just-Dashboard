@@ -501,7 +501,7 @@ func (s *Server) handleSiteControlsVerify(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	vhosts, err := s.modules.proxy.ListVHosts(ctx)
 	if err != nil {
-		return httpx.Internal(err)
+		return proxyReadError(err)
 	}
 	httpx.SetAudit(r, "proxy.site.controls.verify", name, map[string]any{"path": req.Path, "asset": req.Asset})
 	out, err := s.modules.proxy.VerifySiteControls(ctx, name, req, vhosts)

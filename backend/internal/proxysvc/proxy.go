@@ -110,6 +110,8 @@ func NewWithIngressContainer(nginxDir, caddyFile, container string) *Service {
 	return s
 }
 
+// dockerCaddy is the Caddy container deployments share: nil where there is
+// none, and an *IngressProblem where the lookup could not say.
 func (s *Service) dockerCaddy(ctx context.Context) (*dockerCaddy, error) {
 	if !s.dockerIngress {
 		return nil, nil
@@ -140,13 +142,19 @@ type Availability struct {
 	// IngressStartedAt is when that container last started (RFC 3339).
 	IngressStartedAt string `json:"ingressStartedAt,omitempty"`
 	IngressState     string `json:"ingressState,omitempty"`
-	Nginx            bool   `json:"nginx"`
-	Caddy            bool   `json:"caddy"`
-	NginxVer         string `json:"nginxVersion,omitempty"`
-	CaddyVer         string `json:"caddyVersion,omitempty"`
-	NginxDir         string `json:"nginxDir"`
-	CaddyFile        string `json:"caddyFile"`
-	Certbot          bool   `json:"certbot"`
+	// IngressProblem is why the Docker ingress could not be looked up, when
+	// it could not: Docker not answering, or containers that do not name
+	// one Caddy to share. The site list still answers the sites nginx and
+	// the host's Caddyfile serve (ReadVHosts), so this is where a page
+	// learns that the deployment routes are missing from it, and why.
+	IngressProblem *IngressNotice `json:"ingressProblem,omitempty"`
+	Nginx          bool           `json:"nginx"`
+	Caddy          bool           `json:"caddy"`
+	NginxVer       string         `json:"nginxVersion,omitempty"`
+	CaddyVer       string         `json:"caddyVersion,omitempty"`
+	NginxDir       string         `json:"nginxDir"`
+	CaddyFile      string         `json:"caddyFile"`
+	Certbot        bool           `json:"certbot"`
 }
 
 func (s *Service) Availability(ctx context.Context) Availability {
@@ -171,6 +179,7 @@ func (s *Service) Availability(ctx context.Context) Availability {
 	}
 	edge, err := s.dockerCaddy(ctx)
 	a.setIngress(edge, err == nil && edge == nil && s.canProvisionIngress(ctx))
+	a.IngressProblem = ingressNotice(err)
 	return a
 }
 

@@ -100,7 +100,7 @@ func discoverDockerCaddy(ctx context.Context) (*dockerCaddy, error) {
 	}
 	containers, err := ingressContainers(ctx)
 	if err != nil {
-		return nil, errors.New("could not determine Docker ingress ownership")
+		return nil, ingressUnreachable(err)
 	}
 	return selectDockerCaddy(containers)
 }
@@ -126,14 +126,14 @@ func selectDockerCaddy(containers []ingressContainer) (*dockerCaddy, error) {
 			continue
 		}
 		if !public("443/tcp", "443") {
-			return nil, fmt.Errorf("Caddy container %s owns HTTP but does not publish HTTPS on port 443", strings.TrimPrefix(c.Name, "/"))
+			return nil, ingressWithoutHTTPS(strings.TrimPrefix(c.Name, "/"))
 		}
 		found, err := dockerCaddyFrom(c)
 		if err != nil {
 			return nil, err
 		}
 		if edge != nil {
-			return nil, errors.New("multiple public Caddy containers require an explicit ingress selection")
+			return nil, ingressAmbiguous()
 		}
 		edge = found
 	}
@@ -167,7 +167,7 @@ func dockerCaddyFrom(c ingressContainer) (*dockerCaddy, error) {
 		}
 	}
 	if found.Source == "" || !config || !data {
-		return nil, fmt.Errorf("Caddy container %s needs a persisted Caddyfile, /config and /data before deployments can share it", found.Name)
+		return nil, ingressNotPersisted(found.Name)
 	}
 	found.Identity = routeDigest(found.Source + "\x00" + storage["/config"] + "\x00" + storage["/data"])
 	found.ConfigSource = storage["/config"]
@@ -185,15 +185,18 @@ func dockerCaddyFrom(c ingressContainer) (*dockerCaddy, error) {
 func namedDockerCaddy(ctx context.Context, name string) (*dockerCaddy, error) {
 	raw, err := hostexec.Command(ctx, "docker", "inspect", "--type", "container", name).Output()
 	if err != nil {
-		return nil, fmt.Errorf("the ingress container %s is not running", name)
+		return nil, ingressNotRunning(name, err)
 	}
 	var containers []ingressContainer
 	if json.Unmarshal(raw, &containers) != nil || len(containers) != 1 {
-		return nil, errors.New("could not read Docker ingress ownership")
+		return nil, ingressUnreachable(errors.New("could not read Docker ingress ownership"))
 	}
 	c := containers[0]
-	if !c.State.Running || !runsCaddyfile(c) {
-		return nil, fmt.Errorf("the ingress container %s is not a running Caddy serving /etc/caddy/Caddyfile", name)
+	if !c.State.Running {
+		return nil, ingressNotRunning(name, nil)
+	}
+	if !runsCaddyfile(c) {
+		return nil, ingressNotCaddy(name)
 	}
 	return dockerCaddyFrom(c)
 }
