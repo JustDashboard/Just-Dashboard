@@ -20,6 +20,10 @@ import (
 // seconds, and a few seconds after IngressChanged: a container that started
 // or stopped is the usual reason a route needs repair, and waiting for the
 // tick left the route pointing at the old address for up to half a minute.
+//
+// report is handed what every pass returned, nil for one that worked, so its
+// caller can say a failure once and its recovery (safego.Passes) rather than
+// the same line every thirty seconds for as long as Docker is down.
 func (s *Service) MaintainDockerIngress(ctx context.Context, record func(string, bool), report func(error)) {
 	ticker := time.NewTicker(ingressPassEvery)
 	defer ticker.Stop()
@@ -30,7 +34,7 @@ func (s *Service) MaintainDockerIngress(ctx context.Context, record func(string,
 		pass, cancel := context.WithTimeout(ctx, 25*time.Second)
 		err := s.ingressPass(pass, record)
 		cancel()
-		if err != nil && ctx.Err() == nil && report != nil {
+		if ctx.Err() == nil && report != nil {
 			report(err)
 		}
 		select {

@@ -226,9 +226,15 @@ func TestTheUpkeepLoopLooksAgainWhenAContainerChanges(t *testing.T) {
 	service := NewWithDockerIngress(t.TempDir(), filepath.Join(t.TempDir(), "Caddyfile")).WithContainerReader(containers)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	var reported atomic.Int32
 	go func() {
 		defer close(done)
-		service.MaintainDockerIngress(ctx, nil, nil)
+		service.MaintainDockerIngress(ctx, nil, func(err error) {
+			if err != nil {
+				t.Errorf("a pass failed: %v", err)
+			}
+			reported.Add(1)
+		})
 	}()
 	t.Cleanup(func() { cancel(); <-done })
 
@@ -251,5 +257,10 @@ func TestTheUpkeepLoopLooksAgainWhenAContainerChanges(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if got := containers.asked.Load(); got != 2 {
 		t.Fatalf("a burst of changes made %d passes, want one more", got-1)
+	}
+	// Every pass is reported, the ones that worked included, which is how
+	// the caller says a recovery.
+	if got := reported.Load(); got != 2 {
+		t.Fatalf("%d passes were reported, want both", got)
 	}
 }

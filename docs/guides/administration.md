@@ -181,6 +181,30 @@ Docker's image and build-cache cleanup, old backups) and the reserve is written 
 about 256 MB is free. The container stays "healthy" throughout on purpose: restarting the dashboard, or
 rolling back an update, would not empty a disk.
 
+## When the dashboard itself is slow or large
+
+An administrator can ask the dashboard what its own process is using, with an API key of theirs
+(**Account → API keys**) from a machine the dashboard lets in:
+
+```bash
+curl -s -H "Authorization: Bearer $JD_KEY" https://dashboard.example/api/v1/dashboard/self
+```
+
+The answer has the process's memory (`rssBytes` is the figure `docker stats` shows; `memory` is how
+much of it is Go's heap), its goroutines, threads and open files, the processor time it has taken, the
+size of its database and write-ahead log, and every background task with its last failure. To see
+where memory or processor time goes, take a profile and open it with Go's own tool:
+
+```bash
+curl -s -H "Authorization: Bearer $JD_KEY" -o heap.pb.gz https://dashboard.example/api/v1/dashboard/debug/pprof/heap
+curl -s -H "Authorization: Bearer $JD_KEY" -o cpu.pb.gz "https://dashboard.example/api/v1/dashboard/debug/pprof/profile?seconds=30"
+go tool pprof -http=: heap.pb.gz
+```
+
+`…/pprof/goroutine?debug=2` is every goroutine's stack as text, which is the thing to attach to a
+report of a dashboard that hangs. Profiles are an administrator's alone, each one is in the audit log,
+and none of this is reachable without signing in.
+
 ## Uninstalling
 
 **Settings → Configuration → Danger zone → Uninstall** takes the dashboard off the server and asks one

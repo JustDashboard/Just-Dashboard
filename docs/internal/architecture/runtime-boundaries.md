@@ -169,8 +169,9 @@ most once a minute and a reminder each hour as `background task is still failing
 `background task recovered` with how long it lasted and how many passes failed. A pass cut short by the
 loop's own context is neither. The Git branch watch (whose `poll` now returns each failed check with
 its project and environment), the preview reconciler, the database network reconciler, the deployment
-schedule (a due schedule that could not be run is also logged by name), the nginx status sampler and
-the certificate watch report this way. `TestSupervisedLoopsDoNotDiscardWhatAPassReturned`
+schedule (a due schedule that could not be run is also logged by name), the nginx status sampler,
+the certificate watch and the deployment ingress upkeep (which warned every thirty seconds for as long
+as Docker did not answer) report this way. `TestSupervisedLoopsDoNotDiscardWhatAPassReturned`
 (`internal/safego/discard_test.go`) fails on a task function that assigns a call made with its context
 to blank. This is the log only: the deployment page still shows such a watch as `stale`, and a store
 that refuses writes is said on the Overview by [the dashboard's own health](#the-dashboards-own-health).
@@ -214,6 +215,39 @@ margin, not a guarantee: whatever filled the disk can fill 32 MiB more. A reques
 still refused answers `507 disk_full` with a sentence saying so (`httpx.DiskFull`, applied in
 `WriteError` to any error that would otherwise be an unexplained `500 internal`), which is what the
 sign-in page shows.
+
+### What the process uses, and profiles of it
+
+The dashboard measured the host, its containers and its databases and had nothing to say about
+itself; why the backend sat at 130 MB or took 3% of a core with nobody signed in was a guess from
+`docker stats`. Two things answer it, both `system.admin` (`handlers_self_stat.go`), behind the
+allowlist and authentication like the rest of `/api/v1`, and neither on `/healthz`:
+
+- `GET /api/v1/dashboard/self` is one reading: `process` (`internal/selfstat`: pid, start and uptime,
+  Go version, `GOMAXPROCS`, goroutines, threads, open files, cumulative user and system CPU seconds,
+  `rssBytes` as the kernel charges it, and `memory`, the runtime's own account: heap in use, idle and
+  released, stacks, total obtained from the system, the next collection's target, collections and
+  their pause time); `store` (the database file with its `-wal` and `-shm` sizes: a write-ahead log
+  that stays large is a reader holding a checkpoint back); and `tasks`, every `safego` task with its
+  panics and, where its loop reports through `safego.Passes`, `passes: {passes, lastPassAt,
+  failingSince, failedPasses, lastError, lastErrorAt}` (`safego.PassStates`). `lastError` outlives the
+  recovery, so a loop that fails now and then is not only ever seen working. There is no duration of
+  a pass: `Report` is handed what a pass returned and does not know when it began. Tasks that share
+  a name share a row, and a loop that does not report through `Passes` has none.
+- `GET /api/v1/dashboard/debug/pprof/` lists the profiles and `…/pprof/{name}` writes one in the
+  format `go tool pprof` reads, as a file: `profile` (CPU, sampled for `?seconds=`, 1 to 60, 10 unless
+  said; a second one while it runs is 409 `profile_running`, because the runtime takes one at a
+  time), `heap`, `allocs`, `goroutine` and `threadcreate`; `?debug=1` or `2` answers text.
+  `net/http/pprof` is not imported, on purpose: its `init` registers the profiles on
+  `http.DefaultServeMux`, where any listener that ever served the default mux would hand them out
+  unauthenticated, and a test holds the default mux to having none. Block and mutex profiles are not
+  offered: they are empty unless sampling is turned on for the whole process. The routes take the
+  destructive routes' rate budget (`destrLim`) without their mark, each profile is on the audit trail
+  as `dashboard.profile` although it is a read (`httpx.AuditRead`), and the assistant does not call
+  them (`agentExcludedAreas`): the answer is a binary file for a person's tools.
+
+A request that ends in a 5xx is logged at error level with its request id, which is also in the
+answer (`httpx.WriteError`); requests that succeed are logged at debug.
 
 ## Reaching the host, and containing paths
 

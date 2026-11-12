@@ -360,10 +360,14 @@ func (s *Server) Start(ctx context.Context) error {
 	ingressCtx, stopIngress := context.WithCancel(ctx)
 	ingressDone := make(chan struct{})
 	s.ingressStop, s.ingressDone = stopIngress, ingressDone
+	// Every pass is reported, so a Docker that does not answer is said once
+	// and again when it changes or recovers, and GET /dashboard/self shows
+	// how the loop is doing. It was a warning every thirty seconds.
+	ingressPasses := safego.NewPasses(s.Log, "deployment ingress upkeep")
 	safego.Go(ingressCtx, s.Log, "deployment ingress upkeep", func(ctx context.Context) {
 		s.modules.proxy.MaintainDockerIngress(ctx, func(name string, success bool) {
 			s.Audit.Record(context.Background(), audit.Entry{Actor: "system", Action: "proxy.ingress.reconcile", Target: name, Success: success})
-		}, func(err error) { s.Log.Warn("deployment ingress recovery needs attention", "error", err) })
+		}, func(err error) { ingressPasses.Report(ctx, err) })
 	}, safego.Close(ingressDone))
 	if err := s.startProxyExtras(ctx); err != nil {
 		return err

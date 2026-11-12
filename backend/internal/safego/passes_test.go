@@ -96,3 +96,54 @@ func TestPassesIgnoreAPassCutShortByItsContext(t *testing.T) {
 	var none *Passes
 	none.Report(context.Background(), errors.New("no reporter")) // must not panic
 }
+
+// What a loop's passes returned is kept where it can be read, not only said
+// in the log by change of state: the last pass, whether the loop is failing
+// and since when, and the last failure after it has recovered.
+func TestPassesAreRememberedForAReader(t *testing.T) {
+	log, _ := capture()
+	const name = "test loop whose passes are remembered"
+	now := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+	passes := NewPasses(log, name)
+	passes.now = func() time.Time { return now }
+	ctx := context.Background()
+
+	if _, known := PassStates()[name]; known {
+		t.Fatal("a loop that has reported nothing has a state")
+	}
+	passes.Report(ctx, nil)
+	state := PassStates()[name]
+	if state.Passes != 1 || !state.LastPassAt.Equal(now) || state.FailingSince != nil || state.LastError != "" {
+		t.Fatalf("after one pass that worked: %+v", state)
+	}
+
+	first := now.Add(5 * time.Second)
+	now = first
+	passes.Report(ctx, errors.New("database is locked"))
+	now = now.Add(5 * time.Second)
+	passes.Report(ctx, errors.New("no route to host"))
+	state = PassStates()[name]
+	if state.Passes != 3 || state.FailedPasses != 2 || state.FailingSince == nil || !state.FailingSince.Equal(first) ||
+		state.LastError != "no route to host" || state.LastErrorAt == nil || !state.LastErrorAt.Equal(now) {
+		t.Fatalf("while failing: %+v", state)
+	}
+
+	failedAt := now
+	now = now.Add(5 * time.Second)
+	passes.Report(ctx, nil)
+	state = PassStates()[name]
+	if state.FailingSince != nil || state.FailedPasses != 0 || !state.LastPassAt.Equal(now) {
+		t.Fatalf("after the recovery: %+v", state)
+	}
+	if state.LastError != "no route to host" || !state.LastErrorAt.Equal(failedAt) {
+		t.Fatalf("the last failure was forgotten with the recovery: %+v", state)
+	}
+
+	// A pass cut short by its context is no pass.
+	stopped, cancel := context.WithCancel(ctx)
+	cancel()
+	passes.Report(stopped, errors.New("context canceled"))
+	if got := PassStates()[name]; got.Passes != 4 || got.LastError != "no route to host" {
+		t.Fatalf("a pass that was cut short was counted: %+v", got)
+	}
+}
