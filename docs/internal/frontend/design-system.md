@@ -412,6 +412,14 @@ The rule and its three exceptions:
   actions, a `Tag`, or its own row.
 - `Modal` and `SidePanel` keep a `description` prop, rendered `sr-only`. Radix wants an accessible
   description and a screen reader is the one audience that cannot see the rest of the box.
+- `Modal` and `SidePanel` give the keyboard back to what opened them (`hooks/use-focus-return.ts`).
+  Radix returns focus to a `DialogTrigger`, and almost every dialog here is opened by state and has
+  none, so closing a confirmation or an editor left the keyboard on `body` and the next Tab began at the
+  top of the sidebar. The opener is whatever held the keyboard when the dialog opened; for a verb in a
+  row's menu that item is gone by the time the dialog closes, so the menu's own button is remembered
+  beside it (through the menu's `aria-labelledby`) and gets the keyboard instead. A dialog that knows
+  better passes `onCloseAutoFocus` and calls `preventDefault()`. Open dialogs through these two
+  components, not through a bare `DialogContent`, or the keyboard is dropped again.
 
 `EmptyState`, `ErrorState` and `Notice` keep their body text: there, the sentence *is* the content.
 

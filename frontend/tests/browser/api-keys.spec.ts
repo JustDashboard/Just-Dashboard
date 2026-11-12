@@ -534,3 +534,45 @@ for (const width of [390, 1280, 1720]) {
     ).toBe(false)
   })
 }
+
+test("closing a dialog hands the keyboard back to what opened it", async ({ page }) => {
+  await mockKeys(page)
+  await page.goto("/account/keys")
+  const focused = () =>
+    page.evaluate(() => {
+      const el = document.activeElement
+      return el === document.body ? "body" : (el?.getAttribute("aria-label") ?? el?.textContent)
+    })
+
+  // A dialog opened by a button. It has no Radix trigger, so the keyboard was
+  // left on the page's body and the next Tab began at the top of the sidebar.
+  const create = page.getByRole("button", { name: "New key" })
+  await create.focus()
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("dialog", { name: "New API key" })).toBeVisible()
+  await expect(page.getByLabel("Name", { exact: true })).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(create).toBeFocused()
+
+  // A confirmation opened from a row's menu. The item that opened it is gone
+  // with its menu; the menu's own button gets the keyboard back.
+  const more = page.getByRole("button", { name: "More actions for github-actions" })
+  await more.focus()
+  await page.keyboard.press("Enter")
+  await page.getByRole("menuitem", { name: "Revoke key", exact: true }).focus()
+  await page.keyboard.press("Enter")
+  const confirmation = page.getByRole("dialog")
+  await expect(confirmation).toContainText("Its record stays in history")
+  await page.keyboard.press("Escape")
+  await expect(confirmation).toHaveCount(0)
+  await expect.poll(focused).toBe("More actions for github-actions")
+
+  // Cancel is the same way out as Escape.
+  await page.keyboard.press("Enter")
+  await page.getByRole("menuitem", { name: "Revoke key", exact: true }).focus()
+  await page.keyboard.press("Enter")
+  await confirmation.getByRole("button", { name: "Cancel" }).click()
+  await expect(confirmation).toHaveCount(0)
+  await expect.poll(focused).toBe("More actions for github-actions")
+})

@@ -3,6 +3,7 @@
 import { createContext, useContext, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
+import { useFocusReturn } from "@/hooks/use-focus-return"
 import { useWorkspaceFocus } from "@/components/workspace/workspace"
 import {
   Sheet,
@@ -92,6 +93,7 @@ export function SidePanel({
 }) {
   const body = useRef<HTMLDivElement>(null)
   const restoreFocus = useWorkspaceFocus()
+  const returnFocus = useFocusReturn(open)
   const [slot, setSlot] = useState<HTMLElement | null>(null)
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -101,6 +103,9 @@ export function SidePanel({
         onCloseAutoFocus={(event) => {
           onCloseAutoFocus?.(event)
           if (!event.defaultPrevented && restoreFocus?.()) event.preventDefault()
+          // Opened by state, a panel has no trigger for Radix to hand the
+          // keyboard back to: it goes to what opened the panel.
+          returnFocus(event)
         }}
         onOpenAutoFocus={
           initialFocus === "body"

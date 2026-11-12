@@ -559,7 +559,8 @@ database engine navigation and mobile bounds. The design and recording are in th
 `components/workspace/` registers the active page's Find, read refresh, shortcuts and contextual
 actions in the existing command palette. The shell marks its scroll region, and participating pages
 restore row/field focus and scroll after navigation. Editors, terminals and portalled controls keep
-their own keys. `SidePanel` returns focus through a workspace when the sheet's trigger is gone.
+their own keys. `SidePanel` returns focus through a workspace when the sheet's trigger is gone, and
+otherwise, like `Modal`, to whatever opened it (`hooks/use-focus-return.ts`).
 See [`workspace-interactions.md`](workspace-interactions.md) for the page contracts and storage rules.
 
 ## The design system
