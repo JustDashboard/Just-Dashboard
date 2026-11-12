@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"os"
@@ -192,22 +193,30 @@ func (s *Server) writeCPUProfile(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	// Started before anything is written, so its refusal can still be the
-	// answer: the runtime keeps what it samples and writes it when stopped.
-	if err := pprof.StartCPUProfile(w); err != nil {
+	// Sampled into memory and written once the sampling has stopped. The
+	// runtime writes a profile from a goroutine of its own, and a response is
+	// not something two goroutines may write: handed the response itself, that
+	// goroutine read the headers this one was still setting (the race gate
+	// caught it). Nothing is written before the sampling starts, so its
+	// refusal can still be the answer.
+	var sampled bytes.Buffer
+	if err := pprof.StartCPUProfile(&sampled); err != nil {
 		return httpx.Err(http.StatusConflict, "profile_running", "A CPU profile of the dashboard is already being taken.").
 			Because("The Go runtime samples for one CPU profile at a time. Ask again when the other has finished; it runs for at most "+strconv.Itoa(cpuProfileLongest)+" seconds.", err.Error()).
 			Retry()
 	}
 	httpx.AuditRead(s.Audit, r, "dashboard.profile", "cpu "+strconv.Itoa(seconds)+"s")
-	profileHeaders(w, "cpu", false)
 	select {
 	case <-time.After(time.Duration(seconds) * time.Second):
 	case <-r.Context().Done():
 		// The person closed the request, or the server is shutting down:
 		// the sampling ends with it rather than running on for nobody.
 	}
+	// Returns once the runtime's goroutine has written the whole profile.
 	pprof.StopCPUProfile()
+	profileHeaders(w, "cpu", false)
+	// The headers are sent: a write that fails now is the client having gone.
+	_, _ = w.Write(sampled.Bytes())
 	return nil
 }
 
