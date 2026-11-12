@@ -57,7 +57,23 @@ type Systemd struct {
 
 func NewSystemd() *Systemd { return &Systemd{} }
 
-func (s *Systemd) Available() bool { return binaryExists("systemctl") }
+// Available reports whether this host's units can be read and driven:
+// systemctl is here and systemd is running for it to ask. The second half
+// was missing, so a host with the binary and another init (a container, WSL
+// without systemd) had a Services page that answered 502 with systemctl's
+// own complaint instead of saying there is no systemd.
+func (s *Systemd) Available() bool { return s.unavailable() == nil }
+
+// unavailable is why they cannot be, nil when they can.
+func (s *Systemd) unavailable() error {
+	if !binaryExists("systemctl") {
+		return fmt.Errorf("systemctl %w", ErrNotInstalled)
+	}
+	if !systemdBooted() {
+		return ErrNoSystemd
+	}
+	return nil
+}
 
 // List returns every service unit, loaded or not. `--all` matters: a failed or
 // inactive unit is exactly what an operator opens this page to find, and the
@@ -77,8 +93,8 @@ func (s *Systemd) List(ctx context.Context) ([]Unit, error) {
 // one reading List already makes, because listing the unit files is the slow
 // half of it.
 func (s *Systemd) ListInstalled(ctx context.Context) ([]Unit, map[string]string, error) {
-	if !s.Available() {
-		return nil, nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
+	if err := s.unavailable(); err != nil {
+		return nil, nil, err
 	}
 	res, err := run(ctx, 30*time.Second, "systemctl",
 		"list-units", "--type=service", "--all", "--no-pager", "--no-legend", "--output=json")
@@ -311,8 +327,8 @@ func (s *Systemd) Control(ctx context.Context, name string, action UnitAction) (
 // editing a unit in the file manager that nobody remembers, and until it runs
 // the unit page keeps describing the old file.
 func (s *Systemd) DaemonReload(ctx context.Context) (*CommandResult, error) {
-	if !s.Available() {
-		return nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
+	if err := s.unavailable(); err != nil {
+		return nil, err
 	}
 	defer s.forgetUnitFiles()
 	return run(ctx, 90*time.Second, "systemctl", "daemon-reload")

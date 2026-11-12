@@ -13,6 +13,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
@@ -347,13 +348,26 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	s.startPITRSchedule(ctx)
+	// A container that started or stopped is the usual reason a deployment
+	// route needs repair, so the upkeep below looks again when Docker says
+	// one did rather than only at its next tick. The keeper runs on the
+	// goroutine following the stream; telling the loop never blocks.
+	s.modules.dockerEvents.Keep(func(event dockerx.Event) {
+		if event.Type == "container" && (event.Action == "start" || event.Action == "die") {
+			s.modules.proxy.IngressChanged()
+		}
+	})
 	ingressCtx, stopIngress := context.WithCancel(ctx)
 	ingressDone := make(chan struct{})
 	s.ingressStop, s.ingressDone = stopIngress, ingressDone
+	// Every pass is reported, so a Docker that does not answer is said once
+	// and again when it changes or recovers, and GET /dashboard/self shows
+	// how the loop is doing. It was a warning every thirty seconds.
+	ingressPasses := safego.NewPasses(s.Log, "deployment ingress upkeep")
 	safego.Go(ingressCtx, s.Log, "deployment ingress upkeep", func(ctx context.Context) {
 		s.modules.proxy.MaintainDockerIngress(ctx, func(name string, success bool) {
 			s.Audit.Record(context.Background(), audit.Entry{Actor: "system", Action: "proxy.ingress.reconcile", Target: name, Success: success})
-		}, func(err error) { s.Log.Warn("deployment ingress recovery needs attention", "error", err) })
+		}, func(err error) { ingressPasses.Report(ctx, err) })
 	}, safego.Close(ingressDone))
 	if err := s.startProxyExtras(ctx); err != nil {
 		return err

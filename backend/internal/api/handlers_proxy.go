@@ -57,9 +57,46 @@ func withProxyActor(next http.Handler) http.Handler {
 	})
 }
 
+// ingressProblemError is the answer for a Docker ingress that could not be
+// looked up or read: its own code, the sentence, what to do about it as the
+// reason, and what Docker said as the raw text. Docker or a container that
+// may answer a moment later is a 503 worth trying again; containers that do
+// not name one Caddy to share are a 409 that stands until the operator
+// changes them.
+func ingressProblemError(problem *proxysvc.IngressProblem) *httpx.APIError {
+	status := http.StatusConflict
+	if problem.Retryable() {
+		status = http.StatusServiceUnavailable
+	}
+	// Wrapped, so the log line of a 503 carries what Docker said, and then
+	// given the sentence alone as its message.
+	answer := httpx.Wrap(status, problem.Code, problem)
+	answer.Message = problem.Message
+	answer = answer.Because(problem.Advice, problem.Raw())
+	if problem.Retryable() {
+		answer = answer.Retry()
+	}
+	return answer
+}
+
+// proxyReadError is the answer for a read of the proxy that failed below the
+// handler: the ingress lookup's own answer where that is the cause, and an
+// internal error otherwise. A read used to answer 500 "internal error" for
+// both, with the reason the service knew thrown away.
+func proxyReadError(err error) error {
+	var problem *proxysvc.IngressProblem
+	if errors.As(err, &problem) {
+		return ingressProblemError(problem)
+	}
+	return httpx.Internal(err)
+}
+
 func mapProxyError(err error) error {
 	var unfinished *proxysvc.UnfinishedTestError
+	var ingress *proxysvc.IngressProblem
 	switch {
+	case errors.As(err, &ingress):
+		return ingressProblemError(ingress)
 	case errors.Is(err, proxysvc.ErrConfigChanged):
 		return httpx.Err(http.StatusConflict, "config_conflict", "The file or its directory changed. Your draft is retained; review the current file before trying again.")
 	case errors.Is(err, proxysvc.ErrUnsafePath):

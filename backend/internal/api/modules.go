@@ -350,6 +350,10 @@ func (s *Server) initModules() {
 	if s.Cfg.IngressContainer != "" {
 		s.modules.proxy = proxysvc.NewWithIngressContainer(s.Cfg.NginxDir, s.Cfg.CaddyFile, s.Cfg.IngressContainer)
 	}
+	// The ingress lookup asks Docker through the client the Docker pages
+	// use. It ran the docker CLI twice each time instead, every thirty
+	// seconds and on most reads of the proxy pages.
+	s.modules.proxy.WithContainerReader(s.modules.docker)
 	// A deployment route on the name this dashboard is reached by is sent
 	// the dashboard's session cookie, whatever port either is on; the route
 	// takes it out of what the application is sent.

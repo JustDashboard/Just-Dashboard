@@ -51,10 +51,16 @@ func (s *Server) mountVHostRoutes(r chi.Router) {
 	r.Route("/access-lists", s.mountAccessListRoutes)
 }
 
+// handleVHostList answers the sites that could be read. A Docker ingress
+// that cannot be looked up does not fail it: nginx's sites and the host
+// Caddyfile's are answered, and GET /proxy/status says the lookup's problem
+// (ingressProblem), which is where the page reads why the deployment routes
+// are not among them. An ingress found and then unreadable is a 503 with its
+// reason, never "internal error".
 func (s *Server) handleVHostList(w http.ResponseWriter, r *http.Request) error {
-	hosts, err := s.modules.proxy.ListVHosts(r.Context())
+	hosts, _, err := s.modules.proxy.ReadVHosts(r.Context())
 	if err != nil {
-		return httpx.Internal(err)
+		return proxyReadError(err)
 	}
 	if err := s.markDeploymentRoutes(r.Context(), hosts); err != nil {
 		return httpx.Internal(err)

@@ -134,6 +134,7 @@ var agentExcludedAreas = []struct{ prefix, why string }{
 	{"/tailnet/", "the tailnet gate answers the proxy alone"},
 	{"/probe-agent/", "a probe agent's own routes, which take its certificate"},
 	{"/remote-desktop/bridge/", whyStream},
+	{"/dashboard/debug/", "a profile of the dashboard's own process is a binary file for a person's tools, and the CPU one answers only once it has sampled"},
 }
 
 // agentAreaBlurbs say what each area of the API is for, for the prompt and

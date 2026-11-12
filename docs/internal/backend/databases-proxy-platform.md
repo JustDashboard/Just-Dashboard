@@ -4570,6 +4570,10 @@ volume with the tunable, the label and its restart policy, and the fleet must th
   cancelling the job starts nothing more and keeps nothing cut short. `GET /certificates/scans/latest`
   (any account; it only reads) is the fleet with each target's latest stored report (grade, days left,
   expiry flags, negotiated version, count of critical and warning findings) and the running job, if any.
+  Both take the sites that could be read (`ReadVHosts`): a Docker ingress that cannot be looked up
+  leaves nginx's sites, the host Caddyfile's and the watched endpoints in the fleet, and one that is
+  found and cannot be read answers 503 `ingress_unreadable` rather than 500
+  ([runtime boundaries](../architecture/runtime-boundaries.md#server-modules-degradation)).
 - **`probe.go` — the request tester** (`POST /proxy/tools/request {url, method, headers, connectTo}`,
   `system.admin` with the rest of `/proxy/tools`, audited as `proxy.tools.request` with the method and
   URL). It dials only `127.0.0.1` or `::1` on the URL's port, whatever DNS says, and puts the name in
@@ -4673,7 +4677,13 @@ volume with the tunable, the label and its restart policy, and the fleet must th
   write. `Availability` names an ingress only once it runs (`ingressState:
   "running"`); one the first deployment would start is `ingressState: "provisionable"` with neither
   `caddy` nor `ingressContainer` set, and deploy preflight counts either state as a proxy that can
-  serve and certify the domain. A running ingress also carries `ingressId` and `ingressStartedAt` (Docker's
+  serve and certify the domain. A lookup that could not say either way sets neither state and
+  `ingressProblem: {code, message, reason, raw, retryable}` (`proxysvc.IngressNotice`): Docker not
+  answering, the named container not running, more than one public Caddy, or a Caddy that cannot be
+  shared as it runs. `GET /proxy/vhosts` still answers nginx's and the host Caddyfile's sites then
+  (`ReadVHosts`), so this field is where the Sites page learns that the deployment routes are missing
+  from its list and why; the codes and their statuses on the routes that do fail are in
+  [runtime boundaries](../architecture/runtime-boundaries.md#server-modules-degradation). A running ingress also carries `ingressId` and `ingressStartedAt` (Docker's
   `State.StartedAt`), so the overview reads "running as a container, up 3d" and offers Restart
   container (`POST /docker/containers/{id}/restart`, destructive, audited as
   `docker.container.restart`) and Container logs (the container page's logs tab) through the Docker
@@ -5208,7 +5218,10 @@ volume with the tunable, the label and its restart policy, and the fleet must th
   read: a certificate is `ours` when its serial is one held live, imported or in certbot's `archive/`,
   and `unexpectedIssuer` when it is not ours and its issuer's organisation signed none of this host's
   publicly trusted certificates (never set when there are none to compare with). A precertificate and its
-  certificate share a serial and are listed once.
+  certificate share a serial and are listed once. The names come from the whole site list
+  (`ListVHosts`), so while the Docker ingress cannot be looked up the report answers the lookup's own
+  code with its reason (503 `ingress_unreachable`, 409 `ingress_ambiguous`, …; `proxyReadError`), not
+  500 and not a report on the names that could be read as if they were all.
 - **`streams.go`** — nginx's `stream` is a sibling of `http`, so a stream cannot live under
   sites-available. They go in `<JD_NGINX_DIR>/stream.d`, and the page says plainly when `nginx.conf` does not
   include it. nginx.conf is never edited silently: the one change the dashboard makes to connect the

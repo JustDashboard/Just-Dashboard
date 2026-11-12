@@ -141,6 +141,11 @@ func mapProcsError(err error) error {
 	switch {
 	case errors.Is(err, procs.ErrNotInstalled):
 		return httpx.Err(http.StatusServiceUnavailable, "not_installed", err.Error())
+	case errors.Is(err, procs.ErrNoSystemd):
+		// Not a command that failed: nothing was run. systemctl is here and
+		// has no manager to ask, which is a property of the host.
+		return httpx.Err(http.StatusServiceUnavailable, "systemd_not_running", err.Error()).
+			Because("systemctl is installed, but "+procs.SystemdRunDir+" is not there: the host was not booted with systemd, or the dashboard's container runs without the host's /run/systemd mounted.", "")
 	case errors.Is(err, procs.ErrInvalidName):
 		return httpx.Err(http.StatusBadRequest, "invalid_name", err.Error())
 	case errors.Is(err, procs.ErrInvalidValue):

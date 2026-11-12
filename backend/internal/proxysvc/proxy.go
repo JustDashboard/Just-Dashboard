@@ -69,6 +69,12 @@ type Service struct {
 	// dashboardHost is the name the dashboard itself is reached by, set once
 	// before the service is used (WithDashboardHost).
 	dashboardHost string
+	// docker is where the ingress lookups read containers from, set once
+	// before the service is used (WithContainerReader).
+	docker dockerSource
+	// ingressWake asks the upkeep loop for a pass before its next tick
+	// (IngressChanged).
+	ingressWake chan struct{}
 
 	// nginx has no way to test a config fragment in isolation, so validation
 	// has to put the candidate where nginx expects it and take it away again.
@@ -88,7 +94,15 @@ type Service struct {
 }
 
 func New(nginxDir, caddyFile string) *Service {
-	return &Service{nginxDir: filepath.Clean(nginxDir), caddyFile: filepath.Clean(caddyFile)}
+	return &Service{nginxDir: filepath.Clean(nginxDir), caddyFile: filepath.Clean(caddyFile), ingressWake: make(chan struct{}, 1)}
+}
+
+// WithContainerReader has the ingress lookups ask Docker through reader
+// instead of starting the docker CLI. It is set once, before the service is
+// used.
+func (s *Service) WithContainerReader(reader ContainerReader) *Service {
+	s.docker = dockerSource{reader: reader}
+	return s
 }
 
 // NewWithDockerIngress enables discovery of the host's existing public Caddy.
@@ -110,14 +124,24 @@ func NewWithIngressContainer(nginxDir, caddyFile, container string) *Service {
 	return s
 }
 
+// dockerCaddy is the Caddy container deployments share: nil where there is
+// none, and an *IngressProblem where the lookup could not say.
 func (s *Service) dockerCaddy(ctx context.Context) (*dockerCaddy, error) {
 	if !s.dockerIngress {
 		return nil, nil
 	}
+	var edge *dockerCaddy
+	var err error
 	if s.ingressContainer != "" {
-		return namedDockerCaddy(ctx, s.ingressContainer)
+		edge, err = namedDockerCaddy(ctx, s.docker, s.ingressContainer)
+	} else {
+		edge, err = discoverDockerCaddy(ctx, s.docker)
 	}
-	return discoverDockerCaddy(ctx)
+	if err != nil || edge == nil {
+		return nil, err
+	}
+	edge.docker = s.docker
+	return edge, nil
 }
 
 // IngressState says whether the shared Docker Caddy exists yet.
@@ -140,13 +164,19 @@ type Availability struct {
 	// IngressStartedAt is when that container last started (RFC 3339).
 	IngressStartedAt string `json:"ingressStartedAt,omitempty"`
 	IngressState     string `json:"ingressState,omitempty"`
-	Nginx            bool   `json:"nginx"`
-	Caddy            bool   `json:"caddy"`
-	NginxVer         string `json:"nginxVersion,omitempty"`
-	CaddyVer         string `json:"caddyVersion,omitempty"`
-	NginxDir         string `json:"nginxDir"`
-	CaddyFile        string `json:"caddyFile"`
-	Certbot          bool   `json:"certbot"`
+	// IngressProblem is why the Docker ingress could not be looked up, when
+	// it could not: Docker not answering, or containers that do not name
+	// one Caddy to share. The site list still answers the sites nginx and
+	// the host's Caddyfile serve (ReadVHosts), so this is where a page
+	// learns that the deployment routes are missing from it, and why.
+	IngressProblem *IngressNotice `json:"ingressProblem,omitempty"`
+	Nginx          bool           `json:"nginx"`
+	Caddy          bool           `json:"caddy"`
+	NginxVer       string         `json:"nginxVersion,omitempty"`
+	CaddyVer       string         `json:"caddyVersion,omitempty"`
+	NginxDir       string         `json:"nginxDir"`
+	CaddyFile      string         `json:"caddyFile"`
+	Certbot        bool           `json:"certbot"`
 }
 
 func (s *Service) Availability(ctx context.Context) Availability {
@@ -171,6 +201,7 @@ func (s *Service) Availability(ctx context.Context) Availability {
 	}
 	edge, err := s.dockerCaddy(ctx)
 	a.setIngress(edge, err == nil && edge == nil && s.canProvisionIngress(ctx))
+	a.IngressProblem = ingressNotice(err)
 	return a
 }
 

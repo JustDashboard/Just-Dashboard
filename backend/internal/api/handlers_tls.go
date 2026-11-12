@@ -88,7 +88,7 @@ func (s *Server) handleRequestTest(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	vhosts, err := s.modules.proxy.ListVHosts(ctx)
 	if err != nil {
-		return httpx.Internal(err)
+		return proxyReadError(err)
 	}
 	certs, err := s.modules.proxy.ListCertificates(ctx)
 	if err != nil {

@@ -38,8 +38,8 @@ type Timer struct {
 // it last did. `list-timers` has the schedule and no state; `list-units` has
 // the state and no schedule; the two are joined on the unit name.
 func (s *Systemd) Timers(ctx context.Context) ([]Timer, error) {
-	if !s.Available() {
-		return nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
+	if err := s.unavailable(); err != nil {
+		return nil, err
 	}
 	res, err := run(ctx, 30*time.Second, "systemctl",
 		"list-timers", "--all", "--no-pager", "--no-legend", "--output=json")

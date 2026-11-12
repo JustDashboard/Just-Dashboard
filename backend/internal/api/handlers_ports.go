@@ -244,7 +244,9 @@ type portsProxy struct {
 func (s *Server) readPortsProxy(ctx context.Context) portsProxy {
 	ctx, cancel := context.WithTimeout(ctx, ownerSourceTimeout)
 	defer cancel()
-	vhosts, err := s.modules.proxy.ListVHosts(ctx)
+	// The sites that could be read: a Docker ingress that cannot be looked
+	// up leaves nginx's routes on their sockets.
+	vhosts, _, err := s.modules.proxy.ReadVHosts(ctx)
 	if err != nil {
 		vhosts = nil
 	}

@@ -59,6 +59,7 @@ func (p *Passes) Report(ctx context.Context, err error) {
 	now := p.now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	defer p.remember(now, err)
 	if err == nil {
 		if p.failing {
 			log.Info("background task recovered", "task", p.name,
@@ -82,4 +83,67 @@ func (p *Passes) Report(ctx context.Context, err error) {
 		return
 	}
 	p.logged, p.loggedAt = message, now
+}
+
+// PassState is how a loop's passes are going, as the loop itself reported
+// them (Passes.Report): when the last one ended and what it returned. It is
+// what the log says by change of state, kept so it can be read at any time:
+// the question "which loop is failing, and since when" used to have no answer
+// but a search of the log for the first line.
+//
+// There is no duration: Report is handed what a pass returned, after it
+// returned, and does not know when it began.
+type PassState struct {
+	Name string `json:"-"`
+	// Passes counts every pass reported since the process started.
+	Passes     int64     `json:"passes"`
+	LastPassAt time.Time `json:"lastPassAt"`
+	// FailingSince is set while the last pass failed, with how many have in
+	// a row.
+	FailingSince *time.Time `json:"failingSince,omitempty"`
+	FailedPasses int        `json:"failedPasses,omitempty"`
+	// LastError is the last failure there has been, and stays after the
+	// loop recovers: one that fails now and then is otherwise only ever seen
+	// working.
+	LastError   string     `json:"lastError,omitempty"`
+	LastErrorAt *time.Time `json:"lastErrorAt,omitempty"`
+}
+
+var passRegistry = struct {
+	sync.Mutex
+	states map[string]*PassState
+}{states: map[string]*PassState{}}
+
+// PassStates is every loop that has reported a pass, by the name its task
+// was started under. Loops that share a name share a state, as they share a
+// task (Tasks).
+func PassStates() map[string]PassState {
+	passRegistry.Lock()
+	defer passRegistry.Unlock()
+	out := make(map[string]PassState, len(passRegistry.states))
+	for name, state := range passRegistry.states {
+		out[name] = *state
+	}
+	return out
+}
+
+// remember keeps what a pass returned. The caller holds p.mu, and p.failing,
+// p.since and p.failed already say how the pass left the loop.
+func (p *Passes) remember(now time.Time, err error) {
+	passRegistry.Lock()
+	defer passRegistry.Unlock()
+	state, ok := passRegistry.states[p.name]
+	if !ok {
+		state = &PassState{Name: p.name}
+		passRegistry.states[p.name] = state
+	}
+	state.Passes++
+	state.LastPassAt = now
+	if err == nil {
+		state.FailingSince, state.FailedPasses = nil, 0
+		return
+	}
+	since := p.since
+	state.FailingSince, state.FailedPasses = &since, p.failed
+	state.LastError, state.LastErrorAt = err.Error(), &now
 }

@@ -158,6 +158,10 @@ socket-activated service's port.
   `EXIT_STATUS` and the cursor, and takes the invocation of the unit a manager line names
   (`INVOCATION_ID`, then `USER_INVOCATION_ID`) over the writer's own: a user manager is
   `user@1000.service`, one run, under which every run of every user unit would otherwise fold into one.
+- **No systemd is not a failed command.** `Systemd.Available` needs systemctl and a running manager
+  (`/run/systemd/system`, `procs.SystemdRunDir`). Without one the two lists answer `available: false`
+  and every other route answers 503 `systemd_not_running` with a reason, having run nothing
+  ([runtime boundaries](../architecture/runtime-boundaries.md#server-modules-degradation)).
 - `GET /systemd/` carries each unit's live readings and the manager (`Systemd.Inventory`, additive:
   `units` keeps its shape). One `systemctl show -p … --` over every loaded unit reads its type, main
   PID, cgroup memory (page cache included) and tasks, automatic restarts (`NRestarts`), result and

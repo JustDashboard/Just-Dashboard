@@ -224,7 +224,7 @@ func TestSiteRequestRouteAsksTheIngressForADeploymentsRoute(t *testing.T) {
 		"case \"$1\" in\n" +
 		"ps) echo caddy-id ;;\n" +
 		"inspect) cat \"$JD_TEST_INGRESS\" ;;\n" +
-		"exec) if [ -e \"$JD_TEST_ROUTES/$(basename \"$8\")\" ]; then printf present; else printf absent; fi ;;\n" +
+		"exec) if [ -e \"$JD_TEST_ROUTES/$(basename \"$8\")\" ]; then printf 'present\\nroute'; else printf absent; fi ;;\n" +
 		"*) exit 1 ;;\n" +
 		"esac\n"
 	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0o755); err != nil {

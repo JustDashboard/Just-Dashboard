@@ -23,6 +23,9 @@ func (s *Server) mountSelfRoutes(r chi.Router) {
 	// nothing the metrics page does not (how full a disk is) beyond whether
 	// the dashboard can still save.
 	r.Method(http.MethodGet, "/health", s.handle(s.handleDashboardHealth))
+	// What the process uses and how its background work is going, and
+	// profiles of it: an administrator's (handlers_self_stat.go).
+	s.mountSelfStatRoutes(r)
 }
 
 // dashboardHealth is whether the dashboard itself is in working order, with
