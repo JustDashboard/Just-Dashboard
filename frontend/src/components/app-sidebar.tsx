@@ -307,7 +307,10 @@ export function AppSidebar() {
           content box is only 1.5rem, so the search button — which keeps its
           full 2rem — overflowed half a rem to the right and sat visibly off
           the line every icon below it is on. */}
-      <SidebarHeader className="gap-3 p-3 group-data-[collapsible=icon]:p-2">
+      {/* The product's name, its version and search are the page's banner:
+          outside any landmark, the version beside the wordmark was text a
+          screen reader met between regions on every page. */}
+      <SidebarHeader role="banner" className="gap-3 p-3 group-data-[collapsible=icon]:p-2">
         {/* The wordmark alone: no tile, and no "Control panel" strapline under
             it. The strapline named the product category to somebody already
             inside the product, and the tile spent a third of the header's

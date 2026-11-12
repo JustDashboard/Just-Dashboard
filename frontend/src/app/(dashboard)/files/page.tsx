@@ -1343,6 +1343,8 @@ export default function FilesPage() {
 
   return (
     <Page fill data-files-workspace className="gap-2 px-2 py-2 md:px-3 md:py-3">
+      {/* A workbench draws no page header, so its name is said, not drawn. */}
+      <h1 className="sr-only">Files</h1>
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
         {/* One frame around the whole workbench: a strip across the top, then
             the sidebar, the listing and the inspector separated by a hairline

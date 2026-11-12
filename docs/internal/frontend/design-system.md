@@ -770,7 +770,7 @@ without `onOpenChange` (the build fold computes its initial state from detection
 store the operator's later answer), and React writes the `open` property only when the prop changes,
 so a prop-derived value went on announcing "collapsed" over fields that were plainly on screen. The
 one thing `role="button"` costs is the heading outline: a button's descendants are presentational,
-so a fold cannot also be an `<h3>` the way a `FormSection` is, and the standard
+so a fold cannot also be a heading the way a `FormSection` is (an `<h2>`), and the standard
 `<h3><button aria-expanded>` shape is not available inside `<details>`, whose first child must be
 the `<summary>`. That is the same as it was before the unification — the framed strip was not a
 heading either — and the widget semantics are worth more here than the outline entry. A caller that
@@ -1464,6 +1464,17 @@ presses restart twice. The row carries the present participle (`Stopping…`) un
 ## 14. A header is its title
 
 **A surface's header carries its name and its actions. It does not carry a picture of itself.**
+
+**The outline a screen reader walks is part of the header.** Every page has exactly one `h1`: a
+workbench that draws no header (Files, Terminal) says its name in an `sr-only` one. Headings never
+skip a level, so a `FormSection`'s title is an `h2`, the level under the page's title; it was an `h3`
+with nothing between. Nothing is drawn outside a landmark: the sidebar's wordmark, version and search
+are the page's `banner`. A scrolling table with nothing in it to focus is itself a keyboard stop
+(`Table` makes its container a named, focusable region only then, so a table of links keeps the tab
+order it had). A mark that is a link says what it opens in words when its title is drawn rather than
+written (a topology node's `name`), a status dot that carries a label is `role="img"`, and a
+`Sparkline` without a label is hidden rather than an unnamed image. `design-system.spec.ts` holds the
+first three and `network-topology-interfaces.spec.ts` the table and the node's name.
 
 Every `PanelHeader`, `Modal`, `SidePanel` and `Section` used to open with a 28px brand-tinted plot
 and a glyph inside it. On a page of six panels that is six brand marks down the left edge, each one
