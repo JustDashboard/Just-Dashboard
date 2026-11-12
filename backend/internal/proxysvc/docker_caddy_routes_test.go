@@ -15,7 +15,9 @@ import (
 // client does in production, and counts how often it was asked.
 type fakeContainers struct {
 	running string
-	asked   atomic.Int32
+	// one is `docker inspect` of a container by its name, running or not.
+	one   map[string]string
+	asked atomic.Int32
 }
 
 func (f *fakeContainers) InspectRunning(context.Context) ([]byte, error) {
@@ -23,8 +25,11 @@ func (f *fakeContainers) InspectRunning(context.Context) ([]byte, error) {
 	return []byte(f.running), nil
 }
 
-func (f *fakeContainers) InspectOne(context.Context, string) ([]byte, error) {
-	return nil, errors.New("no such container")
+func (f *fakeContainers) InspectOne(_ context.Context, name string) ([]byte, error) {
+	if raw, ok := f.one[name]; ok {
+		return []byte(raw), nil
+	}
+	return nil, errors.New("no such container: " + name)
 }
 
 // containerShim puts a docker first on PATH that logs every run and answers
@@ -98,6 +103,54 @@ func TestAnUpkeepPassWithoutAnIngressStartsNoProcess(t *testing.T) {
 	}
 	if containers.asked.Load() != 1 {
 		t.Fatalf("Docker was asked %d times, want once", containers.asked.Load())
+	}
+	if runs := dockerRuns(t, log); len(runs) != 0 {
+		t.Fatalf("the docker CLI was run: %q", runs)
+	}
+}
+
+// An ingress the operator named (JD_INGRESS_CONTAINER) is the same lookup by
+// another door: `docker inspect --type container <name>` on every pass and
+// page read. It asks the reader for that one container, and what it makes of
+// the answer is what it made of the CLI's: a Caddy that publishes nothing is
+// accepted by name, and one that is stopped or not there is "not running"
+// with what Docker said.
+func TestANamedIngressIsLookedUpThroughTheReader(t *testing.T) {
+	_, log := containerShim(t)
+	private := strings.Replace(ingressInspect, `"Ports":{"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"80"}],"443/tcp":[{"HostIp":"0.0.0.0","HostPort":"443"}]}`, `"Ports":{}`, 1)
+	stopped := strings.Replace(private, `"State":{"Running":true}`, `"State":{"Running":false}`, 1)
+	if private == ingressInspect || stopped == private {
+		t.Fatal("the fixture no longer has the ports and the state this test rewrites")
+	}
+	containers := &fakeContainers{running: "[]", one: map[string]string{"edge": private, "stopped": stopped}}
+	named := func(name string) *Service {
+		return NewWithIngressContainer(t.TempDir(), filepath.Join(t.TempDir(), "Caddyfile"), name).WithContainerReader(containers)
+	}
+
+	edge, err := named("edge").dockerCaddy(context.Background())
+	if err != nil || edge == nil {
+		t.Fatalf("the named ingress was not found: %+v, %v", edge, err)
+	}
+	if edge.ID != "4f1c0ffee" || edge.Name != "edge" || edge.Source != "/srv/edge/Caddyfile" || edge.Identity == "" {
+		t.Fatalf("got %+v", edge)
+	}
+	// Its own lookups, where a route's container is now, go the same way.
+	if edge.docker.reader == nil {
+		t.Fatal("the ingress found by name would ask the docker CLI for the containers")
+	}
+
+	for name, said := range map[string]string{"stopped": "", "absent": "no such container: absent"} {
+		edge, err := named(name).dockerCaddy(context.Background())
+		var problem *IngressProblem
+		if edge != nil || !errors.As(err, &problem) || problem.Code != IngressNotRunning || problem.Raw() != said {
+			t.Errorf("%s: got %+v, %v, want %s with %q as what Docker said", name, edge, err, IngressNotRunning, said)
+		}
+	}
+
+	// One container asked for by name each time: no listing of them all,
+	// and no process.
+	if containers.asked.Load() != 0 {
+		t.Fatalf("every running container was listed %d times for an ingress that has a name", containers.asked.Load())
 	}
 	if runs := dockerRuns(t, log); len(runs) != 0 {
 		t.Fatalf("the docker CLI was run: %q", runs)
