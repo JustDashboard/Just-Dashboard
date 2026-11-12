@@ -182,7 +182,9 @@ all under `JD_DEV`. When a write is refused for space, or free space falls under
 deleted, which hands SQLite room for the sign-in, the audit lines and the settings an operator needs
 while cleaning up; the status stays `disk_full` until there is room to write the reserve again. It is
 random rather than preallocated because a compressing filesystem would keep zeros in a few blocks, and
-it lives in `staging` because every backup of the data directory already excludes that folder. It is a
+it lives in `staging` because every backup of the data directory already excludes that folder. A
+reserve that cannot be written (a quota, a filesystem that reports room it cannot hand out) is said in
+the log once and tried again every ten minutes, not on every pass: each attempt writes all 32 MiB. It is a
 margin, not a guarantee: whatever filled the disk can fill 32 MiB more. A request whose store write is
 still refused answers `507 disk_full` with a sentence saying so (`httpx.DiskFull`, applied in
 `WriteError` to any error that would otherwise be an unexplained `500 internal`), which is what the

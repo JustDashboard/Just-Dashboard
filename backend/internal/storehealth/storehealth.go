@@ -61,6 +61,12 @@ const (
 	// size free, so making it can never be what fills a disk, and a disk that
 	// hovers at full does not have it written and deleted in turns.
 	reserveHeadroom = 8
+	// A reserve that could not be written is left alone this long before it
+	// is tried again. Each attempt writes all of it, so one made on every
+	// pass would be 32 MiB of writing and a log line every fifteen seconds,
+	// for as long as a quota or a filesystem that reports room it cannot hand
+	// out refuses it.
+	reserveRetry = 10 * time.Minute
 	// lowWater is the free space under which the disk is called full without
 	// waiting for a write to fail. SQLite takes small writes into journal
 	// space it already holds, so the probe can pass on a disk where the next
@@ -142,6 +148,10 @@ type Monitor struct {
 	status       Status
 	failingSince time.Time
 	released     bool
+	// reserveFailedAt is when writing the reserve last failed, and reserveErr
+	// what it failed with: see reserveRetry.
+	reserveFailedAt time.Time
+	reserveErr      string
 }
 
 func New(opt Options) *Monitor {
@@ -231,7 +241,7 @@ func (m *Monitor) Check(ctx context.Context) Status {
 	var readErr error
 	if writeErr != nil {
 		readErr = m.opt.Read(ctx)
-	} else if m.restoreReserve(free) {
+	} else if m.restoreReserve(now, free) {
 		free, total, _ = m.opt.Space(m.opt.Dir)
 	}
 
@@ -322,8 +332,9 @@ func (m *Monitor) reserveHeld() bool {
 
 // restoreReserve puts the reserve down where there is room for it and to
 // spare, and reports whether it wrote one. It fails quietly: no reserve is the
-// state every install was in before this existed.
-func (m *Monitor) restoreReserve(free uint64) bool {
+// state every install was in before this existed. A failure is said once, and
+// the next attempt waits reserveRetry.
+func (m *Monitor) restoreReserve(now time.Time, free uint64) bool {
 	if m.opt.Reserve <= 0 || m.reserveHeld() {
 		return false
 	}
@@ -333,10 +344,26 @@ func (m *Monitor) restoreReserve(free uint64) bool {
 	if free < uint64(m.opt.Reserve)*reserveHeadroom {
 		return false
 	}
-	if err := writeReserve(m.reservePath(), m.opt.Reserve); err != nil {
-		m.opt.Log.Warn("the dashboard's space reserve could not be written", "path", m.reservePath(), "error", err)
+	m.mu.Lock()
+	failedAt, failedWith := m.reserveFailedAt, m.reserveErr
+	m.mu.Unlock()
+	if !failedAt.IsZero() && now.Sub(failedAt) < reserveRetry {
 		return false
 	}
+	if err := writeReserve(m.reservePath(), m.opt.Reserve); err != nil {
+		m.mu.Lock()
+		m.reserveFailedAt, m.reserveErr = now, err.Error()
+		m.mu.Unlock()
+		// The same refusal again is not news; a different one is.
+		if err.Error() != failedWith {
+			m.opt.Log.Warn("the dashboard's space reserve could not be written; it is tried again every ten minutes",
+				"path", m.reservePath(), "error", err)
+		}
+		return false
+	}
+	m.mu.Lock()
+	m.reserveFailedAt, m.reserveErr = time.Time{}, ""
+	m.mu.Unlock()
 	m.opt.Log.Info("the dashboard holds a space reserve for a full disk", "path", m.reservePath(), "bytes", m.opt.Reserve)
 	return true
 }

@@ -197,6 +197,70 @@ func TestTheReserveIsNotWrittenWhereItWouldCrowdTheDisk(t *testing.T) {
 	}
 }
 
+// warnings counts the lines a monitor logs at Warn.
+type warnings struct {
+	slog.Handler
+	n int
+}
+
+func (w *warnings) Handle(ctx context.Context, r slog.Record) error {
+	if r.Level == slog.LevelWarn {
+		w.n++
+	}
+	return nil
+}
+
+func TestAReserveThatCannotBeWrittenIsLeftAloneForAWhile(t *testing.T) {
+	dir := t.TempDir()
+	disk := &fakeDisk{dir: dir, other: 10 * gib, total: 100 * gib}
+	// A directory stands where the reserve goes, so every byte is written and
+	// the last step is refused: what a quota, or a filesystem that reports
+	// room it cannot hand out, does to the real one.
+	path := filepath.Join(dir, "staging", ReserveFile)
+	if err := os.MkdirAll(filepath.Join(path, "in-the-way"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	log := &warnings{Handler: slog.NewTextHandler(io.Discard, nil)}
+	now := time.Date(2026, 11, 12, 4, 0, 0, 0, time.UTC)
+	m := New(Options{
+		Dir: dir, Log: slog.New(log), Reserve: 64 * kib, ReservePath: path, Space: disk.space,
+		Now:   func() time.Time { return now },
+		Write: func(context.Context) error { return nil },
+		Read:  func(context.Context) error { return nil },
+	})
+	// Five minutes of passes: one attempt and one line, not twenty of each.
+	for range 20 {
+		if st := m.Check(context.Background()); !st.OK || st.ReserveHeld {
+			t.Fatalf("status = %+v, want a healthy store without its reserve", st)
+		}
+		now = now.Add(DefaultInterval)
+	}
+	if log.n != 1 {
+		t.Fatalf("the reserve's failure was logged %d times in twenty passes, want once", log.n)
+	}
+	if _, err := os.Stat(path + ".tmp"); err == nil {
+		t.Fatal("the failed attempt left its temporary file behind")
+	}
+	// Still refused when it is tried again: tried, and not said a second time.
+	now = now.Add(reserveRetry)
+	m.Check(context.Background())
+	if log.n != 1 {
+		t.Fatalf("the same failure was logged %d times, want once", log.n)
+	}
+	// What was in the way goes: the next attempt, when it is due, succeeds.
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(DefaultInterval)
+	if st := m.Check(context.Background()); st.ReserveHeld {
+		t.Fatalf("status = %+v: the reserve was tried again before it was due", st)
+	}
+	now = now.Add(reserveRetry)
+	if st := m.Check(context.Background()); !st.OK || !st.ReserveHeld {
+		t.Fatalf("status = %+v, want the reserve held once it can be written", st)
+	}
+}
+
 func TestABusyStoreIsAProblemOnlyOnceItHasLastedAMinute(t *testing.T) {
 	dir := t.TempDir()
 	disk := &fakeDisk{dir: dir, other: 10 * gib, total: 100 * gib}
