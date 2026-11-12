@@ -175,13 +175,19 @@ test("an administrator reviews exact changes with pending confirmation when the 
       boot: "not_verified",
     })
   })
-  await page.goto("/network/drift")
+  // The preference is one row on the Network overview; turned off there, it
+  // stays off on the page that makes the change.
+  await page.goto("/network")
   const confirmationPreference = page.getByRole("switch", {
     name: "Require network reconnection confirmation",
   })
   await expect(confirmationPreference).toBeChecked()
   await confirmationPreference.uncheck()
   await expect(confirmationPreference).not.toBeChecked()
+  await page
+    .getByRole("navigation", { name: "Sidebar" })
+    .getByRole("link", { name: "Drift", exact: true })
+    .click()
   await page.getByRole("checkbox", { name: `Select repair for ${resource}` }).check()
   await page.getByRole("button", { name: "Review selected (1)" }).click()
   const dialog = page.getByRole("dialog")

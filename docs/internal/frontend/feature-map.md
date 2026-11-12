@@ -115,7 +115,12 @@ temporary apply and reconnection confirmation. The global
 `components/network/change-confirmation.tsx` keeps incomplete native cleanup visible after the network
 decision and offers an explicit owned cleanup retry. It is mounted in the shell for administrators and
 reads `/network/changes/current` every 2 s while a change is unfinished, every 15 s otherwise, at once on
-the `jd:network-change` event a change's own response raises, and again whenever the tab is shown. These interactions
+the `jd:network-change` event a change's own response raises, and again whenever the tab is shown. With
+nothing pending it draws nothing, so a Network page opens on its own title: the switch that turns the
+ordinary preference off was the first line of all nineteen Network pages until 0.8.6 and is one row,
+*Confirm managed changes after reconnecting*, in the Network overview's last panel, *Managed changes*
+(`components/network/reconnect-guard.tsx`, a store the notice and the row share, kept for the tab's life
+so a reload arms the guard again; `tests/browser/network-confirmation.spec.ts`). These interactions
 are checked by `network-native-profile.spec.ts`; the native manager's separate evidence and limits are
 documented in [the backend contract](../backend/network-native-managers.md).
 

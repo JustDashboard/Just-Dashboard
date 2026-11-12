@@ -67,7 +67,7 @@ last successful data. Malformed items become a failed retained read and block ap
 confirmation rechecks the latest rendered ownership, generation, read state and draft when clicked;
 its old callback cannot send an obsolete client review. Backend identity fences remain authoritative.
 Native profile writes always request temporary apply and reconnection confirmation, even when the
-ordinary managed-network preference is off. A confirmed or recovered network decision with pending
+ordinary managed-network preference (the Network overview's *Managed changes* row) is off. A confirmed or recovered network decision with pending
 or failed native cleanup remains a warning, including outside Network. Further journaled changes
 remain blocked; the applying owner can explicitly retry cleanup. The warning cannot be dismissed
 until cleanup succeeds. Read accounts do not request administrator-only native profiles.
