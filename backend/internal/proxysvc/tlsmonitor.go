@@ -145,6 +145,9 @@ func (m *TLSMonitor) Start(ctx context.Context) {
 	done := make(chan struct{})
 	m.done = done
 	safego.Go(ctx, nil, "certificate watch", func(ctx context.Context) {
+		// One endpoint's failed check is that endpoint's row. A pass that
+		// cannot read the watch list or save a check checks nothing.
+		passes := safego.NewPasses(nil, "certificate watch")
 		ticker := time.NewTicker(m.Tick)
 		defer ticker.Stop()
 		for {
@@ -154,8 +157,13 @@ func (m *TLSMonitor) Start(ctx context.Context) {
 			case <-ticker.C:
 			}
 			pass, cancel := context.WithTimeout(ctx, 50*time.Second)
-			_, _ = m.CheckDue(pass)
+			_, err := m.CheckDue(pass)
 			cancel()
+			// A pass that spent its fifty seconds waiting behind a check an
+			// operator asked for has no answer of its own.
+			if !errors.Is(err, context.DeadlineExceeded) {
+				passes.Report(ctx, err)
+			}
 		}
 	}, safego.Close(done))
 }

@@ -137,6 +137,19 @@ named `Start…` that starts a goroutine with a bare `go`, except the per-reques
 their reasons. Other goroutines a request handler starts for itself (a log follower, a probe's
 fan-out, a terminal's reader) are not covered by that rule: a panic in one still ends the process.
 
+A loop's pass that returns an error is reported, never assigned to blank. `safego.Passes` (one per
+loop, made where the loop begins) logs by change of state, so a loop that runs every five seconds can
+report every pass: the first failure as `background task failed`, a failure whose text has changed at
+most once a minute and a reminder each hour as `background task is still failing`, and the recovery as
+`background task recovered` with how long it lasted and how many passes failed. A pass cut short by the
+loop's own context is neither. The Git branch watch (whose `poll` now returns each failed check with
+its project and environment), the preview reconciler, the database network reconciler, the deployment
+schedule (a due schedule that could not be run is also logged by name), the nginx status sampler and
+the certificate watch report this way. `TestSupervisedLoopsDoNotDiscardWhatAPassReturned`
+(`internal/safego/discard_test.go`) fails on a task function that assigns a call made with its context
+to blank. This is the log only: the deployment page still shows such a watch as `stale`, and a store
+that refuses writes is said on the Overview by [the dashboard's own health](#the-dashboards-own-health).
+
 ## The dashboard's own health
 
 `/healthz` is liveness and nothing else: a fixed `{"status":"ok"}` for as long as the process serves.

@@ -92,11 +92,14 @@ func (r *PreviewReconciler) Start(ctx context.Context) {
 	}
 	ctx, r.cancel = context.WithCancel(ctx)
 	r.done = make(chan struct{})
-	safego.Go(ctx, nil, "preview reconciler", func(ctx context.Context) {
+	safego.Go(ctx, r.log, "preview reconciler", func(ctx context.Context) {
+		// A pass that cannot read the open previews closes none of them, and
+		// used to say nothing.
+		passes := safego.NewPasses(r.log, "preview reconciler")
 		ticker := time.NewTicker(r.interval)
 		defer ticker.Stop()
 		for {
-			_ = r.Reconcile(ctx)
+			passes.Report(ctx, r.Reconcile(ctx))
 			select {
 			case <-ctx.Done():
 				return

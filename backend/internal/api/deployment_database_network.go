@@ -605,11 +605,15 @@ func (o *deploymentDatabaseNetworks) Start(ctx context.Context) {
 	}
 	ctx, o.cancel = context.WithCancel(ctx)
 	o.done = make(chan struct{})
-	safego.Go(ctx, nil, "database network reconciler", func(ctx context.Context) {
+	safego.Go(ctx, o.server.Log, "database network reconciler", func(ctx context.Context) {
+		// Each binding that cannot be reconnected is marked on its own row
+		// (markUnavailable); the log gets the pass as a whole, when it starts
+		// failing, when what fails changes and when it works again.
+		passes := safego.NewPasses(o.server.Log, "database network reconciler")
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {
-			_ = o.Reconcile(ctx)
+			passes.Report(ctx, o.Reconcile(ctx))
 			select {
 			case <-ctx.Done():
 				return

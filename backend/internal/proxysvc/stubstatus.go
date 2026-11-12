@@ -546,12 +546,16 @@ func (m *StatusSampler) Start(ctx context.Context) {
 	done := make(chan struct{})
 	m.stop, m.done = cancel, done
 	safego.Go(ctx, nil, "nginx status sampler", func(ctx context.Context) {
+		// The page says a reading is missing; the log says when the status
+		// address stopped answering and when it answered again.
+		passes := safego.NewPasses(nil, "nginx status sampler")
 		ticker := time.NewTicker(m.interval)
 		defer ticker.Stop()
 		for {
 			pass, cancelPass := context.WithTimeout(ctx, m.interval)
-			_ = m.Poll(pass)
+			err := m.Poll(pass)
 			cancelPass()
+			passes.Report(ctx, err)
 			select {
 			case <-ctx.Done():
 				return
