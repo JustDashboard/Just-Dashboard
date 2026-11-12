@@ -1136,7 +1136,7 @@ test("delete project keeps the project open when the server refuses", async ({ p
     .getByRole("dialog")
     .getByRole("button", { name: "Archive deployment", exact: true })
     .click()
-  await expect(page.getByText("Project is busy", { exact: true })).toBeVisible()
+  await expect(page.getByText("Project is busy.", { exact: true })).toBeVisible()
   await expect(page.getByRole("dialog")).toBeVisible()
   await expect(page).toHaveURL(/\/deploy\/7$/)
 })
