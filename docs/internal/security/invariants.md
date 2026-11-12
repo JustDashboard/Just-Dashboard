@@ -345,9 +345,7 @@ A change that weakens any of these has to say so explicitly.
     since 0.8.5, no less. Its routes are a session's (a deployment's, a new deployment's, a database connection's,
     `POST /databases/{id}/assistant`, and the server's, `POST /assistant/chat`). Every call it makes is a request through the dashboard's own router under the
     person's own session principal (`s.assistantDispatch`, `httpx.WithAssistant`), so the route's capability
-    check, handler rules, destructive budget and audit entry apply exactly as to them (its other calls spend a
-    general budget of its own per session, so they cannot starve the page the person is reading); the entry
-    records the person with
+    check, handler rules, rate limit and audit entry apply exactly as to them; the entry records the person with
     actor `assistant`, so what it did reads apart from what they did. The session is read again before every
     step and every call (`Authenticator.Recheck`). **It is no longer narrowed to deploy-key rules**: there is no
     synthetic key, no `assistantRoutes` list and no handler guard that refuses it (`assistantDraftGuard`,

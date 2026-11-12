@@ -216,11 +216,15 @@ function withoutHistory(report: unknown) {
 
 async function mockApi(page: Page, report: unknown = update) {
   await page.route("**/api/v1/**", async (route) => {
-    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    const url = new URL(route.request().url())
+    const path = url.pathname.replace(/^\/api\/v1/, "")
     if (path === "/auth/session") return json(route, user)
-    // The report that is polled does not carry the changelog; the page reads it once from a
-    // route of its own.
-    if (path === "/dashboard/update") return json(route, withoutHistory(report))
+    // The page asks for the report without the changelog and reads that once from a route of
+    // its own. As on the server, a request that does not say so gets the whole of it.
+    if (path === "/dashboard/update") {
+      const asked = url.searchParams.get("history") === "false"
+      return json(route, asked ? withoutHistory(report) : report)
+    }
     if (path === "/dashboard/update/history") {
       return json(route, { history: (report as { history?: unknown[] }).history ?? [] })
     }
@@ -256,8 +260,16 @@ async function scrollsSideways(page: Page) {
 
 test("the version page is the history, with the update in the header", async ({ page }) => {
   await mockApi(page)
+  // Every read of the report that is polled says it wants no changelog in it.
+  const reports: string[] = []
+  page.on("request", (request) => {
+    const url = new URL(request.url())
+    if (url.pathname === "/api/v1/dashboard/update") reports.push(url.search)
+  })
   await page.goto("/dashboard")
   await expect(page.getByRole("heading", { name: "Version", exact: true })).toBeVisible()
+  expect(reports.length).toBeGreaterThan(0)
+  expect(reports.filter((search) => !search.includes("history=false"))).toEqual([])
   // The readings are gone from the top; what they said is in the identity line.
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 

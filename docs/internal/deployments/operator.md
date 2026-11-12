@@ -30,9 +30,7 @@ instead, unless they chose full access. What still holds it is below, and
   its root (`s.assistantDispatch`) under the person's own session principal, carried in the request's context
   (`httpx.WithAssistant`) and read again for the call. Every group's authentication takes it in place of a
   credential and marks it `Principal.Assistant`, so the route's capability check, handler rules, rate limit
-  (`ByPrincipal`: the person's own budget of destructive actions, and a general budget of its own per session,
-  so its calls cannot empty the bucket the page polls from) and audit entry apply exactly as to them; it sends
-  the CSRF header a
+  (`ByPrincipal`, the person's own budget) and audit entry apply exactly as to them; it sends the CSRF header a
   page sends. It cannot do what their role cannot, and a `readonly` person's assistant changes nothing. The
   audit entry is the person's, with actor `assistant`, so what it did reads apart from what they did.
 - **Its reach is the API, less a closed list.** `api/handlers_assistant_routes.go` reads every route under

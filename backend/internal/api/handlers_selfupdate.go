@@ -123,9 +123,19 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 // immediately and starts a check behind the request, which is what makes a
 // reload a way of asking without making a reload wait. Neither parameter is
 // the ordinary poll, which asks for nothing.
+//
+// history=false leaves the release notes out, and the page always says it: they
+// are a quarter of a megabyte that changes only with the build, and it reads
+// them once from /update/history. A request that does not say it still gets
+// them, because the one caller that cannot be changed is a page loaded before
+// the update that brought this in. It goes on polling the new server with the
+// old script, and that script spreads report.history without asking whether it
+// is there: an answer without the field threw in the sidebar of every open tab
+// at the moment the update finished.
 func (s *Server) handleSelfUpdateStatus(w http.ResponseWriter, r *http.Request) error {
 	query := httpx.Query(r)
 	refresh, nudge := query.Bool("refresh"), query.Bool("nudge")
+	history := query.BoolOr("history", true)
 	if err := query.Err(); err != nil {
 		return err
 	}
@@ -137,8 +147,20 @@ func (s *Server) handleSelfUpdateStatus(w http.ResponseWriter, r *http.Request) 
 		freshness = selfupdate.OnLoad
 	}
 	rep := s.modules.selfUpdate.Report(r.Context(), freshness)
+	if history {
+		httpx.JSON(w, http.StatusOK, selfUpdateReportWithHistory{Report: rep, History: selfupdate.Local().Releases})
+		return nil
+	}
 	httpx.JSON(w, http.StatusOK, rep)
 	return nil
+}
+
+// selfUpdateReportWithHistory is the report as it was answered before the
+// release notes had a route of their own: with everything this build knows
+// about its own past in it.
+type selfUpdateReportWithHistory struct {
+	selfupdate.Report
+	History []selfupdate.Release `json:"history"`
 }
 
 // selfUpdateHistory is the release notes this build was compiled with, encoded

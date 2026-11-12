@@ -102,7 +102,11 @@ export function SelfUpdateProvider({ children }: { children: React.ReactNode }) 
     // "check for updates when the page loads". It costs the server one
     // conditional background fetch, floored at a few minutes, so a tab that is
     // reloaded twenty times asks the repository once.
-    const query = reads === 1 ? { nudge: true } : undefined
+    //
+    // `history: false` on every read: the release notes are read once, apart
+    // (useUpdateHistory). The server still sends them to a request that does
+    // not say so, for the pages that were loaded before it learnt this.
+    const query = reads === 1 ? { nudge: true, history: false } : { history: false }
     const next = await get<SelfUpdateReport>("/dashboard/update", query, signal)
     setLive(next.run?.status === "running" || next.run?.status === "pending")
     if (reads >= 2) setSettling(false)
@@ -118,7 +122,7 @@ export function SelfUpdateProvider({ children }: { children: React.ReactNode }) 
   const check = useCallback(async () => {
     setChecking(true)
     try {
-      await get<SelfUpdateReport>("/dashboard/update", { refresh: true })
+      await get<SelfUpdateReport>("/dashboard/update", { refresh: true, history: false })
       refresh()
     } finally {
       setChecking(false)

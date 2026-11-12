@@ -273,30 +273,76 @@ func offlineUpdates(t *testing.T, s *Server) {
 }
 
 // The report is read twice per page load and every two seconds while an
-// update runs. It used to carry the whole changelog, 278 KB of it.
+// update runs. It used to carry the whole changelog, 278 KB of it, and the
+// page now asks for it without (?history=false).
 func TestTheUpdateReportDoesNotCarryTheChangelog(t *testing.T) {
 	s := testServer(t)
 	offlineUpdates(t, s)
 	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
 
-	w := c.do(http.MethodGet, "/api/v1/dashboard/update", "", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d: %s", w.Code, w.Body)
-	}
-	var report map[string]json.RawMessage
-	if err := json.Unmarshal(w.Body.Bytes(), &report); err != nil {
-		t.Fatal(err)
-	}
-	if _, has := report["history"]; has {
-		t.Error("the report still carries history")
-	}
-	for _, field := range []string{"version", "releases", "check", "install"} {
-		if _, has := report[field]; !has {
-			t.Errorf("the report lost %q", field)
+	for _, spelling := range []string{"false", "0"} {
+		w := c.do(http.MethodGet, "/api/v1/dashboard/update?history="+spelling, "", nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", w.Code, w.Body)
+		}
+		var report map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &report); err != nil {
+			t.Fatal(err)
+		}
+		if _, has := report["history"]; has {
+			t.Errorf("?history=%s: the report still carries history", spelling)
+		}
+		for _, field := range []string{"version", "releases", "check", "install"} {
+			if _, has := report[field]; !has {
+				t.Errorf("the report lost %q", field)
+			}
+		}
+		if w.Body.Len() > 8<<10 {
+			t.Errorf("the report of an idle install is %d bytes", w.Body.Len())
 		}
 	}
-	if w.Body.Len() > 8<<10 {
-		t.Errorf("the report of an idle install is %d bytes", w.Body.Len())
+	if w := c.do(http.MethodGet, "/api/v1/dashboard/update?history=later", "", nil); w.Code != http.StatusBadRequest {
+		t.Errorf("?history=later = %d, want 400", w.Code)
+	}
+}
+
+// A page that was open through an update goes on polling the new server with
+// the script it loaded from the old one, and that script reads report.history
+// as a list without asking whether it is there: the sidebar notice spreads it
+// the moment the run it watched succeeds. So a request that does not ask for
+// the report without its history still gets all of it, beside every field the
+// report has without.
+func TestAPageLoadedBeforeTheUpdateStillGetsItsHistory(t *testing.T) {
+	s := testServer(t)
+	offlineUpdates(t, s)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+	read := func(query string) map[string]json.RawMessage {
+		t.Helper()
+		w := c.do(http.MethodGet, "/api/v1/dashboard/update"+query, "", nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /dashboard/update%s = %d: %s", query, w.Code, w.Body)
+		}
+		var report map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &report); err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	for _, query := range []string{"", "?nudge=true"} {
+		report := read(query)
+		var history []selfupdate.Release
+		if err := json.Unmarshal(report["history"], &history); err != nil {
+			t.Fatalf("GET /dashboard/update%s: history is %s: %v", query, report["history"], err)
+		}
+		if len(history) == 0 || len(history) != len(selfupdate.Local().Releases) {
+			t.Errorf("GET /dashboard/update%s carries %d releases, the build knows %d", query, len(history), len(selfupdate.Local().Releases))
+		}
+		for field := range read("?history=false") {
+			if _, has := report[field]; !has {
+				t.Errorf("GET /dashboard/update%s lost %q", query, field)
+			}
+		}
 	}
 }
 

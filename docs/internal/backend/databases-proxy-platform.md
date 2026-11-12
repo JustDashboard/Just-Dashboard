@@ -6104,9 +6104,17 @@ done by hand, and the UI refuses to fold it away.
   readable by the same every-role audience as the report that already carries its end. The console on
   `/dashboard` reads it once when the tail says it was trimmed and extends it with each polled tail
   (`frontend/src/lib/transcript.ts`).
-- **The changelog is not in the report.** `GET /api/v1/dashboard/update` answers what is polled (every
-  five minutes, every two seconds during a run): the version, the latest, the releases newer than the
-  installed one, the check, the install and the run. What this build knows about its own past
+- **The changelog is not in the report the page polls.** `GET /api/v1/dashboard/update?history=false`
+  answers what is polled (every five minutes, every two seconds during a run): the version, the latest,
+  the releases newer than the installed one, the check, the install and the run. `useSelfUpdate` says
+  `history=false` on every read. **A request that does not say it still gets `history`**, as every
+  report did before: a page that was open through an update goes on polling the new server with the
+  script it loaded from the old one, and that script reads `report.history` as a list without asking
+  whether it is there (the sidebar notice spreads it the moment the run succeeds, the Version page
+  filters it on every poll). Leaving the field out of the default answer would throw in every tab left
+  open through the update that brought the change in, so the default is not to be flipped while an
+  install can still come from a version whose page reads it.
+  What this build knows about its own past
   (`selfupdate.Local()`, about 280 KB) is `GET /api/v1/dashboard/update/history`, `{"history": […]}`,
   for the same every-role audience. It is encoded once per process and carries an `ETag` with
   `Cache-Control: private, no-cache`, so a browser keeps it and a reload costs a `304`; `etagHolds`
