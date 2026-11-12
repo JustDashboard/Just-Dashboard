@@ -252,12 +252,33 @@ for f in "${changed[@]}"; do
 done
 packages=("${!tests[@]}")
 
+# The type-check keeps what it learnt about each file, by the file's contents,
+# in frontend/tsconfig.tsbuildinfo, and a new worktree has none: its first
+# check was over three minutes and 2.4 GB of work that another worktree had
+# already done. One copy is kept in the git directory every worktree of this
+# clone shares. A worktree with none of its own starts from that copy, and a
+# check that passes leaves its own there. The file holds no absolute path, and
+# a copy from another commit costs only the files that differ and what depends
+# on them, which is what CI's cache of the same file does (verify.yml).
+typecheck() {
+	local cache
+	cache="$(git rev-parse --path-format=absolute --git-common-dir)/jd-cache/tsconfig.tsbuildinfo"
+	if [ ! -f tsconfig.tsbuildinfo ] && [ -f "$cache" ]; then
+		cp "$cache" tsconfig.tsbuildinfo
+	fi
+	bunx tsc --noEmit
+	if [ -f tsconfig.tsbuildinfo ]; then
+		mkdir -p "${cache%/*}"
+		cp tsconfig.tsbuildinfo "$cache.$$" && mv "$cache.$$" "$cache"
+	fi
+}
+
 if [ "${#lintable[@]}" -gt 0 ]; then
 	(
 		cd frontend
 		bunx prettier --check "${lintable[@]}"
 		bunx eslint "${lintable[@]}"
-		bunx tsc --noEmit
+		typecheck
 		bun test src
 	)
 fi

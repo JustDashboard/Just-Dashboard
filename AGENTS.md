@@ -61,6 +61,9 @@ packages, the Go tests beside each changed file, the deployment API clients' own
 under `sdk/`, and the browser specs that open a page the change renders, with `design-system.spec.ts`
 for any UI change. The header of the script says how each is
 picked. Use it while working and again before a pull request. There is no separate full gate.
+The type-check of a new worktree starts from what the last passing check in any worktree of this
+clone learnt (`tsconfig.tsbuildinfo`, kept in the shared git directory under `jd-cache/`), so it
+re-checks what differs rather than the whole program.
 Set `JD_BROWSER_WORKERS=1` when concurrent worktrees leave little memory for browser workers;
 without this override, the existing Playwright configuration controls concurrency.
 

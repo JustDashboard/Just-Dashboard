@@ -68,7 +68,9 @@ never into `docs/audits/`.
 - Run the checks with `scripts/test-changed.sh`. It runs only what your diff can reach: Prettier and
   ESLint on the changed frontend files, `tsc --noEmit`, `bun test src`, `go build`/`go vet` and the
   Go tests beside each changed file, the clients' own checks for a change under `sdk/`, and the
-  browser specs that open a page the change renders. Do not
+  browser specs that open a page the change renders. A new worktree has no `tsconfig.tsbuildinfo`,
+  and a cold type-check is three minutes and 2.4 GB, so the script starts it from the copy the last
+  passing check left in the git directory the clone's worktrees share (`jd-cache/`). Do not
   run the whole browser suite or `go test ./...` locally. Install the required Chromium build once
   with `bun run test:browser:install`.
   Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from

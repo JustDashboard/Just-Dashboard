@@ -147,5 +147,79 @@ class SectionSelectionTest(unittest.TestCase):
         self.assertEqual(self.kept("components/database/grid/unused.ts"), [])
 
 
+# The type-check as the script runs it, from frontend/.
+TYPECHECK_PROBE = 'eval "$(sed -n "/^typecheck() {/,/^}/p" "$1")"\ncd frontend\ntypecheck\n'
+
+# Stands in for `bunx tsc --noEmit`: writes down what it was given to start
+# from, leaves its own tsconfig.tsbuildinfo as tsc does whether or not the
+# types hold, and ends as it is told to.
+BUNX = (
+    "#!/usr/bin/env bash\n"
+    "cat tsconfig.tsbuildinfo > started-from 2>/dev/null || : > started-from\n"
+    'printf %s "$TSC_LEAVES" > tsconfig.tsbuildinfo\n'
+    'exit "${TSC_EXIT:-0}"\n'
+)
+
+
+class TypecheckCacheTest(unittest.TestCase):
+    """A worktree's first type-check starts from what another worktree learnt."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        base = pathlib.Path(directory.name)
+        tools = base / "bin"
+        tools.mkdir()
+        (tools / "bunx").write_text(BUNX)
+        (tools / "bunx").chmod(0o755)
+        # Nothing of the machine's own git configuration: the test's clone only.
+        self.env = {
+            "PATH": f"{tools}:/usr/local/bin:/usr/bin:/bin",
+            "HOME": str(base),
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_SYSTEM": "/dev/null",
+        }
+        self.clone = base / "clone"
+        self.other = base / "other"
+        self.git(base, "init", "-q", str(self.clone))
+        self.git(self.clone, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                 "commit", "-q", "--allow-empty", "-m", "start")
+        self.git(self.clone, "worktree", "add", "-q", str(self.other))
+        for tree in (self.clone, self.other):
+            (tree / "frontend").mkdir()
+        self.shared = self.clone / ".git/jd-cache/tsconfig.tsbuildinfo"
+
+    def git(self, cwd, *arguments):
+        subprocess.run(["git", *arguments], cwd=cwd, env=self.env, check=True, capture_output=True)
+
+    def check(self, tree, leaves, exit_code=0):
+        """Runs the type-check in a tree; answers how it ended and what tsc started from."""
+        result = subprocess.run(
+            ["bash", "-c", "set -euo pipefail\n" + TYPECHECK_PROBE, "probe", str(SCRIPT)],
+            cwd=tree, capture_output=True, text=True,
+            env={**self.env, "TSC_LEAVES": leaves, "TSC_EXIT": str(exit_code)},
+        )
+        return result.returncode, (tree / "frontend/started-from").read_text()
+
+    def test_a_new_worktree_starts_from_what_another_one_left(self):
+        self.assertEqual(self.check(self.clone, "first"), (0, ""))
+        self.assertEqual(self.shared.read_text(), "first")
+        self.assertEqual(self.check(self.other, "second"), (0, "first"))
+        self.assertEqual(self.shared.read_text(), "second")
+
+    def test_a_worktree_with_its_own_keeps_it(self):
+        self.check(self.clone, "theirs")
+        (self.other / "frontend/tsconfig.tsbuildinfo").write_text("mine")
+        self.assertEqual(self.check(self.other, "mine again"), (0, "mine"))
+
+    def test_a_check_that_fails_leaves_the_shared_copy_alone(self):
+        self.check(self.clone, "good")
+        code, _ = self.check(self.other, "of a tree that does not type-check", exit_code=2)
+        self.assertEqual(code, 2)
+        self.assertEqual(self.shared.read_text(), "good")
+        # And nothing half written beside it.
+        self.assertEqual([p.name for p in self.shared.parent.iterdir()], ["tsconfig.tsbuildinfo"])
+
+
 if __name__ == "__main__":
     unittest.main()
