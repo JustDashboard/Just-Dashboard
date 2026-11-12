@@ -101,6 +101,13 @@ test.describe("on a phone", () => {
     }
     const box = await bar.boundingBox()
     expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBe(844)
+    // The shared bar (`phone-panes.tsx`) is the one this page drew by hand:
+    // five stops of one width, 56px under a hairline.
+    expect(Math.round(box?.height ?? 0)).toBe(57)
+    const stops = await bar
+      .getByRole("tab")
+      .evaluateAll((tabs) => tabs.map((tab) => Math.round(tab.getBoundingClientRect().width)))
+    expect(stops).toEqual([78, 78, 78, 78, 78])
     await expect(page.locator("html")).toHaveJSProperty("scrollWidth", 390)
 
     await bar.getByRole("tab", { name: "Files" }).click()

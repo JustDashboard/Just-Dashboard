@@ -72,6 +72,7 @@ import { ResizeHandle } from "@/components/resize-handle"
 import { Page } from "@/components/page"
 import { IconAction } from "@/components/icon-action"
 import { PaneHeader } from "@/components/panel"
+import { PaneBar } from "@/components/phone-panes"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { ChipCount, tabClasses } from "@/components/tabs"
@@ -1071,47 +1072,30 @@ export function RepoWorkspace({
             </div>
 
             {!reading && (
-              <nav
-                aria-label="Repository"
-                className="shrink-0 border-t border-hairline bg-surface-header pb-[env(safe-area-inset-bottom)] lg:hidden"
-              >
-                <div role="tablist" className="grid grid-cols-5">
-                  <BarTab
-                    label="Changes"
-                    active={!treeShown && shown === "changes"}
-                    onClick={() => pick("changes")}
-                    icon={<Pencil />}
-                    count={changeCount}
-                    countClassName="bg-(--git-modified)"
-                  />
-                  <BarTab
-                    label="History"
-                    active={!treeShown && shown === "history"}
-                    onClick={() => pick("history")}
-                    icon={<SourceCommit />}
-                  />
-                  <BarTab
-                    label="Branches"
-                    active={!treeShown && shown === "branches"}
-                    onClick={() => pick("branches")}
-                    icon={<SourceBranch />}
-                  />
-                  <BarTab
-                    label="GitHub"
-                    active={!treeShown && shown === "github"}
-                    onClick={() => pick("github")}
-                    icon={<GitHubMark />}
-                    count={openPulls}
-                    countClassName="bg-(--pull-open)"
-                  />
-                  <BarTab
-                    label="Files"
-                    active={treeShown}
-                    onClick={() => setTreeShown(true)}
-                    icon={<FolderOpen />}
-                  />
-                </div>
-              </nav>
+              <PaneBar
+                label="Repository"
+                active={treeShown ? "files" : shown}
+                onPick={(key) => (key === "files" ? setTreeShown(true) : pick(key))}
+                stops={[
+                  {
+                    key: "changes",
+                    label: "Changes",
+                    icon: <Pencil />,
+                    count: changeCount,
+                    countClassName: "bg-(--git-modified)",
+                  },
+                  { key: "history", label: "History", icon: <SourceCommit /> },
+                  { key: "branches", label: "Branches", icon: <SourceBranch /> },
+                  {
+                    key: "github",
+                    label: "GitHub",
+                    icon: <GitHubMark />,
+                    count: openPulls,
+                    countClassName: "bg-(--pull-open)",
+                  },
+                  { key: "files", label: "Files", icon: <FolderOpen /> },
+                ]}
+              />
             )}
           </div>
           <WorktreesDialog
@@ -1170,54 +1154,6 @@ export function RepoWorkspace({
         </Page>
       </CommitAuthors.Provider>
     </Workspace>
-  )
-}
-
-/**
- * A stop on the phone's bar: 56px tall, a finger's width, the glyph over its
- * word, and how many are waiting as a small count on the glyph's shoulder.
- */
-function BarTab({
-  label,
-  active,
-  onClick,
-  icon,
-  count = 0,
-  countClassName,
-}: {
-  label: string
-  active: boolean
-  onClick: () => void
-  icon: React.ReactNode
-  count?: number
-  countClassName?: string
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "flex h-14 min-w-0 flex-col items-center justify-center gap-1 focus-ring-inset transition-colors",
-        active ? "text-foreground" : "text-muted-foreground",
-      )}
-    >
-      <span aria-hidden className={cn("relative flex [&_svg]:size-5", active && "text-brand")}>
-        {icon}
-        {count > 0 && (
-          <span
-            className={cn(
-              "numeric absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-sm px-1 text-micro font-semibold text-background",
-              countClassName,
-            )}
-          >
-            {count > 99 ? "99+" : count}
-          </span>
-        )}
-      </span>
-      <span className="text-micro font-medium">{label}</span>
-    </button>
   )
 }
 

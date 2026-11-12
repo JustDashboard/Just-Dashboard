@@ -580,3 +580,46 @@ test("workspace: match navigation wraps and Escape closes the inspected record",
   await expect(page.locator("[data-line-detail]")).toHaveCount(0)
   await expect(rows.first()).toBeFocused()
 })
+
+test("on a phone a request record is the pane, reached from the sources on the bar", async ({
+  page,
+}, testInfo) => {
+  // The rail stacked over the column below `lg` because a record's chart and
+  // filters left its rows no height when the two shared a window. A phone no
+  // longer shares it: the record has the pane to itself.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockViews(page)
+  await page.goto("/logs?source=file:/var/log/syslog")
+  const bar = page.getByRole("navigation", { name: "Logs", exact: true })
+  const rail = page.locator('[aria-label="Log sources"]')
+  await expect(rail).toBeHidden()
+
+  await bar.getByRole("tab", { name: "Sources" }).click()
+  const record = rail.getByRole("button").filter({ hasText: "api.example.com" })
+  await record.scrollIntoViewIfNeeded()
+  await record.click()
+
+  // Picking it reads it: the pane is the record, and its rows are on screen.
+  await expect(rail).toBeHidden()
+  await expect(strip(page).getByRole("button", { name: "Requests" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  const row = page.getByText("/api/checkout", { exact: true }).first()
+  await expect(row).toBeInViewport()
+  // The rows have the pane: the chart is on Insights there, where it scrolls.
+  const chart = page.locator("[data-slot=request-chart]")
+  await expect(chart).toBeHidden()
+  await expect(page.getByText("/api/items", { exact: false }).first()).toBeInViewport()
+  const at = await bar.boundingBox()
+  expect(Math.round(at!.y + at!.height)).toBe(844)
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(0)
+  await page.screenshot({ path: testInfo.outputPath("logs-record-390.png") })
+
+  await strip(page).getByRole("button", { name: "Insights" }).click()
+  await expect(chart).toBeVisible()
+})

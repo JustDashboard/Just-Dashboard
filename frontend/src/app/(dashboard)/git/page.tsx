@@ -21,6 +21,7 @@ import { ForgeFace } from "@/components/git/marks"
 import { REPO_GRID, RepoCard } from "@/components/git/repo-card"
 import { RepoWorkspace } from "@/components/git/repo-workspace"
 import { useCheckoutRemoval } from "@/components/git/remove-checkout"
+import { InstallHandoff } from "@/components/network/install"
 import { WorktreeSection } from "@/components/git/worktree-list"
 import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
@@ -263,11 +264,14 @@ export default function GitPage() {
         {repos.loading && !repos.data && <LoadingPanel />}
 
         {repos.data && !repos.data.available && (
-          <EmptyState
+          <InstallHandoff
+            pkg="git"
+            products={["git"]}
             icon={GitHubMark}
             title="git is not installed on this host"
-            description="Install git to manage repositories from here."
-            action={controls}
+            description="Repositories are read and changed with the server's own git. Once it is in, the ones under the configured roots appear here, and cloning one is a button."
+            onInstalled={repos.refresh}
+            phases={false}
           />
         )}
 

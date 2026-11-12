@@ -19,13 +19,13 @@ import { NumberTicker } from "@/components/ui/number-ticker"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ProductGlyph, ProductLogos } from "@/components/product-logo"
+import { ProductGlyph } from "@/components/product-logo"
 import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
 import { TunnelPicture } from "@/components/network/vpn/tunnel-picture"
 import { AddPeer, PeerSheet } from "@/components/network/vpn/peers"
 import { WireGuardSetup } from "@/components/network/vpn/setup"
 import { WireGuardFamilyEvidence } from "@/components/network/vpn/family-evidence"
-import { TailscaleBlock } from "@/components/network/vpn/tailscale"
+import { TailscaleBlock, TailscaleMissing } from "@/components/network/vpn/tailscale"
 import { TunnelAlerts, TunnelRecord } from "@/components/network/vpn/record"
 import { ArchivedTunnels } from "@/components/network/vpn/archive"
 import { VPNLog } from "@/components/network/vpn/vpn-log"
@@ -263,11 +263,7 @@ function NetworkVPNContent() {
         {tailscale.error ? (
           <Notice title="Tailscale could not be read">{tailscale.error}</Notice>
         ) : !tailscale.installed ? (
-          <EmptyState
-            title="Tailscale is not installed"
-            mark={<ProductLogos ids={["tailscale", "headscale"]} />}
-            description="Tailscale joins this server to a private network of your devices without opening a port. Install it from tailscale.com/download, then sign in once; its peers, exit node and subnet routes appear here."
-          />
+          <TailscaleMissing onInstalled={vpn.refresh} />
         ) : (
           <TailscaleBlock tailscale={tailscale} headscale={headscale} onChanged={vpn.refresh} />
         )}

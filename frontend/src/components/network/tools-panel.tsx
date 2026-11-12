@@ -3,9 +3,19 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Crosshair, Globe, NetworkDevice, SecureConnection, Servers } from "@/components/icons"
+import {
+  Crosshair,
+  Globe,
+  ListUnordered,
+  NetworkDevice,
+  SecureConnection,
+  Servers,
+  Wrench,
+} from "@/components/icons"
+import { cn } from "@/lib/utils"
 import { PageContext, SearchInput } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
+import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { ChoiceCard } from "@/components/choice-card"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -17,6 +27,13 @@ import type { ToolPrefill } from "./tools/use-tool-run"
 
 const tools = TOOL_GROUPS.flatMap((group) => group.tools)
 const GROUP_MARK = [NetworkDevice, Crosshair, SecureConnection, Globe, Servers]
+
+/** A phone's two panes: the tool in use, and the catalogue to pick another. */
+type ToolsPane = "tool" | "catalogue"
+const TOOLS_STOPS: PaneStop<ToolsPane>[] = [
+  { key: "tool", label: "Tool", icon: <Wrench /> },
+  { key: "catalogue", label: "Every tool", icon: <ListUnordered /> },
+]
 
 /** One diagnostic in focus. Hidden tools stay mounted so their work and drafts survive a switch. */
 export function ToolsPanel() {
@@ -50,7 +67,14 @@ export function ToolsPanel() {
       `${tool.label} ${tool.hint}`.toLowerCase().includes(query.trim().toLowerCase()),
     ),
   }))
-  const choose = (key: string) => setChoice({ arrival, key })
+  // On a phone the catalogue and the tool are one pane at a time, and the
+  // page opens on the tool: the one a link asked for, or the first.
+  const [pane, setPane] = useState<ToolsPane>("tool")
+  const choose = (key: string) => {
+    setChoice({ arrival, key })
+    // Choosing a tool is asking to use it.
+    setPane("tool")
+  }
 
   return (
     <>
@@ -70,14 +94,20 @@ export function ToolsPanel() {
           The subnet calculator runs locally in your browser and is available with read access.
         </Notice>
       )}
-      {/* The chooser and result own their scrolling; this is one framed workbench. */}
+      {/* The chooser and result own their scrolling; this is one framed
+          workbench. Below `md` it is held to the window and runs to its
+          edges, one pane at a time with a bar at the foot: stacked, a phone
+          had the catalogue in a 278px box over the tool. */}
       <div
         data-slot="security-tools"
-        className="grid min-w-0 overflow-hidden rounded-xl border bg-card lg:h-[min(46rem,calc(100svh-16rem))] lg:min-h-[30rem] lg:grid-cols-[17rem_minmax(0,1fr)]"
+        className="grid min-w-0 overflow-hidden rounded-xl border bg-card max-md:-mx-5 max-md:-mb-6 max-md:flex max-md:min-h-0 max-md:flex-1 max-md:flex-col max-md:rounded-none max-md:border-x-0 max-md:border-b-0 lg:h-[min(46rem,calc(100svh-16rem))] lg:min-h-[30rem] lg:grid-cols-[17rem_minmax(0,1fr)]"
       >
         <Pane
           flush
-          className="max-h-80 border-b border-hairline lg:max-h-none lg:border-r lg:border-b-0"
+          className={cn(
+            "border-hairline max-md:flex-1 md:max-h-80 md:border-b lg:max-h-none lg:border-r lg:border-b-0",
+            paneShown(pane === "catalogue", "md"),
+          )}
         >
           <PaneHeader>
             <SearchInput
@@ -135,7 +165,7 @@ export function ToolsPanel() {
               )}
           </nav>
         </Pane>
-        <Pane flush className="min-h-80">
+        <Pane flush className={cn("max-md:flex-1 md:min-h-80", paneShown(pane === "tool", "md"))}>
           <PaneHeader className="justify-between">
             <span className="flex min-w-0 items-baseline gap-2">
               <span className="text-body font-medium">
@@ -151,9 +181,11 @@ export function ToolsPanel() {
                   : `sent from this server · ${tools.length} diagnostics`}
               </span>
             </span>
+            {/* A phone has this as a stop on the bar at the foot. */}
             <Button
               size="xs"
               variant="ghost"
+              className="max-md:hidden"
               onClick={() => {
                 setQuery("")
                 document.querySelector<HTMLInputElement>('[aria-label="Filter tools"]')?.focus()
@@ -177,6 +209,7 @@ export function ToolsPanel() {
             </div>
           </div>
         </Pane>
+        <PaneBar label="Tools" until="md" stops={TOOLS_STOPS} active={pane} onPick={setPane} />
       </div>
     </>
   )

@@ -197,7 +197,7 @@ export function RequestChart({
 
   if (rows.length === 0) return null
   return (
-    <div className="shrink-0 border-b border-hairline px-3 pt-2 pb-2">
+    <div data-slot="request-chart" className="shrink-0 border-b border-hairline px-3 pt-2 pb-2">
       <ChartPanel
         plain
         title="Requests"

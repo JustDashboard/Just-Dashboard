@@ -532,7 +532,8 @@ from the history is read back from the server and folded through the same reduce
 exactly as it did and can be carried on. One another tab is answering is followed and says so in a calm bar over the
 box — a breathing dot, *This chat is running in another tab*, and **Take over** — and the tab it was taken from says
 *Continued somewhere else* and stops. Below the chats, what it has changed with a shortcut to each, and what it has
-read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot.
+read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot
+(`phone-panes.tsx`, which Git, Logs and the network tools share: `workspace-interactions.md`).
 
 A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a transition
 on an outline, not a fifth animation. The floating **Back to chat** is the same surface as Remote Desktop's dock, in
@@ -1843,6 +1844,17 @@ including a stopped, failed, masked and boot-disabled unit, a refused start, res
 the config test panel; `proxy-insights.spec.ts` covers Live traffic, the ingress's routes in it, Recent errors, the nginx counters' switch (pressed on the card as well as the switch) and a phone;
 `proxy-alerts.spec.ts` covers the Alerts page — its picture, what fires, the rule form — and the
 overview bar's firing count.
+
+**A Sites list that could not be read says which read failed, why, and can be asked again.** The list
+is read from nginx, a Caddy on the host and the Caddy container that holds the public ports, and the
+last can fail on a server where the first two are fine (Docker not answering, two public Caddy
+containers and no word on which is the ingress, a Caddy that publishes 80 without 443). The page was
+two words in a red box. `proxy/sites-read-failure.ts` names the block for what was being read
+(*Could not read the sites*), draws the answer's `reason` under its message and its `raw` behind
+*What the server said* where the server sent them, points a bare 500 at the log line with its request
+id where it did not, and always offers **Try again**, since the read changes nothing. The notice over
+rows kept from the last good read carries the same reason and disclosure. `proxy-sites-list.spec.ts`
+holds both at 1280 and 390, with and without a reason.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:
@@ -3484,7 +3496,17 @@ with the guard's sentence beside it (a device's *Set down* on the uplink, forwar
 needs), because a control that disappears says nothing and one greyed out with no reason says less.
 Each page that reads a tool this host may not have opens on its install where it is missing
 (`network/install.tsx`: the package's name, what it would do here drawn as the product, and the
-Packages page's install job streaming under the button).
+Packages page's install job streaming under the button). The Git page and Tailscale on the VPN page do
+the same, without the after-install phases the server keeps only for the network and security tools
+(`phases={false}`); Tailscale is offered only where the package manager carries it
+(`usePackageKnown`, one `GET /packages/tailscale`), since Debian and Ubuntu do not until its own
+repository is added, and is pointed at otherwise. PM2 is an npm package for a host account, not
+something the package manager installs, so its page names the command and opens the terminal
+(`procs/pm2-missing.tsx`). Docker is never missing on an install that runs in it; what its pages say
+when the daemon cannot be asked is which fault it is (`docker/unreachable.ts`): a socket that refused
+the dashboard, a `docker.service` systemd says is not running (with **Start Docker** for
+`service.control`), a daemon that runs but not at the address asked, or no answer where systemd cannot
+be asked. The client's own sentence is behind *What the server said*.
 
 **Network drift took the exit on 2026-10-10**, at the operator's request, because it was dead:
 four grey figures (known differences, incomplete readings, matching observations, owned repair

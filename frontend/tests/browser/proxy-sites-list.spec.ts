@@ -699,6 +699,118 @@ test("a switch whose list could not be read again does not show the state from b
   await expect(site.getByText("not read back", { exact: true })).toHaveCount(0)
 })
 
+/**
+ * The list is read from nginx, a host Caddy and the Caddy container that
+ * holds the public ports. The last can fail on a server where the first two
+ * are fine, and the whole page was two words in a red box: "internal error",
+ * with nothing to press.
+ */
+const ingressRefusal = {
+  error: {
+    code: "ingress_ambiguous",
+    message: "Two public Caddy containers, and nothing says which is the ingress",
+    reason: "Set JD_INGRESS_CONTAINER to the name of the one that serves this server's domains.",
+    raw: "multiple public Caddy containers require an explicit ingress selection",
+  },
+}
+
+for (const width of [1280, 390]) {
+  test(`a first read the ingress lookup failed says why and can be asked again at ${width}`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 })
+    await mockProxy(page, { included: true })
+    let failing = true
+    await page.route("**/api/v1/proxy/vhosts", (route) =>
+      failing
+        ? route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify(ingressRefusal),
+          })
+        : json(route, [app]),
+    )
+    await page.goto("/proxy/sites")
+    // The page keeps its name over the block; it is not the block alone.
+    await expect(page.getByRole("heading", { name: "Sites", exact: true })).toHaveCount(1)
+    const block = page.getByRole("alert").filter({ hasText: "Could not read the sites" })
+    await expect(block).toContainText(ingressRefusal.error.message)
+    await expect(block).toContainText(ingressRefusal.error.reason)
+    // The subsystem's words are one press away, never the headline.
+    await expect(block.getByText(ingressRefusal.error.raw)).toBeHidden()
+    await block.getByText("What the server said").click()
+    await expect(block.getByText(ingressRefusal.error.raw)).toBeVisible()
+    expect(
+      await page
+        .locator("[data-slot='page']")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`sites-ingress-${width}.png`) })
+
+    failing = false
+    await block.getByRole("button", { name: "Try again" }).click()
+    await expect(card(page, "app.example.com")).toBeVisible()
+    await expect(page.getByText("Could not read the sites")).toHaveCount(0)
+  })
+}
+
+test("a first read that failed with no reason still says what failed", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let failing = true
+  await page.route("**/api/v1/proxy/vhosts", (route) =>
+    failing
+      ? route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "internal", message: "internal error", requestId: "4f2a9c" },
+          }),
+        })
+      : json(route, [app]),
+  )
+  await page.goto("/proxy/sites")
+  const block = page.getByRole("alert").filter({ hasText: "Could not read the sites" })
+  await expect(block).toContainText("internal error (request 4f2a9c)")
+  await expect(block).toContainText("Its log has the cause on the line with that request id")
+  await expect(block.getByText("What the server said")).toHaveCount(0)
+
+  failing = false
+  await block.getByRole("button", { name: "Try again" }).click()
+  await expect(card(page, "app.example.com")).toBeVisible()
+})
+
+test("rows kept over a failed read carry the reason the server gave", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  let failing = false
+  await page.route("**/api/v1/proxy/vhosts", (route) =>
+    failing
+      ? route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify(ingressRefusal),
+        })
+      : json(route, [app]),
+  )
+  await page.clock.install()
+  await page.goto("/proxy/sites")
+  await expect(card(page, "app.example.com")).toBeVisible()
+  failing = true
+  // The list is read again every thirty seconds.
+  await page.clock.runFor(30_100)
+  const notice = page.getByRole("alert").filter({ hasText: "Could not read the sites again" })
+  await expect(notice).toContainText(ingressRefusal.error.reason)
+  await notice.getByText("What the server said").click()
+  await expect(notice.getByText(ingressRefusal.error.raw)).toBeVisible()
+  // The rows stay, and the notice does not push the page sideways.
+  await expect(card(page, "app.example.com")).toBeVisible()
+  expect(
+    await page
+      .locator("[data-slot='page']")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
+})
+
 test("a disable another site needs is refused, says so, and leaves the site serving", async ({
   page,
 }) => {
