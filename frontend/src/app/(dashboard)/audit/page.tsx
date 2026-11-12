@@ -30,7 +30,7 @@ import { ProductGlyph } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { Address } from "@/components/security/marks"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState, Hold, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { FaceRun } from "@/components/system-users/marks"
 import { ChipStrip, FilterChip } from "@/components/tabs"
@@ -173,6 +173,9 @@ export default function AuditPage() {
         <PageContext eyebrow="Advanced" title="Audit log" />
 
         {day.data && <DayReadings day={day.data} />}
+        {/* The readings land over the trail: it waits for them rather than
+            being pushed down by them. */}
+        <Hold until={!day.loading} />
 
         {/* The table is the whole of the trail, and it is framed: a grid that
           owns its own scrolling takes an edge, or a row whose actions sit past
@@ -350,6 +353,7 @@ export default function AuditPage() {
                             key={entry.id}
                             data-workspace-item={String(entry.id)}
                             data-workspace-name={entry.action}
+                            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- an entry takes the keyboard so that the trail can be read row by row and the Workspace's keys can land on it
                             tabIndex={0}
                             className={cn(
                               "flex min-w-0 items-start gap-3 py-3 focus-ring-inset",

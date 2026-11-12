@@ -102,9 +102,11 @@ const Tile = memo(function Tile({
   // The name owns keyboard activation; the wrapper makes the whole tile
   // available to the pointer without nesting its checkbox in a button.
   return (
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- a tile of the grid: the arrows move between tiles and Enter opens one, here in onKeyDown, and its name is a button
     <div
       ref={viewportRef}
       data-entry-path={entry.path}
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a tile of the grid: the arrows move between tiles and Enter opens one, here in onKeyDown, and its name is a button
       tabIndex={active ? 0 : -1}
       data-state={selected ? "selected" : undefined}
       data-dragging={dragging || undefined}
@@ -134,6 +136,7 @@ const Tile = memo(function Tile({
       title={entry.name}
     >
       <span
+        role="presentation"
         className={cn("absolute top-1.5 left-1.5 z-10", rowReveal(), selected && "opacity-100")}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}

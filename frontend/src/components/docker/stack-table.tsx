@@ -758,6 +758,7 @@ function NarrowStack({ line, ...shared }: Shared & { line: StackLine }) {
       aria-label={stack.name}
       className={cn("py-2", shared.arrived.has(stack.name) && "animate-rise")}
     >
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the row's name is the link or button a keyboard opens it by */}
       <div
         data-workspace-item={`stack:${stack.name}`}
         data-workspace-name={stack.name}
@@ -834,6 +835,7 @@ function NarrowService({
   const stat = line.stat
   const trend = trendOf(line, shared.trends)
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- the pointer's larger target: the row's name is the link or button a keyboard opens it by
     <li
       data-workspace-item={line.key}
       data-workspace-name={service.name}

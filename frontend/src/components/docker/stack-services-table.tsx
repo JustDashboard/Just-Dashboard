@@ -244,6 +244,7 @@ function ServiceNarrowRow({ reading, arrived, pending, verbsFor, onCreate, onOpe
     traffic ? `↓${rate(traffic.rx)} ↑${rate(traffic.tx)}` : undefined,
   ].filter(Boolean)
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- the pointer's larger target: the row's name is the link or button a keyboard opens it by
     <li
       data-workspace-item={reading.key}
       data-workspace-name={reading.key}

@@ -42,6 +42,7 @@ import {
 } from "@/lib/server-systems"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
+import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
 import { SERVER_BOARD, type MapBoard } from "@/components/map/board"
 import { edgeTypes, type WireData } from "@/components/map/edges"
 import { MapInspector } from "@/components/map/inspector"
@@ -58,22 +59,6 @@ import { SystemRail } from "@/components/map/rail"
 const ZOOM = { min: 0.06, max: 2 }
 /** A system flown to fills the canvas, but a small one is not blown up past its own size. */
 const FLY = { padding: 0.04, maxZoom: 1 }
-
-/**
- * How the canvas is moved, a whiteboard's (Excalidraw's): two fingers on a
- * trackpad slide it, a pinch zooms it about the fingers; a mouse drags it by
- * any open ground, or by its middle button anywhere, and its wheel slides it
- * too — Ctrl or ⌘ with the wheel zooms, Shift with it slides sideways. Space
- * held makes any drag a slide. Nothing on it changes size but by the zoom.
- */
-const MOVE = {
-  panOnScroll: true,
-  panOnScrollSpeed: 1,
-  zoomOnScroll: false,
-  zoomOnPinch: true,
-  zoomOnDoubleClick: false,
-  panOnDrag: [0, 1],
-}
 
 /**
  * Where the map is nothing but the map: below the width the rail and the
@@ -282,16 +267,12 @@ export function MapCanvas({
         target?.closest?.("input, textarea, select, [contenteditable], [role=dialog], [role=menu]")
       )
         return
-      const mod = (e.ctrlKey || e.metaKey) && !e.altKey
-      if (mod && (e.key === "=" || e.key === "+")) {
+      const zoom = zoomKey(e)
+      if (zoom) {
         e.preventDefault()
-        void flow.zoomIn({ duration: 150 })
-      } else if (mod && e.key === "-") {
-        e.preventDefault()
-        void flow.zoomOut({ duration: 150 })
-      } else if (mod && e.key === "0") {
-        e.preventDefault()
-        void flow.zoomTo(1, { duration: 150 })
+        if (zoom === "in") void flow.zoomIn({ duration: 150 })
+        else if (zoom === "out") void flow.zoomOut({ duration: 150 })
+        else void flow.zoomTo(1, { duration: 150 })
       } else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit1") {
         e.preventDefault()
         void flow.fitView({ padding: 0.06, duration: 300 })
@@ -306,60 +287,7 @@ export function MapCanvas({
     return () => window.removeEventListener("keydown", onKey)
   }, [flow, flyTo, frameNode])
 
-  // Safari sends a trackpad's pinch as gesture events rather than as the
-  // Ctrl-wheel every other browser sends, and zooms the page with it unless
-  // told not to. Its gestures carry a scale and no point, so the canvas zooms
-  // about where the pointer last was, and any Ctrl-wheel it also sends while
-  // one runs is let go so a pinch zooms once.
-  useEffect(() => {
-    const el = canvasRef.current
-    if (!el) return
-    let base: number | null = null
-    let at = { x: 0, y: 0 }
-    const track = (e: PointerEvent) => {
-      at = { x: e.clientX, y: e.clientY }
-    }
-    const start = (e: Event) => {
-      e.preventDefault()
-      base = store.getState().transform[2]
-    }
-    const change = (e: Event) => {
-      e.preventDefault()
-      if (base === null) return
-      const [x, y, k] = store.getState().transform
-      const next = clampZoom(base * (e as Event & { scale: number }).scale)
-      const rect = el.getBoundingClientRect()
-      const px = at.x - rect.left
-      const py = at.y - rect.top
-      void flow.setViewport({
-        x: px - ((px - x) * next) / k,
-        y: py - ((py - y) * next) / k,
-        zoom: next,
-      })
-    }
-    const end = (e: Event) => {
-      e.preventDefault()
-      base = null
-    }
-    const once = (e: WheelEvent) => {
-      if (base !== null && e.ctrlKey) {
-        e.preventDefault()
-        e.stopPropagation()
-      }
-    }
-    el.addEventListener("pointermove", track)
-    el.addEventListener("gesturestart", start)
-    el.addEventListener("gesturechange", change)
-    el.addEventListener("gestureend", end)
-    el.addEventListener("wheel", once, { capture: true, passive: false })
-    return () => {
-      el.removeEventListener("pointermove", track)
-      el.removeEventListener("gesturestart", start)
-      el.removeEventListener("gesturechange", change)
-      el.removeEventListener("gestureend", end)
-      el.removeEventListener("wheel", once, { capture: true })
-    }
-  }, [flow, store])
+  useCanvasPinch(canvasRef, ZOOM)
 
   // The first view: the system the address or the last visit named, else
   // where the reader left the canvas, else every system at once. A phone opens
@@ -691,7 +619,7 @@ export function MapCanvas({
               }}
               minZoom={ZOOM.min}
               maxZoom={ZOOM.max}
-              {...MOVE}
+              {...CANVAS_MOVE}
               proOptions={{ hideAttribution: true }}
               nodesConnectable={false}
               nodesDraggable={!bare}

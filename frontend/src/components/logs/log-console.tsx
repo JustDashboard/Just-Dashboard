@@ -511,6 +511,7 @@ export function LogConsole({
       </div>
 
       <div
+        role="group"
         ref={scrollRef}
         data-workspace-scroll
         onScroll={onScroll}
@@ -754,6 +755,7 @@ export const LogRow = memo(function LogRow({
   const stack = Boolean(eventColumn) || Boolean(showSource)
   const beside = stack && cont ? "@max-md:hidden" : undefined
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- a line is pressed by the pointer and walked by the keyboard: the console above takes the arrows and Enter
     <div
       data-row-key={rowKey}
       data-workspace-item={placeKey ? `line:${placeKey}` : undefined}

@@ -119,7 +119,7 @@ function UserCard({
     <span className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
       {/* The options open in a portal, and React carries a press on one back
           up through the card, which would open the editor behind the menu. */}
-      <span onClick={(event) => event.stopPropagation()}>
+      <span role="presentation" onClick={(event) => event.stopPropagation()}>
         <RolePicker
           label={`Role of ${name}`}
           value={user.role}

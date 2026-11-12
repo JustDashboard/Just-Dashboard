@@ -1,6 +1,7 @@
 import { defineConfig, globalIgnores } from "eslint/config"
 import nextVitals from "eslint-config-next/core-web-vitals"
 import nextTs from "eslint-config-next/typescript"
+import jsxA11y from "eslint-plugin-jsx-a11y"
 
 import designSystem from "./eslint-rules/design-system.mjs"
 
@@ -75,6 +76,82 @@ const eslintConfig = defineConfig([
           ],
         },
       ],
+    },
+  },
+  {
+    // Keyboard and screen-reader access, as far as it can be read off the
+    // markup. eslint-config-next turns on six of jsx-a11y's rules as warnings;
+    // this is the plugin's whole recommended set as errors, which found an
+    // unlabelled field and some forty elements a mouse could press and a
+    // keyboard could not. A rule that is wrong for this codebase is turned
+    // off below with the reason beside it, and a single place where a rule
+    // misreads the markup carries the reason on its own disable comment.
+    files: ["src/**/*.tsx"],
+    rules: {
+      ...jsxA11y.flatConfigs.recommended.rules,
+      // The product's own controls are controls: a <label> that wraps a
+      // Checkbox or a Switch and its words is labelled, as one that wraps an
+      // <input> is.
+      "jsx-a11y/label-has-associated-control": [
+        "error",
+        {
+          controlComponents: [
+            "Checkbox",
+            "Switch",
+            "Input",
+            "Textarea",
+            "Select",
+            "SelectTrigger",
+            "RadioGroupItem",
+            "Slider",
+          ],
+          depth: 4,
+        },
+      ],
+      // `role` on one of the product's own components is that component's
+      // prop (a release's part in a canary), not an ARIA role.
+      "jsx-a11y/aria-role": ["error", { ignoreNonDOM: true }],
+      // A press is what a keyboard can be left out of, so a press is what
+      // these two look for. A key handler on a container is the opposite: it
+      // hears the keys of the focusable things inside it (the arrows of a
+      // list that moves its own focus, a canvas's shortcuts) and has nothing
+      // a pointer could do that a keyboard could not.
+      "jsx-a11y/no-static-element-interactions": [
+        "error",
+        { allowExpressionValues: true, handlers: ["onClick", "onMouseDown", "onMouseUp"] },
+      ],
+      "jsx-a11y/no-noninteractive-element-interactions": [
+        "error",
+        {
+          handlers: ["onClick", "onError", "onLoad", "onMouseDown", "onMouseUp"],
+          body: ["onError", "onLoad"],
+          iframe: ["onError", "onLoad"],
+          img: ["onError", "onLoad"],
+        },
+      ],
+      // What may take the keyboard without being a control: a separator that
+      // does is ARIA's window splitter, moved with the arrows; a region, a
+      // log or a group that scrolls has to be reachable for its arrows to
+      // scroll it (WCAG 2.1.1); the remote screen is an application that
+      // takes every key.
+      "jsx-a11y/no-noninteractive-tabindex": [
+        "error",
+        {
+          tags: [],
+          roles: ["tabpanel", "separator", "region", "log", "group", "application"],
+          allowExpressionValues: true,
+        },
+      ],
+      // Off: every autoFocus here is the field a dialog, a sheet or an inline
+      // editor opens on, or the first field of the sign-in page, which is what
+      // the person just asked to type into. The rule is against a page that
+      // takes the keyboard on load for something the reader did not ask for,
+      // and nothing here does that.
+      "jsx-a11y/no-autofocus": "off",
+      // Off: the players are for the operator's own files and a repository's,
+      // read from the server's disk. There is no caption track to offer for a
+      // file nobody wrote captions for.
+      "jsx-a11y/media-has-caption": "off",
     },
   },
   {

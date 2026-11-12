@@ -434,6 +434,7 @@ export function BarReading({
                       ) : (
                         // Nothing to press, but a keyboard and a thumb can still
                         // bring it onto the line.
+                        // eslint-disable-next-line jsx-a11y/click-events-have-key-events -- a thumb's way to what focus does for a keyboard: it brings the part's reading onto the line
                         <span
                           title={part.title}
                           tabIndex={part.markIsControl ? undefined : 0}
@@ -499,6 +500,7 @@ function Line({
 }) {
   const filtering = part?.press && !part.press.opens
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the part's mark in the strip above is the control a keyboard presses
     <div
       data-slot="reading-line"
       title={title}
@@ -543,7 +545,11 @@ function Line({
             <LandedFigures>{figure}</LandedFigures>
           </span>
         )}
-        {control && <span onClick={(event) => event.stopPropagation()}>{control}</span>}
+        {control && (
+          <span role="presentation" onClick={(event) => event.stopPropagation()}>
+            {control}
+          </span>
+        )}
       </span>
     </div>
   )

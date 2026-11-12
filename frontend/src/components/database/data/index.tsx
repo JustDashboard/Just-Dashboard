@@ -343,6 +343,7 @@ export function SqlData() {
       >
         {railShown && (
           <div
+            role="presentation"
             className={cn(
               "flex min-h-0 flex-col border-hairline bg-card",
               railBeside

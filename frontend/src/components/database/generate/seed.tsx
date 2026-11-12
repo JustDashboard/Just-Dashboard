@@ -509,6 +509,7 @@ function SeedOutput({
         </Notice>
       )}
       {plan.warnings.length > 0 && <FormNote tone="warning">{plan.warnings.join(" ")}</FormNote>}
+      {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself */}
       <div
         ref={strip}
         role="tablist"

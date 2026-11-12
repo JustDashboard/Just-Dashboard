@@ -300,6 +300,7 @@ function Identity({ report, actions }: { report: SelfUpdateReport; actions: Reac
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
+                    // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer
                     tabIndex={0}
                     className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-ring"
                   >
@@ -320,6 +321,7 @@ function Identity({ report, actions }: { report: SelfUpdateReport; actions: Reac
         {report.check.error ? (
           <Tooltip>
             <TooltipTrigger asChild>
+              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
               <span tabIndex={0} className="inline-flex cursor-help rounded-sm focus-ring">
                 <Status tone={status.tone} label={status.label} className="text-body font-medium" />
               </span>

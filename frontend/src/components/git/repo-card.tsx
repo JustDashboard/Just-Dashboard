@@ -245,6 +245,7 @@ export function RepoCard({
           of forty does not take two seconds. */}
       <BlurFade delay={Math.min(index, 11) * 0.03} className="h-full">
         <SpotlightBorder className="h-full">
+          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the card's name is the link or button a keyboard opens it by */}
           <div
             onClick={(event) => {
               // React carries a press inside an open menu — a group label, a
@@ -418,6 +419,7 @@ export function RepoCard({
                 // it is a control of its own, and none of them is "open the
                 // repository".
                 <div
+                  role="presentation"
                   onClick={(event) => event.stopPropagation()}
                   className="flex h-[2.875rem] min-w-0 items-center gap-1"
                 >

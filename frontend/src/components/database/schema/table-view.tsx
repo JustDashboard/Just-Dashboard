@@ -514,6 +514,7 @@ export function TableView({
               under the readings rather than covering them. */}
           <div className="@container/strip shrink-0 border-b border-hairline px-1.5">
             <div className="flex min-h-10 items-stretch @max-[36rem]/strip:flex-wrap">
+              {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself */}
               <div
                 ref={tabs}
                 role="tablist"

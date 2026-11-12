@@ -586,6 +586,7 @@ function Blocked({ reason, children }: { reason: string; children: React.ReactNo
   return (
     <Tooltip>
       <TooltipTrigger asChild>
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
         <span tabIndex={0} className="inline-flex rounded-md focus-ring">
           {children}
         </span>

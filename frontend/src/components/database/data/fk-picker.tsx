@@ -199,6 +199,7 @@ function Rows({
           onKeyDown={(event) => step(event, "field")}
         />
       </div>
+      {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself */}
       <div
         ref={list}
         role="listbox"

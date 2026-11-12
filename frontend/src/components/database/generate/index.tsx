@@ -708,6 +708,7 @@ function Output({
       )}
       {result.warnings.length > 0 && <Warnings warnings={result.warnings} />}
       {files.length > 1 && (
+        // eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself
         <div
           ref={strip}
           role="tablist"

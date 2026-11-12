@@ -32,7 +32,7 @@ import { JobIssuanceProblems } from "@/components/proxy/issuance-problems"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Hold, LoadingPanel, LoadingRows, Notice } from "@/components/state"
 import { useProxy, useProxyRead } from "@/components/proxy/proxy-context"
 import {
   ALL_CERTS,
@@ -344,6 +344,15 @@ export function CertificatesPage() {
   const testAuthority = certbot.data?.testAuthority ?? false
 
   const renewal = renewalReading(certbot.data, certbotGone)
+  // A read that is switched off is not loading.
+  const arrived = !(
+    certs.loading ||
+    certbot.loading ||
+    requests.loading ||
+    localCA.loading ||
+    coverage.loading ||
+    providers.loading
+  )
   // Names no certificate covers go to the Issue dialog as a test run first,
   // as the dialog's own button starts one.
   const issueFor =
@@ -449,6 +458,13 @@ export function CertificatesPage() {
           </div>
         </Notice>
       )}
+
+      {/* Every block under here is as tall as what its read says, and each
+          stands over another: the page waits for the reads it makes itself
+          and then draws them together, rather than moving as each lands. */}
+      <Hold until={arrived}>
+        <LoadingPanel plain rows={3} />
+      </Hold>
 
       <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] [&>*]:min-w-0">
         <Panel plain>

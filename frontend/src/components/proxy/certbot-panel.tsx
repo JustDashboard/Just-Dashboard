@@ -50,7 +50,7 @@ import { Meter } from "@/components/meter"
 import { ROW_BLEED } from "@/components/row-list"
 import { CertLife } from "@/components/proxy/expiry-status"
 import { dnsProviderProduct } from "@/components/proxy/marks"
-import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Hold, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
@@ -728,8 +728,10 @@ export function AcmeAccountsPanel({
   )
   const [editing, setEditing] = useState<ACMEAccountEntry | null>(null)
   const list = accounts.data?.accounts ?? []
-  return (
-    <Panel plain>
+  // The panel and, beside it, the marker that keeps what follows it in the
+  // column off the page until the accounts are counted: a line for each.
+  return [
+    <Panel key="accounts" plain>
       <PanelHeader title="ACME accounts" />
       <PanelBody flush>
         {accounts.error ? (
@@ -800,8 +802,9 @@ export function AcmeAccountsPanel({
           onStarted={onJob}
         />
       )}
-    </Panel>
-  )
+    </Panel>,
+    <Hold key="hold" until={!accounts.loading} />,
+  ]
 }
 
 /** certbot update_account: the new contact is sent to the authority. */

@@ -139,6 +139,7 @@ export function QueryRail({
 
   return (
     <div data-slot="query-rail" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself */}
       <div
         ref={tabs}
         role="tablist"

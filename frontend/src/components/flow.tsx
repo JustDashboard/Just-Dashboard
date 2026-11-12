@@ -432,7 +432,11 @@ export function ChoiceRow({
           // The row around these is a click target, so a press that lands
           // on one of them must not also fire it: discarding a draft
           // navigated to the draft it had just deleted.
-          <span onClick={(event) => event.stopPropagation()} className="flex shrink-0 items-center">
+          <span
+            role="presentation"
+            onClick={(event) => event.stopPropagation()}
+            className="flex shrink-0 items-center"
+          >
             {actions}
           </span>
         )}
@@ -446,6 +450,7 @@ export function ChoiceRow({
           <BorderBeam size={80} duration={4} />
         </span>
       )}
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the row's name is the link or button a keyboard opens it by */}
       <div
         onClick={(event) => {
           if (disabled) return
