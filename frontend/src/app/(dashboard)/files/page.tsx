@@ -2388,8 +2388,11 @@ function SymlinkBody({
     >
       <div className="space-y-3">
         <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">Points at</label>
+          <label htmlFor="symlink-target" className="text-xs text-muted-foreground">
+            Points at
+          </label>
           <Input
+            id="symlink-target"
             autoFocus
             value={target}
             onChange={(e) => setTarget(e.target.value)}
@@ -2398,8 +2401,11 @@ function SymlinkBody({
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">Link name</label>
+          <label htmlFor="symlink-name" className="text-xs text-muted-foreground">
+            Link name
+          </label>
           <Input
+            id="symlink-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && create()}

@@ -115,6 +115,7 @@ export function PromptInput({
           {problem}
         </p>
       )}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- a press on the frame's own ground puts the caret in the box; the box is what a keyboard reaches */}
       <div
         data-slot="prompt-frame"
         data-dragging={dragging || undefined}
@@ -193,7 +194,7 @@ export function PromptInput({
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={image.src}
-                      alt={`Image ${at + 1}`}
+                      alt=""
                       className="block size-14 object-cover transition-[filter] duration-150 hover:brightness-90"
                     />
                   </button>

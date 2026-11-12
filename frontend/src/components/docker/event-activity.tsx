@@ -380,8 +380,10 @@ export function ActivityTable({
       <LaneAxis span={span} className="mt-3 ml-11" />
       <ul className="divide-y divide-hairline">
         {rows.map((row) => (
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the row takes the keyboard itself: Enter on it does what a press does
           <li
             key={row.key}
+            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the row takes the keyboard itself: Enter on it does what a press does
             tabIndex={0}
             data-state={selected === row.key ? "selected" : undefined}
             className={cn(

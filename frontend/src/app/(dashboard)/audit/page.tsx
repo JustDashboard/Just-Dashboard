@@ -353,6 +353,7 @@ export default function AuditPage() {
                             key={entry.id}
                             data-workspace-item={String(entry.id)}
                             data-workspace-name={entry.action}
+                            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- an entry takes the keyboard so that the trail can be read row by row and the Workspace's keys can land on it
                             tabIndex={0}
                             className={cn(
                               "flex min-w-0 items-start gap-3 py-3 focus-ring-inset",

@@ -162,6 +162,7 @@ export function ImageLightbox({
               </Button>
             </DialogPrimitive.Close>
           </div>
+          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- swipes, and a press on the ground beside the picture: the arrow keys and Escape do the same */}
           <div
             className="relative min-h-0 flex-1"
             onPointerDown={(event) => {
@@ -260,7 +261,10 @@ function Picture({ image, missingNote }: { image: LightboxImage; missingNote: st
   if (zoomed && shown) {
     return (
       <div className="absolute inset-0 flex overflow-auto px-2 pb-2" data-slot="lightbox-stage">
-        {/* eslint-disable-next-line @next/next/no-img-element -- a data address or our own route, already sized */}
+        {/* A data address or our own route, already sized. Zooming is the
+            pointer's for now: a keyboard reads the picture at the size it
+            fits (audit FE-15, left open). */}
+        {/* eslint-disable-next-line @next/next/no-img-element, jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
         <img
           src={shown}
           alt={image.alt}
@@ -305,7 +309,9 @@ function Picture({ image, missingNote }: { image: LightboxImage; missingNote: st
           />
         )}
         {shown && (
-          // eslint-disable-next-line @next/next/no-img-element -- a data address or our own route, already sized
+          // A data address or our own route, already sized; zooming is the
+          // pointer's for now, as on the zoomed picture above.
+          // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions
           <img
             ref={picture}
             src={shown}

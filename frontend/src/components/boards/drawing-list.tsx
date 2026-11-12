@@ -328,6 +328,7 @@ function DrawingCard({
     <li className="min-w-0">
       <BlurFade delay={Math.min(index, 11) * 0.03} className="h-full">
         <SpotlightBorder className="h-full">
+          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the card's name is the link or button a keyboard opens it by */}
           <div
             onClick={(event) => {
               const target = event.target as HTMLElement

@@ -1002,6 +1002,7 @@ function DomainRow({
             <span className="flex min-w-0 animate-rise flex-wrap items-center gap-x-3 gap-y-1">
               {renewal ? (
                 <HoverTip tip={renewal}>
+                  {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
                   <span tabIndex={0} className="rounded-sm focus-ring">
                     <CertificateStatus domain={certificateRead} named />
                   </span>
