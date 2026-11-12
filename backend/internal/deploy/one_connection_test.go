@@ -243,6 +243,7 @@ func TestEveryListReadFinishesOnOneConnection(t *testing.T) {
 // and a transcript are still read.
 func TestTheReadModelIsReadWhileThePoolIsExhausted(t *testing.T) {
 	f := newOneConnectionFixture(t)
+	storetest.OwnHandles(t, f.store)
 	hold, cancelHold := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelHold()
 	for range f.store.DB.Stats().MaxOpenConnections {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
@@ -55,6 +56,8 @@ func Open(dataDir string) (*store.Store, error) {
 // is how to hunt through a package's whole suite for the mistake OneConnection
 // describes: `JD_STORE_ONE_CONNECTION=1 go test -timeout 5m ./internal/deploy`
 // hangs in the test that makes it, and the timeout's stack names the line.
+// The tests about the store's own handles call OwnHandles and are skipped, so
+// what such a run reports is that mistake and nothing else.
 const oneConnectionEnv = "JD_STORE_ONE_CONNECTION"
 
 // OneConnection leaves the store a single connection, so that a call which
@@ -69,4 +72,16 @@ const oneConnectionEnv = "JD_STORE_ONE_CONNECTION"
 // applied to turns that into a deadline error on the first call.
 func OneConnection(st *store.Store) {
 	st.SingleConnection()
+}
+
+// OwnHandles skips a test that is about the store's bulk writer or read pool
+// being connections of their own, on a store that has one connection for
+// everything. That is every store while JD_STORE_ONE_CONNECTION=1 hunts
+// through a suite: there is then nothing beside the pool to exhaust, and such
+// a test would fail there with nothing wrong.
+func OwnHandles(t testing.TB, st *store.Store) {
+	t.Helper()
+	if st.Bulk() == st.DB || st.Reader() == st.DB {
+		t.Skip("this store has one connection for everything; its bulk writer and read pool are not their own")
+	}
 }

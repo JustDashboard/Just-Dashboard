@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 // outputFixture is a claimed run with one running step and the engine's own
@@ -301,6 +303,7 @@ func TestLegacyLogTailFollowsABatchAndStaysBounded(t *testing.T) {
 // commits do not each wait for the disk.
 func TestALogBatchIsWrittenWhileThePoolIsExhausted(t *testing.T) {
 	f := newOutputFixture(t, time.Hour)
+	storetest.OwnHandles(t, f.store)
 	hold, cancelHold := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelHold()
 	for range f.store.DB.Stats().MaxOpenConnections {

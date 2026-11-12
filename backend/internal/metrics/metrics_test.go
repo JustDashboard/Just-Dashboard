@@ -465,6 +465,7 @@ func TestPruneDropsExpiredMountSamples(t *testing.T) {
 // request shares does not leave a hole in the charts.
 func TestSamplesAreWrittenWhileThePoolIsExhausted(t *testing.T) {
 	r := testRecorder(t, time.Minute, 24*time.Hour)
+	storetest.OwnHandles(t, r.st)
 	hold, cancelHold := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelHold()
 	var held []interface{ Close() error }
@@ -507,6 +508,7 @@ func TestSamplesAreWrittenWhileThePoolIsExhausted(t *testing.T) {
 // neither wait for the pool every request shares nor use it up.
 func TestHistoryIsReadWhileThePoolIsExhausted(t *testing.T) {
 	r := testRecorder(t, time.Minute, 24*time.Hour)
+	storetest.OwnHandles(t, r.st)
 	at := time.Now().Add(-time.Minute).Truncate(time.Second)
 	if err := r.record(context.Background(), Sample{TS: at, CPUPercent: 12.5}); err != nil {
 		t.Fatal(err)

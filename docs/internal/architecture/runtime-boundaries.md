@@ -393,7 +393,10 @@ such a call can never finish; `deploy/one_connection_test.go` calls every list r
 deployment stores that way, with rows present and a deadline, and a new list read belongs in its table.
 And `JD_STORE_ONE_CONNECTION=1` does the same to every store `storetest.Open` opens, which turns a
 package's whole suite into the hunt: `JD_STORE_ONE_CONNECTION=1 go test -timeout 5m ./internal/deploy`
-hangs in the test that makes the mistake and the timeout's stack names the line.
+hangs in the test that makes the mistake and the timeout's stack names the line. A test about the
+handles themselves (samples, a log batch or a read still getting through while `DB` is exhausted) has
+nothing to show on such a store and calls `storetest.OwnHandles`, which skips it there; so a hunt that
+fails names that mistake and nothing else.
 
 `internal/audit` writes `audit_log` **and** mirrors every entry to the process log, so a trail survives
 the database being tampered with. The row is written with the request's values but not its
