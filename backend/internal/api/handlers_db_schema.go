@@ -337,9 +337,10 @@ func (s *Server) runDDL(w http.ResponseWriter, r *http.Request, conn *dbConnecti
 		httpx.JSON(w, http.StatusOK, reply)
 		return nil
 	}
-	if destructive != "" && !s.destrLim.Allow(principal.Username()+"|dbddl") {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-			"too many destructive schema changes, slow down")
+	if destructive != "" {
+		if err := s.destrLim.Spend(principal.Username()+"|dbddl", "too many destructive schema changes, slow down"); err != nil {
+			return err
+		}
 	}
 	detail["statement"] = statement
 	httpx.SetAudit(r, action, conn.Name, detail)

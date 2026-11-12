@@ -284,6 +284,32 @@ export function errorFromResponse(
   )
 }
 
+/** The longest Retry-After a read waits out by itself, in seconds. */
+const RATE_LIMIT_WAIT_MAX = 5
+
+/** The milliseconds a rate limit asked for: a 429 whose Retry-After is short enough to wait out. */
+function rateLimitWait(res: Response): number | undefined {
+  if (res.status !== 429) return undefined
+  const seconds = Number(res.headers.get("Retry-After") ?? "")
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > RATE_LIMIT_WAIT_MAX) return undefined
+  return seconds * 1000
+}
+
+/** Waits, or stops waiting when the request is aborted (the fetch that follows then rejects). */
+function pause(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true },
+    )
+  })
+}
+
 /**
  * Fetch an authenticated response without consuming a successful body. Exports
  * keep their original stream and abort signal, while refusals share JSON recovery.
@@ -295,14 +321,25 @@ export async function fetchResponse(
 ): Promise<Response> {
   const headers = new Headers(options.headers)
   const method = options.method ?? "GET"
-  if (!["GET", "HEAD", "OPTIONS", "TRACE"].includes(method.toUpperCase())) {
+  const read = ["GET", "HEAD", "OPTIONS", "TRACE"].includes(method.toUpperCase())
+  if (!read) {
     for (const [key, value] of Object.entries({
       ...mutationHeaders(),
       ...networkPendingHeaders(path, method),
     }))
       headers.set(key, value)
   }
-  const res = await fetch(buildUrl(path, query), { ...options, headers, credentials: "include" })
+  const send = () => fetch(buildUrl(path, query), { ...options, headers, credentials: "include" })
+  let res = await send()
+  // A read the rate limit refused is asked again once, after the wait the server named
+  // (about a second): a panel that is not polled would otherwise show "too many requests"
+  // until the page is reloaded. A write is not sent again behind the person's back.
+  const wait = read ? rateLimitWait(res) : undefined
+  if (wait !== undefined) {
+    await res.text().catch(() => undefined)
+    await pause(wait, options.signal)
+    res = await send()
+  }
   const networkChange = res.headers.get("X-JD-Network-Change")
   if (networkChange && typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("jd:network-change", { detail: networkChange }))

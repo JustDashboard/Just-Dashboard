@@ -219,8 +219,8 @@ func (s *Server) limitSecondFactor(r *http.Request) error {
 // route asks for it, so no form is a way around another.
 func (s *Server) spendGuess(r *http.Request) error {
 	key := "totp|" + strconv.FormatInt(httpx.MustPrincipal(r).UserID(), 10)
-	if !s.loginLim.Allow(key) {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many verification attempts")
+	if err := s.loginLim.Spend(key, "too many verification attempts"); err != nil {
+		return err
 	}
 	return nil
 }

@@ -1048,9 +1048,8 @@ func (s *Server) authoriseSQL(r *http.Request, risk dbx.Risk) error {
 		return httpx.Err(http.StatusForbidden, "forbidden",
 			"this statement is destructive and your role does not permit it")
 	}
-	if !s.destrLim.Allow(p.Username() + "|dbquery") {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-			"too many destructive statements, slow down")
+	if err := s.destrLim.Spend(p.Username()+"|dbquery", "too many destructive statements, slow down"); err != nil {
+		return err
 	}
 	return nil
 }

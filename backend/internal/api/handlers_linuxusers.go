@@ -88,8 +88,8 @@ func (s *Server) spendDestructive(r *http.Request) error {
 	if !p.Can(auth.CapDestructive) {
 		return httpx.Err(http.StatusForbidden, "forbidden", "your role does not permit this")
 	}
-	if !s.destrLim.Allow(p.Username() + "|systemuser") {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many destructive actions; try again shortly")
+	if err := s.destrLim.Spend(p.Username()+"|systemuser", "too many destructive actions; try again shortly"); err != nil {
+		return err
 	}
 	return nil
 }

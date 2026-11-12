@@ -200,7 +200,7 @@ var openapiErrorFields = map[string]string{
 	"operation": "What the request was trying to do, when the handler names it.",
 	"reason":    "The likely reason it did not work.",
 	"raw":       "What the subsystem underneath reported, kept for the details rather than the headline.",
-	"retryable": "Whether the same request may succeed if tried again: a timeout or a daemon that was briefly unreachable.",
+	"retryable": "Whether the same request may succeed if tried again: a timeout, a daemon that was briefly unreachable, or a rate limit. A 429 rate_limited was refused before anything ran, and its Retry-After header says the wait in whole seconds; every answer of a rate-limited route carries RateLimit-Remaining.",
 	"requestId": "On a 5xx: the id of the request that failed, also in the X-Request-Id header of every answer. Quote it to whoever reads the dashboard's log, where the cause is on the line with the same id.",
 }
 

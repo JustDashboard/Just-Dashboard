@@ -12,7 +12,19 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   handler at all. `httpx.RealIP` trusts `X-Forwarded-For` only from `JD_TRUSTED_PROXIES`, or the
   allowlist could be spoofed past.
 - **Three limiters**, `NewLimiter(perMinute, burst)`: `loginLim` (10/5, per address, on top of the
-  per-account lockout), `apiLim` (600/120, per principal), `destrLim` (30/10, destructive routes).
+  per-account lockout), `apiLim` (600/120, per credential), `destrLim` (30/10, destructive routes).
+  `apiLim` is `PerCredential`: a browser session, each API key, and the assistant working in a
+  session each have a bucket of their own (`httpx.credentialKey`), so a CI job's key or the
+  assistant's calls cannot empty the bucket an open page polls from, even where an SSH tunnel puts
+  them all on one address. `destrLim` is not: it stays the person's at their address, whichever
+  credential spends it, so minting a key or asking the assistant buys no second allowance of
+  irreversible actions. A refusal is `429 rate_limited` in the envelope with `Retry-After` set to
+  the bucket's real wait in whole seconds (rounded up, never 0) and `RateLimit-Remaining: 0`; an
+  admitted request carries `RateLimit-Remaining`. A handler that spends a budget by hand uses
+  `Limiter.Spend(key, message)`, whose error carries the same wait. The clients wait a short
+  `Retry-After` out and ask again, because the refusal came before anything ran: `jd` and both
+  SDKs twice at most for a wait of ten seconds or less, the page (`fetchResponse`) once, for a
+  read, for five seconds or less.
   TOTP setup, enrollment confirmation and verification share a separate account-keyed `loginLim`
   bucket; changing IP or switching between these routes does not reset the second-factor budget.
   A password asked for again from a session spends the same bucket (`Server.spendGuess`):
@@ -57,7 +69,8 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   the person: their own session principal, read again for the call, is carried in the context
   (`httpx.WithAssistant`), and every group's authentication takes it in place of a credential, marked
   `Principal.Assistant` so the route's audit entry records actor `assistant`. It is not a key and the deploy key gate
-  never sees it: the route's capability check, handler rules and rate limit decide as they do for the person, and
+  never sees it: the route's capability check and handler rules decide as they do for the person, its destructive
+  actions spend the person's own `destrLim` budget, its other calls a general budget of its own per session, and
   the request carries the CSRF header a page sends. A WebSocket or a stream is not made this way, nor the short list
   in `agentExclusion`, nor a route into a protected database connection (`agentProtected`). A command it runs on the
   host (`run_command`) is not a request at all: it is the terminal's own way of running a line

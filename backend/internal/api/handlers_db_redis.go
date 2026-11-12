@@ -269,9 +269,8 @@ func (s *Server) redisDestructive(r *http.Request, what string) error {
 		return httpx.Err(http.StatusForbidden, "forbidden",
 			what+", and your role does not permit that (destructive)")
 	}
-	if !s.destrLim.Allow(p.Username() + "|redis") {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-			"too many destructive requests, slow down")
+	if err := s.destrLim.Spend(p.Username()+"|redis", "too many destructive requests, slow down"); err != nil {
+		return err
 	}
 	return nil
 }

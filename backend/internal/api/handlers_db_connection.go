@@ -1448,8 +1448,8 @@ func (s *Server) handleDBPower(w http.ResponseWriter, r *http.Request) error {
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"stopping or restarting a database interrupts whatever is using it, and your role does not permit it")
 		}
-		if !s.destrLim.Allow(p.Username() + "|dbpower") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many stops and restarts, slow down")
+		if err := s.destrLim.Spend(p.Username()+"|dbpower", "too many stops and restarts, slow down"); err != nil {
+			return err
 		}
 	}
 	conn, dsn, err := s.dbConnRow(r.Context(), id)

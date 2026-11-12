@@ -1029,8 +1029,8 @@ func (s *Server) handleStackRun(w http.ResponseWriter, r *http.Request) error {
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"this action interrupts running services and needs the destructive capability")
 		}
-		if !s.destrLim.Allow(p.Username()) {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many destructive actions; try again shortly")
+		if err := s.destrLim.Spend(p.Username(), "too many destructive actions; try again shortly"); err != nil {
+			return err
 		}
 		// The websocket variant: a browser cannot set a header on an upgrade
 		// request, so the phrase arrives as a query parameter here. wsx's

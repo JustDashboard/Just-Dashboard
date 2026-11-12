@@ -308,9 +308,8 @@ func (s *Server) handleDBMaintenance(w http.ResponseWriter, r *http.Request) err
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				action.ID+" "+why+" and your role does not permit it")
 		}
-		if !s.destrLim.Allow(p.Username() + "|dbmaintenance") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-				"too many blocking maintenance actions, slow down")
+		if err := s.destrLim.Spend(p.Username()+"|dbmaintenance", "too many blocking maintenance actions, slow down"); err != nil {
+			return err
 		}
 	}
 	pool, _, err := s.dbPool(r.Context(), id)

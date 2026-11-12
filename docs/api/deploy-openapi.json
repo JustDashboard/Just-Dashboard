@@ -45,7 +45,7 @@
                       "type": "string"
                     },
                     "retryable": {
-                      "description": "Whether the same request may succeed if tried again: a timeout or a daemon that was briefly unreachable.",
+                      "description": "Whether the same request may succeed if tried again: a timeout, a daemon that was briefly unreachable, or a rate limit. A 429 rate_limited was refused before anything ran, and its Retry-After header says the wait in whole seconds; every answer of a rate-limited route carries RateLimit-Remaining.",
                       "type": "boolean"
                     }
                   },

@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // APIError carries an HTTP status alongside a message safe to show the client.
@@ -52,6 +53,9 @@ type APIError struct {
 	RequestID string `json:"requestId,omitempty"`
 
 	err error
+	// retryAfter is how long until the same request would be admitted, for a
+	// refusal by a rate limit; WriteError says it in Retry-After.
+	retryAfter time.Duration
 }
 
 // Describe attaches what was being attempted to an error.
@@ -150,6 +154,12 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	if p, ok := PrincipalFrom(r.Context()); ok {
 		p.FailureReason = apiErr.Message
+	}
+	if apiErr.Status == http.StatusTooManyRequests && apiErr.retryAfter > 0 {
+		// The real wait. It used to be a flat 30 seconds for a bucket that
+		// refills in a tenth of one.
+		w.Header().Set("Retry-After", retryAfterSeconds(apiErr.retryAfter))
+		w.Header().Set("RateLimit-Remaining", "0")
 	}
 	// A refusal is often written before the body was read. What is left of
 	// it is read here, within the client's allowance, so the server does not

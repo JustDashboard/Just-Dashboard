@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The request builder against a test server: what each kind of call puts on
@@ -157,5 +159,82 @@ func TestAStreamIsGivenAsItsAddress(t *testing.T) {
 	}
 	if got := NewClient("http://127.0.0.1:8080", "k").DeploymentRunStreamURL(1, 2); got != "ws://127.0.0.1:8080/api/v1/deploy/1/runs/2/stream" {
 		t.Errorf("stream address %q", got)
+	}
+}
+
+// A rate limit refuses before anything ran and says how long to wait, so the
+// client waits and sends the request again instead of failing the caller.
+func TestARateLimitedRequestIsSentAgainAfterItsWait(t *testing.T) {
+	var calls atomic.Int32
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(raw))
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"error":{"code":"rate_limited","message":"too many requests, slow down","retryable":true}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":9}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(srv.URL, "k")
+
+	started := time.Now()
+	if err := c.do(context.Background(), http.MethodPost, "/deploy/9/redeploy", nil, map[string]any{"a": 1}, nil, nil); err != nil {
+		t.Fatalf("a request that was asked to wait a second: %v", err)
+	}
+	if calls.Load() != 2 || time.Since(started) < time.Second {
+		t.Errorf("%d requests in %v; want two, a second apart", calls.Load(), time.Since(started))
+	}
+	if len(bodies) != 2 || bodies[0] != bodies[1] || bodies[1] != `{"a":1}` {
+		t.Errorf("the second request does not carry the body again: %q", bodies)
+	}
+}
+
+func TestOnlyAShortRateLimitIsWaitedOut(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status     int
+		retryAfter string
+	}{
+		"a wait too long to sit through":     {http.StatusTooManyRequests, "120"},
+		"a 429 that names no wait":           {http.StatusTooManyRequests, ""},
+		"a wait that is not a number":        {http.StatusTooManyRequests, "soon"},
+		"another refusal with a Retry-After": {http.StatusServiceUnavailable, "1"},
+	} {
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			if tc.retryAfter != "" {
+				w.Header().Set("Retry-After", tc.retryAfter)
+			}
+			w.WriteHeader(tc.status)
+			_, _ = io.WriteString(w, `{"error":{"code":"assistant_busy","message":"busy"}}`)
+		}))
+		err := NewClient(srv.URL, "k").do(context.Background(), http.MethodGet, "/deploy", nil, nil, nil, nil)
+		srv.Close()
+		var apiErr *Error
+		if !errors.As(err, &apiErr) || apiErr.Status != tc.status || calls.Load() != 1 {
+			t.Errorf("%s: %d requests, error %v; want one request and its refusal", name, calls.Load(), err)
+		}
+	}
+
+	// A context that ends during the wait ends the call with the refusal.
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Retry-After", "5")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"code":"rate_limited","message":"slow down"}}`)
+	}))
+	t.Cleanup(srv.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := NewClient(srv.URL, "k").do(ctx, http.MethodGet, "/deploy", nil, nil, nil, nil)
+	if !IsCode(err, "rate_limited") || calls.Load() != 1 {
+		t.Errorf("a cancelled wait: %d requests, error %v", calls.Load(), err)
 	}
 }

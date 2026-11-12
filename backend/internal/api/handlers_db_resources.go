@@ -335,8 +335,8 @@ func (s *Server) handleDBResourcesUpdate(w http.ResponseWriter, r *http.Request)
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"lifting a limit replaces the container, which drops every session to it, and your role does not permit it")
 		}
-		if !s.destrLim.Allow(p.Username() + "|dbresources") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many replacements, slow down")
+		if err := s.destrLim.Spend(p.Username()+"|dbresources", "too many replacements, slow down"); err != nil {
+			return err
 		}
 	}
 

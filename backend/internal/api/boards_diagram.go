@@ -47,9 +47,8 @@ func (s *Server) handleBoardDiagram(w http.ResponseWriter, r *http.Request) erro
 		return httpx.Err(http.StatusConflict, "assistant_not_configured",
 			"the assistant is not set up: an administrator chooses its provider in the assistant's settings in the SQL editor, under Databases")
 	}
-	if !s.assistant.limit.Allow("install") {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-			"the assistant has answered as many questions as this install allows in a minute; ask again shortly")
+	if err := s.assistant.limit.Spend("install", "the assistant has answered as many questions as this install allows in a minute; ask again shortly"); err != nil {
+		return err
 	}
 	select {
 	case s.assistant.slots <- struct{}{}:

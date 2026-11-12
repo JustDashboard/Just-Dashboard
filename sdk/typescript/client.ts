@@ -251,8 +251,10 @@ export class ApiError extends Error {
   /** What the request was acting on, when the handler names it. */
   readonly resource?: string
   /**
-   * Whether the same request may succeed if tried again: a timeout or a daemon that was briefly
-   * unreachable.
+   * Whether the same request may succeed if tried again: a timeout, a daemon that was briefly
+   * unreachable, or a rate limit. A 429 rate_limited was refused before anything ran, and its
+   * Retry-After header says the wait in whole seconds; every answer of a rate-limited route
+   * carries RateLimit-Remaining.
    */
   readonly retryable?: boolean
   /** The answer as it came: the envelope, or the text of one that was not. */
@@ -306,6 +308,21 @@ export function pathParam(value: string | number): string {
   return encodeURIComponent(String(value))
 }
 
+/** How many times a rate-limited request is sent again. */
+const rateLimitRetries = 2
+
+/**
+ * The milliseconds a rate limit asked for: a 429 with a Retry-After of ten
+ * seconds or less. Anything longer, and every other refusal, is the caller's
+ * to decide.
+ */
+function rateLimitWait(response: Response): number | undefined {
+  if (response.status !== 429) return undefined
+  const seconds = Number(response.headers.get("Retry-After") ?? "")
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 10) return undefined
+  return seconds * 1000
+}
+
 /** Calls one dashboard's deployment API. */
 export class Client {
   readonly baseUrl: string
@@ -338,7 +355,10 @@ export class Client {
     return this.url(path).replace(/^http(s?):\/\//, "ws$1://")
   }
 
-  /** Sends one call and reads its answer, or throws an ApiError for a refusal. */
+  /**
+   * Sends one call and reads its answer, or throws an ApiError for a refusal. A call
+   * refused by a rate limit (429 with a short Retry-After) is sent again after the wait.
+   */
   async request<T>(call: Call, options?: RequestOptions): Promise<T> {
     const headers: Record<string, string> = {
       Accept:
@@ -354,12 +374,23 @@ export class Client {
       headers["Content-Type"] = "application/json"
       body = JSON.stringify(call.body)
     }
-    const response = await this.fetcher(this.url(call.path, call.query), {
-      method: call.method,
-      headers,
-      body,
-      signal: options?.signal,
-    })
+    const send = () =>
+      this.fetcher(this.url(call.path, call.query), {
+        method: call.method,
+        headers,
+        body,
+        signal: options?.signal,
+      })
+    let response = await send()
+    // A request refused by a rate limit was refused before anything ran, so it
+    // is sent again when the wait it was told is over.
+    for (let retries = 0; retries < rateLimitRetries; retries++) {
+      const wait = rateLimitWait(response)
+      if (wait === undefined || options?.signal?.aborted) break
+      await response.text().catch(() => undefined)
+      await new Promise((resolve) => setTimeout(resolve, wait))
+      response = await send()
+    }
     if (response.status >= 300) {
       const text = await response.text()
       let parsed: unknown = text

@@ -163,4 +163,50 @@ describe("the request builder", () => {
       "ws://127.0.0.1:8080/api/v1/deploy/1/runs/2/stream",
     )
   })
+
+  // A rate limit refuses before anything ran and says how long to wait, so the
+  // client waits and sends the call again instead of failing the caller.
+  test("a rate-limited call is sent again after its wait", async () => {
+    const sent: string[] = []
+    const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
+      sent.push(String(init?.body))
+      if (sent.length === 1) {
+        return new Response(`{"error":{"code":"rate_limited","message":"slow down"}}`, {
+          status: 429,
+          headers: { "Retry-After": "1", "Content-Type": "application/json" },
+        })
+      }
+      return new Response(`{"id":9}`, { headers: { "Content-Type": "application/json" } })
+    }) as typeof fetch
+    const started = Date.now()
+    const answer = await deployGet(new Client({ baseUrl: "https://d", fetch: fetcher }), 9)
+    expect(answer).toEqual({ id: 9 } as never)
+    expect(sent.length).toBe(2)
+    expect(sent[1]).toBe(sent[0])
+    expect(Date.now() - started).toBeGreaterThanOrEqual(990)
+  })
+
+  test("only a short rate limit is waited out", async () => {
+    for (const [status, retryAfter] of [
+      [429, "120"],
+      [429, undefined],
+      [429, "soon"],
+      [503, "1"],
+    ] as const) {
+      let calls = 0
+      const fetcher = (async () => {
+        calls++
+        return new Response(`{"error":{"code":"assistant_busy","message":"busy"}}`, {
+          status,
+          headers: retryAfter ? { "Retry-After": retryAfter } : {},
+        })
+      }) as unknown as typeof fetch
+      const error = await deployGet(new Client({ baseUrl: "https://d", fetch: fetcher }), 9).catch(
+        (e) => e,
+      )
+      expect(error).toBeInstanceOf(ApiError)
+      expect(error.status).toBe(status)
+      expect(calls).toBe(1)
+    }
+  })
 })

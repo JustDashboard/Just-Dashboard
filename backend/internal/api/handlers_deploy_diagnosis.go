@@ -116,9 +116,8 @@ func (s *Server) handleDeploymentRunDiagnose(w http.ResponseWriter, r *http.Requ
 		return httpx.Err(http.StatusConflict, "diagnosis_running", "this run is being diagnosed already; its answer appears here when it arrives")
 	}
 	defer s.assistant.diagnosing.Delete(runID)
-	if !s.assistant.limit.Allow("install") {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-			"the assistant has answered as many questions as this install allows in a minute; ask again shortly")
+	if err := s.assistant.limit.Spend("install", "the assistant has answered as many questions as this install allows in a minute; ask again shortly"); err != nil {
+		return err
 	}
 	select {
 	case s.assistant.slots <- struct{}{}:

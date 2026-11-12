@@ -169,7 +169,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, svc *auth.Servic
 		// top of the per-account lockout.
 		loginLim:   httpx.NewLimiter(10, 5),
 		passkeyLim: httpx.NewLimiter(60, 20),
-		apiLim:     httpx.NewLimiter(600, 120),
+		apiLim:     httpx.NewLimiter(600, 120).PerCredential(),
 		// Destructive routes get their own budget so a scripted delete loop
 		// cannot run away even with a valid admin token.
 		destrLim:  httpx.NewLimiter(30, 10),

@@ -758,9 +758,8 @@ func (s *Server) importUploaded(w http.ResponseWriter, r *http.Request, conn *db
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"replacing a table's contents is destructive and your role does not permit it")
 		}
-		if !s.destrLim.Allow(p.Username() + "|dbimport") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-				"too many destructive imports, slow down")
+		if err := s.destrLim.Spend(p.Username()+"|dbimport", "too many destructive imports, slow down"); err != nil {
+			return err
 		}
 	}
 	ctx, cancel := timeoutCtx(r, 2*time.Hour)
