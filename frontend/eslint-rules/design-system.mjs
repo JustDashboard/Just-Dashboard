@@ -196,6 +196,15 @@ const latencyWords = {
 const BAR_LIST_HOMES =
   /src[\\/]components[\\/](?:bar-list\.tsx|database[\\/]query[\\/]chart-view\.tsx)$/
 
+/**
+ * The 0.6.1 design-system audit asked for one checkbox and one spinner, and
+ * each came back in a newer file: a native `<input type="checkbox">` beside
+ * the Radix one in the same workspace, and `LoaderCircle` spun by hand where
+ * `Spinner` (components/state.tsx) is the spinner. Both are refused outside
+ * the primitives that draw them.
+ */
+const PRIMITIVE_HOMES = /src[\\/]components[\\/](?:ui[\\/]|state\.tsx$|icons\.tsx$)/
+
 const primitives = {
   meta: {
     type: "problem",
@@ -204,7 +213,30 @@ const primitives = {
   },
   create(context) {
     const filename = context.filename ?? ""
+    const home = PRIMITIVE_HOMES.test(filename)
     return {
+      JSXOpeningElement(node) {
+        if (home || node.name?.type !== "JSXIdentifier") return
+        if (node.name.name === "LoaderCircle") {
+          context.report({
+            node,
+            message:
+              "[spinner] Use Spinner from components/state.tsx. A hand-spun LoaderCircle is the spinner drawn a second way.",
+          })
+          return
+        }
+        if (node.name.name !== "input") return
+        const type = node.attributes.find(
+          (attribute) => attribute.type === "JSXAttribute" && attribute.name?.name === "type",
+        )
+        if (type?.value?.type === "Literal" && type.value.value === "checkbox") {
+          context.report({
+            node,
+            message:
+              "[checkbox] Use Checkbox from components/ui/checkbox. The browser's own control beside the product's is two checkboxes on one page.",
+          })
+        }
+      },
       ImportDeclaration(node) {
         if (node.source.value !== "@/components/bar-list") return
         if (BAR_LIST_HOMES.test(filename)) return

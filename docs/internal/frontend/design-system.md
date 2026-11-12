@@ -5,6 +5,11 @@ are mechanical — typing a value where a token exists, and re-deriving a patter
 and `tests/browser/design-system.spec.ts` checks three structural properties in a browser. Everything
 below is judgement, and this is where it is written down.
 
+There is one checkbox and one spinner: `Checkbox` (`components/ui/checkbox`) and `Spinner`
+(`components/state.tsx`). The lint rule `design-system/primitives` refuses a native
+`<input type="checkbox">` and a `LoaderCircle` drawn directly anywhere but `components/ui`,
+`state.tsx` and `icons.tsx`, because each came back in a newer file after the 0.6.1 audit removed it.
+
 Since 0.7.5, automatic Attention/Needs attention sections, recommendation comparisons, Advisor and
 navigation attention marks have been removed. Historical layout examples
 below describe the earlier pages; their attention blocks are no longer part of those page passes.

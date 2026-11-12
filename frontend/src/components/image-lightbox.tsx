@@ -2,14 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Dialog as DialogPrimitive } from "radix-ui"
-import {
-  ChevronLeft,
-  ChevronRight,
-  Cross,
-  Download,
-  External,
-  LoaderCircle,
-} from "@/components/icons"
+import { ChevronLeft, ChevronRight, Cross, Download, External } from "@/components/icons"
+import { Spinner } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -333,10 +327,10 @@ function Picture({ image, missingNote }: { image: LightboxImage; missingNote: st
           />
         )}
         {state === "loading" && (
-          <LoaderCircle
-            aria-hidden
-            className="pointer-events-none absolute top-1/2 left-1/2 size-5 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/70"
-          />
+          // Centred by the wrapper: the spinner's own transform is its turn.
+          <span className="pointer-events-none absolute inset-0 grid place-items-center">
+            <Spinner className="size-5 text-white/70" />
+          </span>
         )}
       </div>
       {state === "missing" && (
