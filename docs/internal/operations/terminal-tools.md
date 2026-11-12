@@ -188,8 +188,9 @@ as the owner of the checkout (`runuser`), so nothing in `.git` ends up owned by 
 
 ## Verification
 
-Run `scripts/test-changed.sh main`, plus `python3 scripts/test_manage.py` and
-`bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`.
+Run `scripts/test-changed.sh main`. For a change to `install.sh` or anything under `scripts/` it runs
+`bash -n` on the changed scripts and every `scripts/test_*.py` that names one of them, which for
+`manage.sh` and the installer is `python3 scripts/test_manage.py`.
 The Python fixtures check command arguments, stdin preservation, root and input checks, checkout paths
 with spaces, Compose fallback, restoring a kept uninstall's `.env`, refusing a weak first password, removing
 the first password after a healthy fresh install and never from a kept `.env`, asking for the key of a store left

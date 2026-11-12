@@ -68,7 +68,11 @@ never into `docs/audits/`.
 - Run the checks with `scripts/test-changed.sh`. It runs only what your diff can reach: Prettier and
   ESLint on the changed frontend files, `tsc --noEmit`, `bun test src`, `go build`/`go vet` and the
   Go tests beside each changed file, the clients' own checks for a change under `sdk/`, and the
-  browser specs that open a page the change renders. Do not
+  browser specs that open a page the change renders. A change to `install.sh`, `scripts/`,
+  `docker-compose.yml`, `deploy/`, `.env.example` or a Dockerfile runs `bash -n` and the
+  `scripts/test_*.py` that name the file; a file under `backend/` that is not Go, `go.mod`, and the
+  frontend's `package.json`, lock and build configuration each pick the packages or specs they reach
+  (the script's header has the rules, and `JD_TEST_CHANGED_PLAN=1` prints the picking alone). Do not
   run the whole browser suite or `go test ./...` locally. Install the required Chromium build once
   with `bun run test:browser:install`.
   Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from

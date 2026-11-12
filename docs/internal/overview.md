@@ -43,7 +43,12 @@ scripts/release.sh 0.6               # see backend/databases-proxy-platform.md#c
 ```
 
 CONTRIBUTING requires `scripts/test-changed.sh` to pass before a PR. It runs only what the diff can
-reach; the whole browser suite and `go test ./...` are not run locally.
+reach; the whole browser suite and `go test ./...` are not run locally. What it reaches includes the
+files that are not source: the installer, the scripts, the compose file, `deploy/`, `.env.example` and
+the Dockerfiles run the `scripts/test_*.py` that name them, a non-Go file under `backend/` runs its
+package, and `go.mod` runs the packages its changed modules reach, which is every package when the
+toolchain line moves. The Go picking for files that are not Go is `scripts/ci-plan.py`'s own, imported,
+so the local gate and the workflow's plan cannot drift apart again.
 
 The browser gate serves the latest `bun run build` output on `127.0.0.1:43117`; it does not reuse a
 development server or an unrelated dashboard on port 3000. Rebuild after frontend edits before running

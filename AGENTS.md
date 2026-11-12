@@ -59,8 +59,14 @@ It reads the diff (committed, staged, unstaged and untracked) and runs Prettier 
 changed frontend files, `tsc --noEmit`, `bun test src`, `go build ./...` and `go vet` on the changed
 packages, the Go tests beside each changed file, the deployment API clients' own checks for a change
 under `sdk/`, and the browser specs that open a page the change renders, with `design-system.spec.ts`
-for any UI change. The header of the script says how each is
-picked. Use it while working and again before a pull request. There is no separate full gate.
+for any UI change. A change that is not source has its checks too: the whole package for a file
+under `backend/` that is not Go or that a package's tests read from outside it, the packages a
+changed line of `go.mod` reaches, the whole lint and the two specs that open every page for the
+frontend's dependencies and build configuration, and `bash -n` with the `scripts/test_*.py` that name
+the file for `install.sh`, `scripts/`, `docker-compose.yml`, `deploy/`, `.env.example` and the
+Dockerfiles. The header of the script says how each is
+picked, and `JD_TEST_CHANGED_PLAN=1` prints what it picked without running it. Use it while working
+and again before a pull request. There is no separate full gate.
 Set `JD_BROWSER_WORKERS=1` when concurrent worktrees leave little memory for browser workers;
 without this override, the existing Playwright configuration controls concurrency.
 
