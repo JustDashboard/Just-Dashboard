@@ -6047,7 +6047,10 @@ update builds and runs what it names as root. `internal/selfupdate/signing.go` c
 signed with a key the *running* release was built with, so a stolen token or a compromised workflow
 secret cannot ship code to installs by itself. **It ships switched off**: `allowed_signers` (embedded
 beside the changelog) names no key, `SignaturesRequired()` is false and nothing is verified. Making the
-key, guarding it and signing with it are the project owner's steps, and this is the order to do them in:
+key, guarding it and signing with it are the project owner's steps, and this is the order to do them in.
+`scripts/manage.sh update`, the update over SSH, makes the same checks against the `allowed_signers`
+committed in the checkout ([terminal tools](../operations/terminal-tools.md#version-update-and-rollback)),
+so the two are changed together:
 
 1. Make a key that lives nowhere in the repository: `ssh-keygen -t ed25519 -C release@just-dashboard.com
    -f jd-release`. Keep `jd-release` offline or in the one secret the release job reads; a second copy

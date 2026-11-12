@@ -139,6 +139,42 @@ of the built backend image into a temporary file beside the target, makes it 075
 `/usr/local/bin/jd` (`JD_CLI_PATH` chooses another path), so a jd already running keeps its file; an
 image with no jd fails with a message and leaves nothing behind.
 
+## Version, update and rollback
+
+Three commands for the day the dashboard is not there to update itself or to show why an update
+failed. They are the operator-facing half of the rollback that `internal/selfupdate` does on its own,
+and `docs/guides/administration.md` ("If an update fails") is where an operator finds them.
+
+`version` changes nothing. It prints the checkout's version, commit and branch and whether that is the
+release (the rule of `scripts/build-stamp.sh`), what `just-dashboard-backend:latest` and `:previous`
+call themselves (`jd version` run from each image), and the last run in `self-update.json` with the
+path of its transcript and of its database copy.
+
+`update [VERSION]` is the by-hand update with the two things an operator forgets: it tags the running
+images `:previous` first and prints the `rollback` command that undoes it. It fetches tags from
+`origin`, takes the newest `v<version>` tag (or the one named), and fast-forwards with
+`merge --ff-only`; it then builds one service at a time with the build stamp and runs
+`up -d --remove-orphans`. It installs a tag and nothing else, for forks too: a branch head is
+`git pull --ff-only` and `install.sh`. When the checkout's committed `allowed_signers` names a key it
+verifies the tag the way `verifyReleaseTag` does (a tag object, named for the release, signed by a key
+in the file, with every deciding git setting passed on the command line), so turning signed releases
+on does not leave an unverified way in. Decided, and said in its output: it copies no database (the
+store can only copy itself from inside a running backend, and a file copy of a live SQLite database is
+not a backup) and it does not watch health or go back by itself. It does not take the lifecycle lock
+either; it refuses while a `just-dashboard-updater` container is running.
+
+`rollback [COMMIT]` retags each `:previous` image that exists over `:latest`, runs
+`git reset --keep` to the commit, and `up -d --no-build --remove-orphans`: `handCommands` in
+`rollback.go`, in the order that lets git refuse before anything is changed. With no commit it uses the
+one the last update started from, but only when the checkout is still where that update left it:
+`manage-update.last` in the data directory (written by `update`) first, then `fromCommit` of
+`self-update.json` when its `toCommit` is HEAD. A checkout somebody has moved since stays where it is
+and the plan says so. With no `:previous` image it changes nothing.
+
+Both ask before changing anything and refuse without a terminal unless `--yes` is appended. git runs
+as the owner of the checkout (`runuser`), so nothing in `.git` ends up owned by root.
+`JD_HOST_DATA_DIR` moves the data directory for the tests only.
+
 ## Verification
 
 Run `scripts/test-changed.sh main`, plus `python3 scripts/test_manage.py` and

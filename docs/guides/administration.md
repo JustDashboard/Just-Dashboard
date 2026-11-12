@@ -26,6 +26,9 @@ while the backend is stopped.
 | `sudo ./scripts/manage.sh logs [backend\|frontend\|proxy]` | Follow logs (Ctrl+C exits) |
 | `sudo ./scripts/manage.sh restart` | Recreate the stack to apply `.env` edits |
 | `sudo ./scripts/manage.sh install-cli` | Install (or reinstall) the `jd` command line at `/usr/local/bin/jd` |
+| `sudo ./scripts/manage.sh version` | Say what is installed: the checkout's version and commit, what the built images call themselves, and the last update |
+| `sudo ./scripts/manage.sh update [0.8.6]` | [Update over SSH](#if-an-update-fails) to the newest release tag, or to the one named, when the dashboard is not there to do it |
+| `sudo ./scripts/manage.sh rollback [COMMIT]` | [Go back](#if-an-update-fails) to the images and the commit from before the last update |
 | `./scripts/manage.sh --help` | Usage, no sudo needed |
 
 Passwords are entered twice with hidden input and must meet the dashboard's strength rules. The
@@ -64,6 +67,25 @@ version that is on `main` but not released yet. The update check is one unauthen
 from GitHub and a second small request for the tag, every two hours and at most every five minutes
 while pages are being opened; `JD_UPDATE_CHECK=false` turns it off.
 
+### What an update trusts
+
+An update runs as root on your server and builds whatever the repository's release tag names, so it is
+worth knowing what stands behind that:
+
+- **GitHub, and the project's repository on it.** The changelog and the tag are read over HTTPS from
+  `JustDashboard/Just-Dashboard`, and the code is fetched from the `origin` of your checkout. Nothing
+  else is contacted, and no host can be configured in its place. `JD_UPDATE_REPO` follows a fork
+  instead, and then the trust is in that fork: it is offered the head of its branch when it has no tags.
+- **The release tag.** It is made by the project's release job only after the checks have passed on
+  `main`. A tag is not yet signed, so anyone who could push to the repository could make one. The
+  dashboard can already require a signature from a release key built into the version you are running;
+  that is switched off until the project publishes its key.
+- **Your own checkout.** The update fast-forwards it and never resets it, so your edits stay; it
+  refuses, changing nothing, when one of them collides with the new version.
+
+`JD_UPDATE_CHECK=false` stops the dashboard asking GitHub at all. Updating is then yours to do by hand,
+with `manage.sh update` below.
+
 A dashboard built from anything other than a release, such as a patch branch, a fork or a clone with
 commits of your own, shows the commit it was built from after the version: `0.8.5+98c9349` on the
 Version page and in `jd version`, where a release shows `0.8.5`. Quote the whole of it when you report
@@ -93,6 +115,61 @@ they belong to the file you set aside. Everything the dashboard recorded after t
 changed. A copy uses as much disk as the database; delete the files in `pre-update/` if you need the
 room.
 
+## If an update fails
+
+Most failures need nothing from you. The update runs in a container of its own,
+`just-dashboard-updater`, which keeps the images that were running as `just-dashboard-backend:previous`
+and `just-dashboard-frontend:previous` before it builds. If the build fails, the old version never
+stopped. If the new version starts and does not answer, the updater puts the `:previous` images back,
+moves the checkout back to the commit it started from and starts the old version again; the Version
+page then shows the update as failed, with the reason and the whole transcript.
+
+When the dashboard is not there to show that, look from SSH, in the directory you installed into:
+
+```bash
+sudo ./scripts/manage.sh version                       # what is checked out, what is built, the last update
+sudo ./scripts/manage.sh status                        # which containers are up
+sudo less /var/lib/just-dashboard/self-update.log      # the last update, as it ran
+sudo docker logs just-dashboard-updater                # the same, from the container a failed update leaves behind
+sudo ./scripts/manage.sh logs backend                  # why the backend is not answering
+```
+
+If the old version did not come back by itself, `rollback` finishes the job. It says what it is about
+to do and asks first:
+
+```bash
+sudo ./scripts/manage.sh rollback
+```
+
+That puts each `:previous` image back as `:latest`, moves the checkout back to the commit the update
+started from (your own edits stay) and recreates the containers without building anything. Name the
+commit, `rollback 98c9349`, when it cannot tell which one: `manage.sh version` and the transcript both
+show it. By hand, the same thing is:
+
+```bash
+sudo docker image tag just-dashboard-backend:previous just-dashboard-backend:latest
+sudo docker image tag just-dashboard-frontend:previous just-dashboard-frontend:latest
+git reset --keep 98c9349                               # the commit you were on before the update
+sudo docker compose up -d --no-build
+```
+
+A rollback leaves the database alone, because the previous version can read it. If the data itself is
+wrong afterwards, put back the copy from before the update as [Updating](#updating) describes.
+
+To move forward instead, for example to a release that fixes what failed, while the dashboard is still
+down:
+
+```bash
+sudo ./scripts/manage.sh update            # the newest release tag on origin
+sudo ./scripts/manage.sh update 0.8.6      # or a version you name
+```
+
+It fetches the tags, fast-forwards the checkout to the release, keeps the running images as
+`:previous`, rebuilds and restarts, and prints the `rollback` command that undoes it. It installs only
+a release tag, and checks the tag's signature once a release key is in the checkout. Unlike **Update
+now** it copies no database first and does not go back by itself, so use the Version page whenever the
+dashboard is up. `sudo ./install.sh` remains the way to rebuild the checkout exactly as it stands.
+
 ## Uninstalling
 
 **Settings → Configuration → Danger zone → Uninstall** takes the dashboard off the server and asks one
@@ -116,6 +193,21 @@ dashboard stops; the whole transcript is in `/var/log/just-dashboard-uninstall.l
 The dashboard's own state is a SQLite database in `JD_DATA_DIR` (`/var/lib/just-dashboard`). Back up
 that directory **and** keep `JD_MASTER_KEY` somewhere separate; either alone will not restore. The
 Backups page lists the dashboard itself under Coverage and writes that job for you.
+
+To put the dashboard's own data back, onto the same server or a new one:
+
+1. Install the dashboard if it is not there (`sudo ./install.sh` in a clone), with the **same**
+   `JD_MASTER_KEY` in `.env` as the server the backup came from. The installer asks for the earlier key
+   when it finds the data without a `.env`; on a new server put the key in `.env` before you start.
+2. Stop the backend: `sudo docker compose stop backend`.
+3. Set aside what is in `/var/lib/just-dashboard` now (`vpsd.db`, with `vpsd.db-wal` and `vpsd.db-shm`
+   when they exist), then copy the backed-up directory's contents into it. `vpsd.db` is the database.
+   If the backup has `vpsd.db-wal` and `vpsd.db-shm` beside it, restore all three together, and never
+   leave the ones you set aside next to a restored `vpsd.db`: they belong to the file they were taken
+   with.
+4. Start it again: `sudo docker compose start backend`, then `sudo ./scripts/manage.sh status`. With a
+   different key the dashboard still starts, but the secrets it stored cannot be read and have to be
+   entered again.
 
 If you install again on a server that still has that directory but no `.env`, `install.sh` asks for
 the earlier key. Without it, database connections the dashboard made from containers on the server

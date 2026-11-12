@@ -47,8 +47,14 @@ if admin_link:
     if os.environ.get("TEST_LINK_OUTPUT"):
         print(os.environ["TEST_LINK_OUTPUT"])
     sys.exit(int(os.environ.get("TEST_ADMIN_EXIT", "0")))
-if args == ["compose", "build"]:
+if args[:2] == ["compose", "build"]:
     sys.exit(int(os.environ.get("TEST_BUILD_FAIL", "0")))
+if args[:1] == ["ps"] and os.environ.get("TEST_UPDATER_RUNNING") == "1":
+    print("0123456789ab")
+if args[:2] == ["image", "inspect"] and args[-1].endswith(":previous"):
+    sys.exit(int(os.environ.get("TEST_NO_PREVIOUS", "0")))
+if args[:4] == ["run", "--rm", "--entrypoint", "/usr/local/bin/jd"]:
+    print(os.environ.get("TEST_JD_SAYS", ""))
 if args[:4] == ["run", "--rm", "--entrypoint", "cat"]:
     sys.stdout.write(os.environ.get("TEST_JD_BINARY", ""))
 ''')
@@ -151,6 +157,216 @@ if args[:4] == ["run", "--rm", "--entrypoint", "cat"]:
             if process.poll() is None:
                 process.kill()
                 process.wait()
+
+    def update_fixture(self, signer=None, sign=None):
+        """The checkout on release 0.1.0 of an origin that has tagged 0.2.0 and moved on.
+
+        Returns git for the checkout, the environment to run manage.sh in and
+        the three commits. signer is an allowed-signers line committed into
+        the first release; sign is the private key the 0.2.0 tag is signed
+        with, "" for an annotated tag with no signature.
+        """
+        git, env = self.fixture_git()
+        origin = pathlib.Path(self.temp.name) / "origin"
+        origin.mkdir()
+
+        def upstream(*args):
+            return subprocess.run(
+                ["git", "-C", str(origin), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                 "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "init.defaultBranch=main", *args],
+                env={**self.env, **env}, capture_output=True, text=True, check=True).stdout.strip()
+
+        upstream("init", "--quiet")
+        commits = []
+        for number, tag in enumerate(("v0.1.0", "v0.2.0", "")):
+            (origin / "release").write_text(str(number))
+            if signer and number == 0:
+                keys = origin / "backend/internal/selfupdate"
+                keys.mkdir(parents=True)
+                (keys / "allowed_signers").write_text("# release keys\n" + signer + "\n")
+            upstream("add", "-A")
+            upstream("commit", "--quiet", "-m", f"commit {number}")
+            commits.append(upstream("rev-parse", "HEAD"))
+            if tag == "v0.2.0" and sign is not None:
+                signing = ["-c", "gpg.format=ssh", "-c", f"user.signingkey={sign}", "tag", "-s"] if sign else ["tag", "-a"]
+                upstream(*signing, "-m", "0.2.0", tag)
+            elif tag:
+                upstream("tag", tag)
+        git("init", "--quiet")
+        git("remote", "add", "origin", str(origin))
+        git("fetch", "--quiet", "--no-tags", "origin")
+        git("checkout", "--quiet", "-B", "main", commits[0])
+        self.data = pathlib.Path(self.temp.name) / "data"
+        self.data.mkdir()
+        # manage.sh runs git as the checkout's owner; here that is this user.
+        self.tool("runuser", '#!/bin/bash\n[ "$1" = -u ] && shift 2\n[ "$1" = -- ] && shift\nexec "$@"\n')
+        self.tool("getent", f'#!/bin/bash\necho "fixture:x:1:1::{self.temp.name}:/bin/sh"\n')
+        return git, {**env, "JD_HOST_DATA_DIR": str(self.data)}, commits
+
+    def docker_calls(self):
+        return [call["args"] for call in self.read_calls()]
+
+    def test_update_installs_the_newest_release_tag_and_keeps_what_ran(self):
+        git, env, (first, second, _head) = self.update_fixture()
+        result = self.run_tool("manage.sh", "update", "--yes", env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # The tag, not the branch head past it.
+        self.assertEqual(git("rev-parse", "HEAD"), second)
+        calls = self.docker_calls()
+        kept = [["image", "tag", f"just-dashboard-{name}:latest", f"just-dashboard-{name}:previous"]
+                for name in ("backend", "frontend")]
+        build = next(i for i, call in enumerate(calls) if call[:2] == ["compose", "build"])
+        up = calls.index(["compose", "up", "-d", "--remove-orphans"])
+        self.assertLess(calls.index(kept[0]), build)
+        self.assertLess(calls.index(kept[1]), build)
+        self.assertLess(build, up)
+        self.assertIn(f"go back with: sudo ./scripts/manage.sh rollback {first[:12]}", result.stdout)
+        self.assertIn("The database is not copied first", result.stdout)
+        self.assertEqual((self.data / "manage-update.last").read_text(), f"{first} {second}\n")
+
+    def test_update_changes_nothing_without_a_yes(self):
+        git, env, (first, _second, _head) = self.update_fixture()
+        result = self.run_tool("manage.sh", "update", env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("append --yes", result.stderr)
+        self.assertIn("fast-forward the checkout from", result.stdout)
+        self.assertEqual(git("rev-parse", "HEAD"), first)
+        self.assertFalse([call for call in self.docker_calls() if call[:2] in (["image", "tag"], ["compose", "build"], ["compose", "up"])])
+
+    def test_update_refuses_while_the_dashboards_own_update_runs(self):
+        git, env, (first, _second, _head) = self.update_fixture()
+        result = self.run_tool("manage.sh", "update", "--yes", env={**env, "TEST_UPDATER_RUNNING": "1"})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("docker logs -f just-dashboard-updater", result.stderr)
+        self.assertEqual(git("rev-parse", "HEAD"), first)
+
+    def test_update_on_the_newest_release_does_nothing(self):
+        git, env, (first, second, _head) = self.update_fixture()
+        git("merge", "--quiet", "--ff-only", second)
+        result = self.run_tool("manage.sh", "update", "--yes", env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("already on v0.2.0", result.stdout)
+        self.assertFalse([call for call in self.docker_calls() if call[:2] in (["image", "tag"], ["compose", "build"])])
+        # A version that has no tag is not installed from anywhere else.
+        result = self.run_tool("manage.sh", "update", "0.3", "--yes", env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("There is no release tag v0.3", result.stderr)
+
+    def test_update_that_cannot_fast_forward_changes_nothing(self):
+        git, env, _commits = self.update_fixture()
+        git("commit", "--quiet", "--allow-empty", "-m", "a commit of the operator's own")
+        mine = git("rev-parse", "HEAD")
+        result = self.run_tool("manage.sh", "update", "--yes", env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cannot be fast-forwarded", result.stderr)
+        self.assertEqual(git("rev-parse", "HEAD"), mine)
+        self.assertFalse([call for call in self.docker_calls() if call[:2] == ["image", "tag"]])
+
+    def test_failed_update_build_names_the_way_back_and_rollback_takes_it(self):
+        git, env, (first, second, _head) = self.update_fixture()
+        result = self.run_tool("manage.sh", "update", "--yes", env={**env, "TEST_BUILD_FAIL": "1"})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"sudo ./scripts/manage.sh rollback {first[:12]}", result.stderr)
+        self.assertNotIn(["compose", "up", "-d", "--remove-orphans"], self.docker_calls())
+        self.assertEqual(git("rev-parse", "HEAD"), second)
+
+        self.calls.unlink()
+        result = self.run_tool("manage.sh", "rollback", "--yes", env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(git("rev-parse", "HEAD"), first)
+        calls = self.docker_calls()
+        for name in ("backend", "frontend"):
+            self.assertIn(["image", "tag", f"just-dashboard-{name}:previous", f"just-dashboard-{name}:latest"], calls)
+        self.assertEqual(calls[-1], ["compose", "up", "-d", "--no-build", "--remove-orphans"])
+        self.assertFalse([call for call in calls if call[:2] == ["compose", "build"]])
+
+    def write_record(self, **fields):
+        record = {"id": "20261110T053000Z", "status": "failed", "phase": "build", "fromVersion": "0.1.0",
+                  "toVersion": "0.2.0", "savedImages": [{"current": "x:latest", "previous": "x:previous"}], **fields}
+        (self.data / "self-update.json").write_text(json.dumps(record, indent=2))
+
+    def test_rollback_reads_the_commit_the_dashboards_update_started_from(self):
+        git, env, (first, second, head) = self.update_fixture()
+        git("merge", "--quiet", "--ff-only", second)
+        (self.root / "docker-compose.override.yml").write_text("# the operator's own\n")
+        self.write_record(fromCommit=first, toCommit=second, databaseCopy="/var/lib/just-dashboard/pre-update/vpsd-0.1.0-x.db")
+        result = self.run_tool("manage.sh", "rollback", "--yes", env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(git("rev-parse", "HEAD"), first)
+        self.assertTrue((self.root / "docker-compose.override.yml").exists())
+        self.assertIn("pre-update/vpsd-0.1.0-x.db", result.stdout)
+
+        # A checkout that is no longer where that update left it is not moved on a guess.
+        git("merge", "--quiet", "--ff-only", head)
+        result = self.run_tool("manage.sh", "rollback", "--yes", env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("leave the checkout where it is", result.stdout)
+        self.assertEqual(git("rev-parse", "HEAD"), head)
+        # Named, it is.
+        result = self.run_tool("manage.sh", "rollback", first[:10], "--yes", env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(git("rev-parse", "HEAD"), first)
+
+    def test_rollback_with_nothing_kept_changes_nothing(self):
+        git, env, (first, second, _head) = self.update_fixture()
+        git("merge", "--quiet", "--ff-only", second)
+        self.write_record(fromCommit=first, toCommit=second)
+        result = self.run_tool("manage.sh", "rollback", "--yes", env={**env, "TEST_NO_PREVIOUS": "1"})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("No :previous image is kept", result.stderr)
+        self.assertEqual(git("rev-parse", "HEAD"), second)
+        self.assertFalse([call for call in self.docker_calls() if call[:2] in (["image", "tag"], ["compose", "up"])])
+        for bad in (("rollback", "v0.1.0"), ("rollback", "a", "b"), ("update", "main")):
+            self.assertEqual(self.run_tool("manage.sh", *bad, env=env).returncode, 1)
+
+    def test_version_says_what_is_checked_out_built_and_last_updated(self):
+        git, env, (first, _second, _head) = self.update_fixture()
+        version_dir = self.root / "backend/internal/version"
+        version_dir.mkdir(parents=True)
+        (version_dir / "version.go").write_text('package version\n\nconst Version = "0.1.0"\n')
+        self.write_record(status="success", fromCommit=first, toCommit=first)
+        result = self.run_tool("manage.sh", "version", env={**env, "TEST_JD_SAYS": "jd 0.1.0+abc1234"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Just Dashboard 0.1.0\n", result.stdout)
+        self.assertIn(f"at {git('rev-parse', '--short', 'HEAD')} on main (not the 0.1.0 release)", result.stdout)
+        self.assertIn("just-dashboard-backend:latest calls itself jd 0.1.0+abc1234", result.stdout)
+        self.assertIn("just-dashboard-backend:previous calls itself jd 0.1.0+abc1234", result.stdout)
+        self.assertIn("Last update  0.1.0 to 0.2.0, success", result.stdout)
+        self.assertIn(str(self.data / "self-update.log"), result.stdout)
+        # On the release's own commit it says so, and it changes nothing either way.
+        git("fetch", "--quiet", "--tags", "origin")
+        result = self.run_tool("manage.sh", "version", env=env)
+        self.assertIn("(the 0.1.0 release)", result.stdout)
+        self.assertFalse([call for call in self.docker_calls() if call[:2] in (["image", "tag"], ["compose", "up"])])
+
+    @unittest.skipUnless(shutil.which("ssh-keygen"), "ssh-keygen signs the fixture's tags")
+    def test_update_installs_only_a_signed_tag_once_a_release_key_is_committed(self):
+        keys = pathlib.Path(self.temp.name) / "keys"
+        keys.mkdir()
+        for name in ("release", "stranger"):
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", name, "-f", str(keys / name)], check=True)
+        public = (keys / "release.pub").read_text().split()
+        signer = f'release@just-dashboard namespaces="git" {public[0]} {public[1]}'
+        for sign, verdict in ((None, "is a lightweight tag"), ("", "is not signed by a Just Dashboard release key"),
+                              (str(keys / "stranger"), "is not signed by a Just Dashboard release key"),
+                              (str(keys / "release"), "")):
+            with self.subTest(sign=sign):
+                for stale in ("origin", "data"):
+                    shutil.rmtree(pathlib.Path(self.temp.name) / stale, ignore_errors=True)
+                shutil.rmtree(self.root / ".git", ignore_errors=True)
+                for stale in ("release", "backend"):
+                    target = self.root / stale
+                    shutil.rmtree(target, ignore_errors=True) if target.is_dir() else target.unlink(missing_ok=True)
+                git, env, (first, second, _head) = self.update_fixture(signer=signer, sign=sign)
+                result = self.run_tool("manage.sh", "update", "--yes", env=env)
+                if verdict:
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertIn(verdict, result.stderr)
+                    self.assertEqual(git("rev-parse", "HEAD"), first)
+                    self.assertFalse([call for call in self.docker_calls() if call[:2] == ["image", "tag"]])
+                else:
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(git("rev-parse", "HEAD"), second)
 
     def run_installer(self, build_fail=False, env_file=True, answers="\n", args=(), env=None, env_body=None,
                       machine=None):
