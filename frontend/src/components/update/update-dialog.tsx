@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { ArrowCircleUp } from "@/components/icons"
 import { notify } from "@/lib/toast"
+import { installSentence } from "@/lib/update-offer"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import { LogoGlyph } from "@/components/logo"
 import { UpdateWire } from "@/components/update/update-art"
@@ -22,7 +23,8 @@ import { Button } from "@/components/ui/button"
  * It asks and does not explain. A dialog that also listed the releases, the
  * breaking notes and what the updater does was too much to read for a yes or
  * a no; all of that is on the Version page, where the notice's *View patch
- * notes* goes. What is left is the picture: the installed version wired to
+ * notes* goes. The one thing its sentence adds is for a fork: that what is
+ * about to be installed is the head of a branch and not a tagged release. What is left is the picture: the installed version wired to
  * the newest, the way the sidebar notice draws it, on the dialog's own ground.
  *
  * No phrase to type: the route is destructive, but installing an update is
@@ -59,7 +61,7 @@ export function UpdateDialog({
       onOpenChange={(next) => !busy && onOpenChange(next)}
       size="sm"
       title={`Update to ${target}`}
-      description={`Installs ${target} over ${report.version} and restarts the dashboard.`}
+      description={installSentence(report)}
       bodyClassName="p-0"
       footer={
         <>

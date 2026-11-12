@@ -7,6 +7,7 @@ import { errorMessage } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { Release, SelfUpdateReport } from "@/lib/types"
+import { offerTagNote, pendingNote } from "@/lib/update-offer"
 import { useAuth } from "@/hooks/use-auth"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import { useUpdateHistory } from "@/hooks/use-update-history"
@@ -47,7 +48,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * the timeline. *Latest* is the identity line's status ("0.7.0 available",
  * with how many releases ahead) and the first entry of the history, tagged.
  * *Checked* is the hint under that status, and a failed check turns the
- * status itself amber. What the tiles did beyond saying those numbers — put
+ * status itself amber. The same hint says whether what is offered is a tagged
+ * release, and names a version the branch carries that has no tag yet, which
+ * is never offered. What the tiles did beyond saying those numbers — put
  * "there is an update" first — the brand-faced button in the page controls does, and
  * did already.
  */
@@ -234,11 +237,18 @@ function Identity({ report, actions }: { report: SelfUpdateReport; actions: Reac
         : { tone: "unknown" as const, label: "Version checks off" }
   const checked = report.check.checkedAt ? `checked ${relativeTime(report.check.checkedAt)}` : ""
   const hint = report.available
-    ? `${behind} ${behind === 1 ? "release" : "releases"} ahead of yours`
+    ? [
+        `${behind} ${behind === 1 ? "release" : "releases"} ahead of yours`,
+        offerTagNote(report),
+        pendingNote(report),
+      ]
+        .filter(Boolean)
+        .join(" · ")
     : report.check.enabled
       ? [
           checked,
           report.latest && report.latest !== report.version && `newest published ${report.latest}`,
+          pendingNote(report),
         ]
           .filter(Boolean)
           .join(" · ")
@@ -259,6 +269,14 @@ function Identity({ report, actions }: { report: SelfUpdateReport; actions: Reac
             <span className="numeric text-2xl leading-none font-semibold tracking-tight">
               {report.version}
             </span>
+            {report.commit && (
+              <span
+                className="font-mono text-xs text-muted-foreground"
+                title={`Built from commit ${report.commit}, which is not the ${report.version} release`}
+              >
+                +{report.commit}
+              </span>
+            )}
           </p>
           <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <a

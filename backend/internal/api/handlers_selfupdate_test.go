@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -150,6 +151,88 @@ func TestInstallRefusesAVersionThatHasMovedOn(t *testing.T) {
 
 // Invariant 4: the capability check is on the route, and the UI hiding the
 // button is not what stops a limited account from pressing it.
+// From the project's own repository a version with no release tag is not on
+// offer, so asking for it installs nothing, and the refusal says where it is.
+func TestInstallRefusesAVersionThatHasNoReleaseTag(t *testing.T) {
+	calls := selfupdatetest.Docker(t)
+	s := testServer(t)
+	repo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/refs/tags/") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(publishedManifest))
+	}))
+	t.Cleanup(repo.Close)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte("name: jd\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.modules.selfUpdate = selfupdate.New(selfupdate.Options{
+		Current: "0.5", DataDir: t.TempDir(), UpdateDir: dir,
+		Repo: selfupdate.DefaultRepo, Ref: "main", CheckOnline: true,
+		BaseURL: repo.URL, DockerHost: selfupdatetest.MissingHost(t), Log: s.Log,
+	})
+	rep := s.modules.selfUpdate.Report(context.Background(), selfupdate.Forced)
+	if rep.Available || rep.Pending != "0.9" {
+		t.Fatalf("the fixture offers %q (available %v, pending %q)", rep.Latest, rep.Available, rep.Pending)
+	}
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			p := &httpx.Principal{User: &auth.User{ID: 1, Username: "tester"}, Role: auth.RoleAdmin, Kind: "session", IP: "127.0.0.1"}
+			next.ServeHTTP(w, req.WithContext(httpx.WithPrincipal(req.Context(), p)))
+		})
+	})
+	s.mountSelfUpdateRoutes(r)
+	for _, body := range []string{`{}`, `{"version":"0.9"}`} {
+		rec := drive(t, r, http.MethodPost, "/dashboard/update/install", body, "")
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "0.9 is on main but has no release tag yet") {
+			t.Errorf("install %s answered %d: %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if got := calls(); len(got) != 0 {
+		t.Fatalf("docker was reached for a version that is not released: %q", got)
+	}
+}
+
+// What an update copies first is the dashboard's real store, by the store's
+// own connection: the copy has to open as a database with the tables in it,
+// into the empty file the update module made for it.
+func TestTheStoreIsCopiedWholeBeforeAnUpdate(t *testing.T) {
+	s := testServer(t)
+	database := s.updateDatabase()
+	if database == nil || filepath.Base(database.Path) != "vpsd.db" {
+		t.Fatalf("the update module was given %+v", database)
+	}
+	if _, err := s.Store.DB.Exec(`INSERT INTO users (username, password_hash, role, created_at) VALUES ('kept', 'x', 'admin', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "copy.db")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CopyTo(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	copied, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copied.Close()
+	var kept int
+	if err := copied.QueryRow(`SELECT count(*) FROM users WHERE username = 'kept'`).Scan(&kept); err != nil || kept != 1 {
+		t.Fatalf("the copy holds %d of the account written before it: %v", kept, err)
+	}
+	if info, _ := os.Stat(path); info == nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("the copy's mode changed: %v", info)
+	}
+}
+
 func TestOnlyAnAdminCanInstallAnUpdate(t *testing.T) {
 	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited} {
 		t.Run(string(role), func(t *testing.T) {

@@ -5974,11 +5974,15 @@ end-to-end harness's is (`hubsignin_test_build.go`).
 
 ### Cutting a release
 
-When the user names a version ("make this 0.6", "release 0.6.1"), that is the trigger. A release is a commit on the tracked branch, not a `git tag` — that is what every install
-compares itself against. Four files carry it and `scripts/release.sh <version>` writes all of them:
-`backend/internal/version/version.go`, `frontend/src/lib/version.ts`, `frontend/package.json`, and
-`backend/internal/selfupdate/changelog.json`. Two tests fail the run if they drift (`version_test.go`,
-which skips when the frontend is absent, and `TestChangelogHeadIsTheProductVersion`).
+When the user names a version ("make this 0.6", "release 0.6.1"), that is the trigger. Cutting a release is a
+commit: the changelog on the tracked branch is what every install compares itself against. *Releasing* it
+is the tag `v<version>`, which nobody makes by hand (below) and without which no install is offered the
+version. Six files carry it. `scripts/release.sh <version>` writes five of them,
+`backend/internal/version/version.go`, `frontend/src/lib/version.ts`, `frontend/package.json`, `README.md`
+and the `info.version` of `docs/api/deploy-openapi.json`, and the sixth,
+`backend/internal/selfupdate/changelog.json`, is written by hand first. Tests fail the run if they drift
+(`version_test.go`, which skips a file that is absent and also holds the API description to the version,
+and `TestChangelogHeadIsTheProductVersion`).
 
 ```bash
 # 1. Write the release notes FIRST in backend/internal/selfupdate/changelog.json
@@ -5987,8 +5991,10 @@ which skips when the frontend is absent, and `TestChangelogHeadIsTheProductVersi
 scripts/release.sh 0.6
 ```
 
-`release.sh` bumps the three version files, regenerates the root `CHANGELOG.md` from the same JSON, and
-runs the two tests; it refuses before touching anything if the changelog does not already describe the
+`release.sh` bumps the version files, regenerates the root `CHANGELOG.md` from the same JSON, regenerates
+the API description (`JD_UPDATE_OPENAPI=1`, so its `info.version` follows the release instead of staying
+where the last route change left it), and
+runs the tests; it refuses before touching anything if the changelog does not already describe the
 version, and prints the skeleton. **`CHANGELOG.md` is generated — never edit it by hand.** The ordering
 is the point: a version bumped with no changelog entry is a release nobody is told about, and a changelog
 entry with no version bump is every install permanently offering itself an update it already has.
@@ -6004,28 +6010,137 @@ changes is `CHANGELOG.md`. Its first step alone does the same without the tests:
 unless the changelog's newest release is the version named. Do it last before the branch is merged into
 `main`, because the GitHub release takes its notes from that section.
 
-A release is cut on its patch branch (`patch/0.7.2`) and reaches installs when that branch is merged into
-`main`. The GitHub release follows on its own: `.github/workflows/release.yml` runs after Verify passes on
-a push to `main`, reads `latest` from the changelog, and when no release `v<latest>` exists, tags that
-commit and publishes the release with the version's `CHANGELOG.md` section as its notes. The version
+A release is cut on its patch branch (`patch/0.7.2`), merged into `main`, and reaches installs when that
+merge is tagged. `.github/workflows/release.yml` runs after Verify passes on a push to `main`, reads
+`latest` from the changelog, and when no release `v<latest>` exists, tags that commit and publishes the
+release with the version's `CHANGELOG.md` section as its notes. Until 0.8.6 the merge itself was the
+announcement and the tag only decorated the Releases page: 0.8.5 was offered to every install for days
+with a failed Verify run and no tag. Now a failed run means nothing is tagged and nothing is offered. The version
 comes from the changelog, never from the branch name, so a merge whose version is already released
 publishes nothing.
 Nothing is tagged by hand; a manual run of the workflow on `main` retries a failed publish.
 
+### Which build this is
+
+The version constant is bumped only when a release is cut, so everything built from a patch branch, a
+fork or an operator's own commits carries the last release's number. Such a build is told apart by the
+commit it was made from: `version.Commit`, set by the linker from the `JD_COMMIT` build argument of
+`backend/Dockerfile`, and `version.Build()` reads `0.8.5+98c9349`. `version.Version` stays the only
+thing compared; the commit is only ever shown, in the backend's start line, in `jd version` (the same
+argument is appended to `main.version`) and on the Version page (`commit` in the report of
+`GET /dashboard/update`, absent for a release).
+
+The argument is passed by the three things that build the stack and only when the checkout is **not**
+on the release's own commit, so a release's compile layer stays cached and a release never shows a
+commit: `selfupdate.BuildCommit` for an update and a rebuild from Settings (through
+`BuildEachService`), and `jd_build_commit` in `scripts/build-stamp.sh` for `install.sh`. They are the
+same rule in two languages and are changed together. HEAD is a release when it is the commit that
+`refs/tags/v<version>` names, or that `refs/just-dashboard/release/v<version>` names. The second ref is
+written by the updater when it installs a tag: the tag it verified was asked of origin and is not
+stored, and the checkout's own tag of that name may be missing (a checkout that fetches without tags)
+or the operator's. Limits, on purpose: a plain `docker compose build` passes nothing and calls itself a
+release; a checkout git cannot read is built unstamped; uncommitted edits are not marked; the frontend
+bundle is not stamped, so the wordmark keeps the release number and the Version page is where the
+commit shows.
+
+### Signed releases
+
+A tag says a version was released, not by whom: whoever can push to the repository can push a tag, and an
+update builds and runs what it names as root. `internal/selfupdate/signing.go` can require the tag to be
+signed with a key the *running* release was built with, so a stolen token or a compromised workflow
+secret cannot ship code to installs by itself. **It ships switched off**: `allowed_signers` (embedded
+beside the changelog) names no key, `SignaturesRequired()` is false and nothing is verified. Making the
+key, guarding it and signing with it are the project owner's steps, and this is the order to do them in.
+`scripts/manage.sh update`, the update over SSH, makes the same checks against the `allowed_signers`
+committed in the checkout ([terminal tools](../operations/terminal-tools.md#version-update-and-rollback)),
+so the two are changed together:
+
+1. Make a key that lives nowhere in the repository: `ssh-keygen -t ed25519 -C release@just-dashboard.com
+   -f jd-release`. Keep `jd-release` offline or in the one secret the release job reads; a second copy
+   in a safe is what makes losing it survivable.
+2. Have the release sign. `.github/workflows/release.yml` makes a lightweight tag today; it has to make a
+   signed one instead, with the key from a repository secret:
+   `git -c gpg.format=ssh -c user.signingkey=<path to the private key> tag -s v<version> -m "Just Dashboard <version>"`.
+   That is a change to CI, which is the operator's to ask for by name (`AGENTS.md`).
+3. Add the public half to `backend/internal/selfupdate/allowed_signers` as one line,
+   `release@just-dashboard.com namespaces="git" ssh-ed25519 AAAA…`, and release.
+   `TestTheShippedSignersFileIsWellFormed` holds the line to that form, because `ssh-keygen` stops at the
+   first line it cannot parse and a file it cannot parse verifies nothing.
+4. **Sign that release's own tag and every one after it.** Installs older than it check nothing and take
+   it either way. Installs *on* it refuse any later tag that is not signed, so one unsigned release after
+   the key ships leaves every install unable to update from the dashboard until a signed one follows.
+
+Do steps 2 and 3 in the same release, in that order of readiness: a key in the file before the workflow
+can sign is the outage in step 4.
+
+What is checked, once a key is there (`verifyReleaseTag`, from `updateTarget`, for the project's own
+repository only): the fetched ref is a tag object, not a lightweight tag; the tag object's own name is
+`v<ToVersion>`, since a signature covers the name and a real signed tag for an older release pushed again
+under a newer name would otherwise verify; and `git verify-tag` accepts it with every deciding setting
+given on the command line (`gpg.ssh.allowedSignersFile` set to the embedded file written to a temporary
+file, `gpg.ssh.program=ssh-keygen`, `gpg.minTrustLevel=fully`, and the OpenPGP and X.509 programs set to
+`false`), so nothing in the checkout's own `.git/config` can vouch for a tag. The verdict line goes into
+the transcript. A refusal changes nothing and says so. The image already carries what this needs: `git`
+and `openssh-client`'s `ssh-keygen`.
+
+A fork named with `JD_UPDATE_REPO` is not held to the project's key, which did not sign its tags; a fork
+that wants the same check replaces the file with its own key. The check that *offers* a version cannot
+see a signature (it reads one file over HTTPS), so an unsigned tag is still offered and then refused at
+install with the reason.
+
+To replace a key, add the new line in a release signed with the old key and remove the old line one
+release later; installs must pass through the release that carries both. If the key is lost with no
+successor shipped, installs cannot verify anything new and are updated by hand from the shell (a
+fast-forward of the checkout and `sudo ./install.sh`) to a release that ships the new key. The tests make their
+own key with `ssh-keygen` and sign real tags in a real repository (`signing_test.go`); there is no
+release key to test with until step 1 is done.
+
 A changelog entry is written for the person deciding whether to upgrade a root-equivalent panel on their
 own server. Each change has a `kind` (`added`, `changed`, `fixed`, `removed`, `security`, `deprecated` —
-closed set, parser-enforced) and reads as what they can now do; `detail` is for a non-obvious
+closed set, enforced on the committed file) and reads as what they can now do; `detail` is for a non-obvious
 consequence, and most changes need none. `breaking: true` requires a `breakingNote` naming what must be
 done by hand, and the UI refuses to fold it away.
 
 **`internal/selfupdate`** manages the product rather than the server.
 
 - **The changelog is data, not prose**: embedded with `go:embed` *and* fetched from
-  `raw.githubusercontent.com`, parsed by the same function both times — so a malformed file fails the test
-  run before it can be a malformed file every install downloads. The compiled-in copy is what an install
-  with `JD_UPDATE_CHECK=false` still shows.
+  `raw.githubusercontent.com`. The compiled-in copy is read by `ParseManifest`, which refuses anything it
+  cannot render, so a malformed file fails the test run before it can be a malformed file every install
+  downloads. It is what an install with `JD_UPDATE_CHECK=false` still shows.
+- **The published changelog is read leniently** (`ParsePublishedManifest`): the file the check fetches,
+  and the one in the commit an update is about to install, which the *old* image reads. The reader is
+  always older than the file, so a field it does not know is ignored, a kind outside its six is shown as
+  `changed`, a day that grew a time of day is cut back to the day, and an entry it cannot make sense of
+  is left out while the rest are kept. Every release it keeps still has a comparable version, a title, a
+  day and a change with text. `Latest` is the newest release it could read; the versions named but not
+  read are in `Manifest.Unread`, and a check with nothing readable to offer and a newer one unread
+  reports that as its error instead of "up to date". Until 0.8.6 the strict parser read both, so one new
+  field would have made every install report that the published changelog could not be read, the release
+  carrying the fix included.
+- **The published file has a size every old install fixed.** Releases up to 0.8.5 read the first 1 MiB
+  (`FieldManifestCap`) and fail to parse what is cut off; from 0.8.6 the ceiling is 8 MiB and a longer
+  file is reported as too long. The file was 300 KB at 0.8.5 and grew about 4 KB a day, so
+  `TestTheChangelogStaysWhereInstallsInTheFieldCanReadIt` fails at 700 KB. When it does: keep the recent
+  releases in `changelog.json`, move the older ones to a file beside it that the build embeds and the
+  check never fetches (`Local()` joins the two; `CHANGELOG.md` stays complete), and raise the test's
+  number only once no install older than 0.8.6 is worth reaching. For the same reason a new field or kind
+  is only ever *added* to this file: what an old reader needs (`version`, `date`, `title`, `changes[].kind`
+  and `.text`) keeps its meaning, and a change of shape goes to a new path.
+- **Only a released version is offered** (`Checker.released`, `TagsOnly`). The changelog on the tracked
+  branch says which versions exist; whether one was released is whether the same file answers at
+  `refs/tags/v<version>/` on the raw host (a `HEAD`, spelled with the full ref so a branch named `v0.9`
+  cannot answer for the tag). For the project's own repository, whatever branch is tracked, the check
+  walks the newer versions from the newest and offers the first tagged one and everything older; the
+  newest untagged one is reported as `pending` and not offered. A tag found is remembered for the life
+  of the process, a missing one is asked about again, at most `maxTagProbes` versions are asked about per
+  check, and a probe that cannot be answered fails the check (the previous answer is kept) rather than
+  guessing either way. A fork named with `JD_UPDATE_REPO` is offered every newer version as before, and
+  `tagged` says whether the newest has a tag. The report carries `tagged`, `pending` and
+  `check.tagsOnly`; the Version page's hint reads them through `frontend/src/lib/update-offer.ts`
+  ("tagged v0.8.6", "no release tag, installs main as it stands", "0.8.6 is on main, not released yet"),
+  and the update dialog says when what it installs is a branch head.
 - **Update discovery is independently controlled**: one unauthenticated
-  GET, a user agent with product and version only, and a switch to turn it off. Automatic deployment
+  GET and the tag's `HEAD`, a user agent with product and version only, and a switch to turn it off. Automatic deployment
   branch monitoring uses separate outbound Git connections regardless of that switch. A failure keeps the
   previous good answer rather than blanking the banner — a dropped tunnel is a normal Tuesday here.
 - Cadence is two floors, not a timer, because the moment somebody wants a current answer is the moment
@@ -6043,7 +6158,7 @@ done by hand, and the UI refuses to fold it away.
   writes `self-update.json` + `self-update.log` into `JD_DATA_DIR` — mounted by both halves, so the *new*
   backend can read what the old one was doing. `Installer.Reconcile` at boot: alive → leave it; gone with
   the version moved → it worked (this process running is the proof); gone with the version unchanged → it
-  stopped.
+  stopped, and what it had changed is put back (below).
 - It **builds one service at a time** (`selfupdate.BuildEachService`, also used by Settings' rebuild,
   and the same loop in `install.sh`). Compose builds every service at once, so the frontend's Turbopack
   peak (2.5–3 GB) and the backend's Go compile (over 1 GB) used to land together; in turn the server
@@ -6056,15 +6171,23 @@ done by hand, and the UI refuses to fold it away.
   and each file the update changed with the folders above it (`handBack`, through `hostexec.GiveBack`).
   Until 0.7.1 an update's new folders stayed root's, and the operator's own next pull stopped halfway in
   them.
-- **It installs the release that was announced** (`updateTarget`). After the fetch it prefers the tag
+- **It installs the release that was offered** (`updateTarget`). After the fetch it takes the tag
   `v<ToVersion>`, asked of `origin` with `ls-remote` and fetched without touching local tags, so a tag
-  the operator made cannot stand in for it and one that clashes cannot fail the fetch. With no tag, which
-  is normal for a fork and for the window before `release.yml` has tagged a merge, it uses
-  `origin/<ref>`. Either way the changelog at the target must name `ToVersion`, or nothing changes. A
-  branch that has moved past `ToVersion` with no tag to pin it is refused rather than installed, because
-  nobody was shown that release's notes and checking again offers it properly. The version it reports
+  the operator made cannot stand in for it and one that clashes cannot fail the fetch. With no tag there
+  are two answers, and the backend writes which into the record (`Run.RequireTag`, from `TagsOnly`)
+  because the updater has no configuration of its own. For the project's own repository nothing is
+  installed, and that includes an origin that could not be asked: an update that falls back to the
+  branch whenever origin is slow has no gate. The check and the updater ask different places: the
+  check reads the tag from the repository `JD_UPDATE_REPO` names, the updater from the checkout's
+  `origin`. They disagree when the checkout was cloned from a fork or a mirror and `JD_UPDATE_REPO` was
+  left alone: every check offers the version and every install refuses it, so that refusal names the
+  two ways out (fetch the tag into the fork, or name the fork in `JD_UPDATE_REPO`) and does not say to
+  wait. For a fork it uses `origin/<ref>`. Either way the
+  changelog at the target must name `ToVersion`, or nothing changes. A branch that has moved past
+  `ToVersion` with no tag to pin it is refused rather than installed, because nobody was shown that
+  release's notes and checking again offers it properly. The version it reports
   (`Run.InstalledVersion`) is read from the changelog at `HEAD` after the merge and recorded only on
-  success.
+  success, and `Run.Tagged` says the commit it landed on is the one the tag names.
 - **It goes back if the new version does not come up** (`rollback.go`). Before the build it tags each image
   the compose file builds `<image>:previous`; one that cannot be tagged is a warning, not a stop. On a
   failed build, a failed `up --wait` or a failed health check it retags them, runs `up -d --no-build`,
@@ -6079,8 +6202,55 @@ done by hand, and the UI refuses to fold it away.
   error with the commands to finish by hand, and no step stops the ones after it. `.env` is not restored:
   a port a Reconcile moved was moved because something holds the old one, and the old version runs on the
   new one just as well. The rollback relies on database changes being additive (invariant 5), since the
-  new backend may already have migrated. The `:previous` images stay until the next update replaces them,
-  so a server holds one older generation on disk, and an uninstall removes them.
+  new backend may already have migrated; it does not put the database back. The `:previous` images stay
+  until the next update replaces them, so a server holds one older generation on disk, and an uninstall
+  removes them.
+- **It prunes the build cache it has outgrown** (`PruneBuildCache`). Both images are built without cache
+  mounts, on purpose (`backend/Dockerfile` records why: the updater that builds a release is always one
+  release older than the file it builds, and a classic builder refuses `--mount` outright), so every
+  update leaves its layers in BuildKit's cache. Docker's own collector lets an entry sit for sixty days
+  and the cache grow until a fifth of the disk is left, which on a 20 GB server is updates failing for
+  room first. So once the new version answers (`updateSteps.tidy`, never after a failure), and at the end
+  of an uninstall, `docker builder prune --force --filter until=168h` runs with a two-minute bound and
+  its total goes into the transcript. It is not `--all`, and a week keeps the build that has just run.
+  The cache is the daemon's rather than this project's, so other builds' entries unused for a week go
+  too, which costs their next build time and nothing else. Cache mounts for `GOCACHE` and `.next/cache`
+  would cut a repeat update to tens of seconds; they stay out for the reason above, and would need the
+  updater to refuse cleanly when it is older than the first release that uses them.
+- **A backend that finds the updater gone puts back what it changed** (`putback.go`). The rollback above
+  runs inside the updater, so an updater that is killed (the Docker daemon restarting under it, a reboot,
+  the kernel taking it when the frontend build runs out of memory) rolled nothing back: the checkout
+  stayed fast-forwarded and the images already built were `:latest`, while the old containers kept
+  running. The run was marked failed, which was true until the next thing recreated the stack (a restart
+  from Configuration, `manage.sh restart`) and brought up half of each version. Now `replaceStack` writes
+  the images it tagged into the record before the build (`Run.SavedImages`), and `Reconcile`, once it has
+  established the updater is gone and read the record again (an updater that rolled back by itself has
+  closed the run, and its account is the one to keep), retags each `:previous` over its `:latest` on the
+  configured daemon and runs the same `restoreCheckout` the rollback does: `reset --keep`, only when
+  `HEAD` is exactly `Run.ToCommit`. A checkout the update never recorded moving is left where it is.
+  **No container is recreated**: from inside one of them that is the manoeuvre the sibling exists to
+  avoid, and with the tags and the checkout back, whatever recreates the stack next gets the old version
+  whole. The run's error says what was put back and gives the one `compose up -d --no-build` to run if a
+  container is still on a new image; whatever could not be done (a local edit in the way, Docker not
+  answering) is listed with the commands, as a rollback's is. It all goes into the transcript after the
+  dead updater's last line. Not covered: an updater killed *after* the backend was recreated on the new
+  version is still settled as a success, though the frontend or proxy may not have been recreated yet.
+- **It copies the database first** (`dbcopy.go`). Additive columns keep the old binary able to open the
+  store, but opening it is not only additive (`store.Open` rewrites archived project names in place and
+  maps legacy deployments into new tables), and a release whose migration is wrong is not protected by
+  the rule at all. So `Installer.Start`, before it writes the record or starts the updater, has the store
+  copy itself with `VACUUM INTO` (`Options.Database`, wired as `Server.updateDatabase`: the store's own
+  connection, one read transaction, a whole database as of one moment) into
+  `JD_DATA_DIR/pre-update/vpsd-<from>-<run id>.db`. The file is created empty and `0600` first, because
+  it holds every password hash and sealed secret and SQLite would create it with the umask. The newest
+  two are kept and only files of that name are ever removed. The copy is skipped when it would leave
+  less than 512 MB free, and given up after three minutes; either way the update still runs, as it does
+  when an image cannot be tagged, and the transcript's first lines say there is no copy and what that
+  costs. Its path is in the record (`Run.DatabaseCopy`), the transcript, and the message of every
+  rollback (`copyNote`). **It is never restored automatically**: going back to it discards everything
+  written since, which after a rollback that worked is an hour of audit log lost for nothing, so that is
+  left to a person, with the steps in the administration guide. The suggested "Dashboard data" backup job
+  excludes the directory.
 - A checkout cloned with sudo has no owner but root for `handBack` to return to, so at every start
   the backend gives the checkout's root-owned entries to the owner of the directory holding it
   (`Service.adoptCheckout`, through `hostexec.Adopt`), when that is not root: whoever owns `/home/ubuntu`
@@ -6251,7 +6421,8 @@ silently switching the initial configuration to plain HTTP.
 so it is built around the moment the page watching it loses its API.
 
 - **One question, two modes.** `keep` removes the stack — its three containers, the two images it builds
-  with the `:previous` tags an update keeps,
+  with the `:previous` tags an update keeps, the build cache unused for a week (`PruneBuildCache`, as an
+  update does),
   the lifecycle siblings, `/tmp/just-dashboard` and the held terminal sessions (`systemctl stop
   jd-terminal-*` on the host) — and leaves everything the dashboard made: deployments keep running, and
   `JD_DATA_DIR`, the backups and the checkout's `.env` stay, with a copy of the `.env` written to

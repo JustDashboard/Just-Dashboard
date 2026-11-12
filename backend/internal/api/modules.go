@@ -314,6 +314,7 @@ func (s *Server) initModules() {
 	// all the decisions in it — is testable without a daemon.
 	s.modules.selfUpdate = selfupdate.New(selfupdate.Options{
 		Current:     version.Version,
+		Commit:      version.Commit,
 		DataDir:     s.Cfg.DataDir,
 		UpdateDir:   s.Cfg.UpdateDir,
 		Repo:        s.Cfg.UpdateRepo,
@@ -324,6 +325,9 @@ func (s *Server) initModules() {
 		List:        s.listSiblings,
 		Log:         s.Log,
 		Adopted:     s.carryGitHubLogin,
+		// Copied before an update starts, so a rollback has data to go back
+		// to as well as code (handlers_selfupdate.go).
+		Database: s.updateDatabase(),
 	})
 	// The settings half of the same idea, and it shares the update module's
 	// answer to "where is this install" rather than working it out again: two

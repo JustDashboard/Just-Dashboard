@@ -108,6 +108,7 @@ explicitly rather than silently changing the contract.
   `backend/internal/selfupdate/changelog.json`, then run `scripts/release.sh <version>`.
 - Do not create Git tags or GitHub releases by hand. Once Verify passes on a push to `main` whose version
   has no release yet, `.github/workflows/release.yml` tags it `v<version>` and publishes the release.
+  That tag is the release: installs are offered a version, and install it, only once it exists.
 - Read the licence sections of [`CONTRIBUTING.md`](CONTRIBUTING.md) before adding dependencies. The
   project is AGPL-3.0 with an additional contributor grant to the owner, and its source files carry no
   licence headers.

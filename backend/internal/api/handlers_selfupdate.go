@@ -1,17 +1,20 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -234,9 +237,10 @@ func (s *Server) handleSelfUpdateInstall(w http.ResponseWriter, r *http.Request)
 	var body struct {
 		// Version is what the browser believed was newest when the operator
 		// pressed the button. It is a check, not an instruction: the only
-		// version that can be installed is whatever the tracked branch carries
-		// now, and a stale tab asking for a superseded one has to be told
-		// rather than quietly given something else.
+		// version that can be installed is the newest one on offer now (for
+		// the project's own repository the newest with a release tag), and a
+		// stale tab asking for a superseded one has to be told rather than
+		// quietly given something else.
 		Version string `json:"version"`
 	}
 	if r.ContentLength > 0 {
@@ -254,7 +258,11 @@ func (s *Server) handleSelfUpdateInstall(w http.ResponseWriter, r *http.Request)
 			return httpx.Err(http.StatusBadGateway, "check_failed",
 				"the newest version could not be looked up: "+rep.Check.Error)
 		}
-		return httpx.BadRequest("this dashboard is already on %s, which is the newest published version", rep.Version)
+		if rep.Pending != "" {
+			return httpx.BadRequest("this dashboard is already on %s, the newest released version; %s is on %s but has no release tag yet",
+				rep.Version, rep.Pending, rep.Check.Ref)
+		}
+		return httpx.BadRequest("this dashboard is already on %s, which is the newest released version", rep.Version)
 	}
 	target := rep.Latest
 	if body.Version != "" && selfupdate.Compare(body.Version, target) != 0 {
@@ -282,6 +290,31 @@ func (s *Server) handleSelfUpdateInstall(w http.ResponseWriter, r *http.Request)
 	// 202: the work has been handed to a container that outlives this process.
 	httpx.JSON(w, http.StatusAccepted, run)
 	return nil
+}
+
+// updateDatabase is the dashboard's own store as the update module sees it:
+// where the file is, for its size, and how to copy it.
+func (s *Server) updateDatabase() *selfupdate.Database {
+	if s.Store == nil {
+		return nil
+	}
+	return &selfupdate.Database{
+		Path:   filepath.Join(s.Cfg.DataDir, store.DatabaseFile),
+		CopyTo: s.copyStore,
+	}
+}
+
+// copyStore writes a consistent copy of the dashboard's own database to path,
+// which exists and is empty. It is what an update takes before it starts.
+//
+// VACUUM INTO through the store's own pool rather than a copy of the file: the
+// database is in WAL mode and being written, so the file alone is not the
+// database, and a copy made of it mid-write may not open. This is one read
+// transaction, so the copy is the whole store as of one moment while
+// everything else keeps writing.
+func (s *Server) copyStore(ctx context.Context, path string) error {
+	_, err := s.Store.DB.ExecContext(ctx, "VACUUM INTO ?", path)
+	return err
 }
 
 // handleSelfUpdateLog answers the whole transcript of the last upgrade as

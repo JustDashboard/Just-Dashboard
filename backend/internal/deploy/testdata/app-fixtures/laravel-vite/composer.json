@@ -3,8 +3,8 @@
   "type": "project",
   "require": {
     "php": "^8.3",
-    "laravel/framework": "^13.0",
-    "laravel/wayfinder": "^0.1.21"
+    "laravel/framework": "13.40.0",
+    "laravel/wayfinder": "0.1.23"
   },
   "autoload": {
     "psr-4": { "App\\": "app/" }

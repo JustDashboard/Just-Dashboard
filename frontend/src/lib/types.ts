@@ -8621,8 +8621,16 @@ export type UpdateRun = {
   image: string
   container: string
   health?: string
+  /** Installed from the repository's tag `v<toVersion>` or not at all. */
+  requireTag?: boolean
   fromCommit?: string
   toCommit?: string
+  /** `toCommit` is the commit that tag names, not wherever the branch was. */
+  tagged?: boolean
+  /** Where the dashboard's database was copied before the update, if it was. */
+  databaseCopy?: string
+  /** The images tagged `:previous` before the build replaced them. */
+  savedImages?: { current: string; previous: string }[]
   actor: string
   startedAt: string
   updatedAt: string
@@ -8640,8 +8648,17 @@ export type UpdateHistory = {
 
 export type SelfUpdateReport = {
   version: string
+  /**
+   * The short commit this build was made from when it is not the release of
+   * `version` (a patch branch, a fork's head). Absent for a release.
+   */
+  commit?: string
   latest?: string
   available: boolean
+  /** The version on offer has a release tag; false is a fork's branch head. */
+  tagged: boolean
+  /** A newer version on the tracked branch with no tag yet. Not offered. */
+  pending?: string
   /** Releases newer than the installed version, newest first. */
   releases: Release[]
   breaking: boolean
@@ -8652,6 +8669,8 @@ export type SelfUpdateReport = {
     source?: string
     repo: string
     ref: string
+    /** Only tagged versions are offered and installed: the project's own repository. */
+    tagsOnly: boolean
   }
   install: {
     supported: boolean

@@ -108,11 +108,13 @@ func upgrade(ctx context.Context, store *Store, run *Run, out io.Writer) error {
 			_ = store.Update(func(r *Run) { r.FromCommit = run.FromCommit })
 		}
 	}
-	commit, installed, err := fastForward(ctx, run.Dir, run.Ref, run.ToVersion, out)
+	landed, err := fastForward(ctx, run.Dir, request{ref: run.Ref, version: run.ToVersion, tagOnly: run.RequireTag}, out)
 	if err != nil {
 		return err
 	}
-	_ = store.Update(func(r *Run) { r.ToCommit = commit })
+	commit, installed := landed.commit, landed.version
+	run.ToCommit, run.Tagged = commit, landed.tagged
+	_ = store.Update(func(r *Run) { r.ToCommit, r.Tagged = commit, landed.tagged })
 
 	compose := run.Compose
 	if compose == "" {
@@ -148,6 +150,15 @@ func upgrade(ctx context.Context, store *Store, run *Run, out io.Writer) error {
 		restore: func(from string) error {
 			return restoreCheckout(ctx, run.Dir, from, commit, out)
 		},
+		tidy: func() {
+			PruneBuildCache(out, func(args ...string) ([]byte, error) {
+				ctx, cancel := context.WithTimeout(ctx, PruneTimeout)
+				defer cancel()
+				prune := exec.CommandContext(ctx, "docker", args...)
+				prune.Dir = run.Dir
+				return prune.CombinedOutput()
+			})
+		},
 	}, out)
 	if err != nil {
 		return err
@@ -158,70 +169,150 @@ func upgrade(ctx context.Context, store *Store, run *Run, out io.Writer) error {
 	return nil
 }
 
+// request is the release an update was asked to install.
+type request struct {
+	// ref is the branch the install tracks. It is installed from only when the
+	// version has no tag and the branch is allowed to stand in for one.
+	ref string
+	// version is the one that was offered and accepted.
+	version string
+	// tagOnly refuses the branch: origin's tag v<version>, or nothing. It is
+	// set for the project's own repository; see TagsOnly.
+	tagOnly bool
+}
+
+// landing is where a fast-forward left the checkout.
+type landing struct {
+	commit  string
+	version string
+	// tagged says the commit is the one origin's tag v<version> names, rather
+	// than wherever the branch was at the time.
+	tagged bool
+}
+
 // updateTarget chooses what the checkout moves to, once fetched.
 //
-// The tag v<version> when origin has one: that commit is the release that was
-// announced, wherever the branch has gone since. Asked of origin rather than
-// looked up locally, so a tag of the operator's own cannot stand in for it, and
-// fetched without touching local tags, so one cannot make the fetch fail either.
+// The tag v<version> when origin has one: that commit is the release, wherever
+// the branch has gone since. Asked of origin rather than looked up locally, so
+// a tag of the operator's own cannot stand in for it, and fetched without
+// touching local tags, so one cannot make the fetch fail either.
 //
-// Without a tag it is the branch, which is the normal case for a fork and for the
-// window before the release workflow has tagged a merge. The branch's changelog
-// must then name exactly the announced version. A branch that has moved on is
+// Without a tag there are two answers. For the project's own repository
+// (want.tagOnly) nothing is installed: the release workflow tags a merge only
+// after its checks pass, so an untagged version is one that has not been
+// released, and the branch it sits on is not a substitute. That includes not
+// being able to ask, since an update that installs the branch whenever origin
+// is slow to answer has no gate at all. For a fork it is the branch, which is
+// the normal case for a repository that never tags. The branch's changelog
+// must then name exactly the offered version. A branch that has moved on is
 // refused rather than installed: nobody was shown that release's notes, and
 // checking again offers it properly.
-func updateTarget(ctx context.Context, dir, ref, to string, out io.Writer) (string, error) {
-	target, tagged := fetchReleaseTag(ctx, dir, "v"+Normalise(to), out)
-	if !tagged {
-		target = "origin/" + ref
+//
+// Once this build carries a release key (SignaturesRequired), the tag from the
+// project's own repository must also be signed with it; see signing.go. A
+// fork's tags are not held to the project's key, which did not sign them.
+func updateTarget(ctx context.Context, dir string, want request, out io.Writer) (target string, tagged bool, err error) {
+	to := want.version
+	tag := "v" + Normalise(to)
+	fetched, tagged, asked := fetchReleaseTag(ctx, dir, tag, out)
+	target = fetched.commit
+	switch {
+	case tagged:
+		if want.tagOnly && SignaturesRequired() {
+			if err := verifyReleaseTag(ctx, dir, tag, fetched.object, releaseSigners, out); err != nil {
+				return "", false, err
+			}
+		}
+	case want.tagOnly && asked != nil:
+		return "", false, fmt.Errorf("could not confirm that %s has been released, because origin could not be asked for the tag %s (%v); "+
+			"nothing was changed. Only a tagged release is installed from this repository", to, tag, asked)
+	case want.tagOnly:
+		// The check offers a version only after it has seen this tag on the
+		// project's repository, and this asks the checkout's origin. So the
+		// likely reader is somebody whose origin is a fork or a mirror the tag
+		// never reached, and "check again later" would send them round the
+		// same refusal for ever.
+		return "", false, fmt.Errorf("origin has no tag %s, so %s was not installed; nothing was changed. "+
+			"Only a tagged release is installed from this repository. %s was offered because the project's repository "+
+			"had that tag when it was last asked: if this checkout's origin is a fork or a mirror, fetch the tag into it, "+
+			"or name the fork in JD_UPDATE_REPO to follow its branch instead. If origin is the project's repository, "+
+			"the tag has been withdrawn, and checking for updates again says what is on offer now", tag, to, to)
+	default:
+		if asked != nil {
+			fmt.Fprintf(out, "could not use the tag %s, so using the branch: %v\n", tag, asked)
+		} else {
+			fmt.Fprintf(out, "origin has no tag %s yet, so using the branch\n", tag)
+		}
+		target = "origin/" + want.ref
 	}
 	raw, err := gitOutput(ctx, dir, "show", target+":"+ManifestPath)
 	if err != nil {
-		return "", fmt.Errorf("could not read the changelog at %s, so it cannot be confirmed as %s; nothing was changed: %w", target, to, err)
+		return "", false, fmt.Errorf("could not read the changelog at %s, so it cannot be confirmed as %s; nothing was changed: %w", target, to, err)
 	}
-	manifest, err := ParseManifest([]byte(raw))
+	manifest, err := ParsePublishedManifest([]byte(raw))
 	if err != nil {
-		return "", fmt.Errorf("the changelog at %s could not be read, so it cannot be confirmed as %s; nothing was changed: %w", target, to, err)
+		return "", false, fmt.Errorf("the changelog at %s could not be read, so it cannot be confirmed as %s; nothing was changed: %w", target, to, err)
 	}
 	if _, ok := manifest.Find(to); !ok {
-		return "", fmt.Errorf("%s does not contain release %s (its newest is %s); nothing was changed", target, to, manifest.Latest)
+		return "", false, fmt.Errorf("%s does not contain release %s (its newest is %s); nothing was changed", target, to, manifest.Latest)
 	}
 	if !tagged && Compare(manifest.Latest, to) > 0 {
-		return "", fmt.Errorf("%s has moved on to %s since %s was offered, and origin has no tag v%s to install exactly; "+
-			"nothing was changed. Check for updates again to install %s", target, manifest.Latest, to, Normalise(to), manifest.Latest)
+		return "", false, fmt.Errorf("%s has moved on to %s since %s was offered, and origin has no tag %s to install exactly; "+
+			"nothing was changed. Check for updates again to install %s", target, manifest.Latest, to, tag, manifest.Latest)
 	}
-	fmt.Fprintf(out, "%s carries release %s (newest %s)\n", target, to, manifest.Latest)
-	return target, nil
+	if tagged {
+		fmt.Fprintf(out, "the tag %s (%s) carries release %s\n", tag, target, to)
+	} else {
+		fmt.Fprintf(out, "%s carries release %s (newest %s)\n", target, to, manifest.Latest)
+	}
+	return target, tagged, nil
 }
 
-// fetchReleaseTag reports the commit a tag on origin names. Failing to find out
-// is not an error: the branch is then checked just as strictly.
-func fetchReleaseTag(ctx context.Context, dir, tag string, out io.Writer) (string, bool) {
+// fetchedTag is a tag as origin has it.
+type fetchedTag struct {
+	// object is what the ref points at: a tag object for an annotated or
+	// signed tag, the commit itself for a lightweight one.
+	object string
+	// commit is the commit it names in the end.
+	commit string
+}
+
+// fetchReleaseTag fetches a tag from origin and reports what it names.
+//
+// found is false with a nil error when origin answered and has no such tag,
+// and false with an error when that could not be established. The difference
+// is the caller's to weigh: a fork falls back to its branch either way, and
+// the project's own repository installs nothing either way but says which.
+func fetchReleaseTag(ctx context.Context, dir, tag string, out io.Writer) (fetched fetchedTag, found bool, err error) {
 	var listed bytes.Buffer
 	if err := gitStream(ctx, dir, &listed, "ls-remote", "--tags", "origin", "refs/tags/"+tag); err != nil {
-		fmt.Fprintf(out, "could not ask origin for the tag %s, so using the branch: %v\n", tag, err)
-		return "", false
+		return fetchedTag{}, false, fmt.Errorf("git ls-remote: %v", err)
 	}
 	// By whole lines, because ssh's own warnings arrive in the same stream.
-	found := false
 	for _, line := range strings.Split(listed.String(), "\n") {
 		found = found || strings.HasSuffix(line, "\trefs/tags/"+tag)
 	}
 	if !found {
-		fmt.Fprintf(out, "origin has no tag %s yet, so using the branch\n", tag)
-		return "", false
+		return fetchedTag{}, false, nil
 	}
 	fmt.Fprintf(out, "\n$ git fetch --no-tags origin refs/tags/%s\n", tag)
 	if err := gitStream(ctx, dir, out, "fetch", "--no-tags", "origin", "refs/tags/"+tag); err != nil {
-		fmt.Fprintf(out, "could not fetch the tag %s, so using the branch: %v\n", tag, err)
-		return "", false
+		return fetchedTag{}, false, fmt.Errorf("git fetch: %v", err)
 	}
-	commit, err := gitOutput(ctx, dir, "rev-parse", "--verify", "FETCH_HEAD^{commit}")
+	// Both read now, by id: FETCH_HEAD is whatever the last fetch left, and
+	// the object a signature is checked on has to be the one that was fetched
+	// for this tag.
+	object, err := gitOutput(ctx, dir, "rev-parse", "--verify", "FETCH_HEAD")
 	if err != nil {
-		fmt.Fprintf(out, "could not read the tag %s, so using the branch: %v\n", tag, err)
-		return "", false
+		return fetchedTag{}, false, fmt.Errorf("the tag could not be read: %v", err)
 	}
-	return strings.TrimSpace(commit), true
+	fetched.object = strings.TrimSpace(object)
+	resolved, err := gitOutput(ctx, dir, "rev-parse", "--verify", fetched.object+"^{commit}")
+	if err != nil {
+		return fetchedTag{}, false, fmt.Errorf("the tag does not name a commit: %v", err)
+	}
+	fetched.commit = strings.TrimSpace(resolved)
+	return fetched, true, nil
 }
 
 // installedVersion is what the checkout's own changelog says it is on. HEAD can
@@ -231,7 +322,7 @@ func installedVersion(ctx context.Context, dir string) string {
 	if err != nil {
 		return ""
 	}
-	manifest, err := ParseManifest([]byte(raw))
+	manifest, err := ParsePublishedManifest([]byte(raw))
 	if err != nil {
 		return ""
 	}
@@ -239,7 +330,7 @@ func installedVersion(ctx context.Context, dir string) string {
 }
 
 // fastForward moves the checkout on to the release updateTarget confirms, and
-// reports the commit and the version it lands on.
+// reports where it landed.
 //
 // --ff-only, never `reset --hard`.
 //
@@ -252,7 +343,7 @@ func installedVersion(ctx context.Context, dir string) string {
 // local change that does not collide, and when one does collide git refuses
 // and says exactly what is in the way — which is a far better outcome than a
 // successful upgrade that ate somebody's configuration.
-func fastForward(ctx context.Context, dir, ref, to string, out io.Writer) (commit, version string, err error) {
+func fastForward(ctx context.Context, dir string, want request, out io.Writer) (landing, error) {
 	if owner, ok := hostexec.OwnerOf(dir); ok {
 		if before, err := gitOutput(ctx, dir, "rev-parse", "HEAD"); err == nil {
 			defer handBack(ctx, dir, owner, strings.TrimSpace(before), out)
@@ -260,29 +351,43 @@ func fastForward(ctx context.Context, dir, ref, to string, out io.Writer) (commi
 	}
 	fmt.Fprintf(out, "$ git fetch --prune origin\n")
 	if err := gitStream(ctx, dir, out, "fetch", "--prune", "origin"); err != nil {
-		return "", "", err
+		return landing{}, err
 	}
 
-	target, err := updateTarget(ctx, dir, ref, to, out)
+	target, tagged, err := updateTarget(ctx, dir, want, out)
 	if err != nil {
-		return "", "", err
+		return landing{}, err
 	}
 	fmt.Fprintf(out, "\n$ git merge --ff-only %s\n", target)
 	if err := gitStream(ctx, dir, out, "merge", "--ff-only", target); err != nil {
-		return "", "", fmt.Errorf("%w\n\nThe checkout at %s could not be fast-forwarded to %s. "+
+		return landing{}, fmt.Errorf("%w\n\nThe checkout at %s could not be fast-forwarded to %s. "+
 			"That normally means it carries local commits, or edits to files this release also "+
 			"changes; commit, stash or revert them and try again", err, dir, target)
 	}
-	version = installedVersion(ctx, dir)
+	landed := landing{version: installedVersion(ctx, dir), tagged: tagged}
 	head, err := gitOutput(ctx, dir, "rev-parse", "HEAD")
 	if err != nil {
 		// The merge succeeded, so the upgrade should proceed; only the record
 		// of which commit it landed on is missing.
-		return "", version, nil
+		return landed, nil
 	}
-	commit = strings.TrimSpace(head)
-	fmt.Fprintf(out, "now at %s (version %s)\n", commit, version)
-	return commit, version, nil
+	landed.commit = strings.TrimSpace(head)
+	// A checkout already past the tag is not on it, whatever was merged.
+	landed.tagged = tagged && landed.commit == target
+	if landed.tagged {
+		// Remembered in the checkout, in a namespace of this dashboard's own.
+		// The tag this was verified against was asked of origin and not
+		// stored, and the checkout's own tag of that name may be missing or
+		// the operator's, so a build made later (the one that follows, a
+		// rebuild from Settings, install.sh) reads this to know the commit is
+		// the release and needs no stamp.
+		ref := releaseRefs(want.version)[1]
+		if _, err := gitOutput(ctx, dir, "update-ref", ref, landed.commit); err != nil {
+			fmt.Fprintf(out, "could not record %s as release %s, so builds of it will carry its commit: %v\n", landed.commit, want.version, err)
+		}
+	}
+	fmt.Fprintf(out, "now at %s (version %s)\n", landed.commit, landed.version)
+	return landed, nil
 }
 
 // handBack gives the checkout's owner back what this process wrote into it.

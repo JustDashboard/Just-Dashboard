@@ -29,7 +29,15 @@ browser. It needs no fleet, no cloud account and no paid tier: **every feature i
 
 ## Install
 
-You need a Linux server you have root on.
+You need a Linux server you have root on:
+
+- **x86_64 or arm64**, running **systemd**. It is tested on Debian and Ubuntu.
+- **2 GB of memory with 2 GB of swap, or 3 GB of memory.** Running the dashboard takes far less; building
+  it during setup and every update is what needs the room.
+- **10 GB of free disk** for the images.
+- Docker, which the installer installs when it is missing.
+
+The installer checks all of this before it changes anything.
 
 ```bash
 git clone https://github.com/JustDashboard/Just-Dashboard.git

@@ -90,11 +90,27 @@ type Run struct {
 	// job like everything else.
 	Health string `json:"health,omitempty"`
 
+	// RequireTag says the version is installed from origin's tag v<ToVersion>
+	// or not at all. The backend sets it for the project's own repository; a
+	// fork leaves it off and may be given the head of Ref instead.
+	RequireTag bool `json:"requireTag,omitempty"`
+
 	FromCommit string `json:"fromCommit,omitempty"`
 	ToCommit   string `json:"toCommit,omitempty"`
+	// Tagged says ToCommit is the commit that tag names, which is what makes
+	// this run the installation of a release rather than of a branch.
+	Tagged bool `json:"tagged,omitempty"`
 	// InstalledVersion is what the changelog at ToCommit says, which is the
 	// version the update really landed on rather than the one it was asked for.
 	InstalledVersion string `json:"installedVersion,omitempty"`
+	// DatabaseCopy is the copy of the dashboard's database taken before the
+	// updater started, or "" when none could be made. A rollback names it and
+	// does not restore it; see dbcopy.go.
+	DatabaseCopy string `json:"databaseCopy,omitempty"`
+	// SavedImages are the images this run tagged :previous before building
+	// over them. They are in the record, and not only in the updater's memory,
+	// so that a backend which finds the updater gone can put them back.
+	SavedImages []SavedImage `json:"savedImages,omitempty"`
 
 	Actor      string     `json:"actor"`
 	StartedAt  time.Time  `json:"startedAt"`

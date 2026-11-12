@@ -4,16 +4,22 @@
 #
 #   scripts/release.sh 0.6
 #
-# A version of Just Dashboard lives in five files, and every install in the
-# world decides whether to offer itself an update by comparing two of them. So
-# this exists to make bumping a release one action rather than five, and the Go
-# test suite fails the build if any of them ever drift apart:
+# A version of Just Dashboard lives in six files, and every install in the
+# world decides whether it is behind by comparing two of them. So this exists
+# to make bumping a release one action rather than six, and the Go test suite
+# fails the build if any of them ever drift apart:
 #
 #   backend/internal/version/version.go          what the server logs and reports
 #   frontend/src/lib/version.ts                  what the wordmark shows
 #   frontend/package.json                        because npm demands the field
 #   README.md                                    what the repository claims to be
 #   backend/internal/selfupdate/changelog.json   what the release *contains*
+#   docs/api/deploy-openapi.json                 what the SDKs are generated from
+#
+# The seventh place is the tag v<version>, which this does not make:
+# .github/workflows/release.yml tags the merge once Verify has passed on it.
+# A build of any commit but the tagged one says so by itself, as 0.6+98c9349
+# (backend/internal/version, scripts/build-stamp.sh).
 #
 # The changelog is the one this cannot write for you, and it is deliberately
 # first: a release with no release notes is a notification an operator cannot
@@ -75,6 +81,13 @@ rm -f backend/internal/version/version.go.bak frontend/src/lib/version.ts.bak \
 	frontend/package.json.bak README.md.bak
 ok "version constants bumped"
 
+# The API description is generated from the build, so its info.version is
+# whatever version.go says when it is written. Nothing rewrote it at a release,
+# which is how it sat at 0.8.4 while the product shipped 0.8.5.
+( cd backend && JD_UPDATE_OPENAPI=1 go test ./internal/api -run '^TestTheCommittedDeployOpenAPIDescriptionIsCurrent$' >/dev/null ) \
+	|| die "docs/api/deploy-openapi.json could not be regenerated; run: cd backend && JD_UPDATE_OPENAPI=1 go test ./internal/api -run TestTheCommittedDeployOpenAPIDescriptionIsCurrent"
+ok "docs/api/deploy-openapi.json regenerated"
+
 # The tests are the enforcement, not this script: they are what fails on a
 # release cut by hand, or by an agent that edited four files and forgot the
 # fifth.
@@ -86,7 +99,7 @@ cat <<EOF
 
 ${BOLD}Released $VERSION locally.${RESET} What is left:
 
-  ${DIM}# read the diff — five files and the generated changelog${RESET}
+  ${DIM}# read the diff — six files and the generated changelog${RESET}
   git diff --stat
 
   ${DIM}# the checks the diff reaches and both builds, as CONTRIBUTING requires${RESET}
@@ -97,8 +110,11 @@ ${BOLD}Released $VERSION locally.${RESET} What is left:
   git commit -am "Release $VERSION"
   ${DIM}# push the release branch and open its pull request into main${RESET}
 
-Every install polling this repository sees $VERSION within six hours of the
-merge into main, because the changelog on the tracked branch *is* the
-announcement. Once Verify passes on that merge, .github/workflows/release.yml
-tags it v$VERSION and publishes the GitHub release from this changelog entry.
+Merging into main does not release $VERSION by itself. Once Verify passes on
+that merge, .github/workflows/release.yml tags it v$VERSION and publishes the
+GitHub release from this changelog entry, and the tag is what installs wait
+for: they are offered $VERSION, and install exactly that commit, only once
+v$VERSION exists. They look every two hours and whenever the dashboard is
+opened. If Verify fails, nothing is tagged and nothing is offered; fix main and
+the next green run tags it.
 EOF

@@ -5,6 +5,23 @@
 Please do not open a public issue. Report it privately through
 [**Security → Report a vulnerability**](https://github.com/JustDashboard/Just-Dashboard/security/advisories/new)
 on this repository. Fixes ship in the newest release, which **Update now** in the dashboard installs.
+Only the newest release is supported: there are no fixes for older versions, so the way to get one is to
+update.
+
+## How updates are verified
+
+An update builds and runs code as root, so this is what it relies on. The dashboard reads the changelog
+and the release tag over HTTPS from the project's repository on GitHub and from nowhere else; no other
+host can be configured, and `JD_UPDATE_REPO` only names a different repository there. The code itself
+is fetched from the `origin` of the checkout you installed from. A version is
+offered and installed only once it has a release tag (`v0.8.6`), which the project's release job makes
+after the checks pass on `main`, and the update installs exactly the tagged commit by fast-forwarding
+your checkout, never by resetting it. Release tags are **not signed yet**: the trust is in GitHub and
+in who can push to the repository. The updater can already require a tag signed by a release key built
+into the running version; it is switched off until that key is published, and this section will say so
+when it is on. Before it builds, an update keeps the running images and copies the dashboard's database,
+and it goes back by itself when the new version does not answer; see
+[If an update fails](docs/guides/administration.md#if-an-update-fails).
 
 ## How the dashboard protects your server
 

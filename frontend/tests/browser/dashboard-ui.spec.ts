@@ -87,7 +87,14 @@ const update = {
     },
   ],
   breaking: true,
-  check: { enabled: true, checkedAt: earlier, repo: "wayy/just-dashboard", ref: "main" },
+  tagged: true,
+  check: {
+    enabled: true,
+    checkedAt: earlier,
+    repo: "wayy/just-dashboard",
+    ref: "main",
+    tagsOnly: true,
+  },
   install: { supported: true, dir, compose: `${dir}/docker-compose.yml`, dirty: ["M Caddyfile"] },
 }
 
@@ -275,7 +282,8 @@ test("the version page is the history, with the update in the header", async ({ 
 
   await expect(page.getByRole("button", { name: "Update to 0.7.0" })).toBeVisible()
   await expect(page.getByText("0.7.0 available")).toBeVisible()
-  await expect(page.getByText("1 release ahead of yours")).toBeVisible()
+  // What is on offer is a release, and the page says how it knows.
+  await expect(page.getByText("1 release ahead of yours · tagged v0.7.0")).toBeVisible()
 
   // The newest release leads the history and the running one is marked.
   const history = page.locator("section", { hasText: "Version history" })
@@ -288,6 +296,52 @@ test("the version page is the history, with the update in the header", async ({ 
   await expect(history.getByRole("heading", { name: "0.7.0" })).toHaveCount(0)
 
   expect(await framedPanels(page)).toEqual([])
+})
+
+test("a version on the branch with no tag is named and not offered", async ({ page }) => {
+  await mockApi(page, {
+    ...update,
+    latest: "0.6.7",
+    available: false,
+    tagged: false,
+    pending: "0.7.0",
+    releases: [],
+    breaking: false,
+  })
+  await page.goto("/dashboard")
+  await expect(page.getByText("Up to date")).toBeVisible()
+  await expect(page.getByText("0.7.0 is on main, not released yet")).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Update to/ })).toHaveCount(0)
+})
+
+test("a build that is not a release shows the commit it was made from", async ({ page }) => {
+  await mockApi(page, { ...update, commit: "98c9349" })
+  await page.goto("/dashboard")
+  await expect(page.getByText("+98c9349")).toBeVisible()
+  await expect(
+    page.getByTitle("Built from commit 98c9349, which is not the 0.6.7 release"),
+  ).toBeVisible()
+})
+
+test("a release shows its version and no commit", async ({ page }) => {
+  await mockApi(page)
+  await page.goto("/dashboard")
+  await expect(page.getByText("Just Dashboard", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText(/^\+[0-9a-f]{7,}$/)).toHaveCount(0)
+})
+
+test("a fork is told that what it is offered has no release tag", async ({ page }) => {
+  await mockApi(page, { ...update, tagged: false, check: { ...update.check, tagsOnly: false } })
+  await page.goto("/dashboard")
+  await expect(
+    page.getByText("1 release ahead of yours · no release tag, installs main as it stands"),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Update to 0.7.0" }).click()
+  await expect(
+    page
+      .getByRole("dialog", { name: "Update to 0.7.0" })
+      .getByText("from the head of main, which has no release tag"),
+  ).toBeVisible()
 })
 
 test("the sidebar's update notice leads to the Version page and installs through its own dialog", async ({

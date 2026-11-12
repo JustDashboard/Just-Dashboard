@@ -194,7 +194,8 @@ never into `docs/audits/`.
   WebAuthn refuses the `127.0.0.1` the other specs use, so the spec opens the same server by name.
   Browser specs do not pass through Caddy; `src/lib/passkeys.test.js` reads `deploy/Caddyfile` to hold
   its `Permissions-Policy` to allowing passkeys.
-- Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
+- Installer and terminal-admin changes also run `python3 scripts/test_manage.py`,
+  `python3 scripts/test_preflight.py`, `python3 scripts/test_build_stamp.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.
 - **`bun run build` is the final frontend type-check gate.** `frontend/Dockerfile`
@@ -241,7 +242,12 @@ never into `docs/audits/`.
   to `main`, reads `latest` from `backend/internal/selfupdate/changelog.json`, and when no release
   `v<latest>` exists yet, tags that commit and publishes the release with the version's section of
   `CHANGELOG.md` as its notes. The branch a release was cut on does not matter, and a merge whose
-  version is already released publishes nothing. Never tag or publish a release by hand; a manual run of the
+  version is already released publishes nothing. The tag is what installs wait for: a version on `main`
+  with no `v<version>` tag is neither offered nor installed (`selfupdate.TagsOnly`), so a merge whose
+  Verify run fails ships to nobody until a later run is green. Release tags can also be required to be
+  signed (`backend/internal/selfupdate/allowed_signers`, which names no key yet, so nothing is checked);
+  "Signed releases" in `docs/internal/backend/databases-proxy-platform.md` has the order to turn it on in.
+  Do not add a key to that file as part of other work. Never tag or publish a release by hand; a manual run of the
   workflow on `main` retries one that failed.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run. `TestLiveSiteControlsAreMeasured` instead writes its
@@ -261,7 +267,11 @@ never into `docs/audits/`.
   new one is built without being added there. They used to run on a self-hosted runner on the release
   host, which put the fixtures' builds on the daemon that serves the dashboard, needed its BuildKit
   cache pruned after every run, and left every run waiting whenever that service was down. Each live
-  job has a 45-minute test timeout. Required live fixtures fail CI if skipped or absent. Logs and
+  job has a 45-minute test timeout. Required live fixtures fail CI if skipped or absent. A fixture
+  names exactly what it installs, in its tool's lock file or as an exact version in the manifest, and
+  `TestAppFixturesNameExactVersions` fails on a range: one that installs whatever is newest fails on
+  the day upstream releases, on every branch at once. Bump a version on purpose, in a change of its
+  own, so the live job that runs is the one that proves it. Logs and
   browser failure traces are retained for 30 days, including failed runs. CI does not replace public
   TLS, clean-host installation, remote-host, architecture or soak acceptance.
 - A test that wants the dashboard's store opens it with `storetest.Open` (`internal/store/storetest`),

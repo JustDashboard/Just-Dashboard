@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -104,6 +105,11 @@ func TestBackupResourcesReportCoverageAndSuggestAJob(t *testing.T) {
 	}
 	if len(dashboard.Suggest.Sources) != 1 || dashboard.Suggest.Sources[0] != filepath.Clean(s.Cfg.DataDir) || len(dashboard.Suggest.SQLitePaths) != 1 {
 		t.Fatalf("dashboard suggestion: %+v", dashboard.Suggest)
+	}
+	// The copies an update takes of the store are left out, or every archive
+	// would carry the database three times.
+	if !slices.Contains(dashboard.Suggest.Excludes, filepath.Join(filepath.Clean(s.Cfg.DataDir), "pre-update")) {
+		t.Fatalf("dashboard suggestion does not exclude the pre-update copies: %q", dashboard.Suggest.Excludes)
 	}
 	if _, ok := report.Unavailable["docker"]; !ok {
 		t.Fatalf("no Docker in the test, yet not reported unavailable: %+v", report.Unavailable)

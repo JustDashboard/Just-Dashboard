@@ -14,6 +14,7 @@ import (
 // question a handler actually asks — "where does this install stand".
 type Service struct {
 	current   string
+	commit    string
 	dataDir   string
 	updateDir string
 	checker   *Checker
@@ -44,6 +45,9 @@ type Service struct {
 type Options struct {
 	// Current is the version running, i.e. version.Version.
 	Current string
+	// Commit is the commit a build that is not a release was made from, i.e.
+	// version.Commit. Empty for a release.
+	Commit  string
 	DataDir string
 	// UpdateDir overrides the checkout discovery entirely. Empty is the normal
 	// case: the dashboard asks Docker where it was deployed from.
@@ -62,6 +66,9 @@ type Options struct {
 	// where the API carries the dashboard's GitHub login across, since the
 	// login it was using belonged to root.
 	Adopted func(ctx context.Context, dir string)
+	// Database is the dashboard's own store, copied before an update starts.
+	// Nil leaves an update with no copy, which its transcript says.
+	Database *Database
 	// BaseURL overrides the raw-content host the changelog is read from.
 	// Empty everywhere but the tests, and deliberately not reachable from the
 	// environment: JD_UPDATE_REPO covers running a fork, while an arbitrary
@@ -78,10 +85,11 @@ func New(o Options) *Service {
 	}
 	return &Service{
 		current:   Normalise(o.Current),
+		commit:    strings.TrimSpace(o.Commit),
 		dataDir:   o.DataDir,
 		updateDir: o.UpdateDir,
 		checker:   checker,
-		installer: NewInstaller(store, o.DataDir, o.DockerHost, o.Log),
+		installer: NewInstaller(store, o.DataDir, o.DockerHost, o.Log).WithDatabase(o.Database),
 		store:     store,
 		list:      o.List,
 		health:    o.Health,
@@ -117,6 +125,9 @@ type CheckMeta struct {
 	Source    string     `json:"source,omitempty"`
 	Repo      string     `json:"repo"`
 	Ref       string     `json:"ref"`
+	// TagsOnly says this install is offered, and installs, only versions with
+	// a release tag: true for the project's own repository, false for a fork.
+	TagsOnly bool `json:"tagsOnly"`
 }
 
 // Install is whether this particular install can upgrade itself, and if not,
@@ -136,9 +147,21 @@ type Install struct {
 
 // Report is the whole answer, and the only thing the API serves.
 type Report struct {
-	Version   string `json:"version"`
+	Version string `json:"version"`
+	// Commit is the short commit this binary was built from when that is not
+	// the release of Version: a patch branch, a fork's head, a checkout with
+	// commits of the operator's own. Empty for a release, so a report of
+	// "0.8.5" and one of "0.8.5+98c9349" can be told apart. Shown, never
+	// compared.
+	Commit    string `json:"commit,omitempty"`
 	Latest    string `json:"latest,omitempty"`
 	Available bool   `json:"available"`
+	// Tagged says the version on offer has a release tag on the repository.
+	// False with Available set is a fork being offered the head of its branch.
+	Tagged bool `json:"tagged"`
+	// Pending is a newer version the tracked branch names that has no tag yet
+	// and so is not offered.
+	Pending string `json:"pending,omitempty"`
 	// Releases are the versions between the installed one and the newest,
 	// newest first. This is what "View changes" shows.
 	Releases []Release `json:"releases"`
@@ -193,8 +216,11 @@ func (s *Service) Report(ctx context.Context, freshness Freshness) Report {
 
 	rep := Report{
 		Version:   s.current,
+		Commit:    s.commit,
 		Latest:    check.Latest,
 		Available: check.Available,
+		Tagged:    check.Available && check.Tagged,
+		Pending:   check.Pending,
 		Releases:  check.Releases,
 		Breaking:  HasBreaking(check.Releases),
 		Check: CheckMeta{
@@ -204,6 +230,7 @@ func (s *Service) Report(ctx context.Context, freshness Freshness) Report {
 			Source:    check.Source,
 			Repo:      s.checker.Repo(),
 			Ref:       s.checker.Ref(),
+			TagsOnly:  s.checker.TagsOnly(),
 		},
 	}
 	if rep.Releases == nil {
@@ -271,11 +298,12 @@ func (s *Service) Install(ctx context.Context, target, actor string) (*Run, erro
 		return nil, err
 	}
 	run, err := s.installer.Start(ctx, loc, StartRequest{
-		From:   s.current,
-		To:     Normalise(target),
-		Ref:    s.checker.Ref(),
-		Health: s.health,
-		Actor:  actor,
+		From:       s.current,
+		To:         Normalise(target),
+		Ref:        s.checker.Ref(),
+		RequireTag: s.checker.TagsOnly(),
+		Health:     s.health,
+		Actor:      actor,
 	})
 	if err != nil {
 		return nil, err

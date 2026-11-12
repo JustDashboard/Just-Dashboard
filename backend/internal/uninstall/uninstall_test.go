@@ -247,6 +247,9 @@ func (h *fakeHost) Docker(_ context.Context, _ string, out io.Writer, args ...st
 
 func (h *fakeHost) DockerOutput(_ context.Context, _ string, args ...string) ([]byte, error) {
 	h.commands = append(h.commands, "docker "+strings.Join(args, " "))
+	if len(args) > 1 && args[0] == "builder" {
+		return []byte("ID\tRECLAIMABLE\tSIZE\nq1w2e3*\ttrue\t1.1GB\nTotal:\t2.2GB\n"), nil
+	}
 	return []byte(`{"services":{
 		"backend":{"image":"just-dashboard-backend:latest","build":{"context":"./backend"}},
 		"frontend":{"image":"just-dashboard-frontend:latest","build":{"context":"./frontend"}},
@@ -313,11 +316,17 @@ func TestKeepLeavesDataAndKeepsTheKey(t *testing.T) {
 		"docker image rm just-dashboard-frontend:latest",
 		"docker image rm just-dashboard-frontend:previous",
 		"docker image rm just-dashboard-backend:previous",
+		// The layers those images were built from, once nothing has used
+		// them for a week. Never --all: other things are built on this server.
+		"docker builder prune --force --filter until=168h\n",
 		"systemd-run --unit just-dashboard-uninstall-20261012t120000z",
 	} {
 		if !strings.Contains(cmds, want) {
 			t.Fatalf("missing %q:\n%s", want, cmds)
 		}
+	}
+	if !strings.Contains(out.String(), "build cache unused for a week removed: 2.2GB") {
+		t.Fatalf("the transcript does not say what the prune freed:\n%s", out.String())
 	}
 	for _, never := range []string{"--volumes", "\ndocker image rm just-dashboard-backend:latest\n", "caddy:2-alpine", "/var/lib/just-dashboard\n"} {
 		if strings.Contains("\n"+cmds+"\n", never) {

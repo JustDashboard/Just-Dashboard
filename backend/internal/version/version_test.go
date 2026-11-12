@@ -3,6 +3,7 @@ package version
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -70,5 +71,67 @@ func TestPackageVersionMatchesRelease(t *testing.T) {
 	}
 	if pkg.Version != Version && !strings.HasPrefix(pkg.Version, Version+".") {
 		t.Fatalf("package.json says %q, which is not a %s release", pkg.Version, Version)
+	}
+}
+
+// The description of the deployment API is generated from the build and
+// carries its version, and the SDKs are generated from that file. The test
+// that keeps the file current (internal/api) leaves the version out of its
+// comparison, so this is what notices a release that did not regenerate it:
+// scripts/release.sh does, and by hand it is
+// JD_UPDATE_OPENAPI=1 go test ./internal/api -run TestTheCommittedDeployOpenAPIDescriptionIsCurrent
+func TestTheAPIDescriptionCarriesThisVersion(t *testing.T) {
+	const path = "../../../docs/api/deploy-openapi.json"
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("no API description to compare against: %v", err)
+	}
+	var description struct {
+		Info struct {
+			Version string `json:"version"`
+		} `json:"info"`
+	}
+	if err := json.Unmarshal(b, &description); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	if description.Info.Version != Version {
+		t.Fatalf("docs/api/deploy-openapi.json says %q, the release is %q — scripts/release.sh regenerates it",
+			description.Info.Version, Version)
+	}
+}
+
+func TestBuildNamesTheCommitOfAnythingThatIsNotTheRelease(t *testing.T) {
+	before := Commit
+	t.Cleanup(func() { Commit = before })
+	Commit = ""
+	if got := Build(); got != Version {
+		t.Fatalf("a release build calls itself %q", got)
+	}
+	Commit = "98c9349"
+	if got := Build(); got != Version+"+98c9349" {
+		t.Fatalf("a build from 98c9349 calls itself %q", got)
+	}
+}
+
+// The linker sets Commit by its full name, written in backend/Dockerfile. A
+// name that matches no variable is not an error to the linker: it sets
+// nothing, and every build then calls itself a release.
+func TestTheDockerfileStampsThisPackagesCommit(t *testing.T) {
+	b, err := os.ReadFile("../../Dockerfile")
+	if err != nil {
+		t.Skipf("no Dockerfile to compare against: %v", err)
+	}
+	dockerfile := string(b)
+	type here struct{}
+	target := reflect.TypeOf(here{}).PkgPath() + ".Commit"
+	if !strings.Contains(dockerfile, "-X "+target+"=${JD_COMMIT}") {
+		t.Fatalf("backend/Dockerfile does not build the server with -X %s=${JD_COMMIT}", target)
+	}
+	if !strings.Contains(dockerfile, "ARG JD_COMMIT") {
+		t.Fatal("backend/Dockerfile no longer declares the JD_COMMIT build argument")
+	}
+	// jd carries the same answer in the one string it has.
+	if !strings.Contains(dockerfile, `${JD_COMMIT:++${JD_COMMIT}}`) {
+		t.Fatal("backend/Dockerfile no longer adds the commit to jd's version")
 	}
 }
