@@ -341,7 +341,8 @@ service state. The pages that moved keep their behaviour:
   the destructive capability lifts one after confirmation (`connections/blocks-panel.tsx`).
 - **Tools** (`/network/tools`): 26 probes plus the browser-only IPv4/IPv6 subnet calculator occupy a two-pane
   workbench (the four counts that stood over it are gone; where probes are sent from is a fact in the
-  result pane's head). The searchable chooser selects one labelled form and result area. Other probes
+  result pane's head). The searchable chooser selects one labelled form and result area; below `md` they
+  are one full-height pane at a time with a bar at the foot (`phone-panes.tsx`), opening on the tool. Other probes
   stay mounted while hidden, preserving drafts, results and in-flight requests when switching. A new
   query-string arrival reseeds only the requested probe. Arriving with `?tool=asn&target=…` never runs
   it; sending traffic remains an explicit Run action.

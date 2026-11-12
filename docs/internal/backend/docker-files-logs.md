@@ -865,7 +865,10 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
 
 Frontend `components/logs/`: the page is a workbench like the terminal — one frame, the source rail
 (`source-rail.tsx`, hideable and resizable, remembered through `view-state` and `panel-size`) beside
-`log-workspace.tsx`, a hairline between them. Over the frame the page reads as a deployment's Logs page
+`log-workspace.tsx`, a hairline between them. Below `md` the two are one full-height pane at a time, the
+log first, with a bar at the foot to reach the sources (`components/phone-panes.tsx`); from `md` to `lg`
+the rail stacks over the lines and the page scrolls. A request record's Requests view leaves its chart to
+Insights on a phone, where the pane is the window's height and the rows are what it is for. Over the frame the page reads as a deployment's Logs page
 does: the chosen source as an identity line (`SourceIdentity` in `source-facts.tsx`, the Overview's
 `HostIdentity` shape: the source drawn as its product, its name, and its kind, state, path, size and
 rotated set as facts), with Export and the shortcuts key at its end — a request record takes the same
