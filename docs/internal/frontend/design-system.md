@@ -1844,6 +1844,17 @@ the config test panel; `proxy-insights.spec.ts` covers Live traffic, the ingress
 `proxy-alerts.spec.ts` covers the Alerts page — its picture, what fires, the rule form — and the
 overview bar's firing count.
 
+**A Sites list that could not be read says which read failed, why, and can be asked again.** The list
+is read from nginx, a Caddy on the host and the Caddy container that holds the public ports, and the
+last can fail on a server where the first two are fine (Docker not answering, two public Caddy
+containers and no word on which is the ingress, a Caddy that publishes 80 without 443). The page was
+two words in a red box. `proxy/sites-read-failure.ts` names the block for what was being read
+(*Could not read the sites*), draws the answer's `reason` under its message and its `raw` behind
+*What the server said* where the server sent them, points a bare 500 at the log line with its request
+id where it did not, and always offers **Try again**, since the read changes nothing. The notice over
+rows kept from the last good read carries the same reason and disclosure. `proxy-sites-list.spec.ts`
+holds both at 1280 and 390, with and without a reason.
+
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:
 `postgresql-16` and `libpq5` are PostgreSQL, `python3-requests` Python, `linux-image-*` the kernel's
