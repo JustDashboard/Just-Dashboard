@@ -1,3 +1,4 @@
+import { readResponse } from "@/lib/api"
 import { isTransient, waitAfterFailure } from "@/lib/backoff"
 
 /**
@@ -68,4 +69,45 @@ export function waitingReason(err: unknown): string {
   if (!words) return "The server refused the request. Trying again."
   const capital = words.charAt(0).toUpperCase() + words.slice(1)
   return `${/[.!?]$/.test(capital) ? capital : `${capital}.`} Trying again.`
+}
+
+/** Where the document's own script leaves the request it started, on `window`. */
+const EARLY_SESSION = "__jdSession"
+
+/**
+ * The probe, started by the document itself rather than by the app.
+ *
+ * Every dashboard route is a splash until the session is known, and the question used to be
+ * asked only after about 450 KB of JavaScript had been downloaded, parsed and hydrated: three
+ * steps in a row, each a round trip or more over a tunnel. This is one line for a nonced inline
+ * script in the root layout's `<head>`: it sends the same request the provider would have sent
+ * and leaves the promise on `window`, so the answer travels while the JavaScript does and is
+ * usually there by the time `earlySession` asks for it.
+ *
+ * Not a `<link rel=preload as=fetch>`: whether a preloaded response is handed to a later
+ * `fetch` depends on the browser and on the response's cache headers, and a miss is a second
+ * request against the limiter. A promise is taken or it is not.
+ */
+export function sessionProbeScript(apiBase: string): string {
+  // `<` cannot appear in an inline script without risking the end of it.
+  const url = JSON.stringify(`${apiBase}/auth/session`).replace(/</g, "\\u003c")
+  // The no-op catch keeps a failed request from being reported as unhandled before the
+  // provider has mounted to handle it; the promise the provider takes still rejects.
+  return (
+    `try{(window.${EARLY_SESSION}=fetch(${url},{credentials:"include"}))` +
+    `.catch(function(){})}catch(e){}`
+  )
+}
+
+/**
+ * The answer to the request the document started, once: the first probe of a page load takes it
+ * and every later ask (a retry, a recheck) makes its own. Nothing when the document started none.
+ */
+export function earlySession<T>(): Promise<T> | undefined {
+  if (typeof window === "undefined") return undefined
+  const holder = window as unknown as Record<string, Promise<Response> | undefined>
+  const started = holder[EARLY_SESSION]
+  if (!started) return undefined
+  holder[EARLY_SESSION] = undefined
+  return started.then((res) => readResponse<T>(res, "/auth/session"))
 }

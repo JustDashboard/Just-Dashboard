@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ApiError, get, post } from "@/lib/api"
-import { untilAnswered } from "@/lib/session-probe"
+import { earlySession, untilAnswered } from "@/lib/session-probe"
 import { forgetWorkingState } from "@/lib/view-state"
 import { signInWithPasskey } from "@/lib/passkeys"
 import type { AuthStatus, Capability } from "@/lib/types"
@@ -140,7 +140,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false
     const requested = generation.current
     const live = () => !cancelled && requested === generation.current
-    untilAnswered(() => get<AuthStatus>("/auth/session"), {
+    // The first ask takes the request the document's own script started while
+    // this code was still downloading; a retry makes its own.
+    const ask = (attempt: number) =>
+      (attempt === 1 ? earlySession<AuthStatus>() : undefined) ?? get<AuthStatus>("/auth/session")
+    untilAnswered(ask, {
       signedOut: (err) => err instanceof ApiError && err.isAuthProblem,
       live,
       onWait: (err) => {

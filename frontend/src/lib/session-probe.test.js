@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { ApiError } from "./api"
-import { untilAnswered, waitingReason } from "./session-probe"
+import { earlySession, sessionProbeScript, untilAnswered, waitingReason } from "./session-probe"
 
 const signedOut = (err) => err instanceof ApiError && err.isAuthProblem
 
@@ -95,4 +95,66 @@ test("the splash says why it is still there", () => {
   expect(waitingReason(new ApiError(403, "unknown", ""))).toBe(
     "The server refused the request. Trying again.",
   )
+})
+
+describe("the probe the document starts itself", () => {
+  const originalWindow = globalThis.window
+  const originalFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    if (originalWindow === undefined) delete globalThis.window
+    else globalThis.window = originalWindow
+  })
+
+  /** Runs the inline script as the document would, against a `fetch` that records. */
+  function runScript(respond) {
+    const calls = []
+    globalThis.window = {}
+    globalThis.fetch = (url, options) => {
+      calls.push({ url, options })
+      return respond()
+    }
+    new Function(sessionProbeScript("/api/v1"))()
+    return calls
+  }
+
+  test("it sends the provider's own request, once, and the provider takes the answer", async () => {
+    const calls = runScript(async () => Response.json({ authenticated: true, user: { id: 1 } }))
+    expect(calls).toEqual([{ url: "/api/v1/auth/session", options: { credentials: "include" } }])
+    const early = earlySession()
+    await expect(early).resolves.toEqual({ authenticated: true, user: { id: 1 } })
+    // Taken: a retry or a recheck asks for itself.
+    expect(earlySession()).toBeUndefined()
+    expect(calls).toHaveLength(1)
+  })
+
+  test("a refusal reaches the provider as the same error a request of its own would give", async () => {
+    runScript(
+      async () =>
+        new Response(JSON.stringify({ error: { code: "rate_limited", message: "slow down" } }), {
+          status: 429,
+          headers: { "Retry-After": "30" },
+        }),
+    )
+    await expect(earlySession()).rejects.toMatchObject({
+      status: 429,
+      code: "rate_limited",
+      retryAfterMs: 30_000,
+    })
+    runScript(() => Promise.reject(new TypeError("Failed to fetch")))
+    await expect(earlySession()).rejects.toThrow("Failed to fetch")
+  })
+
+  test("a document that started nothing leaves the provider to ask", () => {
+    globalThis.window = {}
+    expect(earlySession()).toBeUndefined()
+    delete globalThis.window
+    expect(earlySession()).toBeUndefined()
+  })
+
+  test("the address cannot end the script it is written into", () => {
+    const script = sessionProbeScript("/api</script><script>alert(1)//")
+    expect(script).not.toContain("<")
+    expect(script).toContain("\\u003c/script>")
+  })
 })

@@ -488,7 +488,13 @@ that is not about the session or no answer at all is waited out and asked again 
 doubling to thirty), with `loading` still true and the failure in `useAuth().stalled`; the shell keeps
 its splash, which then says why it is still there (`waitingReason`), and the address is untouched. It
 used to count any failure as signed out, so a restored window of tabs that drained the limiter, or a
-load during a restart, ended on the sign-in form with a session that was still good. Request
+load during a restart, ended on the sign-in form with a session that was still good. **The probe leaves
+with the document, not after hydration.** The root layout's `<head>` carries a second nonced inline
+script (`sessionProbeScript`) that sends `GET /auth/session` and leaves the promise on `window`; the
+provider's first ask takes it (`earlySession`), so the answer travels while the JavaScript downloads
+instead of after it, and a retry or recheck makes a request of its own. It is a script rather than a
+`<link rel=preload as=fetch>` because whether a preload is handed to a later `fetch` depends on the
+browser and the response's cache headers, and a miss would be a second request. Request
 generations prevent a stale session probe or recheck from replacing a newer sign-in, and end a probe
 that is still waiting. Sign-out requests are coalesced, clear working
 drafts immediately, and finish their cookie expiry before a new sign-in is allowed; pending sign-out

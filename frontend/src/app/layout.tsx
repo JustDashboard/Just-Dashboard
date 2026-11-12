@@ -2,6 +2,8 @@ import type { Metadata } from "next"
 import { headers } from "next/headers"
 import { Toaster } from "@/components/ui/sonner"
 import { AuthProvider } from "@/hooks/use-auth"
+import { API_BASE } from "@/lib/api"
+import { sessionProbeScript } from "@/lib/session-probe"
 import { themeBootstrapScript } from "@/lib/themes"
 import { sourceSans3 } from "./font"
 import "./globals.css"
@@ -23,6 +25,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="en" className={`dark ${sourceSans3.variable}`} suppressHydrationWarning>
       <head>
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeBootstrapScript() }} />
+        {/* Every page below is a splash until the session is known, so the
+            question is asked from here, while the JavaScript that will read
+            the answer is still downloading (`AuthProvider` takes it). */}
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: sessionProbeScript(API_BASE) }} />
       </head>
       <body className="antialiased">
         <AuthProvider>

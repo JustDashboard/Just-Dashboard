@@ -120,6 +120,31 @@ test("a first session probe that is refused or unanswered waits on the splash an
   await expect(page.getByLabel("Username")).toHaveCount(0)
 })
 
+test("the session is asked for while the page's JavaScript is still on its way", async ({
+  page,
+}) => {
+  let seen = () => {}
+  const asked = new Promise<void>((resolve) => {
+    seen = resolve
+  })
+  const fixture = await authFixture(page, async (route) => {
+    seen()
+    await route.fallback()
+  })
+  // None of the app's scripts arrives before the probe has left. When the
+  // probe waited for hydration this page could never have loaded.
+  await page.route("**/_next/static/**/*.js", async (route) => {
+    await asked
+    await route.continue()
+  })
+  await page.goto("/account/sessions")
+  await expect(
+    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
+  ).toBeVisible()
+  // The provider took the document's request: it did not ask a second time.
+  expect(fixture.reads()).toBe(1)
+})
+
 test("a delayed expired-session recheck cannot replace a later successful sign-in", async ({
   page,
 }) => {
