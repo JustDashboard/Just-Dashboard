@@ -51,7 +51,11 @@ toolchain line moves. The Go picking for files that are not Go is `scripts/ci-pl
 so the local gate and the workflow's plan cannot drift apart again.
 
 The browser gate serves the latest `bun run build` output on `127.0.0.1:43117`; it does not reuse a
-development server or an unrelated dashboard on port 3000. Rebuild after frontend edits before running
+development server or an unrelated dashboard on port 3000. `bun run start` is
+`frontend/scripts/serve-standalone.mjs`, not `next start`: it copies `.next/static` and `public` beside
+`.next/standalone/server.js` and runs that server, which is what `frontend/Dockerfile` does, so a file
+the standalone trace leaves out fails a spec instead of an install. It takes `next start`'s `--hostname`
+and `--port` and listens on loopback when no host is named. Rebuild after frontend edits before running
 browser tests alone. `JD_BROWSER_BASE_URL` selects an explicitly managed test frontend instead.
 Generated Playwright reports and traces are excluded from source linting.
 

@@ -76,7 +76,9 @@ never into `docs/audits/`.
   run the whole browser suite or `go test ./...` locally. Install the required Chromium build once
   with `bun run test:browser:install`.
   Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from
-  the worktree under test and rebuild/restart it after source changes. `JD_BROWSER_BASE_URL` selects
+  the worktree under test and rebuild/restart it after source changes. `bun run start` serves the
+  build with the standalone server the image runs (`frontend/scripts/serve-standalone.mjs`), so what
+  the specs open is what an install serves. `JD_BROWSER_BASE_URL` selects
   an explicitly managed frontend on another port when worktrees run alongside one another.
   Set `JD_BROWSER_WORKERS=1` to limit the selected browser run on a memory-constrained host; omit
   it to use the existing Playwright worker setting.

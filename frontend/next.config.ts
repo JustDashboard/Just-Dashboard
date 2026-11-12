@@ -48,7 +48,7 @@ const nextConfig: NextConfig = {
   // without one, before it looks at the rewrite below. About 140 API calls
   // spell a list endpoint with its slash (`/jobs/`, `/deploy/`), which the
   // backend's router accepts as it is, so wherever Next fronts the API (`bun
-  // dev`, and `next start` under the browser specs) each of them was two
+  // dev`, and the server under the browser specs) each of them was two
   // round trips: ten of the Overview's reads on load. With the redirect off
   // the request reaches the rewrite as it was sent. Pages still lose their
   // slash: `src/proxy.ts` does that redirect itself, for everything but /api.

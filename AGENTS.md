@@ -79,7 +79,8 @@ under a second. Anything expressible there belongs there rather than in a browse
 cd frontend && bun run build && bun run start --hostname 127.0.0.1 --port 43117   # once per build
 ```
 
-Rebuild and restart it after a source change, or the specs test the old build. `JD_BROWSER_BASE_URL`
+`bun run start` is the standalone server the image runs, with the same files copied beside it, not
+`next start`. Rebuild and restart it after a source change, or the specs test the old build. `JD_BROWSER_BASE_URL`
 points them at a server on another port when worktrees run side by side. To iterate on one spec, run
 it directly: `bunx playwright test tests/browser/docker-ui.spec.ts` (~30s).
 
