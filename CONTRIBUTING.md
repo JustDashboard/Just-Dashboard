@@ -267,7 +267,11 @@ never into `docs/audits/`.
   new one is built without being added there. They used to run on a self-hosted runner on the release
   host, which put the fixtures' builds on the daemon that serves the dashboard, needed its BuildKit
   cache pruned after every run, and left every run waiting whenever that service was down. Each live
-  job has a 45-minute test timeout. Required live fixtures fail CI if skipped or absent. Logs and
+  job has a 45-minute test timeout. Required live fixtures fail CI if skipped or absent. A fixture
+  names exactly what it installs, in its tool's lock file or as an exact version in the manifest, and
+  `TestAppFixturesNameExactVersions` fails on a range: one that installs whatever is newest fails on
+  the day upstream releases, on every branch at once. Bump a version on purpose, in a change of its
+  own, so the live job that runs is the one that proves it. Logs and
   browser failure traces are retained for 30 days, including failed runs. CI does not replace public
   TLS, clean-host installation, remote-host, architecture or soak acceptance.
 - A test that wants the dashboard's store opens it with `storetest.Open` (`internal/store/storetest`),

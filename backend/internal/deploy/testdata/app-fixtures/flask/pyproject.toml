@@ -2,4 +2,4 @@
 name = "jd-acceptance-flask"
 version = "1.0.0"
 requires-python = ">=3.11"
-dependencies = ["flask>=3"]
+dependencies = ["flask==3.1.3"]
