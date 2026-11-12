@@ -5,8 +5,9 @@ import { Bug, FirewallCheck, NetworkDevice, SecureConnection, SignIn } from "@/c
 import { get } from "@/lib/api"
 import { networkOf } from "@/lib/clients"
 import { cn } from "@/lib/utils"
-import type { BanSummary, Connections, Fail2banJail, LoginSession } from "@/lib/types"
+import type { BanSummary, Connections, Fail2banJail, LoginSession, SSHDConfig } from "@/lib/types"
 import type { Tone } from "@/components/tone"
+import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -19,12 +20,15 @@ import { ExposureIdentity } from "@/components/security/exposure-panel"
 import { Perimeter } from "@/components/security/perimeter"
 import { BoundaryPanel } from "@/components/security/boundary-view"
 import { useSecurity } from "@/components/security/security-context"
+import { sshReading } from "@/components/security/ssh-reading"
 
 type Fail2banReply = { available: boolean; running: boolean; jails: Fail2banJail[] }
 
 /** Observed access arrangement and native service readings, followed by the access-boundary report. */
 export default function SecurityOverviewPage() {
   const { firewall, exposure } = useSecurity()
+  const { can } = useAuth()
+  const admin = can("system.admin")
 
   const fail2ban = usePoll<Fail2banReply>((signal) => get("/fail2ban/", undefined, signal), 20_000)
   const bans = usePoll<BanSummary>(
@@ -39,6 +43,13 @@ export default function SecurityOverviewPage() {
     (signal) => get("/ssh-sessions", undefined, signal),
     10_000,
   )
+  // sshd's settings name the accounts that hold keys, so the read is an
+  // administrator's, as the SSH page's is; it changes only when somebody
+  // applies a change there, so it is read once.
+  const sshd = usePoll<SSHDConfig>((signal) => get("/ssh/config", undefined, signal), 0, [], {
+    enabled: admin,
+  })
+  const ssh = sshReading(sshd.data ?? undefined)
 
   const bannedNow = fail2ban.data?.jails.reduce((n, j) => n + j.currentlyBanned, 0) ?? 0
   const fromInternet = connections.data?.peers.filter((p) => !p.private).length
@@ -94,10 +105,33 @@ export default function SecurityOverviewPage() {
           hint={
             !firewall || !firewall.available
               ? "install ufw or firewalld"
-              : `${firewall.rules.filter((r) => !r.ipv6).length} rules · inbound ${firewall.policy.incoming ?? "—"}`
+              : `${firewall.rules.filter((r) => !r.ipv6).length} rules · ${
+                  firewall.policy.incoming
+                    ? `inbound ${firewall.policy.incoming}`
+                    : "inbound policy unknown"
+                }`
           }
         />
-        <AreaTile icon={SecureConnection} title="SSH" href="/security/ssh" value="Configuration" />
+        {/* The door that matters most says how it stands: keys only, passwords
+            allowed, or root's password, with where sshd listens. It was the
+            one tile in the row that read "Configuration". */}
+        <AreaTile
+          icon={SecureConnection}
+          title="SSH"
+          href="/security/ssh"
+          loading={admin && sshd.loading && !sshd.data}
+          value={
+            !admin ? "Administrators only" : sshd.error && !sshd.data ? "Unreadable" : ssh?.value
+          }
+          tone={sshd.error && !sshd.data ? "warning" : (ssh?.tone ?? "default")}
+          hint={
+            !admin
+              ? "its settings name who holds a key"
+              : sshd.error && !sshd.data
+                ? "sshd's configuration could not be read"
+                : ssh?.hint
+          }
+        />
         <AreaTile
           icon={Bug}
           title="Intrusion"
