@@ -68,7 +68,8 @@ is a full load rather than a router link back into what threw.
 
 ### The document proxy and the build configuration
 
-`src/proxy.ts` runs for every document request and nothing under `/api` or `/_next/static` (its
+`src/proxy.ts` runs for every document request and nothing under `/api`, `/_next/static` or the files
+`public/` serves by the dozen (`/monaco/`, `/logos/`, `/brand-logo/`, Excalidraw's fonts: its
 `matcher`). It mints the per-request nonce and the Content-Security-Policy that goes with it, and it
 is where the build's routing choices in `next.config.ts` are completed.
 
@@ -756,12 +757,26 @@ opened. Feature pieces live in `components/<feature>/`: `database/`, `docker/`, 
 ## The editor is served from here, not from a CDN
 
 `components/code-editor.tsx` wraps Monaco, and the line that matters is
-`loader.config({ paths: { vs: "/monaco/vs" } })`. `@monaco-editor/react` otherwise fetches the editor from
+`loader.config({ paths: { vs: MONACO_VS } })`, this origin's `/monaco/<version>/vs`. `@monaco-editor/react` otherwise fetches the editor from
 `cdn.jsdelivr.net` at runtime — third-party JavaScript in the same origin as a session that drives the
 Docker socket and a root shell, and a permanent spinner for an operator whose workstation has no egress,
 which is the workstation this is meant to be reached from. `scripts/sync-monaco.mjs` copies
-`monaco-editor/min/vs` into `public/monaco/vs` from the Bun `dev`/`build` scripts and explicitly in the
+`monaco-editor/min/vs` into `public/monaco/<version>/vs` from the Bun `dev`/`build` scripts and explicitly in the
 Dockerfile. The copy is gitignored and excluded from eslint.
+
+**What `public/` serves is cached, and is not a page.** A file in `public/` has no hash in its name, so
+Next answers it with `max-age=0`, and the proxy gave each one a nonce and a policy it never reads:
+opening an editor was dozens of conditional round trips over the tunnel this product is used through.
+The two copied runtimes therefore sit under the version of the package they came from
+(`/monaco/<version>/vs`, `/excalidraw/<version>/fonts`), which `next.config.ts` reads from the
+installed package exactly as the sync scripts do; it writes the two addresses into the build
+(`lib/vendored.ts`) and answers those paths with `public, max-age=31536000, immutable`. An update that
+brings another Monaco asks under another path. The logos (`/logos`, `/brand-logo`) keep their names
+when redrawn, so they get a day and a week of `stale-while-revalidate`. `src/proxy.ts` leaves all four
+prefixes alone (a drawing's own page, `/excalidraw/<id>`, still comes through), and
+`static-assets.spec.ts` reads the headers off the built server. Behind Caddy these files now carry the
+proxy's fallback policy, as `/_next/static` always has; Monaco starts its workers from blob URLs, which
+take the page's policy, so nothing in `deploy/Caddyfile` changes.
 
 Files exposes Monaco's Find, Replace, Undo, Redo, Format and Commands actions, indentation, word wrap,
 minimap and font size. Models use the file path, search results reveal their matching line, and
