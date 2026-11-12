@@ -1766,7 +1766,13 @@ A watched domain opens a live report and preserves its nonstandard port. Passwor
 lists and watched-domain setup use the deployment settings' sections, each head over its fields; an
 access list is a row you read (its addresses as mono tags, its sites as links, its include line with
 Copy) with Edit inline and Delete in its menu. Certificate renewal lineages and
-DNS providers remain readings with their own actions, laid out to fit the management column; every
+DNS providers remain readings with their own actions, laid out to fit the management column. The
+providers are one list of choices, each a row of one height (mark, name, verbs): a plugin that is not
+installed and credentials nobody saved are the expected answer for a provider nobody chose, so only a
+provider with a token saved, or one a lineage renews through, says where it stands (*credentials
+saved*, *plugin missing*, *no credentials*), and those stand first. The name keeps its width before
+anything beside it; the plugin's id, the propagation wait and why a plugin cannot be installed from
+here are behind the name. Until 0.8.6 all eight carried an amber *plugin missing* line. Every
 run certbot made, the timer's included, follows the two columns as Renewals, a log `Pane` across the
 page's width, which a log needs and the management column does not have. The
 renewal column opens on its recent certbot runs (in the body, where they wrap, not in the narrow

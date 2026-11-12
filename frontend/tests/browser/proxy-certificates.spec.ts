@@ -10,6 +10,7 @@ import {
   stagingCertificate,
 } from "./fixtures/proxy/certs"
 import { healthyOperations, mockProject } from "./deploy-fixture"
+import { risen } from "./risen"
 import type { DeploymentDomainRoute } from "../../src/lib/types"
 
 /**
@@ -1139,6 +1140,95 @@ test("a lineage reports whether the configured renewal can run", async ({ page }
   await expect(lineages.getByText("Cloudflare", { exact: true })).toBeVisible()
   await expect(lineages.getByRole("button", { name: "Dry run", exact: true })).toBeVisible()
 })
+
+// The DNS challenge providers are a list of choices, each one row of one
+// height. A plugin that is not installed is the expected answer for a
+// provider nobody chose, so it is not said there; only a provider with a
+// token saved, or one a lineage renews through, says where it stands, and
+// those stand first.
+for (const viewport of [
+  { width: 1280, height: 900 },
+  { width: 390, height: 844 },
+]) {
+  test(`the DNS providers are one compact list at ${viewport.width}, with state only where one is used`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport)
+    await mockProxy(page, { included: true })
+    const provider = (key: string, name: string, over: object = {}) => ({
+      key,
+      name,
+      plugin: `dns-${key}`,
+      installed: false,
+      hasCredentials: false,
+      defaultWait: 30,
+      credentials: "",
+      ...over,
+    })
+    await page.route("**/api/v1/certificates/dns-providers", (route) =>
+      json(route, [
+        provider("route53", "Route 53"),
+        provider("cloudflare", "Cloudflare", { installed: true, hasCredentials: true }),
+        provider("digitalocean", "DigitalOcean"),
+        provider("gandi", "Gandi"),
+        provider("ovh", "OVH"),
+      ]),
+    )
+    await page.route("**/api/v1/certificates/certbot", (route) =>
+      json(
+        route,
+        certbotState({
+          certs: [
+            certbotLineage({
+              authenticator: "dns-ovh",
+              installer: undefined,
+              dnsProvider: "OVH",
+            }),
+          ],
+        }),
+      ),
+    )
+    await page.goto("/proxy/certificates")
+    const panel = page
+      .locator("[data-slot=panel]")
+      .filter({ has: page.getByRole("heading", { name: "DNS challenge providers" }) })
+    const rows = panel.locator("[data-slot=dns-provider]")
+    await expect(rows).toHaveCount(5)
+    // The two somebody uses first, in the server's order; the rest under them.
+    await expect(rows.nth(0)).toContainText("Cloudflare")
+    await expect(rows.nth(0)).toContainText("credentials saved")
+    await expect(rows.nth(1)).toContainText("OVH")
+    // Used by a lineage and its plugin is missing: the one amber line.
+    await expect(rows.nth(1)).toContainText("plugin missing")
+    await expect(panel.getByText("plugin missing")).toHaveCount(1)
+    await expect(panel.getByText("no credentials")).toHaveCount(0)
+    for (const index of [2, 3, 4]) {
+      await expect(rows.nth(index)).not.toContainText("plugin")
+      await expect(rows.nth(index)).not.toContainText("credentials")
+    }
+    await panel.scrollIntoViewIfNeeded()
+    await risen(page)
+    // A name is what a row is found by: none is cut short by what stands
+    // beside it, in the narrow column a laptop gives this panel or on a phone.
+    for (const row of await rows.all()) {
+      const name = row.locator("[data-slot=dns-provider-name]")
+      expect(
+        await name.evaluate((node) => node.clientWidth > 0 && node.scrollWidth <= node.clientWidth),
+        `${await name.textContent()} is cut short`,
+      ).toBe(true)
+    }
+    const boxes = await Promise.all((await rows.all()).map((row) => row.boundingBox()))
+    expect(boxes.map((box) => Math.round(box!.height))).toEqual([48, 48, 48, 48, 48])
+    // Rows of one height directly under one another: the hairline between two
+    // is inside the lower row's box, so the pitch is the height.
+    expect(boxes.slice(1).map((box, index) => Math.round(box!.y - boxes[index]!.y))).toEqual([
+      48, 48, 48, 48,
+    ])
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+  })
+}
 
 test("a read-only account reads the failure, with nothing to press", async ({ page }) => {
   await mockProxy(page, { included: true })
