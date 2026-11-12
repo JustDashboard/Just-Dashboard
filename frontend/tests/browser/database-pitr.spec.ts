@@ -438,7 +438,15 @@ test("a release's data point opens the recovery on its moment", async ({ page })
       ),
     )
     .toBe(true)
-  const sent = server.sent.filter((one) => one.request === "POST /databases/1/pitr/restore").at(-1)
+  // The recovery itself, not the plan asked for beside it: the dialog asks for
+  // the plan a moment after it opens, which a quick click can come before.
+  const sent = server.sent
+    .filter(
+      (one) =>
+        one.request === "POST /databases/1/pitr/restore" &&
+        !(one.body as { preview?: boolean }).preview,
+    )
+    .at(-1)
   expect(sent?.body).toEqual({ archiveId: 3, target: { kind: "time", time: moment.iso } })
 })
 
