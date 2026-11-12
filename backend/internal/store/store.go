@@ -1519,12 +1519,14 @@ CREATE TABLE IF NOT EXISTS metric_container_samples (
 -- first) cannot serve.
 CREATE INDEX IF NOT EXISTS idx_container_samples_ts ON metric_container_samples(ts);
 
--- A container's id, written once. A sample used to spell the sixty-four
--- characters out in its row and again in the index on them, which was about
--- half of the table above; it now holds this row's number (container_ref,
--- with container_id left empty) and metrics/container_ids.go reads either
--- spelling. AUTOINCREMENT, so a number is never given to a second container
--- after the first one's row was pruned.
+-- A container's id, written once. A sample spells the sixty-four characters
+-- out in its row and again in the index on them, which is about half of the
+-- table above; in the short form it holds this row's number (container_ref,
+-- with container_id left empty). metrics/container_ids.go reads either
+-- spelling from 0.8.6 and says why the recorder does not write the short one
+-- yet: the binary a rollback returns to cannot read it. AUTOINCREMENT, so a
+-- number is never given to a second container after the first one's row was
+-- pruned.
 CREATE TABLE IF NOT EXISTS metric_container_ids (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   container_id TEXT NOT NULL UNIQUE
@@ -1921,9 +1923,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Name continuity serves Docker charts; release attribution needs the exact
 	// observed container identity. Old samples deliberately remain unattributed.
 	{"metric_container_samples", "container_id", "TEXT NOT NULL DEFAULT ''"},
-	// The id as the number of its row in metric_container_ids, which is how
-	// a sample holds it since 0.8.6. NULL for a row from before, which keeps
-	// the id it spells out, and for a container that reported none.
+	// The id as the number of its row in metric_container_ids: the short
+	// form, which 0.8.6 reads and does not write yet. NULL for a row that
+	// spells its id out, and for a container that reported none.
 	{"metric_container_samples", "container_ref", "INTEGER DEFAULT NULL"},
 	// Unknown for pre-upgrade rows: an absent measurement must not become an
 	// idle interface or an operator-configured limit during migration.

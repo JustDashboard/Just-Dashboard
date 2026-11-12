@@ -371,6 +371,11 @@ type Recorder struct {
 	// the pruning of ids, so the two never interleave.
 	idsMu sync.Mutex
 	ids   map[string]int64
+	// numberIDs is whether a sample is written with its container's id as a
+	// number, or spelled out as every release so far has written it. It is
+	// off and only a test turns it on: see container_ids.go for what has to
+	// be true of the binary a rollback returns to before the server may.
+	numberIDs bool
 }
 
 // New builds a recorder. An interval or retention outside the supported band
@@ -750,14 +755,15 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 	}
 	defer tx.Rollback()
 
-	// container_id stays empty: the id is written once, in
-	// metric_container_ids, and the row holds its number (container_ids.go).
+	// A row spells its container's id out in container_id and holds no
+	// number, or, with numberIDs, holds the number of the id's row in
+	// metric_container_ids and leaves container_id empty (container_ids.go).
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO metric_container_samples
 		  (ts, name, cpu_percent, mem_bytes, mem_limit, mem_percent, net_rx, net_tx, pids,
 		   block_read, block_write, container_id, container_ref, size_rw, network_available, block_available,
 		   mem_limited, cpu_total, sample_time, cpu_periods, cpu_throttled)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,'',?,?,?,?,?,?,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(name, ts) DO UPDATE SET
 		  cpu_percent = excluded.cpu_percent,
 		  mem_bytes   = excluded.mem_bytes,
@@ -788,9 +794,12 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		if st.Name == "" {
 			continue // nothing to key the series on, and nothing to look it up by
 		}
-		ref, err := r.containerRef(ctx, tx, st.ID, resolved)
-		if err != nil {
-			return err
+		spelled, ref := st.ID, any(nil)
+		if r.numberIDs {
+			if ref, err = r.containerRef(ctx, tx, st.ID, resolved); err != nil {
+				return err
+			}
+			spelled = ""
 		}
 		observed := at
 		if !st.TS.IsZero() {
@@ -806,7 +815,7 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		if _, err := stmt.ExecContext(ctx, observed.Unix(), st.Name, st.CPUPercent,
 			int64(st.MemUsage), int64(st.MemLimit), st.MemPercent,
 			int64(st.NetRx), int64(st.NetTx), int64(st.PIDs),
-			int64(st.BlockRead), int64(st.BlockWrite), ref, st.SizeRw,
+			int64(st.BlockRead), int64(st.BlockWrite), spelled, ref, st.SizeRw,
 			st.NetworkAvailable, st.BlockAvailable, st.MemLimited, int64(st.CPUTotal),
 			float64(observed.UnixNano())/1e9, periods, throttled); err != nil {
 			return err

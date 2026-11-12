@@ -7,18 +7,30 @@ import (
 )
 
 // A container's id is sixty-four characters, and every sample of a container
-// used to carry it, in the row and again in the index that finds a release's
-// samples: about half of the largest table in the store was the same few
-// strings, written every interval. An id is now written once, in
-// metric_container_ids, and a sample holds the number of that row
+// carries it, in the row and again in the index that finds a release's
+// samples: about half of the largest table in the store is the same few
+// strings, written every interval. The short form writes an id once, in
+// metric_container_ids, and has a sample hold the number of that row
 // (container_ref) with container_id left empty.
 //
-// Nothing was rewritten to get there. A sample recorded before still spells
-// its id out and is read as it always was; it leaves with the retention like
-// any other, so after JD_METRICS_RETENTION the table holds only the short
-// form. Whatever reads a sample's identity reads both spellings through the
-// three fragments below, so a container whose samples straddle the upgrade is
-// one series with the numbers it had.
+// 0.8.6 reads the short form and does not write it yet (Recorder.numberIDs).
+// An update that fails is rolled back to the binary before it with the
+// database left as it is, and every release up to 0.8.5 finds a release's
+// samples by the id they spell and nothing else: over samples written in the
+// short form its release charts are empty, right-sizing has nothing to judge
+// and a container's chart reads its CPU differently where the container was
+// replaced. So the reader ships a release ahead of the writer. The recorder
+// may write the short form once the binary a rollback returns to is one that
+// has these readers, which no release can assume of an install that skipped
+// 0.8.6; TestSamplesSpellTheirIdOutForTheBinaryARollbackReturnsTo is what
+// has to be answered before numberIDs is turned on.
+//
+// Nothing is rewritten either way. A sample that spells its id out is read
+// as it always was and leaves with the retention like any other, so once the
+// short form is written the table holds only it after JD_METRICS_RETENTION.
+// Whatever reads a sample's identity reads both spellings through the three
+// fragments below, so a container whose samples straddle the change is one
+// series with the numbers it had.
 
 const (
 	// containerIdentityJoin makes a sample's written-down id available as i;

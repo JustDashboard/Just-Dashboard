@@ -11,9 +11,10 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
 
-// writeSpelledOut stores samples as every release up to 0.8.5 did: the
-// container's id in the row itself and no number. It is what an upgraded
-// install holds for as long as its retention.
+// writeSpelledOut stores samples as every release up to 0.8.5 did, in that
+// release's own words: the container's id in the row itself and no column
+// for a number. It is what an upgraded install holds, and what the binary a
+// rollback returns to writes.
 func writeSpelledOut(t *testing.T, r *Recorder, stats []dockerx.ContainerStats) {
 	t.Helper()
 	for _, st := range stats {
@@ -121,9 +122,9 @@ func everyChart(t *testing.T, r *Recorder, base time.Time) (string, *SizingUsage
 }
 
 // The charts read the same numbers whichever way a sample spells its
-// container's id: from history recorded before ids were written once, from
-// history recorded since, and from an install upgraded in the middle of a
-// container's life, where one series is made of both.
+// container's id: from history as 0.8.5 recorded it, as this release records
+// it, as the short form will, and from an install that changed in the middle
+// of a container's life, where one series is made of both.
 func TestTheChartsReadTheSameNumbersFromEitherSpellingOfAnId(t *testing.T) {
 	base := time.Unix(1_800_000_000, 0).UTC()
 	history := chartHistory(base)
@@ -133,16 +134,25 @@ func TestTheChartsReadTheSameNumbersFromEitherSpellingOfAnId(t *testing.T) {
 				writeSpelledOut(t, r, batch)
 			}
 		},
-		"recorded since": func(r *Recorder) {
+		"recorded by this release": func(r *Recorder) {
 			for _, batch := range history {
 				if err := r.writeContainers(context.Background(), batch[0].TS, batch); err != nil {
 					t.Fatal(err)
 				}
 			}
 		},
-		// Upgraded while web's second container and the database were
-		// running: each of them has samples in both spellings.
-		"upgraded half way": func(r *Recorder) {
+		"recorded in the short form": func(r *Recorder) {
+			r.numberIDs = true
+			for _, batch := range history {
+				if err := r.writeContainers(context.Background(), batch[0].TS, batch); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+		// The short form began while web's second container and the database
+		// were running: each of them has samples in both spellings.
+		"changed half way": func(r *Recorder) {
+			r.numberIDs = true
 			for i, batch := range history {
 				if i < 110 {
 					writeSpelledOut(t, r, batch)
@@ -168,7 +178,7 @@ func TestTheChartsReadTheSameNumbersFromEitherSpellingOfAnId(t *testing.T) {
 	if sizings["recorded before"].Samples == 0 {
 		t.Fatal("the sizing figures read from spelled-out history are empty")
 	}
-	for _, name := range []string{"recorded since", "upgraded half way"} {
+	for _, name := range []string{"recorded by this release", "recorded in the short form", "changed half way"} {
 		if charts[name] != want {
 			t.Errorf("history %s draws different charts than the same history spelled out:\n%s", name, firstDifference(want, charts[name]))
 		}
@@ -191,10 +201,43 @@ func firstDifference(want, got string) string {
 	return "one is a prefix of the other"
 }
 
-// An id is written once however many samples its container gives, and a
-// sample holds its number in place of the sixty-four characters.
+// This release still spells a container's id out in every sample, as 0.8.5
+// does, and writes no number. manage.sh rollback puts the previous binary
+// back over the database as it is, and that binary finds a release's samples
+// with the condition below and no other: a sample that held a number in
+// place of its id would be missing from its release charts and from
+// right-sizing. Before numberIDs is turned on for the server, the binary a
+// rollback returns to has to be one that reads the short form.
+func TestSamplesSpellTheirIdOutForTheBinaryARollbackReturnsTo(t *testing.T) {
+	r := testRecorder(t, 15*time.Second, time.Hour)
+	base := time.Unix(1_800_000_000, 0).UTC()
+	for _, batch := range chartHistory(base)[:50] {
+		if err := r.writeContainers(context.Background(), batch[0].TS, batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var found, numbered, ids int
+	for query, into := range map[string]*int{
+		// identityFilter as 0.8.5 has it.
+		`SELECT COUNT(*) FROM metric_container_samples WHERE container_id IN ('` + chartWebFirst + `','` + chartDatabase + `')`: &found,
+		`SELECT COUNT(*) FROM metric_container_samples WHERE container_ref IS NOT NULL`:                                         &numbered,
+		`SELECT COUNT(*) FROM metric_container_ids`:                                                                             &ids,
+	} {
+		if err := r.st.DB.QueryRow(query).Scan(into); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if found != 100 || numbered != 0 || ids != 0 {
+		t.Fatalf("of 100 samples of two containers, 0.8.5 finds %d by the id they spell, %d hold a number and %d ids are written down; want 100, 0, 0: "+
+			"a dashboard rolled back would not find the rest", found, numbered, ids)
+	}
+}
+
+// In the short form an id is written once however many samples its container
+// gives, and a sample holds its number in place of the sixty-four characters.
 func TestAContainersIdIsWrittenOnce(t *testing.T) {
 	r := testRecorder(t, 15*time.Second, time.Hour)
+	r.numberIDs = true
 	base := time.Unix(1_800_000_000, 0).UTC()
 	for _, batch := range chartHistory(base)[:50] {
 		if err := r.writeContainers(context.Background(), batch[0].TS, batch); err != nil {
@@ -234,6 +277,7 @@ func TestAContainersIdIsWrittenOnce(t *testing.T) {
 // written down again and found.
 func TestPruningForgetsTheIdsNoSampleRefersTo(t *testing.T) {
 	r := testRecorder(t, 15*time.Second, time.Hour)
+	r.numberIDs = true
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 	gone, kept := strings.Repeat("d", 64), strings.Repeat("e", 64)
