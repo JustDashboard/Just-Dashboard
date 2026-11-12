@@ -357,7 +357,12 @@ const policyRow = (page: Page, name: string) => page.getByRole("row").filter({ h
 async function settled(page: Page) {
   const open = dialog(page)
   await open.evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished),
+    ),
   )
 }
 

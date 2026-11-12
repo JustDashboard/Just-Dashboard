@@ -2412,7 +2412,12 @@ async function settled(page: Page) {
   const sheet = dialog(page)
   await expect(sheet).toBeVisible()
   await sheet.evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished),
+    ),
   )
 }
 

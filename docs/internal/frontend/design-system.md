@@ -1164,7 +1164,14 @@ above:
   being tested, an engine being started from quick setup; and, on `/deploy/new`, a repository or
   an image being inspected. The shimmer lights the stage a release is at and the present
   participles that stand for a wait — *Sending test…*, *Testing…*, *Pausing…*, *Candidate for
-  release #14*, *deploying #14*, *running now*;
+  release #14*, *deploying #14*, *running now*. All three are the browser's own animations, never a
+  script's frame loop, because *live* lasts as long as the page is open: the beam's pulse is a band
+  moved by `transform` behind a mask cut to the line (`jd-beam`), `BorderBeam`'s lap is the frame's
+  edge written as transform keyframes (`lib/beam-lap.ts`) and handed to the Web Animations API
+  once, the shimmer is `jd-shimmer`, the update notice's wire `jd-wire`, and the release path's
+  running `Segment` is `animate-sweep`. Reduced motion stills each of them in CSS. A new *live*
+  mark is written the same way: an endless `motion` animation keeps a page that looks still busy
+  sixty times a second (`design-system.spec.ts` counts the frames a page with wires asks for);
 - *once* — `Confetti` fires only when a release goes live in front of the reader — on the run page,
   on the Overview when a run watched there from start to finish ends in success, and from the
   sidebar's update notice when an update of the dashboard itself finishes while the tab is open —

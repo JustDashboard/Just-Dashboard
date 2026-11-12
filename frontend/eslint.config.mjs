@@ -31,6 +31,15 @@ const eslintConfig = defineConfig([
           message:
             "Print a date through a format built once: clockAt, minuteAt, dayAt and the others in lib/format.ts, or dateFormatter(options) declared at the top of the module.",
         },
+        // An animation that never ends is the browser's to run (a CSS
+        // animation, or one handed to the Web Animations API): motion sets an
+        // endless one from a JavaScript frame loop, and a page with a wire on
+        // it was then never idle (design system §11, *live*).
+        {
+          selector: "Property[key.name='repeat'][value.name='Infinity']",
+          message:
+            "An endless animation is written in CSS (see jd-beam, jd-shimmer and animate-sweep in globals.css), not with motion's repeat: Infinity, which runs a frame loop for as long as the page is open.",
+        },
       ],
       // Reaching past a primitive to the thing it wraps is the other mechanical
       // failure. Each of these has exactly one legitimate assembler, listed in
