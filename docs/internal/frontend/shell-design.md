@@ -5,6 +5,17 @@ security, and deployment workflows plus `/login` and `/welcome`. Most page modul
 deployment detail/new wrappers remain server components and hand interaction to client components under
 `components/deploy/`.
 
+**A route imports its page from a module that is that page's alone.** The bundler keeps a module
+whole: it drops neither the exports a route never names nor what they import. So a folder index that
+re-exports several pages, or one file that holds several, hands every one of them to each route that
+names one. The database section did both until 0.8.6 (`ops/index.tsx` over thirteen pages, the eight
+settings pages in one `ops/settings.tsx`, `mongo/index.tsx` and `redis/index.tsx` over the engines'
+pages): a settings page loaded 2.2 MB of entry JavaScript, half of it other pages and recharts. Each
+route now names its page's own file (`ops/settings-version-page.tsx`), what the settings pages share
+is `ops/settings-frame.tsx`, and `ops/page-modules.test.js` walks every database route's imports and
+fails when two routes share a page module or one reaches another's. An index over small shared parts
+(`database/kit`) is not this: every page that imports it uses most of it.
+
 ## The shell
 
 `(dashboard)/layout.tsx` owns `CommandPaletteProvider`, `SelfUpdateProvider`, `NavScopeProvider`,
