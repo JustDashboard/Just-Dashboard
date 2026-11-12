@@ -64,6 +64,7 @@ import {
 import { FolderColourMenu } from "@/components/files/folder-colour"
 import { COLUMN, FileRow } from "@/components/files/file-row"
 import { DiskRoom } from "@/components/files/disk-room"
+import { useEntryHandlers } from "@/components/files/entry-handlers"
 import { FilesSidebar } from "@/components/files/files-sidebar"
 import { GridView, type TileSize } from "@/components/files/grid-view"
 import { ImageEditorSheet } from "@/components/files/image-editor"
@@ -1323,6 +1324,18 @@ export default function FilesPage() {
   const dropFilesInto = canWrite
     ? (transfer: DataTransfer, dir: string) => void dropFiles(transfer, dir)
     : undefined
+  // What every row and tile is handed: one object for the page's life, so a
+  // render of the page is not a render of the folder (entry-handlers.ts).
+  const entryHandlers = useEntryHandlers({
+    onToggle: toggleSelected,
+    onSelect: selectRow,
+    onFocusEntry: activateEntry,
+    onOpen: openEntry,
+    onDragStart: dragStart,
+    onDropPaths: (paths, dir, mode) => void movePaths(paths, dir, mode),
+    onDropFiles: (transfer, dir) => void dropFiles(transfer, dir),
+    actionsFor,
+  })
 
   return (
     <Page fill data-files-workspace className="gap-2 px-2 py-2 md:px-3 md:py-3">
@@ -1709,13 +1722,7 @@ export default function FilesPage() {
                           dragging={dragging}
                           caps={caps}
                           size={tile}
-                          onToggle={toggleSelected}
-                          onSelect={selectRow}
-                          onFocusEntry={activateEntry}
-                          onOpen={openEntry}
-                          onDragStart={canWrite ? dragStart : undefined}
-                          onDropPaths={dropInto}
-                          onDropFiles={dropFilesInto}
+                          handlers={entryHandlers}
                         />
                       )}
                     </div>
@@ -1805,16 +1812,7 @@ export default function FilesPage() {
                               dimmed={dimmed.has(entry.path)}
                               dragging={dragging.has(entry.path)}
                               caps={caps}
-                              onToggle={(checked) => toggleSelected(entry, checked)}
-                              onSelect={(event) => selectRow(entry, event)}
-                              onFocusEntry={() => activateEntry(entry)}
-                              onOpen={() => openEntry(entry)}
-                              onDragStart={
-                                canWrite ? (event) => dragStart(entry, event) : undefined
-                              }
-                              onDropPaths={dropInto}
-                              onDropFiles={dropFilesInto}
-                              actions={actionsFor(entry)}
+                              handlers={entryHandlers}
                             />
                           ))}
                           {entries.length === 0 && (

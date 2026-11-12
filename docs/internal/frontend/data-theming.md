@@ -410,6 +410,12 @@ are dated evidence, not proof of current attachment ownership.
   on one disk and drew every row of the folder again on each frame: 0.9 to 1.7 s of script in ten idle
   seconds on a 521-row folder, a long task per frame. The reading lives in `files/disk-room.tsx` now and
   the page does not subscribe at all. `useMetrics()` is for a component that draws the frame itself.
+- **A long list's rows are `memo` over props that change only when the row does.** `FileRow` and the
+  grid's `Tile` take the entry, four booleans and one `handlers` object that is the page's for its whole
+  life (`files/entry-handlers.ts`: each call reaches the handler of the latest render through a ref), and
+  build a row's verbs when one is pressed. A click then draws the two rows whose `active` moved instead
+  of all of them. `files-ui.spec.ts` counts the rows React drew for a click and for a metrics frame; a
+  new prop that is a fresh closure or object per render fails it.
 - `lib/metrics-store.ts` keeps the live series **outside React**: owning five minutes of history in a route
   component threw it away on navigation, and pushing a 2 s frame through a context above the router
   re-rendered the terminal and log tail twice a second. Mirrored to sessionStorage so a reload keeps its

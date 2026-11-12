@@ -1,5 +1,6 @@
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { expect, test, type Page, type Route, type WebSocketRoute } from "@playwright/test"
 import { createHash } from "node:crypto"
+import { snapshot as hostSnapshot } from "./host-fixture"
 import { heldResponse, recordProgress } from "./progress-recording"
 
 test.use({
@@ -2293,4 +2294,89 @@ test("account cleanup aborts a pending image upload and suppresses late completi
   await page.evaluate(() => Reflect.get(window, "finishImageUpload")())
   await expect(page.getByText("Saved logo.png", { exact: true })).toHaveCount(0)
   await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+})
+
+/**
+ * The rows React drew since this was last asked, by path; `null` the first time.
+ *
+ * React keeps the props a host element was last drawn with on the element
+ * itself, and a row that sat a render out still holds the object it held. A
+ * count of renders, which a timing cannot give on a busy machine.
+ */
+function rowsDrawn(page: Page) {
+  return page.evaluate(() => {
+    const rows = [...document.querySelectorAll<HTMLElement>("tr[data-entry-path]")]
+    const key = Object.keys(rows[0] ?? {}).find((k) => k.startsWith("__reactProps$"))
+    if (!key) throw new Error("no __reactProps$ on a row: React keeps its props elsewhere now")
+    const held = Reflect.get(window, "jdRowProps") as Map<string, unknown> | undefined
+    const now = new Map(rows.map((row) => [row.dataset.entryPath ?? "", Reflect.get(row, key)]))
+    Reflect.set(window, "jdRowProps", now)
+    return held
+      ? [...now].filter(([path, props]) => held.get(path) !== props).map(([p]) => p)
+      : null
+  })
+}
+
+test("a large folder draws the rows a click is about, and none for a reading of the disk", async ({
+  page,
+}) => {
+  const big = "/srv/big"
+  const many = Array.from({ length: 300 }, (_, i) => ({
+    ...entry(`tool-${String(i).padStart(3, "0")}`, { size: 1000 + i }),
+    path: `${big}/tool-${String(i).padStart(3, "0")}`,
+  }))
+  await mockFiles(page)
+  await page.route("**/api/v1/files/list**", (route) =>
+    json(route, { path: big, parent: "/srv", entries: many, roots: ["/"] }),
+  )
+  // The shell's metrics stream, held open so the test can send the frames.
+  let stream: WebSocketRoute | undefined
+  await page.routeWebSocket("**/api/v1/system/stream**", (socket) => {
+    stream = socket
+  })
+  const frame = (free: number) =>
+    JSON.stringify({
+      type: "metrics",
+      data: {
+        ...hostSnapshot,
+        ts: new Date().toISOString(),
+        mounts: hostSnapshot.mounts.map((m) => (m.mountpoint === "/srv" ? { ...m, free } : m)),
+      },
+    })
+
+  await page.goto(`/files?path=${encodeURIComponent(big)}`)
+  const row = (n: number) => page.locator(`tr[data-entry-path='${many[n].path}']`)
+  await expect(page.locator("tr[data-entry-path]")).toHaveCount(300)
+  await expect.poll(() => stream !== undefined).toBe(true)
+  stream!.send(frame(380 * 1024 ** 3))
+  await expect(page.getByText("380.0 GB free on /srv")).toBeVisible()
+  // Rows near the window load their thumbnails as they are seen; let that end.
+  await expect.poll(() => rowsDrawn(page)).toEqual([])
+
+  // A frame every two seconds is the page's life. The footer follows the
+  // reading and no row is drawn for it; each frame used to draw all 300.
+  stream!.send(frame(379 * 1024 ** 3))
+  await expect(page.getByText("379.0 GB free on /srv")).toBeVisible()
+  stream!.send(frame(378 * 1024 ** 3))
+  await expect(page.getByText("378.0 GB free on /srv")).toBeVisible()
+  expect(await rowsDrawn(page)).toEqual([])
+
+  // A click makes one row the active one: that row is drawn, and on the next
+  // click the one it took the place of. Not the other 298.
+  await row(3).click({ position: { x: 300, y: 8 } })
+  await expect(row(3)).toHaveAttribute("tabindex", "0")
+  expect(await rowsDrawn(page)).toEqual([many[3].path])
+  await row(7).click({ position: { x: 300, y: 8 } })
+  await expect(row(7)).toHaveAttribute("tabindex", "0")
+  await expect(row(3)).toHaveAttribute("tabindex", "-1")
+  expect(((await rowsDrawn(page)) ?? []).sort()).toEqual([many[3].path, many[7].path])
+
+  // The handlers a row holds are the page's for its whole life, and still act
+  // on what the page knows now: a Ctrl-click adds to the selection the first
+  // one started, and the row's own verb opens the row it is on.
+  await row(9).click({ position: { x: 300, y: 8 }, modifiers: ["ControlOrMeta"] })
+  await row(11).click({ position: { x: 300, y: 8 }, modifiers: ["ControlOrMeta"] })
+  await expect(page.getByText("2 items selected").first()).toBeVisible()
+  await expect(row(9)).toHaveAttribute("data-state", "selected")
+  await expect(row(11)).toHaveAttribute("data-state", "selected")
 })
