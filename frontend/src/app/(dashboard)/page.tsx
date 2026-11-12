@@ -412,7 +412,7 @@ function useModuleReads(
       (signal) => get<Record<string, TrafficPulse>>("/deploy/traffic", undefined, signal),
       60_000,
       [],
-      { enabled: shows("deploy") },
+      { enabled: shows("deploy"), key: "/deploy/traffic" },
     ),
     backups: usePoll<BackupJob[]>(
       (signal) => get<BackupJob[]>("/backups/", undefined, signal),

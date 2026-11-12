@@ -64,6 +64,8 @@ export function useRequestRecords() {
   const pulses = usePoll(
     (signal) => get<Record<string, TrafficPulse>>("/deploy/traffic", undefined, signal),
     60_000,
+    [],
+    { key: "/deploy/traffic" },
   )
   const vhosts = usePoll((signal) => get<VHost[]>("/proxy/vhosts", undefined, signal), 60_000)
   const deployments = fleet.data?.deployments

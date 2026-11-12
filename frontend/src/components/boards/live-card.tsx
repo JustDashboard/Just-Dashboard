@@ -47,6 +47,7 @@ export function LiveCardProvider({
   }, [])
   const host = usePoll((signal) => get<HostInfo>("/system/host", undefined, signal), 0, [], {
     enabled: wanted.server > 0,
+    key: "/system/host",
   })
   const metrics = usePoll(
     (signal) => get<Snapshot>("/system/metrics", undefined, signal),

@@ -84,14 +84,16 @@ export function announceAssistantChange() {
 
 /**
  * The settings, read once and again when they are saved. They change when an
- * administrator changes them, so the read is slow.
+ * administrator changes them, so the read is slow. The rail, the dock, the
+ * palette and the page each ask, so the read is keyed: one request and one
+ * answer for all of them (the Overview used to read it three times at once).
  */
 export function useAssistantSettings(enabled: boolean) {
   const poll = usePoll<AssistantSettings>(
     (signal) => get<AssistantSettings>("/assistant", undefined, signal),
     120_000,
     [],
-    { enabled },
+    { enabled, key: "/assistant" },
   )
   const { refresh } = poll
   useEffect(() => {

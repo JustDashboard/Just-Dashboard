@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { ApiError, get, post } from "@/lib/api"
 import { earlySession, untilAnswered } from "@/lib/session-probe"
 import { forgetWorkingState } from "@/lib/view-state"
+import { forgetSharedPolls, releaseSharedPolls } from "@/hooks/poll-share"
 import { signInWithPasskey } from "@/lib/passkeys"
 import type { AuthStatus, Capability } from "@/lib/types"
 
@@ -53,8 +54,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // Storage can be unavailable; the in-memory owner still fences SPA sign-ins.
       }
-      if ((owner !== null && owner !== next.user.id) || (owner === null && clearUnknownOwner))
+      if ((owner !== null && owner !== next.user.id) || (owner === null && clearUnknownOwner)) {
         forgetWorkingState()
+        // Keyed polls keep their last answer for whoever opens the page again;
+        // that must never be another account.
+        forgetSharedPolls()
+      }
       workingOwner.current = next.user.id
       try {
         sessionStorage.setItem("jd.working.owner", String(next.user.id))
@@ -211,6 +216,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (logoutPending.current) return logoutPending.current
     const requested = ++generation.current
     forgetWorkingState()
+    // The shell is still up and reading; what it read goes when it does.
+    releaseSharedPolls()
     const pending = (async () => {
       try {
         await post("/auth/logout")

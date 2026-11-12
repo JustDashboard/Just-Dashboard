@@ -35,6 +35,12 @@ export type PollHandle = (() => void) & {
    * a fetch in flight is left to finish.
    */
   retime: () => void
+  /**
+   * Fetch now, unless a fetch is in flight or a failure's wait is still
+   * running: what a second reader of the same answer does on arriving
+   * (`hooks/poll-share.ts`).
+   */
+  poke: () => void
 }
 
 /**
@@ -147,6 +153,12 @@ export function pollLoop(
     const every = interval()
     if (every <= 0) return
     arm(Math.max(0, Math.max(settledAt + every, heldUntil) - now()))
+  }
+
+  stop.poke = () => {
+    if (stopped || fetching || heldUntil > now()) return
+    clearTimeout(timer)
+    void run()
   }
 
   void run()

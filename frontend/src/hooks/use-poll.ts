@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { ApiError } from "@/lib/api"
 import { pollLoop, type PollHandle } from "@/hooks/poll-loop"
+import { NO_SHARED_ANSWER, sharedPoll, type SharedReader } from "@/hooks/poll-share"
 
 export { pollLoop, type PollFailure, type PollHandle } from "@/hooks/poll-loop"
 
@@ -43,14 +44,31 @@ type PollOptions<T> = {
    * (`pollLoop`). A 429's `Retry-After` is waited out either way.
    */
   steady?: boolean
+  /**
+   * The request's name, when other components make the same one: its path,
+   * and its query when it has one (`"/assistant"`, `"/deploy/traffic"`).
+   * Every poll that gives the same key shares one request, one timer at the
+   * fastest cadence any of them asked for, and one last answer, which is also
+   * what a page opened again draws until the new answer lands, with `loading`
+   * true as for `seed` (`hooks/poll-share.ts`). `refresh` asks again for all
+   * of them.
+   *
+   * The key is the resource's whole identity, so `deps` are not read: a
+   * fetcher whose answer depends on anything must have it in the key. Without
+   * a key a poll is its own, as it always was.
+   */
+  key?: string
 }
+
+const noSubscription = () => () => {}
+const noSharedAnswer = () => NO_SHARED_ANSWER
 
 /** `pollLoop` as a hook: the latest result, and a way to ask again. */
 export function usePoll<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
   intervalMs = 5000,
   deps: unknown[] = [],
-  { enabled = true, seed, steady = false }: PollOptions<T> = {},
+  { enabled = true, seed, steady = false, key }: PollOptions<T> = {},
 ): PollState<T> {
   // A different resource must never borrow the previous resource's rows or
   // permissions while it loads. Refreshes of the same resource retain data.
@@ -79,10 +97,31 @@ export function usePoll<T>(
     intervalRef.current = intervalMs
   })
 
-  const refresh = useCallback(() => setTick((t) => t + 1), [])
+  // A keyed poll is a reader of the one shared with every component that
+  // gave the same key; the loop below is then not run at all.
+  const shared = useMemo(() => (key === undefined ? undefined : sharedPoll(key)), [key])
+  const answer = useSyncExternalStore(
+    shared ? shared.subscribe : noSubscription,
+    shared ? shared.read : noSharedAnswer,
+    noSharedAnswer,
+  )
+  const reader = useRef<SharedReader>({
+    interval: () => intervalRef.current,
+    fetch: (signal) => fetcherRef.current(signal),
+    steady: () => steadyRef.current,
+  })
+  useEffect(() => {
+    if (!shared || !enabled) return
+    return shared.join(reader.current)
+  }, [shared, enabled])
+
+  const refresh = useCallback(() => {
+    if (shared) shared.refresh()
+    else setTick((t) => t + 1)
+  }, [shared])
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || shared) return
     let cancelled = false
     const controller = new AbortController()
 
@@ -116,11 +155,25 @@ export function usePoll<T>(
       stop()
       loop.current = undefined
     }
-  }, [tick, enabled, resource])
+  }, [tick, enabled, resource, shared])
 
   useEffect(() => {
     loop.current?.retime()
-  }, [intervalMs])
+    shared?.retime()
+  }, [intervalMs, shared])
+
+  if (shared) {
+    // The kept answer of a key nobody was reading is drawn like a seed: there
+    // at once, and loading until the read this arrival started has landed.
+    const held = answer.answered || answer.data !== undefined
+    return {
+      data: held ? (answer.data as T | undefined) : seed,
+      error: answer.error,
+      lastSuccess: answer.lastSuccess,
+      loading: enabled && !answer.answered,
+      refresh,
+    }
+  }
 
   // A disabled poll is not loading: nothing is in flight, and reporting
   // otherwise would leave a caller showing a skeleton forever.

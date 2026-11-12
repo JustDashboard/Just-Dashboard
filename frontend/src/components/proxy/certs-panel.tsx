@@ -158,6 +158,7 @@ export function CertificatesPage() {
   // tab, or before this page loaded, holds it just the same.
   const jobs = usePoll<Job[]>((signal) => get("/jobs/", undefined, signal), 5_000, [], {
     enabled: admin,
+    key: "/jobs",
   })
   const elsewhere = runningCertbotJob(jobs.data)
   const certbotJob = certbotRunning(console_.job) ? console_.job : elsewhere

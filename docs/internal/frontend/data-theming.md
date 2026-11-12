@@ -222,6 +222,24 @@ are dated evidence, not proof of current attachment ownership.
   interval was an effect dependency, so every `busy ? 2_000 : 30_000` flip aborted the request and fetched
   again what had just been read, and the update notice's single settling read was two, 36 ms apart.
   Cleanup aborts the request and ignores late responses.
+  **A poll that names its request shares it.** `usePoll`'s `key` option (the request's path, and its query
+  when it has one) joins the component to the one `SharedPoll` for that key (`hooks/poll-share.ts`): one
+  request and one timer for all of them, at the fastest cadence any reader asked for; a reader arriving
+  while a request is in flight, or within two seconds of the last answer, asks nothing, and one arriving
+  later asks once for everybody; `refresh` aborts what is in flight and asks again for every reader, once
+  however many call it in a tick. The last answer is kept for five minutes after its last reader leaves, so
+  a page opened again draws it at once with `loading` true until the new answer lands, which is what `seed`
+  does by hand; the kept answer is never an error. The key is the resource's whole identity, so `deps` are
+  not read, and every reader of a key must make the same request. An answer belongs to the account that
+  was given it: another account signing in forgets every kept answer and reads again for whatever is on
+  screen (`forgetSharedPolls`), and signing out keeps none past the page that is reading it, without
+  asking the server anything more (`releaseSharedPolls`); both sit beside `forgetWorkingState` in
+  `use-auth.tsx`. Keyed
+  today: `/assistant` (`useAssistantSettings`, nine readers), `/deploy/traffic` (the Overview, the fleet,
+  a project's readings and the request records), `/system/host` (the three one-time readers; the metrics
+  stream seeds its own store) and `/jobs` (the certificates page and `RecentJobs`, which was a hand-written
+  interval). A read is worth a key when more than one mounted component makes it, or when coming back to
+  its page should not start from a skeleton; a poll without one is its own, as before.
   Live Processes treats its search and filters as resource identity, and ranking/row-count
   changes as refreshes of that inventory. Automatic focus therefore keeps the table and scroll
   mounted while fetching its new ranking; response-local focus metadata keeps the footer truthful

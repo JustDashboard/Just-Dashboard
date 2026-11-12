@@ -32,7 +32,9 @@ export function ServerPicture({
   purposes: readonly PurposeKey[]
   className?: string
 }) {
-  const host = usePoll((signal) => get<HostInfo>("/system/host", undefined, signal), 0)
+  const host = usePoll((signal) => get<HostInfo>("/system/host", undefined, signal), 0, [], {
+    key: "/system/host",
+  })
   const narrow = useIsMobile()
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
