@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import type { NextConfig } from "next"
 
 /**
@@ -34,6 +35,42 @@ const apiTarget = process.env.JD_API_URL ?? `http://127.0.0.1:${apiPort}`
 // so the gate documented in AGENTS.md still type-checks exactly as before.
 const imageBuild = process.env.JD_IMAGE_BUILD === "1"
 
+/**
+ * The version of an installed package whose runtime a sync script copies into
+ * `public/` under that version (`scripts/sync-monaco.mjs`,
+ * `scripts/sync-excalidraw.mjs`). Read here the way the scripts read it, so
+ * the folder they wrote is the address the pages are built with and the path
+ * the cache rule below is for.
+ */
+function installed(name: string): string {
+  return JSON.parse(readFileSync(`node_modules/${name}/package.json`, "utf8")).version
+}
+const monaco = `/monaco/${installed("monaco-editor")}`
+const excalidraw = `/excalidraw/${installed("@excalidraw/excalidraw")}`
+
+// What `src/proxy.ts` leaves alone answers with a file, and where there is no
+// such file the shell answers with its own page: a document that would go out
+// with no policy at all, free to be framed. So these paths say the policy of
+// something that is not a page, the one Caddy adds to an answer that has none
+// (`deploy/Caddyfile`): nothing loads and nothing frames it. A script, a
+// stylesheet, a font or an image is not governed by the policy it arrives
+// with, so the files themselves are untouched by it.
+const notAPage = [
+  {
+    key: "Content-Security-Policy",
+    value:
+      "default-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  },
+]
+// A year, and never asked about again: only for a path that names its version.
+const forGood = [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }]
+// A logo keeps its name when it is redrawn, so it is kept for a day and
+// refreshed behind the page for a week after: an update's new mark is on
+// screen by the next day at the latest.
+const forADay = [
+  { key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" },
+]
+
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
@@ -53,6 +90,33 @@ const nextConfig: NextConfig = {
   // the request reaches the rewrite as it was sent. Pages still lose their
   // slash: `src/proxy.ts` does that redirect itself, for everything but /api.
   skipTrailingSlashRedirect: true,
+  // Written into the build: `lib/vendored.ts` hands them to the editor's
+  // loader and to Excalidraw.
+  env: {
+    NEXT_PUBLIC_MONACO_VS: `${monaco}/vs`,
+    NEXT_PUBLIC_EXCALIDRAW_ASSETS: `${excalidraw}/`,
+  },
+  // What is in `public/` has no hash in its name, so Next answers it with
+  // `max-age=0` and the browser asks again for every file on every visit:
+  // dozens of round trips to open an editor, over the SSH or Tailscale tunnel
+  // this product is used through. The two copied runtimes sit under their
+  // version and are kept for good; the logos are kept for a day. `src/proxy.ts`
+  // leaves the same paths alone, so none of them is given a page's policy and
+  // a nonce it has no use for.
+  async headers() {
+    return [
+      // The four prefixes the proxy's matcher leaves alone, whatever is asked
+      // for under them.
+      { source: "/monaco/:path*", headers: notAPage },
+      { source: "/excalidraw/:version/fonts/:path*", headers: notAPage },
+      { source: "/logos/:path*", headers: notAPage },
+      { source: "/brand-logo/:path*", headers: notAPage },
+      { source: `${monaco}/:path*`, headers: forGood },
+      { source: `${excalidraw}/fonts/:path*`, headers: forGood },
+      { source: "/logos/:path*", headers: forADay },
+      { source: "/brand-logo/:path*", headers: forADay },
+    ]
+  },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${apiTarget}/api/:path*` }]
   },

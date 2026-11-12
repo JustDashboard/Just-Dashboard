@@ -47,6 +47,7 @@ import { Modal } from "@/components/modal"
 import { sectionHref } from "@/components/database/engine"
 import { ApiError, del, get, put } from "@/lib/api"
 import { dashboardResource, embeddable } from "@/lib/board-embeds"
+import { EXCALIDRAW_ASSETS } from "@/lib/vendored"
 import { BOARD_FILE_TYPES, shownFileIds } from "@/lib/board-files"
 import type { Board, BoardSaved, BoardScene } from "@/lib/boards"
 import type { DbFleet, DeployProject } from "@/lib/types"
@@ -117,7 +118,7 @@ declare global {
   }
 }
 
-if (typeof window !== "undefined") window.EXCALIDRAW_ASSET_PATH = "/excalidraw/"
+if (typeof window !== "undefined") window.EXCALIDRAW_ASSET_PATH = EXCALIDRAW_ASSETS
 
 export default function BoardWorkspace({ id }: { id: number }) {
   const [board, setBoard] = useState<Board | null>(null)

@@ -85,7 +85,7 @@ describe("the page a signed-out browser asked for survives signing in", () => {
       "/login?next=/docker",
       "/welcome",
       "/hub/enter",
-      "/monaco/vs/loader.js",
+      "/monaco/0.56.0/vs/loader.js",
       // A path that only resolves to a section, or leaves one, is not that section's page.
       "/docker/../api/v1/tokens",
       "/dashboard/hub/../../evil?connect=hub",

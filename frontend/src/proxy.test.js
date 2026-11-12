@@ -40,3 +40,18 @@ test("the API never meets the proxy, so its trailing slashes reach the backend a
   for (const path of ["/", "/docker/", "/login", "/excalidraw/9b1c"])
     expect(matched(path)).toBe(true)
 })
+
+test("the files public/ serves by the dozen are not pages: no nonce is made for them", () => {
+  for (const path of [
+    "/monaco/0.56.0/vs/loader.js",
+    "/monaco/0.56.0/vs/editor/editor.main.js",
+    "/logos/alpine.svg",
+    "/brand-logo/just-dashboard-horizontal.svg",
+    "/excalidraw/0.18.1/fonts/Virgil/Virgil-Regular.woff2",
+  ])
+    expect(matched(path)).toBe(false)
+  // A drawing, the drawings' list, and a page that only starts like a folder
+  // of files, still get the page's policy.
+  for (const path of ["/excalidraw", "/excalidraw/12", "/excalidraw/12/fonts", "/logos", "/monaco"])
+    expect(matched(path)).toBe(true)
+})

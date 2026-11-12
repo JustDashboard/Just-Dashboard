@@ -216,7 +216,7 @@ test.describe("metrics export", () => {
     await expect(dialog.getByRole("status", { name: "Loading metrics export" })).toBeVisible()
 
     gate.release()
-    await expect(dialog.getByRole("alert")).toContainText("the history could not be read")
+    await expect(dialog.getByRole("alert")).toContainText("The history could not be read")
     await dialog.getByRole("button", { name: "Try again" }).click()
     await expect(dialog.getByText("Metrics URL")).toBeVisible()
     await expect(dialog.getByRole("alert")).toHaveCount(0)

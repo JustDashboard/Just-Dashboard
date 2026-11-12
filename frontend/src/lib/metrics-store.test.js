@@ -285,3 +285,43 @@ test("a hidden tab keeps every frame and tells nobody until it is shown", async 
   onVisibility()
   expect(told).toBe(2)
 })
+
+// ---------------------------------------------------------------- one reading
+
+test("a reader hands back the same value until what it reads changes, whatever else the frame moved", async () => {
+  const store = await load()
+  const disk = (free) => [{ mountpoint: "/", free, usedPercent: 50, readRate: 0, writeRate: 0 }]
+  const read = store.reader(
+    (state) => state.snapshot?.mounts?.[0],
+    (a, b) => a === b || (!!a && !!b && a.free === b.free),
+  )
+  let told = 0
+  store.subscribe(() => told++)
+
+  expect(read()).toBeUndefined()
+  store.pushSnapshot(snapshot(0, { mounts: disk(10) }))
+  const first = read()
+  expect(first.free).toBe(10)
+
+  // Two more frames: the processor moved, the disk did not. The store told its
+  // subscribers both times, and the reader gave React nothing new to draw.
+  store.pushSnapshot(snapshot(2, { mounts: disk(10), cpu: { totalPercent: 80, modes: {} } }))
+  store.pushSnapshot(snapshot(4, { mounts: disk(10) }))
+  expect(told).toBe(3)
+  expect(store.getState().snapshot.mounts[0]).not.toBe(first)
+  expect(read()).toBe(first)
+
+  store.pushSnapshot(snapshot(6, { mounts: disk(9) }))
+  expect(read().free).toBe(9)
+  expect(read()).toBe(read())
+})
+
+test("a reader compares with Object.is unless it is told how", async () => {
+  const store = await load()
+  const cores = store.reader((state) => state.host?.cpuCores)
+  expect(cores()).toBeUndefined()
+  store.setHost({ hostname: "atlas", cpuCores: 4 })
+  expect(cores()).toBe(4)
+  store.setHost({ hostname: "atlas", cpuCores: 4 })
+  expect(cores()).toBe(4)
+})

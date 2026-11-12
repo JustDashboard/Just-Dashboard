@@ -107,7 +107,12 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     {
-      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+      // Not the files `public/` serves by the dozen either: the Monaco runtime,
+      // the logos and Excalidraw's fonts are not pages, and each one that came
+      // through here was given a fresh nonce and a policy it never reads. A
+      // drawing's own page is `/excalidraw/<id>` and still comes through.
+      source:
+        "/((?!api|_next/static|_next/image|favicon.ico|monaco/|logos/|brand-logo/|excalidraw/[^/]+/fonts/).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

@@ -2,6 +2,7 @@
 
 import { useRef } from "react"
 import { cn } from "@/lib/utils"
+import { useFocusReturn } from "@/hooks/use-focus-return"
 import { OperationProgress, type OperationReading } from "@/components/operation-progress"
 import {
   Dialog,
@@ -85,11 +86,16 @@ export function Modal({
   initialFocus?: "first" | "body"
   bodyClassName?: string
   className?: string
-  /** For a dialog opened by state, with no `DialogTrigger` to hand the keyboard back to. */
+  /**
+   * Where the keyboard goes on close, for a dialog that knows better than the
+   * default: `preventDefault()` and focus it. Left alone, the keyboard goes
+   * back to what opened the dialog (`useFocusReturn`).
+   */
   onCloseAutoFocus?: (event: Event) => void
   children: React.ReactNode
 }) {
   const body = useRef<HTMLDivElement>(null)
+  const returnFocus = useFocusReturn(open)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -106,7 +112,10 @@ export function Modal({
               }
             : undefined
         }
-        onCloseAutoFocus={onCloseAutoFocus}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event)
+          returnFocus(event)
+        }}
       >
         <DialogHeader className="shrink-0 gap-1 border-b border-hairline bg-surface-header px-4 py-3 pr-12 text-left">
           <div className="flex min-w-0 items-center gap-3">

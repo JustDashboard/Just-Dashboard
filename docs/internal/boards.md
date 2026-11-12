@@ -6,7 +6,7 @@ open at `/excalidraw/{id}`. It was called Boards, at `/boards`, until 0.7.1; `ne
 audit names keep the `board` word (`/api/v1/boards/`, `boards`, `board.save`): renaming a stored
 contract to match a page title would break every client for no reader's benefit. The editor embeds the
 MIT-licensed `@excalidraw/excalidraw` package directly in the dashboard shell. Its fonts are copied
-from the pinned package into `public/excalidraw/fonts` by `scripts/sync-excalidraw.mjs` before `dev`
+from the pinned package into `public/excalidraw/<version>/fonts` by `scripts/sync-excalidraw.mjs` before `dev`
 and `build`, and served locally. The package and lockfile are managed with Bun.
 
 ## Data and API

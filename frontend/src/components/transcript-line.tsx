@@ -209,7 +209,7 @@ export function TranscriptRow({
         <span className={flow}>
           {stepped && <StepNo step={line.step} />}
           {line.time && line.kind !== "progress" && (
-            <span className="numeric mr-2 text-muted-foreground/70 select-none">{line.time}</span>
+            <span className="numeric mr-2 text-faint select-none">{line.time}</span>
           )}
           {tokens && line.kind === "output" ? (
             <LogText text={rest} hits={hitRanges(rest, needle)} className="text-foreground/85" />
@@ -255,10 +255,7 @@ export function TranscriptRow({
           style={{ background: lane }}
         />
       )}
-      <span
-        aria-hidden
-        className="numeric w-9 shrink-0 text-right text-muted-foreground/60 select-none"
-      >
+      <span aria-hidden className="numeric w-9 shrink-0 text-right text-faint select-none">
         {line.number}
       </span>
       {stamp}
@@ -272,11 +269,7 @@ export function TranscriptRow({
 
 function StepNo({ step }: { step?: string }) {
   if (!step) return null
-  return (
-    <span className="numeric mr-2 inline-block min-w-7 text-muted-foreground/70 select-none">
-      #{step}
-    </span>
-  )
+  return <span className="numeric mr-2 inline-block min-w-7 text-faint select-none">#{step}</span>
 }
 
 /** A search hit, marked the way the log console marks one. */

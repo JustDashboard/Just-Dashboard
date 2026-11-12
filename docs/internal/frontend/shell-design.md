@@ -68,7 +68,8 @@ is a full load rather than a router link back into what threw.
 
 ### The document proxy and the build configuration
 
-`src/proxy.ts` runs for every document request and nothing under `/api` or `/_next/static` (its
+`src/proxy.ts` runs for every document request and nothing under `/api`, `/_next/static` or the files
+`public/` serves by the dozen (`/monaco/`, `/logos/`, `/brand-logo/`, Excalidraw's fonts: its
 `matcher`). It mints the per-request nonce and the Content-Security-Policy that goes with it, and it
 is where the build's routing choices in `next.config.ts` are completed.
 
@@ -83,9 +84,27 @@ neither rule is met. The spelling of the calls is unchanged: the specs' mocks ma
 
 ### The tab's title
 
-The dashboard's layout renders a React `<title>` from `tabTitle(pathname, host)` in `components/nav.ts`:
-"Files · Just Dashboard", the section's name for a detail page, the product's alone for an address under no
-section. On a server linked to a Just Hub, `host` is this server's own host name (`useHostName` in
+The dashboard's layout renders a React `<title>` from `tabTitle(pathname, host, name)` in
+`components/nav.ts`: "Files · Just Dashboard", the product's alone for an address under no section.
+
+**The item leads.** The address of a detail page names only its section, so every page of every database
+read "Databases", every page of every project "Deployments" and a container "Docker", and four tabs or
+the Back menu's entries could not be told apart. The page knows the item, so the page says it
+(`components/tab-title.tsx`, a small store outside React that only the `<title>` reads):
+
+- `PageContext` hands the words of its `h1` to the tab as well as to a screen reader. The shell uses a
+  heading only where the nav has no row for the address, so a list page keeps its rail entry's word and
+  a detail page reads "nginx · Containers", "orders · Query · Databases", "shop · Logs · Deployments"
+  (a project's page is named from `PROJECT_NAV`), "New project · Deployments", "Page not found".
+- `useTabTitle("Deployment #42", "shop")` is for a page that wants more than its heading, most specific
+  first; it outranks a heading and is used on any address. The run page uses it.
+
+Two rail rows that share a word carry their section: "Alerts · Monitoring" and "Alerts · Proxy & TLS",
+and likewise Traffic, Map, Security and Configuration. `nav.test.js` fails when two rows of the rail
+would give their tabs one title. A word said twice is said once. `/login` is "Sign in · Just Dashboard"
+and `/welcome` "Welcome · Just Dashboard".
+
+On a server linked to a Just Hub, `host` is this server's own host name (`useHostName` in
 `hooks/use-metrics.ts`, the Overview's title from `/system/host`) and goes after the page — "Docker · atlas · Just
 Dashboard" — so five dashboard tabs can be told apart; unlinked, or before the name is read, the title is exactly
 what it was. It is never the name the hub lists the server under: that is the hub's text, which a hub that is taken
@@ -541,7 +560,8 @@ database engine navigation and mobile bounds. The design and recording are in th
 `components/workspace/` registers the active page's Find, read refresh, shortcuts and contextual
 actions in the existing command palette. The shell marks its scroll region, and participating pages
 restore row/field focus and scroll after navigation. Editors, terminals and portalled controls keep
-their own keys. `SidePanel` returns focus through a workspace when the sheet's trigger is gone.
+their own keys. `SidePanel` returns focus through a workspace when the sheet's trigger is gone, and
+otherwise, like `Modal`, to whatever opened it (`hooks/use-focus-return.ts`).
 See [`workspace-interactions.md`](workspace-interactions.md) for the page contracts and storage rules.
 
 ## The design system
@@ -737,12 +757,34 @@ opened. Feature pieces live in `components/<feature>/`: `database/`, `docker/`, 
 ## The editor is served from here, not from a CDN
 
 `components/code-editor.tsx` wraps Monaco, and the line that matters is
-`loader.config({ paths: { vs: "/monaco/vs" } })`. `@monaco-editor/react` otherwise fetches the editor from
+`loader.config({ paths: { vs: MONACO_VS } })`, this origin's `/monaco/<version>/vs`. `@monaco-editor/react` otherwise fetches the editor from
 `cdn.jsdelivr.net` at runtime — third-party JavaScript in the same origin as a session that drives the
 Docker socket and a root shell, and a permanent spinner for an operator whose workstation has no egress,
 which is the workstation this is meant to be reached from. `scripts/sync-monaco.mjs` copies
-`monaco-editor/min/vs` into `public/monaco/vs` from the Bun `dev`/`build` scripts and explicitly in the
+`monaco-editor/min/vs` into `public/monaco/<version>/vs` from the Bun `dev`/`build` scripts and explicitly in the
 Dockerfile. The copy is gitignored and excluded from eslint.
+
+**What `public/` serves is cached, and is not a page.** A file in `public/` has no hash in its name, so
+Next answers it with `max-age=0`, and the proxy gave each one a nonce and a policy it never reads:
+opening an editor was dozens of conditional round trips over the tunnel this product is used through.
+The two copied runtimes therefore sit under the version of the package they came from
+(`/monaco/<version>/vs`, `/excalidraw/<version>/fonts`), which `next.config.ts` reads from the
+installed package exactly as the sync scripts do; it writes the two addresses into the build
+(`lib/vendored.ts`) and answers those paths with `public, max-age=31536000, immutable`. An update that
+brings another Monaco asks under another path. The logos (`/logos`, `/brand-logo`) keep their names
+when redrawn, so they get a day and a week of `stale-while-revalidate`. `src/proxy.ts` leaves all four
+prefixes alone (a drawing's own page, `/excalidraw/<id>`, still comes through), and
+`static-assets.spec.ts` reads the headers off the built server.
+
+**What the proxy leaves alone is still answered with a policy.** Where one of those prefixes names no
+file, the shell answers with its own page, and a page the proxy never saw would go out with no policy
+at all, free to be framed. `next.config.ts` therefore answers everything under the four prefixes with
+the policy of something that is not a page (`default-src 'none'; … frame-ancestors 'none'`), which is
+the one Caddy adds to an answer that has none, so the app answers the same with or without the proxy
+in front and nothing in `deploy/Caddyfile` changes. A script, a stylesheet, a font or an image is not
+governed by the policy it arrives with; Monaco starts its workers from blob URLs, which take the
+page's policy, and the spec opens an editor to hold that. A new prefix in the matcher needs its line
+in `headers()`.
 
 Files exposes Monaco's Find, Replace, Undo, Redo, Format and Commands actions, indentation, word wrap,
 minimap and font size. Models use the file path, search results reveal their matching line, and

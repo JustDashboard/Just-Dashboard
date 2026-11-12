@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import {
+  asSentence,
   byteParts,
   bytes,
   calendarDate,
@@ -14,6 +15,7 @@ import {
   rate,
   timestamp,
   weekdayAt,
+  sentenceCase,
 } from "./format"
 
 test("a value under one byte stays in bytes instead of reaching below the ladder", () => {
@@ -185,4 +187,66 @@ test("a span inside one day is two clocks, and one across days names both days",
     expect(across).toContain("Nov 9")
     expect(across).toContain("Nov 10")
   })
+})
+
+test("the API's words start with a capital where they stand alone", () => {
+  expect(sentenceCase("not found")).toBe("Not found")
+  expect(sentenceCase("too many requests, slow down")).toBe("Too many requests, slow down")
+  expect(sentenceCase("  path is outside the permitted roots ")).toBe(
+    "Path is outside the permitted roots",
+  )
+  expect(sentenceCase("Already a sentence.")).toBe("Already a sentence.")
+  expect(sentenceCase("")).toBe("")
+  // A program's name, a unit, a device or an identifier is not a word to raise.
+  for (const kept of [
+    'nginx: [emerg] unknown directive "foo"',
+    "pg_dump: server version mismatch",
+    "eth0 is down",
+    "ssh.service is masked",
+    "/etc/hosts is not writable",
+    "x509: certificate signed by unknown authority",
+    // A tool's own line: the command, a colon, what it said.
+    "nft list set: permission denied",
+    "tar: write error",
+    // A command that is the sentence's subject keeps its own spelling.
+    "nginx refuses the configuration without app.example.com",
+    "gh did not answer",
+    "systemd did not answer",
+    "ufw already has that exact rule",
+    "ip netns failed",
+    // A command line, as it was run.
+    "wget --spider http://localhost:5678/healthz",
+    "tar -xzf backup.tgz failed",
+  ])
+    expect(sentenceCase(kept)).toBe(kept)
+  // A sentence with a colon further in is still a sentence.
+  expect(sentenceCase("could not connect to the server: connection refused")).toBe(
+    "Could not connect to the server: connection refused",
+  )
+  // A product with a capital of its own, and a word that is also English, take it.
+  expect(sentenceCase("docker is not installed")).toBe("Docker is not installed")
+  expect(sentenceCase("ping failed")).toBe("Ping failed")
+})
+
+test("a reason on its own line ends on a full stop, unless it ends on something quoted", () => {
+  expect(asSentence("not found")).toBe("Not found.")
+  expect(asSentence("too many requests, slow down")).toBe("Too many requests, slow down.")
+  expect(asSentence("Already a sentence.")).toBe("Already a sentence.")
+  expect(asSentence("is it running?")).toBe("Is it running?")
+  // After a path, a line number or a quoted value the stop would read as part of it.
+  expect(asSentence('unknown directive "foo" in /etc/nginx/sites-available/app:3')).toBe(
+    'Unknown directive "foo" in /etc/nginx/sites-available/app:3',
+  )
+  expect(asSentence('no site called "app"')).toBe('No site called "app"')
+  expect(asSentence("cannot open /etc/hosts")).toBe("Cannot open /etc/hosts")
+  expect(asSentence("wget --spider http://localhost:5678/healthz")).toBe(
+    "wget --spider http://localhost:5678/healthz",
+  )
+  // A command's name is left as written, and its sentence still ends.
+  expect(asSentence("gh did not answer")).toBe("gh did not answer.")
+  expect(asSentence("retired-api is already used by another project")).toBe(
+    "retired-api is already used by another project.",
+  )
+  expect(asSentence("line one\nline two")).toBe("Line one\nline two")
+  expect(asSentence("")).toBe("")
 })

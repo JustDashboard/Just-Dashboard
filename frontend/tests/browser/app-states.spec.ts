@@ -124,12 +124,12 @@ test.describe("the tab's title", () => {
     await expect(page).toHaveTitle("Files · Just Dashboard")
   })
 
-  test("the sign-in page keeps the product's name", async ({ page }) => {
+  test("the sign-in page says what it is before the product's name", async ({ page }) => {
     await page.route("**/api/v1/**", (route) =>
       json(route, { error: { code: "unauthenticated", message: "Sign in" } }, 401),
     )
     await page.goto("/login")
-    await expect(page).toHaveTitle("Just Dashboard")
+    await expect(page).toHaveTitle("Sign in · Just Dashboard")
   })
 
   test("changes on a client navigation and on going back", async ({ page }) => {
@@ -143,12 +143,20 @@ test.describe("the tab's title", () => {
     await expect(page).toHaveTitle("Profile · Just Dashboard")
   })
 
-  test("a detail page takes its section, and an unknown address the product", async ({ page }) => {
+  test("a detail page leads with its item, and an unknown address says so", async ({ page }) => {
     await mockProject(page)
+    // Every page of every project read "Deployments": two projects' tabs, and
+    // a project's Logs and its Runtime, could not be told apart.
     await page.goto("/deploy/7/logs")
-    await expect(page).toHaveTitle("Deployments · Just Dashboard")
+    await expect(page).toHaveTitle("api-production · Logs · Deployments · Just Dashboard")
+    await page.getByRole("link", { name: "Runtime", exact: true }).first().click()
+    await expect(page).toHaveURL(/\/deploy\/7\/runtime$/)
+    await expect(page).toHaveTitle("api-production · Runtime · Deployments · Just Dashboard")
+    // Leaving the project takes its name out of the tab with it.
+    await page.goto("/files")
+    await expect(page).toHaveTitle("Files · Just Dashboard")
     await page.goto("/no-such-page")
-    await expect(page).toHaveTitle("Just Dashboard")
+    await expect(page).toHaveTitle("Page not found · Just Dashboard")
   })
 })
 
@@ -246,6 +254,59 @@ test.describe("a read that failed is not an empty list", () => {
     await expect(dialog).toContainText("Could not read")
     await expect(dialog).toContainText("webhooks · schedules · previews")
     await expect(dialog).not.toContainText("nothing is automatic")
+  })
+})
+
+test.describe("an answer that is not a failure", () => {
+  const refusal = (code: string, message: string) => JSON.stringify({ error: { code, message } })
+
+  test("an old link to a project that is gone reads as a sentence, not as a red box", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/1", (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: refusal("not_found", "not found"),
+      }),
+    )
+    await page.goto("/deploy/1")
+    const box = page.locator('[data-slot="error-state"]')
+    await expect(box).toHaveAttribute("data-kind", "missing")
+    // The API's two lower-case words were the page's headline.
+    await expect(box.getByText("Not found", { exact: true })).toBeVisible()
+    await expect(box).toContainText("It may have been removed or renamed since this link was made.")
+    await expect(box).not.toHaveClass(/border-rule-danger/)
+    await expect(page.getByRole("link", { name: "Back to deployments" })).toBeVisible()
+  })
+
+  test("a server that asked for a pause offers Try again, and the page comes back by itself", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    let paused = true
+    await page.route("**/api/v1/deploy/7", (route) =>
+      paused
+        ? route.fulfill({
+            status: 429,
+            headers: { "Retry-After": "1" },
+            contentType: "application/json",
+            body: refusal("rate_limited", "too many requests, slow down"),
+          })
+        : route.fallback(),
+    )
+    await page.goto("/deploy/7")
+    const box = page.locator('[data-slot="error-state"]')
+    await expect(box).toHaveAttribute("data-kind", "throttled")
+    await expect(box.getByText("Too many requests, slow down", { exact: true })).toBeVisible()
+    await expect(box).toContainText("The server asked for a pause.")
+    await expect(box).not.toHaveClass(/border-rule-danger/)
+    await expect(box.getByRole("button", { name: "Try again" })).toBeVisible()
+    // Nobody presses it: the wait the server named ends and the read is made again.
+    paused = false
+    await expect(page.locator('[data-slot="project-header"]')).toBeVisible({ timeout: 15_000 })
+    await expect(box).toHaveCount(0)
   })
 })
 

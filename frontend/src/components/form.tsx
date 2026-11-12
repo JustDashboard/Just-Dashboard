@@ -130,7 +130,7 @@ export function InfoTip({
         <button
           type="button"
           aria-label={label}
-          className="rounded-sm text-muted-foreground/60 focus-ring transition-colors hover:text-foreground"
+          className="rounded-sm text-faint focus-ring transition-colors hover:text-foreground"
         >
           <Information className="size-3.5" />
         </button>
