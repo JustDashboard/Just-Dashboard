@@ -734,6 +734,9 @@ series.
   instant; Left/Right and Home/End inspect samples, Escape releases it, and pinned overlays show
   each chart's values without pointer movement changing the instant. The Metrics page adds sample
   controls and a journal History link for the surrounding two-minute window.
+  The component is the chart's frame, in the page at its height from the first render; the recharts
+  tree is `Plot` inside it, drawn once the chart is within 600px of the view, memoised, and held
+  still while out of reach (`plot-held.ts`), so a page of charts pays for the ones on screen.
 - `chart-panel.tsx` — the header/chart/legend shape and the empty state. A series with no numbers anywhere
   in the window is **dropped rather than drawn flat at zero**, which is what makes a kernel without PSI
   say so instead of reporting three healthy zeroes.
