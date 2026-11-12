@@ -33,6 +33,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/healthprobe"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stackports"
@@ -325,11 +326,7 @@ func run(agentFlag, agentReset bool) error {
 	}
 	// Waited for at shutdown: the store is closed when run returns, and a
 	// purge still writing then is a write to a closed database.
-	janitorDone := make(chan struct{})
-	go func() {
-		defer close(janitorDone)
-		janitor(ctx, svc, log)
-	}()
+	janitorDone := safego.Go(ctx, log, "session janitor", func(ctx context.Context) { janitor(ctx, svc, log) })
 	refreshHostCLI(log)
 
 	if cfg.AgentMode {

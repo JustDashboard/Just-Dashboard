@@ -19,6 +19,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/docker/docker/errdefs"
 )
 
@@ -604,8 +605,7 @@ func (o *deploymentDatabaseNetworks) Start(ctx context.Context) {
 	}
 	ctx, o.cancel = context.WithCancel(ctx)
 	o.done = make(chan struct{})
-	go func() {
-		defer close(o.done)
+	safego.Go(ctx, nil, "database network reconciler", func(ctx context.Context) {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -616,7 +616,7 @@ func (o *deploymentDatabaseNetworks) Start(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
-	}()
+	}, safego.Close(o.done))
 }
 func (o *deploymentDatabaseNetworks) Stop() {
 	if o == nil || o.cancel == nil {

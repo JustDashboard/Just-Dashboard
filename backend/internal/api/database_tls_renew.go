@@ -6,6 +6,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbtls"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 const (
@@ -26,8 +27,7 @@ const (
 func (s *Server) startDatabaseTLS(ctx context.Context) {
 	ctx, s.dbTLS.stop = context.WithCancel(ctx)
 	s.dbTLS.done = make(chan struct{})
-	go func() {
-		defer close(s.dbTLS.done)
+	safego.Go(ctx, s.Log, "database certificate renewal", func(ctx context.Context) {
 		s.mendDBTLSAuthorityFile(ctx)
 		wait := dbTLSFirstCheck
 		for {
@@ -39,7 +39,7 @@ func (s *Server) startDatabaseTLS(ctx context.Context) {
 			s.renewDueDBTLS(ctx)
 			wait = dbTLSCheckEvery
 		}
-	}()
+	}, safego.Close(s.dbTLS.done))
 }
 
 func (s *Server) stopDatabaseTLS() {

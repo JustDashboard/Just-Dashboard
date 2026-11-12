@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"golang.org/x/sys/unix"
 )
 
@@ -212,6 +213,9 @@ func kernelQuality(v [6]uint64) ObserverQuality {
 	return ObserverQuality{Events: v[0], RingDrops: v[1], BudgetOmissions: v[2], HeaderGaps: v[3], IdentityGaps: v[4], StateAdmissionGaps: v[5]}
 }
 func (o *KernelObserver) run(ctx context.Context, k *kernelSession) {
+	// Not started again after a panic: a kernel session is attached once, by
+	// an administrator's opt-in, and a second run would not own its links.
+	defer safego.Recover(nil, "network socket observer")
 	defer close(o.done)
 	defer func() {
 		o.mu.Lock()

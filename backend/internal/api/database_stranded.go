@@ -7,6 +7,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Repairing connections sealed under another master key.
@@ -99,8 +100,7 @@ func (s *Server) strandedFrom(ctx context.Context, origin string, driver dbx.Dri
 func (s *Server) startStrandedRepair(ctx context.Context) {
 	ctx, s.dbStrandedStop = context.WithCancel(ctx)
 	s.dbStrandedDone = make(chan struct{})
-	go func() {
-		defer close(s.dbStrandedDone)
+	safego.Go(ctx, s.Log, "stranded connection repair", func(ctx context.Context) {
 		wait := strandedFirstCheck
 		for {
 			select {
@@ -111,7 +111,7 @@ func (s *Server) startStrandedRepair(ctx context.Context) {
 			s.repairStranded(ctx)
 			wait = strandedCheckEvery
 		}
-	}()
+	}, safego.Close(s.dbStrandedDone))
 }
 
 func (s *Server) stopStrandedRepair() {

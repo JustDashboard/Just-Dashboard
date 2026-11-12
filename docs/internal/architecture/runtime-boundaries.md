@@ -100,6 +100,43 @@ themselves (docker-ce's maintainer script restarts Docker), so they run as trans
 systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
 [streaming and jobs](../backend/databases-proxy-platform.md#streaming-jobs-secrets-agent-mode).
 
+## Background work survives its own panics
+
+A panic on a goroutine nothing recovers ends the process, and `httpx.Recoverer` covers request
+goroutines only. Most background loops parse what the host prints (nginx, `ss`, systemd, Docker's
+JSON), so one unusual line used to take the dashboard down for everybody, and since the line was still
+there after Compose restarted the container, it went down again.
+
+`internal/safego` is how background work is started instead:
+
+- `safego.Go(ctx, log, name, fn, after...)` runs a loop as a named task. A panic is logged once with
+  its stack under the task's name, and `fn` is called again after a pause that starts at one second and
+  doubles to a minute (starting over after a run of five minutes). `ctx` is what stops a task: one whose
+  owner cancelled it is not started again, and the pause ends with it, so a `Stop` never waits one out.
+  Because `fn` runs more than once it must not do on its way out what can only be done once; the channel
+  a `Stop` waits on is closed in `after`, which runs when the task has returned for good.
+- `safego.Once` is the same for work that is finished when it returns (a reconcile at boot, the
+  Remote Desktop and database upgrade recoveries), without the restart.
+- `defer safego.Recover(log, name)` is for a goroutine that must not be started twice or is one of
+  many: a deployment worker (its lease lapses and the schedule's sweep reclaims the run, as for any
+  worker that died), the kernel socket observer, the fan-out inside a loop's pass (one repository's
+  check, one egress round, one container's log reader), a link's inner loops, the container feed the
+  first subscribing page starts, and the keepalive and control reader every WebSocket handler starts.
+  The two cron schedulers (backups, base backups) wrap each job the same way, since `robfig/cron`
+  recovers nothing.
+- `safego.Try(log, name, fn)` is for work that has somebody to tell: the panic comes back as `fn`'s
+  error. `jobs.Manager.run` calls every job's runner through it, so a job that panics is a failed job
+  with the reason on it, not the end of the dashboard and of every other job.
+
+Every task is remembered by name (`safego.Tasks`); a name is a fixed phrase, never built from an id.
+`GET /dashboard/health` lists the ones that panicked in the last half hour as `tasks` and the Overview
+says so as a warning, because a task that is restarted after every panic otherwise fails without a
+sound. Everything `Server.Start` and the modules' `Start` functions launch goes through `safego`, and
+`TestStartFunctionsStartSupervisedGoroutines` (`internal/safego/boot_test.go`) fails on a function
+named `Start…` that starts a goroutine with a bare `go`, except the per-request ones it lists with
+their reasons. Other goroutines a request handler starts for itself (a log follower, a probe's
+fan-out, a terminal's reader) are not covered by that rule: a panic in one still ends the process.
+
 ## The dashboard's own health
 
 `/healthz` is liveness and nothing else: a fixed `{"status":"ok"}` for as long as the process serves.
@@ -119,7 +156,7 @@ by an older image.
 What liveness leaves out is `internal/storehealth`, started first in `Server.Start`. Every fifteen
 seconds it rewrites one `settings` row (`store_health_probe`), reads back if that fails, and measures
 the filesystem under `JD_DATA_DIR`. `GET /api/v1/dashboard/health` (every role, `handlers_self.go`)
-answers `{ok, store}` with the store's `code`: `disk_full` (SQLite or the kernel refused space, under
+answers `{ok, store, tasks}` with the store's `code`: `disk_full` (SQLite or the kernel refused space, under
 4 MiB is free, or the reserve is spent), `store_unreadable` (not even `SELECT 1` answers), or
 `store_unwritable` (writes have failed for another reason for a full minute, so one busy answer during
 a migration is not a problem). The Overview draws a danger `Notice` from it

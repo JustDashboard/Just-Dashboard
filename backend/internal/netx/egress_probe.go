@@ -20,6 +20,8 @@ import (
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 	"golang.org/x/sys/unix"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // A probe is sent from this process, on a socket that carries the member's
@@ -399,7 +401,12 @@ func sampleMember(ctx context.Context, path egressPath, probes []EgressProbe, ti
 	results := make(chan indexed, len(probes))
 	for i, p := range probes {
 		go func(i int, p EgressProbe) {
-			results <- indexed{i, egressProbe(ctx, path, p, timeout)}
+			// The reader below waits for one answer per probe, so a probe
+			// that panics still sends its empty one.
+			out := indexed{i: i}
+			defer func() { results <- out }()
+			defer safego.Recover(nil, "egress probe")
+			out.r = egressProbe(ctx, path, p, timeout)
 		}(i, p)
 	}
 	for range probes {

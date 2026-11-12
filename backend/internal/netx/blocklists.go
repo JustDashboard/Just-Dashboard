@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Limits on a fetched list. The cap is on the body as sent, so a feed that
@@ -928,8 +930,12 @@ func (s *Service) writeBlocklistMetadata(ctx context.Context, id int, edit func(
 // first check is a minute after start, so a host that was down for days
 // catches up without the dashboard's own start-up waiting on the network.
 func (s *Service) StartBlocklistRefresh(ctx context.Context) {
-	go s.refreshLoop(ctx, time.Minute, blocklistRefreshInterval)
-	go s.expiryLoop(ctx, 30*time.Second)
+	safego.Go(ctx, s.log, "blocklist refresh", func(ctx context.Context) {
+		s.refreshLoop(ctx, time.Minute, blocklistRefreshInterval)
+	})
+	safego.Go(ctx, s.log, "protection exception expiry", func(ctx context.Context) {
+		s.expiryLoop(ctx, 30*time.Second)
+	})
 }
 
 // refreshLoop checks after first and then every interval, and returns when ctx

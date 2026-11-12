@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The ports history: when each listening socket appeared and when it went.
@@ -222,8 +224,9 @@ func (r *PortRecorder) Start(parent context.Context) {
 		return
 	}
 	ctx, cancel := context.WithCancel(parent)
-	r.cancel, r.done = cancel, make(chan struct{})
-	go r.loop(ctx, r.done)
+	done := make(chan struct{})
+	r.cancel, r.done = cancel, done
+	safego.Go(ctx, r.log, "listening socket recorder", r.loop, safego.Close(done))
 	r.log.Info("recording listening sockets", "interval", r.interval.String(), "retention", r.retention.String())
 }
 
@@ -242,8 +245,7 @@ func (r *PortRecorder) Stop() {
 	<-done
 }
 
-func (r *PortRecorder) loop(ctx context.Context, done chan struct{}) {
-	defer close(done)
+func (r *PortRecorder) loop(ctx context.Context) {
 	r.prune(ctx)
 	lastPrune := r.now()
 	r.sampleAndLog(ctx)

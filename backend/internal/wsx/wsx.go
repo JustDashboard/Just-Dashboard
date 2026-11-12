@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 const (
@@ -234,6 +236,9 @@ func (c *Conn) Close() error {
 // Keepalive pings the peer and closes the socket when the context ends, so a
 // dropped VPN tunnel does not leave a PTY or log tail running forever.
 func (c *Conn) Keepalive(ctx context.Context) {
+	// Every socket handler starts this and DrainControl with a bare `go`,
+	// outside the request's own recovery: a panic here ends one socket.
+	defer safego.Recover(nil, "socket keepalive")
 	t := time.NewTicker(pingPeriod)
 	defer t.Stop()
 	for {
@@ -261,6 +266,7 @@ func (c *Conn) Keepalive(ctx context.Context) {
 // DrainControl reads and discards inbound frames on push-only sockets. Without
 // a reader the pong handler never runs and the connection dies at pongWait.
 func (c *Conn) DrainControl(cancel context.CancelFunc) {
+	defer safego.Recover(nil, "socket control reader")
 	defer cancel()
 	for {
 		if _, _, err := c.ws.ReadMessage(); err != nil {

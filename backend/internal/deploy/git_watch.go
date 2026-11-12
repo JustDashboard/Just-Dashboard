@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 const GitWatchInterval = 5 * time.Second
@@ -312,8 +314,7 @@ func (w *GitWatcher) Start(ctx context.Context) {
 	}
 	ctx, w.cancel = context.WithCancel(ctx)
 	w.done = make(chan struct{})
-	go func() {
-		defer close(w.done)
+	safego.Go(ctx, nil, "git branch watch", func(ctx context.Context) {
 		ticker := time.NewTicker(GitWatchInterval)
 		defer ticker.Stop()
 		for {
@@ -324,7 +325,7 @@ func (w *GitWatcher) Start(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
-	}()
+	}, safego.Close(w.done))
 }
 
 func (w *GitWatcher) Stop() {
@@ -359,6 +360,8 @@ func (w *GitWatcher) poll(ctx context.Context) error {
 		go func() {
 			defer group.Done()
 			defer func() { <-slots }()
+			// One repository's answer must not end the watch of the others.
+			defer safego.Recover(nil, "git branch check")
 			_ = w.check(ctx, target)
 		}()
 	}

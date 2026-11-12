@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The reconciler is what closes a preview when its pull request merges on
@@ -90,8 +92,7 @@ func (r *PreviewReconciler) Start(ctx context.Context) {
 	}
 	ctx, r.cancel = context.WithCancel(ctx)
 	r.done = make(chan struct{})
-	go func() {
-		defer close(r.done)
+	safego.Go(ctx, nil, "preview reconciler", func(ctx context.Context) {
 		ticker := time.NewTicker(r.interval)
 		defer ticker.Stop()
 		for {
@@ -102,7 +103,7 @@ func (r *PreviewReconciler) Start(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
-	}()
+	}, safego.Close(r.done))
 }
 
 func (r *PreviewReconciler) Stop() {
@@ -228,6 +229,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, targets []PreviewTarg
 		go func(targets []PreviewTarget) {
 			defer group.Done()
 			defer func() { <-slots }()
+			defer safego.Recover(r.log, "preview repository reconcile")
 			r.reconcileRepository(ctx, targets, explicit)
 		}(groups[repository])
 	}

@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Status is where a job has got to.
@@ -245,7 +246,10 @@ func (m *Manager) registerLocked(job Job, cancel context.CancelFunc, exclusive b
 
 func (m *Manager) run(ctx context.Context, cancel context.CancelFunc, e *entry, run Runner) {
 	defer cancel()
-	err := run(ctx, &emitter{entry: e, manager: m})
+	// A runner that panics fails its own job, with the reason on it. Nothing
+	// else recovers this goroutine, so it used to end the dashboard and every
+	// other job with it.
+	err := safego.Try(m.log, "job", func() error { return run(ctx, &emitter{entry: e, manager: m}) })
 	e.finish(err, ctx.Err())
 	// Pruned here as well as at Start. A burst of jobs can finish after
 	// the last one began, and pruning only on the way in left the cap

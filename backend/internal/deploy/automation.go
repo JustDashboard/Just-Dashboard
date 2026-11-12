@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	basestore "github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
 
@@ -909,8 +910,7 @@ func (s *AutomationScheduler) Start(ctx context.Context) {
 	runCtx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 	s.done = make(chan struct{})
-	go func() {
-		defer close(s.done)
+	safego.Go(runCtx, nil, "deployment schedule", func(runCtx context.Context) {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		s.run(runCtx)
@@ -922,7 +922,7 @@ func (s *AutomationScheduler) Start(ctx context.Context) {
 				s.run(runCtx)
 			}
 		}
-	}()
+	}, safego.Close(s.done))
 }
 func (s *AutomationScheduler) run(ctx context.Context) {
 	due, err := s.store.ClaimDueSchedules(ctx, 20)

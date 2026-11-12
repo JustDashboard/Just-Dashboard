@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 const previewQuarantineReason = "This preview predates verified isolation. Its previous runtime must be stopped before an approved deployment can run."
@@ -312,8 +314,7 @@ func (c *PreviewQuarantineController) Start(ctx context.Context) error {
 	c.attempt(ctx)
 	workerCtx, stop := context.WithCancel(ctx)
 	c.stop, c.done = stop, make(chan struct{})
-	go func() {
-		defer close(c.done)
+	safego.Go(workerCtx, nil, "preview quarantine", func(workerCtx context.Context) {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -324,7 +325,7 @@ func (c *PreviewQuarantineController) Start(ctx context.Context) error {
 				c.attempt(workerCtx)
 			}
 		}
-	}()
+	}, safego.Close(c.done))
 	return nil
 }
 

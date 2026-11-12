@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Service is the module the API holds: the check, the installer, and the one
@@ -95,7 +97,7 @@ func New(o Options) *Service {
 func (s *Service) Start(ctx context.Context) {
 	s.installer.Reconcile(ctx, s.current, s.list)
 	s.checker.Start(ctx)
-	go s.adoptCheckout(ctx)
+	safego.Once(nil, "checkout ownership", func() { s.adoptCheckout(ctx) })
 }
 
 func (s *Service) Stop() { s.checker.Stop() }

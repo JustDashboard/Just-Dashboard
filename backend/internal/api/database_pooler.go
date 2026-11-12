@@ -20,6 +20,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/docker/docker/errdefs"
 )
 
@@ -645,8 +646,7 @@ func (k *poolerKeeper) Start(ctx context.Context) {
 	}
 	ctx, k.cancel = context.WithCancel(ctx)
 	k.done = make(chan struct{})
-	go func() {
-		defer close(k.done)
+	safego.Go(ctx, nil, "connection pooler keeper", func(ctx context.Context) {
 		ticker := time.NewTicker(poolerKeeperInterval)
 		defer ticker.Stop()
 		for {
@@ -657,7 +657,7 @@ func (k *poolerKeeper) Start(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
-	}()
+	}, safego.Close(k.done))
 }
 
 func (k *poolerKeeper) Stop() {

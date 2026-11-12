@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Counters that outlive a table replacement, and the Protection page's
@@ -356,8 +358,7 @@ func (t *gatewayTelemetry) start(parent context.Context) {
 	}
 	t.stop, t.done = make(chan struct{}), make(chan struct{})
 	t.mu.Unlock()
-	go func() {
-		defer close(t.done)
+	safego.Go(parent, nil, "gateway protection telemetry", func(parent context.Context) {
 		tick := time.NewTicker(protectionSampleEvery)
 		defer tick.Stop()
 		prune := time.NewTicker(time.Hour)
@@ -378,7 +379,7 @@ func (t *gatewayTelemetry) start(parent context.Context) {
 				t.prune(parent)
 			}
 		}
-	}()
+	}, safego.Close(t.done))
 }
 
 func (t *gatewayTelemetry) halt() {

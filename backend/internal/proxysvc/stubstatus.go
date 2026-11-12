@@ -18,6 +18,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Live request metrics come from nginx's stub_status module, which is built
@@ -542,9 +543,9 @@ func NewStatusSampler(svc *Service) *StatusSampler {
 // Start reads at once and then every interval, until ctx ends or Stop.
 func (m *StatusSampler) Start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
-	m.stop, m.done = cancel, make(chan struct{})
-	go func() {
-		defer close(m.done)
+	done := make(chan struct{})
+	m.stop, m.done = cancel, done
+	safego.Go(ctx, nil, "nginx status sampler", func(ctx context.Context) {
 		ticker := time.NewTicker(m.interval)
 		defer ticker.Stop()
 		for {
@@ -557,7 +558,7 @@ func (m *StatusSampler) Start(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
-	}()
+	}, safego.Close(done))
 }
 
 // Stop ends the loop and waits for it. A sampler never started stops at once.

@@ -11,9 +11,11 @@ const POLL = 30_000
 
 /**
  * What is wrong with the dashboard itself, said first on the Overview: a full disk under its
- * data, a database that refuses writes. The reader has to act on it, which is what a `Notice` is
- * for, and nothing else in the product would tell them: the container stays "healthy" on purpose,
- * and a failed save elsewhere reads as that page's problem. Nothing is drawn while all is well.
+ * data, a database that refuses writes, a background task that keeps crashing. The reader has to
+ * act on it, which is what a `Notice` is for, and nothing else in the product would tell them: the
+ * container stays "healthy" on purpose, a failed save elsewhere reads as that page's problem, and a
+ * task that is restarted after every panic fails without a sound. Nothing is drawn while all is
+ * well.
  */
 export function DashboardHealthNotice() {
   const health = usePoll(
@@ -25,7 +27,7 @@ export function DashboardHealthNotice() {
   return (
     <>
       {problems.map((problem) => (
-        <Notice key={problem.key} tone="danger" icon={Warning} title={problem.title}>
+        <Notice key={problem.key} tone={problem.tone} icon={Warning} title={problem.title}>
           <p>{problem.body}</p>
           {problem.detail && (
             <p className="mt-1 font-mono text-hint break-all text-foreground">{problem.detail}</p>

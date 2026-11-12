@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Host alerts: the machine's own readings, watched while nobody reads them.
@@ -340,7 +341,7 @@ func (a *hostAlerts) Start(ctx context.Context) {
 	if a == nil {
 		return
 	}
-	go func() {
+	safego.Go(ctx, nil, "host alerts", func(ctx context.Context) {
 		ticker := time.NewTicker(a.interval)
 		defer ticker.Stop()
 		for {
@@ -353,7 +354,7 @@ func (a *hostAlerts) Start(ctx context.Context) {
 			a.Evaluate(pass)
 			cancel()
 		}
-	}()
+	})
 }
 
 // LastPass is when the last pass finished; nil before the first.

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 type Service struct {
@@ -64,11 +66,10 @@ func (s *Service) Start(ctx context.Context) error {
 	s.startedAt = time.Now().UTC()
 	loopCtx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
-	go s.loop(loopCtx)
+	safego.Go(loopCtx, nil, "network socket history", s.loop, safego.Close(s.done))
 	return nil
 }
 func (s *Service) loop(ctx context.Context) {
-	defer close(s.done)
 	for {
 		s.mu.Lock()
 		enabled := s.state.Settings.Enabled

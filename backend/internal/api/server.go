@@ -14,6 +14,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/wsx"
@@ -150,6 +151,9 @@ type Server struct {
 	background     sync.WaitGroup
 	stopBackground context.CancelFunc
 	shutdownOnce   sync.Once
+	// faultedTasks replaces safego.Faulted in GET /dashboard/health; nil
+	// outside tests.
+	faultedTasks func() []safego.Task
 
 	modules moduleSet
 }
@@ -202,7 +206,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.stopBackground = stopBackground
 	// First, and whatever else fails below: a store that cannot be written is
 	// the reason most of the rest would fail, and the one thing to say.
-	s.background.Go(func() { s.modules.storeHealth.Run(background) })
+	s.keep(background, "store health", s.modules.storeHealth.Run)
 	// Before anything is served: with hub sign-in off, no grant and no hub
 	// session may survive this start, and if that cannot be written the
 	// dashboard does not start (hub-link-protocol.md section 9.3).
@@ -228,7 +232,7 @@ func (s *Server) Start(ctx context.Context) error {
 	remoteCancel()
 	// An engine or a stream bridge made by an older dashboard is made again
 	// in the background, its volume kept; a current one is left alone.
-	s.background.Go(func() {
+	s.once("remote desktop engine upgrade", func() {
 		upgradeCtx, cancel := context.WithTimeout(background, 10*time.Minute)
 		defer cancel()
 		err := s.modules.remoteDesktop.UpgradeEngine(upgradeCtx, func(line string) {
@@ -281,7 +285,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// A database upgrade this process's predecessor was carrying out has
 	// nobody left to finish it or undo it: the old server is put back in the
 	// background, since it may have to be started and waited for.
-	s.background.Go(func() {
+	s.once("database upgrade recovery", func() {
 		upgradeCtx, cancel := context.WithTimeout(background, 10*time.Minute)
 		defer cancel()
 		s.recoverDatabaseUpgrades(upgradeCtx)
@@ -306,7 +310,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.modules.network.Start(ctx)
 	// A block made from the connection table with an end is lifted when it
 	// ends, whether or not anybody has the page open.
-	s.background.Go(func() { s.expireBlocks(background) })
+	s.keep(background, "connection block expiry", s.expireBlocks)
 	// Country and feed blocklists go stale; each is fetched again a day after
 	// its last refresh, whether or not anybody opens the Protection page.
 	s.modules.network.StartBlocklistRefresh(ctx)
@@ -344,13 +348,13 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.startPITRSchedule(ctx)
 	ingressCtx, stopIngress := context.WithCancel(ctx)
-	s.ingressStop, s.ingressDone = stopIngress, make(chan struct{})
-	go func() {
-		defer close(s.ingressDone)
-		s.modules.proxy.MaintainDockerIngress(ingressCtx, func(name string, success bool) {
+	ingressDone := make(chan struct{})
+	s.ingressStop, s.ingressDone = stopIngress, ingressDone
+	safego.Go(ingressCtx, s.Log, "deployment ingress upkeep", func(ctx context.Context) {
+		s.modules.proxy.MaintainDockerIngress(ctx, func(name string, success bool) {
 			s.Audit.Record(context.Background(), audit.Entry{Actor: "system", Action: "proxy.ingress.reconcile", Target: name, Success: success})
 		}, func(err error) { s.Log.Warn("deployment ingress recovery needs attention", "error", err) })
-	}()
+	}, safego.Close(ingressDone))
 	if err := s.startProxyExtras(ctx); err != nil {
 		return err
 	}
@@ -395,6 +399,19 @@ func (s *Server) Start(ctx context.Context) error {
 	// Runs and sends nothing until an administrator has said yes.
 	s.modules.usagePing.Start(ctx)
 	return nil
+}
+
+// keep runs fn for as long as the server does, as a task that survives its own
+// panics (internal/safego). Shutdown ends ctx and waits for it.
+func (s *Server) keep(ctx context.Context, name string, fn func(context.Context)) {
+	s.background.Add(1)
+	safego.Go(ctx, s.Log, name, fn, s.background.Done)
+}
+
+// once is keep for work that is finished when it returns.
+func (s *Server) once(name string, fn func()) {
+	s.background.Add(1)
+	safego.Once(s.Log, name, fn, s.background.Done)
 }
 
 // startDeployEngine puts tailscale's serve config and the preview address
