@@ -17,10 +17,12 @@ instead, and credentials that fail are counted per address (below).
   allowlist could be spoofed past.
 - **Three limiters**, `NewLimiter(perMinute, burst)`: `loginLim` (10/5, per address, on top of the
   per-account lockout), `apiLim` (600/120, per credential), `destrLim` (30/10, destructive routes).
-  `apiLim` is `PerCredential`: a browser session, each API key, and the assistant working in a
-  session each have a bucket of their own (`httpx.credentialKey`), so a CI job's key or the
-  assistant's calls cannot empty the bucket an open page polls from, even where an SSH tunnel puts
-  them all on one address. `destrLim` is not: it stays the person's at their address, whichever
+  `apiLim` is `PerCredential`: a browser session and each API key have a bucket of their own
+  (`httpx.credentialKey`), so a CI job's key cannot empty the bucket an open page polls from, even
+  where an SSH tunnel puts them both on one address. The assistant is not a credential: it works
+  under the person's session principal and spends that session's bucket, as the person's page does
+  ([invariant 13](../security/invariants.md)). `destrLim` is not `PerCredential`: it stays the person's at their
+  address, whichever
   credential spends it, so minting a key or asking the assistant buys no second allowance of
   irreversible actions. A refusal is `429 rate_limited` in the envelope with `Retry-After` set to
   the bucket's real wait in whole seconds (rounded up, never 0) and `RateLimit-Remaining: 0`; an
@@ -85,7 +87,7 @@ instead, and credentials that fail are counted per address (below).
   (`httpx.WithAssistant`), and every group's authentication takes it in place of a credential, marked
   `Principal.Assistant` so the route's audit entry records actor `assistant`. It is not a key and the deploy key gate
   never sees it: the route's capability check and handler rules decide as they do for the person, its destructive
-  actions spend the person's own `destrLim` budget, its other calls a general budget of its own per session, and
+  actions spend the person's own `destrLim` budget, its other calls the budget of the session it works in, and
   the request carries the CSRF header a page sends. A WebSocket or a stream is not made this way, nor the short list
   in `agentExclusion`, nor a route into a protected database connection (`agentProtected`). A command it runs on the
   host (`run_command`) is not a request at all: it is the terminal's own way of running a line

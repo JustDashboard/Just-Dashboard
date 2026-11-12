@@ -49,8 +49,7 @@ func TestEachCredentialHasABudgetOfItsOwn(t *testing.T) {
 	}
 	// Nothing else of the person's is out of budget for that.
 	for name, p := range map[string]*Principal{
-		"the browser session": session, "a second session": otherSession,
-		"another key": otherKey, "the assistant in the session": assistant,
+		"the browser session": session, "a second session": otherSession, "another key": otherKey,
 	} {
 		for i := range 2 {
 			if w := limited(l, p); w.Code != http.StatusNoContent {
@@ -60,6 +59,35 @@ func TestEachCredentialHasABudgetOfItsOwn(t *testing.T) {
 		if w := limited(l, p); w.Code != http.StatusTooManyRequests {
 			t.Errorf("%s past its own budget: %d, want 429", name, w.Code)
 		}
+	}
+	// The assistant is not one more credential: it works under the session's
+	// own principal and that session's budget is the one it spends (security
+	// invariant 13), so it is out of budget with the session and not before.
+	if w := limited(l, assistant); w.Code != http.StatusTooManyRequests {
+		t.Errorf("the assistant in a session that is out of budget: %d, want 429", w.Code)
+	}
+}
+
+// What the assistant spends is its session's, both ways round: its calls come
+// out of the budget the person's page has, and it has no second one to go on
+// with when that is gone.
+func TestTheAssistantSpendsTheBudgetOfTheSessionItWorksIn(t *testing.T) {
+	session, otherSession, _, _, assistant := credentialsOfOnePerson()
+	l := NewLimiter(60, 2).PerCredential()
+	if w := limited(l, assistant); w.Code != http.StatusNoContent {
+		t.Fatalf("the assistant's first call: %d", w.Code)
+	}
+	if w := limited(l, session); w.Code != http.StatusNoContent {
+		t.Fatalf("the session's request after it: %d", w.Code)
+	}
+	for name, p := range map[string]*Principal{"the assistant": assistant, "the session": session} {
+		if w := limited(l, p); w.Code != http.StatusTooManyRequests {
+			t.Errorf("%s after the two the session had: %d, want 429", name, w.Code)
+		}
+	}
+	// The person's other session is another credential.
+	if w := limited(l, otherSession); w.Code != http.StatusNoContent {
+		t.Errorf("the person's other session: %d", w.Code)
 	}
 }
 

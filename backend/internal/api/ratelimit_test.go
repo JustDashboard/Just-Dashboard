@@ -54,3 +54,35 @@ func TestAKeyOutOfBudgetLeavesThePersonsBrowserItsOwn(t *testing.T) {
 		t.Errorf("RateLimit-Remaining %q on the browser's first request, want 2", got)
 	}
 }
+
+// The test above, and the one of the failed credentials, bring a limiter of
+// their own to keep their counts small, so neither would notice a server built
+// without one. This is the server as New makes it: the key and the page each
+// start from a whole bucket, and failed credentials are counted.
+func TestTheServerIsBuiltWithABudgetForEachCredentialAndACountOfFailures(t *testing.T) {
+	s := testServer(t)
+	browser, user := signedIn(t, s, "ada")
+	_, key, err := s.Auth.CreateAPIToken(t.Context(), user, "ci", auth.RoleAdmin, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const path = "/api/v1/audit/?limit=1"
+	first := withKey(browser.h, key, path)
+	if first.Code != http.StatusOK || first.Header().Get("RateLimit-Remaining") == "" {
+		t.Fatalf("the key's first request: %d, RateLimit-Remaining %q", first.Code, first.Header().Get("RateLimit-Remaining"))
+	}
+	for range 9 {
+		withKey(browser.h, key, path)
+	}
+	// Ten requests of the key's later, the page's first still leaves what the
+	// key's first left: a shared bucket would be ten short, less a refill.
+	page := browser.do(http.MethodGet, path, "", nil)
+	if got, want := page.Header().Get("RateLimit-Remaining"), first.Header().Get("RateLimit-Remaining"); page.Code != http.StatusOK || got != want {
+		t.Errorf("the page's first request after ten of the key's: %d, RateLimit-Remaining %q, want %q", page.Code, got, want)
+	}
+
+	if s.Authn.Failures == nil {
+		t.Error("the server counts no failed credentials: Authenticator.Failures is nil")
+	}
+}

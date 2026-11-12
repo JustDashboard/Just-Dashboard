@@ -40,15 +40,20 @@ func NewLimiter(perMinute, burst int) *Limiter {
 }
 
 // PerCredential makes ByPrincipal give each credential a budget of its own: a
-// browser session, each API key, and the assistant working in a session.
+// browser session and each API key.
 //
 // The general API budget was one bucket per account and address, so an open
-// dashboard's polls, every key the person owned and the assistant's calls all
-// drew on it wherever they shared an address (an SSH tunnel puts everything on
-// loopback), and a CI job could empty the bucket the page was reading from.
+// dashboard's polls and every key the person owned drew on it wherever they
+// shared an address (an SSH tunnel puts everything on loopback), and a CI job
+// could empty the bucket the page was reading from.
 // It is for that budget only. The destructive budget stays the person's own
 // (the default), whichever credential spends it: nobody gains a second
 // allowance of irreversible actions by minting a key or asking the assistant.
+//
+// The assistant is not a credential. It works under the person's own session
+// principal and spends that session's budget, exactly as the person's page
+// does (security invariant 13): a budget of its own would be the person's
+// allowance twice over for whoever can make it call.
 func (l *Limiter) PerCredential() *Limiter {
 	l.perCredential = true
 	return l
@@ -154,16 +159,16 @@ func (l *Limiter) ByPrincipal(next http.Handler) http.Handler {
 	})
 }
 
-// credentialKey names the bucket of the credential behind a request: the
-// assistant working in a session, an API key, or a browser session. A
-// principal with none of them (the hub's, on an agent) keeps the person's key.
+// credentialKey names the bucket of the credential behind a request: an API
+// key or a browser session. A principal with neither (the hub's, on an agent)
+// keeps the person's key.
 //
 // An MCP key's generated tool is a second request under the same key and
-// spends from the same bucket as the call that asked for it.
+// spends from the same bucket as the call that asked for it, and a call the
+// assistant makes is a request under the session it works in and spends from
+// that session's.
 func credentialKey(p *Principal, person string) string {
 	switch {
-	case p.Assistant && p.SessionID != "":
-		return "assistant|" + p.SessionID
 	case p.Token != nil:
 		return "key|" + strconv.FormatInt(p.Token.ID, 10)
 	case p.SessionID != "":
