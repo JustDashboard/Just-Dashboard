@@ -274,7 +274,11 @@ func (s *Server) handleGitPartialDiff(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	q := r.URL.Query()
-	diff, err := s.modules.git.PartialDiff(r.Context(), path, q.Get("file"), q.Get("staged") == "true")
+	staged, err := httpx.QueryBool(r, "staged")
+	if err != nil {
+		return err
+	}
+	diff, err := s.modules.git.PartialDiff(r.Context(), path, q.Get("file"), staged)
 	if err != nil {
 		return gitErr(err)
 	}

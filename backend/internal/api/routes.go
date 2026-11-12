@@ -7,14 +7,18 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 )
 
 // Routes builds the whole API surface.
 //
 // The layering is deliberate and is the security contract of this service:
 //
-//	network allowlist  →  rate limit  →  authentication  →  capability  →  handler
+//	network allowlist  →  authentication  →  rate limit  →  capability  →  handler
+//
+// The rate limit is the credential's (apiLim.ByPrincipal), so it follows
+// authentication. A route with no credential — sign-in, the webhooks, the
+// hub's discovery — has a per-address limiter in front instead, and a
+// credential that fails is counted per address (httpx.FailureBudget).
 //
 // Nothing below /api is reachable without passing every layer above it. There
 // is no "UI-only" protection anywhere: the frontend hides controls a role
@@ -24,7 +28,17 @@ func (s *Server) Routes() http.Handler {
 	// The deploy key gate asks this router which route a request will reach,
 	// so it is the whole tree, read at request time once it is built.
 	root := r
-	r.Use(middleware.RequestID)
+	// The router's own refusals, an unknown path and a method a path does not
+	// take, are answered in the API's envelope (route_methods.go). Set before
+	// anything is mounted, so every subrouter inherits them.
+	methods := &routeMethodTable{root: root}
+	r.NotFound(routeNotFound)
+	r.MethodNotAllowed(methods.methodNotAllowed)
+	// First, so the id is on every answer and every log line below it.
+	r.Use(httpx.RequestID)
+	// The server has a header timeout and, for the sake of its streams, no
+	// other: this is what keeps a body from being trickled in for ever.
+	r.Use(httpx.BodyDeadline(httpx.BodyGrace, httpx.BodyMinRate))
 	r.Use(httpx.RealIP(s.Cfg.TrustedProxies))
 	r.Use(httpx.Recoverer(s.Log))
 	r.Use(httpx.RequestLogger(s.Log))
@@ -135,6 +149,11 @@ func (s *Server) Routes() http.Handler {
 			r.Use(s.apiLim.ByPrincipal)
 			r.Use(httpx.AuditMutations(s.Audit))
 			r.Use(httpx.RequireCSRF)
+			// A method a static path lacks is 405 there, never its {param}
+			// sibling's handler with the action's name as the parameter. Last
+			// in the chain, where the router's own 405 is answered from: after
+			// authentication, and on the audit trail like any refused write.
+			r.Use(methods.refuseShadowedMethods)
 
 			s.mountAccountRoutes(r)
 			s.mountSystemRoutes(r)

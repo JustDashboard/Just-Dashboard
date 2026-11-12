@@ -212,7 +212,12 @@ func (s *Server) handleDBExtensionDrop(w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 	name := httpx.URLParam(r, "name")
-	cascade := queryFlag(r, "cascade")
+	// What a drop takes with it is the reader's choice and never inferred, so
+	// a choice that cannot be read stops the drop.
+	cascade, err := httpx.QueryBool(r, "cascade")
+	if err != nil {
+		return err
+	}
 	return s.runDDL(w, r, conn, 120*time.Second, "database.extension.drop",
 		map[string]any{"extension": name, "cascade": cascade}, "",
 		func(ctx context.Context, pool *sql.DB) (*dbx.DDLPlan, error) {

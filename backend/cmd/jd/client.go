@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -31,6 +32,9 @@ type apiError struct {
 	Code    string
 	Message string
 	Raw     bool
+	// RequestID is the id a 5xx answer carries: the dashboard's log has the
+	// cause on the line with the same id.
+	RequestID string
 }
 
 // Error says what a refusal means for the person holding the key, then the
@@ -56,6 +60,11 @@ func (e *apiError) Error() string {
 	}
 	if e.Raw {
 		return fmt.Sprintf("the dashboard answered %d %s: %s", e.Status, http.StatusText(e.Status), msg)
+	}
+	if e.RequestID != "" {
+		// A 500 says "internal error" and nothing else, on purpose. The id is
+		// what to quote to whoever can read the dashboard's log.
+		return fmt.Sprintf("%s (%d): %s (request %s)", e.Code, e.Status, msg, e.RequestID)
 	}
 	return fmt.Sprintf("%s (%d): %s", e.Code, e.Status, msg)
 }
@@ -133,14 +142,19 @@ func query(pairs ...string) url.Values {
 	return q
 }
 
-// do sends one request and returns the body of a successful answer. body is
+// do sends a request and returns the body of a successful answer. body is
 // marshalled unless it is already JSON (json.RawMessage).
+//
+// A request the dashboard's rate limit refused (429 with Retry-After) was
+// refused before anything ran, so it is sent again when the wait it was told
+// is over: twice at most, and only for a wait of ten seconds or less. A CI job
+// that runs several commands in a row is slowed, not failed.
 func (c *client) do(method, path string, q url.Values, body any) ([]byte, error) {
 	target := c.base + "/api/v1" + path
 	if len(q) > 0 {
 		target += "?" + q.Encode()
 	}
-	var reader io.Reader
+	var payload []byte
 	if body != nil {
 		raw, ok := body.(json.RawMessage)
 		if !ok {
@@ -149,43 +163,66 @@ func (c *client) do(method, path string, q url.Values, body any) ([]byte, error)
 				return nil, err
 			}
 		}
-		reader = bytes.NewReader(raw)
+		payload = raw
+	}
+	for attempt := 0; ; attempt++ {
+		raw, wait, err := c.once(method, target, payload, body != nil)
+		if wait <= 0 || attempt >= 2 {
+			return raw, err
+		}
+		time.Sleep(wait)
+	}
+}
+
+// once sends one request. wait is how long a rate limit asked for, when that
+// is why err is not nil and the wait is short enough to sit through.
+func (c *client) once(method, target string, payload []byte, hasBody bool) (raw []byte, wait time.Duration, err error) {
+	var reader io.Reader
+	if hasBody {
+		reader = bytes.NewReader(payload)
 	}
 	req, err := http.NewRequest(method, target, reader)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.key)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "jd/"+version)
-	if body != nil {
+	if hasBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
 		// The transport's error names the URL, never the header.
-		return nil, fmt.Errorf("could not reach the dashboard: %v", err)
+		return nil, 0, fmt.Errorf("could not reach the dashboard: %v", err)
 	}
 	defer res.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(res.Body, 64<<20))
+	raw, err = io.ReadAll(io.LimitReader(res.Body, 64<<20))
 	if err != nil {
-		return nil, fmt.Errorf("reading the dashboard's answer: %v", err)
+		return nil, 0, fmt.Errorf("reading the dashboard's answer: %v", err)
 	}
 	if res.StatusCode >= 400 {
-		return nil, decodeError(res.StatusCode, raw)
+		if res.StatusCode == http.StatusTooManyRequests {
+			if seconds, convErr := strconv.Atoi(res.Header.Get("Retry-After")); convErr == nil && seconds > 0 && seconds <= 10 {
+				wait = time.Duration(seconds) * time.Second
+			}
+		}
+		return nil, wait, decodeError(res.StatusCode, raw)
 	}
-	return raw, nil
+	return raw, 0, nil
 }
 
 func decodeError(status int, raw []byte) *apiError {
 	var envelope struct {
 		Error *struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
+			Code      string `json:"code"`
+			Message   string `json:"message"`
+			RequestID string `json:"requestId"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(raw, &envelope) == nil && envelope.Error != nil && envelope.Error.Code != "" {
-		return &apiError{Status: status, Code: envelope.Error.Code, Message: envelope.Error.Message}
+		return &apiError{Status: status, Code: envelope.Error.Code, Message: envelope.Error.Message,
+			RequestID: envelope.Error.RequestID}
 	}
 	text := strings.TrimSpace(string(raw))
 	if len(text) > 300 {

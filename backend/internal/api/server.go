@@ -174,13 +174,13 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, svc *auth.Servic
 		// Secure cookie from localhost — they treat it as a trustworthy origin
 		// — but not all of them have, and a session cookie the browser
 		// silently declines to store is a login page that simply loops.
-		Authn: &httpx.Authenticator{Svc: svc, Secure: !cfg.Dev && cfg.TLSMode != selfcfg.TLSOff},
+		Authn: &httpx.Authenticator{Svc: svc, Secure: !cfg.Dev && cfg.TLSMode != selfcfg.TLSOff, Failures: httpx.NewFailureBudget(60, 60)},
 		WS:    wsx.NewUpgrader(cfg.AllowedOrigins, !cfg.Dev && cfg.TLSMode != selfcfg.TLSOff),
 		// Login is deliberately tight: five attempts a minute per address on
 		// top of the per-account lockout.
 		loginLim:   httpx.NewLimiter(10, 5),
 		passkeyLim: httpx.NewLimiter(60, 20),
-		apiLim:     httpx.NewLimiter(600, 120),
+		apiLim:     httpx.NewLimiter(600, 120).PerCredential(),
 		// Destructive routes get their own budget so a scripted delete loop
 		// cannot run away even with a valid admin token.
 		destrLim:  httpx.NewLimiter(30, 10),

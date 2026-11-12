@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -343,18 +344,19 @@ func authLogFile(path string) bool {
 // live view, the search and the export cannot drift apart — an operator who
 // narrows a stream to one request id and then exports it gets that, not the
 // whole file, which is what the previous export did.
-func logFilterFrom(q url.Values) logsx.Filter {
+func logFilterFrom(q url.Values) (logsx.Filter, error) {
+	flags := httpx.QueryOf(q)
 	f := logsx.Filter{
 		Query:      q.Get("q"),
 		Exclude:    q.Get("exclude"),
-		Regex:      q.Get("regex") == "true",
-		IgnoreCase: q.Get("ignoreCase") != "false",
+		Regex:      flags.Bool("regex"),
+		IgnoreCase: flags.BoolOr("ignoreCase", true),
 		Fields:     q["f"],
 	}
 	if levels := q.Get("levels"); levels != "" {
 		f.Levels = strings.Split(levels, ",")
 	}
-	return f
+	return f, flags.Err()
 }
 
 // splitList reads a comma-separated parameter, dropping empty entries.
@@ -371,13 +373,23 @@ func splitList(v string) []string {
 	return out
 }
 
+// A number, a flag or a time that is there and cannot be read is refused: a
+// search answered without the window it was asked for looks like the answer
+// and is not.
 func logSearchOptions(q url.Values) (logsx.SearchOptions, error) {
+	filter, err := logFilterFrom(q)
+	if err != nil {
+		return logsx.SearchOptions{}, err
+	}
+	query := httpx.QueryOf(q)
 	opts := logsx.SearchOptions{
-		Filter:          logFilterFrom(q),
-		Limit:           atoiDefault(q.Get("limit"), 2000),
-		Before:          atoiDefault(q.Get("before"), 0),
-		After:           atoiDefault(q.Get("after"), 0),
-		Archives:        q.Get("archives") == "true",
+		Filter:          filter,
+		Limit:           query.Int("limit", 2000, 0, math.MaxInt32),
+		Before:          query.Int("before", 0, 0, math.MaxInt32),
+		After:           query.Int("after", 0, 0, math.MaxInt32),
+		Archives:        query.Bool("archives"),
+		Since:           query.Time("since"),
+		Until:           query.Time("until"),
 		Head:            q.Get("order") == "asc",
 		Facets:          splitList(q.Get("facets")),
 		Measure:         q.Get("measure"),
@@ -392,17 +404,7 @@ func logSearchOptions(q url.Values) (logsx.SearchOptions, error) {
 		}
 		opts.FacetLimit = n
 	}
-	if v := q.Get("since"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			opts.Since = t
-		}
-	}
-	if v := q.Get("until"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			opts.Until = t
-		}
-	}
-	return opts, nil
+	return opts, query.Err()
 }
 
 // logLens resolves the lens a read goes through: the one asked for, or the
@@ -534,6 +536,10 @@ func (s *Server) handleLogSearch(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	boot, err := httpx.QueryBool(r, "boot")
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
@@ -564,7 +570,7 @@ func (s *Server) handleLogSearch(w http.ResponseWriter, r *http.Request) error {
 		httpx.JSON(w, http.StatusOK, res)
 		return nil
 	case logsx.KindJournal, logsx.KindJournalID, logsx.KindKernel:
-		res, err := s.searchJournal(ctx, target, opts, q.Get("boot") == "true", q.Get("lens") != "")
+		res, err := s.searchJournal(ctx, target, opts, boot, q.Get("lens") != "")
 		if err != nil {
 			return mapProcsError(err)
 		}
@@ -1007,6 +1013,10 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
+	boot, err := httpx.QueryBool(r, "boot")
+	if err != nil {
+		return err
+	}
 	// File-backed exports keep every selected line, oldest first. Native
 	// readers apply their bound below and record the resulting coverage.
 	opts.Head = true
@@ -1063,7 +1073,7 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 		case logsx.KindStack:
 			res, err = s.searchStack(ctx, target.id, opts)
 		default:
-			res, err = s.searchJournal(ctx, target, opts, q.Get("boot") == "true", q.Get("lens") != "")
+			res, err = s.searchJournal(ctx, target, opts, boot, q.Get("lens") != "")
 		}
 		if err != nil {
 			s.Log.Error("log export failed", "source", raw, "err", err)
@@ -1077,7 +1087,7 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 			}
 		}
 		setDownloadHeaders()
-		if err := writeNativeLogExportHeader(w, raw, target.kind, opts, q.Get("boot") == "true", res); err != nil {
+		if err := writeNativeLogExportHeader(w, raw, target.kind, opts, boot, res); err != nil {
 			return nil
 		}
 		for _, line := range res.Lines {
@@ -1184,7 +1194,17 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	spec := logFilterFrom(q)
+	// Read before the upgrade, like everything else a stream can be refused
+	// for: a flag or a count that cannot be read is an error the form can
+	// show rather than a socket that opens on something else.
+	spec, err := logFilterFrom(q)
+	if err != nil {
+		return err
+	}
+	boot, err := httpx.QueryBool(r, "boot")
+	if err != nil {
+		return err
+	}
 	if spec.Lens, err = s.logLens(r.Context(), target, q.Get("lens")); err != nil {
 		return err
 	}
@@ -1194,9 +1214,9 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) error {
 		// the form can show rather than a socket that opens and stays empty.
 		return httpx.BadRequest("%v", err)
 	}
-	lines := atoiDefault(q.Get("lines"), 400)
-	if lines <= 0 || lines > 20000 {
-		lines = 400
+	lines, err := httpx.QueryInt(r, "lines", 400, 1, 20000)
+	if err != nil {
+		return err
 	}
 	var members []stackMember
 	if target.kind == logsx.KindStack {
@@ -1238,7 +1258,7 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) error {
 			return nil
 		}
 	case logsx.KindJournal, logsx.KindJournalID, logsx.KindKernel:
-		if err := s.followJournal(ctx, target, lines, spec, filter, q.Get("boot") == "true", q.Get("lens") != "", out); err != nil {
+		if err := s.followJournal(ctx, target, lines, spec, filter, boot, q.Get("lens") != "", out); err != nil {
 			conn.SendError(err.Error())
 			return nil
 		}

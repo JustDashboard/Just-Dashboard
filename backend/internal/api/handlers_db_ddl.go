@@ -212,9 +212,8 @@ func (s *Server) handleDBImport(w http.ResponseWriter, r *http.Request) error {
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"replacing a table's contents is destructive and your role does not permit it")
 		}
-		if !s.destrLim.Allow(p.Username() + "|dbimport") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-				"too many destructive imports, slow down")
+		if err := s.destrLim.Spend(p.Username()+"|dbimport", "too many destructive imports, slow down"); err != nil {
+			return err
 		}
 	}
 	conn, dsn, err := s.dbConnRow(r.Context(), id)

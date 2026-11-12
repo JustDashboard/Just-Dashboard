@@ -301,7 +301,10 @@ func (s *Server) handleDockerDiskUsage(w http.ResponseWriter, r *http.Request) e
 }
 
 func (s *Server) handleContainerList(w http.ResponseWriter, r *http.Request) error {
-	all := r.URL.Query().Get("all") != "false"
+	all, err := httpx.QueryBoolOr(r, "all", true)
+	if err != nil {
+		return err
+	}
 	list, err := s.modules.docker.ListContainers(r.Context(), all)
 	if err != nil {
 		return s.dockerErr(err)
@@ -596,8 +599,11 @@ func (s *Server) handleContainerRemove(w http.ResponseWriter, r *http.Request) e
 	// not survive is data written inside the container rather than to a volume
 	// — which is a finding Diagnose already raises, on the container, before
 	// anybody reaches this button.
-	force := r.URL.Query().Get("force") == "true"
-	volumes := r.URL.Query().Get("volumes") == "true"
+	query := httpx.Query(r)
+	force, volumes := query.Bool("force"), query.Bool("volumes")
+	if err := query.Err(); err != nil {
+		return err
+	}
 	if err := s.modules.docker.RemoveContainer(r.Context(), id, force, volumes); err != nil {
 		return s.dockerErr(err)
 	}
@@ -704,7 +710,11 @@ func (s *Server) handleContainerExec(w http.ResponseWriter, r *http.Request) err
 }
 
 func (s *Server) handleImageList(w http.ResponseWriter, r *http.Request) error {
-	list, err := s.modules.docker.ListImages(r.Context(), r.URL.Query().Get("all") == "true")
+	all, err := httpx.QueryBool(r, "all")
+	if err != nil {
+		return err
+	}
+	list, err := s.modules.docker.ListImages(r.Context(), all)
 	if err != nil {
 		return s.dockerErr(err)
 	}
@@ -756,9 +766,12 @@ func (s *Server) handleImageRemove(w http.ResponseWriter, r *http.Request) error
 	// The tag is resolved before the removal rather than after, because after
 	// it there is nothing left to resolve it from — and a trail saying which
 	// image went is worth more than one holding a bare digest.
+	force, err := httpx.QueryBool(r, "force")
+	if err != nil {
+		return err
+	}
 	name := s.imageName(r.Context(), id)
-	res, err := s.modules.docker.RemoveImage(r.Context(), id,
-		r.URL.Query().Get("force") == "true", true)
+	res, err := s.modules.docker.RemoveImage(r.Context(), id, force, true)
 	if err != nil {
 		return s.dockerErr(err)
 	}
@@ -768,7 +781,10 @@ func (s *Server) handleImageRemove(w http.ResponseWriter, r *http.Request) error
 }
 
 func (s *Server) handleImagePrune(w http.ResponseWriter, r *http.Request) error {
-	all := r.URL.Query().Get("all") == "true"
+	all, err := httpx.QueryBool(r, "all")
+	if err != nil {
+		return err
+	}
 	rep, err := s.modules.docker.PruneImages(r.Context(), all)
 	if err != nil {
 		return s.dockerErr(err)
@@ -806,7 +822,11 @@ func (s *Server) handleVolumeInspect(w http.ResponseWriter, r *http.Request) err
 
 func (s *Server) handleVolumeRemove(w http.ResponseWriter, r *http.Request) error {
 	name := httpx.URLParam(r, "name")
-	if err := s.modules.docker.RemoveVolume(r.Context(), name, r.URL.Query().Get("force") == "true"); err != nil {
+	force, err := httpx.QueryBool(r, "force")
+	if err != nil {
+		return err
+	}
+	if err := s.modules.docker.RemoveVolume(r.Context(), name, force); err != nil {
 		return s.dockerErr(err)
 	}
 	httpx.SetAudit(r, "docker.volume.remove", name, nil)
@@ -1022,17 +1042,23 @@ func (s *Server) runStackAction(ctx context.Context, actor, name string, action 
 }
 
 func (s *Server) handlePruneAll(w http.ResponseWriter, r *http.Request) error {
+	query := httpx.Query(r)
 	opts := dockerx.PruneOptions{
-		ImagesAndCacheOnly: r.URL.Query().Get("imagesAndCacheOnly") == "true",
-		Volumes:            r.URL.Query().Get("volumes") == "true",
-		AllImages:          r.URL.Query().Get("allImages") == "true",
+		ImagesAndCacheOnly: query.Bool("imagesAndCacheOnly"),
+		Volumes:            query.Bool("volumes"),
+		AllImages:          query.Bool("allImages"),
 		// The build cache is the largest line on any server that builds, and
 		// until 0.6.4 no route in the product could touch it: the dashboard
 		// reported tens of gigabytes as reclaimable and had nothing to reclaim
 		// it with. It is opt-in rather than always-on so the plain sweep still
 		// means what its dialog says.
-		BuildCache:    r.URL.Query().Get("buildCache") == "true",
-		AllBuildCache: r.URL.Query().Get("allBuildCache") == "true",
+		BuildCache:    query.Bool("buildCache"),
+		AllBuildCache: query.Bool("allBuildCache"),
+	}
+	// What a sweep removes is decided by these, so one that cannot be read
+	// stops the sweep rather than narrowing or widening it.
+	if err := query.Err(); err != nil {
+		return err
 	}
 	if opts.ImagesAndCacheOnly && opts.Volumes {
 		return httpx.BadRequest("imagesAndCacheOnly cannot remove volumes")
@@ -1061,7 +1087,10 @@ func (s *Server) handleBuildCachePrune(w http.ResponseWriter, r *http.Request) e
 	// screen is Docker's "reclaimable", which is what `-a` frees. A button
 	// quoting one number and running the command for a smaller one is how the
 	// last version of this feature came to look broken.
-	all := r.URL.Query().Get("all") != "false"
+	all, err := httpx.QueryBoolOr(r, "all", true)
+	if err != nil {
+		return err
+	}
 	rep, err := s.modules.docker.PruneBuildCache(r.Context(), all)
 	if err != nil {
 		return s.dockerErr(err)

@@ -8,6 +8,10 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"reflect"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/storehealth"
 )
@@ -45,8 +49,15 @@ type APIError struct {
 	// daemon that was briefly unreachable, as opposed to a request that will
 	// fail identically every time.
 	Retryable bool `json:"retryable,omitempty"`
+	// RequestID is the id of the request that failed, which is also in the
+	// X-Request-Id header and on the log line that holds the cause. WriteError
+	// sets it on a 5xx, where the message deliberately says nothing.
+	RequestID string `json:"requestId,omitempty"`
 
 	err error
+	// retryAfter is how long until the same request would be admitted, for a
+	// refusal by a rate limit; WriteError says it in Retry-After.
+	retryAfter time.Duration
 }
 
 // Describe attaches what was being attempted to an error.
@@ -151,11 +162,28 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		apiErr = DiskFull(err)
 	}
 	if apiErr.Status >= 500 {
-		slog.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", apiErr.Error())
+		id := RequestIDFrom(r.Context())
+		slog.Error("request failed", "method", r.Method, "path", r.URL.Path, "request", id, "err", apiErr.Error())
+		if id != "" {
+			// A copy: the error may be one of the package's shared values.
+			named := *apiErr
+			named.RequestID = id
+			apiErr = &named
+		}
 	}
 	if p, ok := PrincipalFrom(r.Context()); ok {
 		p.FailureReason = apiErr.Message
 	}
+	if apiErr.Status == http.StatusTooManyRequests && apiErr.retryAfter > 0 {
+		// The real wait. It used to be a flat 30 seconds for a bucket that
+		// refills in a tenth of one.
+		w.Header().Set("Retry-After", retryAfterSeconds(apiErr.retryAfter))
+		w.Header().Set("RateLimit-Remaining", "0")
+	}
+	// A refusal is often written before the body was read. What is left of
+	// it is read here, within the client's allowance, so the server does not
+	// wait on it without one (drainBody).
+	drainBody(r)
 	JSON(w, apiErr.Status, map[string]any{"error": apiErr})
 }
 
@@ -190,10 +218,125 @@ func decodeJSON(r *http.Request, dst any, exactNumbers bool, limit int64) error 
 	}
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		return BadRequest("malformed request body: %v", err)
+		return decodeRefusal(err, limit)
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
+			return decodeRefusal(err, limit)
+		}
 		return BadRequest("request body must contain exactly one JSON value")
 	}
 	return nil
+}
+
+// decodeRefusal says what was wrong with a body in the request's own terms.
+//
+// encoding/json's sentences are written for the programmer holding the struct:
+// "cannot unmarshal number into Go struct field updateProfileRequest.displayName
+// of type string" names a Go type the client never sees and no field the form
+// could mark. So the refusals a client can act on are restated, each with the
+// field it is about: a value of the wrong kind, a field the route does not
+// take, a body that is missing, and a body past the limit, which is a 413 and
+// not a malformed request. Anything else keeps the decoder's own words, which
+// for a syntax error are the offending character and nothing of ours.
+func decodeRefusal(err error, limit int64) *APIError {
+	var tooLarge *http.MaxBytesError
+	var wrongKind *json.UnmarshalTypeError
+	var said *APIError
+	switch {
+	case errors.As(err, &said):
+		// The body's own reader refused: a client that stopped sending is
+		// 408 body_timeout (BodyDeadline), not a malformed request.
+		return said
+	case errors.As(err, &tooLarge):
+		return Err(http.StatusRequestEntityTooLarge, "body_too_large",
+			"the request body is larger than the "+byteLimit(limit)+" this route accepts")
+	case errors.Is(err, io.EOF):
+		return BadRequest("a JSON body is required")
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return BadRequest("malformed request body: it ends before the JSON value does")
+	case errors.As(err, &wrongKind):
+		got := jsonValueKind(wrongKind.Value)
+		if wrongKind.Field == "" {
+			return BadRequest("the request body must be %s, not %s", jsonKindWanted(wrongKind.Type), got)
+		}
+		refusal := BadRequest("%s must be %s, not %s", wrongKind.Field, jsonKindWanted(wrongKind.Type), got)
+		refusal.Field = wrongKind.Field
+		return refusal
+	}
+	if name, ok := unknownJSONField(err); ok {
+		refusal := BadRequest("unknown field %q", name)
+		refusal.Field = name
+		return refusal
+	}
+	return BadRequest("malformed request body: %v", err)
+}
+
+// unknownJSONField is the field a DisallowUnknownFields refusal names. The
+// decoder has no type for it, only the sentence.
+func unknownJSONField(err error) (string, bool) {
+	quoted, ok := strings.CutPrefix(err.Error(), "json: unknown field ")
+	if !ok {
+		return "", false
+	}
+	name, unquoteErr := strconv.Unquote(quoted)
+	return name, unquoteErr == nil
+}
+
+// jsonKindWanted names the JSON a Go type is decoded from.
+func jsonKindWanted(t reflect.Type) string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "a string"
+	case reflect.Bool:
+		return "true or false"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "a whole number"
+	case reflect.Float32, reflect.Float64:
+		return "a number"
+	case reflect.Slice, reflect.Array:
+		return "a list"
+	case reflect.Map, reflect.Struct:
+		return "an object"
+	}
+	return "a different kind of value"
+}
+
+// jsonValueKind names what the body held, from the decoder's description of it
+// ("number", "number 1.5", "string", "array", "object", "bool").
+func jsonValueKind(value string) string {
+	kind, _, _ := strings.Cut(value, " ")
+	switch kind {
+	case "number":
+		// "number 1.5" into a whole number, "number 300" into a small one.
+		if value != kind {
+			return "the " + value
+		}
+		return "a number"
+	case "string":
+		return "a string"
+	case "array":
+		return "a list"
+	case "object":
+		return "an object"
+	case "bool":
+		return "true or false"
+	}
+	return "what was sent"
+}
+
+// byteLimit writes a body limit the way an operator would say it.
+func byteLimit(n int64) string {
+	const mb = 1 << 20
+	if n >= mb && n%mb == 0 {
+		return strconv.FormatInt(n/mb, 10) + " MB"
+	}
+	if n >= 1<<10 {
+		return strconv.FormatInt(n>>10, 10) + " KB"
+	}
+	return strconv.FormatInt(n, 10) + " bytes"
 }

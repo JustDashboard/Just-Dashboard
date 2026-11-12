@@ -87,9 +87,8 @@ func (s *Server) handleDBChanges(w http.ResponseWriter, r *http.Request) error {
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"this change set deletes rows and your role does not permit it")
 		}
-		if !s.destrLim.Allow(p.Username() + "|dbchanges") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-				"too many destructive changes, slow down")
+		if err := s.destrLim.Spend(p.Username()+"|dbchanges", "too many destructive changes, slow down"); err != nil {
+			return err
 		}
 	}
 	pool, conn, err := s.dbPool(r.Context(), id)

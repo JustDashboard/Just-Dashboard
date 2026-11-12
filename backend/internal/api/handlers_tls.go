@@ -137,7 +137,11 @@ func (s *Server) handleTLSScan(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	opts := proxysvc.ScanOptions{AllAddresses: r.URL.Query().Get("all") == "1"}
+	all, err := httpx.QueryBool(r, "all")
+	if err != nil {
+		return err
+	}
+	opts := proxysvc.ScanOptions{AllAddresses: all}
 	if raw := r.URL.Query().Get("connect"); raw != "" {
 		if opts.AllAddresses {
 			return httpx.BadRequest("connect to dials one address; scanning every address asks the name's own")
@@ -203,7 +207,11 @@ func (s *Server) handleDomainDNS(w http.ResponseWriter, r *http.Request) error {
 	if domain == "" {
 		return httpx.BadRequest("domain query parameter is required")
 	}
-	if r.URL.Query().Get("deep") == "1" {
+	deep, err := httpx.QueryBool(r, "deep")
+	if err != nil {
+		return err
+	}
+	if deep {
 		return s.handleDeepDNS(w, r, domain)
 	}
 	ctx, cancel := timeoutCtx(r, 20*time.Second)

@@ -1,6 +1,7 @@
 package wsx
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -144,5 +145,53 @@ func TestTheGuardSeesEverySocketAndCanEndIt(t *testing.T) {
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if _, _, err := conn.ReadMessage(); err == nil {
 		t.Fatal("the socket is still open after the guard ended it")
+	}
+}
+
+// A handshake that fails is answered in the API's error envelope. gorilla's
+// own answer is a line of text ("Bad Request"), the one refusal of a socket
+// route a client could not read a code from.
+func TestAFailedHandshakeIsAnsweredInTheErrorEnvelope(t *testing.T) {
+	u := NewUpgrader(nil, true)
+	handshake := func(edit func(*http.Request)) (*httptest.ResponseRecorder, string) {
+		r := httptest.NewRequest(http.MethodGet, "http://backend.invalid/ws", nil)
+		r.Host = "dashboard.example"
+		r.Header.Set("Connection", "Upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		r.Header.Set("Sec-Websocket-Version", "13")
+		r.Header.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+		edit(r)
+		rec := httptest.NewRecorder()
+		if _, err := u.Upgrade(rec, r); err == nil {
+			t.Fatal("the handshake was accepted")
+		}
+		var body struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Error.Message == "" {
+			t.Fatalf("the refusal is not the envelope: %q (%v)", rec.Body.String(), err)
+		}
+		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+			t.Errorf("Content-Type = %q", got)
+		}
+		return rec, body.Error.Code
+	}
+
+	// A plain GET: curl, or a script that took the route for a read.
+	rec, code := handshake(func(r *http.Request) {
+		r.Header.Del("Connection")
+		r.Header.Del("Upgrade")
+	})
+	if rec.Code != http.StatusBadRequest || code != "websocket_upgrade_required" {
+		t.Errorf("a plain GET = %d %s", rec.Code, code)
+	}
+	if rec, code = handshake(func(r *http.Request) { r.Header.Set("Origin", "https://other.example") }); rec.Code != http.StatusForbidden || code != "origin_not_allowed" {
+		t.Errorf("a foreign origin = %d %s", rec.Code, code)
+	}
+	if rec, code = handshake(func(r *http.Request) { r.Method = http.MethodPost }); rec.Code != http.StatusMethodNotAllowed || code != "method_not_allowed" {
+		t.Errorf("a POST = %d %s", rec.Code, code)
 	}
 }

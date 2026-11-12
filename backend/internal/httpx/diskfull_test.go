@@ -33,7 +33,7 @@ func fullStoreError(t *testing.T) error {
 	return nil
 }
 
-func answer(t *testing.T, err error) (int, APIError) {
+func answerTo(t *testing.T, err error) (int, APIError) {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	WriteError(rec, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil), err)
@@ -53,7 +53,7 @@ func TestAWriteRefusedForSpaceIsAnsweredAsAFullDisk(t *testing.T) {
 		"bare":     fmt.Errorf("start session: %w", full),
 		"internal": Internal(full),
 	} {
-		status, body := answer(t, err)
+		status, body := answerTo(t, err)
 		if status != http.StatusInsufficientStorage || body.Code != "disk_full" {
 			t.Errorf("%s: answered %d %q, want 507 disk_full", name, status, body.Code)
 		}
@@ -64,12 +64,12 @@ func TestAWriteRefusedForSpaceIsAnsweredAsAFullDisk(t *testing.T) {
 }
 
 func TestOtherFailuresKeepTheirAnswers(t *testing.T) {
-	if status, body := answer(t, errors.New("boom")); status != http.StatusInternalServerError || body.Code != "internal" || body.Message != "internal error" {
+	if status, body := answerTo(t, errors.New("boom")); status != http.StatusInternalServerError || body.Code != "internal" || body.Message != "internal error" {
 		t.Errorf("an unknown error answered %d %q %q, want 500 internal", status, body.Code, body.Message)
 	}
 	// A handler's own answer stands even with a full disk underneath it.
 	chosen := Wrap(http.StatusBadGateway, "docker_unavailable", fmt.Errorf("pull: %w", fullStoreError(t)))
-	if status, body := answer(t, chosen); status != http.StatusBadGateway || body.Code != "docker_unavailable" {
+	if status, body := answerTo(t, chosen); status != http.StatusBadGateway || body.Code != "docker_unavailable" {
 		t.Errorf("a handler's own error answered %d %q, want it unchanged", status, body.Code)
 	}
 }

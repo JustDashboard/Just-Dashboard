@@ -466,7 +466,12 @@ func (s *Server) handleDBRoleGrant(w http.ResponseWriter, r *http.Request) error
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	preview := r.URL.Query().Get("preview") == "1"
+	// Read strictly: a preview that failed to parse as one must never fall
+	// through to the grant.
+	preview, err := httpx.QueryBool(r, "preview")
+	if err != nil {
+		return err
+	}
 	if preview {
 		// Nothing changes, whether it answers or fails.
 		httpx.SkipAudit(r)

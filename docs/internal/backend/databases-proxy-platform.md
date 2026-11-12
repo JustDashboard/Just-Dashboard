@@ -1857,8 +1857,11 @@ are decided here, not by the page.
     grants on it regardless. Default privileges are written for the connection's account and, with
     `FOR ROLE`, for every other role that owns the schema or a table or sequence in it and that the
     account is a member of (`pgFutureOwners`); owners it cannot speak for come back in `notes`.
-    `?preview=1` returns the same body with `preview:true` and executes nothing. MySQL escapes `_`
-    and `%` in the database name, which is a pattern at that position.
+    `?preview=1` returns the same body with `preview:true` and executes nothing. The flag is `1`,
+    `0`, `true` or `false` on every route under `/databases`, and anything else (`?preview=yes`, an
+    empty value, the flag twice) is `400 bad_request` naming `preview` before a handler runs
+    (`requirePreviewFlag`): these two routes used to test for `1` alone, so `?preview=true` granted.
+    MySQL escapes `_` and `%` in the database name, which is a pattern at that position.
   - *Fine-grained privileges.* `GET …/server/privileges` publishes the closed set per engine and
     level (`PrivilegeLevels`: database, schema, table, sequence, function, column and role membership
     on PostgreSQL;
@@ -6101,6 +6104,23 @@ done by hand, and the UI refuses to fold it away.
   readable by the same every-role audience as the report that already carries its end. The console on
   `/dashboard` reads it once when the tail says it was trimmed and extends it with each polled tail
   (`frontend/src/lib/transcript.ts`).
+- **The changelog is not in the report the page polls.** `GET /api/v1/dashboard/update?history=false`
+  answers what is polled (every five minutes, every two seconds during a run): the version, the latest,
+  the releases newer than the installed one, the check, the install and the run. `useSelfUpdate` says
+  `history=false` on every read. **A request that does not say it still gets `history`**, as every
+  report did before: a page that was open through an update goes on polling the new server with the
+  script it loaded from the old one, and that script reads `report.history` as a list without asking
+  whether it is there (the sidebar notice spreads it the moment the run succeeds, the Version page
+  filters it on every poll). Leaving the field out of the default answer would throw in every tab left
+  open through the update that brought the change in, so the default is not to be flipped while an
+  install can still come from a version whose page reads it.
+  What this build knows about its own past
+  (`selfupdate.Local()`, about 280 KB) is `GET /api/v1/dashboard/update/history`, `{"history": […]}`,
+  for the same every-role audience. It is encoded once per process and carries an `ETag` with
+  `Cache-Control: private, no-cache`, so a browser keeps it and a reload costs a `304`; `etagHolds`
+  also reads the tag the way a compressing proxy rewrites it (nginx's `W/"…"`, Caddy's `"…-gzip"`).
+  `useUpdateHistory(version)` (`frontend/src/hooks/use-update-history.ts`) reads it once per version
+  per tab: for `/dashboard`, and for the sidebar notice only when it has an outcome to head.
 
 `GET /api/v1/dashboard/health` is the dashboard's reading of itself for whoever is signed in, kept apart
 from `/healthz`, which the container's health check and the updater's rollback read:

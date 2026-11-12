@@ -62,11 +62,6 @@ func (s *Server) mountDatabaseSchemaRoutes(r chi.Router) {
 
 // --- the catalogue ----------------------------------------------------------
 
-func queryFlag(r *http.Request, name string) bool {
-	v := r.URL.Query().Get(name)
-	return v == "1" || strings.EqualFold(v, "true")
-}
-
 // handleDBCatalog returns the object tree: the schemas, and the objects of one
 // of them grouped by kind.
 //
@@ -84,10 +79,14 @@ func (s *Server) handleDBCatalog(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	q := r.URL.Query()
+	all, err := httpx.QueryBool(r, "all")
+	if err != nil {
+		return err
+	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
 	catalog, err := dbx.ReadCatalog(ctx, pool, conn.Driver, dbx.CatalogOptions{
-		Schema: q.Get("schema"), All: queryFlag(r, "all"), Limit: atoiDefault(q.Get("limit"), 0),
+		Schema: q.Get("schema"), All: all, Limit: atoiDefault(q.Get("limit"), 0),
 	})
 	if err != nil {
 		return queryFailed(err)
@@ -173,7 +172,30 @@ func (s *Server) handleDBProgram(w http.ResponseWriter, r *http.Request) error {
 
 // ddlPreview reports whether the caller asked to be shown the statement
 // rather than have it run.
-func ddlPreview(r *http.Request) bool { return queryFlag(r, "preview") }
+//
+// A flag that cannot be read never gets here to be read as "run it":
+// requirePreviewFlag refuses the request at the top of the Databases routes,
+// before any handler, so false means the flag is absent or says so.
+func ddlPreview(r *http.Request) bool {
+	preview, err := httpx.QueryBool(r, "preview")
+	return err == nil && preview
+}
+
+// requirePreviewFlag refuses a request under /databases whose ?preview= is
+// not a boolean. Every schema, extension, grant and privilege route there
+// shows its statements for a preview and runs them otherwise, and a preview
+// spelled a way one handler did not expect used to be the change itself:
+// ?preview=true granted on the routes that tested for "1". It stands in front
+// of the whole section so a route added later is held to it without asking.
+func requirePreviewFlag(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := httpx.QueryBool(r, "preview"); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 // ddlInvalid refuses a schema-change request for what it says.
 //
@@ -315,9 +337,10 @@ func (s *Server) runDDL(w http.ResponseWriter, r *http.Request, conn *dbConnecti
 		httpx.JSON(w, http.StatusOK, reply)
 		return nil
 	}
-	if destructive != "" && !s.destrLim.Allow(principal.Username()+"|dbddl") {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-			"too many destructive schema changes, slow down")
+	if destructive != "" {
+		if err := s.destrLim.Spend(principal.Username()+"|dbddl", "too many destructive schema changes, slow down"); err != nil {
+			return err
+		}
 	}
 	detail["statement"] = statement
 	httpx.SetAudit(r, action, conn.Name, detail)

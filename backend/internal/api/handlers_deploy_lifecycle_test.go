@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
 // The Events view is the reading that tells "silent because it logs nothing"
@@ -108,7 +110,10 @@ func TestLifecycleFeedHonoursTheWindowAndTheLimit(t *testing.T) {
 // A network disappearing under a running deployment is exactly the kind of
 // thing the feed exists for, so the default is not containers alone.
 func TestLifecycleQueryDefaultsToContainersAndNetworks(t *testing.T) {
-	base := lifecycleQueryFrom(url.Values{})
+	base, err := lifecycleQueryFrom(url.Values{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(base.kinds) != 2 || base.kinds[0] != "container" || base.kinds[1] != "network" {
 		t.Fatalf("default kinds are containers and networks, got %v", base.kinds)
 	}
@@ -116,11 +121,14 @@ func TestLifecycleQueryDefaultsToContainersAndNetworks(t *testing.T) {
 		t.Fatalf("an empty question should carry no window and no needle: %+v", base)
 	}
 
-	asked := lifecycleQueryFrom(url.Values{
+	asked, err := lifecycleQueryFrom(url.Values{
 		"kinds":  {"container"},
 		"search": {"  oom  "},
 		"since":  {"2026-09-19T23:00:00Z"},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(asked.kinds) != 1 || asked.kinds[0] != "container" {
 		t.Errorf("kinds not taken from the question: %v", asked.kinds)
 	}
@@ -130,11 +138,13 @@ func TestLifecycleQueryDefaultsToContainersAndNetworks(t *testing.T) {
 	if !asked.since.Equal(time.Date(2026, 9, 19, 23, 0, 0, 0, time.UTC)) {
 		t.Errorf("since not parsed: %s", asked.since)
 	}
-	// An unparseable window is no window rather than an error: the feed is a
-	// reading, and refusing to draw it over a malformed query parameter is
-	// worse than drawing all of it.
-	if junk := lifecycleQueryFrom(url.Values{"since": {"yesterday"}}); !junk.since.IsZero() {
-		t.Errorf("a junk window should be ignored, got %s", junk.since)
+	// An unparseable window is refused. It used to be no window at all, which
+	// answered "restarts since yesterday" with every restart on record and a
+	// 200: a figure nobody asked for, shown as the one they did.
+	_, err = lifecycleQueryFrom(url.Values{"since": {"yesterday"}})
+	var refused *httpx.APIError
+	if !errors.As(err, &refused) || refused.Status != http.StatusBadRequest || refused.Field != "since" {
+		t.Errorf("a junk window should be a 400 naming since, got %v", err)
 	}
 }
 

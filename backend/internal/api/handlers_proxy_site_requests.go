@@ -56,9 +56,13 @@ func (s *Server) handleSiteRequests(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
+	filter, err := requestFilterFrom(r.URL.Query())
+	if err != nil {
+		return err
+	}
 	ctx, cancel := timeoutCtx(r, 45*time.Second)
 	defer cancel()
-	httpx.JSON(w, http.StatusOK, s.observeSiteRequests(ctx, name, requestFilterFrom(r.URL.Query())))
+	httpx.JSON(w, http.StatusOK, s.observeSiteRequests(ctx, name, filter))
 	return nil
 }
 

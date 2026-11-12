@@ -233,7 +233,7 @@ func (s *Server) readServerMap(p *httpx.Principal) mapInputs {
 				report := m.selfUpdate.Report(ctx, selfupdate.Cached)
 				// The page draws one line of it; the release notes stay on the
 				// Version page.
-				report.Releases, report.History, report.Log = nil, nil, ""
+				report.Releases, report.Log = nil, ""
 				return report, nil
 			})
 		})

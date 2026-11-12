@@ -8630,14 +8630,20 @@ export type UpdateRun = {
   error?: string
 }
 
+/**
+ * Everything this build knows about its own past, newest first; needs no network. Served by
+ * `GET /dashboard/update/history`, apart from the report that is polled.
+ */
+export type UpdateHistory = {
+  history: Release[]
+}
+
 export type SelfUpdateReport = {
   version: string
   latest?: string
   available: boolean
   /** Releases newer than the installed version, newest first. */
   releases: Release[]
-  /** Everything this build knows about its own past; needs no network. */
-  history: Release[]
   breaking: boolean
   check: {
     enabled: boolean

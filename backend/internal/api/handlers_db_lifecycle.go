@@ -342,16 +342,16 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	target := r.URL.Query().Get("target")
-	pooled := r.URL.Query().Get("pooled")
-	if pooled != "" && pooled != "1" {
-		return httpx.BadRequest("pooled must be 1")
+	pooled, err := httpx.QueryBool(r, "pooled")
+	if err != nil {
+		return err
 	}
 	if target != "" && target != "host" && target != "container" && target != "public" {
 		return httpx.BadRequest("target must be host, container or public")
 	}
 	ctx, cancel := timeoutCtx(r, 15*time.Second)
 	defer cancel()
-	if pooled == "1" {
+	if pooled {
 		// The same three places, through the pooler instead of straight to the
 		// database: only the address differs.
 		dsn, err = s.poolerConnectionURL(ctx, conn, dsn, target)
@@ -380,13 +380,13 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 	// through with nothing to annotate: the SetAudit that used to stand here
 	// recorded nothing, and "deliberate and recorded" was half true.
 	s.recordRead(r, "database.connection.reveal", conn.Name,
-		map[string]any{"driver": string(conn.Driver), "target": target, "format": format, "pooled": pooled == "1"}, nil)
+		map[string]any{"driver": string(conn.Driver), "target": target, "format": format, "pooled": pooled}, nil)
 	reference := ""
 	if target == "container" {
 		// A pooled string is a different reference: it resolves to the pooler's
 		// name on the environment's network, not the database's.
 		ref := strconv.FormatInt(conn.ID, 10)
-		if pooled == "1" {
+		if pooled {
 			ref += ".pooled"
 		}
 		reference = fmt.Sprintf("${{database.%s}}", ref)

@@ -244,8 +244,8 @@ func (s *Server) mongoNeedsDestructive(r *http.Request, why string) error {
 	if !p.Can(auth.CapDestructive) {
 		return httpx.Err(http.StatusForbidden, "forbidden", why+", and your role does not permit that (destructive)")
 	}
-	if !s.destrLim.Allow(p.Username() + "|mongo") {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many destructive requests, slow down")
+	if err := s.destrLim.Spend(p.Username()+"|mongo", "too many destructive requests, slow down"); err != nil {
+		return err
 	}
 	return nil
 }

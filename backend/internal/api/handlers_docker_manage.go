@@ -391,7 +391,10 @@ func (s *Server) handleImageDetail(w http.ResponseWriter, r *http.Request) error
 // on the host: an old layer nobody references is not news, and each answer
 // costs a registry round trip.
 func (s *Server) handleImageUpdates(w http.ResponseWriter, r *http.Request) error {
-	force := r.URL.Query().Get("refresh") == "true"
+	force, err := httpx.QueryBool(r, "refresh")
+	if err != nil {
+		return err
+	}
 	var refs []string
 	if raw := r.URL.Query().Get("refs"); raw != "" {
 		refs = strings.Split(raw, ",")
@@ -447,13 +450,17 @@ func (s *Server) handleImageBuild(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return httpx.BadRequest("%s is outside the paths this dashboard may reach", requested)
 	}
+	flags := httpx.Query(r)
 	opts := dockerx.BuildOptions{
 		Dir:        dir,
 		Dockerfile: q.Get("dockerfile"),
 		Tag:        q.Get("tag"),
-		NoCache:    q.Get("noCache") == "true",
-		Pull:       q.Get("pull") == "true",
+		NoCache:    flags.Bool("noCache"),
+		Pull:       flags.Bool("pull"),
 		Target:     q.Get("target"),
+	}
+	if err := flags.Err(); err != nil {
+		return err
 	}
 	if strings.TrimSpace(opts.Tag) == "" {
 		return httpx.BadRequest("a name for the built image is required")
@@ -1022,8 +1029,8 @@ func (s *Server) handleStackRun(w http.ResponseWriter, r *http.Request) error {
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"this action interrupts running services and needs the destructive capability")
 		}
-		if !s.destrLim.Allow(p.Username()) {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many destructive actions; try again shortly")
+		if err := s.destrLim.Spend(p.Username(), "too many destructive actions; try again shortly"); err != nil {
+			return err
 		}
 		// The websocket variant: a browser cannot set a header on an upgrade
 		// request, so the phrase arrives as a query parameter here. wsx's

@@ -5,14 +5,32 @@
 `backend/internal/api/routes.go` is the map of the whole API. Every `/api/v1` request passes:
 
 ```
-network allowlist → rate limit → authenticate → CSRF (session mutations) → capability → handler
+network allowlist → authenticate → rate limit → CSRF (session mutations) → capability → handler
 ```
+
+The rate limit of a route with a credential is the credential's, so it follows authentication. A
+route with none (sign-in, the webhooks, the hub's discovery) has a per-address limiter in front
+instead, and credentials that fail are counted per address (below).
 
 - **Allowlist before auth** (`httpx.AllowlistCIDRs`): an off-network attacker cannot reach the login
   handler at all. `httpx.RealIP` trusts `X-Forwarded-For` only from `JD_TRUSTED_PROXIES`, or the
   allowlist could be spoofed past.
 - **Three limiters**, `NewLimiter(perMinute, burst)`: `loginLim` (10/5, per address, on top of the
-  per-account lockout), `apiLim` (600/120, per principal), `destrLim` (30/10, destructive routes).
+  per-account lockout), `apiLim` (600/120, per credential), `destrLim` (30/10, destructive routes).
+  `apiLim` is `PerCredential`: a browser session and each API key have a bucket of their own
+  (`httpx.credentialKey`), so a CI job's key cannot empty the bucket an open page polls from, even
+  where an SSH tunnel puts them both on one address. The assistant is not a credential: it works
+  under the person's session principal and spends that session's bucket, as the person's page does
+  ([invariant 13](../security/invariants.md)). `destrLim` is not `PerCredential`: it stays the person's at their
+  address, whichever
+  credential spends it, so minting a key or asking the assistant buys no second allowance of
+  irreversible actions. A refusal is `429 rate_limited` in the envelope with `Retry-After` set to
+  the bucket's real wait in whole seconds (rounded up, never 0) and `RateLimit-Remaining: 0`; an
+  admitted request carries `RateLimit-Remaining`. A handler that spends a budget by hand uses
+  `Limiter.Spend(key, message)`, whose error carries the same wait. The clients wait a short
+  `Retry-After` out and ask again, because the refusal came before anything ran: `jd` and both
+  SDKs twice at most for a wait of ten seconds or less, the page (`fetchResponse`) once, for a
+  read, for five seconds or less.
   TOTP setup, enrollment confirmation and verification share a separate account-keyed `loginLim`
   bucket; changing IP or switching between these routes does not reset the second-factor budget.
   A password asked for again from a session spends the same bucket (`Server.spendGuess`):
@@ -24,6 +42,17 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   a budget of its own, `passkeyLim` (60/20 per address), so a sign-in page's autofill cannot exhaust
   the password's. Registering a passkey re-checks the password and code on the account-keyed
   second-factor bucket.
+- **Failed credentials are counted per address** (`httpx.FailureBudget` on `Authenticator.Failures`,
+  60 a minute with a burst of 60). The limiters above are keyed by who is asking, so a key or a
+  session that does not resolve never met them: 400 wrong keys used to get 400 answers of `401` in
+  0.4 s and leave no trace. Each one now spends from its address's budget, in `Authenticate`,
+  `AuthenticatePartial` and `AuthenticateMCP` alike. Past it, a wrong key is answered
+  `429 rate_limited` with the wait in `Retry-After` instead of `401`, and the log gets one
+  `repeated failed authentication` line a minute for the address. Nothing is refused before the
+  lookup, and a session cookie that fails keeps its `401` (the page's cue to offer the sign-in): an
+  address is shared wherever an SSH tunnel ends, so the count never locks a valid key or a
+  signed-in browser out. Guessing a key is not feasible either way; this is what tells a script
+  with a revoked key to stop, and what records that an address keeps failing.
 - **Capabilities, not roles** (`auth/roles.go`): `read`, `service.control`, `file.write`, `terminal`,
   `destructive`, `system.admin`, `metrics.read`, held by `admin`/`limited`/`readonly`. Gate with
   `httpx.RequireCapability` so adding a role later cannot silently widen an endpoint.
@@ -57,7 +86,8 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   the person: their own session principal, read again for the call, is carried in the context
   (`httpx.WithAssistant`), and every group's authentication takes it in place of a credential, marked
   `Principal.Assistant` so the route's audit entry records actor `assistant`. It is not a key and the deploy key gate
-  never sees it: the route's capability check, handler rules and rate limit decide as they do for the person, and
+  never sees it: the route's capability check and handler rules decide as they do for the person, its destructive
+  actions spend the person's own `destrLim` budget, its other calls the budget of the session it works in, and
   the request carries the CSRF header a page sends. A WebSocket or a stream is not made this way, nor the short list
   in `agentExclusion`, nor a route into a protected database connection (`agentProtected`). A command it runs on the
   host (`run_command`) is not a request at all: it is the terminal's own way of running a line
@@ -149,9 +179,64 @@ the mount site is only the conversion.
 
 - Return `httpx.Err/BadRequest/Internal/Wrap`; never write an error body by hand. `httpx.WriteError` is
   the single renderer and is what keeps internal error strings off the wire.
+- **A body may keep the server waiting only so long** (`httpx.BodyDeadline`, on the root router). The
+  server has a header timeout and no read or write timeout, because either would sever log tails,
+  uploads and terminals; that left a body unbounded, and a client could send its headers and then a
+  byte now and then. Only time spent blocked on the client is counted: 60 seconds (`BodyGrace`) plus
+  one second for every 4 KB that has arrived (`BodyMinRate`), so a handler's own time is never
+  charged and an upload is never cut for being large. A body that runs out of it reads as
+  `408 body_timeout` (`DecodeJSON` answers exactly that; another reader answers its own refusal). The
+  connection's read deadline stands only while one of the body's reads is in progress, never between
+  them. `WriteError` reads what is left of a small unread body through the same allowance before it
+  writes a refusal, since `net/http` would otherwise do that read itself with no bound. What is not
+  bounded: a body under 256 KB that a handler never reads and then answers with a success, where
+  `net/http`'s own read before the response still waits on the client.
+- **Every request has an id** (`httpx.RequestID`, the first middleware): sixteen hex digits, or the
+  caller's own `X-Request-Id` when it is 8 to 64 letters, digits, `.`, `_` or `-`. It is echoed as
+  `X-Request-Id` on every answer, it is the `request` attribute of the `request failed`, panic and
+  debug request log lines, and `WriteError` puts it in the envelope of a 5xx as `error.requestId`.
+  `httpx.Internal` hides a 500's cause from the client on purpose, so the id is what the person
+  holding it can quote: the page appends it to `internal error`, `jd` prints it, both SDKs carry it,
+  and `grep <id>` in the backend's log finds the line with the cause. A request the dashboard makes
+  of itself through the root router (the assistant's calls, an MCP tool's) keeps the id of the
+  request that caused it.
+- The router's own refusals are in the same envelope (`api/route_methods.go`): a path nothing is
+  mounted at is `404 not_found`, and a method a path does not take is `405 method_not_allowed` with
+  the methods it does take in `Allow` (`HEAD` and `OPTIONS` included: no route serves either). Both
+  are set on the root router before anything is mounted, so every subrouter inherits them; under a
+  group they are still answered after that group's authentication. A WebSocket route asked for
+  without a handshake answers `400 websocket_upgrade_required` in the envelope too, a foreign origin
+  `403 origin_not_allowed` (`wsx.handshakeRefused`).
+- **A static path never answers for its `{param}` sibling.** chi tries the static node first and, when
+  it has no handler for the method, backtracks to the parameter node beside it, so `GET
+  /deploy/templates/import` (a `POST`) used to reach `GET /deploy/templates/{template}` as the
+  template named `import`, and `DELETE /pm2/save` would have removed a process named `save`.
+  `refuseShadowedMethods`, the last middleware of the feature group, asks the router which route the
+  request will reach (`Find`) and answers `405` when that is a parameter route and a static route is
+  registered at the very path without the method. The table is read off the finished router once
+  (`routeMethodTable`), and `TestAStaticPathNeverAnswersForItsParameterSibling` walks every such pair.
+  The cost is a reserved name: a resource called exactly what an action of its collection is called
+  (a volume named `prune`, a site named `bulk`, a PM2 process named `save`) cannot be addressed with
+  the methods that action lacks, as it never could with the methods it has.
 - Decode with `httpx.DecodeJSON` (4 MB cap, `application/json` required, unknown fields and trailing
   values rejected). SQL row values use `DecodeJSONNumbers` with the same constraints, preserving exact
-  numeric tokens until the database adapter binds them.
+  numeric tokens until the database adapter binds them. Its refusals are in the request's terms, never
+  `encoding/json`'s (`httpx.decodeRefusal`): a value of the wrong kind is `displayName must be a
+  string, not a number` with `error.field` set to the JSON path (`runtime.internalPort`), an unknown
+  field names itself in `error.field`, a missing body is `a JSON body is required`, and a body past
+  the limit is `413 body_too_large` naming the limit rather than a `400`. No Go type or struct name
+  reaches the client.
+- Read a query parameter that is a flag, a number or a time with `httpx.QueryBool`/`QueryBoolOr`,
+  `QueryInt` and `QueryTime`, or with a `httpx.Query(r)` reader when a handler fills a struct of
+  options (ask its `Err()` before using what it read). A flag is `1`, `0`, `true` or `false` in any
+  case on every route; a value that is there and cannot be read (`?preview=yes`, `?limit=abc`,
+  `?since=tomorrow`, a flag given twice) is `400 bad_request` with `error.field` naming the
+  parameter, never the default. The rule exists because the default was the change: a preview spelled
+  the way a handler did not expect ran what it was meant to show. `requirePreviewFlag` applies it to
+  `?preview=` in front of every route under `/databases`, and two tests in `api/query_strict_test.go`
+  keep a handler from comparing a flag with a string again and hold every reader to its `Err()`. An
+  empty number or time (`?limit=`) is read as absent, as a form that submits an unfilled box sends it;
+  an empty flag is refused.
 - `s.destructive(r, ...)` = capability check + `destrLim` + audit. It does **not** enforce confirmation;
   the typed-phrase subset calls `httpx.RequireTypedConfirmation(w, r, phrase)` **inside** the handler,
   where the phrase is known, and it reaches the client as `error.phrase`. See [invariant 3](../security/invariants.md#invariant-3-which-routes-take-a-typed-phrase).
@@ -429,4 +514,6 @@ cannot make them. The per-route answers, the neighbour rule and what it does not
 Files: `api/handlers_*.go`, one per feature, each with `mount<Feature>Routes` called from `Routes()`.
 `handlers_domains.go` and `handlers_docker_manage.go` own no mount function — they are mounted from the
 proxy and Docker mounts so those route maps stay in one place. Shared plumbing (`atoiDefault`,
-`timeoutCtx`, `recordAudit`, `detachedContext`) lives in `api/helpers.go`.
+`timeoutCtx`, `recordAudit`, `detachedContext`) lives in `api/helpers.go`. `atoiDefault` reads the
+default for a number that does not parse and is kept only for the routes not yet moved to
+`httpx.QueryInt`; a new handler uses the strict reader.

@@ -67,8 +67,33 @@ func NewUpgrader(allowedOrigins []string, secure bool) *Upgrader {
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
 		CheckOrigin:     u.checkOrigin,
+		Error:           handshakeRefused,
 	}
 	return u
+}
+
+// handshakeRefused answers a handshake that failed in the API's error
+// envelope, with a code a client can read. The upgrader's own answer is a
+// line of plain text ("Bad Request"), which a client that reads every other
+// refusal as {"error":{"code","message"}} can only report as unknown. The
+// package stays free of the API's types, so the envelope is written here.
+func handshakeRefused(w http.ResponseWriter, _ *http.Request, status int, reason error) {
+	code, message := "websocket_handshake_failed", "the WebSocket handshake failed"
+	switch status {
+	case http.StatusBadRequest, http.StatusUpgradeRequired:
+		// A plain GET, or a handshake missing one of its headers.
+		code, message = "websocket_upgrade_required", "this route is a WebSocket: open it with an Upgrade request"
+	case http.StatusMethodNotAllowed:
+		code, message = "method_not_allowed", "a WebSocket is opened with GET"
+	case http.StatusForbidden:
+		code, message = "origin_not_allowed", "this page's origin may not open a socket here"
+	}
+	if reason != nil && status == http.StatusBadRequest {
+		message += " (" + strings.TrimPrefix(reason.Error(), "websocket: ") + ")"
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": message}})
 }
 
 // checkOrigin refuses browser sockets from other sites. A WebSocket handshake

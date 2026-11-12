@@ -900,8 +900,8 @@ func (s *Server) handleDeploymentRunCreate(w http.ResponseWriter, r *http.Reques
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"your role does not permit this action ("+string(auth.CapDestructive)+")")
 		}
-		if !s.destrLim.Allow(p.Username()) {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many destructive actions; try again shortly")
+		if err := s.destrLim.Spend(p.Username(), "too many destructive actions; try again shortly"); err != nil {
+			return err
 		}
 	}
 	if req.SourceRevision != "" && req.Ref != "" {

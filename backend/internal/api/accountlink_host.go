@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -71,8 +70,8 @@ func (h *accountHost) dockerAnswers(ctx context.Context) error {
 // allowDestructive spends one of the destructive budget for the actor, the way
 // the routes behind s.destructive do for a person.
 func (s *Server) allowDestructive(actor string) error {
-	if !s.destrLim.Allow(actor) {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many destructive actions; try again shortly")
+	if err := s.destrLim.Spend(actor, "too many destructive actions; try again shortly"); err != nil {
+		return err
 	}
 	return nil
 }
