@@ -97,7 +97,7 @@ type PassState struct {
 	Name string `json:"-"`
 	// Passes counts every pass reported since the process started.
 	Passes     int64     `json:"passes"`
-	LastPassAt time.Time `json:"lastPassAt"`
+	LastPassAt time.Time `json:"lastPassAt,omitzero"`
 	// FailingSince is set while the last pass failed, with how many have in
 	// a row.
 	FailingSince *time.Time `json:"failingSince,omitempty"`

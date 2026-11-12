@@ -30,7 +30,7 @@ var procSelf = "/proc/self"
 // Process is one reading of the dashboard's own process.
 type Process struct {
 	PID           int       `json:"pid"`
-	StartedAt     time.Time `json:"startedAt"`
+	StartedAt     time.Time `json:"startedAt,omitzero"`
 	UptimeSeconds int64     `json:"uptimeSeconds"`
 	GoVersion     string    `json:"goVersion"`
 	// CPUs is how many processors the runtime schedules onto (GOMAXPROCS),
