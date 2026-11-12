@@ -29,8 +29,8 @@ type Connection struct {
 	TunnelName string    `json:"tunnelName,omitempty"`
 	AccountID  string    `json:"accountId"`
 	CreatedBy  string    `json:"createdBy,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	CreatedAt  time.Time `json:"createdAt,omitzero"`
+	UpdatedAt  time.Time `json:"updatedAt,omitzero"`
 }
 
 // Hostname is one deployment domain marked to be served through the tunnel,

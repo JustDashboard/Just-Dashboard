@@ -47,7 +47,7 @@ type inventoryScan struct {
 	Running    bool      `json:"running,omitempty"`
 	Count      int       `json:"count"`
 	DurationMs int64     `json:"durationMs"`
-	CheckedAt  time.Time `json:"checkedAt"`
+	CheckedAt  time.Time `json:"checkedAt,omitzero"`
 }
 
 // dbInventoryHost is what the inventory reads off the machine itself, beside

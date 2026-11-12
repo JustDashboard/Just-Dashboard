@@ -69,7 +69,7 @@ type AppSummary struct {
 	Name      string    `json:"name"`
 	Owner     string    `json:"owner"`
 	HTMLURL   string    `json:"htmlUrl"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 }
 
 // ManifestRequest is what the page asks with: an optional App name and an

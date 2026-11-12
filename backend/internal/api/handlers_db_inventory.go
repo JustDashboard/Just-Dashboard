@@ -106,7 +106,7 @@ type inventoryResponse struct {
 	// Detail is "full" or "reduced": whether container environment was read
 	// to produce the list.
 	Detail    string    `json:"detail"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 	// KernelProblems is, by instance key, a MongoDB 8 container found here
 	// that cannot start on this kernel as it is (inventoryKernelProblems);
 	// read for an administrator only, as the environment it is read from is.

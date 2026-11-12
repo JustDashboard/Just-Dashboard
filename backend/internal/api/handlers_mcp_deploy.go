@@ -79,7 +79,7 @@ type mcpRun struct {
 	Actor       string     `json:"actor,omitempty"`
 	State       string     `json:"state"`
 	Step        string     `json:"step,omitempty"`
-	RequestedAt time.Time  `json:"requestedAt"`
+	RequestedAt time.Time  `json:"requestedAt,omitzero"`
 	EndedAt     *time.Time `json:"endedAt,omitempty"`
 	Commit      string     `json:"commit,omitempty"`
 	Release     int64      `json:"release,omitempty"`
@@ -240,7 +240,7 @@ type mcpStep struct {
 type mcpLine struct {
 	Step   string    `json:"step,omitempty"`
 	Stream string    `json:"stream"`
-	At     time.Time `json:"at"`
+	At     time.Time `json:"at,omitzero"`
 	Text   string    `json:"text"`
 }
 
@@ -325,7 +325,7 @@ type mcpRelease struct {
 	State       string     `json:"state"`
 	Commit      string     `json:"commit,omitempty"`
 	ImageDigest string     `json:"imageDigest,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
+	CreatedAt   time.Time  `json:"createdAt,omitzero"`
 	ActivatedAt *time.Time `json:"activatedAt,omitempty"`
 	Pinned      bool       `json:"pinned,omitempty"`
 }

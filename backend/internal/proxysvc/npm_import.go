@@ -91,7 +91,7 @@ type NPMItem struct {
 // NPMPreview is what the database maps to, behind a token Apply takes.
 type NPMPreview struct {
 	Token   string    `json:"token"`
-	Expires time.Time `json:"expires"`
+	Expires time.Time `json:"expires,omitzero"`
 	// Layout is where sites go: sites-available or conf.d.
 	Layout string `json:"layout"`
 	// StreamsIncluded says nginx.conf reads stream.d; without it a stream

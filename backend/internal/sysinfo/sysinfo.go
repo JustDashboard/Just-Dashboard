@@ -29,7 +29,7 @@ type HostInfo struct {
 	KernelVersion   string    `json:"kernelVersion"`
 	KernelArch      string    `json:"kernelArch"`
 	Virtualization  string    `json:"virtualization"`
-	BootTime        time.Time `json:"bootTime"`
+	BootTime        time.Time `json:"bootTime,omitzero"`
 	UptimeSeconds   uint64    `json:"uptimeSeconds"`
 	Procs           uint64    `json:"processes"`
 	CPUModel        string    `json:"cpuModel"`
@@ -137,7 +137,7 @@ type NetStats struct {
 // derived from the delta against the previous snapshot, which is why the
 // Collector is stateful.
 type Snapshot struct {
-	TS     time.Time    `json:"ts"`
+	TS     time.Time    `json:"ts,omitzero"`
 	CPU    CPUStats     `json:"cpu"`
 	Memory MemoryStats  `json:"memory"`
 	Swap   SwapStats    `json:"swap"`

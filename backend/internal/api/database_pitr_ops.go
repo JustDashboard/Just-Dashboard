@@ -445,7 +445,7 @@ type pitrRestorePlan struct {
 	Container string            `json:"container"`
 	Port      int               `json:"port"`
 	Backup    string            `json:"backup"`
-	BackupAt  time.Time         `json:"backupAt"`
+	BackupAt  time.Time         `json:"backupAt,omitzero"`
 	Settings  map[string]string `json:"settings"`
 }
 

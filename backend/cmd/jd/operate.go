@@ -139,7 +139,7 @@ type watchWindow struct {
 	State             string     `json:"state"`
 	ReleaseNumber     int64      `json:"releaseNumber"`
 	WarmReleaseNumber int64      `json:"warmReleaseNumber"`
-	ExpiresAt         time.Time  `json:"expiresAt"`
+	ExpiresAt         time.Time  `json:"expiresAt,omitzero"`
 	EndReason         string     `json:"endReason"`
 	EndMessage        string     `json:"endMessage"`
 	EndedAt           *time.Time `json:"endedAt"`

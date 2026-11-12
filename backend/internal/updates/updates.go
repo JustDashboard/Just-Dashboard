@@ -43,7 +43,7 @@ type Report struct {
 	SecurityFiltering bool      `json:"securityFiltering"`
 	RebootRequired    bool      `json:"rebootRequired"`
 	RebootPackages    []string  `json:"rebootPackages,omitempty"`
-	LastChecked       time.Time `json:"lastChecked"`
+	LastChecked       time.Time `json:"lastChecked,omitzero"`
 	Error             string    `json:"error,omitempty"`
 }
 

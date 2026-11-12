@@ -37,7 +37,8 @@ export type DashboardUser = {
   totpEnabled: boolean
   disabled: boolean
   mustChangePassword: boolean
-  lastLoginAt: string
+  /** Absent for an account that has never signed in, and in the answer to its first sign-in. */
+  lastLoginAt?: string
   createdAt: string
   /** Not yet asked what the dashboard is for; the shell sends the account to `/welcome`. */
   needsOnboarding: boolean
@@ -11827,8 +11828,8 @@ export type Passkey = {
   name: string
   rpId: string
   createdAt: string
-  /** Zero time when it has never signed in. */
-  lastUsedAt: string
+  /** Absent when it has never signed in. */
+  lastUsedAt?: string
   /** Backed up by a password manager or a phone's keychain rather than held on one device. */
   synced: boolean
   transports: string[]

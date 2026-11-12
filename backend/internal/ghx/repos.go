@@ -24,7 +24,7 @@ type RepoSummary struct {
 	Private       bool      `json:"private"`
 	Fork          bool      `json:"fork"`
 	Archived      bool      `json:"archived"`
-	PushedAt      time.Time `json:"pushedAt,omitempty"`
+	PushedAt      time.Time `json:"pushedAt,omitzero"`
 }
 
 // Branch is one ref a deployment can track.
@@ -74,7 +74,7 @@ func (s *Service) ListRepos(ctx context.Context, dir, query string, limit int) (
 		PrimaryLanguage struct {
 			Name string `json:"name"`
 		} `json:"primaryLanguage"`
-		PushedAt time.Time `json:"pushedAt"`
+		PushedAt time.Time `json:"pushedAt,omitzero"`
 	}
 	if err := json.Unmarshal([]byte(out), &body); err != nil {
 		return nil, fmt.Errorf("could not read gh's answer: %w", err)

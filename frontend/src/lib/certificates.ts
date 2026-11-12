@@ -436,6 +436,12 @@ const STATE_RANK: Record<CertState, number> = {
 
 export type CertSort = "urgency" | "expiry" | "name"
 
+/** When a certificate ends, for sorting: one with no date sorts after every one that has it. */
+function expiryInstant(cert: Pick<Certificate, "notAfter">): number {
+  const end = Date.parse(cert.notAfter ?? "")
+  return Number.isFinite(end) ? end : Number.MAX_SAFE_INTEGER
+}
+
 export const CERT_SORTS: Record<CertSort, (a: Certificate, b: Certificate) => number> = {
   urgency: (a, b) =>
     STATE_RANK[certState(a)] - STATE_RANK[certState(b)] ||
@@ -445,7 +451,7 @@ export const CERT_SORTS: Record<CertSort, (a: Certificate, b: Certificate) => nu
   // the soonest to expire.
   expiry: (a, b) =>
     Number(Boolean(a.error)) - Number(Boolean(b.error)) ||
-    Date.parse(a.notAfter) - Date.parse(b.notAfter) ||
+    expiryInstant(a) - expiryInstant(b) ||
     a.name.localeCompare(b.name),
   name: (a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path),
 }
@@ -478,8 +484,8 @@ export function certMatches(cert: Certificate, query: string): boolean {
  * renew_before_expiry is not read.
  */
 export function renewalDue(cert: Pick<Certificate, "notBefore" | "notAfter">): Date {
-  const end = Date.parse(cert.notAfter)
-  const start = Date.parse(cert.notBefore)
+  const end = Date.parse(cert.notAfter ?? "")
+  const start = Date.parse(cert.notBefore ?? "")
   const term = Number.isFinite(start) && start < end ? end - start : 90 * DAY
   return new Date(end - term / 3)
 }
@@ -490,7 +496,9 @@ export function renewIfDueLabel(
   now: number = Date.now(),
 ): string {
   const due = renewalDue(cert)
-  if (due.getTime() <= now) return "Renew, due now"
+  // A certificate with no dates (its file could not be read) has no day to
+  // wait for.
+  if (!(due.getTime() > now)) return "Renew, due now"
   return `Renew if due (from ${calendarDate(due.toISOString())})`
 }
 

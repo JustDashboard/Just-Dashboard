@@ -278,8 +278,8 @@ type Attacker struct {
 	// "root, admin, ubuntu" is a scanner working through a wordlist; a single
 	// real account name is somebody who knows the host.
 	Users []string  `json:"users"`
-	First time.Time `json:"first"`
-	Last  time.Time `json:"last"`
+	First time.Time `json:"first,omitzero"`
+	Last  time.Time `json:"last,omitzero"`
 }
 
 // AttackSummary is btmp turned into something to act on.

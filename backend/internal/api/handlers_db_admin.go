@@ -851,7 +851,7 @@ func (s *Server) handleDBStatements(w http.ResponseWriter, r *http.Request) erro
 type dbBackupFile struct {
 	File    string    `json:"file"`
 	Size    int64     `json:"size"`
-	TakenAt time.Time `json:"takenAt"`
+	TakenAt time.Time `json:"takenAt,omitzero"`
 	// Format is what the file is, read from its first bytes: a pg_dump
 	// archive, SQL text, or the dashboard's own gzipped JSON Lines — a
 	// MongoDB collection's documents, or each Redis key's DUMP payload, which

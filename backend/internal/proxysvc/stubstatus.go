@@ -430,7 +430,7 @@ func reloadNginx(ctx context.Context) (string, error) {
 // that produced the page, and on a quiet host it would be the only traffic.
 type StatusSample struct {
 	Seq     int64     `json:"seq"`
-	At      time.Time `json:"at"`
+	At      time.Time `json:"at,omitzero"`
 	Active  int64     `json:"active"`
 	Reading int64     `json:"reading"`
 	Writing int64     `json:"writing"`
@@ -477,7 +477,7 @@ type StatusReport struct {
 	Totals *StubStatus `json:"totals,omitempty"`
 	// At is when the report was made, on the clock the readings are taken
 	// by: a client holding readings drops those older than an hour before it.
-	At time.Time `json:"at"`
+	At time.Time `json:"at,omitzero"`
 	// HourRequests and HourDropped add up the last hour's readings.
 	HourRequests int64 `json:"hourRequests"`
 	HourDropped  int64 `json:"hourDropped"`

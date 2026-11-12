@@ -30,7 +30,7 @@ type dbConnection struct {
 	Port      string     `json:"port"`
 	User      string     `json:"user"`
 	Database  string     `json:"database"`
-	CreatedAt time.Time  `json:"createdAt"`
+	CreatedAt time.Time  `json:"createdAt,omitzero"`
 	// What the operator says about the connection rather than what its DSN
 	// does: the environment it serves, whether the dashboard may change what
 	// is in it, and anything worth remembering.
@@ -1500,10 +1500,10 @@ type savedQuery struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
 	SQL       string    `json:"sql"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 	// UpdatedAt is when the query was last renamed or edited; the creation
 	// time until then.
-	UpdatedAt time.Time `json:"updatedAt"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 }
 
 func (s *Server) handleDBSavedList(w http.ResponseWriter, r *http.Request) error {
@@ -1617,7 +1617,7 @@ type historyEntry struct {
 	RowCount     int       `json:"rowCount"`
 	RowsAffected int64     `json:"rowsAffected"`
 	Error        string    `json:"error,omitempty"`
-	RanAt        time.Time `json:"ranAt"`
+	RanAt        time.Time `json:"ranAt,omitzero"`
 }
 
 func (s *Server) handleDBHistory(w http.ResponseWriter, r *http.Request) error {

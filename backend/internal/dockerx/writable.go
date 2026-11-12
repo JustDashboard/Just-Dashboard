@@ -33,7 +33,7 @@ import (
 type WritableLayerReport struct {
 	ContainerID string    `json:"containerId"`
 	Name        string    `json:"name"`
-	MeasuredAt  time.Time `json:"measuredAt"`
+	MeasuredAt  time.Time `json:"measuredAt,omitzero"`
 
 	// Total is the writable layer as Docker reports it, which is the figure
 	// every other screen shows. Accounted is what the breakdown adds up to.

@@ -431,7 +431,7 @@ func (o listenerOwners) of(address string) string {
 
 // UpstreamReport is one check of every upstream nginx loads.
 type UpstreamReport struct {
-	CheckedAt time.Time        `json:"checkedAt"`
+	CheckedAt time.Time        `json:"checkedAt,omitzero"`
 	Targets   []UpstreamTarget `json:"targets"`
 	// Pools are the same destinations grouped as nginx spreads requests
 	// across them, with what its error logs said of each server over the

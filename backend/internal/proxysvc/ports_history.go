@@ -455,11 +455,11 @@ type PortEvent struct {
 	// At is the sample that saw the change and After the one before it: the
 	// socket opened or closed between the two. They are a minute apart while
 	// the dashboard runs, and further across a restart or a failed walk.
-	At    time.Time `json:"at"`
-	After time.Time `json:"after"`
+	At    time.Time `json:"at,omitzero"`
+	After time.Time `json:"after,omitzero"`
 	// Since is when the socket was first seen listening. Baseline says it was
 	// already listening when recording began, so it opened before then.
-	Since    time.Time `json:"since"`
+	Since    time.Time `json:"since,omitzero"`
 	Baseline bool      `json:"baseline,omitempty"`
 }
 
@@ -476,7 +476,7 @@ type PortHistory struct {
 	IntervalSeconds int  `json:"intervalSeconds"`
 	RetentionDays   int  `json:"retentionDays"`
 	// Since is the start of the window the events are from.
-	Since time.Time `json:"since"`
+	Since time.Time `json:"since,omitzero"`
 	// Events are newest first; within one sample by port, a socket's closing
 	// before its opening, so a socket that changed hands reads in order.
 	Events []PortEvent `json:"events"`

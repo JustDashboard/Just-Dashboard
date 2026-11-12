@@ -23,7 +23,7 @@ type Image struct {
 	RepoTags    []string          `json:"repoTags"`
 	RepoDigests []string          `json:"repoDigests"`
 	Size        int64             `json:"size"`
-	Created     time.Time         `json:"created"`
+	Created     time.Time         `json:"created,omitzero"`
 	Containers  int64             `json:"containers"`
 	Labels      map[string]string `json:"labels"`
 	Dangling    bool              `json:"dangling"`
@@ -342,7 +342,7 @@ type Network struct {
 	Internal   bool              `json:"internal"`
 	Attachable bool              `json:"attachable"`
 	IPv6       bool              `json:"ipv6"`
-	Created    time.Time         `json:"created"`
+	Created    time.Time         `json:"created,omitzero"`
 	Labels     map[string]string `json:"labels"`
 	Subnets    []string          `json:"subnets"`
 	Containers int               `json:"containers"`

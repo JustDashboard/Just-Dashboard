@@ -14,7 +14,7 @@ import (
 // Entry is one immutable record of who did what, when, from where.
 type Entry struct {
 	ID       int64     `json:"id"`
-	TS       time.Time `json:"ts"`
+	TS       time.Time `json:"ts,omitzero"`
 	UserID   int64     `json:"userId"`
 	Username string    `json:"username"`
 	Role     string    `json:"role"`

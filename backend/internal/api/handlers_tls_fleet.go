@@ -102,7 +102,7 @@ type fleetScan struct {
 	Reachable  bool      `json:"reachable"`
 	Negotiated string    `json:"negotiated,omitempty"`
 	Issues     int       `json:"issues"`
-	CheckedAt  time.Time `json:"checkedAt"`
+	CheckedAt  time.Time `json:"checkedAt,omitzero"`
 }
 
 type fleetRow struct {

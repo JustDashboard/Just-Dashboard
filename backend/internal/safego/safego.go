@@ -48,7 +48,7 @@ type Task struct {
 	// Running is false once the task has returned for good, and while it
 	// waits to be started again after a panic.
 	Running   bool      `json:"running"`
-	StartedAt time.Time `json:"startedAt"`
+	StartedAt time.Time `json:"startedAt,omitzero"`
 	// Panics counts every panic since the process started.
 	Panics      int        `json:"panics"`
 	LastPanic   string     `json:"lastPanic,omitempty"`

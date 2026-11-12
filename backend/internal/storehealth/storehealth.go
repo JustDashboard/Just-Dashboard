@@ -102,7 +102,7 @@ type Status struct {
 	Since *time.Time `json:"since,omitempty"`
 	// CheckedAt is the last pass, and LastWriteAt the last one whose write
 	// the store accepted.
-	CheckedAt   time.Time  `json:"checkedAt"`
+	CheckedAt   time.Time  `json:"checkedAt,omitzero"`
 	LastWriteAt *time.Time `json:"lastWriteAt,omitempty"`
 	// The filesystem holding the data directory.
 	Path       string `json:"path"`

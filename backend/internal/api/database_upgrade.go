@@ -617,7 +617,7 @@ type upgradeReport struct {
 	Checks    []dbx.UpgradeCheck     `json:"checks"`
 	// Ready is no check stopping the upgrade.
 	Ready     bool      `json:"ready"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 }
 
 // blockers are the reasons a report stops an upgrade, in one sentence each.

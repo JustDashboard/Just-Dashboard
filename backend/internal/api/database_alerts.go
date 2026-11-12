@@ -102,8 +102,8 @@ type dbAlertRule struct {
 	// every enabled one.
 	Channels  []int64   `json:"channels"`
 	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 	revision  int64
 }
 
@@ -1257,7 +1257,7 @@ type dbAlertEvent struct {
 	// Kept says why nobody was told: "cooldown", or "recovery" for a rule
 	// that tells only firings.
 	Kept      string    `json:"kept,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 }
 
 // jobsDumping is the ids of the backup jobs that dump a database.

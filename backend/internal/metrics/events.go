@@ -16,7 +16,7 @@ import (
 // supply them; the dashboard is already the thing that ran the deploy, took
 // the backup and rebooted the box, so it can simply answer.
 type Event struct {
-	TS   time.Time `json:"ts"`
+	TS   time.Time `json:"ts,omitzero"`
 	Kind string    `json:"kind"`
 	// Title is what goes on the marker; Detail is what goes in its tooltip.
 	Title  string `json:"title"`

@@ -145,8 +145,8 @@ type WakeDevice struct {
 	Interface string    `json:"interface"`
 	Verify    string    `json:"verify,omitempty"`
 	Port      int       `json:"port,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 	CreatedBy string    `json:"createdBy"`
 }
 

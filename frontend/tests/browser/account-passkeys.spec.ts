@@ -58,7 +58,8 @@ const phone = {
   id: 5,
   name: "iPhone",
   rpId: "dash.example.com",
-  lastUsedAt: "0001-01-01T00:00:00Z",
+  // Never used: the server leaves the time out.
+  lastUsedAt: undefined,
   synced: true,
 }
 
@@ -154,7 +155,7 @@ test("adding a passkey asks for the password and the code, then the browser make
     }
     if (path === "/account/passkeys/register/finish") {
       finishes.push(request.postDataJSON())
-      const created = { ...laptop, id: 9, name: "Work laptop", lastUsedAt: "0001-01-01T00:00:00Z" }
+      const created = { ...laptop, id: 9, name: "Work laptop", lastUsedAt: undefined }
       keys = [created, laptop]
       return json(route, created, 201)
     }

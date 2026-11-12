@@ -24,7 +24,7 @@ type ProcessLink struct {
 	// whose CPU is then unknown rather than zero.
 	CPUReady   bool      `json:"cpuReady"`
 	RSS        uint64    `json:"rss"`
-	CreateTime time.Time `json:"createTime"`
+	CreateTime time.Time `json:"createTime,omitzero"`
 }
 
 // ProcessTree is where a process sits: the chain above it up to init, and the

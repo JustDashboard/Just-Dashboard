@@ -120,7 +120,7 @@ type workspace struct {
 	Live      bool      `json:"live"`
 	CWD       string    `json:"cwd,omitempty"`
 	Windows   int       `json:"windows"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 	Attached  int       `json:"attached"`
 	User      string    `json:"user,omitempty"`
 	Shell     string    `json:"shell,omitempty"`

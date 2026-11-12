@@ -92,8 +92,8 @@ type proxyAlertRule struct {
 	// every enabled one.
 	Channels  []int64   `json:"channels"`
 	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 }
 
 type proxyAlertWrite struct {
@@ -221,7 +221,7 @@ type proxyAlertEvent struct {
 	Delivered int       `json:"delivered"`
 	Failed    int       `json:"failed"`
 	Muted     bool      `json:"muted"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 }
 
 // proxyAlertFinding is one subject a reading found firing at one level.

@@ -57,7 +57,7 @@ const pruneEvery = time.Hour
 // Sample is one recorded moment. Rates are per second, averaged over the
 // interval since the previous sample, exactly as the live socket reports them.
 type Sample struct {
-	TS          time.Time `json:"ts"`
+	TS          time.Time `json:"ts,omitzero"`
 	CPUPercent  float64   `json:"cpuPercent"`
 	Load1       float64   `json:"load1"`
 	MemPercent  float64   `json:"memPercent"`
@@ -111,7 +111,7 @@ type Sample struct {
 // means reports a quiet night. The peaks are what make a downsampled week
 // still worth reading.
 type Point struct {
-	TS      time.Time `json:"ts"`
+	TS      time.Time `json:"ts,omitzero"`
 	Samples int       `json:"samples"`
 
 	CPU     float64 `json:"cpu"`
@@ -201,8 +201,8 @@ type Point struct {
 // before here" can be labelled as such rather than looking like an idle
 // server.
 type Window struct {
-	From             time.Time  `json:"from"`
-	To               time.Time  `json:"to"`
+	From             time.Time  `json:"from,omitzero"`
+	To               time.Time  `json:"to,omitzero"`
 	StepSeconds      int        `json:"stepSeconds"`
 	IntervalSeconds  int        `json:"sampleIntervalSeconds"`
 	RetentionSeconds int        `json:"retentionSeconds"`
@@ -220,7 +220,7 @@ type Series struct {
 // pinned a core, or climbed to its memory limit and was killed, leaves nothing
 // behind in a mean.
 type ContainerPoint struct {
-	TS      time.Time `json:"ts"`
+	TS      time.Time `json:"ts,omitzero"`
 	Samples int       `json:"samples"`
 
 	// Null means no sample in the bucket measured an interval, as for the
@@ -264,7 +264,7 @@ type ContainerSeries struct {
 
 // MountPoint is one bucket of one filesystem's capacity.
 type MountPoint struct {
-	TS      time.Time `json:"ts"`
+	TS      time.Time `json:"ts,omitzero"`
 	Samples int       `json:"samples"`
 
 	UsedPercent     float64 `json:"usedPercent"`

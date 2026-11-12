@@ -83,7 +83,7 @@ type BoundaryCheck struct {
 // AccessBoundary is every boundary, read together.
 type AccessBoundary struct {
 	Checks    []BoundaryCheck `json:"checks"`
-	CheckedAt time.Time       `json:"checkedAt"`
+	CheckedAt time.Time       `json:"checkedAt,omitzero"`
 	// The parts a proposal is judged against.
 	Allowlist  []string `json:"allowlist"`
 	Client     string   `json:"client,omitempty"`

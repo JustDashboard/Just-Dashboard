@@ -63,7 +63,7 @@ type SigningRequest struct {
 	Domains []string   `json:"domains"`
 	Subject CSRSubject `json:"subject"`
 	KeyType KeyType    `json:"keyType,omitempty"`
-	Created time.Time  `json:"created"`
+	Created time.Time  `json:"created,omitzero"`
 	// CSR is the request itself, which is what the authority is sent.
 	CSR string `json:"csr"`
 	// KeyPath is where its key waits; the key itself is never sent back.

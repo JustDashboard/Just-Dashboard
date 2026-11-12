@@ -64,7 +64,7 @@ type statementBaseline struct {
 // statementReading is how the newest attempt to read a server's statements
 // went: when, and what stood in the way if nothing could be read.
 type statementReading struct {
-	At        time.Time `json:"at"`
+	At        time.Time `json:"at,omitzero"`
 	Supported bool      `json:"supported"`
 	Reason    string    `json:"reason,omitempty"`
 	rowsRead  bool
@@ -352,8 +352,8 @@ type statementFacts struct {
 	RetentionHours  int       `json:"retentionHours"`
 	KeptPerInterval int       `json:"keptPerInterval"`
 	BucketSeconds   int       `json:"bucketSeconds"`
-	From            time.Time `json:"from"`
-	Until           time.Time `json:"until"`
+	From            time.Time `json:"from,omitzero"`
+	Until           time.Time `json:"until,omitzero"`
 	// Intervals is how many readings were differenced in the window, and
 	// RecordedSeconds how much of it they cover.
 	Intervals       int        `json:"intervals"`

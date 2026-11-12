@@ -95,7 +95,7 @@ type RenewalFailure struct {
 
 // RenewalRun is one run of the renewal, with what it printed.
 type RenewalRun struct {
-	Start time.Time `json:"start"`
+	Start time.Time `json:"start,omitzero"`
 	// Result is "succeeded", "failed", or "" while it runs or when the
 	// record does not say.
 	Result string        `json:"result"`
@@ -106,7 +106,7 @@ type RenewalRun struct {
 // reading first, and Systemd the ones systemd wrote about the run rather
 // than certbot.
 type RenewalLine struct {
-	Time    time.Time `json:"time"`
+	Time    time.Time `json:"time,omitzero"`
 	Text    string    `json:"text"`
 	Error   bool      `json:"error,omitempty"`
 	Systemd bool      `json:"systemd,omitempty"`

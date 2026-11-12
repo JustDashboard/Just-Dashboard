@@ -655,7 +655,7 @@ type dbPower struct {
 type dbPowerChange struct {
 	// Action is start, stop or restart, and Since when it was asked for.
 	Action string    `json:"action"`
-	Since  time.Time `json:"since"`
+	Since  time.Time `json:"since,omitzero"`
 	// done is when the route finished acting; zero while it still is.
 	done time.Time
 }
@@ -1289,7 +1289,7 @@ type dbConnSummary struct {
 	// Capabilities is the feature reading for this driver and flavour, the
 	// same object the driver catalogue serves.
 	Capabilities map[string]any `json:"capabilities"`
-	CheckedAt    time.Time      `json:"checkedAt"`
+	CheckedAt    time.Time      `json:"checkedAt,omitzero"`
 }
 
 // handleDBConnSummary is one connection's reading.

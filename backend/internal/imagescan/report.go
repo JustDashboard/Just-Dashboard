@@ -99,7 +99,7 @@ type Report struct {
 	// is worth more than any count when it is true.
 	OS        string    `json:"os,omitempty"`
 	EndOfLife bool      `json:"endOfLife,omitempty"`
-	CreatedAt time.Time `json:"createdAt,omitempty"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 	Findings  []Finding `json:"findings"`
 }
 
@@ -111,7 +111,7 @@ type trivyReport struct {
 	Trivy         struct {
 		Version string `json:"Version"`
 	} `json:"Trivy"`
-	CreatedAt time.Time `json:"CreatedAt"`
+	CreatedAt time.Time `json:"CreatedAt,omitzero"`
 	Metadata  struct {
 		OS *struct {
 			Family string `json:"Family"`

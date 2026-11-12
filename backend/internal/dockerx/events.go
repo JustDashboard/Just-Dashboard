@@ -33,7 +33,7 @@ import (
 
 // Event is one thing that happened, in a shape the UI can render directly.
 type Event struct {
-	Time time.Time `json:"time"`
+	Time time.Time `json:"time,omitzero"`
 	// Type is Docker's object class: container, image, volume, network,
 	// daemon, plugin.
 	Type   string `json:"type"`

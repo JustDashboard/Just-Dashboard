@@ -39,8 +39,8 @@ type CertificateFacts struct {
 	Serial        string    `json:"serial"`
 	SHA256        string    `json:"sha256"`
 	SHA1          string    `json:"sha1"`
-	NotBefore     time.Time `json:"notBefore"`
-	NotAfter      time.Time `json:"notAfter"`
+	NotBefore     time.Time `json:"notBefore,omitzero"`
+	NotAfter      time.Time `json:"notAfter,omitzero"`
 	KeyType       string    `json:"keyType"`
 	KeyBits       int       `json:"keyBits"`
 	Signature     string    `json:"signature"`
@@ -513,7 +513,7 @@ func decodeCSR(csr *x509.CertificateRequest) DecodedCSR {
 
 // CertificateEvent is one entry in a certificate's timeline.
 type CertificateEvent struct {
-	Time time.Time `json:"time"`
+	Time time.Time `json:"time,omitzero"`
 	// Kind is "version" for a certificate certbot archived, "failure" for a
 	// renewal certbot logged as failed; the API adds "audit".
 	Kind   string `json:"kind"`

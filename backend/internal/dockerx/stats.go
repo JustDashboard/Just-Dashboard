@@ -15,7 +15,7 @@ import (
 type ContainerStats struct {
 	ID         string    `json:"id"`
 	Name       string    `json:"name"`
-	TS         time.Time `json:"ts"`
+	TS         time.Time `json:"ts,omitzero"`
 	CPUPercent float64   `json:"cpuPercent"`
 	CPUReady   bool      `json:"cpuReady"`
 	MemUsage   uint64    `json:"memUsage"`

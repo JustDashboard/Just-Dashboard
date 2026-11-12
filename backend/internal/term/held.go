@@ -189,7 +189,7 @@ type heldMeta struct {
 	Owner       string    `json:"owner"`
 	Shell       string    `json:"shell"`
 	User        string    `json:"user"`
-	CreatedAt   time.Time `json:"createdAt"`
+	CreatedAt   time.Time `json:"createdAt,omitzero"`
 	CWD         string    `json:"cwd,omitempty"`
 }
 

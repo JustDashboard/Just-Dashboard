@@ -140,7 +140,7 @@ func (s *Server) handleDBPooler(w http.ResponseWriter, r *http.Request) error {
 // poolerStatsView is one look at PgBouncer's console.
 type poolerStatsView struct {
 	*dbx.PoolerReading
-	At time.Time `json:"at"`
+	At time.Time `json:"at,omitzero"`
 }
 
 // handleDBPoolerStats answers SHOW POOLS and SHOW STATS. A pooler that is not

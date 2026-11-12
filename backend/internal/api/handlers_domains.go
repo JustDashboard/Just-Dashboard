@@ -28,7 +28,7 @@ type watchedDomain struct {
 	// Kind is "tls", a handshake and its certificate, or "tcp", a network
 	// probe that only connects.
 	Kind      string    `json:"kind"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 	// CheckedAt is when Cert, or a probe's Probe, was read; absent until the
 	// first check.
 	CheckedAt *time.Time            `json:"checkedAt,omitempty"`

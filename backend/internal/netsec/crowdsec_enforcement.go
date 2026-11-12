@@ -44,7 +44,7 @@ type CrowdSecEnforcement struct {
 	Summary  string             `json:"summary"`
 	Bouncers []BouncerEvidence  `json:"bouncers"`
 	Kernel   *CrowdSecKernel    `json:"kernel,omitempty"`
-	Checked  time.Time          `json:"checkedAt"`
+	Checked  time.Time          `json:"checkedAt,omitzero"`
 	Fresh    string             `json:"freshness"`
 	Enforced []string           `json:"enforcedBy"`
 	Missing  []EnforcementCause `json:"missing,omitempty"`

@@ -1893,8 +1893,9 @@ const EDITOR_VERBS = ["open", "scan", "log", "errors", "edit", "deployment"]
 
 /** When the site's file last changed, where the listing could read it. */
 function Edited({ vhost }: { vhost: VHost }) {
-  // A link to nothing reports the link's own time, and a zero time none.
-  if (!vhost.path || vhost.modified.startsWith("0001")) return null
+  // A link to nothing reports the link's own time, and a file that could not
+  // be read none: the server leaves the field out.
+  if (!vhost.path || !vhost.modified) return null
   return <span title={vhost.modified}>edited {relativeTime(vhost.modified)}</span>
 }
 

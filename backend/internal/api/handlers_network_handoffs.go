@@ -35,7 +35,7 @@ type HandoffPhase struct {
 // PackageHandoff is a package's phases at one read.
 type PackageHandoff struct {
 	Package   string         `json:"package"`
-	CheckedAt time.Time      `json:"checkedAt"`
+	CheckedAt time.Time      `json:"checkedAt,omitzero"`
 	Phases    []HandoffPhase `json:"phases"`
 	// Working is true only when every applicable phase is done.
 	Working bool `json:"working"`

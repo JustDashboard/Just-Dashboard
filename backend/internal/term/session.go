@@ -57,7 +57,7 @@ type Session struct {
 	User      string    `json:"user"`
 	Persisted bool      `json:"persisted"`
 	TmuxName  string    `json:"tmuxName,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 	Owner     string    `json:"owner"`
 	Rows      uint16    `json:"rows"`
 	Cols      uint16    `json:"cols"`

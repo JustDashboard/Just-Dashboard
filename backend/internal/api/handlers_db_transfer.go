@@ -101,7 +101,7 @@ type exportState struct {
 	Rows       int        `json:"rows"`
 	Format     string     `json:"format"`
 	Error      string     `json:"error,omitempty"`
-	StartedAt  time.Time  `json:"startedAt"`
+	StartedAt  time.Time  `json:"startedAt,omitzero"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }
 

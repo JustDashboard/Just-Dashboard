@@ -205,6 +205,22 @@ the mount site is only the conversion.
   (`api/handlers_proxy.go`) is the one use: a route that only nginx can answer, failing on a server
   without nginx, is `503 not_installed` whatever its handler made of the failure (they used to say
   400, 404, 409, 502 and two different 503s). A route that also serves Caddy must not carry it.
+- **A time that was never set is left out of the answer**, never sent as `0001-01-01T00:00:00Z`. A
+  `time.Time` in a JSON struct carries `omitzero` (Go 1.24; `omitempty` does nothing on a struct and
+  is refused), or is a `*time.Time` where `null` is the documented spelling. The page reads an absent
+  time through `relativeTime`, `timestamp` and `calendarDate`, which print a dash, and tests for the
+  field, not for the string `0001`. `TestAZeroTimeIsLeftOutNotSentAsYearOne` walks every struct under
+  `backend/internal` and `backend/cmd`. Nine packages are still on its list with a count each
+  (`deploy`, `netx`, `dbx`, `netvantage`, `dnsservice`, `backups`, `accountlink`, `hublink`,
+  `assistant`): they digest, sign or re-render a JSON encoding of their own types, so a field there
+  changes only after its struct is checked against what was stored before. The count goes down; a
+  new field takes `omitzero`. Two places on the page still test for year one, and neither reads the
+  server's own answer: `lib/docker-events.ts` reads a health check's times as Docker wrote them, and
+  `components/deploy/run-evidence.tsx` reads a run's evidence as it was stored. On the page, a type
+  whose time can be absent says so (`lastLoginAt?`, a certificate's `notBefore?` and `notAfter?`, a
+  site file's `modified?`), so the compiler names the code that has to cope: a date that goes
+  through `Date.parse` into `toISOString()` throws on an absent time where year one only looked
+  wrong.
 - **A body may keep the server waiting only so long** (`httpx.BodyDeadline`, on the root router). The
   server has a header timeout and no read or write timeout, because either would sever log tails,
   uploads and terminals; that left a body unbounded, and a client could send its headers and then a

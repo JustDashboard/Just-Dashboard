@@ -57,7 +57,7 @@ type DriftSite struct {
 
 // DriftReport is every checked block and when the check ran.
 type DriftReport struct {
-	CheckedAt time.Time   `json:"checkedAt"`
+	CheckedAt time.Time   `json:"checkedAt,omitzero"`
 	Sites     []DriftSite `json:"sites"`
 }
 

@@ -18,8 +18,8 @@ type Certificate struct {
 	Path       string    `json:"path"`
 	Domains    []string  `json:"domains"`
 	Issuer     string    `json:"issuer"`
-	NotBefore  time.Time `json:"notBefore"`
-	NotAfter   time.Time `json:"notAfter"`
+	NotBefore  time.Time `json:"notBefore,omitzero"`
+	NotAfter   time.Time `json:"notAfter,omitzero"`
 	DaysLeft   int       `json:"daysLeft"`
 	Expired    bool      `json:"expired"`
 	Expiring   bool      `json:"expiring"`
