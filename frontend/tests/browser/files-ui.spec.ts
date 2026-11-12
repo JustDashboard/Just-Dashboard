@@ -495,6 +495,10 @@ test.describe("native Files interactions", () => {
     await page.keyboard.press("Home")
     await page.keyboard.press("Enter")
     await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    // The address changes before the page has followed it. A key pressed in
+    // between is read against the folder being left, so Backspace went up from
+    // there instead; on a slow machine that failed this test.
+    await expect(page.getByRole("button", { name: "Folders in " + home + "/photos" })).toBeVisible()
     await page.keyboard.press("Backspace")
     await expect(item(page, "photos")).toBeFocused()
   })
