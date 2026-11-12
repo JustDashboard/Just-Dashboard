@@ -6174,7 +6174,12 @@ done by hand, and the UI refuses to fold it away.
   are two answers, and the backend writes which into the record (`Run.RequireTag`, from `TagsOnly`)
   because the updater has no configuration of its own. For the project's own repository nothing is
   installed, and that includes an origin that could not be asked: an update that falls back to the
-  branch whenever origin is slow has no gate. For a fork it uses `origin/<ref>`. Either way the
+  branch whenever origin is slow has no gate. The check and the updater ask different places: the
+  check reads the tag from the repository `JD_UPDATE_REPO` names, the updater from the checkout's
+  `origin`. They disagree when the checkout was cloned from a fork or a mirror and `JD_UPDATE_REPO` was
+  left alone: every check offers the version and every install refuses it, so that refusal names the
+  two ways out (fetch the tag into the fork, or name the fork in `JD_UPDATE_REPO`) and does not say to
+  wait. For a fork it uses `origin/<ref>`. Either way the
   changelog at the target must name `ToVersion`, or nothing changes. A branch that has moved past
   `ToVersion` with no tag to pin it is refused rather than installed, because nobody was shown that
   release's notes and checking again offers it properly. The version it reports

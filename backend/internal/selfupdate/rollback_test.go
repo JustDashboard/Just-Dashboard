@@ -439,7 +439,10 @@ func TestWithoutATagNothingIsInstalledFromTheProjectsOwnRepository(t *testing.T)
 	if err == nil {
 		t.Fatalf("installed the branch in place of a release:\n%s", log.String())
 	}
-	for _, want := range []string{"no tag v0.6", "has not been released", "nothing was changed"} {
+	// Whoever reads this was offered 0.6, which means the project's repository
+	// has the tag and their origin does not: it has to say what to do about
+	// that, not to wait for a tag that is already there.
+	for _, want := range []string{"no tag v0.6", "was not installed", "nothing was changed", "a fork or a mirror", "JD_UPDATE_REPO"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not say %q: %v", want, err)
 		}

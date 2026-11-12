@@ -227,8 +227,16 @@ func updateTarget(ctx context.Context, dir string, want request, out io.Writer) 
 		return "", false, fmt.Errorf("could not confirm that %s has been released, because origin could not be asked for the tag %s (%v); "+
 			"nothing was changed. Only a tagged release is installed from this repository", to, tag, asked)
 	case want.tagOnly:
-		return "", false, fmt.Errorf("origin has no tag %s, so %s has not been released; nothing was changed. "+
-			"A version is tagged once the checks on its merge have passed: check for updates again later", tag, to)
+		// The check offers a version only after it has seen this tag on the
+		// project's repository, and this asks the checkout's origin. So the
+		// likely reader is somebody whose origin is a fork or a mirror the tag
+		// never reached, and "check again later" would send them round the
+		// same refusal for ever.
+		return "", false, fmt.Errorf("origin has no tag %s, so %s was not installed; nothing was changed. "+
+			"Only a tagged release is installed from this repository. %s was offered because the project's repository "+
+			"had that tag when it was last asked: if this checkout's origin is a fork or a mirror, fetch the tag into it, "+
+			"or name the fork in JD_UPDATE_REPO to follow its branch instead. If origin is the project's repository, "+
+			"the tag has been withdrawn, and checking for updates again says what is on offer now", tag, to, to)
 	default:
 		if asked != nil {
 			fmt.Fprintf(out, "could not use the tag %s, so using the branch: %v\n", tag, asked)
