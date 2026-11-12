@@ -7,21 +7,30 @@ import type { MapBoard } from "@/components/map/board"
 import { SystemMark } from "@/components/map/inspector"
 import { TONE_DOT } from "@/components/map/marks"
 
-/** What a system holds, in a few words: "3 containers · 1 database · 2 domains". */
+/**
+ * What a system holds, in a few words: "3 containers · 1 database · 2 domains".
+ * What nothing claims has no anchor to read from, so it leads with what
+ * there is most of: eighteen checkouts before the one domain beside them.
+ */
 export function censusLine(system: System, most = 3) {
   const c = systemCensus(system)
-  const parts: string[] = []
+  const parts: { n: number; words: string }[] = []
   const say = (n: number, one: string, many: string) => {
-    if (n > 0) parts.push(`${n} ${n === 1 ? one : many}`)
+    if (n > 0) parts.push({ n, words: `${n} ${n === 1 ? one : many}` })
   }
   say(c.containers, "container", "containers")
   say(c.databases, "database", "databases")
   say(c.domains, "domain", "domains")
   say(c.volumes, "volume", "volumes")
   say(c.backups, "backup", "backups")
+  say(c.checkouts, "checkout", "checkouts")
   if (parts.length === 0)
     return `${system.nodes.length} ${system.nodes.length === 1 ? "thing" : "things"}`
-  return parts.slice(0, most).join(" · ")
+  if (system.kind === "loose") parts.sort((a, b) => b.n - a.n)
+  return parts
+    .slice(0, most)
+    .map((p) => p.words)
+    .join(" · ")
 }
 
 /**
