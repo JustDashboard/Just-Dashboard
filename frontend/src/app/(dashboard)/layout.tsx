@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { MetricsStream, useHostName } from "@/hooks/use-metrics"
@@ -20,7 +20,8 @@ import { HeldSessionsHost, HeldSessionsProvider } from "@/components/remote-desk
 import { AgentDock } from "@/components/assistant/agent/dock"
 import { AskAboutPage } from "@/components/assistant/ask-about"
 import { HubLinkProvider, useShellHub } from "@/hooks/use-hub-link"
-import { signInAddress } from "@/lib/hub-link"
+import { signInAddress } from "@/lib/sign-in-return"
+import { waitingReason } from "@/lib/session-probe"
 import { ServerSwitcher } from "@/components/hub-link/server-switcher"
 
 /**
@@ -57,28 +58,37 @@ function TabTitle() {
 }
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
-  const { status, loading, sessionEnded } = useAuth()
+  const { status, loading, stalled, sessionEnded } = useAuth()
   const hub = useShellHub()
   const router = useRouter()
 
   // Redirecting here is a convenience, not a security control: every API call
   // behind this shell is independently authenticated by the server. An
   // account that has not been asked what the dashboard is for is asked first,
-  // wherever it was headed; answering or skipping ends that for good. The
-  // hub's Connect door, which the hub opens in a new tab that is usually
-  // signed out, is carried through the sign-in (`returnAfterSignIn`).
+  // wherever it was headed; answering or skipping ends that for good.
+  //
+  // A browser that arrives signed out is sent to sign in with the page it
+  // asked for carried along (`signInAddress`): a link from an alert, opened
+  // after the session expired overnight, still ends on the page it named.
+  // One that was signed in here and no longer is has signed out or been
+  // signed out, and whoever signs in next starts from the Overview.
   const onboarding = Boolean(status?.user?.needsOnboarding)
+  const signedInHere = useRef(false)
   useEffect(() => {
+    if (status?.authenticated) signedInHere.current = true
     if (!loading && !status?.authenticated)
       router.replace(
         sessionEnded
           ? "/login?reason=session"
-          : signInAddress(window.location.pathname + window.location.search),
+          : signedInHere.current
+            ? "/login"
+            : signInAddress(window.location.pathname + window.location.search),
       )
     else if (onboarding) router.replace("/welcome")
   }, [loading, status, sessionEnded, onboarding, router])
 
-  if (loading || !status?.authenticated || onboarding) return <ShellSplash />
+  if (loading || !status?.authenticated || onboarding)
+    return <ShellSplash waiting={stalled === undefined ? undefined : waitingReason(stalled)} />
 
   // A recovery probe can discover another tab's sign-in without leaving this
   // route. Recreate mounted editors before the new account can reuse their buffers.
@@ -173,8 +183,13 @@ function MobileSearch() {
  * A bare spinner on an empty background reads as a broken page; the name says
  * the app is starting, which is what is actually happening — and it is one
  * paint, not a layout that then reflows into the shell.
+ *
+ * A probe that has failed and is being asked again (a drained limiter, a
+ * backend restarting, no network yet) keeps this up rather than sending a
+ * signed-in person to sign in, and `waiting` says why it is still here: a
+ * splash with no word under it, for half a minute, is the broken page again.
  */
-function ShellSplash() {
+function ShellSplash({ waiting }: { waiting?: string }) {
   return (
     <div className="auth-backdrop flex min-h-svh flex-col items-center justify-center gap-4 bg-background">
       <div className="flex flex-col items-center gap-2.5">
@@ -183,6 +198,11 @@ function ShellSplash() {
           <div className="h-full w-1/3 animate-[loading_1.2s_ease-in-out_infinite] rounded-full bg-primary" />
         </div>
       </div>
+      {waiting && (
+        <p role="status" className="max-w-xs px-4 text-center text-sm text-muted-foreground">
+          {waiting}
+        </p>
+      )}
       <style>{`@keyframes loading{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}`}</style>
     </div>
   )

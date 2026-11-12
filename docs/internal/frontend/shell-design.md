@@ -43,7 +43,10 @@ sidebar header closes it; Ctrl/Cmd+B still toggles that sheet.
 An address no page claims goes through `(dashboard)/[...missing]` to `(dashboard)/not-found.tsx`, inside
 the shell with the rail still there, and someone signed out is sent to sign in first. It answers HTTP 200:
 the shell draws its splash until the session probe returns, so the server never renders the page that
-throws the 404. `app/not-found.tsx` is the same page without a shell, for what the login and welcome pages
+throws the 404. The probe is started by an inline script in the document's head, so it is in flight
+while the shell's JavaScript downloads. A probe that fails for any reason but the server saying nobody is signed in keeps the
+splash and is asked again; from the first such failure the splash carries one sentence saying why it is
+still there ([data layer](data-theming.md), "The first probe of a page load"). `app/not-found.tsx` is the same page without a shell, for what the login and welcome pages
 throw.
 
 A render that throws under `(dashboard)` keeps the shell (`(dashboard)/error.tsx`). One from the dashboard's
@@ -51,6 +54,21 @@ own layout, or the login and welcome pages, takes the window (`app/error.tsx`); 
 replaces it (`app/global-error.tsx`), which brings its own document, stylesheet and font and has no inline
 script, because a client component cannot read the CSP nonce. The two share `RenderFailure`, whose way out
 is a full load rather than a router link back into what threw.
+
+### The document proxy and the build configuration
+
+`src/proxy.ts` runs for every document request and nothing under `/api` or `/_next/static` (its
+`matcher`). It mints the per-request nonce and the Content-Security-Policy that goes with it, and it
+is where the build's routing choices in `next.config.ts` are completed.
+
+**A trailing slash costs an API call nothing, and a page still loses it.** About 140 calls spell a
+list endpoint with its slash (`/jobs/`, `/deploy/`), which the backend's router accepts. Next answers
+any such path with a 308 to the path without the slash before it consults a rewrite, so wherever Next
+fronts the API (`bun dev`, `next start` under the browser specs) each of those calls was two round
+trips. `skipTrailingSlashRedirect` turns that redirect off and the request reaches the `/api` rewrite as
+sent; `withoutTrailingSlash` in the proxy does the redirect for pages, so `/docker/` is still `/docker`
+and the rail's `pathname === href` still matches. In production Caddy routes `/api` to the backend and
+neither rule is met. The spelling of the calls is unchanged: the specs' mocks match it exactly.
 
 ### The tab's title
 
@@ -277,7 +295,11 @@ Deployments open the second group because shipping something is the reason most 
 
 Above the account card sits the update notice (`components/update/update-notice.tsx`), and only when
 there is something to say: a newer version, an update running, or one that finished and has not been
-dismissed. It is the account card's container (the same edge and ground, tinted green or red only
+dismissed. The rail imports only its slot (`update-notice-slot.tsx`), which reads the shell's one update
+poll and fetches the notice's code when `updateHasNews` says there is something to draw, so the notice,
+its progress and its confetti are in no route's chunks until then. The deployment vocabulary it draws
+with still loads with the shell, through the command palette's inventory
+(`command-search/inventory.ts`). It is the account card's container (the same edge and ground, tinted green or red only
 once a run has finished) with the dashboard's J,
 an eyebrow in the notice's tone, the installed version wired to the newest with a pulse running
 along the wire, the newest release's title and a band of what the releases bring by kind. An admin on

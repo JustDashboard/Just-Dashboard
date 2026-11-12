@@ -11,6 +11,7 @@
  *    phrase on the server and return the expected phrase in the error body.
  */
 
+import { retryAfterMs } from "@/lib/backoff"
 import { networkPendingHeaders } from "@/lib/network-pending"
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api/v1"
@@ -96,6 +97,12 @@ export class ApiError extends Error {
    * the error: a start the config test turned down carries the test beside it.
    */
   body?: unknown
+  /**
+   * How long the answer's `Retry-After` asked the caller to wait, in
+   * milliseconds: the limiter's 429 says thirty seconds. A poll and the
+   * session probe wait that long rather than ask again at their own pace.
+   */
+  retryAfterMs?: number
 
   constructor(
     status: number,
@@ -105,7 +112,15 @@ export class ApiError extends Error {
     detail?: Partial<
       Pick<
         ApiError,
-        "resource" | "operation" | "reason" | "raw" | "retryable" | "field" | "requestId" | "body"
+        | "resource"
+        | "operation"
+        | "reason"
+        | "raw"
+        | "retryable"
+        | "field"
+        | "requestId"
+        | "body"
+        | "retryAfterMs"
       >
     >,
   ) {
@@ -219,7 +234,13 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
  * Successful binary and streaming responses never pass through this reader.
  */
 export async function responseError(res: Response, path: string): Promise<ApiError> {
-  return errorFromResponse(res.status, await res.text(), path, res.statusText)
+  return errorFromResponse(
+    res.status,
+    await res.text(),
+    path,
+    res.statusText,
+    res.headers.get("Retry-After"),
+  )
 }
 
 /**
@@ -236,6 +257,7 @@ export function errorFromResponse(
   text: string,
   path: string,
   statusText = "",
+  retryAfter?: string | null,
 ): ApiError {
   let parsed: ApiErrorBody | undefined
   try {
@@ -280,6 +302,7 @@ export function errorFromResponse(
       field: body?.field,
       requestId: body?.requestId,
       body: parsed,
+      retryAfterMs: retryAfterMs(retryAfter),
     },
   )
 }
@@ -348,15 +371,34 @@ export async function fetchResponse(
   return res
 }
 
-async function readResponse<T>(res: Response, path: string): Promise<T> {
+/** What a page says when an answer arrived but could not be read. */
+export const UNREADABLE_ANSWER =
+  "The server's answer could not be read: it was cut off on the way, or is not what this page expects."
+
+/**
+ * The body of a JSON answer. Nothing for a 204 and for an empty body, which is
+ * how a route says "done" with nothing to add.
+ *
+ * A body that is there and does not parse is a failure, `bad_response`. It
+ * used to come back as `undefined` too, so an answer cut off by a proxy
+ * timeout, or by a backend that died while writing it, was a successful read
+ * of nothing and the page drew its empty state: "no containers" where the
+ * truth was "could not read the containers".
+ */
+export async function readResponse<T>(res: Response, path: string): Promise<T> {
   if (!res.ok) throw await responseError(res, path)
   if (res.status === 204) return undefined as T
   const text = await res.text()
   if (!text) return undefined as T
   try {
     return JSON.parse(text) as T
-  } catch {
-    return undefined as T
+  } catch (err) {
+    // For the disclosure: what kind of thing arrived, never the thing itself.
+    const kind = res.headers.get("Content-Type") ?? "no content type"
+    throw new ApiError(res.status, "bad_response", UNREADABLE_ANSWER, undefined, {
+      raw: `${kind}, ${text.length} characters: ${errorMessage(err)}`,
+      retryable: true,
+    })
   }
 }
 

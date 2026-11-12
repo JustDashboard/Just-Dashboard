@@ -396,7 +396,11 @@ A control can be all three at once and stay readable, which is the test.
 The ring is `focus-ring`, or `focus-ring-inset` where there is no room outside the control — one
 appearance, two placements. It is an `outline`, not Tailwind's `ring`: an outline follows
 `border-radius`, cannot be overwritten by a `shadow-*` utility landing on the same element, and works
-on a `<tr>`.
+on a `<tr>`. Being the outline, it is undone by any class in the same list that sets the outline's style
+to none: `outline-hidden` and `outline-none` win over it. The sidebar's five class lists carried
+`outline-hidden` from the component library's own focus styling, so every row of the rail took the
+keyboard's focus and showed nothing. `components/ui/focus-ring.test.js` fails on a class list that has
+both, and `design-system.spec.ts` walks the rail's own rows.
 
 A row's actions appear through `RowActions`, `IconAction reveal`, or `rowReveal()`. Never by hand: the
 four mechanisms that sentence hides — pointer, keyboard, open menu, touch — are how five action
@@ -798,7 +802,14 @@ The face is **Source Sans 3**, self-hosted from Adobe's
 italic variable WOFF2 files sit in `src/app/fonts/` with their SIL Open Font License. `next/font/local`
 loads both in `app/layout.tsx` at weights 200–900 and emits `--font-source-sans-3`; `--font-sans` in
 `globals.css` puts it ahead of the system fallback. Nothing at build or run time reaches out to a
-font CDN. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
+font CDN. **Only the upright is preloaded.** The two faces are declared apart (`app/font.ts`,
+`app/font-italic.ts`) because one `localFont` call preloads every file it names, and the italic's
+138 KB then raced the page's JavaScript on each first visit for a face most screens never draw; it is
+fetched when italic text first appears. Both declarations assign to a constant named `sourceSans3`,
+which is what the build names the family after, so they are one family and `font-style: italic` picks
+the italic file with nothing else said; `app-states.spec.ts` checks that, and that the response preloads
+the upright alone. The files are whole, not subset to Latin: the licence reserves the name "Source", so
+a subset is a modified font that could not keep it. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
 
 **Glyphs are laid out at their real widths.** Chromium on Linux hints a web font and rounds every
 glyph's advance to a whole pixel, and against the body's −0.02em tracking that broke the 11–13px

@@ -5,7 +5,7 @@ import Link from "next/link"
 import { ArrowCircleUp, ArrowRight, Cross, CrossCircle, Sparkles } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { phaseLabel, useSelfUpdate } from "@/hooks/use-self-update"
+import { phaseLabel, updateHasNews, useSelfUpdate } from "@/hooks/use-self-update"
 import { useUpdateHistory } from "@/hooks/use-update-history"
 import { LogoGlyph } from "@/components/logo"
 import { Segment } from "@/components/deploy/run-pipeline"
@@ -61,7 +61,6 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
 
   const run = report?.run
   const running = run?.status === "running" || run?.status === "pending"
-  const available = Boolean(report?.available)
 
   // An update that finishes while somebody is watching it is §11's *once*.
   // Arriving at a page after it already succeeded is not the moment.
@@ -73,7 +72,7 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   }, [running, status])
 
   // Nothing to say: no update, nothing running, and no outcome left unread.
-  if (!report || (!available && !running && !outcome)) return null
+  if (!updateHasNews(report, outcome)) return null
 
   const mode = running
     ? "running"

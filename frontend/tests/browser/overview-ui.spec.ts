@@ -119,6 +119,24 @@ test("a dashboard in working order says nothing of itself", async ({ page }) => 
   await expect(page.getByText(/background tasks? of the dashboard/)).toHaveCount(0)
 })
 
+test("a reading several components need is asked for once on load", async ({ page }) => {
+  // The rail, the dock and the page each read the assistant's settings; they
+  // share one keyed poll, where the load used to ask three times within 12 ms.
+  const asked: string[] = []
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname
+    if (path === "/api/v1/assistant" || path === "/api/v1/deploy/traffic") asked.push(path)
+  })
+  await page.goto("/")
+  await expect(
+    page.locator('[data-slot="host-identity"]').getByText("atlas", { exact: true }),
+  ).toBeVisible()
+  await expect.poll(() => asked.filter((path) => path.endsWith("/deploy/traffic"))).toHaveLength(1)
+  await page.waitForTimeout(1000)
+  expect(asked.filter((path) => path.endsWith("/assistant"))).toHaveLength(1)
+  expect(asked.filter((path) => path.endsWith("/deploy/traffic"))).toHaveLength(1)
+})
+
 test("each moving reading carries its last hour in its tile", async ({ page }) => {
   await page.goto("/")
   const cpu = page.locator("[data-slot=stat-tile]", { hasText: "CPU" }).first()

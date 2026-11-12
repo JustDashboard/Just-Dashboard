@@ -152,6 +152,37 @@ test.describe("the tab's title", () => {
   })
 })
 
+test.describe("the UI face", () => {
+  test("the italic is a face of the page's own family, and only the upright is preloaded", async ({
+    page,
+  }) => {
+    await page.route("**/api/v1/**", (route) =>
+      json(route, { error: { code: "unauthenticated", message: "Sign in" } }, 401),
+    )
+    const response = await page.goto("/login")
+    // The italic is 138 KB that most screens never draw: it is fetched when
+    // italic text first appears, not ahead of the page's JavaScript.
+    const preloaded = response?.headers()["link"] ?? ""
+    expect(preloaded).toContain("SourceSans3VF_Upright")
+    expect(preloaded).not.toContain("SourceSans3VF_Italic")
+    // Declared apart from the upright, it must still be the same family, or
+    // the browser slants the upright instead of drawing the italic.
+    const face = await page.evaluate(async () => {
+      const bare = (name: string) => name.trim().replace(/^["']|["']$/g, "")
+      const family = bare(getComputedStyle(document.body).fontFamily.split(",")[0])
+      await document.fonts.ready
+      const styles = [...document.fonts]
+        .filter((entry) => bare(entry.family) === family)
+        .map((entry) => entry.style)
+        .sort()
+      const italic = await document.fonts.load(`italic 16px "${family}"`)
+      return { styles, italicLoads: italic.map((entry) => entry.status) }
+    })
+    expect(face.styles).toEqual(["italic", "normal"])
+    expect(face.italicLoads).toEqual(["loaded"])
+  })
+})
+
 test.describe("a read that failed is not an empty list", () => {
   test("Docker cleanup says the preview failed, not that nothing is selected", async ({ page }) => {
     await mockShell(page)

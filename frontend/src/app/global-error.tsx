@@ -3,6 +3,7 @@
 import { useEffect } from "react"
 import { RenderFailure } from "@/components/standalone-state"
 import { sourceSans3 } from "./font"
+import { sourceSans3 as sourceSans3Italic } from "./font-italic"
 import "./globals.css"
 
 /**
@@ -26,7 +27,11 @@ export default function GlobalError({
   }, [error])
 
   return (
-    <html lang="en" className={`dark ${sourceSans3.variable}`} style={{ colorScheme: "dark" }}>
+    <html
+      lang="en"
+      className={`dark ${sourceSans3.variable} ${sourceSans3Italic.variable}`}
+      style={{ colorScheme: "dark" }}
+    >
       <body className="antialiased">
         <RenderFailure error={error} reset={reset} />
       </body>

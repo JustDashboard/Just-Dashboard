@@ -28,7 +28,7 @@ export function useSelfUninstall({ enabled = true }: { enabled?: boolean } = {})
     return next
   }, [])
 
-  const poll = usePoll(fetchReport, live ? LIVE_POLL : IDLE_POLL, [], { enabled })
+  const poll = usePoll(fetchReport, live ? LIVE_POLL : IDLE_POLL, [], { enabled, steady: live })
   const { data: report, error, refresh } = poll
   const running = Boolean(report?.run && isLive(report.run))
 

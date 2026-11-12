@@ -3,13 +3,21 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ApiError, get, post } from "@/lib/api"
+import { earlySession, untilAnswered } from "@/lib/session-probe"
 import { forgetWorkingState } from "@/lib/view-state"
+import { forgetSharedPolls, releaseSharedPolls } from "@/hooks/poll-share"
 import { signInWithPasskey } from "@/lib/passkeys"
 import type { AuthStatus, Capability } from "@/lib/types"
 
 type AuthContextValue = {
   status: AuthStatus | null
   loading: boolean
+  /**
+   * Why the first probe has no answer yet, while it is still asking: the
+   * failure being waited out. `loading` stays true beside it, so the shell
+   * keeps its splash and says this rather than sending anyone to sign in.
+   */
+  stalled: unknown
   sessionEnded: boolean
   refresh: () => Promise<AuthStatus | null>
   login: (username: string, password: string) => Promise<AuthStatus>
@@ -28,6 +36,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus | null>(null)
   const [loading, setLoading] = useState(true)
+  const [stalled, setStalled] = useState<unknown>()
   const [sessionEnded, setSessionEnded] = useState(false)
   const recovering = useRef(false)
   const generation = useRef(0)
@@ -45,8 +54,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // Storage can be unavailable; the in-memory owner still fences SPA sign-ins.
       }
-      if ((owner !== null && owner !== next.user.id) || (owner === null && clearUnknownOwner))
+      if ((owner !== null && owner !== next.user.id) || (owner === null && clearUnknownOwner)) {
         forgetWorkingState()
+        // Keyed polls keep their last answer for whoever opens the page again;
+        // that must never be another account.
+        forgetSharedPolls()
+      }
       workingOwner.current = next.user.id
       try {
         sessionStorage.setItem("jd.working.owner", String(next.user.id))
@@ -123,20 +136,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Establishing who the caller is on mount: the canonical case for an
     // effect, since it subscribes this app to state the server owns.
+    //
+    // Only the server saying so makes this browser signed out. A 429, a 502
+    // during a restart or a network that is not back yet used to count as
+    // that too, and sent a signed-in person to the sign-in form with the
+    // page they asked for lost; those are waited out and asked again
+    // (`lib/session-probe.ts`), with `loading` still true.
     let cancelled = false
     const requested = generation.current
-    get<AuthStatus>("/auth/session")
+    const live = () => !cancelled && requested === generation.current
+    // The first ask takes the request the document's own script started while
+    // this code was still downloading; a retry makes its own.
+    const ask = (attempt: number) =>
+      (attempt === 1 ? earlySession<AuthStatus>() : undefined) ?? get<AuthStatus>("/auth/session")
+    untilAnswered(ask, {
+      signedOut: (err) => err instanceof ApiError && err.isAuthProblem,
+      live,
+      onWait: (err) => {
+        console.error("session probe failed, asking again", err)
+        setStalled(err)
+      },
+    })
       .then((next) => {
-        if (!cancelled && requested === generation.current) applyStatus(next)
+        if (live() && next !== undefined) applyStatus(next)
       })
-      .catch((err) => {
-        if (cancelled || requested !== generation.current) return
-        if (!(err instanceof ApiError && err.isAuthProblem)) {
-          console.error("session probe failed", err)
-        }
-        applyStatus(null)
+      .catch(() => {
+        if (live()) applyStatus(null)
       })
-      .finally(() => !cancelled && setLoading(false))
+      .finally(() => {
+        if (cancelled) return
+        setStalled(undefined)
+        setLoading(false)
+      })
     return () => {
       cancelled = true
     }
@@ -185,6 +216,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (logoutPending.current) return logoutPending.current
     const requested = ++generation.current
     forgetWorkingState()
+    // The shell is still up and reading; what it read goes when it does.
+    releaseSharedPolls()
     const pending = (async () => {
       try {
         await post("/auth/logout")
@@ -213,6 +246,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       status,
       loading,
+      stalled,
       sessionEnded,
       refresh,
       login,
@@ -221,7 +255,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       can,
     }),
-    [status, loading, sessionEnded, refresh, login, loginWithPasskey, verifyTotp, logout, can],
+    [
+      status,
+      loading,
+      stalled,
+      sessionEnded,
+      refresh,
+      login,
+      loginWithPasskey,
+      verifyTotp,
+      logout,
+      can,
+    ],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -392,6 +392,58 @@ test("hover, selection and focus are three different marks on a row", async ({ p
 })
 
 /**
+ * The same rule on the rail, read off the product's own rows rather than a
+ * probe: every sidebar class list carried `outline-hidden` after `focus-ring`,
+ * which set the outline's style back to none, so a keyboard walked through
+ * every page's navigation with nothing on screen saying where it was.
+ */
+test("a sidebar row shows the keyboard where it is", async ({ page }) => {
+  await mockShell(page)
+  await page.goto("/audit")
+  const rows = page.locator(
+    '[data-slot="sidebar"] :is([data-slot="sidebar-menu-button"], [data-slot="sidebar-menu-sub-button"], [data-slot="sidebar-menu-action"], [data-slot="sidebar-group-action"])',
+  )
+  // The audit log opens the rail on its own group; the whole rail is the walk.
+  await page.locator('[data-slot="sidebar"]').getByText("All pages").click()
+  await expect.poll(() => rows.count()).toBeGreaterThan(5)
+  await page.mouse.move(900, 700)
+
+  // `:focus-visible` needs the focus to have come from the keyboard (see the
+  // row test above), so one Tab sets the modality and each row is then focused
+  // in turn, as Tab itself would reach it.
+  await page.keyboard.press("Tab")
+  const marks = await rows.evaluateAll((elements) =>
+    elements
+      .filter((el): el is HTMLElement => el instanceof HTMLElement && el.offsetParent !== null)
+      .map((el) => {
+        const outline = () => {
+          const s = getComputedStyle(el)
+          return { style: s.outlineStyle, width: parseFloat(s.outlineWidth), color: s.outlineColor }
+        }
+        ;(document.activeElement as HTMLElement | null)?.blur()
+        const rest = outline()
+        el.focus()
+        return {
+          row: el.textContent?.trim() || el.getAttribute("aria-label") || el.dataset.slot,
+          visible: el.matches(":focus-visible"),
+          rest,
+          focused: outline(),
+        }
+      }),
+  )
+
+  expect(marks.length).toBeGreaterThan(5)
+  for (const mark of marks) {
+    expect(mark.visible, `${mark.row} takes keyboard focus`).toBe(true)
+    expect(mark.focused.style, `${mark.row} draws no outline when focused`).not.toBe("none")
+    expect(mark.focused.width, `${mark.row} has no ring width`).toBeGreaterThan(0)
+    expect(mark.focused.color, `${mark.row} is the same focused as at rest`).not.toBe(
+      mark.rest.color,
+    )
+  }
+})
+
+/**
  * `IconAction` exists so that an icon-only control carries its label in a
  * tooltip *and* in `aria-label`. A native `title` is neither: the browser holds
  * it back for about a second, and a screen reader announces it only weakly.

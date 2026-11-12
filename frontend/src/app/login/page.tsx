@@ -21,7 +21,7 @@ import {
   refusedByPolicy,
   usePasskeyPlace,
 } from "@/lib/passkeys"
-import { returnAfterSignIn } from "@/lib/hub-link"
+import { returnAfterSignIn } from "@/lib/sign-in-return"
 import { cn } from "@/lib/utils"
 import type { AuthStatus } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -67,8 +67,8 @@ export default function LoginPage() {
   const router = useRouter()
   const params = useSearchParams()
   const endedInUrl = params.get("reason") === "session"
-  // Where the shell sent this browser from, when that is an address worth coming back to: the
-  // hub's Connect door, which the hub opens in a tab that is usually signed out.
+  // Where the shell sent this browser from: the page a link named, checked again here because
+  // `next` is whatever the address bar holds (`lib/sign-in-return.ts`).
   const destination = returnAfterSignIn(params.get("next")) ?? "/"
   const { status, loading, sessionEnded, login, loginWithPasskey, verifyTotp, refresh, logout } =
     useAuth()

@@ -188,7 +188,11 @@ are dated evidence, not proof of current attachment ownership.
   carries more than the error (the proxy engine's config-test refusal carries the test). A
   `403 hub_session_not_allowed` (a session opened through Just Hub, on a route that makes or changes a
   credential or a link) gets `HUB_SESSION_REFUSED` as its message, so every page says to sign in on this
-  server itself rather than repeating the server's words. `wsUrl()` and `downloadUrl()` build the non-JSON
+  server itself rather than repeating the server's words. **An answer that is there and does not parse is a
+  failure.** A 2xx body that is not JSON throws `ApiError` with code `bad_response` and the message
+  `UNREADABLE_ANSWER`; only a 204 and an empty body read as nothing. It used to read as `undefined`, so an
+  answer cut off by a proxy timeout was a successful read of nothing and the page drew its empty state. A
+  poll counts it among the failures it backs off from. `wsUrl()` and `downloadUrl()` build the non-JSON
   URLs. A `Query` value may be an array, which is a repeated
   parameter (`f=a&f=b`, the log routes' field predicates): joining on a character and splitting it again
   on the server breaks on a value that holds it, and an IPv6 address is all colons. `useSocket` takes the
@@ -200,10 +204,42 @@ are dated evidence, not proof of current attachment ownership.
 - `usePoll` schedules the next request only after the previous one settles and stops scheduling on
   hidden tabs. Coming back to the tab fetches at once, replacing any pending timer; a request still in
   flight stands as that refresh, and an interval of 0 ignores the tab. `pollLoop` is that schedule, with
-  `document` passed in so `bun test` can drive it. Each successful response records `lastSuccess`; failed refreshes retain
+  `document` passed in so `bun test` can drive it. **A poll does not keep its cadence against a server
+  that cannot answer.** After a 429, a 5xx, a body cut off or no answer at all (`isTransient` in
+  `lib/backoff.ts`), the next request waits what the answer's `Retry-After` asked for (`ApiError.retryAfterMs`,
+  read once in `responseError` and never trusted past five minutes; the limiter's 429 says 30 seconds), or a
+  wait that doubles from the cadence to a 30 second ceiling with half of each step random; the first success
+  puts the cadence back, a 4xx the server meant keeps it, and returning to the tab does not cut the wait
+  short. The three reads that watch the dashboard through its own restart (`use-self-update`,
+  `use-self-config`, `use-self-uninstall`) pass `steady` while a run is live: a 502 is the restart, and
+  they keep their two seconds so the page sees the moment it ends, while a 429's `Retry-After` is still
+  waited out. Each successful response records `lastSuccess`; failed refreshes retain
   that timestamp only for the same resource. Its fixed-length dependency list identifies the resource:
   changing it immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
-  retain the same resource's data. Cleanup aborts the request and ignores late responses.
+  retain the same resource's data. **A cadence change asks for nothing.** The interval is read from a ref
+  each time the loop schedules, and a new value only moves the next request to that long after the last
+  answer (`PollHandle.retime`; `pollLoop` lives in `hooks/poll-loop.ts`); a request in flight finishes. The
+  interval was an effect dependency, so every `busy ? 2_000 : 30_000` flip aborted the request and fetched
+  again what had just been read, and the update notice's single settling read was two, 36 ms apart.
+  Cleanup aborts the request and ignores late responses.
+  **A poll that names its request shares it.** `usePoll`'s `key` option (the request's path, and its query
+  when it has one) joins the component to the one `SharedPoll` for that key (`hooks/poll-share.ts`): one
+  request and one timer for all of them, at the fastest cadence any reader asked for; a reader arriving
+  while a request is in flight, or within two seconds of the last answer, asks nothing, and one arriving
+  later asks once for everybody; `refresh` aborts what is in flight and asks again for every reader, once
+  however many call it in a tick. The last answer is kept for five minutes after its last reader leaves, so
+  a page opened again draws it at once with `loading` true until the new answer lands, which is what `seed`
+  does by hand; the kept answer is never an error. The key is the resource's whole identity, so `deps` are
+  not read, and every reader of a key must make the same request. An answer belongs to the account that
+  was given it: another account signing in forgets every kept answer and reads again for whatever is on
+  screen (`forgetSharedPolls`), and signing out keeps none past the page that is reading it, without
+  asking the server anything more (`releaseSharedPolls`); both sit beside `forgetWorkingState` in
+  `use-auth.tsx`. Keyed
+  today: `/assistant` (`useAssistantSettings`, nine readers), `/deploy/traffic` (the Overview, the fleet,
+  a project's readings and the request records), `/system/host` (the three one-time readers; the metrics
+  stream seeds its own store) and `/jobs` (the certificates page and `RecentJobs`, which was a hand-written
+  interval). A read is worth a key when more than one mounted component makes it, or when coming back to
+  its page should not start from a skeleton; a poll without one is its own, as before.
   Live Processes treats its search and filters as resource identity, and ranking/row-count
   changes as refreshes of that inventory. Automatic focus therefore keeps the table and scroll
   mounted while fetching its new ranking; response-local focus metadata keeps the footer truthful
@@ -463,8 +499,22 @@ All shared HTTP response readers emit `jd:authentication-lost` for an ordinary f
 recognized authentication failure. Authentication endpoints are excluded: an incorrect password or
 code is a form error. The auth provider coalesces recovery, rechecks `/auth/session`, and sends a
 confirmed ended session to `/login?reason=session` with a visible notice that survives a reload.
-An unavailable recheck retains the current identity for retry. Request generations prevent a stale
-session probe or recheck from replacing a newer sign-in. Sign-out requests are coalesced, clear working
+An unavailable recheck retains the current identity for retry. **The first probe of a page load holds
+to the same rule: only the server's own answer makes a browser signed out.** A 429, a 5xx, a refusal
+that is not about the session or no answer at all is waited out and asked again (`untilAnswered` in
+`lib/session-probe.ts`, by the waits in `lib/backoff.ts`: the answer's `Retry-After`, or one second
+doubling to thirty), with `loading` still true and the failure in `useAuth().stalled`; the shell keeps
+its splash, which then says why it is still there (`waitingReason`), and the address is untouched. It
+used to count any failure as signed out, so a restored window of tabs that drained the limiter, or a
+load during a restart, ended on the sign-in form with a session that was still good. **The probe leaves
+with the document, not after hydration.** The root layout's `<head>` carries a second nonced inline
+script (`sessionProbeScript`) that sends `GET /auth/session` and leaves the promise on `window`; the
+provider's first ask takes it (`earlySession`), so the answer travels while the JavaScript downloads
+instead of after it, and a retry or recheck makes a request of its own. It is a script rather than a
+`<link rel=preload as=fetch>` because whether a preload is handed to a later `fetch` depends on the
+browser and the response's cache headers, and a miss would be a second request. Request
+generations prevent a stale session probe or recheck from replacing a newer sign-in, and end a probe
+that is still waiting. Sign-out requests are coalesced, clear working
 drafts immediately, and finish their cookie expiry before a new sign-in is allowed; pending sign-out
 never starts expiry recovery. Reauthentication by a different account clears the prior account's
 working drafts; the same account retains values held in the shared session/memory stores. The

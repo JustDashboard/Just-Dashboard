@@ -96,35 +96,12 @@ export function connectTarget(param: string | null | undefined, testOrigin?: str
   return `https://${raw.replace(/:443$/, "")}`
 }
 
-const SAME_ORIGIN = "http://dashboard.invalid"
-
-/**
- * Where a browser the shell sent to sign in comes back to afterwards: the hub's Connect door,
- * `/dashboard/hub?connect=<hub host>` (§8.1), and nothing else. The hub opens it in a new tab, which
- * is usually signed out, and its waiting screen tells the person to sign in there; landing on the
- * Overview after that lost the address the link filled in. Only this one address is kept, built
- * afresh, so a `next=` someone else wrote cannot send a fresh sign-in anywhere but Settings → Hub,
- * where `connect` is still only a suggestion (`connectTarget`).
+/*
+ * Where a browser the shell sent to sign in comes back to afterwards lived here while the hub's
+ * Connect door (`/dashboard/hub?connect=<hub host>`, §8.1) was the only address kept. Every page
+ * behind the sign-in is kept now, by the rules in `lib/sign-in-return.ts`, which still gives the
+ * door its `connect` and still treats a `next=` as somebody else's text.
  */
-export function returnAfterSignIn(path: string | null | undefined): string | undefined {
-  if (!path?.startsWith("/")) return undefined
-  let url: URL
-  try {
-    url = new URL(path, SAME_ORIGIN)
-  } catch {
-    return undefined
-  }
-  if (url.origin !== SAME_ORIGIN || url.pathname !== "/dashboard/hub") return undefined
-  const connect = url.searchParams.get("connect")?.trim()
-  if (!connect || connect.length > 300) return undefined
-  return `/dashboard/hub?connect=${encodeURIComponent(connect)}`
-}
-
-/** The sign-in page for a signed-out browser at `path`, carrying `returnAfterSignIn`'s address. */
-export function signInAddress(path: string): string {
-  const back = returnAfterSignIn(path)
-  return back ? `/login?next=${encodeURIComponent(back)}` : "/login"
-}
 
 /**
  * A reason from the backend as a sentence of its own. The API words its reasons in lower case with
