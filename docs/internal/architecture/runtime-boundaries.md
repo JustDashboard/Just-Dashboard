@@ -17,8 +17,8 @@ Databases and disposable application checks to a Docker adapter; Backups owns th
 else; affected routes return a precise "unavailable on this host" code the frontend renders as
 information (`ErrorState` in `components/state.tsx`), not an error.
 
-"There" means usable, not installed: the image ships the docker CLI whatever the host runs, so a
-program on `PATH` says nothing about the daemon behind it.
+"There" means usable, not installed: the image ships the docker CLI and systemctl whatever the host
+runs, so a program on `PATH` says nothing about the daemon or the manager behind it.
 
 - **Docker and the proxy.** The lookup of the Caddy ingress that deployments share answers one of
   three things: an ingress, none, or a `*proxysvc.IngressProblem` (`ingress_problem.go`) that carries a
@@ -34,6 +34,13 @@ program on `PATH` says nothing about the daemon behind it.
   which fails the list rather than showing an ingress with no routes); 409 for `ingress_ambiguous`
   (more than one public Caddy) and `ingress_unusable` (no port 443, nothing persisted, not serving
   `/etc/caddy/Caddyfile`). None of them is a 500.
+- **systemd.** `Systemd.Available` is systemctl on `PATH` and `/run/systemd/system` on the side
+  systemctl runs (`procs.SystemdRunDir`, what `sd_booted(3)` checks; in the container it is the
+  host's, mounted with `/run/systemd`). Without it `GET /systemd/` and `/systemd/timers` answer
+  `available: false` as they do without the program, and every other systemctl call is refused
+  before it starts (`procs.run`) with `ErrNoSystemd`: 503 `systemd_not_running` with the reason,
+  where it used to run and come back as 502 `command_failed` with "System has not been booted with
+  systemd".
 
 `Server.Start(ctx)` is separate from `New` so failing to schedule background work is reported by `main`
 rather than swallowed in construction. It starts the metrics recorder (here, not lazily — its whole
