@@ -5,8 +5,12 @@
 `backend/internal/api/routes.go` is the map of the whole API. Every `/api/v1` request passes:
 
 ```
-network allowlist → rate limit → authenticate → CSRF (session mutations) → capability → handler
+network allowlist → authenticate → rate limit → CSRF (session mutations) → capability → handler
 ```
+
+The rate limit of a route with a credential is the credential's, so it follows authentication. A
+route with none (sign-in, the webhooks, the hub's discovery) has a per-address limiter in front
+instead, and credentials that fail are counted per address (below).
 
 - **Allowlist before auth** (`httpx.AllowlistCIDRs`): an off-network attacker cannot reach the login
   handler at all. `httpx.RealIP` trusts `X-Forwarded-For` only from `JD_TRUSTED_PROXIES`, or the
@@ -36,6 +40,17 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   a budget of its own, `passkeyLim` (60/20 per address), so a sign-in page's autofill cannot exhaust
   the password's. Registering a passkey re-checks the password and code on the account-keyed
   second-factor bucket.
+- **Failed credentials are counted per address** (`httpx.FailureBudget` on `Authenticator.Failures`,
+  60 a minute with a burst of 60). The limiters above are keyed by who is asking, so a key or a
+  session that does not resolve never met them: 400 wrong keys used to get 400 answers of `401` in
+  0.4 s and leave no trace. Each one now spends from its address's budget, in `Authenticate`,
+  `AuthenticatePartial` and `AuthenticateMCP` alike. Past it, a wrong key is answered
+  `429 rate_limited` with the wait in `Retry-After` instead of `401`, and the log gets one
+  `repeated failed authentication` line a minute for the address. Nothing is refused before the
+  lookup, and a session cookie that fails keeps its `401` (the page's cue to offer the sign-in): an
+  address is shared wherever an SSH tunnel ends, so the count never locks a valid key or a
+  signed-in browser out. Guessing a key is not feasible either way; this is what tells a script
+  with a revoked key to stop, and what records that an address keeps failing.
 - **Capabilities, not roles** (`auth/roles.go`): `read`, `service.control`, `file.write`, `terminal`,
   `destructive`, `system.admin`, `metrics.read`, held by `admin`/`limited`/`readonly`. Gate with
   `httpx.RequireCapability` so adding a role later cannot silently widen an endpoint.

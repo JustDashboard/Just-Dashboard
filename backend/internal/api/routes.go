@@ -13,7 +13,12 @@ import (
 //
 // The layering is deliberate and is the security contract of this service:
 //
-//	network allowlist  →  rate limit  →  authentication  →  capability  →  handler
+//	network allowlist  →  authentication  →  rate limit  →  capability  →  handler
+//
+// The rate limit is the credential's (apiLim.ByPrincipal), so it follows
+// authentication. A route with no credential — sign-in, the webhooks, the
+// hub's discovery — has a per-address limiter in front instead, and a
+// credential that fails is counted per address (httpx.FailureBudget).
 //
 // Nothing below /api is reachable without passing every layer above it. There
 // is no "UI-only" protection anywhere: the frontend hides controls a role

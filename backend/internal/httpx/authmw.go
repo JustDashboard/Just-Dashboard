@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +20,62 @@ const SessionCookie = sessioncookie.Name
 type Authenticator struct {
 	Svc    *auth.Service
 	Secure bool
+	// Failures is the budget of credentials that may fail from one address
+	// before the answer says so; nil keeps none.
+	Failures *FailureBudget
+}
+
+// FailureBudget counts, per address, the credentials that were presented and
+// did not resolve.
+//
+// The rate limit of the feature routes is keyed by who is asking, so it can
+// only run once authentication has succeeded: a client inside the allowlist
+// could send wrong keys as fast as it liked, each costing a lookup, and leave
+// no trace. Guessing a key or a session id is not feasible, so this is not a
+// lock on the door. It is what makes a script with a revoked key hear "slow
+// down" instead of 401 for ever, and what puts a line in the log when an
+// address keeps failing.
+//
+// Only a failure spends from it, and nothing is refused before the lookup: an
+// address is shared wherever an SSH tunnel ends, and one broken script there
+// must not lock a valid key or a signed-in browser out.
+type FailureBudget struct {
+	failures *Limiter
+	// noted keeps the log to a line a minute for each address that is over.
+	noted *Limiter
+}
+
+// NewFailureBudget allows perMinute failed credentials from an address, burst
+// at once. The server keeps sixty of each: a page load with an expired session
+// fails a dozen polls together, and a script that is merely wrong fails once.
+func NewFailureBudget(perMinute, burst int) *FailureBudget {
+	return &FailureBudget{failures: NewLimiter(perMinute, burst), noted: NewLimiter(1, 1)}
+}
+
+// refused answers a credential that was presented and did not resolve, with
+// refusal while the address has failures left and otherwise, for a key, with
+// 429 and the wait. A session cookie that fails keeps its 401 whatever the
+// count: that status is how the page learns its session ended and offers the
+// sign-in again.
+func (a *Authenticator) refused(w http.ResponseWriter, r *http.Request, refusal error, bearer bool) {
+	if a.Failures == nil {
+		WriteError(w, r, refusal)
+		return
+	}
+	ip := ClientIP(r)
+	ok, wait, _ := a.Failures.failures.take(ip)
+	if ok {
+		WriteError(w, r, refusal)
+		return
+	}
+	if a.Failures.noted.Allow(ip) {
+		slog.Warn("repeated failed authentication", "ip", ip, "path", r.URL.Path,
+			"credential", map[bool]string{true: "api key", false: "session"}[bearer], "request", RequestIDFrom(r.Context()))
+	}
+	if bearer {
+		refusal = rateLimited("too many requests from this address with a key that is not valid; check the key before trying again", wait)
+	}
+	WriteError(w, r, refusal)
 }
 
 // CookieName is the name this dashboard's session cookie has: the __Host-
@@ -172,8 +229,12 @@ func (a *Authenticator) authenticateWith(next http.Handler, allowPasswordChange,
 			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), &p)))
 			return
 		}
-		p, err := a.resolveWithPasswordChange(w, r, allowPasswordChange)
+		p, failed, err := a.resolveWithPasswordChange(w, r, allowPasswordChange)
 		if err != nil {
+			if failed != failedNone {
+				a.refused(w, r, err, failed == failedKey)
+				return
+			}
 			WriteError(w, r, err)
 			return
 		}
@@ -222,7 +283,7 @@ func (a *Authenticator) AuthenticatePartial(next http.Handler) http.Handler {
 		}
 		sess, user, err := a.Svc.ResolveSession(r.Context(), found.token)
 		if err != nil {
-			WriteError(w, r, Err(http.StatusUnauthorized, "unauthorized", "session invalid or expired"))
+			a.refused(w, r, Err(http.StatusUnauthorized, "unauthorized", "session invalid or expired"), false)
 			return
 		}
 		a.settle(w, found, sess.ExpiresAt)
@@ -240,27 +301,32 @@ func (a *Authenticator) AuthenticatePartial(next http.Handler) http.Handler {
 // route then admits it: a session owing a second factor is still one to keep.
 // A bearer token is read first, so a script's request never has its cookies
 // rewritten.
-func (a *Authenticator) resolveWithPasswordChange(w http.ResponseWriter, r *http.Request, allowPasswordChange bool) (*Principal, error) {
+//
+// failed says which credential was presented and did not resolve, when that is
+// why there is no principal: the caller counts it (Authenticator.refused). A
+// request that brought nothing, and a session that resolved but may not pass,
+// are not failures of a credential.
+func (a *Authenticator) resolveWithPasswordChange(w http.ResponseWriter, r *http.Request, allowPasswordChange bool) (p *Principal, failed failedCredential, err error) {
 	if bearer := bearerToken(r); bearer != "" {
 		tok, user, role, err := a.Svc.ResolveAPIToken(r.Context(), bearer)
 		if err != nil {
-			return nil, Err(http.StatusUnauthorized, "unauthorized", "api token invalid, revoked or expired")
+			return nil, failedKey, Err(http.StatusUnauthorized, "unauthorized", "api token invalid, revoked or expired")
 		}
 		if user.MustChangePW {
-			return nil, passwordChangeRequired()
+			return nil, failedNone, passwordChangeRequired()
 		}
-		return tokenPrincipal(r, tok, user, role), nil
+		return tokenPrincipal(r, tok, user, role), failedNone, nil
 	}
 	found := a.sessionToken(r)
 	if found.token == "" {
-		return nil, ErrUnauthorized
+		return nil, failedNone, ErrUnauthorized
 	}
 	sess, user, err := a.Svc.ResolveSession(r.Context(), found.token)
 	if err != nil {
 		if errors.Is(err, auth.ErrAccountDisabled) {
-			return nil, Err(http.StatusForbidden, "account_disabled", "account disabled")
+			return nil, failedNone, Err(http.StatusForbidden, "account_disabled", "account disabled")
 		}
-		return nil, Err(http.StatusUnauthorized, "unauthorized", "session invalid or expired")
+		return nil, failedSession, Err(http.StatusUnauthorized, "unauthorized", "session invalid or expired")
 	}
 	a.settle(w, found, sess.ExpiresAt)
 	// A password alone is never enough: an un-elevated session is refused
@@ -270,17 +336,26 @@ func (a *Authenticator) resolveWithPasswordChange(w http.ResponseWriter, r *http
 		if !user.TOTPEnabled {
 			code = "totp_enrollment_required"
 		}
-		return nil, Err(http.StatusUnauthorized, code, "two-factor authentication required")
+		return nil, failedNone, Err(http.StatusUnauthorized, code, "two-factor authentication required")
 	}
 	if user.MustChangePW && !allowPasswordChange {
-		return nil, passwordChangeRequired()
+		return nil, failedNone, passwordChangeRequired()
 	}
 	return &Principal{
 		User: user, Role: user.Role, SessionID: sess.ID, Kind: "session",
 		IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: true,
 		HubSession: sess.AuthMethod == auth.MethodHub, HubUser: sess.HubUser,
-	}, nil
+	}, failedNone, nil
 }
+
+// failedCredential is the credential a request presented that did not resolve.
+type failedCredential int
+
+const (
+	failedNone failedCredential = iota
+	failedKey
+	failedSession
+)
 
 // Recheck reads a session's principal again for a request that outlasts its own
 // authentication: the dashboard's assistant works for as long as a press takes, and a
@@ -340,7 +415,7 @@ func (a *Authenticator) AuthenticateMCP(next http.Handler) http.Handler {
 		tok, user, role, err := a.Svc.ResolveAPIToken(r.Context(), bearer)
 		if err != nil {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="Just Dashboard MCP", error="invalid_token"`)
-			WriteError(w, r, Err(http.StatusUnauthorized, "unauthorized", "api token invalid, revoked or expired"))
+			a.refused(w, r, Err(http.StatusUnauthorized, "unauthorized", "api token invalid, revoked or expired"), true)
 			return
 		}
 		if user.MustChangePW {
