@@ -500,6 +500,12 @@ const (
 // waiting first, so nothing reaches the transcript ahead of a line that was
 // printed before it.
 //
+// A line that follows a quiet moment is not made to wait: it is written before
+// Log returns. So the first thing a step says, and what it says before it goes
+// silent, are in the transcript whatever becomes of the process next, which is
+// the line an operator reads after a backend was killed mid-step. Only a line
+// inside a burst waits for its batch, and then for no longer than the delay.
+//
 // The zero batch size writes every line through as it arrives, which is what
 // a test that builds one by hand and then reads the table gets.
 type storeStepOutput struct {
@@ -516,6 +522,9 @@ type storeStepOutput struct {
 	pending      []LogLine
 	pendingBytes int
 	timer        *time.Timer
+	// lastWrite is when a batch last reached the transcript; the zero time
+	// before the first.
+	lastWrite time.Time
 	// logged counts the lines Log has taken. A line's mark is its count, and
 	// spans says which sequence each written line received, so a step can
 	// still point at the one line of its output that proves why it failed
@@ -578,6 +587,10 @@ func (o *storeStepOutput) Log(stream, text string) error {
 		o.flushLocked()
 		return o.err
 	}
+	if len(o.pending) == 1 && time.Since(o.lastWrite) >= o.batchDelay {
+		o.flushLocked()
+		return o.err
+	}
 	if o.timer == nil {
 		o.timer = time.AfterFunc(o.batchDelay, func() { _ = o.Flush() })
 	}
@@ -609,6 +622,7 @@ func (o *storeStepOutput) flushLocked() {
 		o.err = err
 		return
 	}
+	o.lastWrite = time.Now()
 	first := o.logged - int64(len(lines)) + 1
 	seq := events[0].Seq
 	if last := len(o.spans) - 1; last >= 0 &&

@@ -30,7 +30,12 @@ only renderer/executor/validation authority for their feature.
   `OrchestrationStore.AppendLogs` writes them in one transaction — one lease check, one read of the
   run's sequence, a row a line with consecutive sequences, one update of the step's `last_seq` and one
   of the legacy tail — when 64 lines or 256 KiB are waiting, or 100 ms after the first of them, so a
-  page following the run still reads as live. A line used to be a transaction of six statements and a
+  page following the run still reads as live. A line that follows a quiet moment (the step's first, or
+  one printed more than 100 ms after the last write) does not wait: it is written before `Log` returns,
+  so what a step said before it went silent is in the transcript whatever becomes of the process. That
+  is the line `TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun` reads after it kills a backend
+  inside every step; only the tail of a burst, at most 100 ms of it, can be lost to a kill. A line used
+  to be a transaction of six statements and a
   commit of its own, about 5 ms each, and a build that printed 5,000 lines spent some 25 s persisting
   them while every other writer queued behind it. The engine flushes when the step returns, before it
   records how the step ended, and an event the step records (`Output.Event`) flushes first, so nothing

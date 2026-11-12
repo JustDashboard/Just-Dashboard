@@ -51,23 +51,32 @@ func (f *outputFixture) written(t *testing.T) int {
 }
 
 // A step's lines reach the transcript a batch at a time, not a transaction
-// each: nothing is written until a batch is full, the full batch is written
-// at once, and the step's end writes the rest.
+// each: after the first, which is written at once, nothing is written until a
+// batch is full, the full batch is written at once, and the step's end writes
+// the rest.
 func TestStepOutputIsWrittenInBatches(t *testing.T) {
 	f := newOutputFixture(t, time.Hour)
-	for line := 1; line < stepOutputBatchLines; line++ {
+	// The first line follows nothing, so it is not made to wait.
+	if err := f.output.Log("stdout", "line-1\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.written(t); got != 1 {
+		t.Fatalf("the first line a step printed: %d written, want it in the transcript when Log returns", got)
+	}
+	const total = stepOutputBatchLines + 1
+	for line := 2; line < total; line++ {
 		if err := f.output.Log("stdout", fmt.Sprintf("line-%d\n", line)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := f.written(t); got != 0 {
-		t.Fatalf("%d lines were written before the batch filled; each line is a transaction of its own again", got)
+	if got := f.written(t); got != 1 {
+		t.Fatalf("%d lines were written before the batch filled; each line is a transaction of its own again", got-1)
 	}
-	if err := f.output.Log("stdout", fmt.Sprintf("line-%d\n", stepOutputBatchLines)); err != nil {
+	if err := f.output.Log("stdout", fmt.Sprintf("line-%d\n", total)); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.written(t); got != stepOutputBatchLines {
-		t.Fatalf("a full batch wrote %d lines, want %d", got, stepOutputBatchLines)
+	if got := f.written(t); got != total {
+		t.Fatalf("a full batch left %d lines written, want %d", got, total)
 	}
 	if err := f.output.Log("stderr", "the last line\n"); err != nil {
 		t.Fatal(err)
@@ -79,12 +88,12 @@ func TestStepOutputIsWrittenInBatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lines) != stepOutputBatchLines+1 {
-		t.Fatalf("transcript holds %d lines, want %d", len(lines), stepOutputBatchLines+1)
+	if len(lines) != total+1 {
+		t.Fatalf("transcript holds %d lines, want %d", len(lines), total+1)
 	}
 	for index, line := range lines {
 		want := fmt.Sprintf("line-%d\n", index+1)
-		if index == stepOutputBatchLines {
+		if index == total {
 			want = "the last line\n"
 		}
 		if line.Text != want || (index > 0 && line.Seq != lines[index-1].Seq+1) {
@@ -120,6 +129,46 @@ func TestStepOutputWritesAWaitingLineAfterTheDelay(t *testing.T) {
 	}
 	if got := f.written(t); got != 1 {
 		t.Fatalf("written = %d, want 1", got)
+	}
+}
+
+// What a step says after a quiet moment is in the transcript when Log
+// returns, whatever happens to the process next: a backend killed inside a
+// step leaves the line that says where it was (the live process-fault test
+// kills one at every step and reads for it). A line inside a burst waits.
+func TestStepOutputWritesALineThatFollowsAQuietMomentAtOnce(t *testing.T) {
+	f := newOutputFixture(t, 30*time.Millisecond)
+	if err := f.output.Log("status", "entered\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.written(t); got != 1 {
+		t.Fatalf("the step's first line: %d written when Log returned, want 1", got)
+	}
+	// Straight after it: a burst, which waits for its batch.
+	f.output.lastWrite = time.Now().Add(time.Hour)
+	if err := f.output.Log("stdout", "burst\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.written(t); got != 1 {
+		t.Fatalf("a line inside a burst: %d written, want it waiting", got-1)
+	}
+	if err := f.output.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	// The output went quiet for longer than the delay: the next line is not
+	// made to wait for a batch.
+	f.output.lastWrite = time.Now().Add(-time.Second)
+	if err := f.output.Log("stdout", "after the pause\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.written(t); got != 3 {
+		t.Fatalf("a line after a quiet moment: %d written when Log returned, want all 3", got)
+	}
+	// And a line that cannot be written this way says so from Log itself.
+	f.output.lastWrite = time.Time{}
+	f.output.claimToken = "not-the-lease"
+	if err := f.output.Log("stdout", "lost\n"); err != ErrLeaseLost {
+		t.Fatalf("a line written at once that could not be: %v, want the lost lease", err)
 	}
 }
 
@@ -199,6 +248,9 @@ func TestStepOutputMarkFindsItsLineInTheTranscript(t *testing.T) {
 // refused rather than queued for a transcript that will never take them.
 func TestStepOutputReportsALineItCouldNotWrite(t *testing.T) {
 	f := newOutputFixture(t, time.Hour)
+	if err := f.output.Log("stdout", "written\n"); err != nil {
+		t.Fatal(err)
+	}
 	f.output.claimToken = "not-the-lease"
 	if err := f.output.Log("stdout", "lost\n"); err != nil {
 		t.Fatalf("a waiting line is not an error yet: %v", err)
