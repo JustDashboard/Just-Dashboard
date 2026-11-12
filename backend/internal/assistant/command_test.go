@@ -226,6 +226,12 @@ func TestNothingThatWritesOrRunsIsReadAsARead(t *testing.T) {
 			"xxd in out",
 			"sudo xxd -r -p a /etc/cron.d/x",
 			"xxd -revert in out",
+			// bash works out a subscript given to -v as arithmetic, command
+			// substitutions included, even from inside single quotes.
+			"test -v 'a[$(touch /etc/cron.d/x)]'",
+			"[ -v 'a[$(touch /etc/cron.d/x)]' ]",
+			"test -f /etc/passwd -a -v 'a[$(id)]'",
+			"test -R 'a[$(id)]'",
 			"file -C -m /tmp/magic",
 			"file -bC -m /tmp/magic",
 			"blkid -c /etc/cron.d/x",

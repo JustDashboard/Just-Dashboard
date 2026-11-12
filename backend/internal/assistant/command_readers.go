@@ -326,7 +326,7 @@ func oneOf(words ...string) func([]string) bool {
 const whateverPrograms = "ls ll cat head tail grep egrep fgrep wc cut tr column stat du df free uptime uname whoami id groups " +
 	"who w last echo pwd which type whereis ps pgrep pstree netstat lsblk findmnt lscpu lsmem lsusb vmstat " +
 	"iostat mpstat nproc readlink realpath basename dirname md5sum sha1sum sha256sum jq diff cmp zcat zgrep od " +
-	"strings nl tac rev test [ true false seq sleep"
+	"strings nl tac rev true false seq sleep"
 
 // readers are the programs a read may run, by name.
 var readers = buildReaders()
@@ -399,6 +399,13 @@ func buildReaders() map[string]reader {
 	add(only(flagsOf("-p -l -k -i -D -d -V -h -o? -s? -t? -L? -U? -u? -n? -O? -S? --probe --list-one --list-filesystems "+
 		"--info --no-part-details --no-encoding --output? --match-tag? --match-token? --label? --uuid? --usages? "+
 		"--match-types? --offset? --size? --help --version")), "blkid")
+	// test -v asks whether a variable is set, and bash works out a subscript
+	// given with the name as arithmetic, which runs a command substitution
+	// written inside it: test -v 'a[$(touch /etc/x)]' runs touch, quoted or not
+	// (bash 5.2; zsh does not). -R reads a name the same way, so it asks too.
+	add(func(args []string) bool {
+		return !slices.ContainsFunc(args, func(a string) bool { return a == "-v" || a == "-R" })
+	}, "test", "[")
 	// printf -v sets a variable of the shell, PATH among them.
 	add(func(args []string) bool {
 		return len(args) == 0 || args[0] == "--" || !strings.HasPrefix(args[0], "-")
