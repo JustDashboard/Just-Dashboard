@@ -19,7 +19,11 @@ export function useNearViewport<T extends HTMLElement>() {
       (entries) => {
         for (const entry of entries) listeners.get(entry.target)?.(entry.isIntersecting)
       },
-      { rootMargin: "600px" },
+      // The dashboard scrolls a pane of the shell, not the window, and
+      // `rootMargin` widens only the window: a row or a chart below the pane's
+      // fold was "near" at the moment it came into view and not before.
+      // `scrollMargin` widens the pane as well, where the browser has it.
+      { rootMargin: "600px", scrollMargin: "600px" } as IntersectionObserverInit,
     )
     listeners.set(element, setVisible)
     observer.observe(element)

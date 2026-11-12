@@ -993,6 +993,15 @@ rather than assembling its own recharts tree — adding a measurement should mea
   clipped them.
 - A chart's `height` is a **floor**, not a fixed size. Panels in a row stretch to the tallest of
   them, and a fixed plot puts the surplus between the chart and its legend as a band of nothing.
+- **A chart is a frame and a plot, and only the plot is recharts.** The frame (`MetricChart`) is in
+  the page from the first render at the chart's height, with the keyboard, the pinned reading and
+  the crosshair. The plot is drawn when the reader comes within 600px of it (`useNearViewport`),
+  stays drawn once it is, holds the frame it last drew while it is out of reach
+  (`metrics/plot-held.ts`), and is memoised with its legend, so a panel re-rendered for the live
+  figure in its head does not reconcile a tree whose rows are the same array. A page therefore
+  hands a chart **one array per reading, not one per render**: rows built in the render body redraw
+  every chart on every frame of the socket. Opening Metrics drew eleven recharts trees in one
+  blocked stretch and redrew them every two seconds; it now draws the first screen's.
 - **A scale fitted a little above a limit splits into unround steps** (143 / 286 / 429 MB), so
   `yTicks` on `MetricChart` and `ChartPanel` names the ticks. A container's memory chart is scaled to
   its limit and ticks at the limit's quarters, so the top tick names the limit — on Docker's

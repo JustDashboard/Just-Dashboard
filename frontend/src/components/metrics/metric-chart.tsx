@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  memo,
   useCallback,
   useEffect,
   useId,
@@ -33,7 +34,9 @@ import {
 } from "@/lib/metrics-crosshair"
 import type { MouseHandlerDataParam } from "recharts"
 import type { MetricEvent } from "@/lib/types"
+import { useNearViewport } from "@/hooks/use-near-viewport"
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart"
+import { plotHeld } from "@/components/metrics/plot-held"
 
 /**
  * One measurement drawn on a chart.
@@ -107,25 +110,26 @@ export function seriesFormat(
  * labels. A category axis spaces every bucket equally, which quietly lies
  * whenever the record has a hole in it — four hours of downtime and four
  * seconds of it look identical.
+ *
+ * It is two parts, and the split is what a page of charts costs. This one is
+ * the frame: the box at its height, the keyboard, the pinned reading and the
+ * synced crosshair, none of which is recharts. `Plot` below is the recharts
+ * tree, and it is drawn only for a chart the reader can see or is about to:
+ *
+ *  - **memoised**, so a panel re-rendered for the live figure in its head does
+ *    not reconcile a plot whose rows did not change. On Metrics five of the
+ *    eleven charts carry such a head and were redrawn on every two-second
+ *    frame of the socket;
+ *  - **mounted when it comes near the view** (`useNearViewport`), so opening
+ *    the page draws the charts of its first screen and a half rather than all
+ *    eleven in one blocked second;
+ *  - **held while it is away**: a plot scrolled out of reach keeps the frame
+ *    it last drew and takes the current one when it comes back.
+ *
+ * The frame is in the page from the first render at the chart's full height,
+ * so a plot arriving in it moves nothing.
  */
-export function MetricChart({
-  rows,
-  series,
-  config,
-  height = 190,
-  domain,
-  unit,
-  format,
-  axisFormat,
-  events,
-  onZoom,
-  showPeaks = true,
-  stacked = false,
-  className,
-  thresholds,
-  yTicks,
-  axisWidth,
-}: {
+type MetricChartProps = {
   rows: ChartRowLike[]
   series: Series[]
   config: ChartConfig
@@ -163,7 +167,125 @@ export function MetricChart({
    * absent.
    */
   axisWidth?: number
-}) {
+}
+
+export const MetricChart = memo(function MetricChart({ height = 190, ...chart }: MetricChartProps) {
+  const { rows, series, format, unit } = chart
+  const chartId = useId()
+  const wrapper = useRef<HTMLDivElement>(null)
+  const [nearRef, near] = useNearViewport<HTMLDivElement>()
+  // Once drawn a plot stays: unmounting it on the way out would pay for the
+  // whole tree again on the way back, and `Plot` holds still while away.
+  const [seen, setSeen] = useState(false)
+  if (near && !seen) setSeen(true)
+  const attach = useCallback(
+    (el: HTMLDivElement | null) => {
+      wrapper.current = el
+      const leave = nearRef(el)
+      return () => {
+        wrapper.current = null
+        leave?.()
+      }
+    },
+    [nearRef],
+  )
+  // The plot area exists once the plot does, so its arrival is a reason to measure.
+  const plot = usePlotArea(wrapper, seen ? rows.length : -1)
+  useEffect(() => () => unpinCrosshair(), [])
+
+  const bounds = useMemo(() => {
+    if (rows.length === 0) return null
+    return { from: rows[0].ts, to: rows[rows.length - 1].ts }
+  }, [rows])
+
+  return (
+    // A floor, not a fixed height. Panels laid out side by side stretch to the
+    // tallest in the row, and with `height` fixed the surplus fell between the
+    // plot and its legend as a band of nothing — widest exactly where one panel
+    // carries a footer strip and its neighbour does not. The surplus goes to
+    // the plot instead, so the space a row is already occupying is spent on the
+    // data rather than on a gap.
+    <div
+      ref={attach}
+      tabIndex={0}
+      role="group"
+      data-slot="metric-chart"
+      aria-label={`${series.map((series) => series.label).join(", ")} chart. Click or press Enter to pin a moment; arrow keys inspect samples; Escape releases it.`}
+      className="relative w-full flex-1 focus-ring-inset"
+      style={{ minHeight: height }}
+      onKeyDown={(event) => {
+        if (
+          event.target !== event.currentTarget ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.altKey ||
+          !rows.length
+        )
+          return
+        const current = getCrosshair().ts
+        const at =
+          current === null
+            ? rows.length - 1
+            : rows.reduce(
+                (best, row, index) =>
+                  Math.abs(row.ts - current) < Math.abs(rows[best].ts - current) ? index : best,
+                0,
+              )
+        if (event.key === "Escape") {
+          event.preventDefault()
+          unpinCrosshair()
+        } else if (["ArrowLeft", "ArrowRight", "Home", "End", "Enter", " "].includes(event.key)) {
+          event.preventDefault()
+          const next =
+            event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? rows.length - 1
+                : Math.max(
+                    0,
+                    Math.min(
+                      rows.length - 1,
+                      at + (event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0),
+                    ),
+                  )
+          pinCrosshair(rows[next].ts)
+        }
+      }}
+    >
+      <PinnedReading rows={rows} series={series} format={format} unit={unit} />
+      <SyncedCrosshair chartId={chartId} bounds={bounds} plot={plot} />
+      {seen && <Plot {...chart} chartId={chartId} bounds={bounds} near={near} />}
+    </div>
+  )
+})
+
+type PlotProps = Omit<MetricChartProps, "height"> & {
+  chartId: string
+  bounds: { from: number; to: number } | null
+  /** False while the chart is out of reach of the view, when the plot holds still. */
+  near: boolean
+}
+
+/** The recharts tree of one chart, and what the pointer does on it. */
+const Plot = memo(function Plot({
+  rows,
+  series,
+  config,
+  domain,
+  unit,
+  format,
+  axisFormat,
+  events,
+  onZoom,
+  showPeaks = true,
+  stacked = false,
+  className,
+  thresholds,
+  yTicks,
+  axisWidth,
+  chartId,
+  bounds,
+}: PlotProps) {
   // Deliberately *not* subscribed to the crosshair.
   //
   // It used to be, and that is what made a page of ten charts feel heavy: a
@@ -172,18 +294,11 @@ export function MetricChart({
   // one-pixel line. On the 1h window that is ~38 series of 240 points being
   // reconciled per pointer move. The line is now drawn by SyncedCrosshair, a
   // sibling overlay that is the only thing which re-renders.
-  const chartId = useId()
+  //
   // React's ids carry colons, which are legal in an id attribute but a
   // nuisance the moment anything tries to read one back as a selector.
   const fillId = chartId.replace(/[^a-zA-Z0-9_-]/g, "")
-  const wrapper = useRef<HTMLDivElement>(null)
-  const plot = usePlotArea(wrapper, rows.length)
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
-
-  const bounds = useMemo(() => {
-    if (rows.length === 0) return null
-    return { from: rows[0].ts, to: rows[rows.length - 1].ts }
-  }, [rows])
 
   // Events outside the drawn window would be clamped to an edge by recharts
   // and read as something that happened at the start of the chart.
@@ -242,244 +357,188 @@ export function MetricChart({
     () => false,
   )
   const ticks = useMemo(() => tickFormatterFor(rows), [rows])
-  useEffect(() => () => unpinCrosshair(), [])
 
   return (
-    // A floor, not a fixed height. Panels laid out side by side stretch to the
-    // tallest in the row, and with `height` fixed the surplus fell between the
-    // plot and its legend as a band of nothing — widest exactly where one panel
-    // carries a footer strip and its neighbour does not. The surplus goes to
-    // the plot instead, so the space a row is already occupying is spent on the
-    // data rather than on a gap.
-    <div
-      ref={wrapper}
-      tabIndex={0}
-      role="group"
-      aria-label={`${series.map((series) => series.label).join(", ")} chart. Click or press Enter to pin a moment; arrow keys inspect samples; Escape releases it.`}
-      className="relative w-full flex-1 focus-ring-inset"
-      style={{ minHeight: height }}
-      onKeyDown={(event) => {
-        if (
-          event.target !== event.currentTarget ||
-          event.ctrlKey ||
-          event.metaKey ||
-          event.altKey ||
-          !rows.length
-        )
-          return
-        const current = getCrosshair().ts
-        const at =
-          current === null
-            ? rows.length - 1
-            : rows.reduce(
-                (best, row, index) =>
-                  Math.abs(row.ts - current) < Math.abs(rows[best].ts - current) ? index : best,
-                0,
-              )
-        if (event.key === "Escape") {
-          event.preventDefault()
-          unpinCrosshair()
-        } else if (["ArrowLeft", "ArrowRight", "Home", "End", "Enter", " "].includes(event.key)) {
-          event.preventDefault()
-          const next =
-            event.key === "Home"
-              ? 0
-              : event.key === "End"
-                ? rows.length - 1
-                : Math.max(
-                    0,
-                    Math.min(
-                      rows.length - 1,
-                      at + (event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0),
-                    ),
-                  )
-          pinCrosshair(rows[next].ts)
-        }
-      }}
-    >
-      <PinnedReading rows={rows} series={series} format={format} unit={unit} />
-      <SyncedCrosshair chartId={chartId} bounds={bounds} plot={plot} />
-      {/* Positioned rather than `h-full`, and that is what makes the floor
-          above work. A percentage height resolves against a *definite* parent;
-          a flex item sized by `min-height` alone is not definite, so `h-full`
-          collapsed to zero and recharts drew nothing — visible on exactly the
-          panels that stand alone in their row rather than stretching to a
-          neighbour. Absolute positioning takes its height from the box it is
-          in, whatever produced that box. */}
-      <ChartContainer config={config} className={cn("absolute inset-0 aspect-auto", className)}>
-        <ComposedChart
-          data={rows}
-          accessibilityLayer={false}
-          margin={{ left: 4, right: 8, top: 6, bottom: 0 }}
-          onMouseMove={handleMove}
-          onMouseDown={handleDown}
-          onMouseUp={handleUp}
-          onMouseLeave={handleLeave}
-        >
-          <CartesianGrid vertical={false} strokeDasharray="3 3" opacity={0.35} />
-          <XAxis
-            dataKey="ts"
-            type="number"
-            scale="time"
-            domain={["dataMin", "dataMax"]}
-            tickFormatter={ticks}
-            tickLine={false}
-            axisLine={false}
-            minTickGap={44}
-            fontSize={10}
-          />
-          <YAxis
-            domain={domain}
-            ticks={yTicks}
-            // Fitted to the widest label. A fixed gutter had to be wide enough
-            // for "384 MB" — recharts wraps a label wider than it — and left
-            // "48 MB" and "59" a band of nothing between the scale and the
-            // plot, so charts in one row started at different distances from
-            // their own labels.
-            width={axisWidth ?? "auto"}
-            tickLine={false}
-            axisLine={false}
-            fontSize={10}
-            // No trailing zeros in the gutter: "25.0%" beside "50.0%" spends
-            // four characters saying nothing the scale did not already say.
-            // Not rounded to whole numbers either — on a 0–1% scale every
-            // tick read "0%".
-            tickFormatter={(v: number) =>
-              unit === "%"
-                ? `${Number(v.toFixed(2))}${unit}`
-                : (axisFormat ?? seriesFormat(undefined, format, unit))(v)
-            }
-          />
+    /* Positioned rather than `h-full`, and that is what makes the frame's
+       floor work. A percentage height resolves against a *definite* parent;
+       a flex item sized by `min-height` alone is not definite, so `h-full`
+       collapsed to zero and recharts drew nothing — visible on exactly the
+       panels that stand alone in their row rather than stretching to a
+       neighbour. Absolute positioning takes its height from the box it is
+       in, whatever produced that box. */
+    <ChartContainer config={config} className={cn("absolute inset-0 aspect-auto", className)}>
+      <ComposedChart
+        data={rows}
+        accessibilityLayer={false}
+        margin={{ left: 4, right: 8, top: 6, bottom: 0 }}
+        onMouseMove={handleMove}
+        onMouseDown={handleDown}
+        onMouseUp={handleUp}
+        onMouseLeave={handleLeave}
+      >
+        <CartesianGrid vertical={false} strokeDasharray="3 3" opacity={0.35} />
+        <XAxis
+          dataKey="ts"
+          type="number"
+          scale="time"
+          domain={["dataMin", "dataMax"]}
+          tickFormatter={ticks}
+          tickLine={false}
+          axisLine={false}
+          minTickGap={44}
+          fontSize={10}
+        />
+        <YAxis
+          domain={domain}
+          ticks={yTicks}
+          // Fitted to the widest label. A fixed gutter had to be wide enough
+          // for "384 MB" — recharts wraps a label wider than it — and left
+          // "48 MB" and "59" a band of nothing between the scale and the
+          // plot, so charts in one row started at different distances from
+          // their own labels.
+          width={axisWidth ?? "auto"}
+          tickLine={false}
+          axisLine={false}
+          fontSize={10}
+          // No trailing zeros in the gutter: "25.0%" beside "50.0%" spends
+          // four characters saying nothing the scale did not already say.
+          // Not rounded to whole numbers either — on a 0–1% scale every
+          // tick read "0%".
+          tickFormatter={(v: number) =>
+            unit === "%"
+              ? `${Number(v.toFixed(2))}${unit}`
+              : (axisFormat ?? seriesFormat(undefined, format, unit))(v)
+          }
+        />
 
-          <Tooltip
-            active={pinned ? false : undefined}
-            cursor={
-              pinned ? false : { stroke: "var(--foreground)", strokeOpacity: 0.28, strokeWidth: 1 }
-            }
-            isAnimationActive={false}
-            // Recharts positions the default tooltip under the pointer, where on
-            // a dense page it covers the neighbouring chart the crosshair exists
-            // to let you read. Pinning it to the top of the plot keeps both
-            // visible.
-            position={{ y: 0 }}
-            content={<MetricTooltip series={series} format={format} unit={unit} events={marks} />}
-          />
+        <Tooltip
+          active={pinned ? false : undefined}
+          cursor={
+            pinned ? false : { stroke: "var(--foreground)", strokeOpacity: 0.28, strokeWidth: 1 }
+          }
+          isAnimationActive={false}
+          // Recharts positions the default tooltip under the pointer, where on
+          // a dense page it covers the neighbouring chart the crosshair exists
+          // to let you read. Pinning it to the top of the plot keeps both
+          // visible.
+          position={{ y: 0 }}
+          content={<MetricTooltip series={series} format={format} unit={unit} events={marks} />}
+        />
 
-          {/* Drawn before the series so a marker sits behind the data it
-              explains rather than obscuring the moment being explained. */}
-          {marks.map((mark, i) => (
-            <ReferenceLine
-              key={`${mark.ts}-${i}`}
-              x={mark.ts}
-              stroke={eventColor(mark.event)}
-              strokeDasharray="2 3"
-              strokeOpacity={0.75}
-              strokeWidth={1}
-            />
+        {/* Drawn before the series so a marker sits behind the data it
+          explains rather than obscuring the moment being explained. */}
+        {marks.map((mark, i) => (
+          <ReferenceLine
+            key={`${mark.ts}-${i}`}
+            x={mark.ts}
+            stroke={eventColor(mark.event)}
+            strokeDasharray="2 3"
+            strokeOpacity={0.75}
+            strokeWidth={1}
+          />
+        ))}
+
+        {thresholds?.map((t) => (
+          <ReferenceLine
+            key={t.label}
+            y={t.value}
+            stroke={t.tone === "danger" ? "var(--destructive)" : "var(--warning)"}
+            strokeDasharray="4 4"
+            strokeOpacity={0.5}
+            strokeWidth={1}
+            label={{
+              value: t.label,
+              position: "insideTopRight",
+              fontSize: 10,
+              fill: "var(--muted-foreground)",
+            }}
+          />
+        ))}
+
+        {/* A fill that fades to nothing at the baseline rather than a flat
+          wash of the line's colour.
+          At a constant 14% an area chart is a slab: the ink is heaviest
+          along the axis, furthest from the line the reader is actually
+          following, and two overlapping areas mix into a third colour that
+          belongs to neither series. A vertical ramp puts the density under
+          the line and lets the one behind it show through. Stacked series
+          keep a solid fill — there the block *is* the quantity. */}
+        <defs>
+          {series.map((s) => (
+            <linearGradient key={s.key} id={`${fillId}-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={s.color} stopOpacity={0.32} />
+              <stop offset="92%" stopColor={s.color} stopOpacity={0.02} />
+            </linearGradient>
           ))}
+        </defs>
 
-          {thresholds?.map((t) => (
-            <ReferenceLine
-              key={t.label}
-              y={t.value}
-              stroke={t.tone === "danger" ? "var(--destructive)" : "var(--warning)"}
-              strokeDasharray="4 4"
-              strokeOpacity={0.5}
-              strokeWidth={1}
-              label={{
-                value: t.label,
-                position: "insideTopRight",
-                fontSize: 10,
-                fill: "var(--muted-foreground)",
-              }}
-            />
-          ))}
-
-          {/* A fill that fades to nothing at the baseline rather than a flat
-              wash of the line's colour.
-              At a constant 14% an area chart is a slab: the ink is heaviest
-              along the axis, furthest from the line the reader is actually
-              following, and two overlapping areas mix into a third colour that
-              belongs to neither series. A vertical ramp puts the density under
-              the line and lets the one behind it show through. Stacked series
-              keep a solid fill — there the block *is* the quantity. */}
-          <defs>
-            {series.map((s) => (
-              <linearGradient key={s.key} id={`${fillId}-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={s.color} stopOpacity={0.32} />
-                <stop offset="92%" stopColor={s.color} stopOpacity={0.02} />
-              </linearGradient>
-            ))}
-          </defs>
-
-          {/* Peaks first, so the mean is drawn on top of the envelope it lives
-              inside rather than under it. */}
-          {showPeaks &&
-            series.map((s) =>
-              s.peakKey ? (
-                <Area
-                  key={s.peakKey}
-                  dataKey={s.peakKey}
-                  type="monotone"
-                  stroke={s.color}
-                  strokeWidth={1}
-                  strokeOpacity={0.4}
-                  fill={`url(#${fillId}-${s.key})`}
-                  // The envelope is context for the mean, not a second series.
-                  // It shares the gradient so the two read as one shape, at a
-                  // fraction of the density so the line stays the subject.
-                  fillOpacity={0.4}
-                  dot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-              ) : null,
-            )}
-
-          {series.map((s) =>
-            s.kind === "area" || stacked ? (
+        {/* Peaks first, so the mean is drawn on top of the envelope it lives
+          inside rather than under it. */}
+        {showPeaks &&
+          series.map((s) =>
+            s.peakKey ? (
               <Area
-                key={s.key}
-                dataKey={s.key}
+                key={s.peakKey}
+                dataKey={s.peakKey}
                 type="monotone"
-                stackId={s.stack}
                 stroke={s.color}
-                strokeWidth={stacked ? 0 : 1.5}
-                fill={stacked ? s.color : `url(#${fillId}-${s.key})`}
-                fillOpacity={stacked ? 0.78 : 1}
+                strokeWidth={1}
+                strokeOpacity={0.4}
+                fill={`url(#${fillId}-${s.key})`}
+                // The envelope is context for the mean, not a second series.
+                // It shares the gradient so the two read as one shape, at a
+                // fraction of the density so the line stays the subject.
+                fillOpacity={0.4}
                 dot={false}
                 isAnimationActive={false}
                 connectNulls={false}
               />
-            ) : (
-              <Line
-                key={s.key}
-                dataKey={s.key}
-                type="monotone"
-                stroke={s.color}
-                strokeWidth={1.5}
-                dot={false}
-                isAnimationActive={false}
-                connectNulls={false}
-              />
-            ),
+            ) : null,
           )}
 
-          {drag && drag.from !== drag.to && (
-            <ReferenceArea
-              x1={Math.min(drag.from, drag.to)}
-              x2={Math.max(drag.from, drag.to)}
-              fill="var(--primary)"
-              fillOpacity={0.12}
-              stroke="var(--primary)"
-              strokeOpacity={0.4}
+        {series.map((s) =>
+          s.kind === "area" || stacked ? (
+            <Area
+              key={s.key}
+              dataKey={s.key}
+              type="monotone"
+              stackId={s.stack}
+              stroke={s.color}
+              strokeWidth={stacked ? 0 : 1.5}
+              fill={stacked ? s.color : `url(#${fillId}-${s.key})`}
+              fillOpacity={stacked ? 0.78 : 1}
+              dot={false}
+              isAnimationActive={false}
+              connectNulls={false}
             />
-          )}
-        </ComposedChart>
-      </ChartContainer>
-    </div>
+          ) : (
+            <Line
+              key={s.key}
+              dataKey={s.key}
+              type="monotone"
+              stroke={s.color}
+              strokeWidth={1.5}
+              dot={false}
+              isAnimationActive={false}
+              connectNulls={false}
+            />
+          ),
+        )}
+
+        {drag && drag.from !== drag.to && (
+          <ReferenceArea
+            x1={Math.min(drag.from, drag.to)}
+            x2={Math.max(drag.from, drag.to)}
+            fill="var(--primary)"
+            fillOpacity={0.12}
+            stroke="var(--primary)"
+            strokeOpacity={0.4}
+          />
+        )}
+      </ComposedChart>
+    </ChartContainer>
   )
-}
+}, plotHeld)
 
 /**
  * The line marking the instant another chart is being hovered at.

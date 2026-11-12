@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
-import { mockHost } from "./host-fixture"
+import { host, mockHost, snapshot } from "./host-fixture"
+import { risen } from "./risen"
 
 const recordWorkspace = process.env.JD_WORKSPACE_VIDEO === "1"
 test.use({ video: recordWorkspace ? "on" : "off" })
@@ -311,10 +312,99 @@ test("connections are charted by how they fared", async ({ page }) => {
   await expect(page.getByText("CPU 97%", { exact: true })).toBeVisible({ timeout: 20_000 })
   const panel = (title: string) =>
     page.locator("[data-slot=panel]", { has: page.getByRole("heading", { name: title }) })
+  // Below the first screen, where a plot is drawn once the reader is near it.
+  await panel("Resent segments").scrollIntoViewIfNeeded()
   for (const title of ["Resent segments", "Connection RTT", "Failed connections"]) {
     await expect(panel(title).locator(".recharts-surface").first()).toBeVisible()
   }
   const reading = panel("Resent segments").locator("[data-slot=panel-header]")
   await expect(reading).toContainText("0.25%")
   await expect(reading).toContainText("38 ms")
+})
+
+/** The pane the dashboard scrolls: the page's own, not the window. */
+const pane = (page: Page) => page.locator("[data-slot=page]").locator("xpath=..")
+
+for (const size of [
+  { width: 1280, height: 720 },
+  { width: 390, height: 844 },
+]) {
+  test(`a chart is drawn when the reader comes near it, in a frame that was already there, at ${size.width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size)
+    await page.goto("/metrics")
+    await expect(page.getByText("CPU 97%", { exact: true })).toBeVisible({ timeout: 20_000 })
+    await risen(page)
+
+    // Every chart's frame is in the page from the start; the plots are not.
+    const frames = page.locator("[data-slot=metric-chart]")
+    const plots = page.locator("[data-slot=metric-chart] .recharts-wrapper")
+    const total = await frames.count()
+    expect(total).toBeGreaterThanOrEqual(10)
+    // The first is on the first screen at a laptop's width, a scroll away on a phone.
+    await frames.first().scrollIntoViewIfNeeded()
+    await expect(frames.first().locator("svg.recharts-surface")).toBeVisible()
+    const last = frames.last()
+    await expect(last.locator(".recharts-wrapper")).toHaveCount(0)
+    expect(await plots.count(), "plots drawn on arrival").toBeLessThan(total)
+
+    // Coming near draws it where its frame stood: the frame keeps its place
+    // and its height, and the page under it grows by nothing.
+    const tall = () => pane(page).evaluate((el) => el.scrollHeight)
+    const place = () =>
+      last.evaluate((el) => {
+        const sheet = el.closest("[data-slot=page]")!.getBoundingClientRect()
+        const box = el.getBoundingClientRect()
+        return {
+          top: Math.round(box.top - sheet.top),
+          left: Math.round(box.left - sheet.left),
+          height: Math.round(box.height),
+        }
+      })
+    const before = { place: await place(), tall: await tall() }
+    await last.scrollIntoViewIfNeeded()
+    await expect(last.locator("svg.recharts-surface")).toBeVisible()
+    expect(await place()).toEqual(before.place)
+    expect(await tall()).toBe(before.tall)
+
+    // One that is left stays drawn: going back up takes nothing away.
+    const drawn = await plots.count()
+    await frames.first().scrollIntoViewIfNeeded()
+    await expect(last.locator(".recharts-wrapper")).toHaveCount(1)
+    expect(await plots.count()).toBeGreaterThanOrEqual(drawn)
+  })
+}
+
+test("a live figure in a chart's head does not redraw the chart under it", async ({ page }) => {
+  let push: (data: unknown) => void = () => {}
+  await page.routeWebSocket("**/api/v1/system/stream**", (socket) => {
+    socket.send(JSON.stringify({ type: "host", data: host }))
+    socket.send(JSON.stringify({ type: "metrics", data: snapshot }))
+    push = (data) => socket.send(JSON.stringify({ type: "metrics", data }))
+  })
+  await page.setViewportSize({ width: 1280, height: 2400 })
+  await page.goto("/metrics")
+  const sockets = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Sockets" }),
+  })
+  await expect(sockets.locator("svg.recharts-surface")).toBeVisible({ timeout: 20_000 })
+  const head = sockets.locator("[data-slot=panel-header]")
+  await expect(head.getByText("312", { exact: true })).toBeVisible()
+
+  // recharts measures a line's length each time it renders one, so a count of
+  // those measurements is a count of plots redrawn. The window on screen is
+  // the recorded hour: a frame of the socket changes the heads and no row.
+  await page.evaluate(() => {
+    const w = window as unknown as { measured: number }
+    w.measured = 0
+    const measure = SVGGeometryElement.prototype.getTotalLength
+    SVGGeometryElement.prototype.getTotalLength = function () {
+      w.measured++
+      return measure.call(this)
+    }
+  })
+  push({ ...snapshot, sockets: { ...snapshot.sockets, tcpInUse: 313 } })
+  await expect(head.getByText("313", { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => (window as unknown as { measured: number }).measured)).toBe(0)
 })
