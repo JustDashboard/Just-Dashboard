@@ -403,6 +403,13 @@ are dated evidence, not proof of current attachment ownership.
   `"reported"`: an outcome that is only partly what the title promises — a site deleted but nginx not
   reloaded — is announced by the action itself, and a bare "completed" beside it would be the untrue
   half.
+- **One reading out of the metrics store is read through `useMetricsValue(select, same)`**
+  (`hooks/use-metrics.ts`, over `reader` in `lib/metrics-store.ts`), not through `useMetrics()`. The
+  store builds a new state on every two-second frame, so a component that subscribes to all of it
+  renders every two seconds whatever it draws. The Files page read the whole state for the free space
+  on one disk and drew every row of the folder again on each frame: 0.9 to 1.7 s of script in ten idle
+  seconds on a 521-row folder, a long task per frame. The reading lives in `files/disk-room.tsx` now and
+  the page does not subscribe at all. `useMetrics()` is for a component that draws the frame itself.
 - `lib/metrics-store.ts` keeps the live series **outside React**: owning five minutes of history in a route
   component threw it away on navigation, and pushing a 2 s frame through a context above the router
   re-rendered the terminal and log tail twice a second. Mirrored to sessionStorage so a reload keeps its

@@ -4,6 +4,7 @@ import {
   isWithin,
   joinPath,
   mediaKind,
+  mountOf,
   numberedName,
   parentOf,
   thumbnailKind,
@@ -60,6 +61,18 @@ describe("paths", () => {
     expect(isWithin("/home/op", "/home/op")).toBe(true)
     expect(isWithin("/home/operator", "/home/op")).toBe(false)
     expect(isWithin("/etc", "/")).toBe(true)
+  })
+
+  test("a path is on the deepest mount that holds it", () => {
+    const mounts = [{ mountpoint: "/" }, { mountpoint: "/srv" }, { mountpoint: "/srv/data" }]
+    expect(mountOf(mounts, "/srv/data/pg/base")).toBe(mounts[2])
+    expect(mountOf(mounts, "/srv/database")).toBe(mounts[1])
+    expect(mountOf(mounts, "/home/op")).toBe(mounts[0])
+    expect(mountOf([{ mountpoint: "/boot" }], "/home/op")).toBeUndefined()
+    // No folder yet, or a frame that carried no mounts: no reading, not an error.
+    expect(mountOf(mounts, null)).toBeUndefined()
+    expect(mountOf(undefined, "/srv")).toBeUndefined()
+    expect(mountOf({}, "/srv")).toBeUndefined()
   })
 
   test("join and parent agree", () => {

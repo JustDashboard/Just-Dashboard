@@ -47,7 +47,6 @@ import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePanelSize } from "@/lib/panel-size"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMetrics } from "@/hooks/use-metrics"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page } from "@/components/page"
 import { PaneFooter, PaneHeader } from "@/components/panel"
@@ -64,6 +63,7 @@ import {
 } from "@/components/files/file-icon"
 import { FolderColourMenu } from "@/components/files/folder-colour"
 import { COLUMN, FileRow } from "@/components/files/file-row"
+import { DiskRoom } from "@/components/files/disk-room"
 import { FilesSidebar } from "@/components/files/files-sidebar"
 import { GridView, type TileSize } from "@/components/files/grid-view"
 import { ImageEditorSheet } from "@/components/files/image-editor"
@@ -115,7 +115,6 @@ import {
 } from "@/components/files/media"
 import { startPathDrag, useDropTarget, type DropMode } from "@/components/files/dnd"
 import { ResizeHandle } from "@/components/resize-handle"
-import { Meter, utilisationTone } from "@/components/meter"
 import { IconAction } from "@/components/icon-action"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -471,22 +470,6 @@ export default function FilesPage() {
   const parentReachable =
     parent !== null &&
     (listing.data?.roots ?? places.data?.roots ?? []).some((root) => isWithin(parent, root))
-
-  // The disk this folder is on, from the metrics stream the shell already
-  // keeps open: a cloud says how much room is left, and so does this.
-  const { snapshot } = useMetrics()
-  const mount = useMemo(() => {
-    // A frame that has not carried mounts yet — the first one after the
-    // socket opens, or a seeded server snapshot — is simply no reading.
-    if (!path || !Array.isArray(snapshot?.mounts)) return undefined
-    let best: (typeof snapshot.mounts)[number] | undefined
-    for (const m of snapshot.mounts) {
-      if (isWithin(path, m.mountpoint) && (!best || m.mountpoint.length > best.mountpoint.length)) {
-        best = m
-      }
-    }
-    return best
-  }, [path, snapshot])
 
   // An upload into the browsed folder is a change to the listing; one into
   // another folder shows up when that folder is opened.
@@ -1893,20 +1876,7 @@ export default function FilesPage() {
                 >
                   <Question />
                 </IconAction>
-                {mount && (
-                  <span className="flex min-w-0 shrink-0 items-center gap-2">
-                    <Meter
-                      value={mount.usedPercent}
-                      tone={utilisationTone(mount.usedPercent)}
-                      size="thin"
-                      label={`Disk used on ${mount.mountpoint}`}
-                      className="w-20"
-                    />
-                    <span className="numeric truncate">
-                      {bytes(mount.free)} free on {mount.mountpoint}
-                    </span>
-                  </span>
-                )}
+                <DiskRoom path={path} />
               </PaneFooter>
             </div>
 
