@@ -34,7 +34,8 @@ export const CAPABILITIES: {
   {
     key: "read",
     title: "Read everything",
-    description: "Metrics, logs, containers, files, databases and configuration, as they are.",
+    description:
+      "Metrics, logs, containers, databases and configuration, and every file as root reads it, keys and saved secrets included.",
     icon: Eye,
     from: "readonly",
   },
@@ -49,7 +50,8 @@ export const CAPABILITIES: {
   {
     key: "file.write",
     title: "Change files",
-    description: "Edit and upload files, and change what a deployment is built from.",
+    description:
+      "Edit and upload any file as root, and change what a deployment is built from. That is enough to become root.",
     icon: FolderOpen,
     from: "limited",
     products: ["git"],
@@ -79,11 +81,21 @@ export const CAPABILITIES: {
   },
 ]
 
-/** One line per role, for a picker that has to say what it is handing out. */
+/**
+ * One line per role, for a picker that has to say what it is handing out.
+ *
+ * None of the three is a role for somebody the server is not trusted to, and
+ * the lines say so, because the picker is where a role is given away. The
+ * Files page works as root for every role: an account that may change files
+ * can write itself a root login, and one that only reads still reads the
+ * password hashes, the private keys and the dashboard's own key (SECURITY.md,
+ * "Roles"). "No deleting, no accounts" read as a lesser trust, which it is
+ * not; it is fewer buttons.
+ */
 export const ROLE_SUMMARY: Record<Role, string> = {
-  admin: "Everything, including other accounts and this dashboard's settings",
-  limited: "Start, stop and deploy, and edit files — no deleting, no accounts",
-  readonly: "Look at everything, change nothing",
+  admin: "Everything: a root shell, other accounts and this dashboard's settings",
+  limited: "Start, stop, deploy and write any file as root, which is as good as root",
+  readonly: "Changes nothing, but reads every file as root, saved secrets included",
 }
 
 /** The roles from the one that only looks up, each adding to the one before it. */

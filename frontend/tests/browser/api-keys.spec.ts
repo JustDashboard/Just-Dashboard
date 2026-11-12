@@ -434,7 +434,9 @@ test("read-only owners can replace keys within their role but cannot delete reco
   await mockKeys(page, "readonly")
   await page.goto("/account/keys")
   await action(page, "github-actions", "Replace key")
-  await expect(page.getByRole("dialog")).toContainText("Look at everything, change nothing")
+  await expect(page.getByRole("dialog")).toContainText(
+    "Changes nothing, but reads every file as root, saved secrets included",
+  )
   await expect(page.getByRole("dialog").getByText("Start and stop", { exact: true })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await page.getByRole("button", { name: "Show inactive keys" }).click()

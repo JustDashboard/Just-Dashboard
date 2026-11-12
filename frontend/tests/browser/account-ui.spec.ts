@@ -312,7 +312,9 @@ test("keys are drawn as what holds them, wired through their role", async ({ pag
   await page.getByLabel("Name").fill("uptime-kuma")
   await expect(page.getByRole("dialog").locator('img[src="/logos/uptime-kuma.svg"]')).toBeVisible()
   await expect(
-    page.getByRole("dialog").getByText("Look at everything, change nothing"),
+    page
+      .getByRole("dialog")
+      .getByText("Changes nothing, but reads every file as root, saved secrets included"),
   ).toBeVisible()
 })
 
@@ -342,6 +344,15 @@ test("users are cards drawn by their faces, under the line that counts them", as
   await expect(cards.filter({ hasText: "Guest" })).toHaveCount(0)
   await page.getByRole("group", { name: "Show" }).getByRole("button", { name: /^All/ }).click()
   await expect(cards).toHaveCount(4)
+
+  // The picker on a card says what each role is, not only its word.
+  await page.getByRole("combobox", { name: "Role of Deploy bot" }).click()
+  await expect(page.getByRole("option", { name: /limited/ })).toContainText("as good as root")
+  await expect(page.getByRole("option", { name: /readonly/ })).toContainText(
+    "saved secrets included",
+  )
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
 
   // Changing the role from its picker does not open the editor behind it.
   await page.getByRole("button", { name: "Edit Maria Rusu" }).click()

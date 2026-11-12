@@ -400,6 +400,16 @@ close of the file anywhere in it — a scan reading its header, a download, an a
 and another SQLite closing its connection afterwards would believe it was the last one and delete the
 `-wal` and `-shm` the store is still writing through, corrupting the database. Inspect a live store
 read-only: `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`.
+The store, its `-wal` and its `-shm` are `0600` from the moment each exists (`store/file_modes.go`): the
+log holds the pages written last, so it is as private as the file. SQLite gives the two sidecars the mode
+of the database, whatever the umask, so `Open` creates `vpsd.db` `0600`, or makes an existing one and
+its sidecars `0600`, before the first connection; a chmod after the schema used to leave both `0644`
+from a first start until the next restart. `Open` also takes listing and writing in `JD_DATA_DIR` away
+from other accounts (`0755`, as Docker makes a bind mount's source, becomes `0711`). The directory
+stays searchable because the host's nginx reaches `nginx-cache` under it as its own account, and bits
+are only removed, so a directory closed further stays closed. The process umask is not changed: the
+server starts package installs, builds and the terminal, and a umask of 077 handed down to them would
+make what they install unreadable to the accounts meant to read it.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
 `api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `api_token_deployments` — the deployments a deploy key, or an MCP key's deployment grant, was narrowed to —, `audit_log`, whose `key_id` and `key_name` name the API key behind a request, and whose `session_id` and `hub_user` name the session a Just Hub sign-in ticket opened and its hub user); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, the images placed on them in `board_files`, the install's shape library in `board_library`, and `sticky_boards`, which nothing reads since Stickyboard was removed in 0.8 but which stays so the boards made with it in 0.7.2–0.7.5 survive an update); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
 `remote_desktop_sessions`); backups

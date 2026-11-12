@@ -103,12 +103,48 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 
 | | `readonly` | `limited` | `admin` |
 | --- | :---: | :---: | :---: |
-| View everything | ✅ | ✅ | ✅ |
-| Start / stop / restart, Git, edit files | | ✅ | ✅ |
+| View everything, and read any file as root | ✅ | ✅ | ✅ |
+| Start / stop / restart, Git, write any file as root | | ✅ | ✅ |
 | Terminal, delete, prune, restore, updates, accounts, firewall | | | ✅ |
+| **Can become root on the server** | reads what root reads | **yes** | **yes** |
 
-`readonly` can read any file inside `JD_FILE_ROOTS`, so give it to someone you would let read the
-disk.
+**A role decides which buttons an account has, not how far it can be trusted.** There is no role for
+someone you would not trust with the server:
+
+- **`admin` is root.** It has the terminal.
+- **`limited` is root too.** The Files page writes as root, anywhere inside `JD_FILE_ROOTS`, which is
+  the whole server unless you narrowed it. A `limited` account can therefore add its own key to
+  `/root/.ssh/authorized_keys`, or write a sudo rule or a cron job, and from there do anything an
+  administrator can. What it lacks is the terminal, the delete buttons and the accounts page, not the
+  power. Give it only to someone you would give `admin`.
+- **`readonly` changes nothing and reads everything root can read**: `/etc/shadow`, SSH private keys,
+  every project's `.env`, and the dashboard's own `.env` and database (`/var/lib/just-dashboard`).
+  Those two together hold `JD_MASTER_KEY` and everything sealed with it, so a `readonly` account can
+  open every password, token and key the dashboard stores and every account's two-factor secret, and
+  it has every account's password hash to guess at. The pages mask secrets; the Files page reads the
+  files they are kept in. Give `readonly` only to someone you would let read the whole disk as root.
+
+An API key made with one of these roles reaches what the role reaches.
+
+This is how the dashboard is built, not something it overlooked, and it is the owner's decision to keep:
+it is one panel for the people who run one server. `JD_FILE_ROOTS` narrows the Files page, for every
+role at once, administrators included. Keeping the dashboard's own files and the paths that grant
+root away from the roles below `admin` is not built;
+[what that would take](docs/internal/security/invariants.md#what-a-role-is-and-what-it-is-not) is
+written down with the decision.
+
+### When someone who had an account should no longer be trusted
+
+Anyone who had an account, of any role, could read `JD_MASTER_KEY` and the database, and so everything
+stored in the dashboard, along with every file on the server. **`JD_MASTER_KEY` cannot be changed yet
+without losing what is sealed with it**: replacing it in `.env` makes every stored secret unreadable,
+and there is no command that seals them again under a new key. Removing the account is therefore not
+enough, and a new key would not be either, because what they could read was the secrets themselves.
+Change those: the passwords, tokens and keys saved in the dashboard (database connections, Git and DNS
+credentials, backup destinations, deployment secrets), the server's SSH keys and account passwords,
+and every dashboard account's password and authenticator. Backups of the dashboard made while they
+had access open with the same key. What changing the key safely has to do before it can ship is
+written down in [the master key](docs/internal/security/master-key.md).
 
 ## Read further
 

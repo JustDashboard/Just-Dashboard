@@ -2052,7 +2052,17 @@ func Open(dataDir string) (*Store, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
+	// MkdirAll leaves a directory that exists as it is, and the one Docker
+	// makes for the bind mount is 0755.
+	if err := tightenDataDir(dataDir); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(dataDir, DatabaseFile)
+	// Before the first connection, so that the log and the index SQLite makes
+	// beside the database are private from the moment they exist.
+	if err := prepareStoreFiles(path); err != nil {
+		return nil, err
+	}
 	// Transactions begin IMMEDIATE: a transaction that reads first and writes
 	// later under a deferred BEGIN fails at once with SQLITE_BUSY_SNAPSHOT
 	// when any other connection commits in between, and the busy timeout never
@@ -2117,7 +2127,9 @@ func Open(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	// Again now that the log and the index exist: what prepareStoreFiles
+	// arranged through SQLite is checked here by name.
+	if err := keepStoreFilesPrivate(path); err != nil {
 		db.Close()
 		return nil, err
 	}

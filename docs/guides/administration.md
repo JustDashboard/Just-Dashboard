@@ -31,6 +31,10 @@ while the backend is stopped.
 | `sudo ./scripts/manage.sh rollback [COMMIT]` | [Go back](#if-an-update-fails) to the images and the commit from before the last update |
 | `./scripts/manage.sh --help` | Usage, no sudo needed |
 
+A role is a set of buttons, not a level of trust: `limited` writes any file as root and so can become
+root, and `readonly` reads every file as root, the dashboard's own key and database included. Read
+[Roles](../../SECURITY.md#roles) before giving an account to someone you would not give the server.
+
 Passwords are entered twice with hidden input and must meet the dashboard's strength rules. The
 password a script sets is the one the account signs in with — the dashboard does not ask for another
 at sign-in. An account an admin creates from Account → Users, and a bootstrap password the backend
