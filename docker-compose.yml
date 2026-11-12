@@ -98,6 +98,8 @@ services:
       JD_DEPLOY_HEAVY_SLOTS: ${JD_DEPLOY_HEAVY_SLOTS:-1}
       JD_DEPLOY_LIGHT_SLOTS: ${JD_DEPLOY_LIGHT_SLOTS:-2}
       JD_DEPLOY_LEASE_TTL: ${JD_DEPLOY_LEASE_TTL:-30s}
+      # How many of an environment's newest runs keep their whole output.
+      JD_DEPLOY_HISTORY_RUNS: ${JD_DEPLOY_HISTORY_RUNS:-200}
       JD_NGINX_DIR: ${JD_NGINX_DIR:-/etc/nginx}
       JD_CADDYFILE: ${JD_CADDYFILE:-/etc/caddy/Caddyfile}
       JD_INGRESS_CONTAINER: ${JD_INGRESS_CONTAINER:-}

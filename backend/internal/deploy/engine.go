@@ -87,6 +87,14 @@ type EngineConfig struct {
 	LeaseTTL    time.Duration
 	PollEvery   time.Duration
 	HotLogLimit int
+	// History is how much of what ended runs printed is kept; see
+	// HistoryPolicy. The zero value keeps everything.
+	History HistoryPolicy
+
+	// When the history policy is applied: historyFirst after Start, every
+	// historyEvery after that, and historyBacklogPause after a pass that
+	// left runs waiting.
+	historyFirst, historyEvery, historyBacklogPause time.Duration
 }
 
 func (c EngineConfig) normalized() EngineConfig {
@@ -106,6 +114,18 @@ func (c EngineConfig) normalized() EngineConfig {
 	}
 	if c.HotLogLimit <= 0 {
 		c.HotLogLimit = 10_000
+	}
+	if c.History.KeepRuns < 0 {
+		c.History.KeepRuns = 0
+	}
+	if c.historyFirst <= 0 {
+		c.historyFirst = time.Minute
+	}
+	if c.historyEvery <= 0 {
+		c.historyEvery = time.Hour
+	}
+	if c.historyBacklogPause <= 0 {
+		c.historyBacklogPause = time.Second
 	}
 	return c
 }
@@ -189,6 +209,10 @@ func (e *Engine) Start(ctx context.Context) error {
 	}
 	e.loopWG.Add(1)
 	safego.Go(loopCtx, e.log, "deployment engine schedule", e.schedule, e.loopWG.Done)
+	if e.config.History.KeepRuns > 0 {
+		e.loopWG.Add(1)
+		safego.Go(loopCtx, e.log, "deployment history", e.keepHistory, e.loopWG.Done)
+	}
 	return nil
 }
 
@@ -313,7 +337,10 @@ func (e *Engine) startWorker(lease QueueLease, prepared func(context.Context, Qu
 			e.mu.Unlock()
 			// Every path out of a worker — success, failure, cancellation or
 			// a reconciliation decision — passes here, so this is the one
-			// place a terminal run is announced.
+			// place a terminal run is held to the hot limit and announced. A
+			// build that fails in a loop prints the most, and until this was
+			// here only a run that succeeded was held to it.
+			e.compactFinished(lease.RunID)
 			e.observeFinished(lease.RunID)
 			e.Notify()
 		}()
@@ -479,10 +506,17 @@ func (e *Engine) execute(ctx context.Context, lease QueueLease) error {
 			return e.finishCancellation(lease)
 		}
 	}
-	if err := e.finishSuccess(ctx, lease); err != nil {
-		return err
+	return e.finishSuccess(ctx, lease)
+}
+
+// compactFinished keeps the newest HotLogLimit lines of a run that has
+// ended. A worker that lost its lease leaves a run that has not, which the
+// worker that reclaims it will pass here when it ends.
+func (e *Engine) compactFinished(runID int64) {
+	err := e.store.CompactRunLogs(context.Background(), runID, e.config.HotLogLimit)
+	if err != nil && !errors.Is(err, ErrRunStillOpen) && !errors.Is(err, ErrRunNotFound) && e.log != nil {
+		e.log.Error("deployment output could not be compacted", "run", runID, "err", err)
 	}
-	return e.store.CompactRunLogs(context.Background(), lease.RunID, e.config.HotLogLimit)
 }
 
 // A step's output is written to the transcript in batches: when this many

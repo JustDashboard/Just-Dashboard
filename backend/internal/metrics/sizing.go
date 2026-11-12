@@ -379,7 +379,7 @@ func (u SizingUsage) ThrottledShare(ids []string) *float64 {
 }
 
 // SizingUsage reads the samples of the given container ids over [from, to]
-// in one ordered pass over the (container_id, ts) index — a week of one
+// through the two indexes on a sample's identity, in order — a week of one
 // container is forty thousand rows, and folding them here costs a third of
 // the window functions SQLite would run for the same answer.
 //
@@ -394,11 +394,7 @@ func (r *Recorder) SizingUsage(ctx context.Context, ids []string, from, to time.
 	if where == "" || !r.Enabled() {
 		return usage, nil
 	}
-	rows, err := r.history().QueryContext(ctx, `
-		SELECT container_id, ts, COALESCE(sample_time, ts), cpu_percent, mem_bytes, cpu_total, cpu_periods, cpu_throttled
-		  FROM metric_container_samples
-		 WHERE `+where+` AND ts >= ?1 AND ts <= ?2
-		 ORDER BY container_id, ts`, args...)
+	rows, err := r.history().QueryContext(ctx, sizingUsageQuery(where), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +509,19 @@ func sortBins(bins []Bin) {
 	})
 }
 
-// identityFilter is the IN list for a set of container ids and the arguments
+// sizingUsageQuery reads the samples identityFilter's condition picks,
+// a container at a time and in order of time.
+func sizingUsageQuery(where string) string {
+	return `
+		SELECT ` + containerIdentity + ` AS identity, s.ts, COALESCE(s.sample_time, s.ts),
+		       s.cpu_percent, s.mem_bytes, s.cpu_total, s.cpu_periods, s.cpu_throttled
+		  FROM metric_container_samples s` + containerIdentityJoin + `
+		 WHERE ` + where + ` AND s.ts >= ?1 AND s.ts <= ?2
+		 ORDER BY identity, s.ts`
+}
+
+// identityFilter is the condition that picks a set of container ids' samples
+// (containerIdentityIn) and the arguments
 // it binds: the window's bounds as ?1 and ?2, whatever the number of ids, and
 // the ids from ?3 on.
 func identityFilter(ids []string, from, to int64) (string, []any) {
@@ -530,7 +538,7 @@ func identityFilter(ids []string, from, to int64) (string, []any) {
 	if len(marks) == 0 {
 		return "", nil
 	}
-	return "container_id IN (" + strings.Join(marks, ",") + ")", args
+	return containerIdentityIn(marks), args
 }
 
 // SizingInput is everything one environment's judgement rests on.

@@ -964,6 +964,16 @@ CREATE TABLE IF NOT EXISTS deploy_log_chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_deploy_log_run ON deploy_log_chunks(run_id, seq);
 
+-- The runs whose output the history policy (deploy/run_history.go) has cut
+-- down to its end, so a pass does not look at one twice. A table of its own
+-- and not a column of deploy_runs: a pass finds its runs from an index and
+-- this table, and a column added to deploy_runs would sit behind the log
+-- tail, which is read through a chain of overflow pages to reach it.
+CREATE TABLE IF NOT EXISTS deploy_run_output_pruned (
+  run_id    INTEGER PRIMARY KEY REFERENCES deploy_runs(id) ON DELETE CASCADE,
+  pruned_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS deploy_dependencies (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   environment_id INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
@@ -1509,6 +1519,19 @@ CREATE TABLE IF NOT EXISTS metric_container_samples (
 -- first) cannot serve.
 CREATE INDEX IF NOT EXISTS idx_container_samples_ts ON metric_container_samples(ts);
 
+-- A container's id, written once. A sample spells the sixty-four characters
+-- out in its row and again in the index on them, which is about half of the
+-- table above; in the short form it holds this row's number (container_ref,
+-- with container_id left empty). metrics/container_ids.go reads either
+-- spelling from 0.8.6 and says why the recorder does not write the short one
+-- yet: the binary a rollback returns to cannot read it. AUTOINCREMENT, so a
+-- number is never given to a second container after the first one's row was
+-- pruned.
+CREATE TABLE IF NOT EXISTS metric_container_ids (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  container_id TEXT NOT NULL UNIQUE
+);
+
 -- Per-device traffic, recorded by the network module's sampler at the metrics
 -- interval (netx/sampler.go). Each row is the interval's mean and its busiest
 -- two seconds in each direction, and the errors and drops counted in it.
@@ -1672,6 +1695,10 @@ BEGIN
 END;
 CREATE INDEX IF NOT EXISTS idx_container_samples_identity_ts
   ON metric_container_samples(container_id, ts);
+-- The same lookup for a sample that holds its container's id as a number.
+-- Partial, so the rows that spell their id out cost it nothing.
+CREATE INDEX IF NOT EXISTS idx_container_samples_ref_ts
+  ON metric_container_samples(container_ref, ts) WHERE container_ref IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_deploy_runs_queue
   ON deploy_runs(state, priority, requested_at, id);
 -- Every fleet poll ranks each project's runs newest first; an index in that
@@ -1896,6 +1923,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Name continuity serves Docker charts; release attribution needs the exact
 	// observed container identity. Old samples deliberately remain unattributed.
 	{"metric_container_samples", "container_id", "TEXT NOT NULL DEFAULT ''"},
+	// The id as the number of its row in metric_container_ids: the short
+	// form, which 0.8.6 reads and does not write yet. NULL for a row that
+	// spells its id out, and for a container that reported none.
+	{"metric_container_samples", "container_ref", "INTEGER DEFAULT NULL"},
 	// Unknown for pre-upgrade rows: an absent measurement must not become an
 	// idle interface or an operator-configured limit during migration.
 	{"metric_container_samples", "network_available", "INTEGER DEFAULT NULL"},

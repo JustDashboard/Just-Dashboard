@@ -364,6 +364,18 @@ type Recorder struct {
 	// saved a moment ago is judged at once.
 	sizingMu    sync.Mutex
 	sizingCache map[string]sizingCached
+
+	// ids are the numbers container ids are written down under
+	// (container_ids.go), remembered so a sample does not ask the store for
+	// one every interval. idsMu is held for a whole write of samples and for
+	// the pruning of ids, so the two never interleave.
+	idsMu sync.Mutex
+	ids   map[string]int64
+	// numberIDs is whether a sample is written with its container's id as a
+	// number, or spelled out as every release so far has written it. It is
+	// off and only a test turns it on: see container_ids.go for what has to
+	// be true of the binary a rollback returns to before the server may.
+	numberIDs bool
 }
 
 // New builds a recorder. An interval or retention outside the supported band
@@ -735,18 +747,23 @@ func (r *Recorder) recordContainersAt(ctx context.Context, at time.Time, stats [
 }
 
 func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []dockerx.ContainerStats) error {
+	r.idsMu.Lock()
+	defer r.idsMu.Unlock()
 	tx, err := r.samples().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	// A row spells its container's id out in container_id and holds no
+	// number, or, with numberIDs, holds the number of the id's row in
+	// metric_container_ids and leaves container_id empty (container_ids.go).
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO metric_container_samples
 		  (ts, name, cpu_percent, mem_bytes, mem_limit, mem_percent, net_rx, net_tx, pids,
-		   block_read, block_write, container_id, size_rw, network_available, block_available,
+		   block_read, block_write, container_id, container_ref, size_rw, network_available, block_available,
 		   mem_limited, cpu_total, sample_time, cpu_periods, cpu_throttled)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(name, ts) DO UPDATE SET
 		  cpu_percent = excluded.cpu_percent,
 		  mem_bytes   = excluded.mem_bytes,
@@ -758,6 +775,7 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		  block_read  = excluded.block_read,
 		  block_write = excluded.block_write,
 		  container_id = excluded.container_id,
+		  container_ref = excluded.container_ref,
 		  size_rw     = excluded.size_rw,
 		  network_available = excluded.network_available,
 		  block_available = excluded.block_available,
@@ -771,9 +789,17 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 	}
 	defer stmt.Close()
 
+	resolved := map[string]int64{}
 	for _, st := range stats {
 		if st.Name == "" {
 			continue // nothing to key the series on, and nothing to look it up by
+		}
+		spelled, ref := st.ID, any(nil)
+		if r.numberIDs {
+			if ref, err = r.containerRef(ctx, tx, st.ID, resolved); err != nil {
+				return err
+			}
+			spelled = ""
 		}
 		observed := at
 		if !st.TS.IsZero() {
@@ -789,13 +815,17 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		if _, err := stmt.ExecContext(ctx, observed.Unix(), st.Name, st.CPUPercent,
 			int64(st.MemUsage), int64(st.MemLimit), st.MemPercent,
 			int64(st.NetRx), int64(st.NetTx), int64(st.PIDs),
-			int64(st.BlockRead), int64(st.BlockWrite), st.ID, st.SizeRw,
+			int64(st.BlockRead), int64(st.BlockWrite), spelled, ref, st.SizeRw,
 			st.NetworkAvailable, st.BlockAvailable, st.MemLimited, int64(st.CPUTotal),
 			float64(observed.UnixNano())/1e9, periods, throttled); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.rememberContainerRefs(resolved)
+	return nil
 }
 
 // Reduce flattens a full snapshot into the handful of series worth keeping for
@@ -941,6 +971,9 @@ func (r *Recorder) prune(ctx context.Context) error {
 		return err
 	}
 	if _, err := r.samples().ExecContext(ctx, `DELETE FROM metric_container_samples WHERE ts < ?`, cutoff); err != nil {
+		return err
+	}
+	if err := r.pruneContainerIDs(ctx); err != nil {
 		return err
 	}
 	if _, err := r.samples().ExecContext(ctx, `DELETE FROM metric_volume_samples WHERE ts < ?`, cutoff); err != nil {

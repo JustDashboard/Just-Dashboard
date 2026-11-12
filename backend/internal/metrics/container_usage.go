@@ -29,15 +29,22 @@ func (r *Recorder) ContainerRange(ctx context.Context, name string, from, to tim
 	// loses every boundary interval, turns single-sample buckets into zero,
 	// and treats a counter reset as a spike. The bounded look-behind includes
 	// the predecessor of the first visible sample without scanning all history.
+	//
+	// identity is the id a sample was taken from, whether the row spells it
+	// out or holds its number (container_ids.go).
 	rows, err := r.history().QueryContext(ctx, `
-		WITH previous AS (
+		WITH samples AS (
+		  SELECT s.*, `+containerIdentity+` AS identity
+		    FROM metric_container_samples s`+containerIdentityJoin+`
+		   WHERE s.name = ? AND s.ts >= ? AND s.ts <= ?
+		), previous AS (
 		  SELECT *, COALESCE(sample_time, ts) - LAG(COALESCE(sample_time, ts)) OVER w AS elapsed,
-		    LAG(container_id) OVER w AS prev_id, LAG(cpu_total) OVER w AS prev_cpu,
+		    LAG(identity) OVER w AS prev_id, LAG(cpu_total) OVER w AS prev_cpu,
 		    LAG(net_rx) OVER w AS prev_rx, LAG(net_tx) OVER w AS prev_tx,
 		    LAG(block_read) OVER w AS prev_read, LAG(block_write) OVER w AS prev_write,
 		    LAG(COALESCE(network_available, net_rx > 0 OR net_tx > 0)) OVER w AS prev_net,
 		    LAG(COALESCE(block_available, block_read > 0 OR block_write > 0)) OVER w AS prev_block
-		  FROM metric_container_samples WHERE name = ? AND ts >= ? AND ts <= ?
+		  FROM samples
 		  WINDOW w AS (ORDER BY ts)
 		), deltas AS (
 		  SELECT *,
@@ -49,14 +56,14 @@ func (r *Recorder) ContainerRange(ctx context.Context, name string, from, to tim
 		      AND block_read >= prev_read THEN block_read - prev_read END AS rd,
 		    CASE WHEN COALESCE(block_available, block_read > 0 OR block_write > 0) AND prev_block
 		      AND block_write >= prev_write THEN block_write - prev_write END AS wr,
-		    CASE WHEN elapsed > 0 AND elapsed <= ? AND container_id = prev_id
+		    CASE WHEN elapsed > 0 AND elapsed <= ? AND identity = prev_id
 		      AND (cpu_total IS NULL OR prev_cpu IS NULL OR cpu_total >= prev_cpu)
 		      THEN elapsed END AS dt
 		  FROM previous WHERE ts >= ?
 		)
 		SELECT (ts / ?) * ? AS bucket, COUNT(*),
-		  AVG(CASE WHEN dt IS NOT NULL OR container_id = '' THEN cpu_percent END),
-		  MAX(CASE WHEN dt IS NOT NULL OR container_id = '' THEN cpu_percent END), AVG(mem_percent), MAX(mem_percent),
+		  AVG(CASE WHEN dt IS NOT NULL OR identity = '' THEN cpu_percent END),
+		  MAX(CASE WHEN dt IS NOT NULL OR identity = '' THEN cpu_percent END), AVG(mem_percent), MAX(mem_percent),
 		  AVG(mem_bytes), MAX(mem_bytes), MAX(CASE WHEN mem_limited = 1 THEN mem_limit ELSE 0 END),
 		  AVG(pids), MAX(size_rw), MAX(pids),
 		  1.0 * SUM(CASE WHEN dt IS NOT NULL THEN rx END) / SUM(CASE WHEN rx IS NOT NULL THEN dt END),
