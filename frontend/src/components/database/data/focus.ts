@@ -1,3 +1,5 @@
+import { claimFocusReturn } from "@/hooks/use-focus-return"
+
 /** How long a closing dialog is waited for before the keyboard is left where it is. */
 const WAIT_MS = 1500
 
@@ -15,6 +17,10 @@ const WAIT_MS = 1500
  * themselves or another dialog has opened in its place.
  */
 export function focusAfterDialog(focus: () => void) {
+  // A dialog hands the keyboard back to what held it when it opened. Here
+  // that is the link or the menu item that was pressed, not where the reader
+  // was working, so the dialog is told this page answers for it.
+  claimFocusReturn(WAIT_MS)
   const deadline = performance.now() + WAIT_MS
   const look = () => {
     if (document.querySelector("[data-slot=dialog-content]")) {

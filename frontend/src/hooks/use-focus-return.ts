@@ -32,6 +32,22 @@ export function firstReachable<T extends { isConnected: boolean; disabled?: bool
   return undefined
 }
 
+let claimedUntil = 0
+
+/**
+ * A page that hands the keyboard back itself says so, and a dialog closing in
+ * the next moment leaves the keyboard alone.
+ *
+ * The database's data page asks a question before the reader leaves unapplied
+ * changes, and the question is opened by the link they pressed. Back to what
+ * opened it would be that link; the page puts the keyboard back on the rows
+ * they were working in (`focusAfterDialog`), and its answer is the one that
+ * stands.
+ */
+export function claimFocusReturn(forMs: number) {
+  claimedUntil = performance.now() + forMs
+}
+
 /**
  * Where the keyboard goes when a dialog closes: back to what opened it.
  *
@@ -48,7 +64,8 @@ export function firstReachable<T extends { isConnected: boolean; disabled?: bool
  * one that gets the keyboard back.
  *
  * Returns the handler for the dialog's `onCloseAutoFocus`. It leaves an event
- * somebody already answered alone, and does nothing when neither element is
+ * somebody already answered alone, gives way to a page that said it hands the
+ * keyboard back itself (`claimFocusReturn`), and does nothing when neither element is
  * still on the page (the row was removed), which is Radix's own behaviour.
  */
 export function useFocusReturn(open: boolean): (event: Event) => void {
@@ -64,6 +81,11 @@ export function useFocusReturn(open: boolean): (event: Event) => void {
   }, [open])
   return useCallback((event: Event) => {
     if (event.defaultPrevented) return
+    if (performance.now() < claimedUntil) {
+      // The page takes it from here; nothing is focused for it.
+      event.preventDefault()
+      return
+    }
     const target = firstReachable<HTMLElement & { disabled?: boolean }>([
       back.current.opener,
       back.current.menu,

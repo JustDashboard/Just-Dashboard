@@ -418,7 +418,10 @@ The rule and its three exceptions:
   top of the sidebar. The opener is whatever held the keyboard when the dialog opened; for a verb in a
   row's menu that item is gone by the time the dialog closes, so the menu's own button is remembered
   beside it (through the menu's `aria-labelledby`) and gets the keyboard instead. A dialog that knows
-  better passes `onCloseAutoFocus` and calls `preventDefault()`. Open dialogs through these two
+  better passes `onCloseAutoFocus` and calls `preventDefault()`. A page that hands the keyboard back
+  itself, for every dialog it opens, calls `claimFocusReturn` as it closes one: the database's data page
+  does (`focusAfterDialog`), because the question it asks before unapplied changes are left is opened by
+  the link that was pressed, and the keyboard belongs back on the rows. Open dialogs through these two
   components, not through a bare `DialogContent`, or the keyboard is dropped again.
 
 `EmptyState`, `ErrorState` and `Notice` keep their body text: there, the sentence *is* the content.
