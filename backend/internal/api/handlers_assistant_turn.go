@@ -930,6 +930,13 @@ func (pr *agentPress) view(ctx context.Context, call assistant.ToolCall) agentCa
 		in := call.CommandInput()
 		view.Reason, view.Input = in.Reason, call.Input
 		view.Kind = assistant.ClassifyCommand(in.Command)
+		if view.Kind == agentKindRead && pr.commandForTerminal(in.Command) != "" &&
+			(assistant.TypedKind(in.Command) != agentKindRead || pr.terminalBusy()) {
+			// It will be typed into the chat's window (runCommand), where it is
+			// read as a terminal_run line is: by the keys in it, and by whatever
+			// program holds the window.
+			view.Kind = agentKindChange
+		}
 		view.Label = "Run " + clipText(strings.Join(strings.Fields(in.Command), " "), 80)
 	case assistant.ToolTerminalRun, assistant.ToolTerminalSend, assistant.ToolTerminalRead:
 		in := call.TerminalInput()

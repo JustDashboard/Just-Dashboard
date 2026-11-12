@@ -388,6 +388,59 @@ func TestNothingThatWritesOrRunsIsReadAsARead(t *testing.T) {
 			"tee /etc/x",
 			"env X=1 rm -rf /",
 		},
+		"a flag left without its value takes the word after it, verb or not": {
+			"systemctl -p status stop nginx",
+			"systemctl --property status reboot",
+			"systemctl -t status restart nginx",
+			"sudo -n systemctl -P status start evil.service",
+			"loginctl -p session-status terminate-user bob",
+			"pm2 --sort list start /tmp/evil.sh",
+			"pm2 --sort list delete all",
+			"npm --depth ls install evil",
+			"npm --omit ls install evil",
+			"npm config --depth get set script-shell /tmp/x",
+			"docker compose -p shop --profile ps down",
+			"docker compose --profile ps exec db dropdb production",
+			"docker compose --ansi ps down",
+			"docker compose --profile -p exec config sh",
+			"systemd-analyze --from-pattern blame log-level debug",
+			"snap --color list remove core",
+			"git branch --sort -l newbranch",
+			"git tag --sort -l v9.9.9",
+		},
+		"a -- taken for a flag's value ends nothing": {
+			"rg -e -- --pre sh x",
+			"journalctl -u -- --rotate --vacuum-time=1s",
+			"journalctl -t -- --rotate",
+			"tree --charset -- -o /etc/cron.d/x /srv",
+			"docker compose config --format -- -o /etc/cron.d/x",
+			"git diff --no-index -S -- --output=/etc/cron.d/x /dev/null /srv/payload",
+			"file -F -- -C -m /tmp/magic",
+			"systemctl status -p -- -H data.evil.example",
+		},
+		"the file a < reads is not a word of the command": {
+			"docker < ps kill web",
+			"git < log checkout .",
+			"docker compose < logs down",
+			"systemctl < status reboot",
+			"< status systemctl reboot",
+			"pm2 < list delete all",
+			"npm < ls install evil",
+		},
+		"a line left open goes on into the next one typed": {
+			"sort /srv/payload -t \\",
+			"cat /etc/hostname \\",
+			"echo 'one",
+		},
+		"a control character is a key where a line is typed": {
+			"cat x\x15\x10",
+			"cat x\x12rm",
+			"echo 'a\x7f\x7f; rm -rf x; echo 'b",
+			"cat x\x1b[A",
+			"echo ok\x03",
+			"cat 'x\x0f'",
+			"cat x\r",
+		},
 	} {
 		for _, line := range lines {
 			if got := ClassifyCommand(line); got == CommandRead {
@@ -582,6 +635,31 @@ func TestAReadWrittenTheUsualWaysIsStillARead(t *testing.T) {
 		"nginx -T",
 		"apache2ctl -S",
 		"printf '%s\\n' a b",
+		// A value written apart from its flag, after the verb or where no verb
+		// is, moves nothing that decides what the line does.
+		"systemctl status nginx -n 50",
+		"systemctl status -n 50 nginx --no-pager",
+		"systemctl list-units --type service --state running",
+		"systemctl show nginx -p ActiveState",
+		"journalctl -u nginx -n 50 --no-pager",
+		"journalctl -b -u nginx",
+		"git log --stat --oneline -5",
+		"git log --stat -- src/",
+		"git diff HEAD~1 --stat -M -- src",
+		"git log -n 5 --oneline",
+		"git branch --contains HEAD",
+		"git branch -r --merged",
+		"git branch --color -a",
+		"git tag -n -l 'v1.*'",
+		"docker compose -p shop ps",
+		"docker compose ps --format json",
+		"npm ls --depth 0",
+		"pm2 list --sort name",
+		"tree -L 2 /srv",
+		"sort < /etc/passwd",
+		"sort -k 2 -t , < /srv/data.csv",
+		// A tab between quotes is a character to a shell handed the line whole.
+		"cut -d'\t' -f1 /etc/passwd",
 	} {
 		if got := ClassifyCommand(line); got != CommandRead {
 			t.Errorf("%q = %s, want a read", line, got)
@@ -593,7 +671,7 @@ func TestAReadWrittenTheUsualWaysIsStillARead(t *testing.T) {
 // its value, or with its value as the word after, and never a word after that
 // the program would take for a flag of its own.
 func TestFlagsAreReadAsTheProgramReadsThem(t *testing.T) {
-	f := flagsOf("-a -b -n? -u: -# --all --lines? --user=")
+	f := flagsOf("-a -b -n? -u: -o~ -# --all --lines? --user= --stat~")
 	for _, c := range []struct {
 		args     string
 		ok       bool
@@ -621,14 +699,47 @@ func TestFlagsAreReadAsTheProgramReadsThem(t *testing.T) {
 		{"x -- -z --zeta", true, "x -z --zeta"},
 		// -n takes what is written onto it, so the word after is read for itself.
 		{"-n --zeta", false, ""},
+		// The program may take the word after -n for its value: a -- there ends
+		// nothing.
+		{"-n -- -z", false, ""},
+		{"--lines -- x", false, ""},
+		{"-n5 -- -z", true, "-z"},
+		// One that is only ever written onto its flag takes nothing after it.
+		{"--stat -- -z", true, "-z"},
+		{"--stat=80 -o -o5 x", true, "x"},
+		{"-o -- -z", true, "-z"},
 	} {
 		g, ok := f.read(strings.Fields(c.args))
 		if ok != c.ok || ok && strings.Join(g.operands, " ") != c.operands {
 			t.Errorf("%q = %v %q, want %v %q", c.args, ok, g.operands, c.ok, c.operands)
 		}
 	}
-	if g, n, ok := f.lead(strings.Fields("-a -u root ls -x")); !ok || n != 3 || !g.seen["-u"] {
+	if g, n, ok := f.lead(strings.Fields("-a -u root ls -x")); !ok || n != 3 || !g.seen["-u"] || g.loose {
 		t.Errorf("the flags in front took %d words (%v)", n, ok)
+	}
+	// A flag left without the value it may take is said, with where it stood:
+	// in front of the first operand, and in front of another flag.
+	for args, want := range map[string][3]bool{
+		"-n 5 x":       {true, true, false},
+		"x -n 5":       {true, false, false},
+		"-n5 x":        {false, false, false},
+		"x -n":         {false, false, false},
+		"-n -a x":      {true, true, true},
+		"-an x":        {true, true, false},
+		"--lines 5":    {true, true, false},
+		"--lines=5 x":  {false, false, false},
+		"x --lines -a": {true, false, true},
+		"-u root x":    {false, false, false},
+		"--stat x":     {false, false, false},
+		"-o -a x":      {false, false, false},
+	} {
+		g, ok := f.read(strings.Fields(args))
+		if got := [3]bool{g.loose, g.early, g.chained}; !ok || got != want {
+			t.Errorf("%q: loose, early, chained = %v (%v), want %v", args, got, ok, want)
+		}
+	}
+	if g, _, ok := f.lead(strings.Fields("-a -n ls -x")); !ok || !g.loose {
+		t.Errorf("a flag in front left without its value was not said (%v)", ok)
 	}
 	w := wordsOf("-noout -in:")
 	for args, want := range map[string]bool{
@@ -736,6 +847,18 @@ func TestTheTerminalsCallsAreChecked(t *testing.T) {
 		}
 		if got := TerminalKind(calls[i]); got != want {
 			t.Errorf("call %d is %s, want %s", i, got, want)
+		}
+	}
+	// A tab is a key in a window, where the shell completes the word before it;
+	// handed to a shell whole, it is a character.
+	for line, want := range map[string]string{
+		"ls -la /srv":                CommandRead,
+		"cat /etc/pas\t":             CommandChange,
+		"cut -d'\t' -f1 /etc/passwd": CommandChange,
+		"rm -rf /srv/x":              CommandDestructive,
+	} {
+		if got := TypedKind(line); got != want {
+			t.Errorf("typed, %q is %s, want %s", line, got, want)
 		}
 	}
 	for name, tools := range map[string][]Tool{"deployment": AgentTools, "server": ServerTools, "database": DatabaseTools} {

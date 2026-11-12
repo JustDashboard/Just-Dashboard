@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -248,6 +249,51 @@ func TestALineTypedIntoARunningProgramWaits(t *testing.T) {
 	}
 	if held := pending[0].(map[string]any); held["kind"] != "change" || held["tool"] != assistant.ToolTerminalRun {
 		t.Fatalf("held = %v", held)
+	}
+}
+
+// A run_command line that is typed into the window (a sudo that may ask) is read
+// by whatever holds the window too, so it waits there as a terminal_run line
+// does, and so does one with a tab in it, which is a key in a window.
+func TestARunCommandLineTypedIntoTheWindowWaitsLikeATerminalLine(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("the terminal's account is root, whose sudo asks nothing, so run_command types no read into the window")
+	}
+	f := databaseAssistantAs(t, auth.RoleAdmin)
+	withHeldTerminal(t, f)
+	f.provider.queue(
+		claudeCalls("Reading.", terminalCall(assistant.ToolTerminalRun, map[string]any{"command": "cat", "wait": 2, "reason": "x"})),
+		claudeCalls("Again.", terminalCall(assistant.ToolRunCommand, map[string]any{"command": "sudo id", "reason": "x"})),
+	)
+	events := lines(t, f.do(http.MethodPost, "/assistant/chat", `{"question":"x","mode":"changes"}`))
+	called := ofType(events, "called")
+	if len(called) != 1 || called[0]["terminal"].(map[string]any)["state"] != "running" {
+		t.Fatalf("cat was not left running: %v", called)
+	}
+	pending, _ := doneOf(t, events)["pending"].([]any)
+	if len(pending) != 1 {
+		t.Fatalf("a line typed into cat ran unasked: called = %v, pending = %v", called, pending)
+	}
+	if held := pending[0].(map[string]any); held["kind"] != "change" || held["tool"] != assistant.ToolRunCommand {
+		t.Fatalf("held = %v", held)
+	}
+
+	// What a line is read as is decided before anything is typed: a tab is a
+	// key where the line goes to the window, and a blank where it runs on its
+	// own.
+	pr := &agentPress{s: f.s}
+	for line, want := range map[string]string{
+		"sudo cat /etc/hostname":            agentKindRead,
+		"sudo cat /etc/hos\t /etc/hostname": agentKindChange,
+		"cat /etc/hos\t /etc/hostname":      agentKindRead,
+	} {
+		input, err := json.Marshal(assistant.CommandInput{Command: line})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := pr.view(context.Background(), assistant.ToolCall{Name: assistant.ToolRunCommand, Input: input}).Kind; got != want {
+			t.Errorf("%q is read as %s, want %s", line, got, want)
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // run_command: a shell on the host, as the terminal's account, for what the
@@ -196,7 +197,14 @@ func splitCommand(line string) ([][]string, bool) {
 // prompt, and where those differ it takes the reading that asks: >&word writes a
 // file unless the word is a stream's number, $'…' and ${…} can spell or do
 // anything, a ! is the history's in a terminal window, and a # begins a comment
-// in one and is a word in the other, so what follows it may or may not run.
+// in one and is a word in the other, so what follows it may or may not run. A
+// control character is a key to a shell that is typed into — one that rubs out
+// what was typed before it, or fetches a line from the history — and is in no
+// line somebody writes to read something, so it asks wherever it stands; and a
+// line that ends in a backslash is left open, as one with a quote open is.
+//
+// The file a < reads from is no word of the command: git < log checkout . is
+// git checkout, whatever the file is called.
 func parseLine(line string) ([]simple, bool) {
 	var (
 		commands []simple
@@ -234,6 +242,9 @@ func parseLine(line string) ([]simple, bool) {
 	}
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			plain = false
+		}
 		if quote == '\'' {
 			if r == '\'' {
 				quote = 0
@@ -306,6 +317,10 @@ func parseLine(line string) ([]simple, bool) {
 					word.WriteRune(runes[i])
 					inWord, quoted = true, true
 				}
+			} else {
+				// Typed, the line goes on into whatever is typed next, whose
+				// first word becomes one of this command's.
+				plain = false
 			}
 		case ' ', '\t':
 			endWord()
@@ -341,10 +356,12 @@ func parseLine(line string) ([]simple, bool) {
 				}
 			}
 		case '<':
-			if at(i+1) == '<' || !inputFile(runes, i+1) {
-				plain = false
-			}
 			endWord()
+			if end, file := inputFile(runes, i+1); at(i+1) == '<' || !file {
+				plain = false
+			} else {
+				i = end - 1
+			}
 		case '(', ')', '{', '}':
 			plain = false
 			endWord()
@@ -409,10 +426,10 @@ func redirectionEnd(runes []rune, i int) (int, bool) {
 	return i + len(null), ends(i + len(null))
 }
 
-// inputFile reads what follows a <, and reports whether it is a file's path
-// written out. bash opens a connection for /dev/tcp/host/port and /dev/udp, and a
-// name that is quoted, or a variable's, could be one.
-func inputFile(runes []rune, i int) bool {
+// inputFile reads what follows a <, and reports where it ends and whether it is
+// a file's path written out. bash opens a connection for /dev/tcp/host/port and
+// /dev/udp, and a name that is quoted, or a variable's, could be one.
+func inputFile(runes []rune, i int) (int, bool) {
 	for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
 		i++
 	}
@@ -421,10 +438,10 @@ func inputFile(runes []rune, i int) bool {
 		i++
 	}
 	if i < len(runes) && !strings.ContainsRune(" \t\n;|&<>()", runes[i]) {
-		return false
+		return 0, false
 	}
 	target := string(runes[start:i])
-	return !strings.HasPrefix(target, "/dev/tcp") && !strings.HasPrefix(target, "/dev/udp")
+	return i, !strings.HasPrefix(target, "/dev/tcp") && !strings.HasPrefix(target, "/dev/udp")
 }
 
 // wrappers only change how the command after them runs, by the flags of

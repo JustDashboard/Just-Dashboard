@@ -22,9 +22,13 @@ import (
 // from the word after it only where the program certainly takes it from there
 // (orAfter): were that wrong, a real flag would be passed over as a value, so
 // everywhere else a value written apart is read as an operand, which is checked
-// like any other. And what points a reader at configuration of the line's own
-// choosing is left out, since configuration is where these programs are told what
-// to run: git -C and -c, docker --config and compose -f, nginx -c, npm --prefix.
+// like any other. The program may take that word for the value all the same, so
+// what a line does is never read off a word that follows such a flag: it is not
+// the subcommand, a -- there ends nothing, and a flag there is not known to be
+// in force (given.loose). And what points a reader at configuration of the
+// line's own choosing is left out, since configuration is where these programs
+// are told what to run: git -C and -c, docker --config and compose -f, nginx -c,
+// npm --prefix.
 
 // arity is where a flag's value is written, if it takes one.
 type arity uint8
@@ -32,10 +36,13 @@ type arity uint8
 const (
 	// noValue: -a, --all.
 	noValue arity = iota + 1
-	// onIt: -n5, --lines=5, or alone. The word after is never its value.
+	// onIt: -n5, --lines=5, or alone. The table does not take the word after
+	// for its value; whether the program does is not known here (given.loose).
 	onIt
 	// orAfter: -u name, -uname, --user name, --user=name.
 	orAfter
+	// optional: --stat, --stat=80. The program never takes the word after.
+	optional
 )
 
 // flags are the flags a reader may be given.
@@ -51,7 +58,8 @@ type flags struct {
 
 // flagsOf reads flags written as getopt would take them: "-a" and "--all" take
 // no value, "-n?" and "--lines?" one written onto them, "-u:" and "--user=" one
-// written onto them or after, and "-#" is a count (-5).
+// written onto them or after, "-M~" and "--stat~" one that may be left out and
+// is only ever written onto them, and "-#" is a count (-5).
 func flagsOf(spec string) *flags {
 	f := &flags{short: map[rune]arity{}, long: map[string]arity{}}
 	for _, token := range strings.Fields(spec) {
@@ -59,6 +67,8 @@ func flagsOf(spec string) *flags {
 		switch token[len(token)-1] {
 		case '?':
 			how, token = onIt, token[:len(token)-1]
+		case '~':
+			how, token = optional, token[:len(token)-1]
 		case ':', '=':
 			how, token = orAfter, token[:len(token)-1]
 		}
@@ -93,6 +103,16 @@ type given struct {
 	// seen are the flags met, as listed: "-l", "--list".
 	seen     map[string]bool
 	operands []string
+	// A flag that may take a value (-p, --property), written without one and
+	// with a word after it, is read by the program one of two ways the table
+	// does not tell apart: a value that must be given is taken from that word,
+	// one that may be left out is not. The word is read here as what it looks
+	// like, and what turns on which way the program went is not read past it.
+	// loose: there was such a flag. early: there was one before the first
+	// operand, which may then be its value, and the word after it the operand.
+	// chained: one was followed by another flag, which the program may have
+	// taken for the value and not for a flag.
+	loose, early, chained bool
 }
 
 func (g given) any(names ...string) bool {
@@ -117,14 +137,29 @@ func (f *flags) scan(args []string, lead bool) (given, int, bool) {
 	if f == nil {
 		f = &flags{}
 	}
+	// open: the word before this one was a flag left without the value it may
+	// take.
+	open := false
+	leave := func(i int) {
+		if i+1 < len(args) {
+			open, g.loose = true, true
+			g.early = g.early || len(g.operands) == 0
+		}
+	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+		after := open
+		open = false
 		switch {
 		case a == "-" || !strings.HasPrefix(a, "-"):
 			if lead {
 				return g, i, true
 			}
 			g.operands = append(g.operands, a)
+		case after && a == "--":
+			// Taken for the value, it ends nothing, and the program goes on
+			// reading flags after it: rg -e -- --pre sh.
+			return g, i, false
 		case f.words:
 			how, listed := f.long[a]
 			if !listed {
@@ -149,14 +184,20 @@ func (f *flags) scan(args []string, lead bool) (given, int, bool) {
 				return g, i, false
 			}
 			g.seen[name] = true
+			g.chained = g.chained || after
 			if how == orAfter && !valued {
 				if i++; i >= len(args) {
 					return g, i, false
 				}
 			}
+			if how == onIt && !valued {
+				leave(i)
+			}
 		case f.numbers && digits(a[1:]):
 			g.seen["-#"] = true
+			g.chained = g.chained || after
 		default:
+			g.chained = g.chained || after
 			// A run of short flags; one that takes a value takes the rest of it.
 			letters := []rune(a[1:])
 			for j, letter := range letters {
@@ -172,6 +213,9 @@ func (f *flags) scan(args []string, lead bool) (given, int, bool) {
 					if i++; i >= len(args) {
 						return g, i, false
 					}
+				}
+				if how == onIt && j == len(letters)-1 {
+					leave(i)
 				}
 				break
 			}
@@ -220,27 +264,35 @@ func atMost(n int, f *flags) func([]string) bool {
 // verbs is a program whose first operand says what it does, with its flags
 // anywhere on the line: a read when that word is one of these, and, alone, when
 // bare. A verb's own check is given the operands after it.
+//
+// The first operand is the verb only when no flag in front of it may have taken
+// it for a value: systemctl -p status stop nginx stops nginx, its -p having
+// taken "status", and npm --depth ls install x installs. A verb whose check
+// reads the words after it is as sure of those only when no flag anywhere may
+// have taken one of them.
 func verbs(f *flags, bare bool, does map[string]func(rest []string) bool) func([]string) bool {
 	return func(args []string) bool {
 		g, ok := f.read(args)
 		switch {
-		case !ok:
+		case !ok, g.early:
 			return false
 		case len(g.operands) == 0:
 			return bare
 		}
 		check, known := does[g.operands[0]]
-		return known && (check == nil || check(g.operands[1:]))
+		return known && (check == nil || !g.loose && check(g.operands[1:]))
 	}
 }
 
 // staged is a program that reads its own flags up to a subcommand, and leaves
-// the rest of the line to that (docker, git, openssl).
+// the rest of the line to that (docker, git, openssl). As with a verb, the word
+// its flags stop at is the subcommand only when none of them may have taken it
+// for a value: docker compose --profile ps down takes "ps" for the profile.
 func staged(f *flags, bare bool, subcommands map[string]func([]string) bool) func([]string) bool {
 	return func(args []string) bool {
-		_, n, ok := f.lead(args)
+		g, n, ok := f.lead(args)
 		switch {
-		case !ok:
+		case !ok, g.loose:
 			return false
 		case n == len(args):
 			return bare
@@ -632,8 +684,9 @@ func dockerReads() func([]string) bool {
 // remote, whose address can itself be a command (ls-remote, remote show).
 func gitReads() func([]string) bool {
 	// What log, show and diff take: every value is written onto its flag or
-	// read as an operand, which a revision or a path is anyway.
-	history := flagsOf("-# -p -u -s -c -m -g -w -b -i -E -F -P -R -a -W -z -q -n? -S? -G? -L? -U? -M? -C? -B? -X? " +
+	// read as an operand, which a revision or a path is anyway. The ones git
+	// documents as [=<value>] never take the word after (--stat -- path).
+	history := flagsOf("-# -p -u -s -c -m -g -w -b -i -E -F -P -R -a -W -z -q -n? -S? -G? -L? -U~ -M~ -C~ -B~ -X~ " +
 		"--oneline --graph --all --patch --no-patch --shortstat --numstat --name-only --name-status --summary --raw " +
 		"--abbrev-commit --no-abbrev-commit --merges --no-merges --first-parent --reverse --follow --source --cached " +
 		"--staged --no-color --no-decorate --check --ignore-all-space --ignore-space-change --ignore-space-at-eol " +
@@ -642,20 +695,21 @@ func gitReads() func([]string) bool {
 		"--regexp-ignore-case --extended-regexp --fixed-strings --perl-regexp --all-match --invert-grep --exit-code " +
 		"--quiet --no-index --no-notes --simplify-by-decoration --full-history --no-renames --function-context --text " +
 		"--no-prefix --walk-reflogs --reflog --no-mailmap --use-mailmap --children --parents --merge-base --not " +
-		"--no-walk? --stat? --color? --decorate? --pretty? --format? --date? --since? --after? --until? --before? " +
-		"--author? --committer? --grep? --max-count? --skip? --diff-filter? --abbrev? --find-renames? --find-copies? " +
-		"--relative? --unified? --inter-hunk-context? --word-diff? --word-diff-regex? --color-words? --color-moved? " +
-		"--diff-algorithm? --stat-width? --stat-count? --dirstat? --branches? --tags? --remotes? --glob? --exclude? " +
-		"--min-parents? --max-parents? --ancestry-path? --diff-merges? --encoding? --notes? --submodule? " +
-		"--ignore-submodules? --src-prefix? --dst-prefix? --line-prefix? --ws-error-highlight? --decorate-refs? " +
+		"--no-walk~ --stat~ --color~ --decorate~ --pretty~ --format? --date? --since? --after? --until? --before? " +
+		"--author? --committer? --grep? --max-count? --skip? --diff-filter? --abbrev~ --find-renames~ --find-copies~ " +
+		"--relative~ --unified? --inter-hunk-context? --word-diff~ --word-diff-regex? --color-words~ --color-moved~ " +
+		"--diff-algorithm? --stat-width? --stat-count? --dirstat~ --branches~ --tags~ --remotes~ --glob? --exclude? " +
+		"--min-parents? --max-parents? --ancestry-path? --diff-merges? --encoding? --notes~ --submodule~ " +
+		"--ignore-submodules~ --src-prefix? --dst-prefix? --line-prefix? --ws-error-highlight? --decorate-refs? " +
 		"--decorate-refs-exclude? --help")
 	// git branch name and git tag name make one: operands are patterns only
-	// when a flag that lists says so.
+	// when a flag that lists says so, and it says so only when no flag before it
+	// may have taken it for a value (git branch --sort -l name makes name).
 	lists := []string{"-l", "--list", "--contains", "--no-contains", "--merged", "--no-merged", "--points-at"}
 	listing := func(f *flags) func([]string) bool {
 		return func(args []string) bool {
 			g, ok := f.read(args)
-			return ok && (len(g.operands) == 0 || g.any(lists...))
+			return ok && !g.chained && (len(g.operands) == 0 || g.any(lists...))
 		}
 	}
 	remote := flagsOf("-v -n --verbose --push --all")
@@ -666,9 +720,9 @@ func gitReads() func([]string) bool {
 			"--ignore-submodules? --column? --find-renames? --help")),
 		"branch": listing(flagsOf("-a -r -v -l -i --all --remotes --verbose --list --show-current --ignore-case --no-color " +
 			"--no-column --no-abbrev --contains? --no-contains? --merged? --no-merged? --points-at? --sort? --format? " +
-			"--color? --column? --abbrev? --help")),
-		"tag": listing(flagsOf("-l -i -n? --list --ignore-case --no-column --contains? --no-contains? --merged? --no-merged? " +
-			"--points-at? --sort? --format? --color? --column? --help")),
+			"--color~ --column~ --abbrev~ --help")),
+		"tag": listing(flagsOf("-l -i -n~ --list --ignore-case --no-column --contains? --no-contains? --merged? --no-merged? " +
+			"--points-at? --sort? --format? --color~ --column~ --help")),
 		// git remote, -v and get-url read the configuration; show asks the remote
 		// unless -n.
 		"remote": func(args []string) bool {

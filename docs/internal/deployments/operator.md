@@ -155,7 +155,10 @@ else, never by listing what to refuse. A line is a `read` only when all of this 
   (`2>&1`, `>&2`, `>&-`, each a whole word: `>&file` writes a file in bash and zsh, and `/dev/null.txt` is one),
   no `$( )`, backticks, `${ }`, `$'…'`, subshell, group, here-document, background job or comment, and no `!`
   that a terminal window's history would expand. Where bash and zsh, run with `-c` or typed at a prompt, read a
-  line differently, the reading that asks is taken.
+  line differently, the reading that asks is taken: a control character is a key to a shell that is typed into
+  (one that rubs out what was typed before it, or fetches a line from the history), and a line that ends in a
+  backslash or with a quote open goes on into the next line typed, so neither is plain. The file a `<` reads
+  from is no word of the command: `git < log checkout .` is `git checkout`.
 - **Every command in it is a listed reader** (`readers`, `assistant/command_readers.go`), named bare or under a
   system directory (`/usr/bin/ls`, never `./ls` or `/srv/app/bin/cat`). A few can only read whatever they are
   given (`ls`, `cat`, `grep`, `ps`, `jq` and the like) and their arguments are not looked at. Every other is a
@@ -166,7 +169,13 @@ else, never by listing what to refuse. A line is a `read` only when all of this 
   `systemctl status`, `journalctl -u`, `crontab -l`, `iptables -L`, `nft list`, `nginx -t`. **A flag the table has
   not heard of makes the line a change**, so a new flag, an abbreviated one or a letter in a run of short ones
   costs an Allow rather than slipping through; a value is taken from the word after its flag only where the
-  program certainly takes it from there, and is read as an operand otherwise.
+  program certainly takes it from there, and is read as an operand otherwise. The program may take that word
+  for the value all the same, so nothing that decides what the line does is read past such a flag: the word
+  after it is not the subcommand (`systemctl -p status stop nginx` stops nginx, `npm --depth ls install x`
+  installs, `docker compose --profile ps down` takes the project down), a `--` after it ends nothing
+  (`journalctl -u -- --rotate`, `rg -e -- --pre sh`), and a flag after it is not known to be in force
+  (`git branch --sort -l name` makes a branch). A value written onto its flag (`--property=status`, `-n5`), or
+  after the subcommand where only reading follows (`systemctl status nginx -n 50`), costs nothing.
 - **Its arguments are what was typed**, wherever they decide what the program does: a variable (`$X`, `"$X"`)
   or a pattern the shell matches file names against can turn out to be a flag or several words, so a reader
   other than the first kind is not read past one, and neither is a wrapper.
@@ -341,10 +350,12 @@ windows are not held, runs on its own as before.
   password turns the terminal's echo off, so it is not in what the window prints either; one that does not would
   print it, and the field says so. `terminal_send` refuses a masked value outright, so the model cannot send a
   `[REDACTED]` back as if it were the secret.
-- **Held like the shell.** A command line is read as `run_command`'s is (`ClassifyCommand`); whatever is typed
-  into a running program is a change, since an answer to a question is a decision — a `terminal_run` line
-  included when a program holds the window in front of its shell (`terminalBusy`), because that program reads
-  it, not the shell; and a read is a read. The
+- **Held like the shell.** A command line is read as `run_command`'s is (`ClassifyCommand`), and as what is
+  typed (`TypedKind`): a tab is a key in a window, where the shell completes the word before it, so a line with
+  one is a change. Whatever is typed into a running program is a change, since an answer to a question is a
+  decision — a `terminal_run` line included when a program holds the window in front of its shell
+  (`terminalBusy`), because that program reads it, not the shell, and a `run_command` line that goes to the
+  window (a `sudo` that may ask) is read the same two ways; and a read is a read. The
   press's audit entry lists each line typed (`terminal: …`) and each answer (`typed: …`, keys by name), masked.
 - **What it changed is said as a change.** A shell line read as a change that succeeded — `run_command` with exit
   0, a terminal call once its window is back at the prompt — carries a `change` like a route's (`commandChange`),
