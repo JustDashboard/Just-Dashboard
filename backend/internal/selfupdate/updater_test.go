@@ -300,3 +300,126 @@ func TestAReleaseWithAChangelogThisVersionOnlyPartlyUnderstandsIsInstalled(t *te
 		t.Fatalf("landed on %q", version)
 	}
 }
+
+// The project's repository keeps the screenshots of its pull requests on
+// branches of their own, and an update that fetched every branch downloaded
+// all of them. None of it is the release.
+func TestAnUpdateFetchesTheBranchItFollowsAndNoOther(t *testing.T) {
+	upstream, checkout := installed(t)
+	git(t, upstream, "checkout", "-q", "-b", "pr-assets/shots")
+	write(t, filepath.Join(upstream, "shot.png"), "a megabyte of pixels\n")
+	git(t, upstream, "add", ".")
+	git(t, upstream, "commit", "-q", "-m", "evidence")
+	evidence := head(t, upstream, "HEAD")
+	git(t, upstream, "checkout", "-q", "main")
+
+	var log bytes.Buffer
+	if _, version, err := forward(checkout, "0.6", &log); err != nil || version != "0.6" {
+		t.Fatalf("version %q, err %v\n%s", version, err, log.String())
+	}
+	if refs := git(t, checkout, "for-each-ref", "refs/remotes/origin/pr-assets"); refs != "" {
+		t.Errorf("the update fetched a branch it does not follow:\n%s", refs)
+	}
+	probe := exec.Command("git", "cat-file", "-e", evidence)
+	probe.Dir = checkout
+	if probe.Run() == nil {
+		t.Errorf("the update downloaded %s, which only the other branch reaches", evidence)
+	}
+	if head(t, checkout, "refs/remotes/origin/main") != head(t, upstream, "main") {
+		t.Error("origin/main was not brought up to date")
+	}
+}
+
+// shallow is `installed` as the install guide now clones: the one branch, at
+// depth one, so nothing below the commit it was cloned at is there.
+func shallow(t *testing.T) (upstream, checkout string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed on this machine")
+	}
+	root := t.TempDir()
+	upstream = filepath.Join(root, "upstream")
+	if err := os.MkdirAll(upstream, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, upstream, "init", "-q", "-b", "main")
+	write(t, filepath.Join(upstream, "docker-compose.yml"), "name: just-dashboard\n")
+	release(t, upstream, "0.4")
+	release(t, upstream, "0.5")
+
+	checkout = filepath.Join(root, "checkout")
+	// By address: git ignores --depth for a path and copies everything.
+	git(t, root, "clone", "-q", "--depth", "1", "--single-branch", "--branch", "main", "file://"+upstream, checkout)
+	if git(t, checkout, "rev-parse", "--is-shallow-repository") != "true\n" || git(t, checkout, "rev-list", "--count", "HEAD") != "1\n" {
+		t.Fatal("the fixture is not a clone of depth one")
+	}
+
+	release(t, upstream, "0.6")
+	return upstream, checkout
+}
+
+// What the install guide's clone has to survive: a release installed from its
+// tag, with the branch already past it, and the way back when it fails. The
+// fast-forward and the ancestor test in restoreCheckout both read history, and
+// a shallow checkout has only what it was cloned at and what it fetched since.
+func TestAShallowSingleBranchCheckoutUpdatesToATagAndGoesBack(t *testing.T) {
+	upstream, checkout := shallow(t)
+	from := head(t, checkout, "HEAD")
+	tagged := head(t, upstream, "HEAD")
+	git(t, upstream, "tag", "v0.6")
+	release(t, upstream, "0.7")
+
+	var log bytes.Buffer
+	landed, err := fastForward(context.Background(), checkout, request{ref: "main", version: "0.6", tagOnly: true}, &log)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, log.String())
+	}
+	if landed.commit != tagged || landed.version != "0.6" || !landed.tagged {
+		t.Fatalf("landed on %s as %s (tagged %v), want the tag %s as 0.6", landed.commit, landed.version, landed.tagged, tagged)
+	}
+	if err := restoreCheckout(context.Background(), checkout, from, landed.commit, &log); err != nil {
+		t.Fatalf("%v\n%s", err, log.String())
+	}
+	if head(t, checkout, "HEAD") != from {
+		t.Fatal("the checkout did not go back")
+	}
+}
+
+func TestAShallowSingleBranchCheckoutFollowsAForksBranch(t *testing.T) {
+	upstream, checkout := shallow(t)
+	var log bytes.Buffer
+	commit, version, err := forward(checkout, "0.6", &log)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, log.String())
+	}
+	if commit != head(t, upstream, "main") || version != "0.6" {
+		t.Fatalf("landed on %s as %s", commit, version)
+	}
+}
+
+// The branch is not what the project's repository installs, so one that has
+// gone (a patch branch deleted once it was merged) is no reason to refuse the
+// tag. For a fork the branch is the release, and its absence is the answer.
+func TestABranchThatIsGoneStopsAForkAndNotATaggedRelease(t *testing.T) {
+	upstream, checkout := installed(t)
+	tagged := head(t, upstream, "HEAD")
+	git(t, upstream, "tag", "v0.6")
+
+	var log bytes.Buffer
+	landed, err := fastForward(context.Background(), checkout, request{ref: "patch/gone", version: "0.6", tagOnly: true}, &log)
+	if err != nil || landed.commit != tagged {
+		t.Fatalf("landed on %s, err %v\n%s", landed.commit, err, log.String())
+	}
+	if !strings.Contains(log.String(), "could not fetch the branch patch/gone") {
+		t.Errorf("the transcript does not say the branch was passed over:\n%s", log.String())
+	}
+
+	_, other := installed(t)
+	before := head(t, other, "HEAD")
+	if _, err := fastForward(context.Background(), other, request{ref: "patch/gone", version: "0.6"}, &log); err == nil {
+		t.Fatal("a fork was updated from a branch origin does not have")
+	}
+	if head(t, other, "HEAD") != before {
+		t.Fatal("the checkout moved")
+	}
+}

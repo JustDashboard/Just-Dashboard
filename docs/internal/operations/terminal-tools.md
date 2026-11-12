@@ -151,9 +151,12 @@ call themselves (`jd version` run from each image), and the last run in `self-up
 path of its transcript and of its database copy.
 
 `update [VERSION]` is the by-hand update with the two things an operator forgets: it tags the running
-images `:previous` first and prints the `rollback` command that undoes it. It fetches tags from
-`origin`, takes the newest `v<version>` tag (or the one named), and fast-forwards with
-`merge --ff-only`; it then builds one service at a time with the build stamp and runs
+images `:previous` first and prints the `rollback` command that undoes it. It asks `origin` which
+tags it has (`ls-remote`), takes the newest `v<version>` tag (or the one named), fetches that tag
+alone (`fetch --tags` brought every branch too, the `pr-assets/*` ones included, and into a clone of
+depth one every older tag with the history below it), and fast-forwards with `merge --ff-only`. In a
+checkout cloned with `--depth`, where git cannot place a tag that is not ahead of `HEAD`, it runs
+`fetch --unshallow` once and then decides; it then builds one service at a time with the build stamp and runs
 `up -d --remove-orphans`. It installs a tag and nothing else, for forks too: a branch head is
 `git pull --ff-only` and `install.sh`. When the checkout's committed `allowed_signers` names a key it
 verifies the tag the way `verifyReleaseTag` does (a tag object, named for the release, signed by a key

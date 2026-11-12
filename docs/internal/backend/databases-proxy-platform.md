@@ -6183,6 +6183,18 @@ done by hand, and the UI refuses to fold it away.
   and each file the update changed with the folders above it (`handBack`, through `hostexec.GiveBack`).
   Until 0.7.1 an update's new folders stayed root's, and the operator's own next pull stopped halfway in
   them.
+- **It fetches the branch the install follows and the release tag, by name** (`fetchBranch`,
+  `fetchReleaseTag`): `+refs/heads/<ref>:refs/remotes/origin/<ref>`, never the checkout's own refspec.
+  A plain `git fetch origin` in an ordinary clone brings every branch, and the project's repository
+  keeps pull requests' screenshots on `pr-assets/*` branches, so every update downloaded all of them
+  made since the last one. It also makes the update independent of how the checkout was cloned: the
+  install guide's clone is `--depth 1 --single-branch --branch main`, and the fast-forward to a tag,
+  the fork's branch and `restoreCheckout`'s ancestor test are all tested from one
+  (`TestAShallowSingleBranchCheckout...`). For the project's repository the branch only keeps
+  `git status` honest, so one that cannot be fetched (a patch branch deleted once merged) is said in
+  the transcript and passed over; for a fork it is what is installed, and failing to fetch it ends
+  the update. Remote branches an older version already fetched are left alone; the administration
+  guide has the commands that drop them.
 - **It installs the release that was offered** (`updateTarget`). After the fetch it takes the tag
   `v<ToVersion>`, asked of `origin` with `ls-remote` and fetched without touching local tags, so a tag
   the operator made cannot stand in for it and one that clashes cannot fail the fetch. With no tag there

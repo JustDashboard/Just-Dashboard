@@ -312,15 +312,31 @@ case "$command" in
 		updater_running && die "An update started from the dashboard is still running. Follow it with: docker logs -f $updater"
 		command -v git >/dev/null 2>&1 || die "git is not installed."
 		from="$(checkout_git rev-parse HEAD 2>/dev/null)" || die "$root is not a git checkout this can read."
-		printf 'Fetching release tags from origin...\n'
-		checkout_git fetch --tags origin || die "Could not fetch from origin. Nothing was changed."
+		# Origin is asked which tags it has, and only the one being installed
+		# is fetched. `git fetch --tags origin` also brought every branch
+		# origin has, and the project's repository keeps the screenshots of its
+		# pull requests on branches of their own; and into a checkout cloned at
+		# depth one, each older tag brings the whole history below it.
+		printf 'Asking origin for its release tags...\n'
+		listed="$(checkout_git ls-remote --tags --refs origin 'refs/tags/v*')" || die "Could not ask origin for its tags. Nothing was changed."
 		if [ -n "${1:-}" ]; then
 			tag="v${1#v}"
 		else
-			tag="$(checkout_git tag --list 'v[0-9]*' --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' | head -n 1 || true)"
+			tag="$(printf '%s\n' "$listed" | awk '{ sub("^refs/tags/", "", $2); print $2 }' | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' | sort -V | tail -n 1 || true)"
 			[ -n "$tag" ] || die "origin has no release tag, and this installs nothing else. Nothing was changed."
 		fi
+		printf '%s\n' "$listed" | awk -v ref="refs/tags/$tag" '$2 == ref { found = 1 } END { exit !found }' ||
+			die "There is no release tag $tag. Nothing was changed."
+		checkout_git fetch origin "refs/tags/$tag:refs/tags/$tag" || die "Could not fetch $tag from origin. Nothing was changed."
 		target="$(checkout_git rev-parse --verify --quiet "refs/tags/$tag^{commit}")" || die "There is no release tag $tag. Nothing was changed."
+		# A checkout cloned with --depth has nothing below the commit it was
+		# cloned at, so git cannot tell a tag that is behind HEAD from one on
+		# another line. The history is fetched once, when the answer needs it.
+		if ! checkout_git merge-base --is-ancestor HEAD "$target" &&
+			[ "$(checkout_git rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+			printf 'This checkout was cloned without its history, which is needed to place %s. Fetching it...\n' "$tag"
+			checkout_git fetch --unshallow origin || die "Could not fetch the history from origin. Nothing was changed."
+		fi
 		if checkout_git merge-base --is-ancestor "$target" HEAD; then
 			printf 'The checkout is already on %s or past it, so there is nothing to update.\n' "$tag"
 			printf 'To rebuild what is here: sudo ./install.sh\n'
