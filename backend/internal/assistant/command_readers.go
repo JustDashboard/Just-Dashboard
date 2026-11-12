@@ -324,7 +324,7 @@ func oneOf(words ...string) func([]string) bool {
 // sent to a machine of the line's choosing, which is how what was read leaves:
 // a name to look up is a message to whoever answers for it.
 const whateverPrograms = "ls ll cat head tail grep egrep fgrep wc cut tr column stat du df free uptime uname whoami id groups " +
-	"who w last echo pwd which type whereis ps pgrep pstree netstat lsblk findmnt lscpu lsmem lspci lsusb vmstat " +
+	"who w last echo pwd which type whereis ps pgrep pstree netstat lsblk findmnt lscpu lsmem lsusb vmstat " +
 	"iostat mpstat nproc readlink realpath basename dirname md5sum sha1sum sha256sum jq diff cmp zcat zgrep od " +
 	"strings nl tac rev test [ true false seq sleep"
 
@@ -418,6 +418,10 @@ func buildReaders() map[string]reader {
 		"--after-context? --before-context? --context? --regexp? --file? --replace? --color? --colors? --threads? "+
 		"--encoding? --engine? --context-separator? --field-match-separator? --field-context-separator? "+
 		"--path-separator? --ignore-file? --help --version")), "rg")
+	// lspci asks a DNS zone for the names it does not know with -q and -Q, the
+	// zone and the file it keeps the answers in being whatever -O says, and -M
+	// probes the bus.
+	add(only(flagsOf("-v -k -x -b -D -P -n -m -t -s? -d? --version")), "lspci")
 	// ss -K closes the sockets it lists, and -D writes them to a file. Its
 	// filter names sockets by state, port and address, and an address that is a
 	// name is looked up.
@@ -556,10 +560,11 @@ func buildReaders() map[string]reader {
 		},
 	}), "npm")
 
-	// ip runs a file of its commands with -batch and inside a namespace with -n;
-	// an object's show, list and get read.
+	// ip runs a file of its commands with -batch and inside a namespace with -n,
+	// and with -r looks up the name of every address it prints, the one it was
+	// asked the route to among them; an object's show, list and get read.
 	ip := wordsOf("-4 -6 -0 -s -stats -statistics -d -details -o -oneline -j -json -p -pretty -c -color -br -brief " +
-		"-h -human -human-readable -iec -r -resolve -a -all -t -timestamp -ts -tshort -V -Version")
+		"-h -human -human-readable -iec -a -all -t -timestamp -ts -tshort -V -Version")
 	add(func(args []string) bool {
 		g, ok := ip.read(args)
 		switch {

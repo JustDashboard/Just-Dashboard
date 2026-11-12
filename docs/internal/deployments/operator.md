@@ -145,7 +145,8 @@ the provider, not ordinary data from a third machine. So:
 - A shell line that reaches another machine is a `change`, as `curl` always was: `ping`, `dig`, `host`,
   `nslookup` and `traceroute` are not readers, nor are `git ls-remote`, `git remote show`, `openssl s_client`,
   `npm view` and `npm outdated`; `getent hosts name`, `lsof -i @host`, an `ss` filter that names a host,
-  `openssl x509 -in http://…` and bash's `< /dev/tcp/host/port` ask as well.
+  `openssl x509 -in http://…` and bash's `< /dev/tcp/host/port` ask as well, and so do `lspci -q`, which asks a
+  DNS zone of the line's choosing, and `ip -r`, which looks up the name of the address it was asked the route to.
 
 A `run_command` line is read by `assistant.ClassifyCommand`, conservatively, so that a misreading costs an Allow
 rather than a write nobody saw. It keeps that by listing what a read may be made of and asking about everything
