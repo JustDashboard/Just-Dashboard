@@ -52,6 +52,8 @@ if args[:2] == ["compose", "build"]:
 if args[:1] == ["ps"] and os.environ.get("TEST_UPDATER_RUNNING") == "1":
     print("0123456789ab")
 if args[:2] == ["image", "inspect"] and args[-1].endswith(":previous"):
+    if os.environ.get("TEST_NO_PREVIOUS", "0") == "0" and "--format" in args:
+        print(os.environ.get("TEST_PREVIOUS_ID", "sha256:kept"))
     sys.exit(int(os.environ.get("TEST_NO_PREVIOUS", "0")))
 if args[:4] == ["run", "--rm", "--entrypoint", "/usr/local/bin/jd"]:
     print(os.environ.get("TEST_JD_SAYS", ""))
@@ -222,7 +224,7 @@ if args[:4] == ["run", "--rm", "--entrypoint", "cat"]:
         self.assertLess(build, up)
         self.assertIn(f"go back with: sudo ./scripts/manage.sh rollback {first[:12]}", result.stdout)
         self.assertIn("The database is not copied first", result.stdout)
-        self.assertEqual((self.data / "manage-update.last").read_text(), f"{first} {second}\n")
+        self.assertEqual((self.data / "manage-update.last").read_text(), f"{first} {second} sha256:kept,sha256:kept\n")
 
     def test_update_changes_nothing_without_a_yes(self):
         git, env, (first, _second, _head) = self.update_fixture()
@@ -306,6 +308,47 @@ if args[:4] == ["run", "--rm", "--entrypoint", "cat"]:
         result = self.run_tool("manage.sh", "rollback", first[:10], "--yes", env=env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(git("rev-parse", "HEAD"), first)
+
+    # Both records say which commit the :previous images ran at, and each is
+    # true only until something keeps the images again. A stale one moved the
+    # checkout two versions back under images one version back.
+    def test_rollback_drops_its_own_record_once_the_images_were_kept_again(self):
+        git, env, (_first, second, head) = self.update_fixture()
+        result = self.run_tool("manage.sh", "update", "--yes", env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # A later update from the dashboard kept the images again, failed and
+        # went back by itself: the checkout is where this script left it, and
+        # :previous is now the version that is running.
+        self.write_record(fromCommit=second, toCommit=head)
+        result = self.run_tool("manage.sh", "rollback", "--yes", env={**env, "TEST_PREVIOUS_ID": "sha256:kept-again"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("leave the checkout where it is", result.stdout)
+        self.assertEqual(git("rev-parse", "HEAD"), second)
+
+    def test_rollback_drops_the_dashboards_record_once_this_script_kept_the_images_after_it(self):
+        git, env, (first, second, head) = self.update_fixture()
+        git("merge", "--quiet", "--ff-only", second)
+        self.write_record(fromCommit=first, toCommit=second)
+        # This script then updated past it and was rolled back: the images kept
+        # are those of `second`, which is where the checkout is again.
+        last = self.data / "manage-update.last"
+        last.write_text(f"{second} {head} sha256:kept,sha256:kept\n")
+        later = (self.data / "self-update.json").stat().st_mtime + 60
+        os.utime(last, (later, later))
+        result = self.run_tool("manage.sh", "rollback", "--yes", env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("leave the checkout where it is", result.stdout)
+        self.assertEqual(git("rev-parse", "HEAD"), second)
+
+    def test_update_records_what_it_kept_before_the_checkout_moves(self):
+        git, env, (first, second, _head) = self.update_fixture()
+        (self.root / "release").write_text("an edit of the operator's own, in the release's way\n")
+        result = self.run_tool("manage.sh", "update", "--yes", env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("would not fast-forward", result.stderr)
+        self.assertEqual(git("rev-parse", "HEAD"), first)
+        # The images were kept before git refused, so the record of that is there.
+        self.assertEqual((self.data / "manage-update.last").read_text(), f"{first} {second} sha256:kept,sha256:kept\n")
 
     def test_rollback_with_nothing_kept_changes_nothing(self):
         git, env, (first, second, _head) = self.update_fixture()

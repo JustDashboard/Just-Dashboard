@@ -213,6 +213,18 @@ confirm() {
 updater_running() { [ -n "$(docker ps --quiet --filter "name=^${updater}\$" 2>/dev/null)" ]; }
 image_exists() { docker image inspect "$1" >/dev/null 2>&1; }
 
+# Which images the :previous tags name now, as one word. A record of an update
+# says which commit those images ran at, and that is true only until something
+# keeps the images again; this is what rollback compares to find out.
+previous_ids() {
+	local name id ids=""
+	for name in "${images[@]}"; do
+		id="$(docker image inspect --format '{{.Id}}' "$name:previous" 2>/dev/null || true)"
+		ids="${ids:+$ids,}${id:-none}"
+	done
+	printf '%s' "$ids"
+}
+
 # One field of the record the dashboard keeps of its last update.
 recorded() {
 	[ -r "$data/self-update.json" ] || return 0
@@ -328,9 +340,12 @@ case "$command" in
 				docker image tag "$name:latest" "$name:previous" || die "Could not keep $name:latest as $name:previous. Nothing was changed."
 			fi
 		done
+		# What rollback reads when it is given no commit: the commit the images
+		# just kept ran at, where this takes the checkout, and which images
+		# :previous now names. Written before the checkout moves, so the record
+		# is never older than the tags it describes, also when git then refuses.
+		printf '%s %s %s\n' "$from" "$target" "$(previous_ids)" >"$data/manage-update.last" 2>/dev/null || true
 		checkout_git merge --ff-only "$target" || die "git would not fast-forward the checkout (the reason is above). The dashboard is running as it was."
-		# What rollback reads when it is given no commit.
-		printf '%s %s\n' "$from" "$target" >"$data/manage-update.last" 2>/dev/null || true
 		undo="sudo ./scripts/manage.sh rollback ${from:0:12}"
 		build_stack || die "The build failed. The previous version is still running. Put the checkout and the images back with: $undo"
 		"${compose[@]}" up -d --remove-orphans || die "The new version could not be started. Go back with: $undo"
@@ -348,13 +363,21 @@ case "$command" in
 		commit="${1:-}"
 		head="$(checkout_git rev-parse HEAD 2>/dev/null || true)"
 		if [ -z "$commit" ] && [ -n "$head" ]; then
-			# The commit the last update started from, when the checkout is still
-			# where that update left it: this script's own record first, then the
-			# dashboard's. A checkout somebody has moved since is not put back on
-			# a guess.
-			if [ -r "$data/manage-update.last" ] && read -r was now <"$data/manage-update.last" && [ "$now" = "$head" ]; then
+			# The commit the :previous images ran at, from whichever record still
+			# describes them, and only when the checkout is where that update left
+			# it. This script's own record holds until the images are kept again
+			# (it names them). The dashboard's holds until this script keeps them
+			# after it, which makes this script's record the newer file. A stale
+			# record moved the checkout two versions back under images one version
+			# back, so a checkout somebody has moved since, or images kept since,
+			# are not put back on a guess.
+			was="" now="" ids=""
+			if [ -r "$data/manage-update.last" ]; then
+				read -r was now ids <"$data/manage-update.last" || true
+			fi
+			if [ -n "$was" ] && [ "$now" = "$head" ] && [ -n "$ids" ] && [ "$ids" = "$(previous_ids)" ]; then
 				commit="$was"
-			elif [ "$(recorded toCommit)" = "$head" ]; then
+			elif [ "$(recorded toCommit)" = "$head" ] && ! [ "$data/manage-update.last" -nt "$data/self-update.json" ]; then
 				commit="$(recorded fromCommit)"
 			fi
 		fi

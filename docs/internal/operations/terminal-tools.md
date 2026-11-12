@@ -166,10 +166,18 @@ either; it refuses while a `just-dashboard-updater` container is running.
 `rollback [COMMIT]` retags each `:previous` image that exists over `:latest`, runs
 `git reset --keep` to the commit, and `up -d --no-build --remove-orphans`: `handCommands` in
 `rollback.go`, in the order that lets git refuse before anything is changed. With no commit it uses the
-one the last update started from, but only when the checkout is still where that update left it:
-`manage-update.last` in the data directory (written by `update`) first, then `fromCommit` of
-`self-update.json` when its `toCommit` is HEAD. A checkout somebody has moved since stays where it is
-and the plan says so. With no `:previous` image it changes nothing.
+one the `:previous` images ran at, from whichever record still describes them, and only when the
+checkout is still where that update left it. `manage-update.last` in the data directory is `update`'s
+own record, written the moment it has kept the images and before the checkout moves: the commit it
+started from, the commit it was going to, and the ids of the images `:previous` then named. It is used
+when the second is HEAD and `:previous` still names those images. Otherwise `fromCommit` of
+`self-update.json` is used when its `toCommit` is HEAD and `manage-update.last` is not the newer file.
+Both conditions are the same question, whether anything has kept the images again since the record was
+written: a later update from the dashboard that failed and went back by itself leaves the checkout
+where `update` put it and `:previous` one version on, and trusting the older record there moved the
+checkout two versions back under images one version back. A checkout somebody has moved since, or
+images kept since, stay where they are and the plan says so. With no `:previous` image it changes
+nothing.
 
 Both ask before changing anything and refuse without a terminal unless `--yes` is appended. git runs
 as the owner of the checkout (`runuser`), so nothing in `.git` ends up owned by root.
