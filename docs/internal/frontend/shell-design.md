@@ -295,7 +295,11 @@ Deployments open the second group because shipping something is the reason most 
 
 Above the account card sits the update notice (`components/update/update-notice.tsx`), and only when
 there is something to say: a newer version, an update running, or one that finished and has not been
-dismissed. It is the account card's container (the same edge and ground, tinted green or red only
+dismissed. The rail imports only its slot (`update-notice-slot.tsx`), which reads the shell's one update
+poll and fetches the notice's code when `updateHasNews` says there is something to draw, so the notice,
+its progress and its confetti are in no route's chunks until then. The deployment vocabulary it draws
+with still loads with the shell, through the command palette's inventory
+(`command-search/inventory.ts`). It is the account card's container (the same edge and ground, tinted green or red only
 once a run has finished) with the dashboard's J,
 an eyebrow in the notice's tone, the installed version wired to the newest with a pulse running
 along the wire, the newest release's title and a band of what the releases bring by kind. An admin on

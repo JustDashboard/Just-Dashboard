@@ -190,6 +190,21 @@ export function useSelfUpdate() {
   return ctx
 }
 
+/**
+ * Whether the sidebar's notice has anything to say: an update to install, a
+ * run in flight, or a finished run nobody here has read. The notice draws
+ * nothing otherwise, and the shell does not even fetch its code
+ * (`components/update/update-notice-slot.tsx`), so the two must agree on this.
+ */
+export function updateHasNews(
+  report: SelfUpdateReport | undefined,
+  outcome: UpdateRun | undefined,
+): report is SelfUpdateReport {
+  if (!report) return false
+  const running = report.run?.status === "running" || report.run?.status === "pending"
+  return Boolean(report.available) || running || Boolean(outcome)
+}
+
 /** What the phase of a running upgrade is called on screen. */
 export function phaseLabel(run: UpdateRun): string {
   switch (run.phase) {

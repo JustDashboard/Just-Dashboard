@@ -13,7 +13,7 @@ import { useHiddenSections } from "@/hooks/use-hidden-sections"
 import { useCommandPalette } from "@/components/command-palette"
 import { KEYCAP, useLauncherKeys } from "@/components/command-search/keycaps"
 import { Logo, LogoMark } from "@/components/logo"
-import { UpdateNotice } from "@/components/update/update-notice"
+import { UpdateNoticeSlot } from "@/components/update/update-notice-slot"
 import { HubNotice } from "@/components/hub-link/hub-notice"
 import { ServerSwitcher } from "@/components/hub-link/server-switcher"
 import { useShellHub } from "@/hooks/use-hub-link"
@@ -419,8 +419,9 @@ export function AppSidebar() {
             about the server, and it has to be seen without being looked for —
             a page for it would be a page nobody visits, which is how a
             self-hosted panel ends up eighteen months behind. It renders
-            nothing when there is nothing to say. */}
-        <UpdateNotice collapsed={collapsed} />
+            nothing when there is nothing to say, and its code is fetched
+            only when there is. */}
+        <UpdateNoticeSlot collapsed={collapsed} />
         {/* What a linked hub has to say, nearest the account card, and
             nothing at all without one. */}
         <HubNotice collapsed={collapsed} />
