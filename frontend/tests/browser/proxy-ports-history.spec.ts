@@ -260,7 +260,7 @@ test("a history that cannot be read fails alone, leaving the sockets listed", as
   )
   await page.goto("/proxy/ports")
   await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(7)
-  await expect(changesPanel(page).getByRole("alert")).toContainText("database is locked")
+  await expect(changesPanel(page).getByRole("alert")).toContainText("Database is locked")
 })
 
 test("a long history is drawn a page at a time and says when the window held more", async ({

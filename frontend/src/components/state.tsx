@@ -1,7 +1,9 @@
 "use client"
 
-import { Inbox, LoaderCircle, Slash, Warning } from "@/components/icons"
+import { useEffect, useRef } from "react"
+import { Clock, Inbox, LoaderCircle, Question, Slash, Warning } from "@/components/icons"
 import { ApiError } from "@/lib/api"
+import { asSentence, plural, sentenceCase } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
@@ -132,6 +134,15 @@ export function EmptyState({
   )
 }
 
+/** How long a throttled read waits to ask again when the answer did not say. */
+const THROTTLE_WAIT_MS = 10_000
+/**
+ * Past what the server asked for: a page that polls asks again by itself the
+ * moment the wait ends (`hooks/poll-loop.ts`), and a second request then would
+ * be the one the limiter counts against it.
+ */
+const THROTTLE_GRACE_MS = 1_500
+
 /**
  * Renders a fetch failure.
  *
@@ -140,6 +151,18 @@ export function EmptyState({
  * on a given machine that is a normal state and not something broken. It is
  * the same block either way so the page's shape does not change with the
  * severity — only its colour and its title do.
+ *
+ * Two more answers are things that happen, not things that broke, and are
+ * drawn as calmly. An item that is not there (404): an old link to a project,
+ * a job or a drawing that was since removed used to open on a red box reading
+ * "not found". And a server that asked for a pause (429), which is the most
+ * retryable answer there is: the box says so, offers Try again, and asks again
+ * by itself when the wait the server named is over.
+ *
+ * The API words its messages to sit inside other text, lower case and without
+ * a full stop. Here they stand alone, so the headline gets its capital and a
+ * reason its full stop (`sentenceCase`, `asSentence`): once, in this component,
+ * for every page that shows a failure.
  */
 export function ErrorState({
   error,
@@ -160,24 +183,52 @@ export function ErrorState({
     api?.code === "not_installed" ||
     api?.code === "no_proxy" ||
     api?.code === "terminal_disabled"
+  const missing = !unavailable && api?.status === 404
+  const throttled = !unavailable && api?.status === 429
+  const kind = unavailable
+    ? "unavailable"
+    : missing
+      ? "missing"
+      : throttled
+        ? "throttled"
+        : "failed"
+  const calm = kind !== "failed"
+  const Glyph = unavailable ? Slash : missing ? Question : throttled ? Clock : Warning
+
+  // The pause ends by itself. The latest `onRetry` is kept beside the timer so
+  // that a parent drawing again does not start the wait over.
+  const wait = (api?.retryAfterMs ?? THROTTLE_WAIT_MS) + THROTTLE_GRACE_MS
+  const retry = useRef(onRetry)
+  useEffect(() => {
+    retry.current = onRetry
+  })
+  useEffect(() => {
+    if (!throttled) return
+    const timer = setTimeout(() => retry.current?.(), wait)
+    return () => clearTimeout(timer)
+  }, [throttled, wait, error])
 
   return (
     <div
       role="alert"
+      data-slot="error-state"
+      data-kind={kind}
       className={cn(
         // A notice's anatomy (§14): the fence step, and the glyph on the
         // banner's own ground — the tinted plate it stood on was a fourth
         // object in the one hue, on a box that already had a wash and a rule.
         "flex min-w-0 items-start gap-2.5 rounded-lg border p-3",
-        unavailable ? "border-hairline bg-card" : "border-rule-danger bg-wash-danger",
+        calm ? "border-hairline bg-card" : "border-rule-danger bg-wash-danger",
         className,
       )}
     >
-      {unavailable ? (
-        <Slash aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-      ) : (
-        <Warning aria-hidden className="mt-0.5 size-4 shrink-0 text-destructive" />
-      )}
+      <Glyph
+        aria-hidden
+        className={cn(
+          "mt-0.5 size-4 shrink-0",
+          calm ? "text-muted-foreground" : "text-destructive",
+        )}
+      />
       <div className="min-w-0 flex-1 space-y-1">
         {/*
           "Something went wrong" is the fallback, not the headline. Where the
@@ -190,15 +241,31 @@ export function ErrorState({
             ? "Not available on this host"
             : api?.operation && api?.resource
               ? `Could not ${api.operation} ${api.resource}`
-              : (api?.message ?? "Something went wrong")}
+              : api?.message
+                ? sentenceCase(api.message)
+                : "Something went wrong"}
         </p>
-        {(api?.operation || !api) && (
+        {(api?.operation || !api) && error.message && (
           <p className="text-xs leading-relaxed break-words text-muted-foreground">
-            {error.message}
+            {asSentence(error.message)}
           </p>
         )}
         {api?.reason && (
-          <p className="text-xs leading-relaxed break-words text-muted-foreground">{api.reason}</p>
+          <p className="text-xs leading-relaxed break-words text-muted-foreground">
+            {asSentence(api.reason)}
+          </p>
+        )}
+        {missing && (
+          <p className="text-xs leading-relaxed break-words text-muted-foreground">
+            It may have been removed or renamed since this link was made.
+          </p>
+        )}
+        {throttled && (
+          <p className="text-xs leading-relaxed break-words text-muted-foreground">
+            {onRetry
+              ? `The server asked for a pause. This is asked again by itself in ${plural(Math.ceil(wait / 1000), "second")}.`
+              : "The server asked for a pause. It answers again in a moment."}
+          </p>
         )}
         <div className="flex flex-wrap items-center gap-3 pt-0.5">
           {api?.raw && api.raw !== api.message && (
@@ -211,7 +278,7 @@ export function ErrorState({
               </pre>
             </details>
           )}
-          {onRetry && (retryable ?? api?.retryable) && (
+          {onRetry && (throttled || (retryable ?? api?.retryable)) && (
             <Button size="xs" variant="outline" onClick={onRetry}>
               Try again
             </Button>

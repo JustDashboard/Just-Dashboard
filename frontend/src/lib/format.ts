@@ -221,3 +221,92 @@ export function truncateMiddle(value: string, max = 48): string {
 export function plural(n: number, singular: string, many?: string): string {
   return `${n.toLocaleString()} ${n === 1 ? singular : (many ?? singular + "s")}`
 }
+
+/**
+ * A message from the API with the capital a headline starts with.
+ *
+ * The API words its errors to sit inside other text: lower case, no full stop
+ * ("not found", "too many requests, slow down"). Standing alone as the title of
+ * an error box or the reason under a toast they read as something that leaked.
+ * Only a plain word is raised: a message that opens on a program's name, a
+ * path, a unit or an identifier ("nginx: [emerg] …", "pg_dump: …", "eth0 is
+ * down"), or that is a tool's own line with the command before a colon ("nft
+ * list set: permission denied"), is somebody else's text and stays as written.
+ * So does a command that is the subject of the sentence ("nginx refuses the
+ * configuration", "gh did not answer": `COMMANDS`) and a command line ("wget
+ * --spider http://…"): "Gh" and "Nginx" are nobody's spelling.
+ */
+export function sentenceCase(text: string): string {
+  const trimmed = text.trim()
+  const word = /^[a-z]+(?=[\s,]|$)/.exec(trimmed)?.[0]
+  if (!word || COMMANDS.has(word)) return trimmed
+  // Up to three lower-case words and a colon: `tar: …`, `nft list set: …`.
+  const toolLine = /^[a-z0-9_.\-/]+( [a-z0-9_.\-/]+){0,2}: /.test(trimmed)
+  // The word and then an option: a command line, quoted as it was run.
+  const commandLine = /^[a-z]+ --?[a-z]/.test(trimmed)
+  return toolLine || commandLine ? trimmed : trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
+}
+
+/**
+ * Commands the API's messages open on and that are written in lower case
+ * wherever they stand. Only names that are nothing else: a product with a
+ * capital of its own ("Docker", "Git", "Postgres") and a word that is also
+ * English ("ping", "node", "mount") take the capital like any other.
+ */
+const COMMANDS = new Set([
+  "nginx",
+  "systemd",
+  "systemctl",
+  "journalctl",
+  "logrotate",
+  "crontab",
+  "sysctl",
+  "sudo",
+  "ssh",
+  "sshd",
+  "gh",
+  "ufw",
+  "nft",
+  "iptables",
+  "ip",
+  "tc",
+  "wg",
+  "conntrack",
+  "ethtool",
+  "resolvectl",
+  "nmcli",
+  "tracepath",
+  "traceroute",
+  "mtr",
+  "wget",
+  "curl",
+  "rsync",
+  "openssl",
+  "lsblk",
+  "dpkg",
+  "apt",
+  "dnf",
+  "yum",
+  "apk",
+  "pacman",
+  "zypper",
+  "psql",
+  "pgbouncer",
+  "mongod",
+  "mongosh",
+  "mysqld",
+])
+
+/**
+ * `sentenceCase` with the full stop a sentence ends on, for a reason that
+ * stands on its own line. The stop is added only after a word: after a path, a
+ * line number or a quoted value it would read as part of what was quoted, and
+ * tool output that runs over several lines is left alone.
+ */
+export function asSentence(text: string): string {
+  const cased = sentenceCase(text)
+  // The last thing said is a word, not an address or a path that ends on a
+  // letter ("…/healthz", "/etc/hosts").
+  const endsOnWord = /(^|\s)[A-Za-z][A-Za-z'’-]*$/.test(cased)
+  return endsOnWord && !cased.includes("\n") ? `${cased}.` : cased
+}

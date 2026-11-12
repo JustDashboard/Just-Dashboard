@@ -720,7 +720,7 @@ test("a list that cannot be read is an error with a way to ask again", async ({ 
     reads: { list: { status: 500, body: { error: { code: "internal", message: "boom" } } } },
   })
   await visit(page, "/databases/1/import")
-  await expect(page.getByText(/boom/).first()).toBeVisible()
+  await expect(page.getByText(/boom/i).first()).toBeVisible()
   await expect(page.getByRole("button", { name: "Check the source" })).toHaveCount(0)
 })
 

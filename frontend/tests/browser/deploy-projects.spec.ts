@@ -559,7 +559,7 @@ test("a restored project clears a name conflict, then returns to the fleet", asy
   await page.getByRole("button", { name: "Restore", exact: true }).click()
   await expect(page.getByText("Could not restore the project", { exact: true })).toBeVisible()
   await expect(
-    page.getByText("retired-api is already used by another project", { exact: true }),
+    page.getByText("retired-api is already used by another project.", { exact: true }),
   ).toBeVisible()
   await expect(page).toHaveURL(/\/deploy\?view=archived$/)
 

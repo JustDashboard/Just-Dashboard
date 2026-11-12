@@ -423,6 +423,28 @@ The rule and its three exceptions:
 
 `EmptyState`, `ErrorState` and `Notice` keep their body text: there, the sentence *is* the content.
 
+**A failure is said in sentences, in one place.** The API words its messages to sit inside other text:
+lower case, no full stop ("not found", "too many requests, slow down"). `ErrorState` is where they
+stand alone, so it gives the headline its capital and a reason its full stop (`sentenceCase` and
+`asSentence` in `lib/format.ts`), and `notify.error` does the same for the reason under a toast. A
+message that opens on a program's name, a path or an identifier ("nginx: [emerg] …", "eth0 is down")
+is somebody else's text and is left as written; so is a command that is the sentence's subject ("nginx
+refuses the configuration", "gh did not answer": the `COMMANDS` list beside `sentenceCase`, for names
+that are only ever a command) and a command line ("wget --spider …"). No full stop goes after a path,
+an address or a quoted value. A page does not reword an API message itself.
+
+`ErrorState` draws four kinds (`data-kind`), and only one of them is red:
+
+| Kind | When | Drawn as |
+| --- | --- | --- |
+| `failed` | anything else | the danger wash and rule, the message as the headline |
+| `unavailable` | this host has no Docker, nginx, terminal | neutral: "Not available on this host" |
+| `missing` | 404 | neutral: the message, then "It may have been removed or renamed since this link was made." An old link to something deleted is a normal event |
+| `throttled` | 429 | neutral: the message, "The server asked for a pause", **Try again** whenever `onRetry` is given, and `onRetry` called by itself once the answer's `Retry-After` (ten seconds without one) and a short grace have passed |
+
+Pass `onRetry` wherever the read can be repeated: it is what makes a throttled page come back without
+a press on a read that does not poll.
+
 ## 6. Three states, three mechanisms
 
 Selection, hover and focus were once drawn the same way, so a keyboard user could not tell which

@@ -1367,7 +1367,7 @@ test.describe("documents", () => {
   }) => {
     const mongo = await mockMongo(page, { failing: /^\/mongo\/(collections|find|count)/ })
     await page.goto(collection("users"))
-    await expect(rail(page).getByRole("alert")).toContainText("the server did not answer")
+    await expect(rail(page).getByRole("alert")).toContainText("The server did not answer")
     mongo.heal()
     await rail(page).getByRole("button", { name: "Try again" }).click()
     await expect(rail(page).getByRole("link", { name: /users/ }).first()).toBeVisible()

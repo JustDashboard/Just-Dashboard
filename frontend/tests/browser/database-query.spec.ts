@@ -2670,7 +2670,7 @@ test("a refused question is said in the engine's words, and the dialog stays usa
   await explained(page)
   await results(page).getByRole("button", { name: "What if?" }).click()
   const dialog = whatIfDialog(page)
-  await expect(dialog.getByRole("alert")).toContainText('syntax error at or near "selec"')
+  await expect(dialog.getByRole("alert")).toContainText('Syntax error at or near "selec"')
   await dialog.getByRole("button", { name: "Close" }).first().click()
   await expect(dialog).toHaveCount(0)
   expect(advice.candidates).toHaveLength(1)
@@ -2805,7 +2805,7 @@ test("Missing indexes says when there is none, when the login may not read them,
 
   await mockAdvice(page, { missing: 502 })
   await results(page).getByRole("button", { name: "Missing indexes" }).click()
-  await expect(dialog.getByRole("alert")).toContainText("connection reset by peer")
+  await expect(dialog.getByRole("alert")).toContainText("Connection reset by peer")
   await expect(dialog.getByRole("button", { name: "Try again" })).toBeVisible()
 })
 

@@ -257,6 +257,59 @@ test.describe("a read that failed is not an empty list", () => {
   })
 })
 
+test.describe("an answer that is not a failure", () => {
+  const refusal = (code: string, message: string) => JSON.stringify({ error: { code, message } })
+
+  test("an old link to a project that is gone reads as a sentence, not as a red box", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/1", (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: refusal("not_found", "not found"),
+      }),
+    )
+    await page.goto("/deploy/1")
+    const box = page.locator('[data-slot="error-state"]')
+    await expect(box).toHaveAttribute("data-kind", "missing")
+    // The API's two lower-case words were the page's headline.
+    await expect(box.getByText("Not found", { exact: true })).toBeVisible()
+    await expect(box).toContainText("It may have been removed or renamed since this link was made.")
+    await expect(box).not.toHaveClass(/border-rule-danger/)
+    await expect(page.getByRole("link", { name: "Back to deployments" })).toBeVisible()
+  })
+
+  test("a server that asked for a pause offers Try again, and the page comes back by itself", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    let paused = true
+    await page.route("**/api/v1/deploy/7", (route) =>
+      paused
+        ? route.fulfill({
+            status: 429,
+            headers: { "Retry-After": "1" },
+            contentType: "application/json",
+            body: refusal("rate_limited", "too many requests, slow down"),
+          })
+        : route.fallback(),
+    )
+    await page.goto("/deploy/7")
+    const box = page.locator('[data-slot="error-state"]')
+    await expect(box).toHaveAttribute("data-kind", "throttled")
+    await expect(box.getByText("Too many requests, slow down", { exact: true })).toBeVisible()
+    await expect(box).toContainText("The server asked for a pause.")
+    await expect(box).not.toHaveClass(/border-rule-danger/)
+    await expect(box.getByRole("button", { name: "Try again" })).toBeVisible()
+    // Nobody presses it: the wait the server named ends and the read is made again.
+    paused = false
+    await expect(page.locator('[data-slot="project-header"]')).toBeVisible({ timeout: 15_000 })
+    await expect(box).toHaveCount(0)
+  })
+})
+
 test.describe("a saved domain's password", () => {
   test("is never written to the tab's storage, and still reaches the server", async ({ page }) => {
     const mock = await mockProject(page)

@@ -145,7 +145,7 @@ test("another tab's certbot run is refused by the server, and the page says what
   )
   await page.goto("/proxy/certificates")
   await page.getByRole("button", { name: "Renew", exact: true }).click()
-  await expect(page.getByText(/certbot is already running \(Issuing a certificate/)).toBeVisible()
+  await expect(page.getByText(/Certbot is already running \(Issuing a certificate/)).toBeVisible()
 })
 
 test("a DNS issuance sends its propagation wait and its token with the request, and nothing before", async ({
