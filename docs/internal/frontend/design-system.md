@@ -3495,7 +3495,17 @@ with the guard's sentence beside it (a device's *Set down* on the uplink, forwar
 needs), because a control that disappears says nothing and one greyed out with no reason says less.
 Each page that reads a tool this host may not have opens on its install where it is missing
 (`network/install.tsx`: the package's name, what it would do here drawn as the product, and the
-Packages page's install job streaming under the button).
+Packages page's install job streaming under the button). The Git page and Tailscale on the VPN page do
+the same, without the after-install phases the server keeps only for the network and security tools
+(`phases={false}`); Tailscale is offered only where the package manager carries it
+(`usePackageKnown`, one `GET /packages/tailscale`), since Debian and Ubuntu do not until its own
+repository is added, and is pointed at otherwise. PM2 is an npm package for a host account, not
+something the package manager installs, so its page names the command and opens the terminal
+(`procs/pm2-missing.tsx`). Docker is never missing on an install that runs in it; what its pages say
+when the daemon cannot be asked is which fault it is (`docker/unreachable.ts`): a socket that refused
+the dashboard, a `docker.service` systemd says is not running (with **Start Docker** for
+`service.control`), a daemon that runs but not at the address asked, or no answer where systemd cannot
+be asked. The client's own sentence is behind *What the server said*.
 
 **Network drift took the exit on 2026-10-10**, at the operator's request, because it was dead:
 four grey figures (known differences, incomplete readings, matching observations, owned repair

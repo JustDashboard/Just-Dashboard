@@ -8,10 +8,11 @@ import { notify } from "@/lib/toast"
 import type { HeadscaleView, TailscaleView } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { Notice } from "@/components/state"
+import { EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import { ProductGlyph, ProductLogo } from "@/components/product-logo"
+import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
+import { InstallHandoff, usePackageKnown } from "@/components/network/install"
 import { keyExpiry, keyExpiryTip } from "./record-logic"
 import { HostFact, FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Button } from "@/components/ui/button"
@@ -26,6 +27,64 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+
+const TAILSCALE_PITCH =
+  "Tailscale joins this server to a private network of your devices without opening a port."
+
+/**
+ * Where Tailscale is not installed: the install in place where this server's
+ * package manager has it, as WireGuard's is one section up, and where to get
+ * it where it does not — Debian and Ubuntu carry it only once Tailscale's own
+ * repository is added. The block keeps one height while the package manager
+ * is asked: the sentence stands, and its button's place is held.
+ */
+export function TailscaleMissing({ onInstalled }: { onInstalled: () => void }) {
+  const known = usePackageKnown("tailscale")
+  if (known === "known") {
+    return (
+      <InstallHandoff
+        pkg="tailscale"
+        products={["tailscale", "headscale"]}
+        title="Tailscale is not installed"
+        description={`${TAILSCALE_PITCH} Once it is in, sign in once; its peers, exit node and subnet routes appear here.`}
+        onInstalled={onInstalled}
+        phases={false}
+      />
+    )
+  }
+  return (
+    <EmptyState
+      title="Tailscale is not installed"
+      mark={<ProductLogos ids={["tailscale", "headscale"]} />}
+      description={
+        known === "unknown"
+          ? `${TAILSCALE_PITCH} This server's package manager does not carry it: add Tailscale's repository, install it, then sign in once; its peers, exit node and subnet routes appear here.`
+          : `${TAILSCALE_PITCH} Install it, then sign in once; its peers, exit node and subnet routes appear here.`
+      }
+      action={
+        // Held in place, unseen, until the package manager has answered:
+        // the block keeps its height whichever way the answer goes.
+        <Button
+          size="sm"
+          variant="outline"
+          asChild
+          className={known === "asking" ? "invisible" : undefined}
+        >
+          <a
+            href="https://tailscale.com/download/linux"
+            target="_blank"
+            rel="noreferrer"
+            aria-hidden={known === "asking" || undefined}
+            tabIndex={known === "asking" ? -1 : undefined}
+          >
+            <External className="size-4" />
+            tailscale.com/download
+          </a>
+        </Button>
+      }
+    />
+  )
+}
 
 /** A peer's system as the product it is. */
 function osProduct(os: string) {
