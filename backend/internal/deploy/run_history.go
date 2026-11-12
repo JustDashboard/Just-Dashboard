@@ -27,8 +27,12 @@ type HistoryPolicy struct {
 
 const (
 	// historyTailLines is what a run past the policy keeps of its output:
-	// the end, which is where a failure says what it was, and as much of it
-	// as a diagnosis asked for later would be built from.
+	// the end, which is where a failure says what it was, and as many lines
+	// as a diagnosis sends. A diagnosis picks its lines from a run's last
+	// thousand and prefers the failed step's own, so one asked for after the
+	// cut is built from the end of the run: the failed step's lines, unless
+	// later steps printed more than this after it. A diagnosis made before
+	// the cut is stored and stays as it was.
 	historyTailLines = DiagnosisTranscriptLines
 	// historyTailChars is the same for the bounded tail on the run's row,
 	// which the 0.6.6 run shape answers with.

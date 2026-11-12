@@ -214,14 +214,24 @@ func TestHistoryLeavesWhatARollbackReachesAndWhatHasNotEnded(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		failures = append(failures, f.historyRun(t, environmentID, printed, RunFailed))
 	}
+	// Two runs that have not ended. One is still printing and is past the
+	// limit, with as much output behind it as the runs a pass cuts; the other
+	// is queued, the newest, and has printed nothing yet.
+	printing := f.historyRun(t, environmentID, printed, RunFailed)
 	open := f.enqueue(t, environmentID)
+	if _, err := f.store.DB.Exec(`UPDATE deploy_runs SET state = ? WHERE id = ?`, RunRunning, printing.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	// Keep one run whole: everything but the queued run is past the limit.
 	pruned, next, err := f.runs.PruneRunHistory(ctx, HistoryPolicy{KeepRuns: 1}, 0, 0)
 	if err != nil || next != 0 {
 		t.Fatalf("pass: goes on from %d, %v", next, err)
 	}
-	whole := map[int64]string{pinned.ID: "the run behind a pinned release", open.ID: "a run that has not ended"}
+	whole := map[int64]string{
+		pinned.ID: "the run behind a pinned release", printing.ID: "a run that is still printing",
+		open.ID: "a run that has not ended",
+	}
 	for _, run := range wentLive[2:] {
 		whole[run.ID] = "a run behind one of the six newest releases that went live"
 	}
@@ -251,9 +261,11 @@ func TestHistoryLeavesWhatARollbackReachesAndWhatHasNotEnded(t *testing.T) {
 	if run, err := f.runs.Run(ctx, open.ID); err != nil || run.State.Terminal() {
 		t.Fatalf("the queued run = %+v %v", run, err)
 	}
-	var marked int
-	if err := f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_run_output_pruned WHERE run_id = ?`, open.ID).Scan(&marked); err != nil || marked != 0 {
-		t.Fatalf("a run that has not ended was recorded as cut (%d %v): it would keep everything it goes on to print for ever", marked, err)
+	for _, id := range []int64{printing.ID, open.ID} {
+		var marked int
+		if err := f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_run_output_pruned WHERE run_id = ?`, id).Scan(&marked); err != nil || marked != 0 {
+			t.Fatalf("a run that has not ended was recorded as cut (%d %v): it would keep everything it goes on to print for ever", marked, err)
+		}
 	}
 }
 

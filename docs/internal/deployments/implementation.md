@@ -52,9 +52,12 @@ only renderer/executor/validation authority for their feature.
   10,000 lines (`EngineConfig.HotLogLimit`, `compactFinished`; until 0.8.6 only a run that succeeded was
   held to it, and a build failing in a loop is the one that prints the most). Later, the history policy
   (`HistoryPolicy`, `JD_DEPLOY_HISTORY_RUNS`, 200 by default, 0 for no limit) keeps the output of each
-  environment's newest runs whole and cuts an older run to its last 200 lines (`historyTailLines`, what a diagnosis asked for later is built
-  from) and
-  the last 4,000 characters of the tail on its row. The engine applies it a minute after it starts and
+  environment's newest runs whole and cuts an older run to its last 200 lines (`historyTailLines`, as
+  many as a diagnosis sends) and the last 4,000 characters of the tail on its row. A diagnosis picks
+  its lines from a run's last thousand and prefers the failed step's own, so one asked for after the
+  cut is built from the end of the run, which is the failed step's unless later steps printed more
+  than 200 lines after it; a diagnosis made before the cut is stored and unchanged. The engine applies
+  the policy a minute after it starts and
   every hour, 25 runs a pass, with the next pass a second later and from the run the last one reached
   while runs are waiting, which is how an install upgraded with years of history catches up and why
   runs a pass cannot cut never hold one back; each run is one transaction on the store's bulk
