@@ -133,6 +133,19 @@ root away from the roles below `admin` is not built;
 [what that would take](docs/internal/security/invariants.md#what-a-role-is-and-what-it-is-not) is
 written down with the decision.
 
+### When someone who had an account should no longer be trusted
+
+Anyone who had an account, of any role, could read `JD_MASTER_KEY` and the database, and so everything
+stored in the dashboard, along with every file on the server. **`JD_MASTER_KEY` cannot be changed yet
+without losing what is sealed with it**: replacing it in `.env` makes every stored secret unreadable,
+and there is no command that seals them again under a new key. Removing the account is therefore not
+enough, and a new key would not be either, because what they could read was the secrets themselves.
+Change those: the passwords, tokens and keys saved in the dashboard (database connections, Git and DNS
+credentials, backup destinations, deployment secrets), the server's SSH keys and account passwords,
+and every dashboard account's password and authenticator. Backups of the dashboard made while they
+had access open with the same key. What changing the key safely has to do before it can ship is
+written down in [the master key](docs/internal/security/master-key.md).
+
 ## Read further
 
 - [The complete security invariants](docs/internal/security/invariants.md), which every change has to keep

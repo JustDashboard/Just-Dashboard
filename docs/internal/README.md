@@ -21,6 +21,8 @@ strategy, and feature ownership behind those rules.
   optional degradation, host execution, path containment, authentication, encryption, audit, and SQLite.
 - [`security/invariants.md`](security/invariants.md) — the invariants that must not regress, the complete
   typed-confirmation policy, and what a role is and is not.
+- [`security/master-key.md`](security/master-key.md) — what `JD_MASTER_KEY` seals and derives, where its
+  copies are, and why it cannot be rotated yet.
 
 ## Backend features
 

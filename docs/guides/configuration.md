@@ -8,7 +8,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 
 | Variable | Description |
 | --- | --- |
-| `JD_MASTER_KEY` | 64 hex characters. Encrypts every stored secret. `openssl rand -hex 32`. |
+| `JD_MASTER_KEY` | 64 hex characters. Encrypts every stored secret. `openssl rand -hex 32`. Set it once: [it cannot be changed yet](../../SECURITY.md#when-someone-who-had-an-account-should-no-longer-be-trusted) without losing them. |
 
 **Network perimeter**
 
