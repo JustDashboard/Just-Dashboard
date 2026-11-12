@@ -386,12 +386,14 @@ The application remains published on loopback. Proxy resolves that publication t
 container and an internal network address, then connects Caddy to that network. Managed route comments
 persist the exact candidate container ID, network, internal port and address — one comment per replica
 for a release that runs several. The lifecycle worker checks
-every 30 seconds and repairs a lost Caddy network attachment or changed candidate address; the same pass
+every 30 seconds, and a few seconds after Docker reports a container starting or dying (below), and
+repairs a lost Caddy network attachment or changed candidate address; the same pass
 adds the access-log block to a managed route written before request recording existed, so an upgrade
 turns recording on for every existing deployment within a tick rather than at its next deploy. It never
 follows a host port to a replacement container. Repairs are audited as `proxy.ingress.reconcile` with
-route name and success only. Read-only verification does not reconnect networks. Recovery can have up
-to one polling interval of interruption after container recreation; missing/replaced candidates require
+route name and success only. Read-only verification does not reconnect networks. Recovery follows
+container recreation by the few seconds the worker lets a burst of events settle, and by up to one
+polling interval where Docker's events do not reach the dashboard; missing/replaced candidates require
 the normal deployment activation path. Network memberships remain available for other managed routes.
 
 What a pass costs, since it runs on every install whether or not anybody is looking:
