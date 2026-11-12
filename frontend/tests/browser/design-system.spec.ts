@@ -542,6 +542,8 @@ test("a centred row sets every item's text on its centre line", async ({ page })
   for (const path of SURFACES) {
     await page.goto(path)
     await page.waitForLoadState("networkidle")
+    // A figure that has just landed is four pixels into its rise, and off any line.
+    await risen(page)
     expect(await offCentreText(page), `text off its row's centre line on ${path}`).toEqual([])
   }
 })
