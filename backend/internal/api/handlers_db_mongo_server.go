@@ -372,7 +372,7 @@ func (s *Server) handleMongoCommandClassify(w http.ResponseWriter, r *http.Reque
 	}
 	cmd, verdict, err := dbx.MongoClassifyCommand(req.Command)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	db := mongoConsoleDatabase(req.Database, conn)
 	dbx.MongoGuardCommand(db, cmd, &verdict)
@@ -407,7 +407,7 @@ func (s *Server) handleMongoCommand(w http.ResponseWriter, r *http.Request) erro
 	}
 	cmd, verdict, err := dbx.MongoClassifyCommand(req.Command)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	db := mongoConsoleDatabase(req.Database, conn)
 	dbx.MongoGuardCommand(db, cmd, &verdict)

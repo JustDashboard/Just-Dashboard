@@ -109,7 +109,7 @@ func mapDNSServiceError(err error) error {
 	case errors.Is(err, dnsservice.ErrUnavailable):
 		return httpx.Err(http.StatusServiceUnavailable, "dns_service_unavailable", "Native DNS service management is unavailable.")
 	default:
-		return httpx.BadRequest("%s", err.Error())
+		return httpx.Refused(err)
 	}
 }
 

@@ -113,7 +113,7 @@ func settingsError(w http.ResponseWriter, r *http.Request, err error) error {
 	var refused *proxysvc.DumpRefusedError
 	switch {
 	case errors.Is(err, proxysvc.ErrBadSetting):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	case errors.As(err, &refused), errors.Is(err, context.DeadlineExceeded):
 		return effectiveError(w, r, err)
 	}

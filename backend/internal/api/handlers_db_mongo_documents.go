@@ -268,7 +268,7 @@ func (s *Server) handleMongoUpdateDocuments(w http.ResponseWriter, r *http.Reque
 	}
 	empty, err := dbx.MongoFilterIsEmpty(req.Filter)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	whole := empty && req.Many
 	if whole && !req.DryRun {
@@ -322,7 +322,7 @@ func (s *Server) handleMongoDeleteDocuments(w http.ResponseWriter, r *http.Reque
 	}
 	empty, err := dbx.MongoFilterIsEmpty(req.Filter)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	whole := empty && req.Many && strings.TrimSpace(req.ID) == ""
 	if whole && !req.DryRun && !req.All {

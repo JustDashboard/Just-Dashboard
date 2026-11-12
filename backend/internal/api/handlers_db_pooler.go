@@ -206,7 +206,7 @@ func (s *Server) handleDBPoolerPut(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	if err := settings.Validate(); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	conn, dsn, err := s.dbConnRow(r.Context(), id)
 	if err != nil {

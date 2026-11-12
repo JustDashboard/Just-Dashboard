@@ -23,7 +23,7 @@ func (s *Server) mountProxyInsightRoutes(r chi.Router) {
 	// configuration nginx loads, never from the request, and a read serves
 	// the last check for 15 seconds, so polling cannot turn the dashboard
 	// into a scanner.
-	r.Method(http.MethodGet, "/upstreams", s.handle(s.handleProxyUpstreams(false)))
+	r.With(nginxOnly).Method(http.MethodGet, "/upstreams", s.handle(s.handleProxyUpstreams(false)))
 	// Each site's traffic and errors, read from the logs its own file names
 	// and only from under /var/log/nginx. Readable by every account, like a
 	// deployment's request record.
@@ -35,7 +35,7 @@ func (s *Server) mountProxyInsightRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		// A check on demand skips that cache, so it is the operator's.
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
-		r.Method(http.MethodPost, "/upstreams/check", s.handle(s.handleProxyUpstreams(true)))
+		r.With(nginxOnly).Method(http.MethodPost, "/upstreams/check", s.handle(s.handleProxyUpstreams(true)))
 	})
 	// Rules that tell the notification channels about these readings,
 	// the operator's alone; see mountProxyAlertRoutes.
@@ -59,7 +59,7 @@ func (s *Server) handleProxyUpstreams(fresh bool) func(http.ResponseWriter, *htt
 		var refused *proxysvc.DumpRefusedError
 		switch {
 		case errors.Is(err, proxysvc.ErrNoProxy):
-			return httpx.Err(http.StatusServiceUnavailable, "no_nginx", "Upstream checks read nginx, which is not installed on this host.")
+			return httpx.NotInstalled("nginx", err)
 		case errors.As(err, &refused):
 			return httpx.Err(http.StatusServiceUnavailable, "invalid_config",
 				"nginx refuses its configuration, so there is nothing loaded to check.")

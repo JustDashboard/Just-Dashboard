@@ -55,7 +55,7 @@ func (s *Server) handleDBBackupDownload(w http.ResponseWriter, r *http.Request) 
 	// A dump's name and nothing else: not a path, and not the description
 	// kept beside a dump.
 	if err := validDumpName(name); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	dir := s.dbDumpDir(conn.Name)
 	f, st, err := files.New([]string{dir}).Open(filepath.Join(dir, name))
@@ -372,7 +372,7 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 	if format != "" && format != "url" || database != "" {
 		dsn, err = deploy.ConnectionStringForFormat(dsn, format, database)
 		if err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -445,7 +445,7 @@ func (s *Server) publicDatabaseURL(ctx context.Context, conn *dbConnection, dsn 
 	}
 	out, err := publicConnectionURL(conn.Driver, dsn, info, address)
 	if err != nil {
-		return "", httpx.BadRequest("%v", err)
+		return "", httpx.Refused(err)
 	}
 	return out, nil
 }

@@ -151,7 +151,7 @@ func mapTrafficAlertError(err error) error {
 	case errors.Is(err, deploy.ErrTrafficAlertNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", "traffic alert not found")
 	case errors.Is(err, deploy.ErrInvalidNotification):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	return mapDeployError(err)
 }

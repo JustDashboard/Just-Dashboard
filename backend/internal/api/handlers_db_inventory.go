@@ -640,7 +640,7 @@ func (s *Server) resolveFileInstance(ctx context.Context, path string) (*dbx.Ins
 		return nil, nil, httpx.Err(http.StatusForbidden, "outside_root", err.Error())
 	}
 	if err != nil {
-		return nil, nil, httpx.BadRequest("%v", err)
+		return nil, nil, httpx.Refused(err)
 	}
 	info, err := os.Stat(resolved)
 	if err != nil || !info.Mode().IsRegular() {

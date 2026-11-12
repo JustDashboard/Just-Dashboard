@@ -229,7 +229,7 @@ func (s *Server) handleNetworkTrafficAnnotations(w http.ResponseWriter, r *http.
 	defer cancel()
 	list, err := s.modules.network.TrafficAnnotations(ctx, from, to)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, list)
 	return nil

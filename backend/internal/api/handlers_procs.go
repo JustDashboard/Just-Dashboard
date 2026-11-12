@@ -145,9 +145,19 @@ func mapProcsError(err error) error {
 		return httpx.Err(http.StatusBadRequest, "invalid_name", err.Error())
 	case errors.Is(err, procs.ErrInvalidValue):
 		return httpx.Err(http.StatusBadRequest, "invalid_value", err.Error())
+	case systemdNotRunning(err):
+		return httpx.Absent("systemd", "systemd is not running on this server.", err)
 	default:
 		return httpx.Wrap(http.StatusBadGateway, "command_failed", err)
 	}
+}
+
+// systemdNotRunning reads systemctl's own refusal on a machine whose init is
+// something else (a container, WSL 1, a chroot): the program is there and the
+// thing it talks to is not. That is this server lacking systemd, the same
+// answer as systemctl missing, and not a command that failed.
+func systemdNotRunning(err error) bool {
+	return strings.Contains(err.Error(), "System has not been booted with systemd")
 }
 
 func (s *Server) handlePM2List(w http.ResponseWriter, r *http.Request) error {
@@ -477,7 +487,7 @@ func (s *Server) handleProcessOOM(w http.ResponseWriter, r *http.Request) error 
 	}
 	previous, _ := procs.OOMScoreAdj(int32(pid64))
 	if err := s.modules.table.SetOOMScoreAdj(r.Context(), int32(pid64), *req.Adj); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "process.oom", p.Name,
 		map[string]any{"pid": pid64, "previous": previous, "adj": *req.Adj})
@@ -513,7 +523,7 @@ func (s *Server) handleProcessPriority(w http.ResponseWriter, r *http.Request) e
 		return refusedControl(p, procs.ErrZombie)
 	}
 	if err := s.modules.table.SetNice(r.Context(), int32(pid64), *req.Nice); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "process.priority", p.Name,
 		map[string]any{"pid": pid64, "previous": p.Nice, "nice": *req.Nice})
@@ -562,7 +572,7 @@ func (s *Server) handleProcessSignal(w http.ResponseWriter, r *http.Request) err
 				fmt.Sprintf("The dashboard itself runs under %s (%d), so it cannot end that process with its children. Signal the process on its own, or stop what supervises it.", detail.Name, pid))
 		}
 		if err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		httpx.SetAudit(r, "process.signal", detail.Name,
 			map[string]any{"pid": pid, "signal": req.Signal, "cmdline": detail.Cmdline, "tree": true, "pids": reached})
@@ -570,7 +580,7 @@ func (s *Server) handleProcessSignal(w http.ResponseWriter, r *http.Request) err
 		return nil
 	}
 	if err := s.modules.table.Signal(r.Context(), pid, req.Signal); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "process.signal", detail.Name,
 		map[string]any{"pid": pid, "signal": req.Signal, "cmdline": detail.Cmdline})
@@ -689,7 +699,7 @@ func (s *Server) handleCronUserPut(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	if err := procs.ValidateCrontab(req.Content); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	// No typed phrase: this is the Save button of an editor whose contents are
 	// on screen, and a Save that asks you to type the account name is a Save

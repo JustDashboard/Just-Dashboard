@@ -155,7 +155,7 @@ func mapLogDrainError(err error) error {
 	case errors.Is(err, logdrain.ErrNameTaken):
 		return httpx.Err(http.StatusConflict, "name_taken", err.Error())
 	case errors.Is(err, logdrain.ErrInvalid):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	default:
 		return httpx.Internal(err)
 	}

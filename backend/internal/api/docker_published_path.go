@@ -46,11 +46,11 @@ func (s *Server) handleContainerPublishedPath(w http.ResponseWriter, r *http.Req
 	}
 	request := netpath.PublishedRequest{ContainerID: detail.ID, HostPort: port, Protocol: protocol, Family: family}
 	if _, err := netpath.ValidatePublished(request); err != nil {
-		return httpx.BadRequest("%s", err)
+		return httpx.Refused(err)
 	}
 	result, err := netpath.InvestigatePublished(ctx, request, s.publishedPathProviders(detail, binding))
 	if err != nil {
-		return httpx.BadRequest("%s", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, result)
 	return nil

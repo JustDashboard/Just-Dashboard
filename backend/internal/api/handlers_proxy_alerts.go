@@ -76,7 +76,7 @@ func mapProxyAlertError(err error) error {
 	case errors.Is(err, errProxyAlertNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, errProxyAlertInvalid):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	return httpx.Internal(err)
 }

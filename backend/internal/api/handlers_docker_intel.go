@@ -57,7 +57,7 @@ func (s *Server) handleMigrationPlan(w http.ResponseWriter, r *http.Request) err
 		if errors.Is(err, dockerx.ErrUnavailable) {
 			return s.dockerErr(err)
 		}
-		return httpx.BadRequest("%s", err.Error())
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, plan)
 	return nil

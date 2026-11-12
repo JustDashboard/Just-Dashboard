@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
@@ -33,8 +34,8 @@ func (s *Server) mountProxyRoutes(r chi.Router) {
 		})
 		r.Route("/proxy/realip", s.mountRealIPRoutes)
 		r.Route("/proxy/php-sockets", s.mountPHPSocketRoutes)
-		r.Route("/proxy/streams", s.mountStreamRoutes)
-		r.Route("/proxy/modules", s.mountModuleRoutes)
+		r.With(nginxOnly).Route("/proxy/streams", s.mountStreamRoutes)
+		r.With(nginxOnly).Route("/proxy/modules", s.mountModuleRoutes)
 		r.Route("/proxy/auth-files", s.mountAuthFileRoutes)
 		r.Route("/proxy/tools", s.mountProxyToolRoutes)
 		r.Route("/proxy/tunnel", s.mountTunnelRoutes)
@@ -57,9 +58,30 @@ func withProxyActor(next http.Handler) http.Handler {
 	})
 }
 
+// withoutNginx is the one answer of a route that needs nginx on a server that
+// has none: 503 not_installed, whatever the handler made of the failure. The
+// routes used to say it eight ways (a 400 from the settings, a 404 from the
+// file tree, a 409 from the resolver, a 502 from the dump, a 503 no_nginx
+// from the upstream check), so a script could not tell "this server has no
+// nginx" from "your request was wrong". It is asked only when a handler
+// failed, and the program is looked for then, not on every request.
+func withoutNginx(err error) error {
+	if errors.Is(err, proxysvc.ErrNoNginx) || !hostexec.Available("nginx") {
+		return httpx.NotInstalled("nginx", err)
+	}
+	return err
+}
+
+// nginxOnly marks a route, or a group, that only nginx can answer. A route
+// that also serves Caddy (the config editor, test and reload, the site list)
+// does not carry it: its failure on a Caddy server is not nginx's absence.
+var nginxOnly = httpx.MapErrors(withoutNginx)
+
 func mapProxyError(err error) error {
 	var unfinished *proxysvc.UnfinishedTestError
 	switch {
+	case errors.Is(err, proxysvc.ErrNoNginx):
+		return httpx.NotInstalled("nginx", err)
 	case errors.Is(err, proxysvc.ErrConfigChanged):
 		return httpx.Err(http.StatusConflict, "config_conflict", "The file or its directory changed. Your draft is retained; review the current file before trying again.")
 	case errors.Is(err, proxysvc.ErrUnsafePath):
@@ -81,6 +103,6 @@ func mapProxyError(err error) error {
 			Because("A test that did not finish says nothing about the configuration either way, and nothing was changed.", unfinished.Output).
 			Retry()
 	default:
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 }

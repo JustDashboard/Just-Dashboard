@@ -84,7 +84,7 @@ func mapFileError(err error) error {
 	case errors.Is(err, fs.ErrExist):
 		return httpx.Err(http.StatusConflict, "already_exists", err.Error())
 	default:
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 }
 
@@ -507,7 +507,7 @@ func (s *Server) handleFileSearch(w http.ResponseWriter, r *http.Request) error 
 	result, err := s.modules.hostFiles.SearchDetailed(ctx, options)
 	if err != nil {
 		if errors.Is(err, files.ErrInvalidSearch) {
-			return httpx.BadRequest("%s", err.Error())
+			return httpx.Refused(err)
 		}
 		return mapFileError(err)
 	}

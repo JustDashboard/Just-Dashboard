@@ -5784,7 +5784,8 @@ volume with the tunable, the label and its restart policy, and the fleet must th
   signed-in account because destinations come only from the config on disk, and it serves the last check
   for 15 s with concurrent readers sharing one, so polling cannot amplify outbound traffic.
   `POST /proxy/upstreams/check` (system.admin, audited `proxy.upstreams.check`) skips the cache. 503
-  `no_nginx` on a host without nginx, 503 `invalid_config` when `nginx -T` refuses.
+  `not_installed` on a host without nginx (the one answer of every nginx-only route, see `nginxOnly`
+  in the request-lifecycle document), 503 `invalid_config` when `nginx -T` refuses.
   **Pools** (`upstream_pools.go`): the same report carries `pools`, the destinations grouped as nginx
   spreads them — one per upstream block a route forwards to (its method: round-robin, `least_conn`,
   `ip_hash`, `hash <key>`, `random`; `keepalive`; every `server` with weight, `max_fails`,

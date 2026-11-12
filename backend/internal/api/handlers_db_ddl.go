@@ -244,7 +244,7 @@ func (s *Server) handleDBImport(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		httpx.SetAudit(r, "database.import", conn.Name,
 			map[string]any{"table": req.Table, "error": err.Error()})
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "database.import", conn.Name, map[string]any{
 		"table": req.Table, "inserted": res.Inserted, "failed": res.Failed,
@@ -286,7 +286,7 @@ func (s *Server) importMongo(w http.ResponseWriter, r *http.Request, conn *dbCon
 		if err := dbx.ValidateMongoImport(req.Format, req.Data); err != nil {
 			httpx.SetAudit(r, "database.import", conn.Name,
 				map[string]any{"collection": req.Table, "error": err.Error()})
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		// Emptied rather than dropped: the collection keeps its indexes and
 		// its validator, which a dropped one comes back without.
@@ -298,7 +298,7 @@ func (s *Server) importMongo(w http.ResponseWriter, r *http.Request, conn *dbCon
 	if err != nil {
 		httpx.SetAudit(r, "database.import", conn.Name,
 			map[string]any{"collection": req.Table, "error": err.Error()})
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "database.import", conn.Name, map[string]any{
 		"collection": req.Table, "inserted": res.Inserted, "failed": res.Failed,

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
@@ -32,8 +33,8 @@ func (s *Server) mountVHostRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPut, "/default-site", s.handle(s.handleDefaultSitePut))
-		r.Method(http.MethodGet, "/resolve", s.handle(s.handleRouteResolve))
-		r.Method(http.MethodGet, "/resolve/access", s.handle(s.handleRouteAccess))
+		r.With(nginxOnly).Method(http.MethodGet, "/resolve", s.handle(s.handleRouteResolve))
+		r.With(nginxOnly).Method(http.MethodGet, "/resolve/access", s.handle(s.handleRouteAccess))
 		s.destructive(r, func(r chi.Router) {
 			// Removing the catch-all hands unknown hosts back to whichever
 			// site nginx reads first.
@@ -51,16 +52,27 @@ func (s *Server) mountVHostRoutes(r chi.Router) {
 	r.Route("/access-lists", s.mountAccessListRoutes)
 }
 
+// siteListError answers a site list that could not be read. The list asks
+// Docker for the shared Caddy, so on a server whose Docker cannot be reached
+// it failed as an unexplained 500; that is Docker's one answer, the 503 the
+// Docker pages give.
+func (s *Server) siteListError(err error) error {
+	if dockerx.Unreachable(err) {
+		return s.dockerErr(err)
+	}
+	return httpx.Internal(err)
+}
+
 func (s *Server) handleVHostList(w http.ResponseWriter, r *http.Request) error {
 	hosts, err := s.modules.proxy.ListVHosts(r.Context())
 	if err != nil {
-		return httpx.Internal(err)
+		return s.siteListError(err)
 	}
 	if err := s.markDeploymentRoutes(r.Context(), hosts); err != nil {
-		return httpx.Internal(err)
+		return s.siteListError(err)
 	}
 	if err := s.keepOpenableLogs(r.Context(), hosts); err != nil {
-		return httpx.Internal(err)
+		return s.siteListError(err)
 	}
 	httpx.JSON(w, http.StatusOK, hosts)
 	return nil
@@ -199,7 +211,7 @@ func (s *Server) handleProxyPending(w http.ResponseWriter, r *http.Request) erro
 	after := r.URL.Query().Get("after")
 	if after != "" {
 		if _, _, err := proxysvc.ParseGeneration(after); err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 	}
 	ctx, cancel := timeoutCtx(r, 20*time.Second)

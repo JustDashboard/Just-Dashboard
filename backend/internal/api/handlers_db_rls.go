@@ -76,7 +76,7 @@ func (s *Server) handleRLSRead(w http.ResponseWriter, r *http.Request) error {
 	case errors.Is(err, dbx.ErrObjectNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", "no table named "+table)
 	case conn.Driver != dbx.DriverPostgres:
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	default:
 		return queryFailed(err)
 	}
@@ -245,7 +245,7 @@ func (s *Server) handleRLSTest(w http.ResponseWriter, r *http.Request) error {
 		Schema: strings.TrimSpace(req.Schema), Table: strings.TrimSpace(req.Table), MaxRows: req.MaxRows,
 	}
 	if _, err := dbx.CheckRoleTest(conn.Driver, test); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	pool, _, err := s.dbPool(r.Context(), id)
 	if err != nil {
@@ -273,7 +273,7 @@ func (s *Server) handleRLSTest(w http.ResponseWriter, r *http.Request) error {
 		}
 		httpx.SetAudit(r, "database.rls.test", conn.Name, detail)
 		if refusal {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		// The middleware writes the error it is handed into the trail and
 		// the log, so the values are taken out before it is handed one.

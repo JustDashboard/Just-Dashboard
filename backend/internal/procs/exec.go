@@ -89,7 +89,9 @@ func runPrepared(ctx context.Context, cmd *exec.Cmd, timeout time.Duration, name
 		return res, fmt.Errorf("%s %w", name, ErrNotInstalled)
 	}
 	if ctx.Err() == context.DeadlineExceeded {
-		return res, fmt.Errorf("%s timed out after %s", name, timeout)
+		// The deadline stays in the chain so the API answers it as a
+		// timeout, 504 and worth another try, not as a command that failed.
+		return res, fmt.Errorf("%s timed out after %s: %w", name, timeout, context.DeadlineExceeded)
 	}
 	if stdout.truncated || stderr.truncated {
 		return res, fmt.Errorf("%s output exceeded 4 MiB", name)

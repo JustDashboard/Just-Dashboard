@@ -179,6 +179,32 @@ the mount site is only the conversion.
 
 - Return `httpx.Err/BadRequest/Internal/Wrap`; never write an error body by hand. `httpx.WriteError` is
   the single renderer and is what keeps internal error strings off the wire.
+- **Three failures are not about the request and have one answer each** (`httpx/failures.go`).
+  *This server lacks X* is `503 not_installed` with the thing in `error.resource`
+  (`httpx.NotInstalled("nginx", err)`, or `httpx.Absent` when the sentence is not "is not installed":
+  systemd that is not running); the page shows that code as "not on this server", not as a fault.
+  Docker keeps its own `503 docker_unavailable`, which also covers a daemon that is stopped. *A
+  handler's own deadline* is `504 timeout`, retryable: `WriteError` answers it for any error that
+  still carries `context.DeadlineExceeded` in its chain while the caller is still waiting, whatever
+  status the mapper on the way chose, unless the handler already marked its answer retryable (the
+  proxy's `busy` and `test_unfinished` keep their words). So wrap a cause (`Wrap`, `Internal`,
+  `Refused`, `%w`) and do not test for the deadline in a handler. *The host failed* (a full disk is
+  `507 disk_full`; I/O error, no descriptors, no memory are `500 host_failure` with the kernel's two
+  words) is said and logged. A request whose caller left is logged at debug as `request abandoned`,
+  not as an ERROR.
+- **The last branch of an error mapper is `httpx.Refused(err)`**, never `httpx.BadRequest("%v", err)`.
+  It refuses with the error's own sentence, `400 bad_request`, as before, except for the three above
+  and for an error that is already an `APIError`, which keeps its status. The old spelling made a
+  deadline, a missing program or `ENOSPC` under any of some 250 call sites the caller's mistake, and a
+  400 is not logged. `TestNoHandlerCallsAServerFailureABadRequest` keeps it out of `internal/api`
+  (the session and assistant handlers are on its list until they move). The default stays a 400
+  because most packages return validation sentences as plain errors; a package that can tell its own
+  failures apart should say so with a sentinel and let its mapper answer 5xx.
+- **A group whose routes share a cause of failure says so at the mount** (`httpx.MapErrors`). The
+  function sees the error a handler under it returned, only when one did. `nginxOnly`
+  (`api/handlers_proxy.go`) is the one use: a route that only nginx can answer, failing on a server
+  without nginx, is `503 not_installed` whatever its handler made of the failure (they used to say
+  400, 404, 409, 502 and two different 503s). A route that also serves Caddy must not carry it.
 - **A body may keep the server waiting only so long** (`httpx.BodyDeadline`, on the root router). The
   server has a header timeout and no read or write timeout, because either would sever log tails,
   uploads and terminals; that left a body unbounded, and a client could send its headers and then a

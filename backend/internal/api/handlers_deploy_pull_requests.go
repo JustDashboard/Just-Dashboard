@@ -201,7 +201,7 @@ func pullRequestsError(err error) error {
 		return httpx.Err(http.StatusBadGateway, "github_unavailable", "GitHub did not answer in time")
 	}
 	// gh's own words are the diagnosis, as on the Git page.
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 // observePreviewServices reads each live Compose preview's services and

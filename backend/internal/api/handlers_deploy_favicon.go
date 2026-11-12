@@ -80,7 +80,7 @@ func (s *Server) handleDeploymentFavicon(w http.ResponseWriter, r *http.Request)
 	}
 	origin, err := deploymentPreviewURL(summary.Endpoint)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	entry, ok := s.favicons.get(id, origin.String())
 	if !ok {

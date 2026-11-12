@@ -710,7 +710,7 @@ func (s *Server) handleTerminalWindowKill(w http.ResponseWriter, r *http.Request
 		if errors.Is(err, term.ErrNotFound) {
 			return httpx.ErrNotFound
 		}
-		return httpx.BadRequest("%s", err.Error())
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "terminal.window.kill", id, map[string]any{"window": windowID})
 	httpx.NoContent(w)

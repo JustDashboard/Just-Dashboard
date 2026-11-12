@@ -37,7 +37,7 @@ func (s *Server) mountNetworkCaptureRoutes(r chi.Router) {
 func mapCaptureError(err error) error {
 	switch {
 	case errors.Is(err, netcapture.ErrInvalid):
-		return httpx.BadRequest("%s", err)
+		return httpx.Refused(err)
 	case errors.Is(err, netcapture.ErrNotFound):
 		return httpx.ErrNotFound
 	case errors.Is(err, netcapture.ErrRunning), errors.Is(err, netcapture.ErrBusy):

@@ -126,7 +126,7 @@ func mapFirewallError(err error) error {
 	case errors.Is(err, netsec.ErrNoFirewall):
 		return httpx.Err(http.StatusServiceUnavailable, "no_firewall", err.Error())
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 // recordFirewall files a rule event; a history failure is logged, never

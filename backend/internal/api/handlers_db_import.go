@@ -581,7 +581,7 @@ func (s *Server) handleImportStart(w http.ResponseWriter, r *http.Request) error
 	}
 	database := strings.TrimSpace(req.Database)
 	if err := newDatabaseName(conn, database); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	source := strings.TrimSpace(req.Source)
 	if source == "" {

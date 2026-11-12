@@ -186,7 +186,7 @@ func mapUninstallError(err error) error {
 	case errors.Is(err, uninstall.ErrNoLocation):
 		return httpx.Err(http.StatusServiceUnavailable, "uninstall_unsupported", err.Error())
 	case errors.Is(err, uninstall.ErrMode):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	case errors.Is(err, selfupdate.ErrDockerUnreachable):
 		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable", err.Error())
 	default:

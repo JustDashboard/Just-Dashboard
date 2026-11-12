@@ -258,7 +258,7 @@ func redisFail(err error, write bool) error {
 	case errors.As(err, &replied) && !write:
 		return queryFailed(err)
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 // redisDestructive applies what s.destructive applies — the capability and
@@ -320,7 +320,7 @@ func (s *Server) handleRedisGet(w http.ResponseWriter, r *http.Request) error {
 		// A 400 whatever went wrong, missing key included: it is what this
 		// route has always answered, and /keys/members is the one that says
 		// key_not_found.
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, val)
 	return nil

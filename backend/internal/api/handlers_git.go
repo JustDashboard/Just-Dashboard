@@ -166,7 +166,7 @@ func gitErr(err error) error {
 	case errors.Is(err, gitx.ErrProtected):
 		return httpx.Err(http.StatusConflict, "protected", err.Error())
 	case errors.Is(err, gitx.ErrNotARepo), errors.Is(err, gitx.ErrInvalidRef):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	return httpx.Internal(err)
 }

@@ -338,7 +338,7 @@ func (s *Server) handleDBConnectHost(w http.ResponseWriter, r *http.Request) err
 		// The engine's own words. "password authentication failed for user
 		// postgres" is the entire diagnosis and names the account it refused;
 		// anything this layer said instead would be a worse version of it.
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 
 	// The same server, database and account is the same connection, and takes
@@ -1552,7 +1552,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	version, err := tmpl.version(strings.TrimSpace(req.Version))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if tmpl.recipe != "" && s.modules.docker != nil && !s.recipeBuild(r.Context(), tmpl, version).Ready {
 		// Never pulled: the name is this server's own, and a pull of it
@@ -1577,7 +1577,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	exposure, hostIP, err := provisionBinding(req.Exposure)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if problem := dbLimitsProblem(req.MemoryMB, req.CPUs, s.hostCapacity(r.Context())); problem != "" {
 		return httpx.BadRequest("%s", problem)
@@ -1610,7 +1610,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	user, err := provisionAccount(req.Engine, tmpl, req.User, req.Password)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	password := req.Password
 	if password == "" {
@@ -1631,7 +1631,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 
 	port, err := freeHostPort(tmpl.port, hostIP)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	spec := dockerx.ContainerSpec{
 		Name:  name,

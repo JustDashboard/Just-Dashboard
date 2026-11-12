@@ -133,7 +133,7 @@ func objectReadFailed(err error) error {
 	case errors.Is(err, dbx.ErrAmbiguousObject):
 		return httpx.Err(http.StatusConflict, "ambiguous_object", err.Error())
 	case errors.Is(err, dbx.ErrNoDefinition), errors.Is(err, dbx.ErrUnsupported), errors.Is(err, dbx.ErrInvalidObject):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	return queryFailed(err)
 }
@@ -345,7 +345,7 @@ func (s *Server) runDDL(w http.ResponseWriter, r *http.Request, conn *dbConnecti
 	detail["statement"] = statement
 	httpx.SetAudit(r, action, conn.Name, detail)
 	if err := p.Exec(ctx, pool); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	// A routine saved where the catalogue names overloads by signature is
 	// named in the reply, because a page that addressed the old one by its

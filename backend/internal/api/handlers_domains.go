@@ -107,11 +107,11 @@ func (s *Server) handleWatchDomain(w http.ResponseWriter, r *http.Request) error
 	}
 	target, err := proxysvc.ParseScanTarget(req.Domain, req.Port)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	ip, err := proxysvc.ParseWatchIP(req.IP)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	kind := req.Kind
 	if kind == "" {

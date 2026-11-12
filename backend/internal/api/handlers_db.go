@@ -807,14 +807,14 @@ func (s *Server) handleDBBrowse(w http.ResponseWriter, r *http.Request) error {
 		defer client.Disconnect(context.Background())
 		res, err := dbx.MongoFind(r.Context(), client, q.Get("schema"), q.Get("table"), q.Get("filter"), limit, offset)
 		if err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		httpx.JSON(w, http.StatusOK, res)
 		return nil
 	}
 	opts, err := browseOptions(q)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	pool, conn, err := s.dbPool(r.Context(), id)
 	if err != nil {
@@ -855,7 +855,7 @@ func tableReadError(err error) error {
 	if dbx.Unreachable(err) {
 		return queryFailed(err)
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 const (
@@ -1087,7 +1087,7 @@ func (s *Server) handleDBQuery(w http.ResponseWriter, r *http.Request) error {
 	}
 	statement, err := dbx.SingleStatementFor(conn.Driver, req.Query)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	risk := statement.Risk
 	if err := s.authoriseSQL(r, risk); err != nil {
@@ -1798,7 +1798,7 @@ func (s *Server) handleDBCount(w http.ResponseWriter, r *http.Request) error {
 	}
 	opts, err := browseOptions(r.URL.Query())
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	ctx, cancel := timeoutCtx(r, 120*time.Second)
 	defer cancel()
@@ -1897,7 +1897,7 @@ func (s *Server) handleDBExplain(w http.ResponseWriter, r *http.Request) error {
 	}
 	statement, err := dbx.ExplainTarget(conn.Driver, req.Query)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if req.Analyze {
 		if !httpx.MustPrincipal(r).Can(auth.CapServiceControl) {
@@ -1926,7 +1926,7 @@ func (s *Server) handleDBExplain(w http.ResponseWriter, r *http.Request) error {
 		if errors.Is(err, dbx.ErrExplainUnsupported) {
 			return httpx.Err(http.StatusBadRequest, "unsupported", err.Error())
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "database.explain", conn.Name, map[string]any{
 		"statement": statement.SQL, "analyze": req.Analyze, "format": plan.Format,
@@ -2017,7 +2017,7 @@ func (s *Server) handleDBKill(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	if err := dbx.KillQuery(ctx, pool, conn.Driver, req.PID); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "database.session.kill", conn.Name, map[string]any{"pid": req.PID})
 	httpx.JSON(w, http.StatusOK, map[string]any{"killed": req.PID})
@@ -2133,7 +2133,7 @@ func (s *Server) handleDBRowSQL(w http.ResponseWriter, r *http.Request) error {
 	}
 	out, err := dbx.TableRowsInsertSQL(ctx, pool, conn.Driver, req.Schema, req.Table, req.Rows)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"sql": out})
 	return nil

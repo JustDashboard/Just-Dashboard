@@ -60,7 +60,7 @@ func (s *Server) handleNetworkInvestigate(w http.ResponseWriter, r *http.Request
 	}
 	req, err := netpath.Validate(request)
 	if err != nil {
-		return httpx.BadRequest("%s", err)
+		return httpx.Refused(err)
 	}
 	auditScope := map[string]any{"sourceKind": req.SourceKind, "containerId": req.ContainerID, "family": req.Family, "protocol": req.Protocol, "port": req.Port, "measure": req.Measure, "requestedSource": req.SourceAddress, "requestedAddress": req.Address, "mark": req.Mark}
 	httpx.SetAudit(r, "network.path.investigate", req.Target, auditScope)
@@ -72,7 +72,7 @@ func (s *Server) handleNetworkInvestigate(w http.ResponseWriter, r *http.Request
 	}
 	result, err := netpath.Investigate(ctx, req, providers)
 	if err != nil {
-		return httpx.BadRequest("%s", err)
+		return httpx.Refused(err)
 	}
 	auditScope["pinnedAddress"], auditScope["selectedSource"] = result.Scope.Address, result.Scope.SourceAddress
 	if len(result.Evidence) > 0 {

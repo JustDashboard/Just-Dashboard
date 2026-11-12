@@ -118,7 +118,7 @@ func (s *Server) handleCrowdSecAdd(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	if err := netsec.ValidateDecision(req.Value, req.Duration, req.Reason); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if err := s.boundaryGate(r, "crowdsec.decision.add", netsec.BoundaryProposal{Kind: "ban", Target: req.Value}, req.AcknowledgeBoundary); err != nil {
 		return err
@@ -137,7 +137,7 @@ func (s *Server) handleCrowdSecAdd(w http.ResponseWriter, r *http.Request) error
 		case errors.Is(err, netsec.ErrCrowdSecMissing):
 			return httpx.Err(http.StatusServiceUnavailable, "crowdsec_unavailable", err.Error())
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "crowdsec.decision.add", req.Value, map[string]any{"duration": req.Duration, "reason": req.Reason})
 	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
@@ -156,7 +156,7 @@ func (s *Server) handleCrowdSecDelete(w http.ResponseWriter, r *http.Request) er
 		if errors.Is(err, netsec.ErrCrowdSecMissing) {
 			return httpx.Err(http.StatusServiceUnavailable, "crowdsec_unavailable", err.Error())
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "crowdsec.decision.delete", strconv.Itoa(id), nil)
 	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
@@ -208,7 +208,7 @@ func (s *Server) handleSuricataInterface(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	plan, err := s.modules.netsec.PlanSuricataInterface(ctx, req.Interface)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "suricata.interface", plan.Interface, map[string]any{"previous": plan.Previous})
 	s.startJob(w, r, jobs.Spec{Capability: auth.CapSystemAdmin, Kind: "suricata.interface", Title: "Moving Suricata's capture to " + plan.Interface,

@@ -111,7 +111,7 @@ func mapLinuxUserError(err error) error {
 	case errors.Is(err, linuxusers.ErrSharedNumber):
 		return httpx.Err(http.StatusConflict, "shares_number", err.Error())
 	default:
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 }
 
@@ -231,7 +231,7 @@ func (s *Server) handleSysUserCreate(w http.ResponseWriter, r *http.Request) err
 	if req.GitHubUser != "" {
 		keys, err := linuxusers.FetchGitHubKeys(ctx, req.GitHubUser)
 		if err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		if len(keys) == 0 {
 			return httpx.BadRequest("%s has no public keys on GitHub", req.GitHubUser)
@@ -248,11 +248,11 @@ func (s *Server) handleSysUserCreate(w http.ResponseWriter, r *http.Request) err
 		password = generated
 	}
 	if err := linuxusers.CheckNewPassword(password); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if req.Sudo != nil {
 		if err := linuxusers.CheckGrant(req.Username, *req.Sudo); err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 	}
 	login := !req.System && (req.Shell == "" || linuxusers.IsLoginShell(req.Shell))
@@ -659,7 +659,7 @@ func (s *Server) handleSysUserSessionsEnd(w http.ResponseWriter, r *http.Request
 			return httpx.BadRequest("%s has no sign-in running as process %d", name, pid)
 		}
 		if _, err := s.modules.netsec.Disconnect(ctx, int32(pid)); err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		httpx.SetAudit(r, "system.user.session.end", name, map[string]any{"pid": pid})
 		httpx.NoContent(w)
@@ -1081,7 +1081,7 @@ func (s *Server) handleSysTemplatesSet(w http.ResponseWriter, r *http.Request) e
 	}
 	clean, err := linuxusers.CleanTemplates(req)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	encoded, err := json.Marshal(clean)
 	if err != nil {

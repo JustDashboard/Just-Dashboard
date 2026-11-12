@@ -551,7 +551,7 @@ func (s *Server) handleLogSearch(w http.ResponseWriter, r *http.Request) error {
 	// source is chosen: a bad expression found inside a container read would
 	// come back as a daemon error rather than as the operator's mistake.
 	if err := opts.Validate(); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 
 	switch target.kind {
@@ -583,7 +583,7 @@ func (s *Server) handleLogSearch(w http.ResponseWriter, r *http.Request) error {
 		}
 		res, err := s.modules.logs.SearchTargets(ctx, targets, opts)
 		if err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		httpx.JSON(w, http.StatusOK, res)
 		return nil
@@ -591,7 +591,7 @@ func (s *Server) handleLogSearch(w http.ResponseWriter, r *http.Request) error {
 
 	res, err := s.modules.logs.Search(ctx, target.path, opts)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
@@ -1040,7 +1040,7 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	if err := opts.Validate(); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 
 	name := strings.NewReplacer("/", "-", ":", "-", " ", "-", ",", "-").Replace(strings.TrimPrefix(target.label, "/"))
@@ -1212,7 +1212,7 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		// Refused before the upgrade, so a bad regular expression is an error
 		// the form can show rather than a socket that opens and stays empty.
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	lines, err := httpx.QueryInt(r, "lines", 400, 1, 20000)
 	if err != nil {
@@ -1543,7 +1543,7 @@ func (s *Server) handleLogRetention(w http.ResponseWriter, r *http.Request) erro
 		return httpx.BadRequest("retention applies to file-backed sources only")
 	}
 	if err := s.modules.logs.Allow(target.path); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	st, err := logsx.LogrotateStatus(r.Context())
 	if err != nil {
@@ -1646,7 +1646,7 @@ func (s *Server) describeLogSource(ctx context.Context, t logTarget) (logsx.Sour
 	}
 	src, ok, err := s.modules.logs.Describe(t.path)
 	if err != nil {
-		return logsx.Source{}, httpx.BadRequest("%v", err)
+		return logsx.Source{}, httpx.Refused(err)
 	}
 	if !ok {
 		return logsx.Source{}, httpx.Err(http.StatusNotFound, "not_found", "There is no log file at "+t.path+".")
