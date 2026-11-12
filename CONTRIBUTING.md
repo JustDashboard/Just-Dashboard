@@ -194,7 +194,8 @@ never into `docs/audits/`.
   WebAuthn refuses the `127.0.0.1` the other specs use, so the spec opens the same server by name.
   Browser specs do not pass through Caddy; `src/lib/passkeys.test.js` reads `deploy/Caddyfile` to hold
   its `Permissions-Policy` to allowing passkeys.
-- Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
+- Installer and terminal-admin changes also run `python3 scripts/test_manage.py`,
+  `python3 scripts/test_preflight.py`, `python3 scripts/test_build_stamp.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.
 - **`bun run build` is the final frontend type-check gate.** `frontend/Dockerfile`

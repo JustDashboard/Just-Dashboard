@@ -21,7 +21,7 @@ class TerminalToolsTest(unittest.TestCase):
         self.scripts = self.root / "scripts"
         self.scripts.mkdir(parents=True)
         for name in ("manage.sh", "create-user.sh", "reset-password.sh", "dotenv.sh", "password.sh",
-                     "build-stamp.sh"):
+                     "build-stamp.sh", "preflight.sh"):
             shutil.copy2(REPO / "scripts" / name, self.scripts / name)
         self.bin = pathlib.Path(self.temp.name) / "bin"
         self.bin.mkdir()
@@ -152,7 +152,8 @@ if args[:4] == ["run", "--rm", "--entrypoint", "cat"]:
                 process.kill()
                 process.wait()
 
-    def run_installer(self, build_fail=False, env_file=True, answers="\n", args=(), env=None, env_body=None):
+    def run_installer(self, build_fail=False, env_file=True, answers="\n", args=(), env=None, env_body=None,
+                      machine=None):
         script = (REPO / "install.sh").read_text()
         # Every writable absolute host path is confined to this disposable fixture.
         for prefix in ("/var/lib/", "/var/backups/", "/tmp/just-dashboard", "/usr/local/bin/jd"):
@@ -185,7 +186,54 @@ JD_FRONTEND_PORT=42002
         self.tool("logname", '#!/bin/bash\necho operator\n')
         (pathlib.Path(self.temp.name) / "host/tmp").mkdir(parents=True, exist_ok=True)
         return subprocess.run([str(installer), *args], input=answers, capture_output=True, text=True,
-                              cwd=self.temp.name, env={**self.env, "TEST_BUILD_FAIL": "1" if build_fail else "0", **(env or {})})
+                              cwd=self.temp.name, env={**self.env, **self.machine(**(machine or {})),
+                                                       "TEST_BUILD_FAIL": "1" if build_fail else "0", **(env or {})})
+
+    def machine(self, arch="x86_64", memory_gb=4, swap_gb=0, free_mb=40000, systemd=True):
+        """The server the installer's preflight sees, whatever machine the tests run on."""
+        host = pathlib.Path(self.temp.name) / "machine"
+        (host / "systemd").mkdir(parents=True, exist_ok=True)
+        (host / "meminfo").write_text(
+            f"MemTotal: {int(memory_gb * 1024 * 1024)} kB\nSwapTotal: {int(swap_gb * 1024 * 1024)} kB\n")
+        self.tool("uname", f'#!/bin/bash\n[ "$1" = -m ] && echo {arch} && exit 0\nexec /usr/bin/uname "$@"\n')
+        self.tool("df", '#!/bin/bash\necho "Filesystem 1048576-blocks Used Available Capacity Mounted on"\n'
+                        f'echo "/dev/vda1 80000 1 {free_mb} 1% /"\n')
+        return {"JD_PREFLIGHT_MEMINFO": str(host / "meminfo"),
+                "JD_PREFLIGHT_SYSTEMD": str(host / ("systemd" if systemd else "none"))}
+
+    def test_installer_stops_before_changing_anything_on_a_server_it_cannot_run_on(self):
+        for machine, reason in ((dict(arch="armv7l"), "This server is armv7l."),
+                                (dict(systemd=False), "does not run systemd")):
+            with self.subTest(reason=reason):
+                self.calls.unlink(missing_ok=True)
+                result = self.run_installer(env_file=False, machine=machine)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(reason, result.stderr)
+                self.assertIn("Nothing was installed or changed.", result.stderr)
+                self.assertNotIn("Required host tools", result.stdout)
+                # Asking Docker where it keeps images is the only thing it ran.
+                self.assertFalse([call["args"] for call in self.read_calls() if call["args"][:1] != ["info"]])
+                self.assertFalse((self.root / ".env").exists())
+                self.assertFalse((pathlib.Path(self.temp.name) / "host/var").exists())
+
+    def test_installer_warns_with_the_numbers_and_says_them_again_when_the_build_fails(self):
+        small = dict(memory_gb=0.95, free_mb=4200)
+        result = self.run_installer(machine=small)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[!] 0.9 GB of memory and 0.0 GB of swap.", result.stdout)
+        self.assertIn("[!] 4.1 GB free under /var/lib/docker.", result.stdout)
+        self.assertIn("Setup complete", result.stdout)
+
+        result = self.run_installer(build_fail=True, machine=small)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("The build failed, and this server is below what building needs: 0.9 GB of memory", result.stderr)
+        self.assertNotIn("Setup complete", result.stdout)
+
+        # With enough of everything a failed build says only that it failed.
+        result = self.run_installer(build_fail=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("The build failed; the reason is above.", result.stderr)
+        self.assertIn("[ok] 4.0 GB of memory and 0.0 GB of swap", result.stdout)
 
     def fixture_git(self):
         """git in the fixture checkout, reading no configuration but the arguments here."""

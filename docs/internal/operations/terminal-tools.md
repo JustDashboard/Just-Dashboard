@@ -12,6 +12,23 @@ a re-run that keeps `.env`, only `--link` links. The link itself is the last ste
 check, runs with input from `/dev/null`, and never fails the install: a decline, a timeout or an unreachable
 site becomes a warning and a `Not linked. Later: ...` line in the summary.
 
+The first step of stage 1, before a package is installed or a file written, is the preflight in
+`scripts/preflight.sh` (`jd_preflight`, sourced like the other helpers and tested by
+`python3 scripts/test_preflight.py`). It only reads the machine and prints one line per thing it looked
+at, `ok`, `warn` or `stop`, which the installer renders. `stop` ends setup with "Nothing was installed
+or changed": an architecture other than x86_64 or aarch64, which `backend/Dockerfile` cannot build for
+(its rclone stage pins those two), and a host with no `/run/systemd/system`, since the backend manages
+units over the systemd bus and uninstalls itself with `systemd-run`. `warn` lets setup go on: memory
+plus swap under `JD_NEED_MEMORY_MB` (2800, "about 3 GB": the frontend compiler's peak, set a little
+under 3 GB because a server sold as 3 GB reports less) and less than `JD_NEED_DISK_MB` (10000) free
+on the filesystem of Docker's root directory, or of the nearest existing parent of `/var/lib/docker`
+before Docker is installed. A build that then fails ends on the warnings again instead of on
+BuildKit's error alone. Warn rather than stop for those two is decided: the numbers are estimates, a
+re-run with a warm build cache needs less, and an operator may know better. What cannot be measured is
+left out, not guessed. The same numbers are the Requirements in `README.md` and
+`docs/guides/install.md`, and the preflight test fails when those documents stop stating them.
+`JD_PREFLIGHT_MEMINFO` and `JD_PREFLIGHT_SYSTEMD` point the two reads elsewhere for the tests only.
+
 When the checkout has no `.env` and `/var/lib/just-dashboard/install.env` exists — the copy an uninstall
 that kept its data left beside that data — the installer offers to restore it (default yes) and then
 continues as a re-run that keeps its settings, so the reinstall opens the secrets it kept. Declining
