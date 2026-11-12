@@ -224,10 +224,10 @@ test("the profile opens on the account's identity line and what is signed in as 
   await expect(page.getByText("Granted.")).toHaveCount(6)
 
   // A rename raises the floating Save rather than a button under the fields.
-  await page.getByLabel("Name", { exact: true }).fill("Ion M.")
+  await page.getByLabel("Name", { exact: true }).fill("Ion P.")
   await expect(page.getByText("Edited", { exact: true })).toBeVisible()
   await expect(
-    page.getByRole("img", { name: /The rail draws this account as Ion M\./ }),
+    page.getByRole("img", { name: /The rail draws this account as Ion P\./ }),
   ).toBeVisible()
   await expect(page.getByRole("button", { name: /^Save/ })).toBeVisible()
 })
