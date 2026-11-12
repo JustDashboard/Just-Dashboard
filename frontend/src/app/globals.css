@@ -46,6 +46,15 @@
   --secondary-foreground: oklch(0.9461 0 0);
   --muted: oklch(0.215 0 0);
   --muted-foreground: oklch(0.7118 0.0129 286.0665);
+  /* The dimmest ink that is still text: a count, a timestamp, a unit, a label
+     that should sit behind the secondary text beside it. Secondary text passes
+     WCAG AA with room (7.6:1 on the page), and every opacity step of it at or
+     under 70% does not: /70 measured 4.2:1 and /60 3.4:1, at 10 to 12 px,
+     where AA asks 4.5:1. This is the lowest lightness of the same hue that
+     keeps 4.5:1 on every ground text is set on: 5.3:1 on the page, 5.1 on a
+     card, 4.9 on a popover, 4.8 on --muted. `text-faint` is how it is written;
+     the faded spellings of the muted ink resolve to it too (see below). */
+  --faint: oklch(0.62 0.0129 286.0665);
   --destructive: oklch(0.6368 0.2078 25.3313);
   --destructive-foreground: oklch(1 0 0);
 
@@ -433,6 +442,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
@@ -827,6 +837,66 @@
   outline-offset: -2px;
   &:focus-visible {
     outline-color: var(--ring);
+  }
+}
+
+/* Faded secondary text has a floor.
+ *
+ * `text-muted-foreground/60` is written about two hundred times: line numbers,
+ * counts, timestamps, units, hints. As an opacity of the muted ink it lands at
+ * 3.4:1 (/60), 2.7:1 (/50) or 2.1:1 (/40) on the page, under the 4.5:1 WCAG AA
+ * asks of small text, and /70 at 4.2:1 misses it too. Those spellings draw the
+ * `--faint` ink instead, which is the dimmest that passes: one place, rather
+ * than two hundred call sites in files eight people are editing. New code
+ * writes `text-faint`.
+ *
+ * Not an icon. A glyph given the same class keeps its fade: a graphic needs
+ * 3:1 where it carries meaning and nothing where it decorates. `:where()`
+ * keeps the rule at one class's weight, so a `hover:` or `data-[…]:` colour on
+ * the same element still wins as it did. */
+@layer utilities {
+  .text-muted-foreground\/70:where(:not(svg)),
+  .text-muted-foreground\/60:where(:not(svg)),
+  .text-muted-foreground\/50:where(:not(svg)),
+  .text-muted-foreground\/45:where(:not(svg)),
+  .text-muted-foreground\/40:where(:not(svg)) {
+    color: var(--faint);
+  }
+  .placeholder\:text-muted-foreground\/60::placeholder {
+    color: var(--faint);
+  }
+}
+
+/* Row verbs at rest (`DimActions`, `ROW_DIM` in components/icon-action.tsx).
+ *
+ * A row's controls are always drawn and merely quiet until the pointer is on
+ * the row. Quiet was `opacity-55` on the whole cluster, which also took the
+ * words to 55%: a red "Sign out" measured 2.3:1 at rest. The glyphs keep the
+ * fade and the words take the faint ink, so a resting verb still reads at
+ * 4.5:1 and gets its own colour back with the row's hover, its focus, or an
+ * open menu. A filled button is left as it is: faint words on a filled face
+ * would be the unreadable thing. Without a pointer to hover with, nothing is
+ * dimmed. */
+@utility row-dim {
+  &:is(svg),
+  & svg {
+    transition: opacity 150ms;
+  }
+  @media (hover: hover) {
+    &:not(:is(:where(.group):hover *, :where(.group):focus-within *, :has([data-state="open"]))) {
+      &:is(svg),
+      & svg {
+        opacity: 0.55;
+      }
+      &
+        :is(button, a):not(
+          [data-variant="default"],
+          [data-variant="destructive"],
+          [data-variant="secondary"]
+        ) {
+        color: var(--faint);
+      }
+    }
   }
 }
 

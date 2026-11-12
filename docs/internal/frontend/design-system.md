@@ -25,6 +25,19 @@ is now one bootstrap script: it puts `.dark` on the root element before first pa
 shadcn primitives' `dark:` variants resolve, sets `color-scheme`, and clears the stored preference
 from anyone upgrading. `hooks/use-theme.tsx` and `/appearance` are gone.
 
+**Text has three inks, and the third has a floor.** `text-foreground`, `text-muted-foreground` for
+secondary text (7.6:1 on the page), and `text-faint` (`--faint`) for what sits behind that: a count, a
+timestamp, a line number, a unit. `--faint` is the dimmest lightness of the muted hue that keeps WCAG
+AA's 4.5:1 on every ground text is set on: 5.3:1 on the page, 5.1 on a card, 4.9 on a popover, 4.8 on
+`--muted`. On `--accent` (a chosen row) it is 4.0:1; set `text-muted-foreground` there. **Do not fade
+text with an opacity.** `text-muted-foreground/60` measured 3.4:1 and `/40` 2.1:1 at 10 to 12 px, on
+about two hundred call sites. Those spellings (`/70` and fainter) now draw the faint ink through one
+rule in `globals.css`, which leaves an `svg` its fade (a glyph needs 3:1 where it carries meaning) and
+stays at one class's weight so a `hover:` colour still wins; new code writes `text-faint`, and the old
+spellings are to be renamed, not copied. A count beside a tab's or a chip's label (`ChipCount`) is the
+label's own ink at 80%, 5.2:1 unselected. `design-system.spec.ts` measures all of these in the browser,
+painted onto a canvas and read back, against each ground.
+
 Colours live on `:root` in `app/globals.css`. That is the only place a colour is named. One page
 holds a copy: `/hub/enter` (`lib/hub-enter.ts`) is a document written by hand that loads no
 stylesheet, because its first script must run before anything else the app would load, so it repeats
@@ -436,8 +449,11 @@ press from reaching the row around it — discarding a draft used to navigate to
 deleted.
 
 Reveal only where the controls share their space with something else. Where they have a column of
-their own — a container card's actions slot — use `DimActions` instead: always drawn, one step of opacity until
-the pointer is on the row. A reserved column left empty reads as a layout bug, not as an affordance.
+their own — a container card's actions slot — use `DimActions` instead: always drawn, and quiet until
+the pointer is on the row. Quiet is the `row-dim` utility: the glyphs at 55% and the words in the faint
+ink, so a resting verb still reads at 4.5:1 (the whole cluster at 55% put a red "Sign out" at 2.3:1).
+A verb takes its own colour back with the row's hover, focus inside it, or an open menu; a filled
+button in the cluster is not dimmed, and nothing is where there is no hover. A reserved column left empty reads as a layout bug, not as an affordance.
 The Data page's rail is the shared case: a row's menu takes the place of its row count under the
 pointer, in the same grid cell, and the count's slot is at least the menu's width so the menu never
 covers the name. With a column of its own, every count stood a button's width short of the edge the

@@ -873,3 +873,189 @@ test("the wordmark's version stands inside a landmark", async ({ page }) => {
   await expect(banner).toContainText(/\d+\.\d+\.\d+/)
   await expect(banner.getByRole("button", { name: "Search" })).toBeVisible()
 })
+
+/**
+ * Installs `window.jdContrast(element)`: the WCAG contrast ratio of an
+ * element's text against what is drawn behind it, as the screen has it.
+ *
+ * Measured, not computed from the tokens: every ancestor's background is
+ * painted onto one pixel of a canvas, outermost first, then the element's own
+ * colour at the opacity it and its ancestors give it, and the two pixels are
+ * read back as the 8-bit sRGB the browser resolved them to.
+ */
+async function installContrast(page: Page) {
+  await page.evaluate(() => {
+    const canvas = document.createElement("canvas")
+    canvas.width = canvas.height = 1
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })!
+    const paint = (colour: string, alpha = 1) => {
+      ctx.globalAlpha = alpha
+      ctx.fillStyle = colour
+      ctx.fillRect(0, 0, 1, 1)
+    }
+    const luminance = () => {
+      const [r, g, b] = [...ctx.getImageData(0, 0, 1, 1).data].map((v) => {
+        const c = v / 255
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+      })
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    Reflect.set(window, "jdContrast", (element: Element) => {
+      const chain: Element[] = []
+      for (let node: Element | null = element; node; node = node.parentElement) chain.unshift(node)
+      ctx.clearRect(0, 0, 1, 1)
+      let opacity = 1
+      for (const node of chain) {
+        const style = getComputedStyle(node)
+        paint(style.backgroundColor)
+        opacity *= Number(style.opacity)
+      }
+      const ground = luminance()
+      paint(getComputedStyle(element).color, opacity)
+      const ink = luminance()
+      return (Math.max(ink, ground) + 0.05) / (Math.min(ink, ground) + 0.05)
+    })
+  })
+}
+
+test("faded secondary text keeps 4.5:1 on every ground text is set on", async ({ page }) => {
+  await mockShell(page)
+  await page.goto("/account")
+  await expect(page.locator('[data-slot="page"]')).toBeVisible()
+  await installContrast(page)
+
+  // The faint ink, and the faded spellings of the muted ink that resolve to
+  // it: /60 measured 3.4:1 and /40 2.1:1 before they had a floor.
+  const inks = [
+    "text-faint",
+    "text-muted-foreground/70",
+    "text-muted-foreground/60",
+    "text-muted-foreground/50",
+    "text-muted-foreground/45",
+    "text-muted-foreground/40",
+  ]
+  const grounds = ["--background", "--card", "--popover", "--muted", "--surface-header"]
+  const measured = await page.evaluate(
+    ({ inks, grounds }) => {
+      const contrast = Reflect.get(window, "jdContrast") as (element: Element) => number
+      const out: { ink: string; ground: string; ratio: number }[] = []
+      for (const ground of grounds) {
+        const plate = document.createElement("div")
+        plate.style.background = `var(${ground})`
+        document.body.append(plate)
+        for (const ink of inks) {
+          const word = document.createElement("span")
+          word.className = `text-micro ${ink}`
+          word.textContent = "12 rows"
+          plate.append(word)
+          out.push({ ink, ground, ratio: Math.round(contrast(word) * 100) / 100 })
+        }
+        plate.remove()
+      }
+      return out
+    },
+    { inks, grounds },
+  )
+  expect(measured).toHaveLength(inks.length * grounds.length)
+  expect(measured.filter((m) => m.ratio < 4.5)).toEqual([])
+  // The token is the floor, not a second muted: on the page it is the faint
+  // ink's 5.3:1, well under the muted ink's 7.6:1.
+  const onPage = measured.find((m) => m.ink === "text-faint" && m.ground === "--background")!
+  expect(onPage.ratio).toBeGreaterThan(5)
+  expect(onPage.ratio).toBeLessThan(6)
+
+  // A glyph keeps its fade, and a colour asked for on hover still wins.
+  const kept = await page.evaluate(() => {
+    const colour = (markup: string) => {
+      const holder = document.createElement("div")
+      holder.innerHTML = markup
+      document.body.append(holder)
+      const value = getComputedStyle(holder.firstElementChild!).color
+      holder.remove()
+      return value
+    }
+    return {
+      word: colour('<span class="text-muted-foreground/60">x</span>'),
+      faint: colour('<span class="text-faint">x</span>'),
+      glyph: colour('<svg class="text-muted-foreground/60"></svg>'),
+    }
+  })
+  expect(kept.word).toBe(kept.faint)
+  expect(kept.glyph).not.toBe(kept.faint)
+  await page.evaluate(() => {
+    const probe = document.createElement("button")
+    probe.id = "jd-hover-probe"
+    probe.className = "fixed top-0 left-0 z-50 text-muted-foreground/60 hover:text-foreground"
+    probe.textContent = "probe"
+    document.body.append(probe)
+  })
+  await page.hover("#jd-hover-probe")
+  expect(
+    await page.evaluate(() => {
+      const probe = document.getElementById("jd-hover-probe")!
+      const ink = document.createElement("span")
+      ink.className = "text-foreground"
+      document.body.append(ink)
+      return getComputedStyle(probe).color === getComputedStyle(ink).color
+    }),
+  ).toBe(true)
+})
+
+test("a row's verb at rest and a tab's count are still text: 4.5:1", async ({ page }) => {
+  await mockShell(page)
+  await page.route("**/api/v1/account/sessions", (route) =>
+    json(route, [
+      {
+        id: "this",
+        userId: 1,
+        twoFactorPassed: true,
+        ip: "203.0.113.7",
+        userAgent: "Mozilla/5.0 (X11; Linux x86_64) Chrome/141.0",
+        createdAt: now,
+        lastSeenAt: now,
+        expiresAt: now,
+        current: true,
+      },
+      {
+        id: "other",
+        userId: 1,
+        twoFactorPassed: true,
+        ip: "198.51.100.9",
+        userAgent: "Mozilla/5.0 (Macintosh) Safari/605.1.15",
+        createdAt: now,
+        lastSeenAt: now,
+        expiresAt: now,
+        current: false,
+      },
+    ]),
+  )
+  await page.goto("/account/sessions")
+  // `exact`: the verb's accessible name says which session, and the page's own
+  // "Sign out other sessions" is another button.
+  const verb = page.getByText("Sign out", { exact: true }).first()
+  await expect(verb).toBeVisible()
+  await risen(page)
+  await installContrast(page)
+  // At rest, with the pointer nowhere near the row: the red verb drawn at 55%
+  // measured 2.3:1.
+  await page.mouse.move(0, 0)
+  const contrast = (target: typeof verb) =>
+    target.evaluate((node) =>
+      (Reflect.get(window, "jdContrast") as (element: Element) => number)(node),
+    )
+  expect(await contrast(verb)).toBeGreaterThanOrEqual(4.5)
+  // On the row it is the verb's own colour again.
+  const resting = await verb.evaluate((node) => getComputedStyle(node).color)
+  await verb.hover()
+  await expect.poll(() => verb.evaluate((node) => getComputedStyle(node).color)).not.toBe(resting)
+
+  // The count in an unselected chip: 60% of the muted ink was 3.4:1 at 10px.
+  await page.evaluate(() => {
+    const chip = document.createElement("div")
+    chip.className = "text-muted-foreground"
+    chip.innerHTML =
+      '<span id="jd-count-probe" class="numeric text-micro tabular-nums opacity-80">13</span>'
+    document.querySelector('[data-slot="page"]')!.append(chip)
+  })
+  expect(await contrast(page.locator("#jd-count-probe"))).toBeGreaterThanOrEqual(4.5)
+})
