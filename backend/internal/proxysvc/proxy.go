@@ -69,6 +69,12 @@ type Service struct {
 	// dashboardHost is the name the dashboard itself is reached by, set once
 	// before the service is used (WithDashboardHost).
 	dashboardHost string
+	// docker is where the ingress lookups read containers from, set once
+	// before the service is used (WithContainerReader).
+	docker dockerSource
+	// ingressWake asks the upkeep loop for a pass before its next tick
+	// (IngressChanged).
+	ingressWake chan struct{}
 
 	// nginx has no way to test a config fragment in isolation, so validation
 	// has to put the candidate where nginx expects it and take it away again.
@@ -88,7 +94,15 @@ type Service struct {
 }
 
 func New(nginxDir, caddyFile string) *Service {
-	return &Service{nginxDir: filepath.Clean(nginxDir), caddyFile: filepath.Clean(caddyFile)}
+	return &Service{nginxDir: filepath.Clean(nginxDir), caddyFile: filepath.Clean(caddyFile), ingressWake: make(chan struct{}, 1)}
+}
+
+// WithContainerReader has the ingress lookups ask Docker through reader
+// instead of starting the docker CLI. It is set once, before the service is
+// used.
+func (s *Service) WithContainerReader(reader ContainerReader) *Service {
+	s.docker = dockerSource{reader: reader}
+	return s
 }
 
 // NewWithDockerIngress enables discovery of the host's existing public Caddy.
@@ -116,10 +130,18 @@ func (s *Service) dockerCaddy(ctx context.Context) (*dockerCaddy, error) {
 	if !s.dockerIngress {
 		return nil, nil
 	}
+	var edge *dockerCaddy
+	var err error
 	if s.ingressContainer != "" {
-		return namedDockerCaddy(ctx, s.ingressContainer)
+		edge, err = namedDockerCaddy(ctx, s.docker, s.ingressContainer)
+	} else {
+		edge, err = discoverDockerCaddy(ctx, s.docker)
 	}
-	return discoverDockerCaddy(ctx)
+	if err != nil || edge == nil {
+		return nil, err
+	}
+	edge.docker = s.docker
+	return edge, nil
 }
 
 // IngressState says whether the shared Docker Caddy exists yet.

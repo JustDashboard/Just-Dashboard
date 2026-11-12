@@ -13,6 +13,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
@@ -347,6 +348,15 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	s.startPITRSchedule(ctx)
+	// A container that started or stopped is the usual reason a deployment
+	// route needs repair, so the upkeep below looks again when Docker says
+	// one did rather than only at its next tick. The keeper runs on the
+	// goroutine following the stream; telling the loop never blocks.
+	s.modules.dockerEvents.Keep(func(event dockerx.Event) {
+		if event.Type == "container" && (event.Action == "start" || event.Action == "die") {
+			s.modules.proxy.IngressChanged()
+		}
+	})
 	ingressCtx, stopIngress := context.WithCancel(ctx)
 	ingressDone := make(chan struct{})
 	s.ingressStop, s.ingressDone = stopIngress, ingressDone

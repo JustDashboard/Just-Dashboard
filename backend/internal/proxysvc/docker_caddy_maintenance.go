@@ -13,23 +13,22 @@ import (
 // MaintainDockerIngress repairs only targets persisted by an authorized route
 // activation. Container identity prevents a reused host port selecting a different
 // application. Reads never reconnect networks; this lifecycle worker owns repair.
+//
+// A pass asks Docker for the running containers through the service's reader
+// and, where there is an ingress, reads all of its routes in one exec. It
+// starts no process on a host without an ingress. It runs every thirty
+// seconds, and a few seconds after IngressChanged: a container that started
+// or stopped is the usual reason a route needs repair, and waiting for the
+// tick left the route pointing at the old address for up to half a minute.
 func (s *Service) MaintainDockerIngress(ctx context.Context, record func(string, bool), report func(error)) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(ingressPassEvery)
 	defer ticker.Stop()
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 		pass, cancel := context.WithTimeout(ctx, 25*time.Second)
-		var err error
-		if s.mu.TryLock() {
-			edge, discoverErr := s.dockerCaddy(pass)
-			err = discoverErr
-			if err == nil && edge != nil {
-				_, err = edge.reconcile(pass, record)
-			}
-			s.mu.Unlock()
-		}
+		err := s.ingressPass(pass, record)
 		cancel()
 		if err != nil && ctx.Err() == nil && report != nil {
 			report(err)
@@ -38,7 +37,59 @@ func (s *Service) MaintainDockerIngress(ctx context.Context, record func(string,
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-s.ingressWake:
+			// A compose project or a restarted daemon starts many
+			// containers in a burst, and a container in a restart loop
+			// starts and dies again and again: the pass waits for the burst
+			// to end, and what arrives meanwhile is the same pass.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(ingressSettle):
+			}
+			select {
+			case <-s.ingressWake:
+			default:
+			}
+			// The next pass of the loop's own is a full interval after
+			// this one, not whenever the tick it was counting to falls.
+			ticker.Reset(ingressPassEvery)
 		}
+	}
+}
+
+// ingressPass is one upkeep pass: the lookup, and the repair of what it
+// finds. A route mutation in progress holds the lock and is its own repair,
+// so the pass is skipped rather than made to wait behind it.
+func (s *Service) ingressPass(ctx context.Context, record func(string, bool)) error {
+	if !s.mu.TryLock() {
+		return nil
+	}
+	defer s.mu.Unlock()
+	edge, err := s.dockerCaddy(ctx)
+	if err != nil || edge == nil {
+		return err
+	}
+	_, err = edge.reconcile(ctx, record)
+	return err
+}
+
+// ingressPassEvery is the upkeep loop's own interval.
+const ingressPassEvery = 30 * time.Second
+
+// ingressSettle is how long the upkeep loop waits after being told a
+// container changed before it looks, which is also the least time between
+// two passes that changes ask for. A variable for the tests.
+var ingressSettle = 5 * time.Second
+
+// IngressChanged tells the upkeep loop that a container started or stopped,
+// so it looks again shortly instead of at its next tick. It never blocks and
+// may be called from the goroutine that follows Docker's events; calls made
+// while a pass is already owed are that pass.
+func (s *Service) IngressChanged() {
+	select {
+	case s.ingressWake <- struct{}{}:
+	default:
 	}
 }
 
@@ -123,27 +174,25 @@ func parseDockerCaddyTargetLine(content, prefix string) (dockerCaddyTarget, bool
 
 // reconcile is one pass over the managed routes. It answers with the routes
 // whose certificate copy it refreshed, for a renewal job to report.
+//
+// A pass that finds nothing to repair is one exec in the container, the
+// read of every route with the copies old enough to prune, and one reading
+// of the running containers: it was two execs, two more per route and one
+// for the copies, around the docker CLI run twice.
 func (c *dockerCaddy) reconcile(ctx context.Context, record func(string, bool)) ([]string, error) {
-	// An unintegrated proxy has nothing to repair and must not be modified.
-	evidence, err := c.command(ctx, "", "sh", "-c", `if [ -d "$1" ]; then printf present; else printf absent; fi`, "sh", dockerCaddyRoot+"/routes")
+	routes, err := c.readRoutes(ctx, true)
 	if err != nil {
 		return nil, err
 	}
-	if string(evidence) == "absent" {
+	// An unintegrated proxy has nothing to repair and must not be modified.
+	if !routes.Integrated {
 		return nil, nil
 	}
-	if string(evidence) != "present" {
-		return nil, ErrRouteRecovery
-	}
-	return c.reconcileRoutes(ctx, record)
+	return c.reconcileRoutes(ctx, routes, record)
 }
 
-func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, bool)) ([]string, error) {
-	raw, err := c.command(ctx, "", "find", dockerCaddyRoot+"/routes", "-maxdepth", "1", "-type", "f", "-name", "just-dashboard-*.caddy")
-	if err != nil {
-		return nil, err
-	}
-	containers, err := ingressContainers(ctx)
+func (c *dockerCaddy) reconcileRoutes(ctx context.Context, routes managedRoutes, record func(string, bool)) ([]string, error) {
+	containers, err := c.docker.running(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -153,16 +202,14 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 	// the prune at the end keeps what is in use, two routes sharing a copy
 	// included; a pass that stops early prunes nothing.
 	serves := map[string]string{}
-	for _, path := range strings.Fields(string(raw)) {
+	for _, route := range routes.Routes {
+		path := route.Path
 		name := strings.TrimSuffix(filepath.Base(path), ".caddy")
 		wantPath, err := dockerCaddyRoutePath(name)
 		if err != nil || wantPath != path {
 			return refreshed, ErrRouteRecovery
 		}
-		snapshot, err := c.snapshot(ctx, name)
-		if err != nil {
-			return refreshed, err
-		}
+		snapshot := c.snapshotOf(name, path, route.Content, true)
 		// The certificate the route serves against the one the host holds:
 		// a lineage certbot renewed since the copy was taken is copied again
 		// and the route moved to it, and a route written before its source
@@ -283,7 +330,7 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 	for _, hash := range serves {
 		referenced[hash] = true
 	}
-	return refreshed, c.pruneCertificateCopies(ctx, referenced)
+	return refreshed, c.pruneCertificateCopies(ctx, routes.AgedCopies, referenced)
 }
 
 // locateTarget finds a persisted target's container where it is now: its

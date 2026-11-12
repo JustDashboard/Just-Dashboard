@@ -44,21 +44,16 @@ func (c *dockerCaddy) vhosts(ctx context.Context) ([]VHost, error) {
 	for _, name := range caddyHostnames(config) {
 		hosts[name] = true
 	}
-	// Missing managed storage means this is an existing, unintegrated server.
-	raw, err := c.command(ctx, "", "sh", "-c", `if [ -d "$1" ]; then find "$1" -maxdepth 1 -type f -name 'just-dashboard-*.caddy'; fi`, "sh", dockerCaddyRoot+"/routes")
+	// Missing managed storage means this is an existing, unintegrated
+	// server, which has no routes to list. Every route is read in one exec.
+	routes, err := c.readRoutes(ctx, false)
 	if err != nil {
 		return nil, err
 	}
 	sites := []VHost{}
-	for _, path := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		if path == "" {
-			continue
-		}
-		content, exists, err := c.read(ctx, path)
-		if err != nil {
-			return nil, err
-		}
-		if !exists || !strings.HasPrefix(content, "# Managed by Just Dashboard\n") {
+	for _, route := range routes.Routes {
+		path, content := route.Path, route.Content
+		if !strings.HasPrefix(content, "# Managed by Just Dashboard\n") {
 			continue
 		}
 		// Adapt the closed managed fragment so inventory follows Caddy's parser.

@@ -394,6 +394,30 @@ route name and success only. Read-only verification does not reconnect networks.
 to one polling interval of interruption after container recreation; missing/replaced candidates require
 the normal deployment activation path. Network memberships remain available for other managed routes.
 
+What a pass costs, since it runs on every install whether or not anybody is looking:
+
+- **The lookup starts no process.** The running containers are read through the dashboard's Docker
+  client (`proxysvc.ContainerReader`, which `dockerx.Client.InspectRunning` and `InspectOne` satisfy and
+  `api/modules.go` hands in with `WithContainerReader`): the daemon's own inspect JSON, so the decoder
+  is the one that read `docker inspect`. It was `docker ps -q` and `docker inspect` of every container
+  through the CLI, twice a pass and again on most reads of the proxy pages. A service built without a
+  reader (the tests' fake docker, the live fixtures) still asks the CLI. The lookups and the
+  `docker exec` calls below must reach the same daemon, as `JD_DOCKER_HOST` and the CLI's default
+  socket do in the shipped stack.
+- **A pass with nothing to repair is one `docker exec`.** `dockerCaddy.readRoutes`
+  (`docker_caddy_routes.go`) reads every managed route, and the certificate copies old enough to
+  prune, in one fixed `sh -c`: each file after a line of its own carrying a boundary that is random
+  per run, so a route's bytes come back exactly and nothing in a route can pass for the framing; any
+  output that is not exactly that framing is `ErrRouteRecovery` and nothing is repaired. It was a
+  test for the directory, a `find`, a test and a `cat` per route, and a `find` for the copies. The
+  site inventory (`dockerCaddy.vhosts`) reads its routes the same way, and `dockerCaddy.read` is one
+  exec where it was two.
+- **A container that starts or dies asks for a pass.** `Server.Start` hands the Docker event log a
+  keeper that calls `Service.IngressChanged` on a container's `start` and `die`; the loop waits
+  `ingressSettle` (five seconds, so a compose project or a restart loop is one pass) and looks, then
+  counts its thirty seconds from there. The tick stays: a certificate certbot renewed and a route
+  written before request recording are not Docker events.
+
 ## Cloudflare Tunnel
 
 A domain marked to be served through Cloudflare Tunnel ([the tunnel](cloudflare-tunnel.md)) is a
