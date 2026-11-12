@@ -25,9 +25,13 @@ runs, so a program on `PATH` says nothing about the daemon or the manager behind
   code, the sentence, what to do about it and what Docker said. `GET /proxy/vhosts` reads nginx's
   sites and the host Caddyfile's from files, so a lookup that fails takes none of them away
   (`Service.ReadVHosts`): the list answers 200 with them, and `GET /proxy/status` carries the problem
-  as `ingressProblem: {code, message, reason, raw, retryable}`, the names an API error uses.
+  as `ingressProblem: {code, message, reason, raw, retryable}`, the names an API error uses. The TLS
+  fleet (`GET /certificates/scans/latest` and the scan `POST /certificates/scan-all` starts) and the
+  ports page read the sites the same way, so they keep nginx's sites too.
   `Service.ListVHosts` stays whole-or-error for callers that decide from the list (deploy preflight,
-  the TLS report). Where an ingress problem does fail a request, `mapProxyError` and `proxyReadError`
+  the request tester, the site-controls check, the Certificate Transparency monitor, which does not
+  report on the names it could read as if they were all). Where an ingress problem does fail a
+  request, `mapProxyError` and `proxyReadError`
   (`handlers_proxy.go`) answer it under its own code with `reason` and `raw`: 503 and retryable for
   `ingress_unreachable` (Docker did not answer), `ingress_not_running` (the container
   `JD_INGRESS_CONTAINER` names) and `ingress_unreadable` (found, but its routes could not be read,

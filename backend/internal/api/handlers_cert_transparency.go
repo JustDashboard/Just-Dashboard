@@ -54,7 +54,11 @@ func (s *Server) handleCTReport(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	report, err := s.modules.proxyExtras.ct.Transparency(ctx, s.modules.proxy)
 	if err != nil {
-		return httpx.Internal(err)
+		// The monitor asks about every name the sites serve and does not
+		// report on the ones it could read as if they were all there are, so
+		// a Docker ingress that cannot be looked up fails it: as the
+		// lookup's own answer with its reason, not "internal error".
+		return proxyReadError(err)
 	}
 	httpx.JSON(w, http.StatusOK, ctResponse{Enabled: true, CTReport: report})
 	return nil

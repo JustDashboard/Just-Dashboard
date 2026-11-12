@@ -22,8 +22,15 @@ import (
 const fleetJobKind = "tls.scan-all"
 
 // fleetTargets is the fleet as the sites and the watch list stand now.
+//
+// The sites are the ones that could be read (ReadVHosts). nginx's sites, the
+// host Caddyfile's and the watched endpoints owe Docker nothing, so a Docker
+// ingress that cannot be looked up takes none of them off the report or out
+// of the scan: the fleet used to answer 500 "internal error" on a host whose
+// Docker daemon did not answer, as the site list did. An ingress that is
+// found and cannot be read still fails, as the lookup's own answer.
 func (s *Server) fleetTargets(ctx context.Context) ([]proxysvc.FleetTarget, error) {
-	vhosts, err := s.modules.proxy.ListVHosts(ctx)
+	vhosts, _, err := s.modules.proxy.ReadVHosts(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +59,7 @@ func (s *Server) handleTLSScanAll(w http.ResponseWriter, r *http.Request) error 
 	}
 	targets, err := s.fleetTargets(r.Context())
 	if err != nil {
-		return httpx.Internal(err)
+		return proxyReadError(err)
 	}
 	if len(targets) == 0 {
 		return httpx.BadRequest("no enabled TLS site or watched endpoint to scan")
@@ -123,7 +130,7 @@ type fleetView struct {
 func (s *Server) handleLatestTLSScans(w http.ResponseWriter, r *http.Request) error {
 	targets, err := s.fleetTargets(r.Context())
 	if err != nil {
-		return httpx.Internal(err)
+		return proxyReadError(err)
 	}
 	view := fleetView{Targets: make([]fleetRow, 0, len(targets)), Job: s.runningFleetScan()}
 	for _, t := range targets {

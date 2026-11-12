@@ -19,14 +19,14 @@ const ingressInspectJSON = `[{"Id":"4f1c0ffee","Name":"/edge","State":{"Running"
 {"Type":"volume","Source":"/var/lib/docker/volumes/edge-data/_data","Destination":"/data","RW":true}],
 "NetworkSettings":{"Ports":{"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"80"}],"443/tcp":[{"HostIp":"0.0.0.0","HostPort":"443"}]},"Networks":{}}}]`
 
-// ingressLookupServer is a server with one nginx site whose proxy looks the
-// Docker ingress up through a docker the test writes: setDocker replaces its
-// body.
+// ingressLookupServer is a server with one nginx site, served over TLS too,
+// whose proxy looks the Docker ingress up through a docker the test writes:
+// setDocker replaces its body.
 func ingressLookupServer(t *testing.T) (c *client, setDocker func(body string)) {
 	t.Helper()
 	c, s, root := vhostServer(t, func(string) string { return "exit 0" })
 	site := filepath.Join(root, "sites-available", "app")
-	if err := os.WriteFile(site, []byte("server {\n  listen 80;\n  server_name app.example.com;\n}\n"), 0o644); err != nil {
+	if err := os.WriteFile(site, []byte("server {\n  listen 80;\n  listen 443 ssl;\n  server_name app.example.com;\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink("../sites-available/app", filepath.Join(root, "sites-enabled", "app")); err != nil {
@@ -133,6 +133,52 @@ esac`)
 	}
 	// The list still answers, since nginx's site is not Docker's to hide.
 	if w := c.do(http.MethodGet, "/api/v1/proxy/vhosts", "", nil); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"name":"app"`) {
+		t.Fatalf("got %d %s", w.Code, w.Body)
+	}
+}
+
+// The TLS fleet is the sites and the watched endpoints, read through the
+// same list, and it answered 500 "internal error" with it: the report of
+// every site was gone from a host whose Docker daemon did not answer, though
+// nginx's sites owe Docker nothing. It lists them, and an ingress that is
+// found and cannot be read fails it as what it is.
+func TestTheTLSFleetAnswersWhenDockerDoesNot(t *testing.T) {
+	c, setDocker := ingressLookupServer(t)
+	setDocker(`echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?" >&2
+exit 1`)
+
+	w := c.do(http.MethodGet, "/api/v1/certificates/scans/latest", "", nil)
+	var fleet struct {
+		Targets []struct {
+			Host  string   `json:"host"`
+			Port  int      `json:"port"`
+			Sites []string `json:"sites"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &fleet); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("the fleet answered %d: %s", w.Code, w.Body)
+	}
+	if len(fleet.Targets) != 1 || fleet.Targets[0].Host != "app.example.com" || fleet.Targets[0].Port != 443 ||
+		len(fleet.Targets[0].Sites) != 1 || fleet.Targets[0].Sites[0] != "app" {
+		t.Fatalf("got %s, want nginx's one TLS site", w.Body)
+	}
+
+	inspect := filepath.Join(t.TempDir(), "inspect.json")
+	if err := os.WriteFile(inspect, []byte(ingressInspectJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	setDocker(`case "$1" in
+ps) echo 4f1c0ffee ;;
+inspect) cat "` + inspect + `" ;;
+exec) echo "Error response from daemon: container 4f1c0ffee is restarting, wait until the container is running" >&2; exit 1 ;;
+esac`)
+	w = c.do(http.MethodGet, "/api/v1/certificates/scans/latest", "", nil)
+	var answer ingressAnswer
+	if err := json.Unmarshal(w.Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusServiceUnavailable || answer.Error.Code != proxysvc.IngressUnreadable || !answer.Error.Retryable ||
+		answer.Error.Reason == "" || !strings.Contains(answer.Error.Raw, "is restarting") {
 		t.Fatalf("got %d %s", w.Code, w.Body)
 	}
 }
