@@ -918,8 +918,12 @@ func (s *PlanningStore) advanceDesiredRevisionTx(
 	return next, nil
 }
 
+// variableRows is the pool or the caller's transaction. Every statement
+// activeVariableValues runs goes through it: a transaction that asked the pool
+// for a second connection would hold one while waiting for another.
 type variableRows interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 func (s *PlanningStore) activeVariableValues(
@@ -967,9 +971,12 @@ func (s *PlanningStore) activeVariableValues(
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if len(values) == 0 {
 		var exists int
-		if err := s.db.QueryRowContext(ctx, `
+		if err := query.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM deploy_environments
 			 WHERE id = ? AND project_id = ? AND archived_at = 0`, environmentID, projectID).Scan(&exists); err != nil {
 			return nil, err

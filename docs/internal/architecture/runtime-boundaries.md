@@ -319,6 +319,85 @@ dashboard ([network module](../backend/network.md#three-rules)). The schema bloc
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old
 columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
 
+### The store's connections
+
+`store.Open` opens the one database file through three handles. The two that write differ in what a
+power cut may take; the third cannot write at all:
+
+| Handle | Connections | Opened with | Carries |
+| --- | --- | --- | --- |
+| `Store.DB` | 4 | `synchronous=FULL`, `_txlock=immediate` | everything, unless it is named in the next rows |
+| `Store.Bulk()` | 1 | `synchronous=NORMAL`, `_txlock=immediate` | metric samples and their pruning (`metrics.Recorder`), the lines a deployment step prints (`OrchestrationStore.AppendLogs`) |
+| `Store.Reader()` | 4 | `query_only`, no `_txlock` | the reads that take long or that a page polls: metric history and its events, forecasts and sizing (`metrics.Recorder`), the deployments read model, run lists, insights and transcripts (`OrchestrationStore.reader()`), a page of the audit trail (`audit.Logger.List`) |
+
+All three wait five seconds on a busy database. `DB` is kept at four connections so SQLite's one
+writer does not queue behind itself; that number was chosen for the writer, and it used to be all the
+readers had too.
+
+**Long reads have a pool of their own.** A week of host history takes about half a second to fold, a
+Metrics page asks for several such reads at once, and Deployments polls its fleet. On `DB` two such
+tabs held all four connections, and a session check, an audit row or the next metric sample waited in
+`database/sql`'s queue, not in SQLite: a 2 ms request took a third of a second. In WAL mode a reader
+never waits for the writer nor the writer for a reader, so those reads now run on `Reader()`, whose
+connections are not `DB`'s. A read there sees every commit made before it began, on whichever handle.
+Its connections are `query_only`, so a write sent to it fails instead of being lost, and it is opened
+without `_txlock=immediate`, because a transaction on a connection that cannot write must not begin by
+asking for the write lock. Two rules follow. A read goes to `Reader()` when it is long (history over a
+range, a filtered scan) or frequent (a poll), and is not part of a write: a function that reads and
+then writes inside one transaction keeps to that transaction on `DB`. And the rule below holds on this
+pool as on any other: a cursor open on `Reader()` is closed before the next query on `Reader()`.
+`Store.Reader()` on a store that `Open` did not make answers with `DB`.
+
+**Which writes survive a power cut is a decision, and this is it.** The database is in WAL mode. With
+`synchronous=FULL` a commit returns once the write-ahead log is on disk; with `NORMAL` it returns once
+the operating system has it, and the log is synced at the next checkpoint or the next `FULL` commit,
+whichever comes first. Neither can corrupt the database, and neither loses anything when the process
+is killed or crashes. The difference shows only after a power cut or a kernel crash: commits made
+under `NORMAL` since the log was last synced can be missing. That is the last seconds of them: any
+`FULL` commit syncs the log, and with none the kernel writes it out by itself within about thirty
+seconds.
+
+- **Kept durable (`DB`, the default):** every write the dashboard has acknowledged and somebody would
+  act on — audit entries, accounts, passwords, second factors, sessions and their revocation, API keys,
+  hub grants, settings, sealed secrets, a deployment's runs, steps, releases and leases, backups,
+  schedules, proxy and network records. A revoked key that works again after the power returns, or an
+  audit trail missing the last thing that was done to the host, is not a trade for speed. Anything
+  nobody has classified is here.
+- **Relaxed (`Bulk()`):** rows whose last seconds nobody would miss. A metric sample lost to a power
+  cut leaves a gap no wider than the outage draws anyway; the last lines of a build log are lost
+  together with the build that was printing them, and how each step and the run ended is written on
+  `DB`, whose commit makes every line before it durable. In return the recorder no longer costs the
+  disk three or four syncs every sampling interval, and a build's log does not wait on the disk for
+  every batch.
+
+A writer moves to `Bulk()` only when the answer to "if the server lost power the moment after this
+write, would anybody act differently for not having the row?" is no. It has one connection, because a
+second would only wait for the first inside SQLite; so a transaction on it never asks the store for
+anything else while it is open (the rule below, at its strictest). `Store.Bulk()` on a store that
+`Open` did not make (a test's own database) answers with `DB`.
+
+**Nothing queries the pool while it holds one of its connections.** An open `*sql.Rows` holds a
+connection until it is closed or read to its end, and a `*sql.Tx` until it commits or rolls back. A
+query made in between — directly, or through a method that looks harmless — takes a second connection.
+That works until as many such calls run at once as the pool has connections: each then holds one and
+waits for another, and every other database call in the process (session checks, audit rows, the
+metrics recorder, the deployment engine) waits behind them until the stuck requests' clients go away.
+The fleet read and the schedule list both did this, and four browser tabs on Deployments during a busy
+deploy were enough. So a list reads its cursor to the end and closes it before it looks anything up
+(better: selects it in the same statement, or reads it for all rows in one `IN` query), and a function
+that is handed a transaction runs every statement on that transaction, never on the pool beside it.
+
+Two things keep it that way. `storetest.OneConnection(st)` leaves a test's store one connection for
+everything (`Store.SingleConnection`: every handle answers with `DB`, and `DB` keeps one), on which
+such a call can never finish; `deploy/one_connection_test.go` calls every list read of the
+deployment stores that way, with rows present and a deadline, and a new list read belongs in its table.
+And `JD_STORE_ONE_CONNECTION=1` does the same to every store `storetest.Open` opens, which turns a
+package's whole suite into the hunt: `JD_STORE_ONE_CONNECTION=1 go test -timeout 5m ./internal/deploy`
+hangs in the test that makes the mistake and the timeout's stack names the line. A test about the
+handles themselves (samples, a log batch or a read still getting through while `DB` is exhausted) has
+nothing to show on such a store and calls `storetest.OwnHandles`, which skips it there; so a hunt that
+fails names that mistake and nothing else.
+
 `internal/audit` writes `audit_log` **and** mirrors every entry to the process log, so a trail survives
 the database being tampered with. The row is written with the request's values but not its
 cancellation (bounded at five seconds), so a client that disconnects once its mutation applied still

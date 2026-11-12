@@ -19,6 +19,13 @@ func (s *Server) handleDeploymentDatabaseLinks(w http.ResponseWriter, r *http.Re
 	if _, err := s.modules.deployRuns.EnvironmentExecutionTarget(r.Context(), projectID, environmentID); err != nil {
 		return mapDeployError(err)
 	}
+	// Read before the cursor below opens, and the database names after it
+	// closes: a query made while a cursor holds a connection waits for a
+	// second one, and a few such requests at once use up the store's pool.
+	policies, err := s.modules.deployRuns.PreviewBranchPolicies(r.Context(), environmentID)
+	if err != nil {
+		return httpx.Internal(err)
+	}
 	rows, err := s.Store.DB.QueryContext(r.Context(), `SELECT b.connection_id,c.name,c.driver,n.network_name,b.status,b.detail,b.checked_at,
 		EXISTS(SELECT 1 FROM db_poolers p WHERE p.connection_id=b.connection_id) FROM deploy_database_bindings b
 		JOIN deploy_database_networks n ON n.environment_id=b.environment_id JOIN db_connections c ON c.id=b.connection_id WHERE b.environment_id=? ORDER BY c.name`, environmentID)
@@ -26,22 +33,7 @@ func (s *Server) handleDeploymentDatabaseLinks(w http.ResponseWriter, r *http.Re
 		return httpx.Internal(err)
 	}
 	defer rows.Close()
-	policies, err := s.modules.deployRuns.PreviewBranchPolicies(r.Context(), environmentID)
-	if err != nil {
-		return httpx.Internal(err)
-	}
 	items := []databaseLink{}
-	// The database a connection opens is inside the sealed DSN rather than in
-	// a column of its own, so it is read the way every other database route
-	// reads it. A connection whose DSN no longer resolves against the current
-	// roots keeps its row without the name, rather than failing the report.
-	databaseName := func(id int64) string {
-		conn, _, err := s.dbConnRow(r.Context(), id)
-		if err != nil {
-			return ""
-		}
-		return conn.Database
-	}
 	for rows.Next() {
 		var item databaseLink
 		var checked int64
@@ -49,7 +41,6 @@ func (s *Server) handleDeploymentDatabaseLinks(w http.ResponseWriter, r *http.Re
 			return httpx.Internal(err)
 		}
 		item.Hostname = databaseDNSName(item.ConnectionID)
-		item.Database = databaseName(item.ConnectionID)
 		item.Previews = deploy.PreviewBranchPolicy{ConnectionID: item.ConnectionID, Mode: deploy.PreviewBranchNone, MaskedColumns: []string{}}
 		if policy, ok := policies[item.ConnectionID]; ok {
 			item.Previews = policy
@@ -71,6 +62,18 @@ func (s *Server) handleDeploymentDatabaseLinks(w http.ResponseWriter, r *http.Re
 	}
 	if err := rows.Err(); err != nil {
 		return httpx.Internal(err)
+	}
+	if err := rows.Close(); err != nil {
+		return httpx.Internal(err)
+	}
+	// The database a connection opens is inside the sealed DSN rather than in
+	// a column of its own, so it is read the way every other database route
+	// reads it. A connection whose DSN no longer resolves against the current
+	// roots keeps its row without the name, rather than failing the report.
+	for i := range items {
+		if conn, _, err := s.dbConnRow(r.Context(), items[i].ConnectionID); err == nil {
+			items[i].Database = conn.Database
+		}
 	}
 	httpx.JSON(w, http.StatusOK, items)
 	return nil

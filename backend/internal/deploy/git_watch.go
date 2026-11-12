@@ -184,8 +184,14 @@ type gitWatchCursor struct {
 	Generation, RunID, CheckedAt                                     int64
 }
 
-func (s *OrchestrationStore) gitWatchTargets(ctx context.Context, projectID, environmentID int64) ([]GitWatchTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `
+// gitWatchTargetsQuery is asked every GitWatchInterval for as long as the
+// server runs, and deploy_runs is never pruned. Both subqueries therefore
+// read an environment's runs newest first from idx_deploy_runs_environment
+// (environment_id, id) and stop at the first that fits; without it the first
+// walked the whole table back to that environment's last deploy and the
+// second had SQLite build an index over the table on every execution.
+// TestTheGitWatcherReadsAnEnvironmentsRunsFromAnIndex holds the plan.
+const gitWatchTargetsQuery = `
 		SELECT p.id, p.name, e.id, e.desired_revision, e.live_release_id, src.config_json, src.identity_json,
 		       COALESCE((SELECT r.id FROM deploy_runs r WHERE r.environment_id = e.id
 		         AND r.operation IN ('deploy','force_build') ORDER BY r.id DESC LIMIT 1), 0),
@@ -198,7 +204,10 @@ func (s *OrchestrationStore) gitWatchTargets(ctx context.Context, projectID, env
 		JOIN deploy_build_plans b ON b.environment_id = e.id AND b.revision = e.desired_revision
 		WHERE p.archived_at = 0 AND e.archived_at = 0 AND e.kind IN ('production', 'staging')
 		  AND b.method <> 'legacy_compose' AND (? = 0 OR p.id = ?) AND (? = 0 OR e.id = ?)
-		ORDER BY e.id`, projectID, projectID, environmentID, environmentID)
+		ORDER BY e.id`
+
+func (s *OrchestrationStore) gitWatchTargets(ctx context.Context, projectID, environmentID int64) ([]GitWatchTarget, error) {
+	rows, err := s.db.QueryContext(ctx, gitWatchTargetsQuery, projectID, projectID, environmentID, environmentID)
 	if err != nil {
 		return nil, err
 	}

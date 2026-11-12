@@ -812,14 +812,29 @@ func (s *AutomationStore) ListSchedules(ctx context.Context, projectID, environm
 				v.NextRuns = append([]time.Time{x}, rest...)
 			}
 		}
-		steps, err := s.scheduleSteps(ctx, v.ID)
-		if err != nil {
-			return nil, err
-		}
-		v.Steps = steps
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	// Read once the cursor has let go of its connection: a query made inside
+	// the loop above holds one connection and waits for a second, and four
+	// such reads at once stop every database call in the process.
+	ids := make([]int64, 0, len(out))
+	for _, v := range out {
+		ids = append(ids, v.ID)
+	}
+	steps, err := s.scheduleSteps(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Steps = steps[out[i].ID]
+	}
+	return out, nil
 }
 
 type ScheduleDispatch struct {
@@ -853,14 +868,25 @@ func (s *AutomationStore) ClaimDueSchedules(ctx context.Context, limit int) ([]S
 		v.UpdatedAt = time.Unix(updated, 0).UTC()
 		due := time.Unix(next, 0).UTC()
 		v.NextRunAt = &due
-		v.Steps, err = s.scheduleSteps(ctx, v.ID)
-		if err != nil {
-			return nil, err
-		}
 		out = append(out, ScheduleDispatch{Schedule: v, DueAt: due})
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
+	}
+	if err = rows.Close(); err != nil {
+		return nil, err
+	}
+	// As in ListSchedules: nothing queries while the cursor is open.
+	ids := make([]int64, 0, len(out))
+	for _, item := range out {
+		ids = append(ids, item.Schedule.ID)
+	}
+	steps, err := s.scheduleSteps(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Schedule.Steps = steps[out[i].Schedule.ID]
 	}
 	claimed := out[:0]
 	for _, item := range out {
@@ -947,23 +973,35 @@ func (s *AutomationScheduler) Stop() {
 	<-s.done
 	s.cancel = nil
 }
-func (s *AutomationStore) scheduleSteps(ctx context.Context, id int64) ([]ScheduleStep, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT action,config_json,required FROM deploy_schedule_steps WHERE schedule_id=? ORDER BY ordinal`, id)
+
+// scheduleSteps reads the steps of every listed schedule in one statement,
+// each schedule's in order. A schedule with none still has an entry, so its
+// steps encode as an empty list.
+func (s *AutomationStore) scheduleSteps(ctx context.Context, ids []int64) (map[int64][]ScheduleStep, error) {
+	out := make(map[int64][]ScheduleStep, len(ids))
+	for _, id := range ids {
+		out[id] = []ScheduleStep{}
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	placeholders, args := inPlaceholders(ids)
+	rows, err := s.db.QueryContext(ctx, `SELECT schedule_id,action,config_json,required FROM deploy_schedule_steps WHERE schedule_id IN `+placeholders+` ORDER BY schedule_id,ordinal`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []ScheduleStep{}
 	for rows.Next() {
+		var id int64
 		var v ScheduleStep
 		var cfg string
 		var required int
-		if err := rows.Scan(&v.Action, &cfg, &required); err != nil {
+		if err := rows.Scan(&id, &v.Action, &cfg, &required); err != nil {
 			return nil, err
 		}
 		v.Config = json.RawMessage(cfg)
 		v.Required = required != 0
-		out = append(out, v)
+		out[id] = append(out[id], v)
 	}
 	return out, rows.Err()
 }

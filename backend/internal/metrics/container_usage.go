@@ -29,7 +29,7 @@ func (r *Recorder) ContainerRange(ctx context.Context, name string, from, to tim
 	// loses every boundary interval, turns single-sample buckets into zero,
 	// and treats a counter reset as a spike. The bounded look-behind includes
 	// the predecessor of the first visible sample without scanning all history.
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		WITH previous AS (
 		  SELECT *, COALESCE(sample_time, ts) - LAG(COALESCE(sample_time, ts)) OVER w AS elapsed,
 		    LAG(container_id) OVER w AS prev_id, LAG(cpu_total) OVER w AS prev_cpu,

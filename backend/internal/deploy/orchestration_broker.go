@@ -6,7 +6,11 @@ import (
 	"sync"
 )
 
-const liveEventBuffer = 128
+// liveEventBuffer is how far a subscriber may fall behind before it is dropped
+// and has to reconnect and replay. A step's output arrives a batch at a time
+// (stepOutputBatchLines), so this is a dozen and more batches of slack rather
+// than two.
+const liveEventBuffer = 1024
 
 // RunEventReplayLimit bounds one replay page before a subscriber catches up
 // through another page or hands off to live events.

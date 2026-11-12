@@ -329,7 +329,7 @@ const VolumeInterval = 15 * time.Minute
 
 // Recorder samples the host and answers questions about the past.
 type Recorder struct {
-	db        *sql.DB
+	st        *store.Store
 	log       *slog.Logger
 	interval  time.Duration
 	retention time.Duration
@@ -378,13 +378,26 @@ func New(st *store.Store, log *slog.Logger, interval, retention time.Duration) *
 		retention = MinRetention
 	}
 	return &Recorder{
-		db:        st.DB,
+		st:        st,
 		log:       log,
 		interval:  interval,
 		retention: retention,
 		col:       sysinfo.NewCollector(),
 	}
 }
+
+// samples is where samples are written and pruned: the store's bulk writer,
+// which does not sync the disk on every commit. A power cut can take the last
+// few seconds of samples, which leaves a gap no wider than the one the outage
+// itself draws, and the recorder stops costing the disk a sync for every
+// table it writes every interval.
+func (r *Recorder) samples() *sql.DB { return r.st.Bulk() }
+
+// history is where the past is read from: the store's read pool. A week of
+// samples takes half a second to fold and a Metrics page asks for several at
+// once; on the pool every request shares, two such pages left no connection
+// for a session check or for the next sample.
+func (r *Recorder) history() *sql.DB { return r.st.Reader() }
 
 // WithContainers attaches per-container recording. Called after New because
 // the Docker client is built alongside the recorder rather than before it.
@@ -556,7 +569,7 @@ func (r *Recorder) writeVolumes(ctx context.Context, at time.Time, sizes []Volum
 	if len(sizes) == 0 {
 		return nil
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.samples().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -588,7 +601,7 @@ func (r *Recorder) recordMounts(ctx context.Context, at time.Time, mounts []sysi
 	if len(mounts) == 0 {
 		return nil
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.samples().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -648,7 +661,7 @@ func (r *Recorder) StorageRange(ctx context.Context, from, to time.Time, maxPoin
 	series := &StorageSeries{Window: window, Mounts: []MountSeries{}}
 
 	secs := int64(window.StepSeconds)
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT mountpoint,
 		       (ts / ?) * ? AS bucket,
 		       COUNT(*),
@@ -724,7 +737,7 @@ func (r *Recorder) recordContainersAt(ctx context.Context, at time.Time, stats [
 }
 
 func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []dockerx.ContainerStats) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.samples().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -860,7 +873,7 @@ func (r *Recorder) record(ctx context.Context, s Sample) error {
 	if ts.IsZero() {
 		ts = time.Now()
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.samples().ExecContext(ctx, `
 		INSERT INTO metric_samples
 		  (ts, cpu_percent, load1, mem_percent, mem_used, mem_total, swap_percent,
 		   net_rx, net_tx, disk_read, disk_write, disk_percent, uptime_seconds,
@@ -926,16 +939,16 @@ func (r *Recorder) prune(ctx context.Context) error {
 		return nil
 	}
 	cutoff := time.Now().Add(-r.retention).Unix()
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM metric_samples WHERE ts < ?`, cutoff); err != nil {
+	if _, err := r.samples().ExecContext(ctx, `DELETE FROM metric_samples WHERE ts < ?`, cutoff); err != nil {
 		return err
 	}
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM metric_container_samples WHERE ts < ?`, cutoff); err != nil {
+	if _, err := r.samples().ExecContext(ctx, `DELETE FROM metric_container_samples WHERE ts < ?`, cutoff); err != nil {
 		return err
 	}
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM metric_volume_samples WHERE ts < ?`, cutoff); err != nil {
+	if _, err := r.samples().ExecContext(ctx, `DELETE FROM metric_volume_samples WHERE ts < ?`, cutoff); err != nil {
 		return err
 	}
-	_, err := r.db.ExecContext(ctx, `DELETE FROM metric_mount_samples WHERE ts < ?`, cutoff)
+	_, err := r.samples().ExecContext(ctx, `DELETE FROM metric_mount_samples WHERE ts < ?`, cutoff)
 	return err
 }
 
@@ -960,7 +973,7 @@ func (r *Recorder) Range(ctx context.Context, from, to time.Time, maxPoints int)
 	series := &Series{Window: window, Points: []Point{}}
 
 	secs := int64(window.StepSeconds)
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT (ts / ?) * ?                          AS bucket,
 		       COUNT(*),
 		       AVG(cpu_percent),  MAX(cpu_percent),
@@ -1056,7 +1069,7 @@ func (r *Recorder) window(ctx context.Context, from, to time.Time, maxPoints int
 		RetentionSeconds: int(r.retention / time.Second),
 	}
 	var ts sql.NullInt64
-	if err := r.db.QueryRowContext(ctx, earliestQuery, args...).Scan(&ts); err != nil {
+	if err := r.history().QueryRowContext(ctx, earliestQuery, args...).Scan(&ts); err != nil {
 		return Window{}, err
 	}
 	if ts.Valid {
@@ -1098,7 +1111,7 @@ func (r *Recorder) Sparklines(ctx context.Context, from, to time.Time, maxPoints
 	step := bucketFor(to.Sub(from), maxPoints, r.interval)
 	secs := int64(step / time.Second)
 
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT name,
 		       (ts / ?) * ? AS bucket,
 		       MAX(cpu_percent), MAX(mem_bytes)
@@ -1143,7 +1156,7 @@ func (r *Recorder) Sparklines(ctx context.Context, from, to time.Time, maxPoints
 // UI can offer a series for one that is no longer running — which is exactly
 // the container an operator is usually looking for.
 func (r *Recorder) RecordedContainers(ctx context.Context, from, to time.Time) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT name FROM metric_container_samples
 		 WHERE ts >= ? AND ts <= ?
 		 GROUP BY name ORDER BY name`, from.Unix(), to.Unix())

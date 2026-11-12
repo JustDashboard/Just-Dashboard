@@ -64,7 +64,7 @@ func (r *Recorder) Events(ctx context.Context, from, to time.Time, limit int) ([
 }
 
 func (r *Recorder) deployEvents(ctx context.Context, from, to time.Time, limit int) []Event {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT d.started_at, d.ended_at, d.status, d.trigger, d.actor, p.id, p.name
 		  FROM deploy_runs d
 		  JOIN deploy_projects p ON p.id = d.project_id
@@ -103,7 +103,7 @@ func (r *Recorder) deployEvents(ctx context.Context, from, to time.Time, limit i
 }
 
 func (r *Recorder) backupEvents(ctx context.Context, from, to time.Time, limit int) []Event {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT b.started_at, b.ended_at, b.status, b.size_bytes, j.name
 		  FROM backup_runs b
 		  JOIN backup_jobs j ON j.id = b.job_id
@@ -154,7 +154,7 @@ func (r *Recorder) rebootEvents(ctx context.Context, from, to time.Time) []Event
 	// One sample of slack on the lower bound so a reboot in the first bucket
 	// of the window still has a predecessor to be compared against.
 	lower := from.Add(-2 * r.interval).Unix()
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT ts, uptime_seconds FROM metric_samples
 		 WHERE ts >= ? AND ts <= ? AND uptime_seconds > 0
 		 ORDER BY ts`, lower, to.Unix())
@@ -197,7 +197,7 @@ func (r *Recorder) rebootEvents(ctx context.Context, from, to time.Time) []Event
 // service control — plus every failure, since a failed destructive action is
 // worth seeing next to whatever the machine did afterwards.
 func (r *Recorder) auditEvents(ctx context.Context, from, to time.Time, limit int) []Event {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT ts, action, target, username, success
 		  FROM audit_log
 		 WHERE ts >= ? AND ts <= ?

@@ -6,13 +6,46 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	DB    *sql.DB
-	guard *walGuard
+	// DB is the pool everything uses unless it has a reason not to: reads and
+	// writes, every commit synced to disk before it returns.
+	DB *sql.DB
+	// bulk is the writer for what a power cut may take; see Bulk. It is read
+	// on every use rather than kept by whoever asked, so SingleConnection can
+	// take it away under a running test.
+	bulk atomic.Pointer[sql.DB]
+	// read is the pool for reads that take long; see Reader.
+	read atomic.Pointer[sql.DB]
+	// handles are the pools Open made beside DB, to close with the store.
+	handles []*sql.DB
+	guard   *walGuard
+}
+
+// Bulk is the writer for rows nobody would miss the last seconds of: metric
+// samples and the lines a build prints. It is the same database through a
+// connection that does not sync the write-ahead log on every commit
+// (synchronous=NORMAL, where DB is FULL).
+//
+// What that gives up is narrow. Neither setting can corrupt the database, and
+// neither loses anything when the process is killed or crashes: the operating
+// system already has the write. After a power cut or a kernel crash, the
+// commits made here since the log was last synced can be missing: the last
+// seconds of them, since any commit on DB syncs the log and so makes
+// everything written before it durable too. Whether a write may go here is
+// therefore one question: if the server lost power the moment after it, would
+// anybody act differently for not having the row? An audit entry, a password,
+// a session's end, a revoked key, a deployment's state all answer yes, and
+// stay on DB. A store that was not opened by Open has only DB, and gets it.
+func (s *Store) Bulk() *sql.DB {
+	if db := s.bulk.Load(); db != nil {
+		return db
+	}
+	return s.DB
 }
 
 // DatabaseFile is the SQLite file inside the data directory. It keeps its
@@ -1645,6 +1678,11 @@ CREATE INDEX IF NOT EXISTS idx_deploy_runs_queue
 -- order lets the ranking read ids from the index alone instead of sorting rows.
 CREATE INDEX IF NOT EXISTS idx_deploy_runs_project_requested
   ON deploy_runs(project_id, requested_at DESC, id DESC);
+-- The git watcher asks for each environment's newest run every five seconds,
+-- and the table is never pruned; nothing else led on the environment, so
+-- that was a walk of the table and an index built for each execution.
+CREATE INDEX IF NOT EXISTS idx_deploy_runs_environment
+  ON deploy_runs(environment_id, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_deploy_runs_idempotency
   ON deploy_runs(project_id, environment_id, operation, idempotency_key)
   WHERE idempotency_key <> '';
@@ -2022,12 +2060,20 @@ func Open(dataDir string) (*Store, error) {
 	// writer wait instead. A deployment worker's step transition racing a
 	// notification delivery or an operator's settings save is exactly that
 	// case, and a lost transition used to end the run as unrecoverable.
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate")
+	//
+	// synchronous is spelled out because it is a decision, not a default that
+	// happened: with FULL a commit returns once the write-ahead log is on
+	// disk, so what the dashboard has acknowledged (an audit entry, a changed
+	// password, a revoked key, a deployment's state) survives a power cut.
+	// The writes that do not need that go through Bulk instead.
+	db, err := sql.Open("sqlite", path+"?"+writerPragmas+"&_pragma=synchronous(FULL)")
 	if err != nil {
 		return nil, err
 	}
 	// SQLite tolerates a single writer; the pool is kept small so the WAL
-	// writer never contends with itself under WebSocket fan-out.
+	// writer never contends with itself under WebSocket fan-out. Four is for
+	// the writer's sake only: the reads that take long have a pool of their
+	// own (Reader), so they do not use these up.
 	db.SetMaxOpenConns(4)
 	if _, err := db.ExecContext(context.Background(), schema); err != nil {
 		db.Close()
@@ -2080,12 +2126,85 @@ func Open(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{DB: db, guard: guard}, nil
+	st := &Store{DB: db, guard: guard}
+	// One connection: SQLite has one writer, and a second connection here
+	// would only wait for the first inside SQLite instead of in the pool.
+	bulk, err := st.openHandle(path, writerPragmas+"&_pragma=synchronous(NORMAL)", 1)
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("open the bulk writer: %w", err)
+	}
+	st.bulk.Store(bulk)
+	// Readers do not take the write lock, so they are not what the four
+	// connections of DB are rationed for; they get as many of their own.
+	// No _txlock here: a transaction on a connection that cannot write must
+	// not begin by asking for the write lock.
+	read, err := st.openHandle(path, "_pragma=busy_timeout(5000)&_pragma=query_only(1)", 4)
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("open the read pool: %w", err)
+	}
+	st.read.Store(read)
+	return st, nil
+}
+
+// writerPragmas are what every connection that writes is opened with. See
+// Open for why transactions begin IMMEDIATE.
+const writerPragmas = "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
+
+// openHandle opens one more pool on a database Open has already built, and
+// proves it connects: sql.Open alone reports nothing until first use.
+func (s *Store) openHandle(path, pragmas string, connections int) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", path+"?"+pragmas)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(connections)
+	if err := db.PingContext(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
+	s.handles = append(s.handles, db)
+	return db, nil
 }
 
 func (s *Store) Close() error {
+	// The other handles first: the guard is released only on the way to
+	// closing the last connection to the database.
+	for _, db := range s.handles {
+		db.Close()
+	}
 	s.guard.release()
 	return s.DB.Close()
+}
+
+// Reader is the pool for reads that take long or come in bursts: a week of
+// metric history, the deployments read model, a run's transcript, a page of
+// the audit trail. Its connections can only read (query_only), and they are
+// not DB's, so a few slow chart reads no longer stand between a request and
+// its session check, an audit row or the next metric sample: those wait for
+// DB, which the long reads have left alone.
+//
+// A read here sees every commit made before it began, on whichever handle,
+// as any SQLite reader in WAL mode does. What it must not be is part of a
+// write: a function that reads and then writes inside one transaction keeps
+// to that transaction. A store that was not opened by Open has only DB.
+func (s *Store) Reader() *sql.DB {
+	if db := s.read.Load(); db != nil {
+		return db
+	}
+	return s.DB
+}
+
+// SingleConnection leaves the store one connection for everything: every
+// handle answers with DB from now on, and DB keeps a single connection. It
+// exists for tests (storetest.OneConnection): on a store like this, a call
+// that needs a second connection from any handle while it still holds one can
+// never finish.
+func (s *Store) SingleConnection() {
+	s.bulk.Store(nil)
+	s.read.Store(nil)
+	s.DB.SetMaxOpenConns(1)
 }
 
 func (s *Store) Setting(ctx context.Context, key string) (string, bool, error) {
