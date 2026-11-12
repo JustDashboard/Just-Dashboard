@@ -511,6 +511,7 @@ func (s *Server) initModules() {
 				Light: s.Cfg.DeployLightSlots,
 			},
 			LeaseTTL: s.Cfg.DeployLeaseTTL,
+			History:  deploy.HistoryPolicy{KeepRuns: s.Cfg.DeployHistoryRuns},
 		},
 		s.Log,
 	)

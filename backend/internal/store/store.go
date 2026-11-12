@@ -964,6 +964,16 @@ CREATE TABLE IF NOT EXISTS deploy_log_chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_deploy_log_run ON deploy_log_chunks(run_id, seq);
 
+-- The runs whose output the history policy (deploy/run_history.go) has cut
+-- down to its end, so a pass does not look at one twice. A table of its own
+-- and not a column of deploy_runs: a pass finds its runs from an index and
+-- this table, and a column added to deploy_runs would sit behind the log
+-- tail, which is read through a chain of overflow pages to reach it.
+CREATE TABLE IF NOT EXISTS deploy_run_output_pruned (
+  run_id    INTEGER PRIMARY KEY REFERENCES deploy_runs(id) ON DELETE CASCADE,
+  pruned_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS deploy_dependencies (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   environment_id INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,

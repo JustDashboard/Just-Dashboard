@@ -47,6 +47,32 @@ only renderer/executor/validation authority for their feature.
   from those columns, and a row written before the change (its text repeated in `data_json`) or by the
   0.6.6 migration still answers with the data it holds. `deploy_runs.log`, the bounded tail the 0.6.6
   run shape (`lastRun.log`, the legacy run list) still answers with, is rewritten once a batch.
+- What a run printed is the only part of deployment history that is ever removed, and it is removed
+  in two steps (`deploy/run_history.go`). When a run ends, however it ends, the engine keeps its newest
+  10,000 lines (`EngineConfig.HotLogLimit`, `compactFinished`; until 0.8.6 only a run that succeeded was
+  held to it, and a build failing in a loop is the one that prints the most). Later, the history policy
+  (`HistoryPolicy`, `JD_DEPLOY_HISTORY_RUNS`, 200 by default, 0 for no limit) keeps the output of each
+  environment's newest runs whole and cuts an older run to its last 200 lines (`historyTailLines`, what a diagnosis asked for later is built
+  from) and
+  the last 4,000 characters of the tail on its row. The engine applies it a minute after it starts and
+  every hour, 25 runs a pass, with the next pass a second later and from the run the last one reached
+  while runs are waiting, which is how an install upgraded with years of history catches up and why
+  runs a pass cannot cut never hold one back; each run is one transaction on the store's bulk
+  writer, and `deploy_run_output_pruned` records the runs done so a pass never returns to one. The
+  policy deletes rows of `deploy_log_chunks` whose type is `step.log` and nothing else. A run's row,
+  its steps and their evidence, its diagnosis, its variable and plan snapshots, its state events, its
+  release and the release's artifacts stay for as long as the project does: a rollback, a retry, a
+  promotion and the release comparison read those and none reads output, so no policy value can take
+  something they need. Three kinds of run keep their whole output whatever their age
+  (`historyProtectedQuery`): the one behind the live release, the ones behind pinned releases, and the
+  ones behind the six newest releases that went live, the same six `ArtifactRetentionPlan` keeps images
+  for. A run that has not ended is passed over. A cut run reads as a compacted one always has: the
+  transcript says earlier lines exist and a stream starts with a `resync`. A pass lists its runs from
+  `idx_deploy_runs_environment` and the table of cut runs without reading a run's row
+  (`TestTheHistoryPassFindsItsRunsWithoutReadingRunRows` holds the plan); that is also why the record
+  of a cut is a table and not a column of `deploy_runs`, where it would sit behind the log tail.
+  Webhook deliveries are not pruned: a row is what refuses a replayed delivery
+  (`ErrDeliveryReplayed`), and the provider signs no time a replay could be refused by instead.
 - Reusing a run's `Idempotency-Key` with a different manual `sourceRevision` or `ref` returns
   `409 idempotency_conflict`. The comparison includes the persisted source-request metadata alongside
   the existing digest, so keys created before this check retain their behavior. Retrying the same ref

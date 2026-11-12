@@ -358,6 +358,19 @@ func (s *OrchestrationStore) CompactRunLogs(ctx context.Context, runID int64, ke
 		return err
 	}
 	defer tx.Rollback()
+	if err := compactRunLogsTx(ctx, tx, runID, keep); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ErrRunStillOpen is what compacting a run's output answers while the run
+// can still print: a reader following it has to find every line.
+var ErrRunStillOpen = errors.New("deployment logs compact only after the run is terminal")
+
+// compactRunLogsTx is CompactRunLogs inside a transaction of the caller's,
+// which holds the store's write lock.
+func compactRunLogsTx(ctx context.Context, tx *sql.Tx, runID int64, keep int) error {
 	var terminal string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT state FROM deploy_runs WHERE id = ?`, runID).Scan(&terminal); err != nil {
@@ -367,7 +380,7 @@ func (s *OrchestrationStore) CompactRunLogs(ctx context.Context, runID int64, ke
 		return err
 	}
 	if !RunState(terminal).Terminal() {
-		return fmt.Errorf("deployment logs compact only after the run is terminal")
+		return ErrRunStillOpen
 	}
 	var watermark int64
 	if err := tx.QueryRowContext(ctx, `
@@ -381,22 +394,22 @@ func (s *OrchestrationStore) CompactRunLogs(ctx context.Context, runID int64, ke
 		return err
 	}
 	if watermark == 0 {
-		return tx.Commit()
+		return nil
 	}
+	// The mark an earlier, wider compaction left goes with the lines: only
+	// the newest one is read.
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM deploy_log_chunks
-		 WHERE run_id = ? AND event_type = ? AND compacted = 0 AND seq < ?`,
+		 WHERE run_id = ? AND event_type = ? AND seq < ?`,
 		runID, EventStepLog, watermark); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
+	_, err := tx.ExecContext(ctx, `
 		UPDATE deploy_log_chunks
 		   SET compacted = 1, stream = 'status', text = '', data_json = '{}',
 		       redacted = 0, truncated = 0
-		 WHERE run_id = ? AND seq = ?`, runID, watermark); err != nil {
-		return err
-	}
-	return tx.Commit()
+		 WHERE run_id = ? AND seq = ?`, runID, watermark)
+	return err
 }
 
 func boolInt(value bool) int {
