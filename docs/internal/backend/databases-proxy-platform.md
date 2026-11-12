@@ -6104,6 +6104,15 @@ done by hand, and the UI refuses to fold it away.
   readable by the same every-role audience as the report that already carries its end. The console on
   `/dashboard` reads it once when the tail says it was trimmed and extends it with each polled tail
   (`frontend/src/lib/transcript.ts`).
+- **The changelog is not in the report.** `GET /api/v1/dashboard/update` answers what is polled (every
+  five minutes, every two seconds during a run): the version, the latest, the releases newer than the
+  installed one, the check, the install and the run. What this build knows about its own past
+  (`selfupdate.Local()`, about 280 KB) is `GET /api/v1/dashboard/update/history`, `{"history": […]}`,
+  for the same every-role audience. It is encoded once per process and carries an `ETag` with
+  `Cache-Control: private, no-cache`, so a browser keeps it and a reload costs a `304`; `etagHolds`
+  also reads the tag the way a compressing proxy rewrites it (nginx's `W/"…"`, Caddy's `"…-gzip"`).
+  `useUpdateHistory(version)` (`frontend/src/hooks/use-update-history.ts`) reads it once per version
+  per tab: for `/dashboard`, and for the sidebar notice only when it has an outcome to head.
 
 ### The dashboard's own settings
 

@@ -208,11 +208,22 @@ const usagePing = {
   nextBody: usageBody,
 }
 
+function withoutHistory(report: unknown) {
+  const status = { ...(report as Record<string, unknown>) }
+  delete status.history
+  return status
+}
+
 async function mockApi(page: Page, report: unknown = update) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
     if (path === "/auth/session") return json(route, user)
-    if (path === "/dashboard/update") return json(route, report)
+    // The report that is polled does not carry the changelog; the page reads it once from a
+    // route of its own.
+    if (path === "/dashboard/update") return json(route, withoutHistory(report))
+    if (path === "/dashboard/update/history") {
+      return json(route, { history: (report as { history?: unknown[] }).history ?? [] })
+    }
     if (path === "/dashboard/config") return json(route, config)
     if (path === "/dashboard/uninstall") return json(route, { supported: true })
     if (path === "/dashboard/uninstall/plan") return json(route, uninstallPlan)

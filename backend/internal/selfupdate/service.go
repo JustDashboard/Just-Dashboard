@@ -140,9 +140,10 @@ type Report struct {
 	// Releases are the versions between the installed one and the newest,
 	// newest first. This is what "View changes" shows.
 	Releases []Release `json:"releases"`
-	// History is what this build knows about its own past. It needs no network
-	// and is what the changelog reads on an install that is up to date.
-	History  []Release `json:"history"`
+	// What this build knows about its own past is not here: it is a quarter
+	// of a megabyte that changes only with the build, and this report is read
+	// every two seconds while an update runs. Local() is that history, and
+	// the API serves it from a route of its own.
 	Breaking bool      `json:"breaking"`
 	Check    CheckMeta `json:"check"`
 	Install  Install   `json:"install"`
@@ -188,13 +189,11 @@ func (s *Service) Report(ctx context.Context, freshness Freshness) Report {
 		check = s.checker.Nudge(checkInterval)
 	}
 
-	local := Local()
 	rep := Report{
 		Version:   s.current,
 		Latest:    check.Latest,
 		Available: check.Available,
 		Releases:  check.Releases,
-		History:   local.Releases,
 		Breaking:  HasBreaking(check.Releases),
 		Check: CheckMeta{
 			Enabled:   check.Enabled,

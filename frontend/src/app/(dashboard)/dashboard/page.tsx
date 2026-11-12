@@ -9,6 +9,7 @@ import { notify } from "@/lib/toast"
 import type { Release, SelfUpdateReport } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useSelfUpdate } from "@/hooks/use-self-update"
+import { useUpdateHistory } from "@/hooks/use-update-history"
 import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph } from "@/components/product-logo"
 import { ReleaseTimeline } from "@/components/update/release-timeline"
@@ -59,11 +60,13 @@ export default function DashboardVersionPage() {
   // Everything this build knows about, newest first: the releases the check
   // turned up sit above the ones compiled in, and a version in both is shown
   // once. An install with no network still has the whole of its own past.
+  // The compiled-in ones are read apart from the report, once: they change only with the build.
+  const history = useUpdateHistory(report?.version)
   const all = useMemo<Release[]>(() => {
     if (!report) return []
     const seen = new Set(report.releases.map((r) => r.version))
-    return [...report.releases, ...report.history.filter((r) => !seen.has(r.version))]
-  }, [report])
+    return [...report.releases, ...(history ?? []).filter((r) => !seen.has(r.version))]
+  }, [report, history])
   const newer = useMemo(() => new Set(report?.releases.map((r) => r.version)), [report])
 
   const visible = useMemo(() => {
@@ -192,6 +195,8 @@ export default function DashboardVersionPage() {
               newer={newer}
               expanded={Boolean(filter.trim())}
             />
+          ) : history === undefined ? (
+            <Skeleton className="h-96 rounded-xl" />
           ) : filter ? (
             <EmptyNote>
               Nothing matches that. The notes are searched by version, title and every line of every

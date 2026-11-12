@@ -1,8 +1,13 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
+	"sync"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
@@ -23,6 +28,9 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 		// read-only operator seeing "0.6 is out" is how the person who *can*
 		// install it finds out.
 		r.Method(http.MethodGet, "/update", s.handle(s.handleSelfUpdateStatus))
+		// The release notes this build was compiled with, apart from the
+		// report that is polled: the same audience, asked for once.
+		r.Method(http.MethodGet, "/update/history", s.handle(s.handleSelfUpdateHistory))
 		// The same audience as the report, which already carries this
 		// transcript's last 64 KB: this is the rest of it, asked for once.
 		r.Method(http.MethodGet, "/update/log", s.handle(s.handleSelfUpdateLog))
@@ -131,6 +139,65 @@ func (s *Server) handleSelfUpdateStatus(w http.ResponseWriter, r *http.Request) 
 	rep := s.modules.selfUpdate.Report(r.Context(), freshness)
 	httpx.JSON(w, http.StatusOK, rep)
 	return nil
+}
+
+// selfUpdateHistory is the release notes this build was compiled with, encoded
+// once, and the tag they are known by. The changelog is embedded in the binary,
+// so the answer is the same bytes for as long as the process lives and its tag
+// changes only with the build.
+var selfUpdateHistory = sync.OnceValues(func() ([]byte, string) {
+	body, err := json.Marshal(struct {
+		History []selfupdate.Release `json:"history"`
+	}{selfupdate.Local().Releases})
+	if err != nil {
+		body = []byte(`{"history":[]}`)
+	}
+	sum := sha256.Sum256(body)
+	return body, hex.EncodeToString(sum[:8])
+})
+
+// handleSelfUpdateHistory answers what this build knows about its own past.
+//
+// It used to ride in the status report, where it was 278 KB of every answer:
+// twice per page load, and every two seconds on every open tab while an update
+// ran, which is when the server is busiest. It needs no network and no check,
+// so it is a route of its own with an ETag: a browser keeps it and asks only
+// whether it still holds (no-cache is "ask every time", not "do not keep"), so
+// a reload costs a 304 and the notes of a new build are never the last one's.
+func (s *Server) handleSelfUpdateHistory(w http.ResponseWriter, r *http.Request) error {
+	body, tag := selfUpdateHistory()
+	h := w.Header()
+	h.Set("ETag", `"`+tag+`"`)
+	h.Set("Cache-Control", "private, no-cache")
+	if etagHolds(r.Header.Get("If-None-Match"), tag) {
+		w.WriteHeader(http.StatusNotModified)
+		return nil
+	}
+	h.Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+	return nil
+}
+
+// etagHolds reports whether an If-None-Match header names tag. A proxy that
+// compresses the answer rewrites the tag on the way out (nginx makes it weak,
+// W/"…"; Caddy appends the encoding, "…-gzip") and not every one undoes that
+// on the way back in, so both spellings are read as the tag they came from.
+func etagHolds(header, tag string) bool {
+	for candidate := range strings.SplitSeq(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" {
+			return true
+		}
+		candidate = strings.Trim(strings.TrimPrefix(candidate, "W/"), `"`)
+		for _, encoding := range []string{"-gzip", "-zstd", "-br"} {
+			candidate = strings.TrimSuffix(candidate, encoding)
+		}
+		if candidate != "" && candidate == tag {
+			return true
+		}
+	}
+	return false
 }
 
 // handleSelfUpdateInstall starts the upgrade and answers before it finishes.

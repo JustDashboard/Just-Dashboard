@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -204,7 +205,7 @@ func TestAnInstallWithNothingToRebuildSaysSo(t *testing.T) {
 	}
 	// The changelog is compiled in, so it is readable with no network, no
 	// Docker and no checkout.
-	if len(rep.History) == 0 {
+	if len(selfupdate.Local().Releases) == 0 {
 		t.Error("an install that cannot update itself also lost its own release notes")
 	}
 	if rep.Version != "0.5" {
@@ -258,5 +259,93 @@ func TestOnlyASessionChangesTheDashboardsOwnSettings(t *testing.T) {
 	}
 	if w := key.do(http.MethodPost, "/api/v1/dashboard/restart", `{}`, bearer); w.Code == http.StatusForbidden {
 		t.Fatalf("an admin key restarting = %d %s", w.Code, w.Body)
+	}
+}
+
+// offlineUpdates gives a test server an updater that never asks the network.
+func offlineUpdates(t *testing.T, s *Server) {
+	t.Helper()
+	s.modules.selfUpdate = selfupdate.New(selfupdate.Options{
+		Current: "0.5", DataDir: t.TempDir(),
+		UpdateDir: filepath.Join(t.TempDir(), "not-here"),
+		Log:       s.Log,
+	})
+}
+
+// The report is read twice per page load and every two seconds while an
+// update runs. It used to carry the whole changelog, 278 KB of it.
+func TestTheUpdateReportDoesNotCarryTheChangelog(t *testing.T) {
+	s := testServer(t)
+	offlineUpdates(t, s)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+	w := c.do(http.MethodGet, "/api/v1/dashboard/update", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body)
+	}
+	var report map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := report["history"]; has {
+		t.Error("the report still carries history")
+	}
+	for _, field := range []string{"version", "releases", "check", "install"} {
+		if _, has := report[field]; !has {
+			t.Errorf("the report lost %q", field)
+		}
+	}
+	if w.Body.Len() > 8<<10 {
+		t.Errorf("the report of an idle install is %d bytes", w.Body.Len())
+	}
+}
+
+func TestTheChangelogIsServedOnceAndThenByItsTag(t *testing.T) {
+	s := testServer(t)
+	offlineUpdates(t, s)
+	c := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "reader", auth.RoleReadOnly)}
+
+	const path = "/api/v1/dashboard/update/history"
+	first := c.do(http.MethodGet, path, "", nil)
+	if first.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", first.Code, first.Body)
+	}
+	var answer struct {
+		History []selfupdate.Release `json:"history"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
+	}
+	if len(answer.History) == 0 || len(answer.History) != len(selfupdate.Local().Releases) {
+		t.Errorf("%d releases served, the build knows %d", len(answer.History), len(selfupdate.Local().Releases))
+	}
+	tag := first.Header().Get("ETag")
+	if len(tag) < 10 || !strings.HasPrefix(tag, `"`) || !strings.HasSuffix(tag, `"`) {
+		t.Fatalf("ETag %q is not a strong tag", tag)
+	}
+	// Kept by the browser and asked about every time: never served stale
+	// after an update, never stored by something shared.
+	if got := first.Header().Get("Cache-Control"); got != "private, no-cache" {
+		t.Errorf("Cache-Control %q", got)
+	}
+
+	bare := strings.Trim(tag, `"`)
+	for name, header := range map[string]string{
+		"the tag as it was sent":            tag,
+		"the tag an nginx in front weakens": "W/" + tag,
+		"the tag a Caddy in front suffixes": `"` + bare + `-gzip"`,
+		"one of several":                    `"something-else", ` + tag,
+	} {
+		again := c.do(http.MethodGet, path, "", map[string]string{"If-None-Match": header})
+		if again.Code != http.StatusNotModified || again.Body.Len() != 0 {
+			t.Errorf("%s: status %d with %d bytes, want 304 and none", name, again.Code, again.Body.Len())
+		}
+		if again.Header().Get("ETag") != tag {
+			t.Errorf("%s: the 304 does not repeat the tag", name)
+		}
+	}
+	// Another build's tag is answered in full.
+	if other := c.do(http.MethodGet, path, "", map[string]string{"If-None-Match": `"0123456789abcdef"`}); other.Code != http.StatusOK || other.Body.Len() != first.Body.Len() {
+		t.Errorf("a tag that is not this build's: status %d, %d bytes", other.Code, other.Body.Len())
 	}
 }
