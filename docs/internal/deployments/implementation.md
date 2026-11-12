@@ -1479,6 +1479,13 @@ only renderer/executor/validation authority for their feature.
   instantaneous push-delivery guarantee. Tags, local checkouts, legacy Compose and archived projects
   are excluded. Monitoring status and access failures appear in the project identity line
   and on Settings → General's Automatic deployment section.
+  Each tick asks one statement which environments to watch (`gitWatchTargetsQuery`), with each
+  environment's newest deploy and the revision it built. `deploy_runs` is never pruned, so both of its
+  looks at an environment's runs read `idx_deploy_runs_environment (environment_id, id)` newest first
+  and stop at the first that fits; `TestTheGitWatcherReadsAnEnvironmentsRunsFromAnIndex` holds the
+  plan, so a change to the statement that brings back a table scan or an index built per execution
+  fails there. The other questions about one environment's runs (what is in flight before it sleeps,
+  is promoted or is quarantined) use the same index.
   `deploy_git_watches` persists the last observed revision, policy digest, decision reason and observation generation: restarts,
   failed runs, duplicate provider deliveries and a crash after enqueue cannot cause repeated builds;
   a later branch change (including a force-push back to an older commit) remains eligible. Watching

@@ -1678,6 +1678,11 @@ CREATE INDEX IF NOT EXISTS idx_deploy_runs_queue
 -- order lets the ranking read ids from the index alone instead of sorting rows.
 CREATE INDEX IF NOT EXISTS idx_deploy_runs_project_requested
   ON deploy_runs(project_id, requested_at DESC, id DESC);
+-- The git watcher asks for each environment's newest run every five seconds,
+-- and the table is never pruned; nothing else led on the environment, so
+-- that was a walk of the table and an index built for each execution.
+CREATE INDEX IF NOT EXISTS idx_deploy_runs_environment
+  ON deploy_runs(environment_id, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_deploy_runs_idempotency
   ON deploy_runs(project_id, environment_id, operation, idempotency_key)
   WHERE idempotency_key <> '';
