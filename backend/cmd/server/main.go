@@ -343,7 +343,7 @@ func run(agentFlag, agentReset bool) error {
 	errCh := make(chan error, 1)
 	go func() {
 		log.Info("just-dashboard listening",
-			"version", version.Version,
+			"version", version.Build(),
 			"addr", cfg.Addr, "allowlist", len(cfg.AllowedCIDRs),
 			"agent", cfg.AgentMode)
 		var err error

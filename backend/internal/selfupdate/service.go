@@ -12,6 +12,7 @@ import (
 // question a handler actually asks — "where does this install stand".
 type Service struct {
 	current   string
+	commit    string
 	dataDir   string
 	updateDir string
 	checker   *Checker
@@ -42,6 +43,9 @@ type Service struct {
 type Options struct {
 	// Current is the version running, i.e. version.Version.
 	Current string
+	// Commit is the commit a build that is not a release was made from, i.e.
+	// version.Commit. Empty for a release.
+	Commit  string
 	DataDir string
 	// UpdateDir overrides the checkout discovery entirely. Empty is the normal
 	// case: the dashboard asks Docker where it was deployed from.
@@ -79,6 +83,7 @@ func New(o Options) *Service {
 	}
 	return &Service{
 		current:   Normalise(o.Current),
+		commit:    strings.TrimSpace(o.Commit),
 		dataDir:   o.DataDir,
 		updateDir: o.UpdateDir,
 		checker:   checker,
@@ -140,7 +145,13 @@ type Install struct {
 
 // Report is the whole answer, and the only thing the API serves.
 type Report struct {
-	Version   string `json:"version"`
+	Version string `json:"version"`
+	// Commit is the short commit this binary was built from when that is not
+	// the release of Version: a patch branch, a fork's head, a checkout with
+	// commits of the operator's own. Empty for a release, so a report of
+	// "0.8.5" and one of "0.8.5+98c9349" can be told apart. Shown, never
+	// compared.
+	Commit    string `json:"commit,omitempty"`
 	Latest    string `json:"latest,omitempty"`
 	Available bool   `json:"available"`
 	// Tagged says the version on offer has a release tag on the repository.
@@ -203,6 +214,7 @@ func (s *Service) Report(ctx context.Context, freshness Freshness) Report {
 	local := Local()
 	rep := Report{
 		Version:   s.current,
+		Commit:    s.commit,
 		Latest:    check.Latest,
 		Available: check.Available,
 		Tagged:    check.Available && check.Tagged,

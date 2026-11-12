@@ -366,6 +366,18 @@ func fastForward(ctx context.Context, dir string, want request, out io.Writer) (
 	landed.commit = strings.TrimSpace(head)
 	// A checkout already past the tag is not on it, whatever was merged.
 	landed.tagged = tagged && landed.commit == target
+	if landed.tagged {
+		// Remembered in the checkout, in a namespace of this dashboard's own.
+		// The tag this was verified against was asked of origin and not
+		// stored, and the checkout's own tag of that name may be missing or
+		// the operator's, so a build made later (the one that follows, a
+		// rebuild from Settings, install.sh) reads this to know the commit is
+		// the release and needs no stamp.
+		ref := releaseRefs(want.version)[1]
+		if _, err := gitOutput(ctx, dir, "update-ref", ref, landed.commit); err != nil {
+			fmt.Fprintf(out, "could not record %s as release %s, so builds of it will carry its commit: %v\n", landed.commit, want.version, err)
+		}
+	}
 	fmt.Fprintf(out, "now at %s (version %s)\n", landed.commit, landed.version)
 	return landed, nil
 }

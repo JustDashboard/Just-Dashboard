@@ -291,6 +291,7 @@ func (s *Server) initModules() {
 	// all the decisions in it — is testable without a daemon.
 	s.modules.selfUpdate = selfupdate.New(selfupdate.Options{
 		Current:     version.Version,
+		Commit:      version.Commit,
 		DataDir:     s.Cfg.DataDir,
 		UpdateDir:   s.Cfg.UpdateDir,
 		Repo:        s.Cfg.UpdateRepo,

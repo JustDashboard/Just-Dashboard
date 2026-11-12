@@ -168,6 +168,8 @@ source scripts/install-dependencies.sh
 source scripts/dotenv.sh
 # shellcheck source=scripts/password.sh
 source scripts/password.sh
+# shellcheck source=scripts/build-stamp.sh
+source scripts/build-stamp.sh
 jd_install_dependencies || die "Required host tools could not be provisioned. See the package-manager error above; re-run setup after resolving it."
 
 # The web terminal is a shell on this host, not in the dashboard's image, so
@@ -834,12 +836,22 @@ say ""
 # 1 GB for the backend. In turn they need only the larger of the two, which is
 # what decides how small a server can install this. If the services cannot be
 # listed, the single build below fails exactly as it always did.
+#
+# A checkout that is not on a release's own commit (a patch branch, a fork, a
+# clone with commits of its own) is built with that commit stamped in, so the
+# Version page and `jd version` say 0.8.5+98c9349 where a release says 0.8.5.
+build_args=()
+build_commit="$(jd_build_commit .)"
+if [ -n "$build_commit" ]; then
+	build_args=(--build-arg "JD_COMMIT=$build_commit")
+	say "  ${DIM}This checkout is not a release: the build is stamped with commit $build_commit.${RESET}"
+fi
 if services=$($COMPOSE config --services) && [ -n "$services" ]; then
 	for service in $services; do
-		$COMPOSE build "$service"
+		$COMPOSE build ${build_args[@]+"${build_args[@]}"} "$service"
 	done
 else
-	$COMPOSE build
+	$COMPOSE build ${build_args[@]+"${build_args[@]}"}
 fi
 # Use the freshly built backend so installs and in-app lifecycle operations
 # share port ownership detection and update every consumer through .env.

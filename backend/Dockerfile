@@ -20,9 +20,15 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+# The commit a build that is not a release was made from, shown as
+# "0.8.5+98c9349" (internal/version). install.sh, an update and a rebuild pass
+# it when the checkout is not on the release's own commit and leave it empty
+# when it is, so a release's compile stays cached from one update to the next.
+# An ordinary build argument, which the classic builder reads as well.
+ARG JD_COMMIT=
 # CGO stays off so the binary runs on a slim base without a libc mismatch;
 # the SQLite driver is pure Go precisely so this works.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/just-dashboard ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X github.com/Wayy01/Just-Dashboard/backend/internal/version.Commit=${JD_COMMIT}" -o /out/just-dashboard ./cmd/server
 # The terminal holder runs on the host, not in this image, for as long as a
 # session lasts — the dashboard copies it out at boot. Static for the same
 # reason as above, and small so each session pins megabytes rather than the
@@ -33,7 +39,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/jd-term
 # dashboard keeps that copy current at boot (internal/clihost), and
 # GET /api/v1/cli/jd hands it to anyone signed in. Standard library only, so
 # it adds a few seconds and a few megabytes.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/version/version.go)" -o /out/jd ./cmd/jd
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/version/version.go)${JD_COMMIT:++${JD_COMMIT}}" -o /out/jd ./cmd/jd
 
 # rclone, for backup jobs whose destination is one of the storage services it
 # speaks. Debian packages a release from 2022; this is the project's own

@@ -8640,6 +8640,11 @@ export type UpdateRun = {
 
 export type SelfUpdateReport = {
   version: string
+  /**
+   * The short commit this build was made from when it is not the release of
+   * `version` (a patch branch, a fork's head). Absent for a release.
+   */
+  commit?: string
   latest?: string
   available: boolean
   /** The version on offer has a release tag; false is a fork's branch head. */

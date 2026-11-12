@@ -27,3 +27,28 @@ package version
 // It is a marketing version, not a semver contract: 0.5 is the dashboard as a
 // complete single-server panel, 1.0 is when the API stops moving under people.
 const Version = "0.8.5"
+
+// Commit is the short commit this binary was built from, when that is not the
+// release's own commit. Empty in a build of a release.
+//
+// Version alone says which release the code started from, and until a release
+// is cut that is the last one: a server running a patch branch reported 0.8.5
+// in the wordmark, in `jd version` and in every bug report, exactly as a
+// server running the real 0.8.5 did. The build stamps this with
+// `-ldflags -X` (backend/Dockerfile's JD_COMMIT), and the things that build
+// the image, which are install.sh, an update and a rebuild from Settings, pass
+// it only when the checkout is not on the commit the release's tag names. A
+// plain `docker compose build` passes nothing and is not told apart.
+//
+// A variable because the linker has to be able to set it.
+var Commit string
+
+// Build is the version as a person reporting a problem should quote it:
+// "0.8.5" for a release, "0.8.5+98c9349" for anything else built from 0.8.5's
+// line. Version stays the thing to compare; this is only ever shown.
+func Build() string {
+	if Commit == "" {
+		return Version
+	}
+	return Version + "+" + Commit
+}

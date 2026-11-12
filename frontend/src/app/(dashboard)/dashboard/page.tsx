@@ -264,6 +264,14 @@ function Identity({ report, actions }: { report: SelfUpdateReport; actions: Reac
             <span className="numeric text-2xl leading-none font-semibold tracking-tight">
               {report.version}
             </span>
+            {report.commit && (
+              <span
+                className="font-mono text-xs text-muted-foreground"
+                title={`Built from commit ${report.commit}, which is not the ${report.version} release`}
+              >
+                +{report.commit}
+              </span>
+            )}
           </p>
           <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <a

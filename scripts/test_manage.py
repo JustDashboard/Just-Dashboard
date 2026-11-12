@@ -20,7 +20,8 @@ class TerminalToolsTest(unittest.TestCase):
         self.root = pathlib.Path(self.temp.name) / "checkout with spaces"
         self.scripts = self.root / "scripts"
         self.scripts.mkdir(parents=True)
-        for name in ("manage.sh", "create-user.sh", "reset-password.sh", "dotenv.sh", "password.sh"):
+        for name in ("manage.sh", "create-user.sh", "reset-password.sh", "dotenv.sh", "password.sh",
+                     "build-stamp.sh"):
             shutil.copy2(REPO / "scripts" / name, self.scripts / name)
         self.bin = pathlib.Path(self.temp.name) / "bin"
         self.bin.mkdir()
@@ -185,6 +186,40 @@ JD_FRONTEND_PORT=42002
         (pathlib.Path(self.temp.name) / "host/tmp").mkdir(parents=True, exist_ok=True)
         return subprocess.run([str(installer), *args], input=answers, capture_output=True, text=True,
                               cwd=self.temp.name, env={**self.env, "TEST_BUILD_FAIL": "1" if build_fail else "0", **(env or {})})
+
+    def fixture_git(self):
+        """git in the fixture checkout, reading no configuration but the arguments here."""
+        env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+               "GIT_CEILING_DIRECTORIES": self.temp.name, "HOME": self.temp.name}
+
+        def git(*args):
+            return subprocess.run(
+                ["git", "-C", str(self.root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                 "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *args],
+                env={**self.env, **env}, capture_output=True, text=True, check=True).stdout.strip()
+        return git, env
+
+    def test_installer_stamps_a_build_that_is_not_a_release(self):
+        git, env = self.fixture_git()
+        git("init", "--quiet")
+        git("commit", "--quiet", "--allow-empty", "-m", "a commit of the operator's own")
+        short = git("rev-parse", "--short", "HEAD")
+        result = self.run_installer(env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(["compose", "build", "--build-arg", "JD_COMMIT=" + short],
+                      [call["args"] for call in self.read_calls()])
+        self.assertIn("stamped with commit " + short, result.stdout)
+
+    def test_installer_does_not_stamp_a_release(self):
+        git, env = self.fixture_git()
+        git("init", "--quiet")
+        git("commit", "--quiet", "--allow-empty", "-m", "the release")
+        version = (REPO / "backend/internal/version/version.go").read_text().split('const Version = "')[1].split('"')[0]
+        git("tag", "v" + version)
+        result = self.run_installer(env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(["compose", "build"], [call["args"] for call in self.read_calls()])
+        self.assertNotIn("stamped with commit", result.stdout)
 
     def test_installer_completion_shows_stages_access_and_terminal_commands(self):
         result = self.run_installer()

@@ -64,6 +64,11 @@ version that is on `main` but not released yet. The update check is one unauthen
 from GitHub and a second small request for the tag, every two hours and at most every five minutes
 while pages are being opened; `JD_UPDATE_CHECK=false` turns it off.
 
+A dashboard built from anything other than a release, such as a patch branch, a fork or a clone with
+commits of your own, shows the commit it was built from after the version: `0.8.5+98c9349` on the
+Version page and in `jd version`, where a release shows `0.8.5`. Quote the whole of it when you report
+a problem.
+
 Before an update builds anything, the dashboard copies its own database to
 `/var/lib/just-dashboard/pre-update/`, as `vpsd-<the version you were on>-<when>.db`, and keeps the
 newest two. If the new version does not come up the update goes back to the previous one by itself; it

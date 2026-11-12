@@ -5974,10 +5974,12 @@ end-to-end harness's is (`hubsignin_test_build.go`).
 When the user names a version ("make this 0.6", "release 0.6.1"), that is the trigger. Cutting a release is a
 commit: the changelog on the tracked branch is what every install compares itself against. *Releasing* it
 is the tag `v<version>`, which nobody makes by hand (below) and without which no install is offered the
-version. Four files carry it and `scripts/release.sh <version>` writes all of them:
-`backend/internal/version/version.go`, `frontend/src/lib/version.ts`, `frontend/package.json`, and
-`backend/internal/selfupdate/changelog.json`. Two tests fail the run if they drift (`version_test.go`,
-which skips when the frontend is absent, and `TestChangelogHeadIsTheProductVersion`).
+version. Six files carry it. `scripts/release.sh <version>` writes five of them,
+`backend/internal/version/version.go`, `frontend/src/lib/version.ts`, `frontend/package.json`, `README.md`
+and the `info.version` of `docs/api/deploy-openapi.json`, and the sixth,
+`backend/internal/selfupdate/changelog.json`, is written by hand first. Tests fail the run if they drift
+(`version_test.go`, which skips a file that is absent and also holds the API description to the version,
+and `TestChangelogHeadIsTheProductVersion`).
 
 ```bash
 # 1. Write the release notes FIRST in backend/internal/selfupdate/changelog.json
@@ -5986,8 +5988,10 @@ which skips when the frontend is absent, and `TestChangelogHeadIsTheProductVersi
 scripts/release.sh 0.6
 ```
 
-`release.sh` bumps the three version files, regenerates the root `CHANGELOG.md` from the same JSON, and
-runs the two tests; it refuses before touching anything if the changelog does not already describe the
+`release.sh` bumps the version files, regenerates the root `CHANGELOG.md` from the same JSON, regenerates
+the API description (`JD_UPDATE_OPENAPI=1`, so its `info.version` follows the release instead of staying
+where the last route change left it), and
+runs the tests; it refuses before touching anything if the changelog does not already describe the
 version, and prints the skeleton. **`CHANGELOG.md` is generated — never edit it by hand.** The ordering
 is the point: a version bumped with no changelog entry is a release nobody is told about, and a changelog
 entry with no version bump is every install permanently offering itself an update it already has.
@@ -6012,6 +6016,29 @@ with a failed Verify run and no tag. Now a failed run means nothing is tagged an
 comes from the changelog, never from the branch name, so a merge whose version is already released
 publishes nothing.
 Nothing is tagged by hand; a manual run of the workflow on `main` retries a failed publish.
+
+### Which build this is
+
+The version constant is bumped only when a release is cut, so everything built from a patch branch, a
+fork or an operator's own commits carries the last release's number. Such a build is told apart by the
+commit it was made from: `version.Commit`, set by the linker from the `JD_COMMIT` build argument of
+`backend/Dockerfile`, and `version.Build()` reads `0.8.5+98c9349`. `version.Version` stays the only
+thing compared; the commit is only ever shown, in the backend's start line, in `jd version` (the same
+argument is appended to `main.version`) and on the Version page (`commit` in the report of
+`GET /dashboard/update`, absent for a release).
+
+The argument is passed by the three things that build the stack and only when the checkout is **not**
+on the release's own commit, so a release's compile layer stays cached and a release never shows a
+commit: `selfupdate.BuildCommit` for an update and a rebuild from Settings (through
+`BuildEachService`), and `jd_build_commit` in `scripts/build-stamp.sh` for `install.sh`. They are the
+same rule in two languages and are changed together. HEAD is a release when it is the commit that
+`refs/tags/v<version>` names, or that `refs/just-dashboard/release/v<version>` names. The second ref is
+written by the updater when it installs a tag: the tag it verified was asked of origin and is not
+stored, and the checkout's own tag of that name may be missing (a checkout that fetches without tags)
+or the operator's. Limits, on purpose: a plain `docker compose build` passes nothing and calls itself a
+release; a checkout git cannot read is built unstamped; uncommitted edits are not marked; the frontend
+bundle is not stamped, so the wordmark keeps the release number and the Version page is where the
+commit shows.
 
 ### Signed releases
 

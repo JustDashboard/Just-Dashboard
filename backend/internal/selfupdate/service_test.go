@@ -58,6 +58,24 @@ func TestTheReportSaysWhetherWhatIsOfferedIsARelease(t *testing.T) {
 	}
 }
 
+// A build that is not a release tells the page which commit it is, and a
+// release tells it nothing, so the two stop reading alike on the Version page.
+func TestTheReportNamesTheCommitOfABuildThatIsNotARelease(t *testing.T) {
+	srv, _ := repository(t, threeReleases, "v0.6")
+	checkout := t.TempDir()
+	options := Options{
+		Current: "0.6", DataDir: t.TempDir(), UpdateDir: checkout, Repo: DefaultRepo, Ref: DefaultRef,
+		CheckOnline: true, BaseURL: srv.URL, Log: quiet(),
+	}
+	if got := New(options).Report(context.Background(), Forced); got.Version != "0.6" || got.Commit != "" {
+		t.Fatalf("a release reported version %q commit %q", got.Version, got.Commit)
+	}
+	options.Commit = "98c9349\n"
+	if got := New(options).Report(context.Background(), Forced); got.Version != "0.6" || got.Commit != "98c9349" {
+		t.Fatalf("a build from 98c9349 reported version %q commit %q", got.Version, got.Commit)
+	}
+}
+
 // The updater decides what to install from the record alone, so the gate has
 // to be written into it by the backend that knows which repository this is.
 func TestAnUpdateFromTheProjectsOwnRepositoryIsRecordedAsTagOnly(t *testing.T) {

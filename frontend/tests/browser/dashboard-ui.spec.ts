@@ -291,6 +291,22 @@ test("a version on the branch with no tag is named and not offered", async ({ pa
   await expect(page.getByRole("button", { name: /^Update to/ })).toHaveCount(0)
 })
 
+test("a build that is not a release shows the commit it was made from", async ({ page }) => {
+  await mockApi(page, { ...update, commit: "98c9349" })
+  await page.goto("/dashboard")
+  await expect(page.getByText("+98c9349")).toBeVisible()
+  await expect(
+    page.getByTitle("Built from commit 98c9349, which is not the 0.6.7 release"),
+  ).toBeVisible()
+})
+
+test("a release shows its version and no commit", async ({ page }) => {
+  await mockApi(page)
+  await page.goto("/dashboard")
+  await expect(page.getByText("Just Dashboard", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText(/^\+[0-9a-f]{7,}$/)).toHaveCount(0)
+})
+
 test("a fork is told that what it is offered has no release tag", async ({ page }) => {
   await mockApi(page, { ...update, tagged: false, check: { ...update.check, tagsOnly: false } })
   await page.goto("/dashboard")
