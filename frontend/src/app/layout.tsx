@@ -6,6 +6,7 @@ import { API_BASE } from "@/lib/api"
 import { sessionProbeScript } from "@/lib/session-probe"
 import { themeBootstrapScript } from "@/lib/themes"
 import { sourceSans3 } from "./font"
+import { sourceSans3 as sourceSans3Italic } from "./font-italic"
 import "./globals.css"
 
 // No title here: each of the pages below names its own tab (`login/layout.tsx`,
@@ -22,7 +23,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // before the first paint. suppressHydrationWarning covers exactly that
   // divergence, which is confined to <html>.
   return (
-    <html lang="en" className={`dark ${sourceSans3.variable}`} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`dark ${sourceSans3.variable} ${sourceSans3Italic.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeBootstrapScript() }} />
         {/* Every page below is a splash until the session is known, so the

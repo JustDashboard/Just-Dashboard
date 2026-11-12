@@ -798,7 +798,14 @@ The face is **Source Sans 3**, self-hosted from Adobe's
 italic variable WOFF2 files sit in `src/app/fonts/` with their SIL Open Font License. `next/font/local`
 loads both in `app/layout.tsx` at weights 200–900 and emits `--font-source-sans-3`; `--font-sans` in
 `globals.css` puts it ahead of the system fallback. Nothing at build or run time reaches out to a
-font CDN. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
+font CDN. **Only the upright is preloaded.** The two faces are declared apart (`app/font.ts`,
+`app/font-italic.ts`) because one `localFont` call preloads every file it names, and the italic's
+138 KB then raced the page's JavaScript on each first visit for a face most screens never draw; it is
+fetched when italic text first appears. Both declarations assign to a constant named `sourceSans3`,
+which is what the build names the family after, so they are one family and `font-style: italic` picks
+the italic file with nothing else said; `app-states.spec.ts` checks that, and that the response preloads
+the upright alone. The files are whole, not subset to Latin: the licence reserves the name "Source", so
+a subset is a modified font that could not keep it. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
 
 **Glyphs are laid out at their real widths.** Chromium on Linux hints a web font and rounds every
 glyph's advance to a whole pixel, and against the body's −0.02em tracking that broke the 11–13px
