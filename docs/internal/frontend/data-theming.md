@@ -188,7 +188,11 @@ are dated evidence, not proof of current attachment ownership.
   carries more than the error (the proxy engine's config-test refusal carries the test). A
   `403 hub_session_not_allowed` (a session opened through Just Hub, on a route that makes or changes a
   credential or a link) gets `HUB_SESSION_REFUSED` as its message, so every page says to sign in on this
-  server itself rather than repeating the server's words. `wsUrl()` and `downloadUrl()` build the non-JSON
+  server itself rather than repeating the server's words. **An answer that is there and does not parse is a
+  failure.** A 2xx body that is not JSON throws `ApiError` with code `bad_response` and the message
+  `UNREADABLE_ANSWER`; only a 204 and an empty body read as nothing. It used to read as `undefined`, so an
+  answer cut off by a proxy timeout was a successful read of nothing and the page drew its empty state. A
+  poll counts it among the failures it backs off from. `wsUrl()` and `downloadUrl()` build the non-JSON
   URLs. A `Query` value may be an array, which is a repeated
   parameter (`f=a&f=b`, the log routes' field predicates): joining on a character and splitting it again
   on the server breaks on a value that holds it, and an IPv6 address is all colons. `useSocket` takes the

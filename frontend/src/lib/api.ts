@@ -318,15 +318,34 @@ export async function fetchResponse(
   return res
 }
 
-async function readResponse<T>(res: Response, path: string): Promise<T> {
+/** What a page says when an answer arrived but could not be read. */
+export const UNREADABLE_ANSWER =
+  "The server's answer could not be read: it was cut off on the way, or is not what this page expects."
+
+/**
+ * The body of a JSON answer. Nothing for a 204 and for an empty body, which is
+ * how a route says "done" with nothing to add.
+ *
+ * A body that is there and does not parse is a failure, `bad_response`. It
+ * used to come back as `undefined` too, so an answer cut off by a proxy
+ * timeout, or by a backend that died while writing it, was a successful read
+ * of nothing and the page drew its empty state: "no containers" where the
+ * truth was "could not read the containers".
+ */
+export async function readResponse<T>(res: Response, path: string): Promise<T> {
   if (!res.ok) throw await responseError(res, path)
   if (res.status === 204) return undefined as T
   const text = await res.text()
   if (!text) return undefined as T
   try {
     return JSON.parse(text) as T
-  } catch {
-    return undefined as T
+  } catch (err) {
+    // For the disclosure: what kind of thing arrived, never the thing itself.
+    const kind = res.headers.get("Content-Type") ?? "no content type"
+    throw new ApiError(res.status, "bad_response", UNREADABLE_ANSWER, undefined, {
+      raw: `${kind}, ${text.length} characters: ${errorMessage(err)}`,
+      retryable: true,
+    })
   }
 }
 
