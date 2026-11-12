@@ -348,68 +348,135 @@ func (s *OrchestrationStore) EventsAfter(
 // reconnect request prove that it needs a fresh snapshot even when retained
 // state events have older sequence numbers.
 func (s *OrchestrationStore) CompactRunLogs(ctx context.Context, runID int64, keep int) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if keep < 0 {
-		return fmt.Errorf("negative deployment log retention")
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := compactRunLogsTx(ctx, tx, runID, keep); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.compactRunLogs(ctx, s.db, runID, keep, nil)
 }
 
 // ErrRunStillOpen is what compacting a run's output answers while the run
 // can still print: a reader following it has to find every line.
 var ErrRunStillOpen = errors.New("deployment logs compact only after the run is terminal")
 
-// compactRunLogsTx is CompactRunLogs inside a transaction of the caller's,
-// which holds the store's write lock.
-func compactRunLogsTx(ctx context.Context, tx *sql.Tx, runID int64, keep int) error {
+const (
+	// compactStepLines is how many lines one transaction of a compaction
+	// removes. Nothing limits what a run prints while it runs, and a run that
+	// failed was not held to the hot limit until 0.8.6, so a store can hold a
+	// run of any length. Removing three hundred thousand lines in one
+	// transaction held the store's write lock for four seconds on a busy
+	// server and ten on a busier one, and every other writer gives up after
+	// five.
+	compactStepLines = 10_000
+	// compactStepPause is how long a compaction waits between two steps. A
+	// writer on another connection asks for the lock again a tenth of a
+	// second later at most, so this is long enough for it to be given it.
+	compactStepPause = 150 * time.Millisecond
+)
+
+// compactRunLogs is CompactRunLogs on the handle given, compactStepLines at
+// a time, each step a transaction of its own. Between two steps the run reads
+// as one compacted less far: the lines above a watermark, and the watermark.
+// finish, when there is one, runs in the transaction of the last step, so
+// what it writes is there exactly when the compaction is whole.
+func (s *OrchestrationStore) compactRunLogs(ctx context.Context, db *sql.DB, runID int64, keep int, finish func(*sql.Tx) error) error {
+	if keep < 0 {
+		return fmt.Errorf("negative deployment log retention")
+	}
+	for {
+		done, err := s.compactRunLogsStep(ctx, db, runID, keep, finish)
+		if err != nil || done {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(compactStepPause):
+		}
+	}
+}
+
+func (s *OrchestrationStore) compactRunLogsStep(ctx context.Context, db *sql.DB, runID int64, keep int, finish func(*sql.Tx) error) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	done, err := compactRunLogsTx(ctx, tx, runID, keep, compactStepLines)
+	if err != nil {
+		return false, err
+	}
+	if done && finish != nil {
+		if err := finish(tx); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return done, nil
+}
+
+// compactRunLogsTx is one step of a compaction inside a transaction of the
+// caller's, which holds the store's write lock. It removes the oldest lines
+// past the newest keep, atMost of them, and reports whether that was all of
+// them.
+func compactRunLogsTx(ctx context.Context, tx *sql.Tx, runID int64, keep, atMost int) (bool, error) {
 	var terminal string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT state FROM deploy_runs WHERE id = ?`, runID).Scan(&terminal); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrRunNotFound
+			return false, ErrRunNotFound
 		}
-		return err
+		return false, err
 	}
 	if !RunState(terminal).Terminal() {
-		return ErrRunStillOpen
+		return false, ErrRunStillOpen
 	}
+	// The newest line that goes: the one after the newest keep. Both this
+	// and the bound below walk the index on (run_id, seq) from one end and
+	// stop, where reading every line of the run to find it was most of what
+	// a compaction cost.
 	var watermark int64
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(MAX(seq), 0) FROM deploy_log_chunks
+	err := tx.QueryRowContext(ctx, `
+		SELECT seq FROM deploy_log_chunks
 		 WHERE run_id = ? AND event_type = ? AND compacted = 0
-		   AND seq NOT IN (
-		     SELECT seq FROM deploy_log_chunks
-		      WHERE run_id = ? AND event_type = ? AND compacted = 0
-		      ORDER BY seq DESC LIMIT ?
-		   )`, runID, EventStepLog, runID, EventStepLog, keep).Scan(&watermark); err != nil {
-		return err
+		 ORDER BY seq DESC LIMIT 1 OFFSET ?`, runID, EventStepLog, keep).Scan(&watermark)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
 	}
-	if watermark == 0 {
-		return nil
+	if err != nil {
+		return false, err
 	}
-	// The mark an earlier, wider compaction left goes with the lines: only
-	// the newest one is read.
+	done := true
+	// The line atMost lines from the oldest. When it is older than the
+	// watermark, this step stops there and another follows.
+	var bound int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT seq FROM deploy_log_chunks
+		 WHERE run_id = ? AND event_type = ? AND compacted = 0
+		 ORDER BY seq LIMIT 1 OFFSET ?`, runID, EventStepLog, atMost).Scan(&bound)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return false, err
+	case bound < watermark:
+		watermark, done = bound, false
+	}
+	// The mark an earlier, wider compaction or an earlier step left goes
+	// with the lines: only the newest one is read.
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM deploy_log_chunks
 		 WHERE run_id = ? AND event_type = ? AND seq < ?`,
 		runID, EventStepLog, watermark); err != nil {
-		return err
+		return false, err
 	}
-	_, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE deploy_log_chunks
 		   SET compacted = 1, stream = 'status', text = '', data_json = '{}',
 		       redacted = 0, truncated = 0
-		 WHERE run_id = ? AND seq = ?`, runID, watermark)
-	return err
+		 WHERE run_id = ? AND seq = ?`, runID, watermark); err != nil {
+		return false, err
+	}
+	return done, nil
 }
 
 func boolInt(value bool) int {

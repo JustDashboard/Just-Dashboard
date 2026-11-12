@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 )
@@ -37,8 +38,10 @@ const (
 	// historyTailChars is the same for the bounded tail on the run's row,
 	// which the 0.6.6 run shape answers with.
 	historyTailChars = 4000
-	// historyBatchRuns is how many runs one pass cuts before it lets the
-	// store's other writers in; a backlog takes several passes.
+	// historyBatchRuns is how many runs one pass cuts before the engine
+	// waits historyBacklogPause; a backlog takes several passes. Each run is
+	// a transaction of its own, or several (compactRunLogs), with a pause
+	// after it for the store's other writers.
 	historyBatchRuns = 25
 )
 
@@ -127,6 +130,16 @@ func (s *OrchestrationStore) PruneRunHistory(ctx context.Context, policy History
 		if pruned == limit && index < len(candidates)-1 {
 			return pruned, id, nil
 		}
+		// Between two runs, as between two steps of one: back to back, the
+		// cuts of a pass kept a writer on another connection waiting for
+		// over a second at a time.
+		if cut && index < len(candidates)-1 {
+			select {
+			case <-ctx.Done():
+				return pruned, 0, ctx.Err()
+			case <-time.After(compactStepPause):
+			}
+		}
 	}
 	if len(candidates) == listed {
 		return pruned, candidates[len(candidates)-1], nil
@@ -152,35 +165,29 @@ func (s *OrchestrationStore) historyProtectedRuns(ctx context.Context) (map[int6
 }
 
 // pruneRunOutput cuts one ended run's output to its end and records that it
-// did, in one transaction. It goes through the store's bulk writer: a power
-// cut that takes the cut takes its record with it, and the next pass cuts
-// the run again.
+// did. A run of ordinary length is one transaction; a longer one is cut a
+// step at a time (compactRunLogs), and the tail on its row and the record
+// are written in the transaction of the last step, so a run recorded as cut
+// is cut. It goes through the store's bulk writer: a power cut that takes
+// the cut takes its record with it, and the next pass cuts the run again,
+// from where a pass that was interrupted got to.
 func (s *OrchestrationStore) pruneRunOutput(ctx context.Context, runID int64) (bool, error) {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	tx, err := s.st.Bulk().BeginTx(ctx, nil)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback()
-	if err := compactRunLogsTx(ctx, tx, runID, historyTailLines); err != nil {
-		// Still running, or deleted with its project since the pass listed it.
-		if errors.Is(err, ErrRunStillOpen) || errors.Is(err, ErrRunNotFound) {
-			return false, nil
+	err := s.compactRunLogs(ctx, s.st.Bulk(), runID, historyTailLines, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE deploy_runs SET log = '…' || substr(log, ?)
+			 WHERE id = ? AND length(log) > ?`, -historyTailChars, runID, historyTailChars+1); err != nil {
+			return err
 		}
-		return false, err
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO deploy_run_output_pruned(run_id, pruned_at) VALUES(?, ?)
+			ON CONFLICT(run_id) DO NOTHING`, runID, s.now().UTC().Unix())
+		return err
+	})
+	// Still running, or deleted with its project since the pass listed it.
+	if errors.Is(err, ErrRunStillOpen) || errors.Is(err, ErrRunNotFound) {
+		return false, nil
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE deploy_runs SET log = '…' || substr(log, ?)
-		 WHERE id = ? AND length(log) > ?`, -historyTailChars, runID, historyTailChars+1); err != nil {
-		return false, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO deploy_run_output_pruned(run_id, pruned_at) VALUES(?, ?)
-		ON CONFLICT(run_id) DO NOTHING`, runID, s.now().UTC().Unix()); err != nil {
-		return false, err
-	}
-	return true, tx.Commit()
+	return err == nil, err
 }
 
 // keepHistory applies the policy for as long as the engine runs: a first

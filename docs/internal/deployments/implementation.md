@@ -60,8 +60,16 @@ only renderer/executor/validation authority for their feature.
   the policy a minute after it starts and
   every hour, 25 runs a pass, with the next pass a second later and from the run the last one reached
   while runs are waiting, which is how an install upgraded with years of history catches up and why
-  runs a pass cannot cut never hold one back; each run is one transaction on the store's bulk
-  writer, and `deploy_run_output_pruned` records the runs done so a pass never returns to one. The
+  runs a pass cannot cut never hold one back. Both compactions remove at most 10,000 lines in one
+  transaction (`compactStepLines`, `compactRunLogs`): nothing limits what a run prints while it runs,
+  a failed run was not held to the hot limit before 0.8.6, and removing 300,000 lines at once held the
+  store's write lock for four to ten seconds where every other writer gives up after five. A longer
+  run is cut a step at a time, each step a compaction that ends at a watermark, so a reader between
+  two steps sees a run compacted less far; the steps of one run and the runs of one pass are 150 ms
+  apart (`compactStepPause`), which is longer than a writer on another connection waits before it
+  asks for the lock again. The history pass goes through the store's bulk writer, and
+  `deploy_run_output_pruned` records a run in the transaction of its last step, so a pass never
+  returns to a run it finished and goes on with one it did not. The
   policy deletes rows of `deploy_log_chunks` whose type is `step.log` and nothing else. A run's row,
   its steps and their evidence, its diagnosis, its variable and plan snapshots, its state events, its
   release and the release's artifacts stay for as long as the project does: a rollback, a retry, a

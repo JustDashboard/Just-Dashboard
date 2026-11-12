@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -330,6 +331,99 @@ func TestHistoryPassesGoOnPastRunsTheyCannotCut(t *testing.T) {
 	}
 	if total != 1 || f.outputLines(t, old.ID) != historyTailLines {
 		t.Fatalf("%d runs cut and the old run keeps %d lines: the runs ahead of it that have not ended held every pass back", total, f.outputLines(t, old.ID))
+	}
+}
+
+// A compaction removes a bounded number of lines in each transaction, so a
+// run that printed without limit does not hold the store's write lock for as
+// long as removing all of it takes. Between two steps the run reads as one
+// compacted less far, and the steps end where one transaction would have.
+func TestACompactionRemovesItsLinesAStepAtATime(t *testing.T) {
+	f := newOrchestrationFixture(t)
+	ctx := context.Background()
+	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
+	const printed, keep, atMost = 230, 20, 50
+	run := f.historyRun(t, environmentID, printed, RunFailed)
+	steps := 0
+	for done := false; !done; steps++ {
+		if steps == 20 {
+			t.Fatal("twenty steps did not finish a compaction of 230 lines, 50 at a time")
+		}
+		before := f.outputLines(t, run.ID)
+		tx, err := f.store.DB.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done, err = compactRunLogsTx(ctx, tx, run.ID, keep, atMost)
+		if err != nil {
+			tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		// The lines removed and the one that became the watermark.
+		if removed := before - f.outputLines(t, run.ID); removed > atMost+1 || removed == 0 {
+			t.Fatalf("step %d removed %d lines, want some and at most %d", steps+1, removed, atMost+1)
+		}
+		var marks int
+		if err := f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_log_chunks WHERE run_id = ? AND compacted = 1`, run.ID).Scan(&marks); err != nil || marks != 1 {
+			t.Fatalf("after step %d the run has %d watermarks, %v; want the one a reader is told of", steps+1, marks, err)
+		}
+		lines, earlier, err := f.runs.RunTranscriptTail(ctx, run.ID, printed)
+		if err != nil || !earlier || len(lines) == 0 || !strings.HasPrefix(lines[len(lines)-1].Text, fmt.Sprintf("run %d line %d ", run.ID, printed)) {
+			t.Fatalf("after step %d the transcript = %d lines, earlier=%v, %v; want the end of the run and a mark that more came before", steps+1, len(lines), earlier, err)
+		}
+	}
+	// 51 lines a step: four steps stop at their bound and the fifth reaches
+	// the newest line that goes.
+	if steps != 5 {
+		t.Errorf("the compaction took %d steps, want 5", steps)
+	}
+	lines, _, err := f.runs.RunTranscriptTail(ctx, run.ID, printed)
+	if err != nil || len(lines) != keep || !strings.HasPrefix(lines[0].Text, fmt.Sprintf("run %d line %d ", run.ID, printed-keep+1)) {
+		t.Fatalf("the run keeps %d lines, %v; want its last %d, from line %d", len(lines), err, keep, printed-keep+1)
+	}
+}
+
+// A run longer than one step is cut in several by the history pass, and is
+// recorded as cut, with the tail on its row, only when the last has run.
+func TestHistoryCutsALongRunInStepsAndRecordsItOnce(t *testing.T) {
+	f := newOrchestrationFixture(t)
+	ctx := context.Background()
+	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
+	long := f.historyRun(t, environmentID, compactStepLines+historyTailLines+100, RunFailed)
+	f.historyRun(t, environmentID, 5, RunSucceeded)
+
+	// One step by hand, as a pass interrupted after it leaves the run.
+	if done, err := f.runs.compactRunLogsStep(ctx, f.store.DB, long.ID, historyTailLines, func(*sql.Tx) error {
+		t.Fatal("the record of a cut was written before the cut was whole")
+		return nil
+	}); err != nil || done {
+		t.Fatalf("the first step = done %v, %v; want more to follow", done, err)
+	}
+	var marked int
+	if err := f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_run_output_pruned WHERE run_id = ?`, long.ID).Scan(&marked); err != nil || marked != 0 {
+		t.Fatalf("a run cut part of the way is recorded as cut (%d %v): no pass would finish it", marked, err)
+	}
+	if got := f.outputLines(t, long.ID); got != historyTailLines+99 {
+		t.Fatalf("after one step the run keeps %d lines, want %d", got, historyTailLines+99)
+	}
+
+	pruned, next, err := f.runs.PruneRunHistory(ctx, HistoryPolicy{KeepRuns: 1}, 0, 0)
+	if err != nil || pruned != 1 || next != 0 {
+		t.Fatalf("pass = %d cut, goes on from %d, %v; want the long run", pruned, next, err)
+	}
+	if got := f.outputLines(t, long.ID); got != historyTailLines {
+		t.Fatalf("the long run keeps %d lines, want %d", got, historyTailLines)
+	}
+	var tail string
+	if err := f.store.DB.QueryRow(`SELECT log FROM deploy_runs WHERE id = ?`, long.ID).Scan(&tail); err != nil ||
+		!strings.HasPrefix(tail, "…") || utf8.RuneCountInString(tail) > historyTailChars+1 {
+		t.Fatalf("the tail on its row is %d characters, %v; want at most %d behind a mark that it was cut", utf8.RuneCountInString(tail), err, historyTailChars)
+	}
+	if err := f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_run_output_pruned WHERE run_id = ?`, long.ID).Scan(&marked); err != nil || marked != 1 {
+		t.Fatalf("the long run is recorded as cut %d times, %v; want once", marked, err)
 	}
 }
 
