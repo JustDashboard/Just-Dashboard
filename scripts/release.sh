@@ -102,6 +102,9 @@ ${BOLD}Released $VERSION locally.${RESET} What is left:
   ${DIM}# read the diff — six files and the generated changelog${RESET}
   git diff --stat
 
+  ${DIM}# advisories that reach the code and what is behind; needs the network${RESET}
+  scripts/deps-check.sh
+
   ${DIM}# the checks the diff reaches and both builds, as CONTRIBUTING requires${RESET}
   scripts/test-changed.sh
   (cd backend && go build ./...)

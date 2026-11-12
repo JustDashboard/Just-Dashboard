@@ -2747,7 +2747,11 @@ say, the window, the base backup a recovery starts from, retention — is `dbx/p
 - **Encrypted with WAL-G's own OpenPGP**, to a key made for the archive. The server is given only the
   public half, which is all encrypting needs: a server, or a superuser reading `walg.json` through
   `pg_read_file`, cannot read its own archive back. The private half is sealed in the store and written
-  only into a recovery's own volume, which is removed once the copy has recovered.
+  only into a recovery's own volume, which is removed once the copy has recovered. The pair is made and
+  its fingerprint read with `github.com/ProtonMail/go-crypto`, the maintained fork WAL-G itself uses,
+  as a version 4 RSA key of 3072 bits named in the code rather than left to the library's defaults;
+  `golang.org/x/crypto/openpgp`, which made the keys of installs up to 0.8.5, is withdrawn as unsafe
+  (GO-2026-5932), and a key it made reads back with the same fingerprint (`pitr_test.go`).
 - **Base backups and retention.** `POST /{id}/pitr/backup` (and each firing of the archive's cron
   schedule, `database_pitr_schedule.go`, the backup jobs' parser) runs `backup-push` in the server.
   Retention by time follows: `dbx.WALRetentionKeep` keeps the newest base backup that finished before
@@ -5998,6 +6002,14 @@ runs the tests; it refuses before touching anything if the changelog does not al
 version, and prints the skeleton. **`CHANGELOG.md` is generated — never edit it by hand.** The ordering
 is the point: a version bumped with no changelog entry is a release nobody is told about, and a changelog
 entry with no version bump is every install permanently offering itself an update it already has.
+
+Before the release is cut, run `scripts/deps-check.sh` (it needs the network): `govulncheck` over the
+backend, `bun audit` over the frontend, and the direct modules and packages that are behind. It fails on
+an advisory that reaches the code unless the script lists it as accepted with the reason, which is only
+for an advisory with no fixed version (today the two daemon-side ones in `github.com/docker/docker`,
+which end when `internal/dockerx` moves to `github.com/moby/moby/client`). `release.sh` names it in the
+steps it prints and does not run it, because a release must be cuttable offline;
+`scripts/test_deps_check.py` checks what it makes of a report.
 
 A note added to a release whose version is already bumped — every change merged into an open patch
 branch after its release was cut — is in `changelog.json`, and so in every install's notice, but not

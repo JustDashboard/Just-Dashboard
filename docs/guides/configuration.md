@@ -102,6 +102,7 @@ printed once in `docker compose logs backend`.
 | --- | --- |
 | `scripts/test-changed.sh` | Runs exactly the checks, Go tests and browser specs your diff can reach — run it before a pull request |
 | `scripts/go-test-race.sh` | Runs Go packages under the race detector, split across processes |
+| `scripts/deps-check.sh` | Reports the advisories that reach the code (`govulncheck`, `bun audit`) and the dependencies that are behind; fails on an advisory it does not list as accepted |
 | `scripts/release.sh <version>` | Cuts a release: bumps the version everywhere and regenerates the changelog from `backend/internal/selfupdate/changelog.json` |
 
 See [CONTRIBUTING.md](../../CONTRIBUTING.md) before opening a pull request.
