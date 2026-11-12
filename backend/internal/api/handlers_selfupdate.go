@@ -26,6 +26,8 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 		// The same audience as the report, which already carries this
 		// transcript's last 64 KB: this is the rest of it, asked for once.
 		r.Method(http.MethodGet, "/update/log", s.handle(s.handleSelfUpdateLog))
+		// What the dashboard reads of itself (handlers_self.go).
+		s.mountSelfRoutes(r)
 		// Where this server stands with Just Hub, and the hub's fleet and
 		// notices for the server switcher: every role reads it; only an
 		// administrator is sent the admin part (handlers_hublink.go).

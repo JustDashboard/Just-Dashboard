@@ -11,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The watch list checked on a schedule by the server itself. It used to be
@@ -140,9 +142,12 @@ func NewTLSMonitor(store WatchStore) *TLSMonitor {
 // Start runs the schedule until ctx ends or Stop.
 func (m *TLSMonitor) Start(ctx context.Context) {
 	ctx, m.cancel = context.WithCancel(ctx)
-	m.done = make(chan struct{})
-	go func() {
-		defer close(m.done)
+	done := make(chan struct{})
+	m.done = done
+	safego.Go(ctx, nil, "certificate watch", func(ctx context.Context) {
+		// One endpoint's failed check is that endpoint's row. A pass that
+		// cannot read the watch list or save a check checks nothing.
+		passes := safego.NewPasses(nil, "certificate watch")
 		ticker := time.NewTicker(m.Tick)
 		defer ticker.Stop()
 		for {
@@ -152,10 +157,15 @@ func (m *TLSMonitor) Start(ctx context.Context) {
 			case <-ticker.C:
 			}
 			pass, cancel := context.WithTimeout(ctx, 50*time.Second)
-			_, _ = m.CheckDue(pass)
+			_, err := m.CheckDue(pass)
 			cancel()
+			// A pass that spent its fifty seconds waiting behind a check an
+			// operator asked for has no answer of its own.
+			if !errors.Is(err, context.DeadlineExceeded) {
+				passes.Report(ctx, err)
+			}
 		}
-	}()
+	}, safego.Close(done))
 }
 
 // Stop ends the schedule and waits for a pass in flight; it is a no-op for a
@@ -227,6 +237,7 @@ func (m *TLSMonitor) CheckEndpoints(ctx context.Context, endpoints []WatchedEndp
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer safego.Recover(nil, "certificate endpoint check")
 			check := WatchCheck{EndpointID: e.ID}
 			var err error
 			if e.Kind == WatchTCP {

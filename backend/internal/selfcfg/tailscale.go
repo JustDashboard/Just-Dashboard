@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The one configuration in which a browser opening this dashboard sees an
@@ -95,7 +96,7 @@ func (k *CertKeeper) Start(ctx context.Context) {
 		return
 	}
 	ctx, k.stop = context.WithCancel(ctx)
-	go func() {
+	safego.Go(ctx, k.log, "tailscale certificate keeper", func(ctx context.Context) {
 		retry := firstRetry
 		for {
 			wait := checkInterval
@@ -111,7 +112,7 @@ func (k *CertKeeper) Start(ctx context.Context) {
 			case <-time.After(wait):
 			}
 		}
-	}()
+	})
 }
 
 func (k *CertKeeper) Stop() {

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
 )
@@ -455,7 +456,17 @@ func (r *Recorder) Start(parent context.Context) error {
 		r.log.Warn("metrics prune failed", "error", err)
 	}
 
-	go r.loop(ctx, done)
+	// Volumes on a loop of their own: the disk walk behind a volume's size can
+	// take minutes on a cold cache, and the host's fifteen-second record must
+	// not wait on it. Each is a task of its own (internal/safego), so a panic
+	// in one is logged and that one started again; done closes when both have
+	// left, which is what Stop waits for.
+	var volumes sync.WaitGroup
+	if r.volumes != nil {
+		volumes.Add(1)
+		safego.Go(ctx, r.log, "volume size recorder", r.volumeLoop, volumes.Done)
+	}
+	safego.Go(ctx, r.log, "metrics recorder", r.loop, volumes.Wait, safego.Close(done))
 	r.log.Info("recording metrics history",
 		"interval", r.interval.String(), "retention", r.retention.String())
 	return nil
@@ -475,20 +486,7 @@ func (r *Recorder) Stop() {
 	<-done
 }
 
-func (r *Recorder) loop(ctx context.Context, done chan struct{}) {
-	defer close(done)
-	// Volumes on a loop of their own: the disk walk behind a volume's size can
-	// take minutes on a cold cache, and the host's fifteen-second record must
-	// not wait on it. Deferred after close(done), so it is waited for first.
-	var volumes sync.WaitGroup
-	defer volumes.Wait()
-	if r.volumes != nil {
-		volumes.Add(1)
-		go func() {
-			defer volumes.Done()
-			r.volumeLoop(ctx)
-		}()
-	}
+func (r *Recorder) loop(ctx context.Context) {
 	t := time.NewTicker(r.interval)
 	defer t.Stop()
 	lastPrune := time.Now()

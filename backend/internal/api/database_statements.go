@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -131,8 +132,7 @@ func (h *statementHistory) noteReset(id int64) {
 
 func (s *Server) startStatementHistory(ctx context.Context) {
 	s.dbStatements.done = make(chan struct{})
-	go func() {
-		defer close(s.dbStatements.done)
+	safego.Go(ctx, s.Log, "statement history recorder", func(ctx context.Context) {
 		timer := time.NewTicker(statementSnapshotEvery)
 		defer timer.Stop()
 		for {
@@ -143,7 +143,7 @@ func (s *Server) startStatementHistory(ctx context.Context) {
 			case <-timer.C:
 			}
 		}
-	}()
+	}, safego.Close(s.dbStatements.done))
 }
 
 func (s *Server) recordStatementHistory(ctx context.Context) {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Traffic alerts: the request record, watched.
@@ -309,7 +310,7 @@ func (e *TrafficAlertEvaluator) Start(ctx context.Context) {
 	if e == nil || e.store == nil {
 		return
 	}
-	go func() {
+	safego.Go(ctx, nil, "traffic alerts", func(ctx context.Context) {
 		ticker := time.NewTicker(e.interval)
 		defer ticker.Stop()
 		for {
@@ -322,7 +323,7 @@ func (e *TrafficAlertEvaluator) Start(ctx context.Context) {
 			e.Evaluate(pass)
 			cancel()
 		}
-	}()
+	})
 }
 
 // TrafficAlertOutcome is what one pass decided for one rule, for the tests

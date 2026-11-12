@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/storehealth"
 )
 
 // APIError carries an HTTP status alongside a message safe to show the client.
@@ -126,10 +128,27 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// DiskFull is the answer when the dashboard's own store was refused space. It
+// is said in full: "internal error" on the sign-in page told an operator whose
+// disk had filled nothing, at the moment the dashboard was the tool they
+// needed to find what filled it.
+func DiskFull(err error) *APIError {
+	return &APIError{
+		Status: http.StatusInsufficientStorage, Code: "disk_full",
+		Message: "The server's disk is full, so the dashboard could not save this. Free some space on the server and try again.",
+		err:     err,
+	}
+}
+
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
 		apiErr = Internal(err)
+	}
+	// Whether a handler returned the store's error bare or wrapped it as
+	// Internal itself, a write refused for space is not an unexplained 500.
+	if apiErr.Status == http.StatusInternalServerError && apiErr.Code == "internal" && storehealth.IsDiskFull(err) {
+		apiErr = DiskFull(err)
 	}
 	if apiErr.Status >= 500 {
 		slog.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", apiErr.Error())

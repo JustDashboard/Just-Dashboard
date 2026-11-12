@@ -34,6 +34,12 @@ services:
       context: ./backend
     image: just-dashboard-backend:latest
     restart: unless-stopped
+    # Docker's default is ten seconds between SIGTERM and SIGKILL. A stop
+    # takes the backend up to fifty (cmd/server/lifecycle.go): requests are
+    # drained, then a deployment in mid-step gets thirty seconds to reach a
+    # boundary it can resume from. Compose reads this on stop and on every
+    # recreate, an update's included.
+    stop_grace_period: 60s
     logging: *logging
     # The dashboard manages the host, so it shares the host's namespaces.
     # This is the trade the product makes: without it, "restart nginx" and

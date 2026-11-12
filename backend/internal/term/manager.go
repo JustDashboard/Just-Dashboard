@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/creack/pty"
 )
 
@@ -78,7 +79,7 @@ func NewManager(enabled bool, shell, username string) *Manager {
 	// the wrong machine — and offer persistence backed by a tmux server that
 	// can never see them.
 	m.useTmux = hostexec.AvailableOnHost("tmux")
-	go m.cleanupClipboard()
+	safego.Go(context.Background(), nil, "terminal clipboard cleanup", func(context.Context) { m.cleanupClipboard() })
 	return m
 }
 

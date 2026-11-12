@@ -28,6 +28,10 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/just-da
 # reason as above, and small so each session pins megabytes rather than the
 # whole dashboard. See internal/ptyhold.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/jd-terminal-holder ./cmd/terminal-holder
+# The container's health check. Docker starts it every thirty seconds, so it
+# is a program of its own on the standard library: as a mode of the server it
+# initialised the whole dashboard each time, 150 ms and 57 MB a run.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/jd-healthcheck ./cmd/healthcheck
 # The jd command line, for the server's own shell and for other machines.
 # install.sh and `manage.sh install-cli` copy it to /usr/local/bin/jd, the
 # dashboard keeps that copy current at boot (internal/clihost), and
@@ -190,6 +194,7 @@ RUN set -eu; \
 
 COPY --from=build /out/just-dashboard /usr/local/bin/just-dashboard
 COPY --from=build /out/jd-terminal-holder /usr/local/bin/jd-terminal-holder
+COPY --from=build /out/jd-healthcheck /usr/local/bin/jd-healthcheck
 COPY --from=build /out/jd /usr/local/bin/jd
 COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 
@@ -200,6 +205,6 @@ WORKDIR /var/lib/just-dashboard
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["/usr/local/bin/just-dashboard", "-healthcheck"]
+  CMD ["/usr/local/bin/jd-healthcheck"]
 
 ENTRYPOINT ["/usr/local/bin/just-dashboard"]

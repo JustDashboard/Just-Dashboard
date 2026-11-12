@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The connection is one row (proxy_cloudflare_tunnel): which tunnel, how it
@@ -273,7 +274,7 @@ func (m *Manager) Start(ctx context.Context) {
 	if m == nil || m.opts.DB == nil {
 		return
 	}
-	go func() {
+	safego.Go(ctx, nil, "cloudflare tunnel sync", func(ctx context.Context) {
 		ticker := time.NewTicker(m.interval)
 		defer ticker.Stop()
 		for {
@@ -286,7 +287,7 @@ func (m *Manager) Start(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
-	}()
+	})
 }
 
 // Status is the last pass's reading with the connector read again now, so a

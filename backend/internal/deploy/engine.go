@@ -9,6 +9,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 var errOperatorCancellation = errors.New("deployment cancellation requested by operator")
@@ -186,7 +188,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		return err
 	}
 	e.loopWG.Add(1)
-	go e.schedule(loopCtx)
+	safego.Go(loopCtx, e.log, "deployment engine schedule", e.schedule, e.loopWG.Done)
 	return nil
 }
 
@@ -251,7 +253,6 @@ func (e *Engine) Cancel(ctx context.Context, runID int64) (*EngineRun, error) {
 }
 
 func (e *Engine) schedule(ctx context.Context) {
-	defer e.loopWG.Done()
 	ticker := time.NewTicker(e.config.PollEvery)
 	defer ticker.Stop()
 	for {
@@ -300,6 +301,10 @@ func (e *Engine) startWorker(lease QueueLease, prepared func(context.Context, Qu
 	e.mu.Unlock()
 	e.workerWG.Add(1)
 	go func() {
+		// A worker that panics ends as one that died: its lease stops being
+		// renewed and the schedule's sweep reclaims the run. It is not the
+		// end of the dashboard and of every other run with it.
+		defer safego.Recover(e.log, "deployment worker")
 		defer e.workerWG.Done()
 		defer func() {
 			cancel(context.Canceled)
@@ -340,6 +345,7 @@ func (e *Engine) heartbeat(
 	cancel context.CancelCauseFunc,
 	done chan<- struct{},
 ) {
+	defer safego.Recover(e.log, "deployment lease heartbeat")
 	defer close(done)
 	interval := e.config.LeaseTTL / 3
 	if interval < 100*time.Millisecond {

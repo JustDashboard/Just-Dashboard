@@ -29,6 +29,96 @@ test("the host is drawn as itself, and its facts are one line", async ({ page })
   await expect(page.getByText("184 processes")).toBeVisible()
 })
 
+/** `GET /dashboard/health` as the store monitor reports it, healthy unless told otherwise. */
+function dashboardHealth(store: Record<string, unknown> = {}, tasks: unknown[] = []) {
+  const report = {
+    ok: true,
+    checkedAt: iso(now),
+    lastWriteAt: iso(now),
+    path: "/var/lib/just-dashboard",
+    freeBytes: 30 * 1024 ** 3,
+    totalBytes: 40 * 1024 ** 3,
+    reserveBytes: 32 * 1024 ** 2,
+    reserveHeld: true,
+    reserveReleased: false,
+    ...store,
+  }
+  return { ok: report.ok && tasks.length === 0, store: report, tasks }
+}
+
+test("a full disk under the dashboard's data is said first, to a reader as well", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await page.route("**/api/v1/dashboard/health", (route) =>
+    json(
+      route,
+      dashboardHealth({
+        ok: false,
+        code: "disk_full",
+        detail: "database or disk is full (13)",
+        since: iso(now - 5 * 60_000),
+        freeBytes: 30 * 1024 ** 2,
+        reserveHeld: false,
+        reserveReleased: true,
+      }),
+    ),
+  )
+  await page.goto("/")
+  const title = page.getByText("The server's disk is full", { exact: true })
+  await expect(title).toBeVisible()
+  await expect(
+    page.getByText(
+      /is free on the disk holding the dashboard's data \(\/var\/lib\/just-dashboard\)/,
+    ),
+  ).toBeVisible()
+  await expect(page.getByText(/gave up its 32 MB reserve/)).toBeVisible()
+  await expect(page.getByText("database or disk is full (13)", { exact: true })).toBeVisible()
+  // Before the machine's own line: nothing below it can be trusted to save.
+  const said = await title.boundingBox()
+  const identity = await page.locator('[data-slot="host-identity"]').boundingBox()
+  expect(said!.y).toBeLessThan(identity!.y)
+})
+
+test("a background task that keeps crashing is a warning beside nothing else", async ({ page }) => {
+  await page.route("**/api/v1/dashboard/health", (route) =>
+    json(
+      route,
+      dashboardHealth({}, [
+        {
+          name: "nginx status sampler",
+          running: true,
+          startedAt: iso(now - 60_000),
+          panics: 4,
+          lastPanic: "index out of range [3] with length 2",
+          lastPanicAt: iso(now - 2 * 60_000),
+        },
+      ]),
+    ),
+  )
+  await page.goto("/")
+  await expect(
+    page.getByText("A background task of the dashboard is crashing", { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText(/The nginx status sampler failed 4 times/)).toBeVisible()
+  await expect(
+    page.getByText("index out of range [3] with length 2", { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText("The server's disk is full")).toHaveCount(0)
+})
+
+test("a dashboard in working order says nothing of itself", async ({ page }) => {
+  const asked = page.waitForResponse("**/api/v1/dashboard/health")
+  await page.route("**/api/v1/dashboard/health", (route) => json(route, dashboardHealth()))
+  await page.goto("/")
+  await asked
+  await expect(page.locator('[data-slot="host-identity"]')).toBeVisible()
+  await expect(page.getByText("The server's disk is full")).toHaveCount(0)
+  await expect(page.getByText(/background tasks? of the dashboard/)).toHaveCount(0)
+})
+
 test("each moving reading carries its last hour in its tile", async ({ page }) => {
   await page.goto("/")
   const cpu = page.locator("[data-slot=stat-tile]", { hasText: "CPU" }).first()

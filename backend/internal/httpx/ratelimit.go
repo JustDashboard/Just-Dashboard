@@ -1,12 +1,15 @@
 package httpx
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Limiter keeps a token bucket per key (client IP, or principal for
@@ -31,7 +34,7 @@ func NewLimiter(perMinute, burst int) *Limiter {
 		burst:   burst,
 		ttl:     10 * time.Minute,
 	}
-	go l.sweep()
+	safego.Go(context.Background(), nil, "rate limit sweep", func(context.Context) { l.sweep() })
 	return l
 }
 

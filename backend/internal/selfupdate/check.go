@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Asking the repository what the newest version is.
@@ -155,7 +157,7 @@ func (c *Checker) Start(ctx context.Context) {
 	if !c.enabled {
 		return
 	}
-	go func() {
+	safego.Go(ctx, c.log, "update check", func(ctx context.Context) {
 		timer := time.NewTimer(firstCheckDelay)
 		defer timer.Stop()
 		for {
@@ -174,7 +176,7 @@ func (c *Checker) Start(ctx context.Context) {
 			}
 			timer.Reset(checkInterval)
 		}
-	}()
+	})
 }
 
 func (c *Checker) Stop() { c.once.Do(func() { close(c.stop) }) }

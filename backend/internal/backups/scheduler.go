@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Scheduler drives cron-scheduled jobs. The schedule set is rebuilt from the
@@ -36,15 +38,19 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// Descriptors ("@daily") and standard five-field expressions are both
 	// accepted, which is what operators expect from anything cron-shaped.
 	s.cron = cron.New(cron.WithParser(cron.NewParser(
-		cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
-	)))
+		cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Descriptor,
+	)), cron.WithChain(func(job cron.Job) cron.Job {
+		// cron runs each job on a goroutine of its own and recovers nothing:
+		// a panic in one backup would end the dashboard.
+		return cron.FuncJob(func() {
+			defer safego.Recover(s.log, "scheduled backup")
+			job.Run()
+		})
+	}))
 	s.cron.Start()
 	s.mu.Unlock()
 
-	go func() {
-		<-ctx.Done()
-		s.Stop()
-	}()
+	context.AfterFunc(ctx, s.Stop)
 	return s.Reload(ctx)
 }
 

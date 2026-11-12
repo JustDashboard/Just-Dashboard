@@ -1,0 +1,10 @@
+nodev	sysfs
+nodev	tmpfs
+nodev	proc
+nodev	devtmpfs
+	ext4
+	squashfs
+	vfat
+	iso9660
+nodev	overlay
+nodev	nsfs

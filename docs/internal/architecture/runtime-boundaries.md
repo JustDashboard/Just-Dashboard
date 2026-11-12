@@ -72,6 +72,23 @@ fences their old work. Its controller stops owned containers, disables restart, 
 and retries incomplete isolation every 30 seconds without preventing access to the dashboard. It stops
 before the deployment engine on shutdown; retained legacy data is never deleted by quarantine.
 
+**A stop has a budget, and the container is given longer than it.** `docker-compose.yml` sets the
+backend's `stop_grace_period` to 60 seconds, and `cmd/server/lifecycle.go` spends at most 50 of them
+(`shutdownBudget`; a test holds the two apart). On SIGTERM `drainHTTP` stops accepting requests and
+gives those under way three seconds to finish as they would have; then it cancels the base context every
+request's context descends from (`http.Server.BaseContext`), which is the only thing that ends a
+response held open on purpose (an assistant's answer, an export) or a hijacked socket, neither of which
+`http.Server.Shutdown` cancels by itself. Handlers have eight seconds in all to return. Then
+`api.Server.ShutdownContext(budget)` runs the module shutdown above with what is left: the deployment
+engine's 30-second grace and the three 10-second waits (socket history, captures, diagnostics) keep their
+own limits and are cut short by the budget. It ends by waiting for the goroutines `Start` launched itself
+(`Server.background`: the store's health, block expiry, the Remote Desktop and database upgrade
+recoveries), and `main` waits for the session janitor, so nothing is still writing when the store closes.
+`Shutdown` runs once; the deferred call after a signal's is a no-op. Before this the HTTP drain alone
+could take 15 seconds against Docker's default of 10, so a stop with a stream open was a kill and the
+engine's grace was never available. Compose reads the grace period on `stop` and on every recreate, an
+update's and a settings restart's included; the uninstaller's `down --timeout 30` is its own choice.
+
 `helpers.detachedContext` is the deliberate opposite: work that must outlive its request (a backup
 transfer, a `compose up --build`) descends from `context.Background()` and is not cancelled by shutdown
 — a deploy killed halfway is worse than one finishing into a dashboard that is gone. Its timeout is the
@@ -82,6 +99,96 @@ backend container's cgroup and is killed when the container stops. Package comma
 themselves (docker-ce's maintainer script restarts Docker), so they run as transient units of the host's
 systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
 [streaming and jobs](../backend/databases-proxy-platform.md#streaming-jobs-secrets-agent-mode).
+
+## Background work survives its own panics
+
+A panic on a goroutine nothing recovers ends the process, and `httpx.Recoverer` covers request
+goroutines only. Most background loops parse what the host prints (nginx, `ss`, systemd, Docker's
+JSON), so one unusual line used to take the dashboard down for everybody, and since the line was still
+there after Compose restarted the container, it went down again.
+
+`internal/safego` is how background work is started instead:
+
+- `safego.Go(ctx, log, name, fn, after...)` runs a loop as a named task. A panic is logged once with
+  its stack under the task's name, and `fn` is called again after a pause that starts at one second and
+  doubles to a minute (starting over after a run of five minutes). `ctx` is what stops a task: one whose
+  owner cancelled it is not started again, and the pause ends with it, so a `Stop` never waits one out.
+  Because `fn` runs more than once it must not do on its way out what can only be done once; the channel
+  a `Stop` waits on is closed in `after`, which runs when the task has returned for good.
+- `safego.Once` is the same for work that is finished when it returns (a reconcile at boot, the
+  Remote Desktop and database upgrade recoveries), without the restart.
+- `defer safego.Recover(log, name)` is for a goroutine that must not be started twice or is one of
+  many: a deployment worker (its lease lapses and the schedule's sweep reclaims the run, as for any
+  worker that died), the kernel socket observer, the fan-out inside a loop's pass (one repository's
+  check, one egress round, one container's log reader), a link's inner loops, the container feed the
+  first subscribing page starts, and the keepalive and control reader every WebSocket handler starts.
+  The two cron schedulers (backups, base backups) wrap each job the same way, since `robfig/cron`
+  recovers nothing.
+- `safego.Try(log, name, fn)` is for work that has somebody to tell: the panic comes back as `fn`'s
+  error. `jobs.Manager.run` calls every job's runner through it, so a job that panics is a failed job
+  with the reason on it, not the end of the dashboard and of every other job.
+
+Every task is remembered by name (`safego.Tasks`); a name is a fixed phrase, never built from an id.
+`GET /dashboard/health` lists the ones that panicked in the last half hour as `tasks` and the Overview
+says so as a warning, because a task that is restarted after every panic otherwise fails without a
+sound. Everything `Server.Start` and the modules' `Start` functions launch goes through `safego`, and
+`TestStartFunctionsStartSupervisedGoroutines` (`internal/safego/boot_test.go`) fails on a function
+named `Start…` that starts a goroutine with a bare `go`, except the per-request ones it lists with
+their reasons. Other goroutines a request handler starts for itself (a log follower, a probe's
+fan-out, a terminal's reader) are not covered by that rule: a panic in one still ends the process.
+
+A loop's pass that returns an error is reported, never assigned to blank. `safego.Passes` (one per
+loop, made where the loop begins) logs by change of state, so a loop that runs every five seconds can
+report every pass: the first failure as `background task failed`, a failure whose text has changed at
+most once a minute and a reminder each hour as `background task is still failing`, and the recovery as
+`background task recovered` with how long it lasted and how many passes failed. A pass cut short by the
+loop's own context is neither. The Git branch watch (whose `poll` now returns each failed check with
+its project and environment), the preview reconciler, the database network reconciler, the deployment
+schedule (a due schedule that could not be run is also logged by name), the nginx status sampler and
+the certificate watch report this way. `TestSupervisedLoopsDoNotDiscardWhatAPassReturned`
+(`internal/safego/discard_test.go`) fails on a task function that assigns a call made with its context
+to blank. This is the log only: the deployment page still shows such a watch as `stale`, and a store
+that refuses writes is said on the Overview by [the dashboard's own health](#the-dashboards-own-health).
+
+## The dashboard's own health
+
+`/healthz` is liveness and nothing else: a fixed `{"status":"ok"}` for as long as the process serves.
+It is what the image's `HEALTHCHECK` asks, and through the container's
+health so do `docker compose up --wait` in the installer and the updater, and the updater's rollback. It
+must therefore not depend on the store: a liveness that turned red when SQLite cannot be written would
+restart-loop the stack on a full disk and roll an update back for a reason the previous version shares,
+at the moment the dashboard is the tool for finding what filled the disk.
+
+The check itself is `jd-healthcheck` (`cmd/healthcheck`, `internal/healthprobe`): one GET of `/healthz`
+on `JD_ADDR`, over TLS without verification in agent mode. It is a program of its own on the standard
+library, which a test holds it to, because Docker starts it every thirty seconds: as a mode of the server
+binary each run initialised all 340 packages the server links, about 150 ms and 57 MB, against 1 ms and
+8 MB now. The server's `-healthcheck` flag runs the same probe and stays for a container still described
+by an older image.
+
+What liveness leaves out is `internal/storehealth`, started first in `Server.Start`. Every fifteen
+seconds it rewrites one `settings` row (`store_health_probe`), reads back if that fails, and measures
+the filesystem under `JD_DATA_DIR`. `GET /api/v1/dashboard/health` (every role, `handlers_self.go`)
+answers `{ok, store, tasks}` with the store's `code`: `disk_full` (SQLite or the kernel refused space, under
+4 MiB is free, or the reserve is spent), `store_unreadable` (not even `SELECT 1` answers), or
+`store_unwritable` (writes have failed for another reason for a full minute, so one busy answer during
+a migration is not a problem). The Overview draws a danger `Notice` from it
+(`components/overview/health-notice.tsx`, worded in `lib/dashboard-health.ts`), and the log says each
+change of state once.
+
+The monitor also keeps a **space reserve**: 32 MiB of random bytes at
+`JD_DATA_DIR/staging/disk-reserve`, written only while that leaves eight times its size free, and not at
+all under `JD_DEV`. When a write is refused for space, or free space falls under 4 MiB, the file is
+deleted, which hands SQLite room for the sign-in, the audit lines and the settings an operator needs
+while cleaning up; the status stays `disk_full` until there is room to write the reserve again. It is
+random rather than preallocated because a compressing filesystem would keep zeros in a few blocks, and
+it lives in `staging` because every backup of the data directory already excludes that folder. A
+reserve that cannot be written (a quota, a filesystem that reports room it cannot hand out) is said in
+the log once and tried again every ten minutes, not on every pass: each attempt writes all 32 MiB. It is a
+margin, not a guarantee: whatever filled the disk can fill 32 MiB more. A request whose store write is
+still refused answers `507 disk_full` with a sentence saying so (`httpx.DiskFull`, applied in
+`WriteError` to any error that would otherwise be an unexplained `500 internal`), which is what the
+sign-in page shows.
 
 ## Reaching the host, and containing paths
 
@@ -150,7 +257,10 @@ prefix test, with the same hole. File-manager extraction additionally stops afte
 8 GiB of bytes actually written, reserves at least 1 GiB of free space, serialises extraction requests,
 removes the current partial file on failure, and obeys a ten-minute request deadline — compressed
 metadata is never trusted as the quota. `internal/sysinfo` reads the host through gopsutil rather than parsing
-`/proc`, so the same path works across kernels and inside a container with `/proc` bind-mounted.
+`/proc`, so the same path works across kernels and inside a container with `/proc` bind-mounted. The one
+reading `/proc` cannot give, each filesystem's size, is a `statfs` of the mount point, which `sysinfo`
+makes through `InHostMounts` with a two-second wait per pass
+([per-filesystem capacity](../backend/observability-security.md#metrics-and-saturation)).
 
 ## Auth, secrets, state
 

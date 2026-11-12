@@ -15,7 +15,15 @@ since a tab was opened, and charts that start empty every visit cannot show last
   its mean — a 100% second inside a ten-minute bucket averages away to nothing.
 - Capacity is **per filesystem** (`metric_mount_samples`, `GET /system/metrics/storage`), never a
   worst-of line: when the fullest mount stops being the fullest, one line drops to the runner-up and
-  reads as freed space on a disk that never changed. Pseudo filesystems are filtered before the write.
+  reads as freed space on a disk that never changed. Pseudo filesystems are filtered before the write,
+  and so are images that are always full (`iso9660`, `udf`, `cramfs`, `romfs`, `erofs`).
+- The mount table is the host's (`/proc/1/mountinfo`, through the shared PID namespace), so each mount
+  point is **measured in the host's mount namespace** too (`sysinfo/mounts.go`, `hostexec.InHostMounts`).
+  A `statfs` from inside the container answers for the image's own directory of that name: `/boot` was
+  recorded at the root disk's size, and `/boot/efi` or a second disk at `/data` was absent. A filesystem
+  that does not answer within two seconds (a detached volume, a dead network device) is left out of the
+  sample; its one outstanding call is shared by every collector and is not repeated until the kernel
+  answers it, so a hung mount cannot stall the recorder or pile up threads.
 - Containers are sampled into `metric_container_samples`, keyed by **name, not id** — a compose redeploy
   replaces the container and seeing across the restart is the point. Docker being absent is logged once,
   not an error. `/docker/containers/stats/history` serves a sparkline per table row in one query.

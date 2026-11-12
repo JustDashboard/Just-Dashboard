@@ -32,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
 
@@ -175,8 +176,9 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 	ctx, s.cancel = context.WithCancel(ctx)
-	s.done = make(chan struct{})
-	go s.run(ctx, s.done)
+	done := make(chan struct{})
+	s.done = done
+	safego.Go(ctx, s.log, "usage count", s.run, safego.Close(done))
 }
 
 func (s *Service) Stop() {
@@ -193,8 +195,7 @@ func (s *Service) Stop() {
 	}
 }
 
-func (s *Service) run(ctx context.Context, done chan struct{}) {
-	defer close(done)
+func (s *Service) run(ctx context.Context) {
 	timer := time.NewTimer(firstCheck)
 	defer timer.Stop()
 	for {

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The monitor measures every member of every group on the group's own
@@ -144,7 +146,7 @@ func (m *egressMonitor) start(ctx context.Context) {
 		m.mu.Lock()
 		m.started = m.clock()
 		m.mu.Unlock()
-		go m.loop(ctx)
+		safego.Go(ctx, nil, "egress monitor", m.loop, safego.Close(m.done))
 	})
 }
 
@@ -165,7 +167,6 @@ func (m *egressMonitor) halt() {
 }
 
 func (m *egressMonitor) loop(ctx context.Context) {
-	defer close(m.done)
 	m.reconcile(ctx)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -216,6 +217,7 @@ func (m *egressMonitor) loop(ctx context.Context) {
 						}
 						m.mu.Unlock()
 					}()
+					defer safego.Recover(nil, "egress monitor round")
 					m.round(ctx, g)
 				}(g)
 			}
@@ -307,6 +309,7 @@ func (m *egressMonitor) round(ctx context.Context, g EgressGroupSpec) {
 		wg.Add(1)
 		go func(mem EgressMember) {
 			defer wg.Done()
+			defer safego.Recover(nil, "egress member sample")
 			s := sampleMember(ctx, m.s.egressMemberPath(g, mem, sources), g.Probes, timeout, now)
 			lock.Lock()
 			samples[mem.ID] = s
