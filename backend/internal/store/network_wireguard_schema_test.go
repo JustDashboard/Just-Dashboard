@@ -9,6 +9,7 @@ import (
 )
 
 func TestWireGuardRecordSchemaFreshAndUpgradeKeepHistory(t *testing.T) {
+	t.Parallel()
 	upgraded := t.TempDir()
 	script, e := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
 	if e != nil {

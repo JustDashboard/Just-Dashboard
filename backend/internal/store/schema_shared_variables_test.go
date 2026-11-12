@@ -24,6 +24,7 @@ func TestSharedVariableSchemaOnlyAddsTables(t *testing.T) {
 // one per scope however many projects use it, and a project's own go with the
 // project while the server's stay.
 func TestSharedVariableSchemaReachesFreshAndUpgradedInstalls(t *testing.T) {
+	t.Parallel()
 	upgraded := t.TempDir()
 	script, err := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
 	if err != nil {
