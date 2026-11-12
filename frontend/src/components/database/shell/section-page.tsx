@@ -39,7 +39,7 @@ export function SectionPage({
         engine={engine}
         thing={thing}
         href={href(data ? "data" : "home")}
-        action={data ? `Open ${data.title}` : "Open Home"}
+        action={data ? `Open ${data.title}` : "Open the database's Home"}
       >
         {reason}
       </BlockedState>

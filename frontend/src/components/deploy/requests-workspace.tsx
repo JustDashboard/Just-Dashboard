@@ -237,7 +237,7 @@ export function RequestsWorkspace({
         emptyAction
       ) : !data.driver ? (
         <Button size="sm" variant="outline" asChild>
-          <Link href="/proxy">Open Proxy</Link>
+          <Link href="/proxy">Open Proxy &amp; TLS</Link>
         </Button>
       ) : undefined
     const reason =

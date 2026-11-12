@@ -8,7 +8,7 @@ import { deployment, mockProject, project } from "./deploy-fixture"
  * strip of route tabs across the top of every page in that section, so the six
  * multi-page sections each said where you were twice and the rail could be
  * thirty rows deep. The rail drills into a section now: one list at a time,
- * always the list for where you are. A group — Monitoring, Server configuration
+ * always the list for where you are. A group — Monitoring, Administration
  * — is a row with no page of its own that opens a panel of the pages it holds.
  *
  * These are the claims that makes, plus the one it removes. They are

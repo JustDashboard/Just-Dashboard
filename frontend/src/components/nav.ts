@@ -159,7 +159,9 @@ export type NavEntry = NavItem | NavGroup
  * The top-level list is twelve rows, not seventeen. Metrics, Processes and Logs
  * are one question — how is the machine doing — and sit behind Monitoring; the
  * packages, system accounts and audit trail are the pages you open to change
- * the server rather than to use it, and sit behind Server configuration. The
+ * the server rather than to use it, and sit behind Administration (it was
+ * "Server configuration", a synonym of Settings → Configuration two rows down
+ * for a group that holds the audit log, which configures nothing). The
  * network — its devices, routes, gateway, tunnels and resolver, and the proxy
  * in front of the sites — is a group of its own before Protection.
  */
@@ -363,7 +365,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
       },
       // The reverse proxy, its certificates, the TCP/UDP streams and the load
       // balancing in a site's upstreams are the gateway's other half, so the
-      // section sits beside Network rather than under Server configuration.
+      // section sits beside Network rather than under Administration.
       {
         title: "Proxy & TLS",
         href: "/proxy",
@@ -404,7 +406,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
     label: "Advanced",
     items: [
       {
-        title: "Server configuration",
+        title: "Administration",
         icon: SettingsSliders,
         children: [
           { title: "Packages", href: "/packages", icon: Puzzle },

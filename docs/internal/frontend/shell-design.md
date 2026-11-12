@@ -80,7 +80,7 @@ already inside the right section. The single piece of state is a look elsewhere 
 page you are on — the step back out, or a group opened from the list — and it is dropped on the next
 navigation. Three levels exist: the top-level list, a section, and one deployment inside Deployments
 or one database inside Databases — or, inside a group, the group, a section in it, and that section's
-pages (Monitoring → Processes → PM2; Server configuration → Proxy & TLS → Sites).
+pages (Monitoring → Processes → PM2; Administration → Proxy & TLS → Sites).
 
 `components/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
 `PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `sectionsFor`, `navLocation`, and for the sections an
@@ -104,8 +104,17 @@ runs). It was nineteen siblings with four glyphs each used twice. No two pages o
 glyph, which `nav.test.js` holds for every section: the glyph is what a row is found by before it is
 read.
 
+The group that holds Packages, System users and the Audit log is **Administration**. Until 0.8.6 it was
+"Server configuration", a synonym of Settings → Configuration two rows under it for a group whose audit
+log configures nothing. A button that opens a section says the rail's name for it in sentence case
+(*Open Deployments*, *Open Proxy & TLS*, *Open the database's Home*), never a shorter word the rail
+does not use. Excalidraw stays the page's name, the tool's own, and a document made there is a
+*drawing* everywhere; "board" is only the API's path. Pages of different sections that share a name
+(Traffic, Alerts, Map, Configuration, Security) are told apart by the panel they stand in and by the
+trail the palette prints beside each.
+
 A **group** (`NavGroup`) is a row with a chevron and no page: Monitoring holds Metrics, its Alerts
-(administrators only), Processes and Logs, and Server configuration holds Proxy & TLS, Packages, System users and Audit log. There is nothing
+(administrators only), Processes and Logs, and Administration holds Proxy & TLS, Packages, System users and Audit log. There is nothing
 that is "Monitoring" as such, so pressing the row opens its panel over the page you are on rather than
 navigating, and a group owns a path only through its entries (`navOwns`) — Metrics, Processes and Logs
 share no prefix. `sectionsFor` returns the chain of groups and sections a path sits inside, and the rail
@@ -134,7 +143,7 @@ without it. Packages, System users and the audit log can be, but every answer ke
 What a hidden section loses is exactly three things, each read through `useHiddenSections()`:
 
 - **Its row in the rail.** `shownFor` in `nav.ts` decides every row (and asks the role, so a group
-  whose remaining entries the role cannot open goes with them — Server configuration with Packages
+  whose remaining entries the role cannot open goes with them — Administration with Packages
   hidden, to an account without `system.admin`). A section's root is hidden, never a page inside it.
   **While you are inside a hidden section it is drawn anyway**: a deployment's domain links to
   `/proxy/sites?site=…`, about 150 such links cross sections, and the rail must still say where you
@@ -192,7 +201,7 @@ purpose is chosen when every section of it the role is offered is shown (`purpos
 chosen one takes its sections out and pressing any other brings them back whole (`pressPurpose`).
 Purposes share no section, so a press never moves another card. Beside it, *Sidebar* is the rail itself (`SidebarEditor`), walked
 from the same registry in its groups and order with a switch on every row the role may hide;
-Overview, Map, Monitoring and Settings say *Always* instead, and Server configuration heads the three
+Overview, Map, Monitoring and Settings say *Always* instead, and Administration heads the three
 sections it holds. A list of sections beside a separate picture of the rail was the same list twice.
 Both edit one draft, and an edit raises the settings pages' floating Save (`SaveBarProvider`,
 design system §7) rather than a disabled button sitting under the page. Accounts that predate the
@@ -279,7 +288,7 @@ row's slot made the heading read as one more row to press.
 The groups run in the order a day on the server runs, and the rail names each group:
 **Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
 then Databases, Docker), **Workspace** (Excalidraw, Terminal, Files, Git, Remote Desktop), **Protection** (Security, Backups),
-**Advanced** (Server configuration: Proxy & TLS, Packages, System users, Audit log) and **System**
+**Advanced** (Administration: Proxy & TLS, Packages, System users, Audit log) and **System**
 (Settings). The top-level list is twelve rows rather than seventeen: the three monitoring pages answer
 one question, and the four configuration pages are opened to change the server rather than to use it.
 Deployments open the second group because shipping something is the reason most visits happen; until

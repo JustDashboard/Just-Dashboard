@@ -90,9 +90,9 @@ test("a new account is asked what the server is for, and the answer shapes the s
     await expect(rail(page).getByRole("link", { name: hidden, exact: true })).toHaveCount(0)
   }
   // Workspace held only hidden sections, so a label with nothing left under it
-  // goes with its rows, and Server configuration is in every answer.
+  // goes with its rows, and Administration is in every answer.
   await expect(rail(page).getByText("Workspace", { exact: true })).toHaveCount(0)
-  await expect(rail(page).getByText("Server configuration")).toBeVisible()
+  await expect(rail(page).getByText("Administration")).toBeVisible()
   // The Overview keeps the tiles and blocks of what was chosen — Packages
   // among them, because every answer keeps it — and Databases is a block.
   const tile = (name: RegExp) => page.locator("[data-slot=stat-tile]", { hasText: name })
