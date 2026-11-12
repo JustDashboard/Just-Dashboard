@@ -396,7 +396,11 @@ A control can be all three at once and stay readable, which is the test.
 The ring is `focus-ring`, or `focus-ring-inset` where there is no room outside the control — one
 appearance, two placements. It is an `outline`, not Tailwind's `ring`: an outline follows
 `border-radius`, cannot be overwritten by a `shadow-*` utility landing on the same element, and works
-on a `<tr>`.
+on a `<tr>`. Being the outline, it is undone by any class in the same list that sets the outline's style
+to none: `outline-hidden` and `outline-none` win over it. The sidebar's five class lists carried
+`outline-hidden` from the component library's own focus styling, so every row of the rail took the
+keyboard's focus and showed nothing. `components/ui/focus-ring.test.js` fails on a class list that has
+both, and `design-system.spec.ts` walks the rail's own rows.
 
 A row's actions appear through `RowActions`, `IconAction reveal`, or `rowReveal()`. Never by hand: the
 four mechanisms that sentence hides — pointer, keyboard, open menu, touch — are how five action
