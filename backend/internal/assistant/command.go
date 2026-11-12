@@ -50,6 +50,7 @@ var runCommandTool = Tool{
 		"Its working directory is the account's home; write cd /path && … for another. It answers with the exit code and the end of its output, secret values masked. " +
 		"A line that only reads need not wait for the person when it is written plainly: reading programs with their usual flags spelled out, " +
 		"no substitution and no output sent to a file, and no variable or wildcard given to a program whose flags could make it write (find, sort, git, docker). " +
+		"What reaches another machine (ping, dig, curl, openssl s_client) waits, as a change does. " +
 		"A line that changes packages or restarts Docker, or runs sudo that may ask for a password, is typed into this chat's terminal window instead, as terminal_run would, " +
 		"where it outlives the dashboard restarting and can be answered; its answer then says so, and terminal_read follows it." +
 		agentRoleLine + agentHoldLine,
@@ -340,7 +341,7 @@ func parseLine(line string) ([]simple, bool) {
 				}
 			}
 		case '<':
-			if at(i+1) == '<' {
+			if at(i+1) == '<' || !inputFile(runes, i+1) {
 				plain = false
 			}
 			endWord()
@@ -406,6 +407,24 @@ func redirectionEnd(runes []rune, i int) (int, bool) {
 		return 0, false
 	}
 	return i + len(null), ends(i + len(null))
+}
+
+// inputFile reads what follows a <, and reports whether it is a file's path
+// written out. bash opens a connection for /dev/tcp/host/port and /dev/udp, and a
+// name that is quoted, or a variable's, could be one.
+func inputFile(runes []rune, i int) bool {
+	for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
+		i++
+	}
+	start := i
+	for i < len(runes) && (nameRune(runes[i]) || strings.ContainsRune("./~+,:@%=-", runes[i])) {
+		i++
+	}
+	if i < len(runes) && !strings.ContainsRune(" \t\n;|&<>()", runes[i]) {
+		return false
+	}
+	target := string(runes[start:i])
+	return !strings.HasPrefix(target, "/dev/tcp") && !strings.HasPrefix(target, "/dev/udp")
 }
 
 // wrappers only change how the command after them runs, by the flags of

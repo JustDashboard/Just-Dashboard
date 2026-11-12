@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"net/netip"
 	"slices"
 	"strings"
 )
@@ -266,11 +267,14 @@ func oneOf(words ...string) func([]string) bool {
 }
 
 // What only reads whatever it is given. sed, awk, less, env and xargs are not
-// here because they run what they are told; tee and curl because they write.
+// here because they run what they are told; tee and curl because they write;
+// and ping, dig, host, nslookup and traceroute because what they are given is
+// sent to a machine of the line's choosing, which is how what was read leaves:
+// a name to look up is a message to whoever answers for it.
 const whateverPrograms = "ls ll cat head tail grep egrep fgrep wc cut tr column stat du df free uptime uname whoami id groups " +
-	"who w last echo pwd which type whereis ps pgrep pstree lsof netstat ping dig nslookup host getent traceroute " +
-	"lsblk findmnt lscpu lsmem lspci lsusb vmstat iostat mpstat nproc readlink realpath basename dirname md5sum " +
-	"sha1sum sha256sum jq diff cmp zcat zgrep od strings nl tac rev test [ true false seq sleep"
+	"who w last echo pwd which type whereis ps pgrep pstree netstat lsblk findmnt lscpu lsmem lspci lsusb vmstat " +
+	"iostat mpstat nproc readlink realpath basename dirname md5sum sha1sum sha256sum jq diff cmp zcat zgrep od " +
+	"strings nl tac rev test [ true false seq sleep"
 
 // readers are the programs a read may run, by name.
 var readers = buildReaders()
@@ -362,12 +366,31 @@ func buildReaders() map[string]reader {
 		"--after-context? --before-context? --context? --regexp? --file? --replace? --color? --colors? --threads? "+
 		"--encoding? --engine? --context-separator? --field-match-separator? --field-context-separator? "+
 		"--path-separator? --ignore-file? --help --version")), "rg")
-	// ss -K closes the sockets it lists, and -D writes them to a file.
-	add(only(flagsOf("-h -V -n -r -a -l -o -e -m -p -T -i -s -E -Z -z -b -4 -6 -0 -t -u -d -w -x -S -M -H -O -Q -f? -A? "+
-		"--numeric --resolve --all --listening --options --extended --memory --processes --threads --info --summary "+
-		"--events --context --contexts --bpf --ipv4 --ipv6 --packet --tcp --mptcp --sctp --udp --dccp --raw --unix "+
-		"--vsock --xdp --tipc --tos --cgroup --kernel --no-header --oneline --no-queues --inet-sockopt --family? "+
-		"--query? --socket? --help --version")), "ss")
+	// ss -K closes the sockets it lists, and -D writes them to a file. Its
+	// filter names sockets by state, port and address, and an address that is a
+	// name is looked up.
+	ss := flagsOf("-h -V -n -r -a -l -o -e -m -p -T -i -s -E -Z -z -b -4 -6 -0 -t -u -d -w -x -S -M -H -O -Q -f? -A? " +
+		"--numeric --resolve --all --listening --options --extended --memory --processes --threads --info --summary " +
+		"--events --context --contexts --bpf --ipv4 --ipv6 --packet --tcp --mptcp --sctp --udp --dccp --raw --unix " +
+		"--vsock --xdp --tipc --tos --cgroup --kernel --no-header --oneline --no-queues --inet-sockopt --family? " +
+		"--query? --socket? --help --version")
+	add(func(args []string) bool {
+		g, ok := ss.read(args)
+		return ok && !slices.ContainsFunc(g.operands, func(o string) bool { return !ssFilterWord(o) })
+	}, "ss")
+	// lsof -i @host looks the host up, and getent hosts asks the resolver for
+	// whatever name it is given.
+	add(func(args []string) bool {
+		return !slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "@") })
+	}, "lsof")
+	getent := flagsOf("-i -V --no-idn --help --version")
+	add(func(args []string) bool {
+		g, ok := getent.read(args)
+		if !ok || len(g.operands) < 2 {
+			return ok
+		}
+		return !slices.Contains([]string{"hosts", "ahosts", "ahostsv4", "ahostsv6", "networks"}, g.operands[0])
+	}, "getent")
 	// journalctl removes with --vacuum-*, --rotate and --flush, and writes a
 	// file with --cursor-file, --setup-keys and --update-catalog. -n and -b take
 	// their value only when the word after is one, so nothing here takes it from
@@ -448,8 +471,9 @@ func buildReaders() map[string]reader {
 	// openssl writes with -out, -keyout, -sess_out, -keylogfile, -msgfile and
 	// -writerand, and loads code with -engine and -provider, in every command of
 	// its: each is listed whole. s_client is not one of them: it writes three of
-	// those, and connects to whatever it is told to.
-	add(staged(nil, false, map[string]func([]string) bool{
+	// those, and connects to whatever it is told to. A certificate or a list
+	// named by an address rather than a path is fetched from it.
+	openssl := staged(nil, false, map[string]func([]string) bool{
 		"x509": only(wordsOf("-noout -text -dates -startdate -enddate -subject -issuer -serial -fingerprint -sha1 -sha256 " +
 			"-sha384 -sha512 -md5 -email -ocsp_uri -ocspid -purpose -pubkey -modulus -hash -subject_hash -issuer_hash " +
 			"-subject_hash_old -issuer_hash_old -alias -nocert -in: -inform: -nameopt: -certopt: -dateopt: -checkend: " +
@@ -461,15 +485,20 @@ func buildReaders() map[string]reader {
 			"-verify -in: -inform: -nameopt: -CAfile: -CApath:")),
 		"ciphers": atMost(1, wordsOf("-v -V -s -tls1 -tls1_1 -tls1_2 -tls1_3 -stdname -psk -srp -ciphersuites: -convert:")),
 		"version": atMost(0, wordsOf("-a -v -b -o -f -p -d -e -m -r -c")),
-	}), "openssl")
+	})
+	add(func(args []string) bool {
+		return !slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "://") }) && openssl(args)
+	}, "openssl")
 	// certbot writes its log and its working files where it is told to.
 	add(verbs(flagsOf("-d: --domain= --domains= --cert-name= --help"), false, reading("certificates")), "certbot")
 	add(verbs(flagsOf("-m -s -v -V -h --mini-list --silent --no-color --sort? --help --version"), true,
 		reading("list ls status show describe info jlist prettylist")), "pm2")
-	// npm takes a registry, a cache and every other setting as a flag.
+	// npm takes a registry, a cache and every other setting as a flag, and
+	// from the .npmrc of the directory it is run in; view and outdated ask the
+	// registry that names.
 	add(verbs(flagsOf("-l -p -a -g --json --long --parseable --all --global --link --prod --production --dev --silent "+
 		"--offline --depth? --omit? --include? --help"), false, map[string]func([]string) bool{
-		"ls": nil, "list": nil, "view": nil, "outdated": nil,
+		"ls": nil, "list": nil,
 		"config": func(rest []string) bool {
 			return len(rest) > 0 && slices.Contains([]string{"get", "list", "ls"}, rest[0])
 		},
@@ -519,6 +548,28 @@ func buildReaders() map[string]reader {
 		return len(args) > 0
 	}, "apache2ctl", "apachectl")
 	return out
+}
+
+// ssFilterWords are the words of an ss filter that name no machine.
+var ssFilterWords = setOf("state", "exclude", "all", "connected", "synchronized", "bucket", "big", "established",
+	"syn-sent", "syn-recv", "fin-wait-1", "fin-wait-2", "time-wait", "closed", "close-wait", "last-ack", "listening",
+	"closing", "sport", "dport", "src", "dst", "=", "==", "eq", "!=", "ne", "neq", "gt", "lt", "ge", "le", "and", "or",
+	"not", "autobound")
+
+// ssFilterWord is a word of an ss filter that is looked up nowhere: one of its
+// own, a port by number, or an address written out.
+func ssFilterWord(word string) bool {
+	if ssFilterWords[word] || digits(strings.TrimPrefix(word, ":")) {
+		return true
+	}
+	if _, err := netip.ParseAddr(word); err == nil {
+		return true
+	}
+	if _, err := netip.ParsePrefix(word); err == nil {
+		return true
+	}
+	_, err := netip.ParseAddrPort(word)
+	return err == nil
 }
 
 // ipReads are what an ip object reads with, as the word after it; "" is the

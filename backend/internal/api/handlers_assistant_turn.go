@@ -156,7 +156,8 @@ type agentCallView struct {
 	Input  json.RawMessage `json:"input,omitempty"`
 
 	// asks is a call that waits for the person whatever the scope, unless the
-	// mode is full access: what the assistant used to be refused. draftOwn is a
+	// mode is full access: what the assistant used to be refused, and a read that
+	// is sent to another machine (agentReachingReads). draftOwn is a
 	// call to the draft a draft's conversation is about, which otherwise never
 	// waits, since a draft runs nothing.
 	asks, draftOwn bool
@@ -872,9 +873,10 @@ func agentName(call assistant.ToolCall) string {
 
 // agentHolds is the person's mode: whether a call waits for their answer. Full
 // access runs everything. Otherwise what the assistant used to be refused waits
-// (asks), a draft's own changes run, since a draft runs nothing until it is
-// committed, and the mode decides the rest: "changes" runs reads, "ask" runs
-// nothing unasked. Looking something up is free in every mode.
+// (asks), and so does a read that reaches another machine; a draft's own changes
+// run, since a draft runs nothing until it is committed, and the mode decides the
+// rest: "changes" runs reads, "ask" runs nothing unasked. Looking something up is
+// free in every mode.
 func agentHolds(scope *agentScope, mode assistant.Mode, view agentCallView) bool {
 	switch {
 	case view.Kind == agentKindFree, mode == assistant.ModeFull:
@@ -971,11 +973,12 @@ func (pr *agentPress) view(ctx context.Context, call assistant.ToolCall) agentCa
 			break
 		}
 		view.Kind = s.apiRequestKind(ctx, route, in.Path, in.Body)
+		view.asks = view.Kind == agentKindRead && agentReaches(route.Method, route.Pattern, in.Query)
 		view.Label = routeLabel(route.Words)
 		if scope.kind == agentScopeDraft && strings.HasPrefix(route.Pattern, "/deploy/drafts/{draft}") &&
 			strings.HasPrefix(in.Path+"/", "/deploy/drafts/"+scope.draft.ID+"/") {
 			view.draftOwn = true
-			view.asks = s.agentDraftAsks(ctx, scope, route.Method, strings.TrimSuffix(route.Pattern, "/"), in.Body)
+			view.asks = view.asks || s.agentDraftAsks(ctx, scope, route.Method, strings.TrimSuffix(route.Pattern, "/"), in.Body)
 		}
 	case assistant.ToolCallOperation:
 		in := call.AgentInput()
@@ -988,6 +991,15 @@ func (pr *agentPress) view(ctx context.Context, call assistant.ToolCall) agentCa
 		}
 		view.Kind, view.Label = op.Kind(), op.Tool.Title
 		view.Route = op.Method + " " + op.Pattern
+		if view.Kind == agentKindRead {
+			// What it would be sent with, as callOperation reads it; arguments that
+			// cannot be read make no request.
+			if raw, err := agentArguments(scope, op, in.Arguments); err == nil {
+				if req, err := mcp.DecodeRequest(op.Operation, raw); err == nil {
+					view.asks = agentReaches(op.Method, op.Pattern, req.Query)
+				}
+			}
+		}
 		// A draft's own operations, and what under /deploy it reads to choose
 		// from, are the draft's: they run nothing.
 		if scope.kind == agentScopeDraft && (!op.Both || op.Kind() == agentKindRead) {
@@ -996,7 +1008,7 @@ func (pr *agentPress) view(ctx context.Context, call assistant.ToolCall) agentCa
 			}
 			_ = json.Unmarshal(in.Arguments, &args)
 			view.draftOwn = true
-			view.asks = s.agentDraftAsks(ctx, scope, op.Method, op.Pattern, agentBody(args.Body))
+			view.asks = view.asks || s.agentDraftAsks(ctx, scope, op.Method, op.Pattern, agentBody(args.Body))
 		}
 	default:
 		view.Input = call.Input

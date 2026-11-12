@@ -1193,6 +1193,10 @@ test("the mode menu says plainly what each mode lets it do", async ({ page }) =>
   await expect(page.getByRole("menuitem", { name: /Ask before changes/ })).toContainText(
     "Every change waits for your Allow",
   )
+  // A read that leaves the server is held like a change.
+  await expect(page.getByRole("menuitem", { name: /Ask before changes/ })).toContainText(
+    "so does a read it would send to another machine",
+  )
 })
 
 /* -------------------------------------------------------- a new deployment */

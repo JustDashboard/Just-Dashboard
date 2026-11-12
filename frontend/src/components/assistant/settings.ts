@@ -136,6 +136,7 @@ export const MODE_LABEL: Record<AssistantMode, string> = {
 /** What each mode lets it do, in the words the choice is made on. */
 export const MODE_DETAIL: Record<AssistantMode, string> = {
   ask: "Every read and every change waits for your Allow.",
-  changes: "It reads on its own. Every change waits for your Allow before it runs.",
+  changes:
+    "It reads on its own. Every change waits for your Allow before it runs, and so does a read it would send to another machine.",
   full: "Runs everything without asking — reads, changes, restarts and deletions — as you, within your role. Every call is audited.",
 }

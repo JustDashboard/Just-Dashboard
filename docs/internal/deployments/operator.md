@@ -92,7 +92,7 @@ instead, unless they chose full access. What still holds it is below, and
 | Mode | Runs without asking | Waits for the person |
 | --- | --- | --- |
 | Ask every time (`ask`) | Looking up an operation or a route, offering a shortcut | Every read and every change |
-| Ask before changes (`changes`, the default) | Reads, including a SQL statement and a shell command that only read | Every change |
+| Ask before changes (`changes`, the default) | Reads that stay on the server, including a SQL statement and a shell command that only read | Every change, and every read that is sent to another machine |
 | Full access (`full`) | Everything the person's role allows | Anything past `agentSteps` |
 
 The page sends the mode on every press; left out, it is the install's default, which an administrator
@@ -105,6 +105,34 @@ what the card says and how Allow is drawn. An `api_request` is read by its metho
 (`agentReadingPosts`: a Mongo find, a statement's classification, a DNS lookup) is a read, and
 `POST /databases/{id}/query` is a read when its one statement is (`dbx.SingleStatementFor`, risk `read`), so a
 database is asked about without an Allow for each query in "changes".
+
+**A read that is sent to another machine waits, in every mode but full access.** What the model reads is not
+instructions, but it can be told things by it, and a read that sends what it is given to a machine of its
+choosing is the way out for everything else it has read: a row, a file or a host name can be put into a name
+to look up or a path to fetch, and whoever answers for that name is sent it. Masking keeps secrets' values from
+the provider, not ordinary data from a third machine. So:
+
+- A route that reads by reaching a host, a domain or an address its caller names is listed in
+  `agentReachingReads` (`api/handlers_assistant_routes.go`) and its call carries `asks`, which `agentHolds`
+  holds like a change though the card and the answer stay a read's: `GET /certificates/check`, `/scan`,
+  `/scan/deep` and `/dns`, `GET /remote-desktop/probe`, `GET /deploy/hostname` when it is given a `hostname`
+  (a name suggested for a deployment is under the server's own domain), `POST /databases/test` and
+  `POST /databases/{id}/imports/inspect`, which connect to the address they are given,
+  `POST /network/dns/lookup` and `/dnssec-chain`, and `POST /docker/stacks/{name}/validate`, since Compose
+  resolves what a file includes. A scan of one of the server's own sites waits as any other does: the route is
+  listed, not the name. A draft's chat, whose own reads never wait, waits for these too. A read is not
+  listed when it reaches only where the server already points: a saved database connection, a deployment's own
+  domain or repository, GitHub, an image's registry, a configured resolver, the distribution's package index.
+  A new route that takes a host from its caller and reads by reaching it joins the list, which
+  `TestTheCatalogueIsTheRoutesItSaysItIs` holds to the router.
+- A ClickHouse `SELECT` from a table function that reads another machine or runs a program (`url`, `remote`,
+  `s3`, `mysql`, `executable` and kin, `clickHouseReaching`) is not a statement that runs unasked, though the
+  statement's own classifier reads it as a read. The name is looked for anywhere in the statement, quoted or
+  with a comment before its bracket, so a column of that name called like a function costs an Allow.
+- A shell line that reaches another machine is a `change`, as `curl` always was: `ping`, `dig`, `host`,
+  `nslookup` and `traceroute` are not readers, nor are `git ls-remote`, `git remote show`, `openssl s_client`,
+  `npm view` and `npm outdated`; `getent hosts name`, `lsof -i @host`, an `ss` filter that names a host,
+  `openssl x509 -in http://…` and bash's `< /dev/tcp/host/port` ask as well.
 
 A `run_command` line is read by `assistant.ClassifyCommand`, conservatively, so that a misreading costs an Allow
 rather than a write nobody saw. It keeps that by listing what a read may be made of and asking about everything

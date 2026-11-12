@@ -38,7 +38,10 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   let Just Hub sign you in (or stop it), make an API key, uninstall the dashboard, attach to your own terminal windows or a stream, or read a database
   connection you marked protected. It asks before any change unless you give it full access,
   which runs everything your role allows without asking. Text it reads, such as a log line, can try to talk a
-  model into something, so leave "Ask before changes" on where someone else's text can reach it. Its chats
+  model into something, so leave "Ask before changes" on where someone else's text can reach it. In that mode
+  it also asks before a read that is sent to another machine, such as a DNS lookup, a certificate scan or a
+  ping, because a name to look up can carry what it has read off the server; what it reads still goes to the
+  model you chose. Its chats
   are yours alone, saved encrypted on the server.
 - The session cookie stays the dashboard's. It is `__Host-jd_session` — HttpOnly, SameSite=Strict,
   Secure and sent to no other name — and the previews and tailnet-only apps the dashboard publishes on

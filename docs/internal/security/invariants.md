@@ -362,7 +362,9 @@ A change that weakens any of these has to say so explicitly.
     the operator protected is out of every chat's reach as well (`agentProtected`): its own chat is refused by the
     guard, and a call into its routes is answered with why, so nothing in it is sent to a model. What used to be
     refused is asked instead: how much runs without asking is the mode, which the server holds on every press —
-    "ask" holds every read and change, "changes" (the default) holds every change, and **full access runs
+    "ask" holds every read and change, "changes" (the default) holds every change and every read that is sent to
+    a machine the call names (a lookup, a scan, a probe: `agentReachingReads`, and the shell's `ping`, `dig` and
+    kin), since that is how what it has read would leave the server, and **full access runs
     everything the person's role allows, unseen**; a draft's own saves never wait, but committing it, discarding
     it, or a save that changes its source, points a variable at a saved secret or reaches the host waits unless
     the mode is full. Text the model reads can try to talk it into a change, which is why "changes" stays the
