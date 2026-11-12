@@ -8,6 +8,7 @@ import { SelfUpdateProvider } from "@/hooks/use-self-update"
 import { AppSidebar } from "@/components/app-sidebar"
 import { Logo, LogoStacked } from "@/components/logo"
 import { tabTitle } from "@/components/nav"
+import { useTabName } from "@/components/tab-title"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { CommandPaletteProvider, useCommandPalette } from "@/components/command-palette"
 import { MagnifyingGlass } from "@/components/icons"
@@ -30,6 +31,10 @@ import { ServerSwitcher } from "@/components/hub-link/server-switcher"
  * the element to the head instead. The root layout declares no title for that
  * reason: Next would write its own over a `document.title`, and beside this one
  * would be the first of two.
+ *
+ * The address names the page and the page names the item: a detail page's
+ * heading, or what it says with `useTabTitle`, goes before the section, so two
+ * tabs on two containers read differently (`tabTitle`, `components/tab-title.tsx`).
  *
  * The hub link's provider sits above the title because a linked server names
  * itself in the tab, and above the shell because the rail, the phone's strip
@@ -54,7 +59,8 @@ function TabTitle() {
   const pathname = usePathname()
   const hub = useShellHub()
   const host = useHostName()
-  return <title>{tabTitle(pathname, hub ? (host ?? undefined) : undefined)}</title>
+  const name = useTabName()
+  return <title>{tabTitle(pathname, hub ? (host ?? undefined) : undefined, name)}</title>
 }
 
 function DashboardShell({ children }: { children: React.ReactNode }) {

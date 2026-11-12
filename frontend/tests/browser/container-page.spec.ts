@@ -15,6 +15,8 @@ test("a container opens on its identity, its live readings and the project it ru
 
   const identity = page.locator("[data-slot=host-identity]")
   await expect(identity.getByText("automations-n8n-1", { exact: true })).toBeVisible()
+  // The tab says which container, not only "Docker".
+  await expect(page).toHaveTitle("automations-n8n-1 · Containers · Just Dashboard")
   await expect(identity.getByText(":1.98.2")).toBeVisible()
   await expect(identity.getByText("restarted unless stopped")).toBeVisible()
   await expect(identity.getByText(/^up 4d/)).toBeVisible()

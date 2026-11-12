@@ -124,12 +124,12 @@ test.describe("the tab's title", () => {
     await expect(page).toHaveTitle("Files · Just Dashboard")
   })
 
-  test("the sign-in page keeps the product's name", async ({ page }) => {
+  test("the sign-in page says what it is before the product's name", async ({ page }) => {
     await page.route("**/api/v1/**", (route) =>
       json(route, { error: { code: "unauthenticated", message: "Sign in" } }, 401),
     )
     await page.goto("/login")
-    await expect(page).toHaveTitle("Just Dashboard")
+    await expect(page).toHaveTitle("Sign in · Just Dashboard")
   })
 
   test("changes on a client navigation and on going back", async ({ page }) => {
@@ -143,12 +143,20 @@ test.describe("the tab's title", () => {
     await expect(page).toHaveTitle("Profile · Just Dashboard")
   })
 
-  test("a detail page takes its section, and an unknown address the product", async ({ page }) => {
+  test("a detail page leads with its item, and an unknown address says so", async ({ page }) => {
     await mockProject(page)
+    // Every page of every project read "Deployments": two projects' tabs, and
+    // a project's Logs and its Runtime, could not be told apart.
     await page.goto("/deploy/7/logs")
-    await expect(page).toHaveTitle("Deployments · Just Dashboard")
+    await expect(page).toHaveTitle("api-production · Logs · Deployments · Just Dashboard")
+    await page.getByRole("link", { name: "Runtime", exact: true }).first().click()
+    await expect(page).toHaveURL(/\/deploy\/7\/runtime$/)
+    await expect(page).toHaveTitle("api-production · Runtime · Deployments · Just Dashboard")
+    // Leaving the project takes its name out of the tab with it.
+    await page.goto("/files")
+    await expect(page).toHaveTitle("Files · Just Dashboard")
     await page.goto("/no-such-page")
-    await expect(page).toHaveTitle("Just Dashboard")
+    await expect(page).toHaveTitle("Page not found · Just Dashboard")
   })
 })
 

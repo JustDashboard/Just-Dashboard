@@ -83,9 +83,27 @@ neither rule is met. The spelling of the calls is unchanged: the specs' mocks ma
 
 ### The tab's title
 
-The dashboard's layout renders a React `<title>` from `tabTitle(pathname, host)` in `components/nav.ts`:
-"Files · Just Dashboard", the section's name for a detail page, the product's alone for an address under no
-section. On a server linked to a Just Hub, `host` is this server's own host name (`useHostName` in
+The dashboard's layout renders a React `<title>` from `tabTitle(pathname, host, name)` in
+`components/nav.ts`: "Files · Just Dashboard", the product's alone for an address under no section.
+
+**The item leads.** The address of a detail page names only its section, so every page of every database
+read "Databases", every page of every project "Deployments" and a container "Docker", and four tabs or
+the Back menu's entries could not be told apart. The page knows the item, so the page says it
+(`components/tab-title.tsx`, a small store outside React that only the `<title>` reads):
+
+- `PageContext` hands the words of its `h1` to the tab as well as to a screen reader. The shell uses a
+  heading only where the nav has no row for the address, so a list page keeps its rail entry's word and
+  a detail page reads "nginx · Containers", "orders · Query · Databases", "shop · Logs · Deployments"
+  (a project's page is named from `PROJECT_NAV`), "New project · Deployments", "Page not found".
+- `useTabTitle("Deployment #42", "shop")` is for a page that wants more than its heading, most specific
+  first; it outranks a heading and is used on any address. The run page uses it.
+
+Two rail rows that share a word carry their section: "Alerts · Monitoring" and "Alerts · Proxy & TLS",
+and likewise Traffic, Map, Security and Configuration. `nav.test.js` fails when two rows of the rail
+would give their tabs one title. A word said twice is said once. `/login` is "Sign in · Just Dashboard"
+and `/welcome` "Welcome · Just Dashboard".
+
+On a server linked to a Just Hub, `host` is this server's own host name (`useHostName` in
 `hooks/use-metrics.ts`, the Overview's title from `/system/host`) and goes after the page — "Docker · atlas · Just
 Dashboard" — so five dashboard tabs can be told apart; unlinked, or before the name is read, the title is exactly
 what it was. It is never the name the hub lists the server under: that is the hub's text, which a hub that is taken

@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { MagnifyingGlass } from "@/components/icons"
 import { ErrorState, LoadingPanel } from "@/components/state"
+import { TabHeading } from "@/components/tab-title"
 
 /**
  * The frame every page renders into.
@@ -76,7 +77,10 @@ export function Page({
  *
  * The rail identifies the page visually. A repeated title above the content
  * used a full row without adding context, so only a linked parent and controls
- * are drawn here. The h1 still names the page for assistive technology.
+ * are drawn here. The h1 still names the page for assistive technology, and
+ * the same words name its tab where the nav cannot: on an item's own page the
+ * address says only "Containers", and the heading says which one
+ * (`components/tab-title.tsx`).
  */
 export function PageContext({
   eyebrow,
@@ -94,6 +98,7 @@ export function PageContext({
   return (
     <>
       <h1 className="sr-only">{title}</h1>
+      <TabHeading title={title} />
       {(back || actions) && (
         <div
           data-slot="page-context"
