@@ -145,6 +145,32 @@ test("the session is asked for while the page's JavaScript is still on its way",
   expect(fixture.reads()).toBe(1)
 })
 
+test("a link opened while signed out ends on its page after signing in, with only its view kept", async ({
+  page,
+}) => {
+  const fixture = await authFixture(page, undefined, false)
+  // What an alert's link looks like the morning after the session expired,
+  // with a key a page would act on added by whoever wrote it.
+  await page.goto("/account/sessions?tab=x&sql=DROP%20TABLE%20users")
+  await expect(page).toHaveURL(/\/login\?next=%2Faccount%2Fsessions%3Ftab%3Dx$/)
+  await signIn(page)
+  await expect(page).toHaveURL(/\/account\/sessions\?tab=x$/)
+  await expect(
+    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
+  ).toBeVisible()
+
+  // Signing out is not arriving signed out: the next sign-in starts from the Overview.
+  await signOut(page)
+  await expect(page.getByLabel("Username")).toBeVisible()
+  await expect(page).toHaveURL(/\/login$/)
+
+  // A `next` that is not a page of this dashboard leads nowhere.
+  fixture.account.signedIn = false
+  await page.goto("/login?next=%2Fapi%2Fv1%2Ffiles%2Fraw%3Fpath%3D%2Fetc%2Fshadow")
+  await signIn(page)
+  await expect(page).toHaveURL(/\/$/)
+})
+
 test("a delayed expired-session recheck cannot replace a later successful sign-in", async ({
   page,
 }) => {

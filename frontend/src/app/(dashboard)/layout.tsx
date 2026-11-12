@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { MetricsStream, useHostName } from "@/hooks/use-metrics"
@@ -20,7 +20,7 @@ import { HeldSessionsHost, HeldSessionsProvider } from "@/components/remote-desk
 import { AgentDock } from "@/components/assistant/agent/dock"
 import { AskAboutPage } from "@/components/assistant/ask-about"
 import { HubLinkProvider, useShellHub } from "@/hooks/use-hub-link"
-import { signInAddress } from "@/lib/hub-link"
+import { signInAddress } from "@/lib/sign-in-return"
 import { waitingReason } from "@/lib/session-probe"
 import { ServerSwitcher } from "@/components/hub-link/server-switcher"
 
@@ -65,16 +65,24 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   // Redirecting here is a convenience, not a security control: every API call
   // behind this shell is independently authenticated by the server. An
   // account that has not been asked what the dashboard is for is asked first,
-  // wherever it was headed; answering or skipping ends that for good. The
-  // hub's Connect door, which the hub opens in a new tab that is usually
-  // signed out, is carried through the sign-in (`returnAfterSignIn`).
+  // wherever it was headed; answering or skipping ends that for good.
+  //
+  // A browser that arrives signed out is sent to sign in with the page it
+  // asked for carried along (`signInAddress`): a link from an alert, opened
+  // after the session expired overnight, still ends on the page it named.
+  // One that was signed in here and no longer is has signed out or been
+  // signed out, and whoever signs in next starts from the Overview.
   const onboarding = Boolean(status?.user?.needsOnboarding)
+  const signedInHere = useRef(false)
   useEffect(() => {
+    if (status?.authenticated) signedInHere.current = true
     if (!loading && !status?.authenticated)
       router.replace(
         sessionEnded
           ? "/login?reason=session"
-          : signInAddress(window.location.pathname + window.location.search),
+          : signedInHere.current
+            ? "/login"
+            : signInAddress(window.location.pathname + window.location.search),
       )
     else if (onboarding) router.replace("/welcome")
   }, [loading, status, sessionEnded, onboarding, router])
