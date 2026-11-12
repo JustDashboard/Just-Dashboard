@@ -98,6 +98,14 @@ where there is not. The same reading lays out the same diagram.
   image's product (Postgres is a database wherever it runs) and, for a language's image, from the
   container's name (`shop-worker-1`, `just-dashboard-backend-1`). It decides how a box looks and
   nothing else: no line is drawn from it.
+- **What nothing claims stands on shelves** (`shelve`), because it is not one flow: thirty checkouts
+  nobody builds from are thirty unrelated things, and in the one column their kind has they were a
+  tower taller than every other system put together. Each thing is laid out with what a line joins it
+  to — a domain over its certificate, a volume beside the backup that takes it — as a small diagram
+  of its own, and the diagrams stand in rows, one kind after another in the rail's order. A kind that
+  fills a row wraps under itself; kinds with a few things each share a row. A row runs to about one
+  and a half times the square the diagrams' areas make, and to no less than `SHELF.least`, so a
+  handful of things is one row. Its head and its rail row lead with what there is most of.
 - **The atlas** (`layoutAtlas`) puts every system's frame on one canvas, in rows that read in the
   rail's order, about one and a half times as wide as the square their areas make. A frame's head is
   the system's mark, name, kind, what it holds and its anchor's state.
@@ -308,8 +316,9 @@ center's own copy of that picture went at the same time.
   overlapping and every box inside its system; determinism; a database two systems use drawn in each
   and marked shared; a stack of its own as a card wired to its members; this dashboard as a system
   (its tailnet, address, stack and store); services drawn only when wired, a native database named by
-  itself; what nothing claims as one system last; absent and unread kinds drawing nothing; the atlas's
-  rows; dragging (a box, its satellites following, a stack's frame redrawn); neighbours; and
+  itself; what nothing claims as one system last, in rows by kind however much of it there is, with
+  what a line joins kept together, and a few things on one row; absent and unread kinds drawing
+  nothing; the atlas's rows; dragging (a box, its satellites following, a stack's frame redrawn); neighbours; and
   the document decoder reading a version-1 document as fresh.
 - `api/map_build_test.go`: the joins, the measured states (exit codes, project states), unread and
   absent sources, worst-first capping, a box's facts and the per-role filter; `map_links_test.go`: every
@@ -336,8 +345,9 @@ center's own copy of that picture went at the same time.
   tidied away; a version-1 arrangement read as fresh; every word the same size far out; a trackpad's
   slide, its pinch and the zoom keys; a mouse sliding the canvas from inside a frame; a system carried
   by its head with everything in it, not taken for a click, kept across a reload and tidied away; no
-  box's words running out of it with every name and state stretched; and a fresh server's offer to
-  deploy with what it could not read. `/map` is one of `design-system.spec.ts`'s surfaces.
+  box's words running out of it with every name and state stretched; thirty checkouts nothing claims
+  drawn in rows inside their frame, none over another; and a fresh server's offer to deploy with
+  what it could not read. `/map` is one of `design-system.spec.ts`'s surfaces.
 - `lib/database-systems.test.js`: a diagram for each database holding only what it is wired to; its
   columns from readers to backups; what two databases share drawn in each; the server map's own
   systems unchanged by it; the topology's readers, sessions, broken links and could-reach lines; a

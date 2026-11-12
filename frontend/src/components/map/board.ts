@@ -65,6 +65,7 @@ export const SERVER_BOARD: MapBoard = {
       { label: "Domains", value: c.domains },
       { label: "Volumes", value: c.volumes },
       { label: "Backups", value: c.backups },
+      { label: "Checkouts", value: c.checkouts },
     ]
       .filter((f) => f.value > 0)
       .map((f) => ({ label: f.label, value: String(f.value) }))

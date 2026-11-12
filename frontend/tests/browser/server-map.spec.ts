@@ -490,6 +490,58 @@ test("no box's words run out of it, however long a name or a state is", async ({
   }
 })
 
+test("thirty checkouts nothing claims stand in rows, not in one column", async ({ page }) => {
+  const checkouts = Array.from({ length: 30 }, (_, i) => ({
+    id: `repo:/home/deploy/checkouts/c${i}`,
+    name: `checkout-${String(i).padStart(2, "0")}`,
+    tone: i < 3 ? "warning" : "ok",
+    state: i < 3 ? `${i + 2} changes` : "clean",
+    href: `/git?repo=c${i}`,
+    product: "git",
+    detail: "main",
+  }))
+  const crowded = {
+    ...busyMap,
+    kinds: busyMap.kinds.map((k) =>
+      k.key === "repositories" ? { ...k, items: [...k.items, ...checkouts] } : k,
+    ),
+  }
+  await open(page, "/map?system=system:loose", { map: crowded as typeof busyMap })
+  await still(page)
+
+  // What it holds leads with what there is most of, in the rail and on its head.
+  await expect(railRow(page, "system:loose")).toContainText("31 checkouts")
+  await expect(frame(page, "system:loose")).toContainText("31 checkouts")
+
+  const drawn = page.locator('.react-flow__node[data-id^="system:loose/"]')
+  await expect(drawn).toHaveCount(35)
+  const outline = await at(page, "frame:system:loose")
+  expect(outline.width).toBeGreaterThan(outline.height)
+  const boxes = await drawn.evaluateAll((nodes) =>
+    nodes.map((n) => {
+      const r = n.getBoundingClientRect()
+      return { id: (n as HTMLElement).dataset.id, x: r.x, y: r.y, right: r.right, bottom: r.bottom }
+    }),
+  )
+  for (const a of boxes) {
+    expect(a.x, a.id).toBeGreaterThanOrEqual(outline.x)
+    expect(a.y, a.id).toBeGreaterThanOrEqual(outline.y)
+    expect(a.right, a.id).toBeLessThanOrEqual(outline.x + outline.width)
+    expect(a.bottom, a.id).toBeLessThanOrEqual(outline.y + outline.height)
+    for (const b of boxes) {
+      if (a === b) continue
+      const apart =
+        a.right <= b.x + 0.5 ||
+        b.right <= a.x + 0.5 ||
+        a.bottom <= b.y + 0.5 ||
+        b.bottom <= a.y + 0.5
+      expect(apart, `${a.id} over ${b.id}`).toBe(true)
+    }
+  }
+  // The whole of it reads at once: it is not zoomed out to fit a tower.
+  expect((await view(page)).zoom).toBeGreaterThan(0.5)
+})
+
 test("a server with nothing on it offers the first deployment, and says what it could not read", async ({
   page,
 }) => {

@@ -574,6 +574,12 @@ const COLUMN_GAP = 96
 const ROW_GAP = 24
 const SAT_GAP = 44
 const SAT_SPACE = 12
+/**
+ * Between two unrelated things on a shelf, between one kind's shelf and the
+ * next, and the least a row runs to before it wraps — about a small
+ * deployment's width, so a handful of things is one row and not a stack.
+ */
+const SHELF = { gap: 32, between: 64, least: 1024 }
 
 /**
  * Left to right: how the system is reached, what it is, what it runs, what
@@ -840,7 +846,10 @@ function buildSystem(graph: Graph, draft: Draft, sharedBy: Map<string, string[]>
   }
 
   const column = draft.column ?? ((itemId: string, kind: string) => columnOf(kind, itemId))
-  const laid = place(sid, [...nodes.values()], satellites, edges, framed, graph, anchorId, column)
+  const laid =
+    draft.kind === "loose"
+      ? shelve(sid, [...nodes.values()], satellites, edges, graph, column)
+      : place(sid, [...nodes.values()], satellites, edges, framed, graph, anchorId, column)
   // A line runs from the left column to the right; one inside a column drops
   // from the upper box to the lower.
   const at = new Map(laid.nodes.map((n) => [n.id, n]))
@@ -1108,6 +1117,112 @@ function place(
   }
 }
 
+/**
+ * What nothing claims, on shelves. It is not one flow: thirty checkouts nobody
+ * builds from are thirty unrelated things, and set in the one column their
+ * kind has they are a tower taller than every other system put together. So
+ * each thing is laid out with what a line joins it to — a domain and its
+ * certificate, a volume and the backup that takes it — as a small diagram of
+ * its own (`place`), and the diagrams stand in rows, one kind after another
+ * in the order the rail reads them. A kind that fills a row wraps under
+ * itself; kinds with a few things each share a row. The rows are as wide as
+ * the atlas's are for its systems — about one and a half times the square the
+ * diagrams' areas make — and never narrower than `SHELF.least`.
+ */
+function shelve(
+  sid: string,
+  main: SystemNode[],
+  satellites: SystemNode[],
+  edges: SystemEdge[],
+  graph: Graph,
+  columnFor: (itemId: string, kind: string) => number,
+) {
+  // Which things are one diagram. A satellite counts as the box it hangs
+  // under, and the earlier of two joined things leads, so the diagrams come
+  // out in the order their first things were listed.
+  const seat = new Map(main.map((n) => [n.id, n.id]))
+  for (const s of satellites) if (s.host && seat.has(s.host)) seat.set(s.id, s.host)
+  const index = new Map(main.map((n, i) => [n.id, i]))
+  const lead = new Map(main.map((n) => [n.id, n.id]))
+  const leader = (id: string) => {
+    let at = id
+    while (lead.get(at) !== at) at = lead.get(at)!
+    return at
+  }
+  for (const edge of edges) {
+    const a = seat.get(edge.source)
+    const b = seat.get(edge.target)
+    if (!a || !b) continue
+    const la = leader(a)
+    const lb = leader(b)
+    if (la === lb) continue
+    if (index.get(la)! < index.get(lb)!) lead.set(lb, la)
+    else lead.set(la, lb)
+  }
+  const joined = new Map<string, SystemNode[]>()
+  for (const n of main) {
+    const l = leader(n.id)
+    joined.set(l, [...(joined.get(l) ?? []), n])
+  }
+  const cells = [...joined.values()].map((nodes) => ({
+    kind: nodes[0].kind,
+    ...place(sid, nodes, satellites, edges, new Map(), graph, nodes[0].itemId, columnFor),
+  }))
+  if (cells.length === 0) return { nodes: [], frames: [], width: 0, height: 0 }
+
+  const area = cells.reduce((s, c) => s + (c.width + SHELF.gap) * (c.height + SHELF.gap), 0)
+  const limit = Math.max(SHELF.least, ...cells.map((c) => c.width), Math.sqrt(area) * 1.6)
+
+  // One kind's diagrams, in rows of their own.
+  type Shelf = {
+    kind: string
+    cells: { nodes: SystemNode[]; x: number; y: number }[]
+    width: number
+    height: number
+  }
+  const shelves: Shelf[] = []
+  let x = 0
+  let y = 0
+  let row = 0
+  for (const cell of cells) {
+    let shelf = shelves[shelves.length - 1]
+    if (!shelf || shelf.kind !== cell.kind) {
+      shelf = { kind: cell.kind, cells: [], width: 0, height: 0 }
+      shelves.push(shelf)
+      x = y = row = 0
+    }
+    if (x > 0 && x + cell.width > limit) {
+      x = 0
+      y += row + SHELF.gap
+      row = 0
+    }
+    shelf.cells.push({ nodes: cell.nodes, x, y })
+    row = Math.max(row, cell.height)
+    shelf.width = Math.max(shelf.width, x + cell.width)
+    shelf.height = y + row
+    x += cell.width + SHELF.gap
+  }
+
+  // The shelves, left to right while they fit and then under one another.
+  const nodes: SystemNode[] = []
+  x = y = row = 0
+  let width = 0
+  for (const shelf of shelves) {
+    if (x > 0 && x + shelf.width > limit) {
+      x = 0
+      y += row + SHELF.between
+      row = 0
+    }
+    for (const cell of shelf.cells) {
+      for (const n of cell.nodes) nodes.push({ ...n, x: n.x + x + cell.x, y: n.y + y + cell.y })
+    }
+    row = Math.max(row, shelf.height)
+    width = Math.max(width, x + shelf.width)
+    x += shelf.width + SHELF.between
+  }
+  return { nodes, frames: [] as StackFrame[], width, height: y + row }
+}
+
 /** Every system on the server, each laid out on its own. */
 export function detectSystems(map: ServerMap | undefined): System[] {
   if (!map) return []
@@ -1180,6 +1295,7 @@ export function systemCensus(system: System) {
     domains: count((n) => n.kind === "domains" || n.itemId === "dashboard:site"),
     volumes: count((n) => n.kind === "volumes"),
     backups: count((n) => n.kind === "backups"),
+    checkouts: count((n) => n.kind === "repositories"),
   }
 }
 
