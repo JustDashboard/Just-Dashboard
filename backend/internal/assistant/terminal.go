@@ -184,9 +184,22 @@ func readTerminalInput(tool string, f *fields) TerminalInput {
 func TerminalKind(call ToolCall) string {
 	switch call.Name {
 	case ToolTerminalRun:
-		return ClassifyCommand(call.TerminalInput().Command)
+		return TypedKind(call.TerminalInput().Command)
 	case ToolTerminalRead:
 		return CommandRead
 	}
 	return CommandChange
+}
+
+// TypedKind reads a line that is typed into a terminal window rather than
+// handed to a shell whole, as terminal_run's is and as run_command's is when it
+// goes to the window: what ClassifyCommand reads it as, except that a tab is a
+// key there as well, which has the shell complete the word before it with
+// whatever it finds, so a line with one is not known to run as it was written.
+func TypedKind(line string) string {
+	kind := ClassifyCommand(line)
+	if kind == CommandRead && strings.ContainsRune(line, '\t') {
+		return CommandChange
+	}
+	return kind
 }
