@@ -40,9 +40,7 @@
 const TOKEN = /^[a-z0-9][\w:./[\]#%(),!*&>~+'"=-]*$/
 const classLike = (text) => {
   const tokens = text.trim().split(/\s+/)
-  return (
-    tokens.every((t) => TOKEN.test(t)) && tokens.some((t) => /[-:[]/.test(t))
-  )
+  return tokens.every((t) => TOKEN.test(t)) && tokens.some((t) => /[-:[]/.test(t))
 }
 
 /**
@@ -120,6 +118,138 @@ const rule = {
   },
 }
 
-const plugin = { rules: { tokens: rule } }
+/**
+ * How long things took is said in words ("19 in 20 within"), not as
+ * `p50 / p95 / p99`: the operator found the notation unclear, and the same
+ * figure had two names depending on the page. `src/lib/latency-words.ts` holds
+ * the words; this keeps the notation from being typed into a label again.
+ *
+ * It reads what a person would see: JSX text, a string or template with other
+ * words around the term ("p95 above", `p95 ${figure}`), and a bare term given
+ * as a `label`, `title`, `name` or `hint`. A bare `"p95"` anywhere else is a
+ * key — a series, a sort, a field of the server's answer — and is left alone.
+ *
+ * Two files are outside it: the words' own module, which names the term for
+ * tooltips, and the interface charts, whose percentiles are of throughput
+ * rather than of how long anything took.
+ */
+const NOTATION = /(?:^|[^\w.$])p(?:50|75|90|95|99)(?![\w(])/
+const NOTATION_BARE = /^\s*p(?:50|75|90|95|99)\s*$/
+const NOTATION_EXEMPT =
+  /(?:\.test\.[jt]sx?$|[\\/]tests[\\/]|[\\/]eslint-rules[\\/]|src[\\/]lib[\\/]latency-words\.ts$|network[\\/]traffic[\\/]interface-charts\.tsx$)/
+const WORDED_PROPS = new Set(["label", "title", "name", "hint", "info", "aria-label"])
+
+const latencyWords = {
+  meta: {
+    type: "problem",
+    docs: { description: "Say how long things took in words, not as p50 / p95 / p99." },
+    schema: [],
+  },
+  create(context) {
+    if (NOTATION_EXEMPT.test(context.filename ?? "")) return {}
+    const message =
+      'Percentile notation in rendered text. Say it in words from lib/latency-words.ts (latencyHead, latencyWords, LATENCY_SHARE): "19 in 20 within", not "p95".'
+    const worded = (node) => {
+      const parent = node.parent
+      if (parent?.type === "JSXAttribute") return WORDED_PROPS.has(parent.name?.name)
+      if (parent?.type === "Property" && parent.value === node)
+        return WORDED_PROPS.has(parent.key?.name ?? parent.key?.value)
+      return false
+    }
+    const check = (node, text) => {
+      if (typeof text !== "string" || !NOTATION.test(text)) return
+      if (NOTATION_BARE.test(text) && !worded(node)) return
+      context.report({ node, message })
+    }
+    return {
+      JSXText(node) {
+        if (NOTATION.test(node.value)) context.report({ node, message })
+      },
+      Literal(node) {
+        // A property's own key, an import's source and a type's literal are
+        // names, not words anyone reads.
+        const parent = node.parent
+        if (parent?.type === "Property" && parent.key === node) return
+        if (parent?.type === "TSLiteralType" || parent?.type === "ImportDeclaration") return
+        check(node, node.value)
+      },
+      TemplateElement(node) {
+        if (node.parent?.parent?.type === "TSLiteralType") return
+        check(node, node.value?.cooked)
+      },
+    }
+  },
+}
+
+/**
+ * Primitives a page may not reach past or bring back.
+ *
+ * `BarList` draws a ranked list as bars of different lengths, which the
+ * operator asked to stop: figures sit in aligned columns (`RankList`) with one
+ * fixed strip for a whole (`SplitBar`). Insights left it first, the Databases
+ * pages next, and the deploy, proxy, security, network and Files lists last.
+ * It stays for the one place where the bars are the picture the reader asked
+ * for, the Query page's Chart tab. (The small size bars inside table cells,
+ * the other shape the operator kept, are their own few lines and never were a
+ * `BarList`.) A new ranked list is a `RankList`.
+ */
+const BAR_LIST_HOMES =
+  /src[\\/]components[\\/](?:bar-list\.tsx|database[\\/]query[\\/]chart-view\.tsx)$/
+
+/**
+ * The 0.6.1 design-system audit asked for one checkbox and one spinner, and
+ * each came back in a newer file: a native `<input type="checkbox">` beside
+ * the Radix one in the same workspace, and `LoaderCircle` spun by hand where
+ * `Spinner` (components/state.tsx) is the spinner. Both are refused outside
+ * the primitives that draw them.
+ */
+const PRIMITIVE_HOMES = /src[\\/]components[\\/](?:ui[\\/]|state\.tsx$|icons\.tsx$)/
+
+const primitives = {
+  meta: {
+    type: "problem",
+    docs: { description: "Compose the design system's primitives rather than their predecessors." },
+    schema: [],
+  },
+  create(context) {
+    const filename = context.filename ?? ""
+    const home = PRIMITIVE_HOMES.test(filename)
+    return {
+      JSXOpeningElement(node) {
+        if (home || node.name?.type !== "JSXIdentifier") return
+        if (node.name.name === "LoaderCircle") {
+          context.report({
+            node,
+            message:
+              "[spinner] Use Spinner from components/state.tsx. A hand-spun LoaderCircle is the spinner drawn a second way.",
+          })
+          return
+        }
+        if (node.name.name !== "input") return
+        const type = node.attributes.find(
+          (attribute) => attribute.type === "JSXAttribute" && attribute.name?.name === "type",
+        )
+        if (type?.value?.type === "Literal" && type.value.value === "checkbox") {
+          context.report({
+            node,
+            message:
+              "[checkbox] Use Checkbox from components/ui/checkbox. The browser's own control beside the product's is two checkboxes on one page.",
+          })
+        }
+      },
+      ImportDeclaration(node) {
+        if (node.source.value !== "@/components/bar-list") return
+        if (BAR_LIST_HOMES.test(filename)) return
+        context.report({
+          node,
+          message:
+            "[bar-list] A ranked list is a RankList (components/rank-list.tsx): name, figure and share in columns, with SplitBar for one strip of a whole. BarList stays only on the Query page's Chart tab.",
+        })
+      },
+    }
+  },
+}
+
+const plugin = { rules: { tokens: rule, "latency-words": latencyWords, primitives } }
 
 export default plugin

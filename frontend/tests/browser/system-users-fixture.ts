@@ -99,7 +99,7 @@ export const people = [
   account({
     username: "ion",
     uid: 1002,
-    comment: "Ion Moisei",
+    comment: "Ion Popescu",
     groups: ["ion", "sudo", "docker", "adm"],
     password: "set",
     sshKeyCount: 4,

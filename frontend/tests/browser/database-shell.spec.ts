@@ -137,7 +137,7 @@ test("an address under a database that is none of its pages stays inside it", as
 
   await expect(page.getByText("Page not found").last()).toBeVisible()
   await expect(strip(page)).toContainText("shop")
-  await expect(page.getByRole("link", { name: "Open Home" })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "Open the database's Home" })).toHaveAttribute(
     "href",
     "/databases/1",
   )

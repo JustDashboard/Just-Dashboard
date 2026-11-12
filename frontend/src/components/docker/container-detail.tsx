@@ -254,7 +254,12 @@ function ContainerDetailPanel({
                     onOpenTab={setTab}
                     onChanged={changed}
                   />
-                  <span className="flex items-center">
+                  {/* The walk belongs beside the shortcuts that drive it. On a
+                    phone the pair wrapped onto a line of its own under the
+                    verbs, two bare chevrons with nothing to say what they
+                    walked; there the way to another container is the back
+                    arrow above and the list it leads to. */}
+                  <span className="flex items-center max-sm:hidden">
                     <IconAction
                       label="Previous container"
                       disabled={at <= 0}
@@ -269,11 +274,7 @@ function ContainerDetailPanel({
                     >
                       <ChevronDown />
                     </IconAction>
-                    {/* Keyboard shortcuts mean nothing on a touch screen, and
-                      the row of verbs already wraps there. */}
-                    <span className="max-sm:hidden">
-                      <WorkspaceHelp />
-                    </span>
+                    <WorkspaceHelp />
                   </span>
                 </>
               )

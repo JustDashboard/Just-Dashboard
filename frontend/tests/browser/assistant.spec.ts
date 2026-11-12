@@ -1472,3 +1472,26 @@ test("a command still running in the terminal says so, with the way to its windo
   )
   await expect(card.getByLabel("Password for the terminal")).toHaveCount(0)
 })
+
+// On a phone the head of an assistant that is off keeps its words on their own
+// lines' width: the command sits under them at the head's full width, where it
+// had squeezed "The / assistant is / off" into a column a word wide.
+test("the head of an assistant that is off reads across a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockAssistant(page, [], { settings: off })
+  await page.goto("/assistant?view=settings")
+  const head = page.locator("[data-slot='assistant-now']")
+  const title = head.getByText("The assistant is off", { exact: true })
+  const command = head.getByRole("button", { name: "Set up the assistant" })
+  await expect(command).toBeVisible()
+  const frame = (await head.boundingBox())!
+  const words = (await title.boundingBox())!
+  const button = (await command.boundingBox())!
+  // One line of the title's 28px, not three.
+  expect(words.height).toBeLessThanOrEqual(30)
+  expect(button.y).toBeGreaterThanOrEqual(words.y + words.height)
+  expect(button.width).toBeGreaterThan(frame.width - 40)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+})

@@ -489,11 +489,15 @@ export function CertbotRuntimeLine({ state }: { state: CertbotState }) {
 }
 
 /**
- * The DNS plugins certbot can drive from here, and whether each can: the
- * plugin installed, a token saved, and which lineages renew through it. The
- * token is never shown — that a credential for a whole DNS zone exists on
- * disk is the whole of what the page says about it — but it can be replaced,
- * tried with a dry run, and removed, the removal naming what stops renewing.
+ * The DNS plugins certbot can drive from here, as one compact list of
+ * choices: a provider's mark and name on a row of one height, with its verbs.
+ * Where it stands, the plugin missing or a token saved, and which lineages
+ * renew through it, is said only for a provider somebody uses; for the rest a
+ * missing plugin is the expected answer, and its propagation wait and why its
+ * plugin cannot be installed from here are behind the name. The token is
+ * never shown — that a credential for a whole DNS zone exists on disk is the
+ * whole of what the page says about it — but it can be replaced, tried with a
+ * dry run, and removed, the removal naming what stops renewing.
  */
 export function DnsProvidersPanel({
   providers,
@@ -528,12 +532,17 @@ export function DnsProvidersPanel({
       setInstalling("")
     }
   }
+  // The providers somebody uses stand first, in the order the server lists
+  // them; the rest are the menu under them.
+  const inUseOf = (p: DNSProvider) =>
+    p.hasCredentials || certs.some((c) => c.dnsProvider === p.name)
+  const ranked = [...providers].sort((a, b) => Number(inUseOf(b)) - Number(inUseOf(a)))
   return (
     <Panel plain>
       <PanelHeader title="DNS challenge providers" />
       <PanelBody flush>
         <ul className="divide-y divide-hairline">
-          {providers.map((p) => {
+          {ranked.map((p) => {
             const users = certs.filter((c) => c.dnsProvider === p.name).map((c) => c.name)
             const route = installs?.[p.plugin]
             // Route 53 without a saved profile reads the machine's IAM role.
@@ -603,55 +612,75 @@ export function DnsProvidersPanel({
                   ]
                 : []),
             ]
+            // What a provider needs said about it depends on whether anybody
+            // uses it. A plugin that is not installed and credentials nobody
+            // saved are the expected answer for every provider nobody chose,
+            // and eight amber lines of them turned a list of choices into a
+            // wall of warnings. Only a provider with a token saved, or one a
+            // lineage renews through, says where it stands.
+            const inUse = inUseOf(p)
+            const about =
+              p.key === "route53"
+                ? "Reads the saved profile, or the machine's IAM role."
+                : `Waits ${p.defaultWait}s for the record to propagate.`
             return (
               <li
                 key={p.key}
+                data-slot="dns-provider"
+                data-in-use={inUse ? "" : undefined}
+                // One line, one height, whatever the provider's state: its
+                // mark and name, where it stands when it is in use, its verbs.
                 className={cn(
-                  "group flex min-w-0 flex-wrap items-center gap-3 py-4 transition-colors hover:bg-row-hover",
+                  "group flex h-12 min-w-0 items-center gap-3 transition-colors hover:bg-row-hover",
                   ROW_BLEED,
                 )}
               >
                 {/* The provider as itself where it has a mark — Cloudflare,
                     Route 53 as AWS — and a key for the ones that do not. */}
                 <ProductLogo id={dnsProviderProduct(p.key)} size="sm" fallback={Key} />
-                <div className="min-w-0 flex-1 basis-40">
-                  <div className="flex min-w-0 flex-wrap items-baseline gap-2">
-                    <span className="text-body font-medium">{p.name}</span>
-                    <Tag mono>{p.plugin}</Tag>
-                  </div>
-                  <p className="text-hint text-muted-foreground">
-                    {p.key === "route53"
-                      ? "Reads the saved profile, or the machine's IAM role."
-                      : `Waits ${p.defaultWait}s for the record to propagate.`}
-                  </p>
+                {/* The name is what a row is found by, so it keeps its width:
+                    it takes what it needs before anything beside it does (a
+                    share of the leftover cut Cloudflare to "Cl…" and OVH to
+                    nothing in the narrow column), the plugin's id stands by
+                    it only on a row nobody uses, where there is room, and
+                    what renews through it gives way first. */}
+                <div
+                  className="flex min-w-0 flex-[1_1_auto] items-baseline gap-2"
+                  // What every provider answers the same way is behind the
+                  // name, with why its plugin cannot be installed from here.
+                  title={[`Plugin ${p.plugin}.`, about, !p.installed && route?.reason]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
+                  <span data-slot="dns-provider-name" className="truncate text-body font-medium">
+                    {p.name}
+                  </span>
+                  {!inUse && (
+                    <Tag mono className="max-sm:hidden">
+                      {p.plugin}
+                    </Tag>
+                  )}
                 </div>
-                {admin && <VerbActions dim verbs={verbs} />}
-                <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
-                  <Status
-                    verdict={p.installed ? "ok" : "warning"}
-                    label={
-                      p.installed
-                        ? "plugin installed"
-                        : route?.package
-                          ? `plugin missing · ${route.package}`
-                          : "plugin missing"
-                    }
-                  />
-                  <Status
-                    tone={p.hasCredentials ? "running" : "stopped"}
-                    label={p.hasCredentials ? "credentials saved" : "no credentials"}
-                  />
-                </div>
-                {!p.installed && route?.reason && (
-                  <p className="w-full text-hint break-words text-muted-foreground">
-                    {route.reason}
-                  </p>
-                )}
                 {users.length > 0 && (
-                  <p className="w-full text-hint break-words text-muted-foreground">
-                    Renews {users.join(", ")}
-                  </p>
+                  <span
+                    className="min-w-0 shrink-[999] truncate text-hint text-muted-foreground max-sm:hidden"
+                    title={`Renews ${users.join(", ")}`}
+                  >
+                    renews {users.length === 1 ? users[0] : `${users.length} certificates`}
+                  </span>
                 )}
+                {inUse &&
+                  (!p.installed ? (
+                    <Status verdict="warning" label="plugin missing" className="shrink-0" />
+                  ) : p.hasCredentials ? (
+                    <Status tone="running" label="credentials saved" className="shrink-0" />
+                  ) : (
+                    // Route 53 without a saved profile reads the machine's role.
+                    p.key !== "route53" && (
+                      <Status verdict="warning" label="no credentials" className="shrink-0" />
+                    )
+                  ))}
+                {admin && <VerbActions dim verbs={verbs} menuLabel={`Actions for ${p.name}`} />}
               </li>
             )
           })}

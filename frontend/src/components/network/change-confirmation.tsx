@@ -9,9 +9,9 @@ import { setNetworkPendingApply } from "@/lib/network-pending"
 import type { BoundaryAfterVerify, NetworkChangeStatus, NetworkConfirmationView } from "@/lib/types"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
 import { useConfirm } from "@/components/confirm-dialog"
 import { BoundaryChanges } from "@/components/security/boundary-view"
+import { setReconnectGuardAvailable, useReconnectGuard } from "@/components/network/reconnect-guard"
 
 /**
  * How often an administrator's every page asks whether a change is pending.
@@ -35,7 +35,17 @@ const SETTLED_PHASES: ReadonlySet<NetworkChangeStatus["phase"]> = new Set([
   "boot_degraded",
 ])
 
-/** The pending change survives navigation, polling failures and backend restarts in the host journal. */
+/**
+ * The pending change survives navigation, polling failures and backend restarts in the host journal.
+ *
+ * It is drawn only when there is something to say: a change awaiting
+ * confirmation, its outcome, or a status that cannot be read. With nothing
+ * pending it draws nothing, so a Network page opens on its own title. The
+ * switch that turns the confirmation off was its first line on all nineteen
+ * Network pages; it is one row on the Network overview now
+ * (`reconnect-guard.tsx`), and this component still owns what the switch
+ * decides, the header every managed change is sent with.
+ */
 export function NetworkChangeConfirmation() {
   const { can } = useAuth()
   const admin = can("system.admin")
@@ -54,7 +64,7 @@ export function NetworkChangeConfirmation() {
     { enabled: admin },
   )
   const refresh = state.refresh
-  const [enabled, setEnabled] = useState(true)
+  const { enabled } = useReconnectGuard()
   const [dismissed, setDismissed] = useState<string>()
   const [verification, setVerification] = useState<{
     id: string
@@ -81,6 +91,13 @@ export function NetworkChangeConfirmation() {
     setNetworkPendingApply(admin && available && enabled)
     return () => setNetworkPendingApply(false)
   }, [admin, available, enabled])
+
+  // The overview's switch is offered only where the host can hold a change
+  // and to somebody who can apply one.
+  useEffect(() => {
+    setReconnectGuardAvailable(admin && available)
+    return () => setReconnectGuardAvailable(false)
+  }, [admin, available])
 
   useEffect(() => {
     const changed = (event: Event) => {
@@ -181,7 +198,7 @@ export function NetworkChangeConfirmation() {
     ["recovered", "degraded", "confirmed"].includes(change.phase) &&
     dismissed !== change.id &&
     (inNetwork || observed === change.id || change.phase === "degraded" || cleanupPending)
-  if (!pending && !outcome && !(observed && state.error) && !(inNetwork && available)) return null
+  if (!pending && !outcome && !(observed && state.error)) return null
   return (
     <aside aria-label="Network change confirmation" className="mx-4 my-3 min-w-0">
       {pending ? (
@@ -309,16 +326,6 @@ export function NetworkChangeConfirmation() {
           </p>
         </Notice>
       ) : null}
-      {inNetwork && available && !pending && (
-        <label className="mt-2 flex min-h-11 items-center gap-3 text-body">
-          <Switch
-            aria-label="Require network reconnection confirmation"
-            checked={enabled}
-            onCheckedChange={setEnabled}
-          />
-          Confirm managed network changes after reconnecting (90 seconds)
-        </label>
-      )}
       {dialog}
     </aside>
   )

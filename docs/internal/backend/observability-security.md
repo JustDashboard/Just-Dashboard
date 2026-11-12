@@ -236,6 +236,14 @@ proxy's page in `components/alerts/alert-parts.tsx`.
 
 ## netsec: exposure and login history
 
+The Security overview's SSH reading says the riskiest fact about how a login reaches a shell, from the
+same `GET /ssh/config` the SSH page reads (an administrator's; anybody else's tile says so and asks for
+nothing): *Keys only*, *Passwords allowed* in the warning tone, or *Root can sign in* in the danger tone
+when `PermitRootLogin yes` stands beside password authentication, with the ports sshd listens on as its
+hint (`components/security/ssh-reading.ts`, unit-tested). An absent directive is read as sshd's own
+default, as the SSH page's picture reads it. The Firewall reading says *inbound policy unknown* where
+the backend reports none, rather than a dash.
+
 The Security overview's Intrusion reading describes fail2ban only: its current bans and jails,
 whether it is installed or running, or a status read that failed. It never infers that no engine
 blocks repeated failures from a missing fail2ban. CrowdSec and the combined engine evidence remain

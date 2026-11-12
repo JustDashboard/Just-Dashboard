@@ -7,7 +7,7 @@ import { plural, relativeTime, timestamp } from "@/lib/format"
 import type { SuricataView } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { BarList, type BarListItem } from "@/components/bar-list"
+import { RankList, type RankItem } from "@/components/rank-list"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -15,7 +15,7 @@ import { Address } from "@/components/security/marks"
 import { SuricataSetup } from "@/components/security/suricata-setup"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { Status, type DotTone } from "@/components/status-dot"
+import { Status, StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import type { Tone } from "@/components/tone"
 import { Button } from "@/components/ui/button"
@@ -98,17 +98,22 @@ export function SuricataPanel() {
   const ips = data.mode === "ips"
   const severity = (level: number) => data.bySeverity.find((s) => s.severity === level)?.count ?? 0
   const readable = !data.logRefused && !data.logError
-  const strongest = data.topSignatures.reduce((most, s) => Math.max(most, s.count), 1)
-
-  const signatures: BarListItem[] = data.topSignatures.map((signature) => ({
+  // Figures in columns: how often each signature matched and its share of
+  // the alerts scanned, with its severity as the dot before the name.
+  const signatures: RankItem[] = data.topSignatures.map((signature) => ({
     key: String(signature.signatureId),
     label: signature.signature,
     mono: false,
+    mark: (
+      <StatusDot
+        tone={
+          signature.severity === 1 ? "danger" : signature.severity === 2 ? "warning" : "unknown"
+        }
+      />
+    ),
     hint: signature.category,
-    value: signature.count,
-    share: signature.count / strongest,
-    signal: signature.severity <= 2 ? 1 : 0,
-    tone: signature.severity === 1 ? "danger" : "warning",
+    value: signature.count.toLocaleString(),
+    share: data.scanned > 0 ? signature.count / data.scanned : undefined,
     title: `${signature.signature} (sid ${signature.signatureId})`,
   }))
 
@@ -191,7 +196,7 @@ export function SuricataPanel() {
           <Panel plain>
             <PanelHeader title="Top signatures" />
             <PanelBody flush>
-              <BarList
+              <RankList
                 items={signatures}
                 emptyLabel="No signature has matched in the alerts scanned."
               />

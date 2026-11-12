@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { Clock, CodeBracket } from "@/components/icons"
 import { relativeTime, timestamp } from "@/lib/format"
+import { latencyHead } from "@/lib/latency-words"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useViewState } from "@/lib/view-state"
@@ -353,9 +354,9 @@ const CALLS: Series[] = [{ key: "calls", label: "Calls", color: "var(--chart-2)"
 const MEAN: Series[] = [{ key: "mean", label: "Mean", color: "var(--chart-1)" }]
 const SPREAD: Series[] = [
   { key: "mean", label: "Mean", color: "var(--chart-1)" },
-  { key: "p50", label: "p50", color: "var(--chart-2)" },
-  { key: "p95", label: "p95", color: "var(--chart-4)" },
-  { key: "p99", label: "p99", color: "var(--chart-3)" },
+  { key: "p50", label: latencyHead("p50"), color: "var(--chart-2)" },
+  { key: "p95", label: latencyHead("p95"), color: "var(--chart-4)" },
+  { key: "p99", label: latencyHead("p99"), color: "var(--chart-3)" },
 ]
 const ROWS: Series[] = [
   { key: "returned", label: "Returned", color: "var(--chart-2)" },
@@ -484,9 +485,15 @@ function Figures({
       <Metric label="Calls" value={entry.calls.toLocaleString()} />
       <Metric label="Total" value={millis(entry.totalMs)} />
       <Metric label="Mean" value={millis(entry.meanMs)} />
-      {entry.p50Ms !== undefined && <Metric label="p50" value={millis(entry.p50Ms)} />}
-      {entry.p95Ms !== undefined && <Metric label="p95" value={millis(entry.p95Ms)} />}
-      {entry.p99Ms !== undefined && <Metric label="p99" value={millis(entry.p99Ms)} />}
+      {entry.p50Ms !== undefined && (
+        <Metric label={latencyHead("p50")} value={millis(entry.p50Ms)} />
+      )}
+      {entry.p95Ms !== undefined && (
+        <Metric label={latencyHead("p95")} value={millis(entry.p95Ms)} />
+      )}
+      {entry.p99Ms !== undefined && (
+        <Metric label={latencyHead("p99")} value={millis(entry.p99Ms)} />
+      )}
       <Metric
         label="Rows"
         value={entry.rows.toLocaleString()}

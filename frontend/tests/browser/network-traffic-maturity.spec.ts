@@ -40,7 +40,7 @@ test("the live window says how old its reading is, with packets, TCP resent and 
   // 30 of every 1000 segments are sent again, past the 2% warning.
   await expect(context).toContainText("3.0%")
   await expect(context).toContainText("23 ms")
-  await expect(context).toContainText("median of 37 sockets · p90 118 ms")
+  await expect(context).toContainText("median of 37 sockets · 9 in 10 inside 118 ms")
   await expect(page.getByLabel("ens3 packets")).toContainText("packets in")
   await expect(page.getByLabel("ens3 packets")).toContainText("3 drops in 15 min")
   expect(requests.some((u) => u.includes("latency=1"))).toBe(true)

@@ -3,6 +3,7 @@ import type {
   DbStatementHistoryPoint,
   DbStatementHistorySort,
 } from "@/components/database/ops/performance-types"
+import { LATENCY_SHARE } from "@/lib/latency-words"
 import type { MetricEvent } from "@/lib/types"
 
 /**
@@ -16,7 +17,7 @@ const SORTS: { id: DbStatementHistorySort; label: string }[] = [
   { id: "total", label: "Share" },
   { id: "calls", label: "Calls" },
   { id: "mean", label: "Mean" },
-  { id: "p95", label: "p95" },
+  { id: "p95", label: LATENCY_SHARE.p95 },
   { id: "rows", label: "Rows" },
   { id: "rowsRead", label: "Examined" },
 ]
@@ -101,13 +102,13 @@ export function historyMethod(engine: EngineWords, facts: DbStatementHistoryFact
     case "mysql":
       return [
         facts.percentiles
-          ? `performance_schema keeps running totals for each digest, and a histogram of how long its runs took. ${reading}. p50, p95 and p99 are read from the histogram over the same readings: never under the true figure, and over it by less than 5%. Examined is the rows the server read to answer.`
+          ? `performance_schema keeps running totals for each digest, and a histogram of how long its runs took. ${reading}. How long half, 19 in 20 and 99 in 100 of its runs took is read from the histogram over the same readings: never under the true figure, and over it by less than 5%. Examined is the rows the server read to answer.`
           : `performance_schema keeps running totals for each digest. ${reading}. Examined is the rows the server read to answer. ${engine.label} keeps no histogram of run times, so there are no percentiles.`,
         kept,
       ]
     case "clickhouse":
       return [
-        `ClickHouse's query log holds every finished query. Every ${every} the dashboard sums the runs that finished since the reading before, by the query's shape. p50, p95 and p99 are read from those runs' own durations: never under the true figure, and over it by less than 5%. Examined is the rows each run read.`,
+        `ClickHouse's query log holds every finished query. Every ${every} the dashboard sums the runs that finished since the reading before, by the query's shape. How long half, 19 in 20 and 99 in 100 of them took is read from those runs' own durations: never under the true figure, and over it by less than 5%. Examined is the rows each run read.`,
         kept,
       ]
     case "sqlserver":

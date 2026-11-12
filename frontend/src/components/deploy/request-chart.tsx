@@ -4,6 +4,7 @@ import { useMemo } from "react"
 import { RotateCounterClockwise } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { MetricEvent, RequestBucket, TrafficAlert } from "@/lib/types"
+import { latencyHead } from "@/lib/latency-words"
 import { latency } from "@/lib/requests"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import type { ChartRowLike, Series } from "@/components/metrics/metric-chart"
@@ -57,7 +58,7 @@ const AUDIENCE_SERIES: Series[] = [
 ]
 
 const LATENCY_SERIES: Series[] = [
-  { key: "p95", label: "p95", color: "var(--chart-3)", kind: "line" },
+  { key: "p95", label: latencyHead("p95"), color: "var(--chart-3)", kind: "line" },
 ]
 
 const count = (value: number) => Math.round(value).toLocaleString()

@@ -100,7 +100,7 @@ export function LiveContext({
               ? latency.error
               : latency.sockets === 0
                 ? "no non-loopback TCP socket to measure"
-                : `median of ${plural(latency.sockets, "socket")} · p90 ${millis(latency.p90Ms)} · read ${relativeTime(latency.at)}`
+                : `median of ${plural(latency.sockets, "socket")} · 9 in 10 inside ${millis(latency.p90Ms)} · read ${relativeTime(latency.at)}`
         }
       />
     </StatGrid>

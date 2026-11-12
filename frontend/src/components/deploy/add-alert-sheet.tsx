@@ -1,6 +1,7 @@
 "use client"
 
 import type { DeploymentRequests, NotificationChannel } from "@/lib/types"
+import { latencyHead, latencyTerm } from "@/lib/latency-words"
 import { latency, perMinute } from "@/lib/requests"
 import { FormFact, FormFacts } from "@/components/form"
 import { SidePanel } from "@/components/side-panel"
@@ -50,8 +51,10 @@ export function AddAlertSheet({
             <span className="numeric">{(summary.errorRate * 100).toFixed(1)}% failing</span>
           </FormFact>
           {summary.latency && (
-            <FormFact label="p95">
-              <span className="numeric">{latency(summary.latency.p95)}</span>
+            <FormFact label={latencyHead("p95")}>
+              <span className="numeric" title={latencyTerm("p95")}>
+                {latency(summary.latency.p95)}
+              </span>
             </FormFact>
           )}
           <FormFact label="Rate">

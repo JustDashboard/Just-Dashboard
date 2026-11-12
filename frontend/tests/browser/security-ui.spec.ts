@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { HOST_LOG_SOURCES, mockHostLogs } from "./host-logs-fixture"
 import { loaded } from "./network-fixture"
+import { risen } from "./risen"
 
 /**
  * The Security section against a mocked API: every page renders its readings
@@ -1430,6 +1431,85 @@ test("the overview reads the access boundary and names the part that broke", asy
     "broken",
   )
   await expect(boundary).toContainText("21001 is funnelled")
+})
+
+// The SSH tile is a reading like the tiles beside it: the riskiest fact about
+// how a login gets in, in its tone, with where sshd listens. It said
+// "Configuration". The row keeps one height whichever reading each tile holds.
+test("the overview's SSH tile says how a login gets in, and the firewall's has no bare dash", async ({
+  page,
+}) => {
+  const tile = (name: string) =>
+    page.getByRole("main").getByRole("link", { name, exact: true }).locator("[data-slot=stat-tile]")
+  const heights = async () => {
+    await risen(page)
+    const boxes = await Promise.all(
+      (
+        await page.getByRole("main").locator("[data-slot=stat-grid]").first().locator("a").all()
+      ).map((link) => link.boundingBox()),
+    )
+    return boxes.map((box) => Math.round(box!.height))
+  }
+
+  await mockSecurity(page)
+  await page.goto("/security")
+  await expect(tile("SSH")).toContainText("Passwords allowed")
+  await expect(tile("SSH")).toContainText("port 22")
+  await expect(tile("SSH")).not.toContainText("Configuration")
+  await expect(tile("SSH").locator("span.text-warning")).toContainText("Passwords allowed")
+  const passwords = await heights()
+  expect(new Set(passwords).size).toBe(1)
+
+  // Keys only is the expected answer and is plain; an unknown inbound policy
+  // is said in words rather than as a dash.
+  const keysOnly = {
+    ...sshd,
+    ports: ["22", "2222"],
+    settings: sshd.settings.map((setting) =>
+      setting.key === "passwordauthentication" ? { ...setting, value: "no" } : setting,
+    ),
+  }
+  await mockSecurity(page, [], {
+    overrides: {
+      "/ssh/config": keysOnly,
+      "/firewall/": { ...firewall, policy: { outgoing: "allow" } },
+    },
+  })
+  await page.goto("/security")
+  await expect(tile("SSH")).toContainText("Keys only")
+  await expect(tile("SSH")).toContainText("ports 22, 2222")
+  await expect(tile("SSH").locator("span.text-warning, span.text-destructive")).toHaveCount(0)
+  await expect(tile("Firewall")).toContainText("inbound policy unknown")
+  await expect(tile("Firewall")).not.toContainText("—")
+  expect(await heights()).toEqual(passwords)
+
+  // Root by password is the red one.
+  await mockSecurity(page, [], {
+    overrides: {
+      "/ssh/config": {
+        ...sshd,
+        settings: sshd.settings.map((setting) =>
+          setting.key === "permitrootlogin" ? { ...setting, value: "yes" } : setting,
+        ),
+      },
+    },
+  })
+  await page.goto("/security")
+  await expect(tile("SSH")).toContainText("Root can sign in")
+  await expect(tile("SSH").locator("span.text-destructive")).toContainText("Root can sign in")
+  expect(await heights()).toEqual(passwords)
+})
+
+test("a reader who may not open sshd's settings is told so on the SSH tile", async ({ page }) => {
+  let asked = false
+  await mockSecurity(page, [], { session: readonly })
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/v1/ssh/config")) asked = true
+  })
+  await page.goto("/security")
+  const tile = page.getByRole("main").getByRole("link", { name: "SSH", exact: true })
+  await expect(tile).toContainText("Administrators only")
+  expect(asked).toBe(false)
 })
 
 for (const available of [false, true]) {

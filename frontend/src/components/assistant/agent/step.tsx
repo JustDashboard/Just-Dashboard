@@ -8,7 +8,6 @@ import {
   Check,
   ChevronRight,
   Cross,
-  LoaderCircle,
   LockClosed,
   TerminalWindow,
   Warning,
@@ -17,6 +16,7 @@ import { errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Well } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
+import { Spinner } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -271,7 +271,7 @@ function StepBadge({ state }: { state: AgentStep["state"] }) {
           </Badge>
         ) : state === "running" ? (
           <Badge key="running" className="bg-card text-signal">
-            <LoaderCircle className="size-3 animate-spin" />
+            <Spinner className="size-3" />
           </Badge>
         ) : state === "waiting" ? (
           <Badge key="waiting" className="size-2 animate-breathe bg-warning" />

@@ -233,7 +233,9 @@ export function FormSection({
       >
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-6 gap-y-2">
           <div className="min-w-0 space-y-1">
-            <h3 className="text-base font-semibold tracking-tight">{title}</h3>
+            {/* The level under the page's title: these sections are the
+                page's structure, and as h3 they skipped one. */}
+            <h2 className="text-base font-semibold tracking-tight">{title}</h2>
             {hint && <div className="text-xs leading-relaxed text-muted-foreground">{hint}</div>}
           </div>
           {actions && <div className="flex flex-wrap items-center gap-1.5">{actions}</div>}

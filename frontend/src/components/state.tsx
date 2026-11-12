@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import type { Tone } from "@/components/tone"
 
 export function Spinner({ className }: { className?: string }) {
-  return <LoaderCircle className={cn("size-4 animate-spin", className)} />
+  return <LoaderCircle aria-hidden className={cn("size-4 animate-spin", className)} />
 }
 
 export function LoadingRows({ rows = 5, className }: { rows?: number; className?: string }) {

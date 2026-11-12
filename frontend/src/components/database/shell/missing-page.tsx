@@ -28,7 +28,7 @@ export function MissingPage() {
         description={`${conn.name} has no page at this address. Its pages are in the rail.`}
         action={
           <Button size="sm" variant="outline" asChild>
-            <Link href={href("home")}>Open Home</Link>
+            <Link href={href("home")}>Open the database&apos;s Home</Link>
           </Button>
         }
       />

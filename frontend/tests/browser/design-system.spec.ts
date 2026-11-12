@@ -817,3 +817,59 @@ function expectOneRegister(path: string, seen: { registers: string[]; panels: nu
     expect(seen.panels, `a reading page drew a flow panel on ${path}`).toBe(0)
   }
 }
+
+/**
+ * The structure a screen reader walks by: one `h1` on every page, the
+ * workbenches that draw no header included; headings that never skip a level,
+ * so a settings page's sections sit under its title rather than a step past
+ * it; and nothing drawn outside a landmark, which the version beside the
+ * wordmark was on every page.
+ */
+const headings = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll("h1, h2, h3, h4, h5, h6")]
+      .filter((node) => !node.closest("[hidden], [aria-hidden=true], [role=dialog]"))
+      .map((node) => ({ level: Number(node.tagName[1]), text: node.textContent?.trim() ?? "" })),
+  )
+
+for (const [path, name] of [
+  ["/files", "Files"],
+  ["/terminal", "Terminal"],
+] as const) {
+  test(`${path} names itself in one h1 though it draws no header`, async ({ page }) => {
+    await mockShell(page)
+    await page.goto(path)
+    await expect(page.locator("[data-slot=page]").first()).toBeVisible()
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(name)
+    expect((await headings(page)).filter((heading) => heading.level === 1)).toHaveLength(1)
+  })
+}
+
+test("a settings page's sections are the level under its title", async ({ page }) => {
+  test.setTimeout(60_000)
+  await mockProject(page, { showcase: true })
+  for (const path of [
+    "/deploy/7/settings/general",
+    "/deploy/7/settings/domains",
+    "/deploy/7/settings/variables",
+  ]) {
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+    const seen = await headings(page)
+    expect(seen[0]?.level, `${path} does not open on an h1`).toBe(1)
+    const skipped = seen.filter(
+      (heading, index) => index > 0 && heading.level > seen[index - 1].level + 1,
+    )
+    expect(skipped, `headings that skip a level on ${path}`).toEqual([])
+    expect(seen.filter((heading) => heading.level === 2).length).toBeGreaterThan(0)
+  }
+})
+
+test("the wordmark's version stands inside a landmark", async ({ page }) => {
+  await mockShell(page)
+  await page.goto("/audit")
+  const banner = page.getByRole("banner")
+  await expect(banner).toHaveCount(1)
+  await expect(banner).toContainText(/\d+\.\d+\.\d+/)
+  await expect(banner.getByRole("button", { name: "Search" })).toBeVisible()
+})

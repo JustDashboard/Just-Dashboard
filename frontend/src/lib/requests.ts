@@ -296,10 +296,10 @@ export const ALERT_KINDS = {
   latency: {
     label: "Slow responses",
     unit: "ms",
-    hint: "The p95 response time over the window.",
+    hint: "How long 19 in 20 requests take at most, over the window.",
     describe: (threshold: number, minutes: number) =>
-      `p95 above ${latency(threshold)} over ${minutes} min`,
-    read: (observed: number) => `p95 ${latency(observed)}`,
+      `more than 1 in 20 requests slower than ${latency(threshold)} over ${minutes} min`,
+    read: (observed: number) => `19 in 20 inside ${latency(observed)}`,
   },
   silence: {
     label: "No traffic",

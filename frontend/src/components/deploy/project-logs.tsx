@@ -21,6 +21,7 @@ import type {
   TrafficAlert,
   TrafficAlertList,
 } from "@/lib/types"
+import { latencyWords } from "@/lib/latency-words"
 import { ALERT_KINDS, latency, latencyTone, perMinute } from "@/lib/requests"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { Pane } from "@/components/panel"
@@ -666,7 +667,7 @@ function TrafficReadings({
       />
       <StatTile
         label="Response time"
-        key={`p95:${summary?.latency?.p95 ?? "none"}`}
+        key={`latency:${summary?.latency?.p95 ?? "none"}`}
         value={summary?.latency ? latency(summary.latency.p95) : "—"}
         tone={latencyTone(summary?.latency?.p95)}
         trend={
@@ -675,13 +676,13 @@ function TrafficReadings({
               values={p95s}
               max={line.length > 0 ? Math.max(Math.min(...line), ...p95s) : undefined}
               color="var(--chart-3)"
-              label="The p95 over the last hour"
+              label="How long 19 in 20 responses took, over the last hour"
             />
           ) : undefined
         }
         hint={
           summary?.latency
-            ? `p95 · half answered inside ${latency(summary.latency.p50)}`
+            ? `19 in 20 inside this · ${latencyWords("p50", latency(summary.latency.p50))}`
             : requests?.latency === false
               ? "This ingress records no timing"
               : undefined

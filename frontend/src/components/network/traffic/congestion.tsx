@@ -105,7 +105,7 @@ function Groups({ comparison, label }: { comparison: CongestionComparison; label
             <TableHead>Algorithm</TableHead>
             <TableHead className="text-right">Sockets</TableHead>
             <TableHead className="text-right">Median RTT</TableHead>
-            <TableHead className="text-right max-sm:hidden">p90 RTT</TableHead>
+            <TableHead className="text-right max-sm:hidden">RTT, 9 in 10 within</TableHead>
             <TableHead className="text-right">Resent</TableHead>
             <TableHead className="text-right max-md:hidden">Delivery rate</TableHead>
             <TableHead className="text-right max-md:hidden">Sent</TableHead>

@@ -9,6 +9,7 @@ import type { NetworkLink, NetworkOverview } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { NetworkChange } from "@/components/network/change-status"
 import { NetworkReadWarning } from "@/components/network/read-warning"
+import { ReconnectGuardPanel } from "@/components/network/reconnect-guard"
 import { Page, PageContext, Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
@@ -156,6 +157,8 @@ export default function NetworkOverviewPage() {
       <TrafficChart links={links} live={live} />
 
       <EgressIdentityTable identity={data.identity} />
+
+      <ReconnectGuardPanel />
     </Page>
   )
 }

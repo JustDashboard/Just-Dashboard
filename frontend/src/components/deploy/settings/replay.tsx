@@ -140,9 +140,9 @@ export function ReplaySection({
             </FieldRow>
             <FieldRow>
               <Field
-                label="p95 against the live release"
+                label="Slowdown against the live release"
                 htmlFor="runtime-replay-factor"
-                info="A multiple of the recorded p95 over the same requests, and always at least a quarter of a second slower, so 4 ms becoming 9 ms is not a regression. An nginx ingress records no durations, so there only the status classes decide."
+                info="A multiple of the time 19 in 20 of the same requests finished inside when they were recorded, and always at least a quarter of a second slower, so 4 ms becoming 9 ms is not a regression. An nginx ingress records no durations, so there only the status classes decide."
                 error={errorFor("runtime-replay-factor")}
               >
                 {number("runtime-replay-factor", "latencyFactor", "×", {

@@ -15,6 +15,7 @@ import {
   saveSettings,
   user,
 } from "./deploy-fixture"
+import { risen } from "./risen"
 import type { DeploymentRuntimeServices } from "../../src/lib/types"
 
 /**
@@ -380,6 +381,43 @@ test("the deployments tab reports delivery figures with their basis and window",
     await page.screenshot({ path: testInfo.outputPath(`deployments-${width}.png`), fullPage: true })
   }
 })
+
+// Why releases failed is read as figures, not as bars of different lengths:
+// each cause a row of one height with its count and its share of every failed
+// release in columns that end on one edge, at a laptop's width and a phone's.
+for (const viewport of [
+  { width: 1280, height: 900 },
+  { width: 390, height: 844 },
+]) {
+  test(`the failure causes are figures in columns at ${viewport.width}`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await mockProject(page)
+    await page.goto("/deploy/7")
+    const failures = page.getByRole("heading", { name: "Why releases failed" }).locator("../..")
+    await expect(failures.locator("[data-slot=bar-list]")).toHaveCount(0)
+    const rows = failures.locator("[data-slot=rank-row]")
+    await expect(rows).toHaveCount(2)
+    await expect(rows.first()).toContainText("×2")
+    // Two of the three failed releases, and one of them.
+    await expect(rows.first().locator("[data-slot=rank-share]")).toHaveText("67%")
+    await expect(rows.nth(1).locator("[data-slot=rank-share]")).toHaveText("33%")
+    await failures.scrollIntoViewIfNeeded()
+    await risen(page)
+    const boxes = await Promise.all((await rows.all()).map((row) => row.boundingBox()))
+    expect(boxes.map((box) => box!.height)).toEqual([32, 32])
+    expect(boxes[1]!.y - boxes[0]!.y).toBe(32)
+    const edges = await Promise.all(
+      (await failures.locator("[data-slot=rank-share]").all()).map(async (cell) => {
+        const box = (await cell.boundingBox())!
+        return Math.round(box.x + box.width)
+      }),
+    )
+    expect(new Set(edges).size).toBe(1)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+  })
+}
 
 test("a window nothing succeeded in draws no release time, and a lone cause no bar", async ({
   page,

@@ -41,6 +41,8 @@ const eslintConfig = defineConfig([
             "An endless animation is written in CSS (see jd-beam, jd-shimmer and animate-sweep in globals.css), not with motion's repeat: Infinity, which runs a frame loop for as long as the page is open.",
         },
       ],
+      "design-system/latency-words": "error",
+      "design-system/primitives": "error",
       // Reaching past a primitive to the thing it wraps is the other mechanical
       // failure. Each of these has exactly one legitimate assembler, listed in
       // the override below.

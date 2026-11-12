@@ -1,4 +1,8 @@
+import { percent } from "@/lib/format"
+import { LATENCY_SHARE, latencyWords } from "@/lib/latency-words"
+import { latency } from "@/lib/requests"
 import type { RollbackPolicy, RollbackReading, RollbackWatch } from "@/lib/types"
+import type { DotTone } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
 
 /**
@@ -108,8 +112,9 @@ export function watchTitle(watch: RollbackWatch) {
 
 /**
  * The terms in one sentence, as the settings and the panel's tip say them:
- * "Rolls back when 5xx passes the previous release's by 5 points or p95
- * reaches 2× it, over at least 20 requests."
+ * "Traffic goes back to it when the 5xx share passes its own by 5 points or
+ * 19 in 20 requests take 2× as long as its own did, over at least 20
+ * requests."
  */
 export function policyLine(policy: RollbackPolicy) {
   if (!policy.keepWarm) return "The previous release is removed as soon as a new one is live."
@@ -120,7 +125,7 @@ export function policyLine(policy: RollbackPolicy) {
       : `${policy.windowSeconds} seconds`
   if (!policy.automatic)
     return `The previous release is kept warm for ${window}, to switch back to by hand.`
-  return `The previous release is kept warm for ${window}. Traffic goes back to it when the 5xx share passes its own by ${trim(policy.errorRateMargin)} points or the p95 reaches ${trim(policy.latencyFactor)}× its own, over at least ${policy.minRequests} requests.`
+  return `The previous release is kept warm for ${window}. Traffic goes back to it when the 5xx share passes its own by ${trim(policy.errorRateMargin)} points or 19 in 20 requests take ${trim(policy.latencyFactor)}× as long as its own did, over at least ${policy.minRequests} requests.`
 }
 
 function trim(value: number) {
@@ -136,6 +141,128 @@ export function warmLine(watch: RollbackWatch) {
   if (!watch.warmRunning) return `release #${watch.warmReleaseNumber} paused`
   const served = watch.warmServed?.requests ?? 0
   return `release #${watch.warmReleaseNumber} answered ${served.toLocaleString()} of its visitors' ${served === 1 ? "request" : "requests"}`
+}
+
+/** Who ended a window that rolled back: the watch itself, or a person. */
+export function rolledBackBy(watch: RollbackWatch) {
+  return watch.endMessage?.includes("Rolled back instantly by")
+    ? "Rolled back by hand"
+    : "Rolled back automatically"
+}
+
+/**
+ * The window as the Overview's blocks open (§16): the reading as one sentence,
+ * what it was judged as under it, and the state for the dot on the mark.
+ *
+ * The sentence is the new release's own figures, said the way a person would
+ * ask — how much of it fails, how long 19 in 20 take — and the previous
+ * release's stand beside them in the picture under it. The judgement is the
+ * server's own sentence wherever that says something the figures do not; a
+ * reading inside the baseline is said here, because the server's sentence for
+ * it only repeats the figures.
+ */
+export function watchLead(watch: RollbackWatch): { title: string; hint?: string; tone: DotTone } {
+  const verdict = watch.verdict
+  if (watch.state === "rolled_back")
+    return { title: rolledBackBy(watch), hint: watch.endMessage, tone: "danger" }
+  if (watch.state === "rolling_back")
+    return {
+      title: `Traffic is going back to release #${watch.warmReleaseNumber}`,
+      hint: verdict?.reason,
+      tone: "danger",
+    }
+  if (watch.state === "closing")
+    return {
+      title: `Release #${watch.releaseNumber} stays live; release #${watch.warmReleaseNumber} is being removed`,
+      tone: "running",
+    }
+  // No route, or no record to read: the server's sentence is the whole of it.
+  if (verdict && (verdict.code === "no_route" || verdict.code === "no_record"))
+    return { title: verdict.reason, tone: "unknown" }
+
+  const observed = watch.observed
+  const manual = watch.policy.automatic
+    ? undefined
+    : "Nothing is rolled back automatically in this environment."
+  if (!observed || observed.requests === 0)
+    return {
+      title: `Release #${watch.releaseNumber} has answered no requests yet`,
+      hint: join(`${watch.policy.minRequests} requests decide.`, manual),
+      tone: "unknown",
+    }
+
+  const failing =
+    observed.failures === 0
+      ? `has failed none of its ${observed.requests.toLocaleString()} ${observed.requests === 1 ? "request" : "requests"}`
+      : `fails ${percent(shareOf(observed), 1)} of its requests`
+  const speed =
+    observed.p95 === undefined
+      ? ""
+      : `; ${LATENCY_SHARE.p95} finish inside ${latency(observed.p95)}`
+  const worst = [shareTone(watch), latencyTone(watch)]
+  return {
+    title: `Release #${watch.releaseNumber} ${failing}${speed}`,
+    hint: join(judgement(watch), manual),
+    tone: worst.includes("danger")
+      ? "danger"
+      : worst.includes("warning")
+        ? "warning"
+        : verdict?.judged
+          ? "running"
+          : "unknown",
+  }
+}
+
+/** What the reading was judged as, in a sentence, or nothing before a verdict. */
+function judgement(watch: RollbackWatch) {
+  const verdict = watch.verdict
+  if (!verdict) return undefined
+  const before = `release #${watch.warmReleaseNumber}`
+  if (verdict.code === "latency" && watch.observed?.p95 !== undefined) {
+    const was = trustedBaseline(watch)?.p95
+    return `${LATENCY_SHARE.p95} requests now take up to ${latency(watch.observed.p95)}${
+      was === undefined ? "" : `, from ${latency(was)} on ${before}`
+    }.`
+  }
+  if (verdict.code !== "within_baseline") return verdict.reason
+  if (verdict.latencyJudged) return `No worse than ${before} was.`
+  return trustedBaseline(watch)
+    ? `Failing no more than ${before} did. This ingress records no durations, so its speed is not judged.`
+    : `Inside the margin. ${before[0].toUpperCase()}${before.slice(1)} served too little to compare with, so its speed is not judged.`
+}
+
+const join = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ") || undefined
+
+/**
+ * One release's row of the picture: how much of it failed and how long 19 in
+ * 20 took, in the sentence's own words, or what there is to say with nothing
+ * to read.
+ */
+export function readingLine(reading: RollbackReading | undefined) {
+  if (!reading || reading.requests === 0) return "no requests"
+  const failed = reading.failures === 0 ? "none failed" : `${percent(shareOf(reading), 1)} failed`
+  return reading.p95 === undefined
+    ? failed
+    : `${failed} · ${latencyWords("p95", latency(reading.p95))}`
+}
+
+/**
+ * Which proxy wrote the record the window is read from, for the block's mark.
+ * The watch does not carry the driver, but its readings do say it: an nginx
+ * record holds no durations, so a release that answered requests with no time
+ * among them was read from nginx. The Docker ingress is Caddy, and the answer
+ * with nothing read yet.
+ */
+export function watchProxy(watch: RollbackWatch): "caddy" | "nginx" {
+  const untimed = (reading: RollbackReading | undefined) =>
+    Boolean(reading && reading.requests > 0 && reading.p95 === undefined)
+  return untimed(watch.observed) || untimed(watch.baseline) ? "nginx" : "caddy"
+}
+
+/** The window's own line: how long it has left and what the warm release is doing. */
+export function windowLine(watch: RollbackWatch, remaining: number) {
+  const warm = warmLine(watch)
+  return watch.state === "watching" ? `${clock(remaining)} left to decide · ${warm}` : warm
 }
 
 /** Skew protection in one sentence, as the settings say it back. */

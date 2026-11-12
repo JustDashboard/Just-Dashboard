@@ -16,7 +16,7 @@ const DAY = 24 * HOUR
 const me = {
   id: 1,
   username: "ion",
-  displayName: "Ion Moisei",
+  displayName: "Ion Popescu",
   avatarVersion: 0,
   role: "admin",
   totpEnabled: true,
@@ -188,7 +188,7 @@ test("the profile opens on the account's identity line and what is signed in as 
 }) => {
   await mockAccount(page)
   await page.goto("/account")
-  await expect(page.getByRole("heading", { name: "Ion Moisei" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Ion Popescu" })).toBeVisible()
   await expect(
     page.locator("[data-slot=host-identity]").getByText("@ion", { exact: true }),
   ).toBeVisible()
@@ -331,7 +331,7 @@ test("users are cards drawn by their faces, under the line that counts them", as
   const cards = page.locator("[data-slot=choice-row]")
   await expect(cards).toHaveCount(4)
   // Administrators first.
-  await expect(cards.first()).toContainText("Ion Moisei")
+  await expect(cards.first()).toContainText("Ion Popescu")
   await expect(cards.nth(1)).toContainText("Maria Rusu")
   await expect(cards.filter({ hasText: "Deploy bot" })).toContainText("never signed in")
   await expect(page.getByRole("button", { name: "New user" })).toBeVisible()
@@ -473,7 +473,7 @@ for (const required of [false, true]) {
     await expect(page.locator("[data-slot=choice-row]")).toHaveCount(2)
     await expect(page.locator("[data-slot=choice-row]", { hasText: "Guest" })).toHaveCount(0)
     await page.getByRole("group", { name: "Show" }).getByRole("button", { name: /^All/ }).click()
-    await page.getByRole("button", { name: "More actions for Ion Moisei" }).click()
+    await page.getByRole("button", { name: "More actions for Ion Popescu" }).click()
     await page.getByRole("menuitem", { name: "Reset two-factor" }).click()
     const reset = page.getByRole("dialog", { name: "Reset two-factor" })
     await expect(reset).toContainText(

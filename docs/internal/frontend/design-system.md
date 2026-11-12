@@ -5,6 +5,11 @@ are mechanical — typing a value where a token exists, and re-deriving a patter
 and `tests/browser/design-system.spec.ts` checks three structural properties in a browser. Everything
 below is judgement, and this is where it is written down.
 
+There is one checkbox and one spinner: `Checkbox` (`components/ui/checkbox`) and `Spinner`
+(`components/state.tsx`). The lint rule `design-system/primitives` refuses a native
+`<input type="checkbox">` and a `LoaderCircle` drawn directly anywhere but `components/ui`,
+`state.tsx` and `icons.tsx`, because each came back in a newer file after the 0.6.1 audit removed it.
+
 Since 0.7.5, automatic Attention/Needs attention sections, recommendation comparisons, Advisor and
 navigation attention marks have been removed. Historical layout examples
 below describe the earlier pages; their attention blocks are no longer part of those page passes.
@@ -361,6 +366,21 @@ that will change, and *Pinned* is a `Tag` with a pin, because somebody set it an
 because that is what the control does — but anything choosing a *colour* chooses from the shared
 union. A component that declares its own tone names is the drift this file exists to stop.
 
+**How long something took is said in words, never as `p50` / `p95` / `p99`.** The operator found the
+notation unclear ("notation asks the reader to learn it") and Insights' readings became *Half*,
+*19 in 20* and *99 in 100*; in 0.8.6 every other rendered label, legend, column head and sentence
+followed, so one figure has one name on every page. The words live in `lib/latency-words.ts`:
+`LATENCY_SHARE` names a figure, `latencyHead` is a column head, a legend or a tile's label
+("19 in 20 within"), `latencyWords` is the reading inside a sentence ("19 in 20 inside 180ms"), and
+`latencyTerm` is the `title` that keeps the term for a reader who looks for it. A threshold reads the
+other way round, by the share past it ("more than 1 in 20 requests slower than 800ms"), and a factor
+between two readings is a *slowdown*. The lint rule `design-system/latency-words` refuses the
+notation in JSX text, in a string with other words around it and in a `label`, `title`, `name` or
+`hint`; a bare `"p95"` elsewhere is a key of the server's answer and stays. The interface charts on
+`/network/traffic` are outside it: their percentiles are of throughput, not of how long anything
+took. Sentences the server writes (a rollback watch's verdict, a canary's, a replay's, a traffic
+alert's notification) still say p95 and are shown as the server wrote them.
+
 ## 5. No descriptions under titles
 
 **`PageContext`, `Section`, `PanelHeader` and `ChartPanel` have no `description`.** They have no `icon`
@@ -435,8 +455,8 @@ rail's headings end on.
 | `StatTile` | One headline figure, in a `StatGrid` | Not free-form — a row of them is read as a table |
 | `ChoiceCard` | One thing you pick out of several, in a `ChoiceGrid` — a source, a template, a database engine | Not a `Panel`: a panel is content that happens to be framed, this is a button that happens to be large |
 | `ChoiceRow` | One instance among many of one kind, in a `ChoiceList` — a repository, an image tag, an unfinished setup | Not a `Row`: a `Row` is read, a `ChoiceRow` is taken |
-| `BarList` | A ranked list with the meter's track behind each name and the figure at the right — the top ten of something, with a signal segment for the share that is wrong | Not a chart, and not a `RowList`: nothing here has a second line worth a row. Not for a new ranked list either: that is a `RankList`. The Databases pages left it in 0.8.6; a query result's Chart view keeps it, because there the bars are the picture the reader asked for |
-| `RankList` | A ranked list read rather than measured: name, figure and share in columns, with `SplitBar` for one strip of a whole over it, and `RankSkeleton` (rows of its own height) while it loads. Insights and every ranked list on the Databases pages use it. The share is of a real whole — the schema's bytes, the keys walked, the runtime counted — and a list of the top few of a whole nobody read has no share column rather than a share of the largest | Not a `BarList`: no bar per row, so nothing grows from row to row |
+| `BarList` | A ranked list with the meter's track behind each name and the figure at the right — the top ten of something, with a signal segment for the share that is wrong | Not a chart, and not a `RowList`: nothing here has a second line worth a row. Not for a ranked list any more: that is a `RankList`. Every page left it in 0.8.6 — the Databases pages first, then a project's failure causes, the proxy's busiest sites, a stream's outcomes and clients, Suricata's signatures, the connection table's breakdowns and the Files inspector's largest entries. A query result's Chart view is the one importer left, because there the bars are the picture the reader asked for, and the lint rule `design-system/primitives` refuses the import anywhere else (the small size bars inside table cells are their own few lines, not a `BarList`) |
+| `RankList` | A ranked list read rather than measured: name, figure and share in columns, with `SplitBar` for one strip of a whole over it, and `RankSkeleton` (rows of its own height) while it loads. Insights, every ranked list on the Databases pages and, since 0.8.6, every other ranked list in the product use it. The share is of a real whole — the schema's bytes, the keys walked, the runtime counted — and a list of the top few of a whole nobody read has no share column rather than a share of the largest | Not a `BarList`: no bar per row, so nothing grows from row to row |
 | `BarReading` | One block of a band: a head, a bar, one line and one strip of marks, the same height in every state (§10) | Not a `BarList`: nothing is listed under the bar, and it is the only thing a band's bar is drawn with |
 
 **Reach for `Panel`/`Pane`/`Page`, and add a variant there rather than a one-off in a feature page.**
@@ -754,7 +774,7 @@ without `onOpenChange` (the build fold computes its initial state from detection
 store the operator's later answer), and React writes the `open` property only when the prop changes,
 so a prop-derived value went on announcing "collapsed" over fields that were plainly on screen. The
 one thing `role="button"` costs is the heading outline: a button's descendants are presentational,
-so a fold cannot also be an `<h3>` the way a `FormSection` is, and the standard
+so a fold cannot also be a heading the way a `FormSection` is (an `<h2>`), and the standard
 `<h3><button aria-expanded>` shape is not available inside `<details>`, whose first child must be
 the `<summary>`. That is the same as it was before the unification — the framed strip was not a
 heading either — and the widget semantics are worth more here than the outline entry. A caller that
@@ -1472,6 +1492,17 @@ presses restart twice. The row carries the present participle (`Stopping…`) un
 
 **A surface's header carries its name and its actions. It does not carry a picture of itself.**
 
+**The outline a screen reader walks is part of the header.** Every page has exactly one `h1`: a
+workbench that draws no header (Files, Terminal) says its name in an `sr-only` one. Headings never
+skip a level, so a `FormSection`'s title is an `h2`, the level under the page's title; it was an `h3`
+with nothing between. Nothing is drawn outside a landmark: the sidebar's wordmark, version and search
+are the page's `banner`. A scrolling table with nothing in it to focus is itself a keyboard stop
+(`Table` makes its container a named, focusable region only then, so a table of links keeps the tab
+order it had). A mark that is a link says what it opens in words when its title is drawn rather than
+written (a topology node's `name`), a status dot that carries a label is `role="img"`, and a
+`Sparkline` without a label is hidden rather than an unnamed image. `design-system.spec.ts` holds the
+first three and `network-topology-interfaces.spec.ts` the table and the node's name.
+
 Every `PanelHeader`, `Modal`, `SidePanel` and `Section` used to open with a 28px brand-tinted plot
 and a glyph inside it. On a page of six panels that is six brand marks down the left edge, each one
 the same weight as the one control the reader is actually meant to press — and none of them said
@@ -1773,7 +1804,13 @@ A watched domain opens a live report and preserves its nonstandard port. Passwor
 lists and watched-domain setup use the deployment settings' sections, each head over its fields; an
 access list is a row you read (its addresses as mono tags, its sites as links, its include line with
 Copy) with Edit inline and Delete in its menu. Certificate renewal lineages and
-DNS providers remain readings with their own actions, laid out to fit the management column; every
+DNS providers remain readings with their own actions, laid out to fit the management column. The
+providers are one list of choices, each a row of one height (mark, name, verbs): a plugin that is not
+installed and credentials nobody saved are the expected answer for a provider nobody chose, so only a
+provider with a token saved, or one a lineage renews through, says where it stands (*credentials
+saved*, *plugin missing*, *no credentials*), and those stand first. The name keeps its width before
+anything beside it; the plugin's id, the propagation wait and why a plugin cannot be installed from
+here are behind the name. Until 0.8.6 all eight carried an amber *plugin missing* line. Every
 run certbot made, the timer's included, follows the two columns as Renewals, a log `Pane` across the
 page's width, which a log needs and the management column does not have. The
 renewal column opens on its recent certbot runs (in the body, where they wrap, not in the narrow
@@ -3787,6 +3824,18 @@ a new block on this page takes it too:
   its own tint (`WireMark hue`, the `HUE` map's colours), a name, the reading as words ("0.1% of one core"),
   a detail and its last hour at the line's end. Each is one height in every state and opens the page that
   has the rest.
+
+- **A block that shows only in one state takes the shape too.** The release watch and the sleeping
+  block were missed in 0.8.5 because each is drawn only while a release is on watch or the environment
+  is asleep, and stayed two rows of four tiles until 0.8.6. The watch opens on the proxy that wrote the
+  record (Caddy, or nginx where the readings carry no durations) with *Release #12 fails 0.4% of its
+  requests; 19 in 20 finish inside 180ms*, the judgement and the countdown under it, and its picture is
+  the release before and the release now as two strips of one length, what each answered and what it
+  failed, the figures in a column beside them. The sleeping block opens on Docker's mark with *Asleep
+  by design for 42 min*, and its picture is the last seven days as one strip with each stretch asleep on
+  it. Their verbs stay in the head: *Keep release #N* and *Roll back instantly*, *Wake now*. The rows
+  and strips keep one height and one place whether there is a reading or not
+  (`deploy-rollback-watch.spec.ts` and `deploy-sleep.spec.ts` measure both at 1280 and 390).
 
 The Deployments tab's history and every other page keep `StatTile`: this is the Overview's register of
 speech, not a retirement of the figure.

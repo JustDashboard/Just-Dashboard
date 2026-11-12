@@ -2151,3 +2151,19 @@ test("container identity polls external changes and retains the selected view", 
     "true",
   )
 })
+
+// A phone has no keyboard to walk the containers with, and the pair of bare
+// chevrons had wrapped onto a line of its own under the verbs. They are a
+// laptop's; on a phone the way to another container is the back arrow.
+test("a phone's container page draws no walk chevrons", async ({ page }) => {
+  await mockDocker(page)
+  await page.route("**/api/v1/docker/containers/1111111111111111", (route) => json(route, detail))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/docker/containers/1111111111111111")
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Next container" })).toBeHidden()
+  await expect(page.getByRole("button", { name: "Previous container" })).toBeHidden()
+  await expect(page.getByRole("link", { name: "Containers" }).first()).toBeVisible()
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await expect(page.getByRole("button", { name: "Next container" })).toBeVisible()
+})

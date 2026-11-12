@@ -16,10 +16,16 @@ import { useAddress } from "@/components/database/fleet/use-address"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASES_HREF, type AddMode } from "@/components/database/shell/routes"
 
-const MODES: { key: AddMode; label: string; icon: Icon }[] = [
-  { key: "start", label: "Start a new one here", icon: Play },
-  { key: "connect", label: "Connect to one", icon: Linked },
-  { key: "found", label: "Found on this server", icon: MagnifyingGlass },
+/**
+ * The three ways in. `short` is the name on a phone, where the three full
+ * names are wider than the screen: the strip scrolled there and the third way,
+ * often the right one on a server that already runs a database, was cut at
+ * "Found on th" with nothing to say it went on. Short, all three are in view.
+ */
+const MODES: { key: AddMode; label: string; short: string; icon: Icon }[] = [
+  { key: "start", label: "Start a new one here", short: "Start new", icon: Play },
+  { key: "connect", label: "Connect to one", short: "Connect", icon: Linked },
+  { key: "found", label: "Found on this server", short: "Found here", icon: MagnifyingGlass },
 ]
 
 /** The sequence each way in is, as its own steps (§17 pass 3). */
@@ -101,7 +107,9 @@ export function AddDatabase() {
       />
       {/* A group of pressed buttons, not a tablist: a tablist must own tabs,
           and these are three toggles for one answer. On a phone the strip
-          runs to the screen's edge and scrolls there. */}
+          runs to the screen's edge with each way under its short name, so
+          all three are in view; it still scrolls on a screen narrower than
+          that. */}
       <div
         role="group"
         aria-label="Where the database is"
@@ -124,7 +132,8 @@ export function AddDatabase() {
                 mode === option.key ? "size-3.5 text-brand" : "size-3.5 text-muted-foreground"
               }
             />
-            {option.label}
+            <span className="max-sm:hidden">{option.label}</span>
+            <span className="sm:hidden">{option.short}</span>
           </button>
         ))}
       </div>

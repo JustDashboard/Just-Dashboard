@@ -8,7 +8,7 @@ import { deployment, mockProject, project } from "./deploy-fixture"
  * strip of route tabs across the top of every page in that section, so the six
  * multi-page sections each said where you were twice and the rail could be
  * thirty rows deep. The rail drills into a section now: one list at a time,
- * always the list for where you are. A group — Monitoring, Server configuration
+ * always the list for where you are. A group — Monitoring, Administration
  * — is a row with no page of its own that opens a panel of the pages it holds.
  *
  * These are the claims that makes, plus the one it removes. They are
@@ -268,6 +268,28 @@ test("opening a section replaces the rail with that section's pages", async ({ p
   // …and the rest of the product is not competing with them.
   await expect(rail(page).getByRole("link", { name: "Metrics" })).toHaveCount(0)
   await expectNoStrip(page)
+})
+
+// Network's nineteen pages are read under three headings rather than as one
+// flat list, with the overview above them, and every row of the panel is one
+// height at the rail's left edge whichever heading it is under.
+test("the Network panel groups its pages under headings", async ({ page }) => {
+  await mockShell(page)
+  await page.goto("/network/traffic")
+  const nav = rail(page)
+  await expect(nav.getByText("Setup", { exact: true })).toBeVisible()
+  await expect(nav.getByText("Activity", { exact: true })).toBeVisible()
+  await expect(nav.getByText("Diagnostics", { exact: true })).toBeVisible()
+  const links = nav.getByRole("link")
+  await expect(links).toHaveCount(19)
+  await expect(links.first()).toHaveText("Overview")
+  const order = await links.allTextContents()
+  expect(order.indexOf("Interfaces")).toBeLessThan(order.indexOf("Traffic"))
+  expect(order.indexOf("Drift")).toBeLessThan(order.indexOf("Tools"))
+  expect(order.at(-1)).toBe("Saved runs")
+  const boxes = await Promise.all((await links.all()).map((link) => link.boundingBox()))
+  expect(new Set(boxes.map((box) => box!.height)).size).toBe(1)
+  expect(new Set(boxes.map((box) => Math.round(box!.x))).size).toBe(1)
 })
 
 test("a deep link opens with the rail already inside the section", async ({ page }) => {
