@@ -1909,6 +1909,100 @@ test("the diagram's single keys are heard in the diagram only", async ({ page })
   await expect(inspector).toBeHidden()
 })
 
+/** Where the diagram's canvas stands: how far it has slid, and how large it draws. */
+const diagramView = (page: Page) =>
+  page.locator(".react-flow__viewport").evaluate((el) => {
+    const m = new DOMMatrix(getComputedStyle(el).transform)
+    return { x: m.e, y: m.f, zoom: m.a }
+  })
+
+/** Waits out the first fit: the canvas has stopped moving. */
+async function diagramStill(page: Page) {
+  let last = ""
+  await expect
+    .poll(
+      async () => {
+        const now = JSON.stringify(await diagramView(page))
+        const still = now === last
+        last = now
+        return still
+      },
+      { intervals: [150] },
+    )
+    .toBe(true)
+}
+
+/** A point of the canvas with no table, wire or control over it. */
+async function openGround(page: Page) {
+  const point = await page.locator(".react-flow").evaluate((el) => {
+    const box = el.getBoundingClientRect()
+    for (const fy of [0.9, 0.8, 0.1, 0.2])
+      for (const fx of [0.1, 0.2, 0.3, 0.9, 0.8]) {
+        const x = box.left + box.width * fx
+        const y = box.top + box.height * fy
+        if (document.elementFromPoint(x, y)?.classList.contains("react-flow__pane")) return { x, y }
+      }
+    return null
+  })
+  expect(point, "the canvas has open ground").not.toBeNull()
+  return point!
+}
+
+test("the diagram moves as the server's map does: two fingers slide it, a pinch zooms it", async ({
+  page,
+}) => {
+  // The operator's rule for every canvas. The diagram was a stock React Flow:
+  // two fingers zoomed it, and a wide schema could not be scrolled across.
+  await mockSchema(page, { graphs: GRAPHS })
+  await page.goto("/databases/1/diagram?schema=public")
+  await expect(tableNode(page, "public.orders")).toBeVisible()
+  await diagramStill(page)
+  const ground = await openGround(page)
+  await page.mouse.move(ground.x, ground.y)
+
+  const start = await diagramView(page)
+  await page.mouse.wheel(120, 80)
+  // To the tenth of a pixel: the fit leaves the canvas at a fraction.
+  const moved = async () => {
+    const now = await diagramView(page)
+    return {
+      x: Math.round((now.x - start.x) * 10) / 10,
+      y: Math.round((now.y - start.y) * 10) / 10,
+      zoom: now.zoom / start.zoom,
+    }
+  }
+  await expect.poll(moved).toEqual({ x: -120, y: -80, zoom: 1 })
+
+  // A pinch is a wheel with Ctrl held, which is also how a mouse zooms.
+  await page.keyboard.down("Control")
+  await page.mouse.wheel(0, -40)
+  await page.keyboard.up("Control")
+  await expect.poll(async () => (await diagramView(page)).zoom).toBeGreaterThan(start.zoom)
+  await diagramStill(page)
+
+  // A double click on open ground is not a zoom.
+  const pinched = await diagramView(page)
+  await page.mouse.dblclick(ground.x, ground.y)
+  await diagramStill(page)
+  expect((await diagramView(page)).zoom).toBe(pinched.zoom)
+
+  // A mouse drags it by open ground.
+  await page.mouse.move(ground.x, ground.y)
+  await page.mouse.down()
+  await page.mouse.move(ground.x + 90, ground.y - 40, { steps: 6 })
+  await page.mouse.up()
+  const dragged = await diagramView(page)
+  expect(dragged.x - pinched.x).toBeCloseTo(90, 0)
+  expect(dragged.y - pinched.y).toBeCloseTo(-40, 0)
+
+  // The whiteboard's zoom keys, while the keyboard is in the diagram.
+  await page.getByRole("button", { name: "Actions for public.orders" }).focus()
+  await page.keyboard.press("Control+0")
+  await expect.poll(async () => (await diagramView(page)).zoom).toBe(1)
+  await page.keyboard.press("Control+-")
+  await expect.poll(async () => (await diagramView(page)).zoom).toBeLessThan(1)
+})
+
 test("on a phone the inspector takes none of the canvas until it is asked for", async ({
   page,
 }) => {

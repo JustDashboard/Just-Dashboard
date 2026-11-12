@@ -51,6 +51,7 @@ import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
+import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Segments } from "@/components/deploy/settings/segments"
 import { FormFact } from "@/components/form"
@@ -453,6 +454,7 @@ function Canvas({
    * fitted is the widest part of it that leaves the type readable.
    */
   const canvas = useRef<HTMLDivElement>(null)
+  useCanvasPinch(canvas, ZOOM)
   const minimap = doc.minimap
   const fitPicture = useCallback(
     (duration: number, all = false) => {
@@ -713,6 +715,16 @@ function Canvas({
       if (typing) return
       if (focus || pickedEdge) focusTable(null)
       else onLeaveImmersive()
+      return
+    }
+    // A whiteboard's zoom keys, as on the server's map: Ctrl or ⌘ with + and
+    // −, and with 0 the real size.
+    const zoom = typing ? null : zoomKey(e)
+    if (zoom) {
+      e.preventDefault()
+      if (zoom === "in") void flow.zoomIn({ duration: 150 })
+      else if (zoom === "out") void flow.zoomOut({ duration: 150 })
+      else void flow.zoomTo(1, { duration: 150 })
       return
     }
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return
@@ -1116,6 +1128,7 @@ function Canvas({
             }}
             minZoom={ZOOM.min}
             maxZoom={ZOOM.max}
+            {...CANVAS_MOVE}
             proOptions={{ hideAttribution: true }}
             nodesConnectable={false}
             nodesDraggable={!doc.locked}
