@@ -37,7 +37,8 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   terminal: the assistant and its model never see it, and it is not saved or logged. It cannot sign in, change your password, second factor, passkeys or sessions,
   let Just Hub sign you in (or stop it), make an API key, uninstall the dashboard, attach to your own terminal windows or a stream, or read a database
   connection you marked protected. It asks before any change unless you give it full access,
-  which runs everything your role allows without asking. Text it reads, such as a log line, can try to talk a
+  which runs everything your role allows without asking; for an administrator that includes what outlasts the
+  chat, such as a new account, an SSH key, a sudo rule or a VPN peer. Text it reads, such as a log line, can try to talk a
   model into something, so leave "Ask before changes" on where someone else's text can reach it. In that mode
   it also asks before a read that is sent to another machine, such as a DNS lookup, a certificate scan or a
   ping, because a name to look up can carry what it has read off the server; what it reads still goes to the

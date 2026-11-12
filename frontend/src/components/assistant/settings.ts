@@ -138,5 +138,5 @@ export const MODE_DETAIL: Record<AssistantMode, string> = {
   ask: "Every read and every change waits for your Allow.",
   changes:
     "It reads on its own. Every change waits for your Allow before it runs, and so does a read it would send to another machine.",
-  full: "Runs everything without asking — reads, changes, restarts and deletions — as you, within your role. Every call is audited.",
+  full: "Runs everything without asking — reads, changes, restarts and deletions — as you, within your role, including what outlasts the chat: a new account, a key, a sudo rule. Every call is audited.",
 }

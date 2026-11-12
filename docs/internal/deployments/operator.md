@@ -99,6 +99,19 @@ The page sends the mode on every press; left out, it is the install's default, w
 sets on `/assistant` (`PUT /assistant/preferences`). Anyone asking may change it for their conversation.
 It is in the audit entry of every press.
 
+**Full access includes what outlasts the chat.** The routes a hub session is refused because what they make
+outlives whoever made it (`httpx.RefuseHubSession`: an account, a reset password or second factor, an SSH key,
+a sudo rule, a VPN peer, a Git token, the dashboard's own settings) are the assistant's to call where they are
+the person's, except those `agentExclusion` closes. In "ask" and "changes" each of them that makes or changes
+something waits for the person, none being read as a read
+(`TestWhatOutlivesTheChatWaitsForThePersonOutsideFullAccess` walks the hub's table); the few that only show a
+stored secret are reads, whose answer is masked before the provider is sent it. In full access they run
+unasked like the rest. Holding those routes alone there would not keep an instruction the model read from
+leaving access behind: an administrator's shell line or file write can add the same key or sudo rule and runs
+unasked too, and holding those as well is the mode called "Ask before changes". So the mode says what it
+includes where it is chosen (`MODE_DETAIL` in `components/assistant/settings.ts`), and making full access stop
+at lasting access would change what the mode means (security invariant 13), which is the operator's to decide.
+
 A call is one of four kinds: `free` reads nothing of the server; `read`; `change`; and `destructive` for a route
 behind `s.destructive`, a `DELETE`, or one of `mcpDestructiveHints`. `change` and `destructive` differ only in
 what the card says and how Allow is drawn. An `api_request` is read by its method, but a `POST` that only reads

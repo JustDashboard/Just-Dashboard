@@ -365,7 +365,12 @@ A change that weakens any of these has to say so explicitly.
     "ask" holds every read and change, "changes" (the default) holds every change and every read that is sent to
     a machine the call names (a lookup, a scan, a probe: `agentReachingReads`, and the shell's `ping`, `dig` and
     kin), since that is how what it has read would leave the server, and **full access runs
-    everything the person's role allows, unseen**; a draft's own saves never wait, but committing it, discarding
+    everything the person's role allows, unseen**, which for an administrator includes what a hub session is
+    refused because it outlives whoever made it (an account, a key, a sudo rule, a VPN peer, the dashboard's
+    settings): holding those routes alone would not keep one from being made, since the shell and file writes
+    run unseen there too, so the mode says so where it is chosen (`MODE_DETAIL`) and
+    `TestWhatOutlivesTheChatWaitsForThePersonOutsideFullAccess` holds that in the other two modes each of them
+    that makes or changes something waits; a draft's own saves never wait, but committing it, discarding
     it, or a save that changes its source, points a variable at a saved secret or reaches the host waits unless
     the mode is full. Text the model reads can try to talk it into a change, which is why "changes" stays the
     default and who answers takes a session. **What is kept from the provider is every secret's value**: every
