@@ -10,5 +10,10 @@ test("the image installs with the Bun package.json pins", () => {
   const manifest = JSON.parse(readFileSync(join(frontend, "package.json"), "utf8"))
   const dockerfile = readFileSync(join(frontend, "Dockerfile"), "utf8")
   const version = manifest.packageManager.replace(/^bun@/, "")
-  expect(dockerfile).toContain(`FROM oven/bun:${version} AS deps`)
+  // With the digest scripts/pin-images.py holds every image of the stack to:
+  // the tag says which Bun, the digest which build of it.
+  const escaped = version.replaceAll(".", "\\.")
+  expect(dockerfile).toMatch(
+    new RegExp(`^FROM oven/bun:${escaped}@sha256:[0-9a-f]{64} AS deps$`, "m"),
+  )
 })
