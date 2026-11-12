@@ -774,9 +774,17 @@ installed package exactly as the sync scripts do; it writes the two addresses in
 brings another Monaco asks under another path. The logos (`/logos`, `/brand-logo`) keep their names
 when redrawn, so they get a day and a week of `stale-while-revalidate`. `src/proxy.ts` leaves all four
 prefixes alone (a drawing's own page, `/excalidraw/<id>`, still comes through), and
-`static-assets.spec.ts` reads the headers off the built server. Behind Caddy these files now carry the
-proxy's fallback policy, as `/_next/static` always has; Monaco starts its workers from blob URLs, which
-take the page's policy, so nothing in `deploy/Caddyfile` changes.
+`static-assets.spec.ts` reads the headers off the built server.
+
+**What the proxy leaves alone is still answered with a policy.** Where one of those prefixes names no
+file, the shell answers with its own page, and a page the proxy never saw would go out with no policy
+at all, free to be framed. `next.config.ts` therefore answers everything under the four prefixes with
+the policy of something that is not a page (`default-src 'none'; … frame-ancestors 'none'`), which is
+the one Caddy adds to an answer that has none, so the app answers the same with or without the proxy
+in front and nothing in `deploy/Caddyfile` changes. A script, a stylesheet, a font or an image is not
+governed by the policy it arrives with; Monaco starts its workers from blob URLs, which take the
+page's policy, and the spec opens an editor to hold that. A new prefix in the matcher needs its line
+in `headers()`.
 
 Files exposes Monaco's Find, Replace, Undo, Redo, Format and Commands actions, indentation, word wrap,
 minimap and font size. Models use the file path, search results reveal their matching line, and

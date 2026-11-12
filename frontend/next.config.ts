@@ -48,6 +48,20 @@ function installed(name: string): string {
 const monaco = `/monaco/${installed("monaco-editor")}`
 const excalidraw = `/excalidraw/${installed("@excalidraw/excalidraw")}`
 
+// What `src/proxy.ts` leaves alone answers with a file, and where there is no
+// such file the shell answers with its own page: a document that would go out
+// with no policy at all, free to be framed. So these paths say the policy of
+// something that is not a page, the one Caddy adds to an answer that has none
+// (`deploy/Caddyfile`): nothing loads and nothing frames it. A script, a
+// stylesheet, a font or an image is not governed by the policy it arrives
+// with, so the files themselves are untouched by it.
+const notAPage = [
+  {
+    key: "Content-Security-Policy",
+    value:
+      "default-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  },
+]
 // A year, and never asked about again: only for a path that names its version.
 const forGood = [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }]
 // A logo keeps its name when it is redrawn, so it is kept for a day and
@@ -91,6 +105,12 @@ const nextConfig: NextConfig = {
   // a nonce it has no use for.
   async headers() {
     return [
+      // The four prefixes the proxy's matcher leaves alone, whatever is asked
+      // for under them.
+      { source: "/monaco/:path*", headers: notAPage },
+      { source: "/excalidraw/:version/fonts/:path*", headers: notAPage },
+      { source: "/logos/:path*", headers: notAPage },
+      { source: "/brand-logo/:path*", headers: notAPage },
       { source: `${monaco}/:path*`, headers: forGood },
       { source: `${excalidraw}/fonts/:path*`, headers: forGood },
       { source: "/logos/:path*", headers: forADay },

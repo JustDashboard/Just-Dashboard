@@ -16,6 +16,11 @@ const installed = (name: string): string =>
   JSON.parse(readFileSync(join(process.cwd(), "node_modules", name, "package.json"), "utf8"))
     .version
 
+// What something that is not a page is answered with: no nonce, nothing may
+// load, nothing may frame it.
+const NOT_A_PAGE =
+  "default-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
 const monaco = `/monaco/${installed("monaco-editor")}/vs`
 const fonts = `/excalidraw/${installed("@excalidraw/excalidraw")}/fonts`
 
@@ -28,7 +33,7 @@ test("the copied runtimes are kept for good, under their version", async ({ requ
     const answer = await request.get(path)
     expect(answer.status(), path).toBe(200)
     expect(answer.headers()["cache-control"], path).toBe("public, max-age=31536000, immutable")
-    expect(answer.headers()["content-security-policy"], path).toBeUndefined()
+    expect(answer.headers()["content-security-policy"], path).toBe(NOT_A_PAGE)
   }
   // The address without a version serves no file any more (the shell answers
   // an unknown address with its own page), so nothing can be reading a copy
@@ -46,7 +51,25 @@ test("a logo is kept for a day and is not given a page's policy", async ({ reque
     expect(answer.headers()["cache-control"], path).toBe(
       "public, max-age=86400, stale-while-revalidate=604800",
     )
-    expect(answer.headers()["content-security-policy"], path).toBeUndefined()
+    expect(answer.headers()["content-security-policy"], path).toBe(NOT_A_PAGE)
+  }
+})
+
+test("an address under those folders that names no file is not a page either", async ({
+  request,
+}) => {
+  // The proxy does not see these addresses, and the shell answers an unknown
+  // one with its own page. Without a policy that page could be framed and
+  // would run with none of the page's restrictions.
+  for (const path of [
+    "/logos/no-such-mark.svg",
+    "/brand-logo/no-such-mark.svg",
+    "/monaco/vs/loader.js",
+    `${fonts}/no-such-face.woff2`,
+  ]) {
+    const answer = await request.get(path)
+    expect(answer.headers()["content-type"], path).toContain("text/html")
+    expect(answer.headers()["content-security-policy"], path).toBe(NOT_A_PAGE)
   }
 })
 
@@ -59,6 +82,13 @@ test("a page still carries its own policy and is not kept", async ({ request }) 
 
 test("the editor loads from the versioned folder", async ({ page }) => {
   const asked: string[] = []
+  // Monaco's files arrive with the policy of something that is not a page.
+  // Its workers start from blob URLs and take this page's policy, so they
+  // still run; one that could not would say so on the console.
+  const complaints: string[] = []
+  page.on("console", (message) => {
+    if (/web worker|Content Security Policy/i.test(message.text())) complaints.push(message.text())
+  })
   page.on("request", (r) => {
     const { pathname } = new URL(r.url())
     if (pathname.startsWith("/monaco/")) asked.push(pathname)
@@ -123,4 +153,5 @@ test("the editor loads from the versioned folder", async ({ page }) => {
   await expect(page.locator(".monaco-editor .view-lines").first()).toContainText("atlas")
   expect(asked.length).toBeGreaterThan(0)
   expect(asked.filter((path) => !path.startsWith(`${monaco}/`))).toEqual([])
+  expect(complaints).toEqual([])
 })
