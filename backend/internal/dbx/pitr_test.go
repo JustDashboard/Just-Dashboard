@@ -6,10 +6,14 @@ import (
 	"debug/elf"
 	"encoding/json"
 	"io"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
 func TestPostgresCommandSettingsKeepEveryOtherArgument(t *testing.T) {
@@ -320,6 +324,64 @@ func TestWALKeysEncryptWithThePublicHalfAlone(t *testing.T) {
 	}
 	if WALKeyFingerprint("not a key") != "" {
 		t.Error("a fingerprint was read from nothing")
+	}
+}
+
+// What WAL-G does with the two halves, through the library it does it with:
+// the archive is written to the public half and only the private half reads
+// it. The key is a version 4 RSA key, which is the format every archive made
+// so far is encrypted to.
+func TestAWALKeyEncryptsToThePublicHalfAndOnlyThePrivateHalfReadsIt(t *testing.T) {
+	public, private, err := NewWALKey("jd-postgres")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipients, err := openpgp.ReadArmoredKeyRing(strings.NewReader(public))
+	if err != nil || len(recipients) != 1 {
+		t.Fatalf("the public half does not read as one key: %v", err)
+	}
+	key := recipients[0].PrimaryKey
+	if bits, _ := key.BitLength(); key.Version != 4 || key.PubKeyAlgo != packet.PubKeyAlgoRSA || bits != 3072 {
+		t.Errorf("the key is version %d, algorithm %d, %d bits; want a version 4 RSA key of 3072", key.Version, key.PubKeyAlgo, bits)
+	}
+
+	var sealed bytes.Buffer
+	w, err := openpgp.Encrypt(&sealed, recipients, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(w, "a segment of the log"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := openpgp.ReadMessage(bytes.NewReader(sealed.Bytes()), recipients, nil, nil); err == nil {
+		t.Error("the public half alone read the archive back")
+	}
+	holders, err := openpgp.ReadArmoredKeyRing(strings.NewReader(private))
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := openpgp.ReadMessage(bytes.NewReader(sealed.Bytes()), holders, nil, nil)
+	if err != nil {
+		t.Fatalf("the private half could not read the archive: %v", err)
+	}
+	if plain, _ := io.ReadAll(message.UnverifiedBody); string(plain) != "a segment of the log" {
+		t.Errorf("read back %q", plain)
+	}
+}
+
+// A key made before the library changed is still in the store of every
+// install that archives, and its fingerprint is how the operator knows it.
+func TestAKeyMadeByTheOldLibraryKeepsItsFingerprint(t *testing.T) {
+	public, err := os.ReadFile("testdata/wal-key-x-crypto.asc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := WALKeyFingerprint(string(public)), "622A 21BA BA3D 00AA 64BE 40FF 718A D674 D34B 6418"; got != want {
+		t.Errorf("fingerprint %q, want %q", got, want)
 	}
 }
 

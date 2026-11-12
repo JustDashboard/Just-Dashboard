@@ -315,6 +315,35 @@ func fetchReleaseTag(ctx context.Context, dir, tag string, out io.Writer) (fetch
 	return fetched, true, nil
 }
 
+// fetchBranch brings origin's copy of the branch this install follows up to
+// date, and nothing else origin has.
+//
+// A plain `git fetch origin` follows the checkout's configured refspec, which
+// in an ordinary clone is every branch. The project's repository keeps the
+// screenshots of its pull requests on branches of their own, so each update
+// downloaded all of them made since the last one: a quarter of a gigabyte that
+// no install reads, growing with every pull request. The release tag is asked
+// for by name in fetchReleaseTag, so this branch is all that is left to want.
+//
+// Naming the refspec also makes the update independent of how the checkout was
+// cloned: one made with --single-branch for another branch still gets this one.
+//
+// For the project's own repository the branch only keeps `git status` honest,
+// because what is installed is the tag. A branch that cannot be fetched there
+// (a patch branch deleted once it was merged) is said and passed over, and the
+// tag's own fetch decides whether origin can be reached at all. For a fork the
+// branch is what is installed, so failing to fetch it is the end.
+func fetchBranch(ctx context.Context, dir string, want request, out io.Writer) error {
+	refspec := "+refs/heads/" + want.ref + ":refs/remotes/origin/" + want.ref
+	fmt.Fprintf(out, "$ git fetch origin %s\n", refspec)
+	err := gitStream(ctx, dir, out, "fetch", "origin", refspec)
+	if err != nil && want.tagOnly {
+		fmt.Fprintf(out, "could not fetch the branch %s, which is not what is installed, so going on to the tag: %v\n", want.ref, err)
+		return nil
+	}
+	return err
+}
+
 // installedVersion is what the checkout's own changelog says it is on. HEAD can
 // be past the target when it already was, so the target's answer would not do.
 func installedVersion(ctx context.Context, dir string) string {
@@ -349,8 +378,7 @@ func fastForward(ctx context.Context, dir string, want request, out io.Writer) (
 			defer handBack(ctx, dir, owner, strings.TrimSpace(before), out)
 		}
 	}
-	fmt.Fprintf(out, "$ git fetch --prune origin\n")
-	if err := gitStream(ctx, dir, out, "fetch", "--prune", "origin"); err != nil {
+	if err := fetchBranch(ctx, dir, want, out); err != nil {
 		return landing{}, err
 	}
 

@@ -102,6 +102,13 @@ ${BOLD}Released $VERSION locally.${RESET} What is left:
   ${DIM}# read the diff — six files and the generated changelog${RESET}
   git diff --stat
 
+  ${DIM}# advisories that reach the code and what is behind; needs the network${RESET}
+  scripts/deps-check.sh
+
+  ${DIM}# move the base images and Caddy to what their tags name today, then build${RESET}
+  ${DIM}# both images, which nothing else does before an operator's server${RESET}
+  scripts/pin-images.py && docker compose build
+
   ${DIM}# the checks the diff reaches and both builds, as CONTRIBUTING requires${RESET}
   scripts/test-changed.sh
   (cd backend && go build ./...)

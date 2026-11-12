@@ -5,9 +5,15 @@
 Everything `install.sh` does, what happens at first sign-in, and how to upgrade.
 
 ```bash
-git clone https://github.com/JustDashboard/Just-Dashboard.git
+git clone --depth 1 --single-branch --branch main https://github.com/JustDashboard/Just-Dashboard.git
 cd Just-Dashboard && sudo ./install.sh
 ```
+
+The clone takes the one branch an install follows, without its history: about 150 MB to download where
+a plain `git clone` takes about 470 MB, most of it screenshots from pull requests on branches of their
+own and the evidence of past audits. Updates work from it as from a full clone, and fetch only that
+branch and the release tag. To work on the code, clone without `--depth` and `--single-branch`: the
+contributor checks compare a change with the branch it started from.
 
 ## Requirements
 

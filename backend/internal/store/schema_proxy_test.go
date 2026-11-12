@@ -13,6 +13,7 @@ import (
 // has been upgraded since 0.6.6 and already holds deployments. Both must open,
 // and keep opening, since Open runs on every boot.
 func TestProxySchemaAppliesToFreshAndUpgradedDatabases(t *testing.T) {
+	t.Parallel()
 	upgraded := t.TempDir()
 	script, err := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
 	if err != nil {

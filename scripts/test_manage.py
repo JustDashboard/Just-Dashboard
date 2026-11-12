@@ -264,6 +264,60 @@ if args[:4] == ["run", "--rm", "--entrypoint", "cat"]:
         self.assertEqual(git("rev-parse", "HEAD"), mine)
         self.assertFalse([call for call in self.docker_calls() if call[:2] == ["image", "tag"]])
 
+    def test_update_fetches_the_tag_it_installs_and_no_branch(self):
+        git, env, (_first, second, _head) = self.update_fixture()
+        origin = str(pathlib.Path(self.temp.name) / "origin")
+        upstream = ["git", "-C", origin, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                    "-c", "commit.gpgsign=false"]
+        run = dict(env={**self.env, **env}, capture_output=True, text=True, check=True)
+        subprocess.run([*upstream, "checkout", "--quiet", "-b", "pr-assets/shots"], **run)
+        subprocess.run([*upstream, "commit", "--quiet", "--allow-empty", "-m", "evidence"], **run)
+        evidence = subprocess.run([*upstream, "rev-parse", "HEAD"], **run).stdout.strip()
+        subprocess.run([*upstream, "checkout", "--quiet", "main"], **run)
+        result = self.run_tool("manage.sh", "update", "--yes", env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(git("rev-parse", "HEAD"), second)
+        self.assertEqual(git("for-each-ref", "refs/remotes/origin/pr-assets"), "")
+        with self.assertRaises(subprocess.CalledProcessError):
+            git("cat-file", "-e", evidence)
+
+    def shallow_at(self, git, ref):
+        """Make the fixture checkout a clone of depth one of ref, as the install guide clones."""
+        origin = "file://" + str(pathlib.Path(self.temp.name) / "origin")
+        git("remote", "set-url", "origin", origin)
+        for stale in git("for-each-ref", "--format=%(refname)", "refs/remotes").split():
+            git("update-ref", "-d", stale)
+        git("checkout", "--quiet", "--detach")
+        git("branch", "--quiet", "-D", "main")
+        git("config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main")
+        (self.root / ".git/shallow").unlink(missing_ok=True)
+        git("fetch", "--quiet", "--no-tags", "--depth", "1", "origin", ref)
+        git("checkout", "--quiet", "-B", "main", "FETCH_HEAD")
+        git("reflog", "expire", "--expire=now", "--all")
+        git("gc", "--quiet", "--prune=now")
+        self.assertEqual(git("rev-parse", "--is-shallow-repository"), "true")
+        self.assertEqual(git("rev-list", "--count", "HEAD"), "1")
+
+    def test_update_moves_a_checkout_cloned_at_depth_one_forward(self):
+        git, env, (_first, second, _head) = self.update_fixture()
+        self.shallow_at(git, "refs/tags/v0.1.0")
+        result = self.run_tool("manage.sh", "update", "--yes", env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(git("rev-parse", "HEAD"), second)
+        self.assertNotIn("cloned without its history", result.stdout)
+
+    def test_update_places_a_tag_behind_a_checkout_cloned_at_depth_one(self):
+        git, env, (_first, _second, head) = self.update_fixture()
+        self.shallow_at(git, "refs/heads/main")
+        self.assertEqual(git("rev-parse", "HEAD"), head)
+        result = self.run_tool("manage.sh", "update", "--yes", env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # Without the history below it, v0.2.0 reads as a line of its own and
+        # the update was refused as one that cannot be fast-forwarded.
+        self.assertIn("cloned without its history", result.stdout)
+        self.assertIn("already on v0.2.0", result.stdout)
+        self.assertEqual(git("rev-parse", "HEAD"), head)
+
     def test_failed_update_build_names_the_way_back_and_rollback_takes_it(self):
         git, env, (first, second, _head) = self.update_fixture()
         result = self.run_tool("manage.sh", "update", "--yes", env={**env, "TEST_BUILD_FAIL": "1"})

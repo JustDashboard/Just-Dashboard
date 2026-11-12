@@ -40,7 +40,7 @@ You need a Linux server you have root on:
 The installer checks all of this before it changes anything.
 
 ```bash
-git clone https://github.com/JustDashboard/Just-Dashboard.git
+git clone --depth 1 --single-branch --branch main https://github.com/JustDashboard/Just-Dashboard.git
 cd Just-Dashboard && sudo ./install.sh
 ```
 

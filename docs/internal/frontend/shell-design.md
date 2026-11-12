@@ -75,7 +75,7 @@ is where the build's routing choices in `next.config.ts` are completed.
 **A trailing slash costs an API call nothing, and a page still loses it.** About 140 calls spell a
 list endpoint with its slash (`/jobs/`, `/deploy/`), which the backend's router accepts. Next answers
 any such path with a 308 to the path without the slash before it consults a rewrite, so wherever Next
-fronts the API (`bun dev`, `next start` under the browser specs) each of those calls was two round
+fronts the API (`bun dev`, the standalone server under the browser specs) each of those calls was two round
 trips. `skipTrailingSlashRedirect` turns that redirect off and the request reaches the `/api` rewrite as
 sent; `withoutTrailingSlash` in the proxy does the redirect for pages, so `/docker/` is still `/docker`
 and the rail's `pathname === href` still matches. In production Caddy routes `/api` to the backend and

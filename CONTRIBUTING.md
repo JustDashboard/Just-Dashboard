@@ -68,11 +68,17 @@ never into `docs/audits/`.
 - Run the checks with `scripts/test-changed.sh`. It runs only what your diff can reach: Prettier and
   ESLint on the changed frontend files, `tsc --noEmit`, `bun test src`, `go build`/`go vet` and the
   Go tests beside each changed file, the clients' own checks for a change under `sdk/`, and the
-  browser specs that open a page the change renders. Do not
+  browser specs that open a page the change renders. A change to `install.sh`, `scripts/`,
+  `docker-compose.yml`, `deploy/`, `.env.example` or a Dockerfile runs `bash -n` and the
+  `scripts/test_*.py` that name the file; a file under `backend/` that is not Go, `go.mod`, and the
+  frontend's `package.json`, lock and build configuration each pick the packages or specs they reach
+  (the script's header has the rules, and `JD_TEST_CHANGED_PLAN=1` prints the picking alone). Do not
   run the whole browser suite or `go test ./...` locally. Install the required Chromium build once
   with `bun run test:browser:install`.
   Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from
-  the worktree under test and rebuild/restart it after source changes. `JD_BROWSER_BASE_URL` selects
+  the worktree under test and rebuild/restart it after source changes. `bun run start` serves the
+  build with the standalone server the image runs (`frontend/scripts/serve-standalone.mjs`), so what
+  the specs open is what an install serves. `JD_BROWSER_BASE_URL` selects
   an explicitly managed frontend on another port when worktrees run alongside one another.
   Set `JD_BROWSER_WORKERS=1` to limit the selected browser run on a memory-constrained host; omit
   it to use the existing Playwright worker setting.

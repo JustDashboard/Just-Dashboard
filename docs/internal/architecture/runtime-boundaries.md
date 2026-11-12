@@ -427,7 +427,12 @@ with seven days of per-minute protection samples (`network_gateway_counters`,
 `/etc/just-dashboard/network/spec.json` instead, because it describes the host and has to outlive the
 dashboard ([network module](../backend/network.md#three-rules)). The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old
-columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
+columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract. A test that takes
+that fixture through `Open` calls `t.Parallel()` first, and `parallel_test.go` fails one that does
+not: each migrates twice, under the race detector one `Open` is about six seconds, and twenty of them
+in a row put the package at `go test`'s ten minutes, which is what failed the race gate three times
+in November 2026 with no race reported. They own the directories they open and the package keeps no
+state between stores, so nothing is shared.
 
 ### The store's connections
 

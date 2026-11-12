@@ -352,9 +352,9 @@ commands and keep their exit status.
 ## Verification
 
 ```bash
-scripts/test-changed.sh                 # the Go packages touched, vet, python3 scripts/test_manage.py
+scripts/test-changed.sh                 # the Go packages touched, vet; test_manage.py when manage.sh or install.sh changed
 cd backend && go test -race ./internal/accountlink/... ./internal/admin
-python3 scripts/test_manage.py          # manage.sh and the installer, through stubs
+python3 scripts/test_manage.py          # manage.sh and the installer, through stubs, by hand
 ```
 
 `accountlink` tests run against a fake site that verifies signatures, the time window and the sequence as the

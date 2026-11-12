@@ -12,6 +12,7 @@ import (
 // they read as unknown bytes rather than zero; the traffic tables exist on a
 // fresh install and on an upgraded one.
 func TestTrafficSchemaFreshAndUpgradeKeepHistory(t *testing.T) {
+	t.Parallel()
 	upgraded := t.TempDir()
 	script, e := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
 	if e != nil {

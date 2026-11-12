@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.26.10-bookworm AS build
+# Every image below is held to a digest: the tag says which releases it
+# follows, the digest is what is built on, and scripts/pin-images.py moves it
+# when a release is cut. A tag alone is whatever the registry serves that day,
+# so two installs of one version were not the same bytes.
+FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./
@@ -50,7 +54,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=
 # build, pinned and checked against the checksums its release publishes (the
 # same on downloads.rclone.org and on GitHub). Fetched in a stage of its own so
 # unzip does not stay in the image.
-FROM debian:bookworm-slim AS rclone
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS rclone
 ARG TARGETARCH
 ARG RCLONE_VERSION=v1.75.2
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip \
@@ -65,7 +69,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && unzip -q /tmp/rclone.zip -d /tmp \
     && install -m 0755 "/tmp/rclone-${RCLONE_VERSION}-linux-${TARGETARCH:-amd64}/rclone" /usr/local/bin/rclone
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
 
 # The dashboard drives the host through these tools; a scratch image would
 # leave most of the product non-functional. They are the same binaries an

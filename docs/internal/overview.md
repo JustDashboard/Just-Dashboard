@@ -43,10 +43,19 @@ scripts/release.sh 0.6               # see backend/databases-proxy-platform.md#c
 ```
 
 CONTRIBUTING requires `scripts/test-changed.sh` to pass before a PR. It runs only what the diff can
-reach; the whole browser suite and `go test ./...` are not run locally.
+reach; the whole browser suite and `go test ./...` are not run locally. What it reaches includes the
+files that are not source: the installer, the scripts, the compose file, `deploy/`, `.env.example` and
+the Dockerfiles run the `scripts/test_*.py` that name them, a non-Go file under `backend/` runs its
+package, and `go.mod` runs the packages its changed modules reach, which is every package when the
+toolchain line moves. The Go picking for files that are not Go is `scripts/ci-plan.py`'s own, imported,
+so the local gate and the workflow's plan cannot drift apart again.
 
 The browser gate serves the latest `bun run build` output on `127.0.0.1:43117`; it does not reuse a
-development server or an unrelated dashboard on port 3000. Rebuild after frontend edits before running
+development server or an unrelated dashboard on port 3000. `bun run start` is
+`frontend/scripts/serve-standalone.mjs`, not `next start`: it copies `.next/static` and `public` beside
+`.next/standalone/server.js` and runs that server, which is what `frontend/Dockerfile` does, so a file
+the standalone trace leaves out fails a spec instead of an install. It takes `next start`'s `--hostname`
+and `--port` and listens on loopback when no host is named. Rebuild after frontend edits before running
 browser tests alone. `JD_BROWSER_BASE_URL` selects an explicitly managed test frontend instead.
 Generated Playwright reports and traces are excluded from source linting.
 
@@ -119,7 +128,7 @@ rewrite proxies HTTP but **not** WebSocket upgrades, so socket-backed pages in d
 backend. The default WebSocket origin check matches scheme, hostname, and effective port (`https` in
 production, `http` under `JD_DEV`); each cross-origin exception must be a complete origin in that
 allowlist. `bun dev`/`bun run build` run `scripts/sync-monaco.mjs` first; invoking `next` directly skips
-it and leaves every editor spinning. `go.mod` declares `go 1.26.10` — check `go version` before blaming
+it and leaves every editor spinning. `go.mod` declares `go 1.26.11` — check `go version` before blaming
 the code on a network-restricted machine.
 
 **Browser testing.** Playwright tests live in `frontend/tests/browser`; `playwright.config.ts` starts a

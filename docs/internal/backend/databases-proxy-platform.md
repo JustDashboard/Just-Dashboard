@@ -2747,7 +2747,11 @@ say, the window, the base backup a recovery starts from, retention — is `dbx/p
 - **Encrypted with WAL-G's own OpenPGP**, to a key made for the archive. The server is given only the
   public half, which is all encrypting needs: a server, or a superuser reading `walg.json` through
   `pg_read_file`, cannot read its own archive back. The private half is sealed in the store and written
-  only into a recovery's own volume, which is removed once the copy has recovered.
+  only into a recovery's own volume, which is removed once the copy has recovered. The pair is made and
+  its fingerprint read with `github.com/ProtonMail/go-crypto`, the maintained fork WAL-G itself uses,
+  as a version 4 RSA key of 3072 bits named in the code rather than left to the library's defaults;
+  `golang.org/x/crypto/openpgp`, which made the keys of installs up to 0.8.5, is withdrawn as unsafe
+  (GO-2026-5932), and a key it made reads back with the same fingerprint (`pitr_test.go`).
 - **Base backups and retention.** `POST /{id}/pitr/backup` (and each firing of the archive's cron
   schedule, `database_pitr_schedule.go`, the backup jobs' parser) runs `backup-push` in the server.
   Retention by time follows: `dbx.WALRetentionKeep` keeps the newest base backup that finished before
@@ -5999,6 +6003,32 @@ version, and prints the skeleton. **`CHANGELOG.md` is generated — never edit i
 is the point: a version bumped with no changelog entry is a release nobody is told about, and a changelog
 entry with no version bump is every install permanently offering itself an update it already has.
 
+Before the release is cut, run `scripts/deps-check.sh` (it needs the network): `govulncheck` over the
+backend, `bun audit` over the frontend, and the direct modules and packages that are behind. It fails on
+an advisory that reaches the code unless the script lists it as accepted with the reason, which is only
+for an advisory with no fixed version (today the two daemon-side ones in `github.com/docker/docker`,
+which end when `internal/dockerx` moves to `github.com/moby/moby/client`). `release.sh` names it in the
+steps it prints and does not run it, because a release must be cuttable offline;
+`scripts/test_deps_check.py` checks what it makes of a report.
+
+The same moment moves the images. The five images the stack is built from (`golang`, `debian` twice,
+`oven/bun`, `node` twice) and the one it runs as it is (`caddy`) are named `name:tag@sha256:...` in
+`backend/Dockerfile`, `frontend/Dockerfile` and `docker-compose.yml`: Docker uses the digest, and the tag
+stays to say which line of releases the digest follows. `scripts/pin-images.py` asks Docker Hub what
+each tag names today and rewrites the digests; `--check` (and `scripts/test_pin_images.py`, which
+`test-changed.sh` runs for a change to any of the three files) fails when a reference has none. Named
+by tag alone, what an update built was whatever the registry served that day, and Caddy was never
+fetched again after the first install, because Compose pulls a tag only when it is missing; a server
+installed with 2.11.7 was still on it under 0.8.5 with 2.11.9 out. With a digest neither the installer
+nor the updater needs `--pull`: a digest that is not on the machine is fetched, by the build for a base
+image and by `compose up` for Caddy, and one that is there is not asked about, so an update no longer
+needs Docker Hub at all unless the release moved an image. Run it, then `docker compose build`, before
+the release is merged: no check builds the images (OPS-10's job is a proposal), so this is the one
+place a moved base is tried. A release cut without it keeps the previous release's images, which is
+safe and is how base images age: nothing forces the step. Not covered: the Caddy containers
+`internal/proxysvc` starts by name for the deployments' ingress and the tailnet gate
+(`docker run ... caddy:2-alpine`), which keep the image they were created from until they are removed.
+
 A note added to a release whose version is already bumped — every change merged into an open patch
 branch after its release was cut — is in `changelog.json`, and so in every install's notice, but not
 in `CHANGELOG.md` until the markdown is generated again. Nothing fails meanwhile:
@@ -6171,6 +6201,18 @@ done by hand, and the UI refuses to fold it away.
   and each file the update changed with the folders above it (`handBack`, through `hostexec.GiveBack`).
   Until 0.7.1 an update's new folders stayed root's, and the operator's own next pull stopped halfway in
   them.
+- **It fetches the branch the install follows and the release tag, by name** (`fetchBranch`,
+  `fetchReleaseTag`): `+refs/heads/<ref>:refs/remotes/origin/<ref>`, never the checkout's own refspec.
+  A plain `git fetch origin` in an ordinary clone brings every branch, and the project's repository
+  keeps pull requests' screenshots on `pr-assets/*` branches, so every update downloaded all of them
+  made since the last one. It also makes the update independent of how the checkout was cloned: the
+  install guide's clone is `--depth 1 --single-branch --branch main`, and the fast-forward to a tag,
+  the fork's branch and `restoreCheckout`'s ancestor test are all tested from one
+  (`TestAShallowSingleBranchCheckout...`). For the project's repository the branch only keeps
+  `git status` honest, so one that cannot be fetched (a patch branch deleted once merged) is said in
+  the transcript and passed over; for a fork it is what is installed, and failing to fetch it ends
+  the update. Remote branches an older version already fetched are left alone; the administration
+  guide has the commands that drop them.
 - **It installs the release that was offered** (`updateTarget`). After the fetch it takes the tag
   `v<ToVersion>`, asked of `origin` with `ls-remote` and fetched without touching local tags, so a tag
   the operator made cannot stand in for it and one that clashes cannot fail the fetch. With no tag there

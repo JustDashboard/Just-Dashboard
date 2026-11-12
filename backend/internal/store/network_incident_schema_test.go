@@ -21,6 +21,7 @@ func TestNetworkIncidentSchemaOnlyAddsTablesAndIndexes(t *testing.T) {
 }
 
 func TestNetworkIncidentSchemaReachesFreshAndUpgradedInstalls(t *testing.T) {
+	t.Parallel()
 	upgraded := t.TempDir()
 	script, err := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
 	if err != nil {

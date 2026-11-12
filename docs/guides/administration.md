@@ -80,11 +80,35 @@ worth knowing what stands behind that:
   `main`. A tag is not yet signed, so anyone who could push to the repository could make one. The
   dashboard can already require a signature from a release key built into the version you are running;
   that is switched off until the project publishes its key.
+- **Docker Hub, for exact images.** The images the dashboard is built on (Debian, Go, Node, Bun) and
+  the Caddy that fronts it are named in the release by digest, so every install of a version builds on
+  and runs the same bytes, whatever the registry serves under those names later. An update contacts
+  Docker Hub only when the release moved one of them, and that is also how a newer Caddy reaches a
+  server: up to 0.8.5 the proxy stayed on the Caddy of the day you installed.
 - **Your own checkout.** The update fast-forwards it and never resets it, so your edits stay; it
   refuses, changing nothing, when one of them collides with the new version.
 
 `JD_UPDATE_CHECK=false` stops the dashboard asking GitHub at all. Updating is then yours to do by hand,
 with `manage.sh update` below.
+
+An update fetches the branch your install follows and the release tag, and nothing else the repository
+has. Up to 0.8.5 it fetched every branch, and the project keeps the screenshots of its pull requests on
+branches of their own, so an install made with a plain `git clone` carries a few hundred megabytes it
+never reads. They stay until you drop them, which is safe at any time, from the directory you installed
+into:
+
+```bash
+git remote set-branches origin main
+git for-each-ref --format='delete %(refname)' refs/remotes/origin \
+  | grep -v -e ' refs/remotes/origin/main$' -e ' refs/remotes/origin/HEAD$' \
+  | git update-ref --stdin
+git gc --prune=now
+```
+
+Name your own branch in place of `main` if `JD_UPDATE_BRANCH` names another. An install cloned as the
+[install guide](install.md) now says, with `--depth 1 --single-branch`, never had them. Such a checkout
+has no history below the commit it was cloned at; `manage.sh update` fetches that history once if it
+ever needs it to compare a release with what you have.
 
 A dashboard built from anything other than a release, such as a patch branch, a fork or a clone with
 commits of your own, shows the commit it was built from after the version: `0.8.5+98c9349` on the
