@@ -19,6 +19,8 @@ type Store struct {
 	// on every use rather than kept by whoever asked, so SingleConnection can
 	// take it away under a running test.
 	bulk atomic.Pointer[sql.DB]
+	// read is the pool for reads that take long; see Reader.
+	read atomic.Pointer[sql.DB]
 	// handles are the pools Open made beside DB, to close with the store.
 	handles []*sql.DB
 	guard   *walGuard
@@ -2064,7 +2066,9 @@ func Open(dataDir string) (*Store, error) {
 		return nil, err
 	}
 	// SQLite tolerates a single writer; the pool is kept small so the WAL
-	// writer never contends with itself under WebSocket fan-out.
+	// writer never contends with itself under WebSocket fan-out. Four is for
+	// the writer's sake only: the reads that take long have a pool of their
+	// own (Reader), so they do not use these up.
 	db.SetMaxOpenConns(4)
 	if _, err := db.ExecContext(context.Background(), schema); err != nil {
 		db.Close()
@@ -2126,6 +2130,16 @@ func Open(dataDir string) (*Store, error) {
 		return nil, fmt.Errorf("open the bulk writer: %w", err)
 	}
 	st.bulk.Store(bulk)
+	// Readers do not take the write lock, so they are not what the four
+	// connections of DB are rationed for; they get as many of their own.
+	// No _txlock here: a transaction on a connection that cannot write must
+	// not begin by asking for the write lock.
+	read, err := st.openHandle(path, "_pragma=busy_timeout(5000)&_pragma=query_only(1)", 4)
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("open the read pool: %w", err)
+	}
+	st.read.Store(read)
 	return st, nil
 }
 
@@ -2159,6 +2173,24 @@ func (s *Store) Close() error {
 	return s.DB.Close()
 }
 
+// Reader is the pool for reads that take long or come in bursts: a week of
+// metric history, the deployments read model, a run's transcript, a page of
+// the audit trail. Its connections can only read (query_only), and they are
+// not DB's, so a few slow chart reads no longer stand between a request and
+// its session check, an audit row or the next metric sample: those wait for
+// DB, which the long reads have left alone.
+//
+// A read here sees every commit made before it began, on whichever handle,
+// as any SQLite reader in WAL mode does. What it must not be is part of a
+// write: a function that reads and then writes inside one transaction keeps
+// to that transaction. A store that was not opened by Open has only DB.
+func (s *Store) Reader() *sql.DB {
+	if db := s.read.Load(); db != nil {
+		return db
+	}
+	return s.DB
+}
+
 // SingleConnection leaves the store one connection for everything: every
 // handle answers with DB from now on, and DB keeps a single connection. It
 // exists for tests (storetest.OneConnection): on a store like this, a call
@@ -2166,6 +2198,7 @@ func (s *Store) Close() error {
 // never finish.
 func (s *Store) SingleConnection() {
 	s.bulk.Store(nil)
+	s.read.Store(nil)
 	s.DB.SetMaxOpenConns(1)
 }
 

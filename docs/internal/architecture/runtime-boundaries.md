@@ -321,16 +321,32 @@ columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
 
 ### The store's connections
 
-`store.Open` opens the one database file through two handles, which differ in what a power cut may
-take:
+`store.Open` opens the one database file through three handles. The two that write differ in what a
+power cut may take; the third cannot write at all:
 
-| Handle | Connections | `synchronous` | Carries |
+| Handle | Connections | Opened with | Carries |
 | --- | --- | --- | --- |
-| `Store.DB` | 4 | `FULL` | everything, unless it is named in the next row |
-| `Store.Bulk()` | 1 | `NORMAL` | metric samples and their pruning (`metrics.Recorder`), the lines a deployment step prints (`OrchestrationStore.AppendLogs`) |
+| `Store.DB` | 4 | `synchronous=FULL`, `_txlock=immediate` | everything, unless it is named in the next rows |
+| `Store.Bulk()` | 1 | `synchronous=NORMAL`, `_txlock=immediate` | metric samples and their pruning (`metrics.Recorder`), the lines a deployment step prints (`OrchestrationStore.AppendLogs`) |
+| `Store.Reader()` | 4 | `query_only`, no `_txlock` | the reads that take long or that a page polls: metric history and its events, forecasts and sizing (`metrics.Recorder`), the deployments read model, run lists, insights and transcripts (`OrchestrationStore.reader()`), a page of the audit trail (`audit.Logger.List`) |
 
-Both write with `_txlock=immediate` and a five-second busy timeout. `DB` is kept at four connections so
-SQLite's one writer does not queue behind itself.
+All three wait five seconds on a busy database. `DB` is kept at four connections so SQLite's one
+writer does not queue behind itself; that number was chosen for the writer, and it used to be all the
+readers had too.
+
+**Long reads have a pool of their own.** A week of host history takes about half a second to fold, a
+Metrics page asks for several such reads at once, and Deployments polls its fleet. On `DB` two such
+tabs held all four connections, and a session check, an audit row or the next metric sample waited in
+`database/sql`'s queue, not in SQLite: a 2 ms request took a third of a second. In WAL mode a reader
+never waits for the writer nor the writer for a reader, so those reads now run on `Reader()`, whose
+connections are not `DB`'s. A read there sees every commit made before it began, on whichever handle.
+Its connections are `query_only`, so a write sent to it fails instead of being lost, and it is opened
+without `_txlock=immediate`, because a transaction on a connection that cannot write must not begin by
+asking for the write lock. Two rules follow. A read goes to `Reader()` when it is long (history over a
+range, a filtered scan) or frequent (a poll), and is not part of a write: a function that reads and
+then writes inside one transaction keeps to that transaction on `DB`. And the rule below holds on this
+pool as on any other: a cursor open on `Reader()` is closed before the next query on `Reader()`.
+`Store.Reader()` on a store that `Open` did not make answers with `DB`.
 
 **Which writes survive a power cut is a decision, and this is it.** The database is in WAL mode. With
 `synchronous=FULL` a commit returns once the write-ahead log is on disk; with `NORMAL` it returns once

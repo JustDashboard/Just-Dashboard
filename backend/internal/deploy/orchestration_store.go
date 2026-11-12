@@ -56,6 +56,14 @@ func NewOrchestrationStore(st *basestore.Store) *OrchestrationStore {
 	return &OrchestrationStore{db: st.DB, st: st, now: time.Now, broker: newEventBroker()}
 }
 
+// reader is the store's read pool, for the reads a page polls or pages
+// through: the fleet and its summaries, run lists, transcripts. They are the
+// long and the frequent ones, and on a pool of their own they cannot stand
+// between the engine, or a request's session check, and the database. They
+// see every commit made before they began. Nothing that is part of a write
+// reads through it.
+func (s *OrchestrationStore) reader() *sql.DB { return s.st.Reader() }
+
 const engineRunColumns = `
 id, run_number, source_revision, project_id, environment_id, state, operation, trigger, actor,
 requested_at, queued_at, claimed_at, heartbeat_at, ended_at,

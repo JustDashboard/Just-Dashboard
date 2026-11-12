@@ -237,6 +237,46 @@ func TestEveryListReadFinishesOnOneConnection(t *testing.T) {
 	}
 }
 
+// The pages that poll read through the store's read pool, so they neither
+// wait for the pool the engine and every request's session check share, nor
+// use it up: with every connection of that pool taken, the fleet, a run list
+// and a transcript are still read.
+func TestTheReadModelIsReadWhileThePoolIsExhausted(t *testing.T) {
+	f := newOneConnectionFixture(t)
+	hold, cancelHold := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelHold()
+	for range f.store.DB.Stats().MaxOpenConnections {
+		conn, err := f.store.DB.Conn(hold)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	budget := QueueBudget{Heavy: 2, Light: 4}
+	fleet, err := f.runs.Fleet(ctx, budget)
+	if err != nil {
+		t.Fatalf("the fleet behind an exhausted pool: %v", err)
+	}
+	if len(fleet.Deployments) != 1 || len(fleet.ActiveWork) != 3 {
+		t.Fatalf("fleet = %d deployments, %d runs in flight; the read pool must see what was just written",
+			len(fleet.Deployments), len(fleet.ActiveWork))
+	}
+	if _, err := f.runs.DeploymentSummary(ctx, f.projectID, budget); err != nil {
+		t.Fatalf("a deployment's summary behind an exhausted pool: %v", err)
+	}
+	if runs, _, err := f.runs.ProjectRunsFiltered(ctx, f.projectID, RunListFilter{}); err != nil || len(runs) != 3 {
+		t.Fatalf("the run list behind an exhausted pool: %d runs, %v", len(runs), err)
+	}
+	if _, _, err := f.runs.RunTranscriptTail(ctx, f.run.ID, 50); err != nil {
+		t.Fatalf("a transcript behind an exhausted pool: %v", err)
+	}
+	if _, err := f.runs.EnvironmentInsights(ctx, f.projectID, f.environmentID, 30); err != nil {
+		t.Fatalf("insights behind an exhausted pool: %v", err)
+	}
+}
+
 // The freeze as it happened: more concurrent fleet and schedule reads than the
 // pool has connections, with runs in flight. Before the reads stopped querying
 // inside their cursors, none of these returned until its caller gave up.

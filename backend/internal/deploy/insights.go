@@ -89,7 +89,7 @@ func (s *OrchestrationStore) insights(ctx context.Context, projectID, environmen
 	now := s.now().UTC()
 	since := now.AddDate(0, 0, -windowDays).Truncate(24 * time.Hour)
 	scope, args := projectRunScope(environmentID)
-	rows, err := s.db.QueryContext(ctx, `SELECT `+engineRunColumns+` FROM deploy_runs
+	rows, err := s.reader().QueryContext(ctx, `SELECT `+engineRunColumns+` FROM deploy_runs
 		WHERE project_id = ? AND `+scope+` AND requested_at >= ? ORDER BY requested_at, id LIMIT ?`,
 		append(append([]any{projectID}, args...), since.Unix(), insightsMaxRuns)...)
 	if err != nil {

@@ -394,7 +394,7 @@ func (r *Recorder) SizingUsage(ctx context.Context, ids []string, from, to time.
 	if where == "" || !r.Enabled() {
 		return usage, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT container_id, ts, COALESCE(sample_time, ts), cpu_percent, mem_bytes, cpu_total, cpu_periods, cpu_throttled
 		  FROM metric_container_samples
 		 WHERE `+where+` AND ts >= ?1 AND ts <= ?2

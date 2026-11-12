@@ -81,7 +81,7 @@ func (r *Recorder) ContainerIdentityRange(ctx context.Context, ids []string, fro
 		toSecond++
 	}
 	queryArgs = append(queryArgs, fromSecond, toSecond)
-	rows, err := r.db.QueryContext(ctx, `SELECT container_id, (ts / ?) * ? AS bucket,
+	rows, err := r.history().QueryContext(ctx, `SELECT container_id, (ts / ?) * ? AS bucket,
 		COUNT(*), AVG(cpu_percent), MAX(cpu_percent), AVG(mem_percent), MAX(mem_percent),
 		AVG(mem_bytes), MAX(mem_bytes), MAX(mem_limit)
 		FROM metric_container_samples WHERE `+where+` AND ts >= ? AND ts < ?

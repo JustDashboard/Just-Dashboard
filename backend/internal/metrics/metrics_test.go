@@ -468,8 +468,8 @@ func TestSamplesAreWrittenWhileThePoolIsExhausted(t *testing.T) {
 	hold, cancelHold := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelHold()
 	var held []interface{ Close() error }
-	for range r.db.Stats().MaxOpenConnections {
-		conn, err := r.db.Conn(hold)
+	for range r.st.DB.Stats().MaxOpenConnections {
+		conn, err := r.st.DB.Conn(hold)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -497,7 +497,49 @@ func TestSamplesAreWrittenWhileThePoolIsExhausted(t *testing.T) {
 		conn.Close()
 	}
 	var samples int
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM metric_samples WHERE ts = ?`, at.Unix()).Scan(&samples); err != nil || samples != 1 {
+	if err := r.st.DB.QueryRow(`SELECT COUNT(*) FROM metric_samples WHERE ts = ?`, at.Unix()).Scan(&samples); err != nil || samples != 1 {
 		t.Fatalf("samples read back through the pool = %d, %v", samples, err)
+	}
+}
+
+// History is read through the store's read pool. A week of samples takes half
+// a second to fold and a Metrics page asks for several at once; those reads
+// neither wait for the pool every request shares nor use it up.
+func TestHistoryIsReadWhileThePoolIsExhausted(t *testing.T) {
+	r := testRecorder(t, time.Minute, 24*time.Hour)
+	at := time.Now().Add(-time.Minute).Truncate(time.Second)
+	if err := r.record(context.Background(), Sample{TS: at, CPUPercent: 12.5}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.recordMounts(context.Background(), at, []sysinfo.MountStats{{Mountpoint: "/", UsedPercent: 40, Used: 4, Total: 10}}); err != nil {
+		t.Fatal(err)
+	}
+	hold, cancelHold := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelHold()
+	for range r.st.DB.Stats().MaxOpenConnections {
+		conn, err := r.st.DB.Conn(hold)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	from, to := at.Add(-time.Hour), at.Add(time.Hour)
+	series, err := r.Range(ctx, from, to, 60)
+	if err != nil {
+		t.Fatalf("host history behind an exhausted pool: %v", err)
+	}
+	if len(series.Points) == 0 {
+		t.Fatal("the read pool did not see the sample that was just written")
+	}
+	if storage, err := r.StorageRange(ctx, from, to, 60); err != nil || len(storage.Mounts) != 1 {
+		t.Fatalf("storage history behind an exhausted pool: %+v %v", storage, err)
+	}
+	if _, err := r.Sparklines(ctx, from, to, 30); err != nil {
+		t.Fatalf("container sparklines behind an exhausted pool: %v", err)
+	}
+	if _, err := r.Events(ctx, from, to, 20); err != nil {
+		t.Fatalf("events behind an exhausted pool: %v", err)
 	}
 }
