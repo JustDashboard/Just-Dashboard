@@ -667,6 +667,21 @@ place of the glyph. `min-w-0` on the frame and its children is load-bearing: a w
 table's intrinsic width would otherwise widen the flex column and take the whole shell sideways instead
 of scrolling inside its panel.
 
+**A page arrives from the top.** A block whose answer is taller than its skeleton, or that is not on
+the page until its read answers, pushes everything under it down when it lands; eight pages moved that
+way while they loaded, past a quarter of the window on Certificates. `Hold` (also in `state.tsx`) is the
+answer where the loaded height cannot be reserved: `<Hold until={!read.loading} />` after the block
+leaves a marker until the read's first answer, and a rule in `globals.css` keeps what follows the marker,
+and every block of the `Page` under the one the marker is in, off the page until then. What is held is
+mounted, so its own reads start with the page; it is only not drawn, so when it appears nothing that
+was already there moves. Its children are what stands there meanwhile; `LoadingRows hold` and
+`LoadingPanel hold` are the same for a skeleton that already stands in the block. A hold lets go once
+and for good (a filter that makes the read load again takes nothing away) and after four seconds
+whatever the read is doing, so a read that hangs does not keep the page from its reader. A band is not
+a case for it: a band is drawn during load at its one height (design-system §10). `design-system.spec.ts`
+makes the reads of those eight pages land apart, in both orders, at 1280 and at 390, and holds what the
+browser's `layout-shift` observer reports under 0.02 (`tests/browser/layout-shift.ts`).
+
 **Nothing lifts.** Cards, buttons, tabs, tiles and the sign-in panel used to carry a `raised` utility —
 a gradient gloss, a light hairline on the top edge, a dark lip below, a drop shadow, and an inversion on
 `:active`. It is gone. Forty-nine surfaces all claiming to stand in front of the page is a page with no

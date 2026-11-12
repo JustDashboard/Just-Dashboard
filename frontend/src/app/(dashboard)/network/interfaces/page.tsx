@@ -10,7 +10,7 @@ import { plural } from "@/lib/format"
 import type { NetworkLink, NetworkNamespace } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
-import { ErrorState, LoadingPanel } from "@/components/state"
+import { ErrorState, Hold, LoadingPanel } from "@/components/state"
 import { FilterChip, ChipCount } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { DeviceList, GROUPS } from "@/components/network/interfaces/device-list"
@@ -150,7 +150,7 @@ function Interfaces() {
         links.error ? (
           <ErrorState error={links.error} onRetry={links.refresh} />
         ) : (
-          <LoadingPanel />
+          <LoadingPanel hold />
         )
       ) : (
         <DeviceList
@@ -181,6 +181,8 @@ function Interfaces() {
         }}
         onOpen={(ns) => setInspecting({ kind: ns.kind, name: ns.name })}
       />
+      {/* A row for each namespace: the log under them waits to know how many. */}
+      <Hold until={!namespaces.loading} />
       <InterfacesLog />
       <NamespaceSheet
         target={inspecting}

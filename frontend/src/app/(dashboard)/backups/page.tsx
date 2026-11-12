@@ -22,7 +22,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceList } from "@/components/flow"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState, Hold, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { JobDialog, type JobPrefill } from "@/components/backups/job-form"
 import { CoveragePanel, type CoverageFilter } from "@/components/backups/coverage"
@@ -197,6 +197,15 @@ export default function BackupsPage() {
           </div>
         )}
 
+        {/* The picture stands on both reads and lands over the jobs, and the
+            jobs land over the key and the coverage: until both have answered
+            the page is its skeleton, and then it is all there at once. The
+            containers are in it because the picture and a job's marks are
+            drawn from them. */}
+        <Hold until={!jobs.loading && !coverage.loading && !docker.loading}>
+          <LoadingRows rows={3} />
+        </Hold>
+
         {/* Only what somebody has to act on: a run that failed, a job that has
           gone quiet. What is not covered is the Coverage list's to say — a
           finding repeating its count was the same sentence twice. */}
@@ -267,7 +276,6 @@ export default function BackupsPage() {
             </PanelBody>
           </Panel>
         )}
-        {jobs.loading && !jobs.data && <LoadingRows rows={3} />}
 
         <BackupKeyPanel
           encrypting={list.some((job) => job.encrypt)}

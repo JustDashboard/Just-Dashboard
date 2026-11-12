@@ -91,7 +91,7 @@ export function CrowdSecPanel({
     onBlocked?.()
   }
 
-  if (loading && !data) return <LoadingPanel />
+  if (loading && !data) return <LoadingPanel hold />
   if (error && !data) return <ErrorState error={error} onRetry={refresh} />
   if (!data) return null
 

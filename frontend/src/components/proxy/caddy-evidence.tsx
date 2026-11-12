@@ -6,7 +6,7 @@ import { notify } from "@/lib/toast"
 import type { CertificateEvidence, EvidencePrune } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Notice } from "@/components/state"
+import { Hold, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 
 /**
@@ -22,7 +22,16 @@ export function CaddyEvidencePrune({ onPruned }: { onPruned: () => void }) {
     0,
   )
   const list = orphans.data ?? []
-  if (list.length === 0) return dialog
+  // Whether there is anything to prune decides whether this is on the page:
+  // what is under it waits to find out.
+  const hold = <Hold until={!orphans.loading} />
+  if (list.length === 0)
+    return (
+      <>
+        {dialog}
+        {hold}
+      </>
+    )
 
   const prune = () =>
     confirm({
@@ -79,6 +88,7 @@ export function CaddyEvidencePrune({ onPruned }: { onPruned: () => void }) {
         </div>
       </Notice>
       {dialog}
+      {hold}
     </>
   )
 }

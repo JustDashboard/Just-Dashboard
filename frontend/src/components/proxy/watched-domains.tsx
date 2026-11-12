@@ -20,7 +20,7 @@ import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FormSection, FormSections } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
 import { Sparkline } from "@/components/metrics/sparkline"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState, Hold, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbBar } from "@/components/verbs"
 import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
@@ -460,6 +460,9 @@ export function WatchedDomains({
           )}
         </div>
       </FormSection>
+      {/* A row for each watched name: the page's blocks under this one wait
+          to know how many. */}
+      <Hold until={!watched.loading} />
     </FormSections>
   )
 }

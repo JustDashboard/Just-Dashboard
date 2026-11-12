@@ -35,7 +35,7 @@ import type {
 } from "@/lib/types"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Hold, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Modal } from "@/components/modal"
 import { SidePanel } from "@/components/side-panel"
@@ -609,6 +609,9 @@ export function CredentialsPage() {
         credentials={list}
         onChange={credentials.refresh}
       />
+      {/* The App's block is a different height in each of its states, and
+          which one it is in is not known until it answers. */}
+      <Hold until={!githubApp.loading} />
 
       <Panel plain>
         <PanelHeader

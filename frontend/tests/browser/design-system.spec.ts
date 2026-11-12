@@ -5,6 +5,11 @@ import { mockProject } from "./deploy-fixture"
 import { overview as remoteDesktopOverview } from "./remote-desktop-fixture"
 import { busyMap } from "./server-map-fixture"
 import { risen } from "./risen"
+import { SHIFT_BUDGET, watchShifts } from "./layout-shift"
+import { mockWorkbench } from "./workbench-fixture"
+import { mockProxy } from "./proxy-fixtures"
+import { mockIntrusion } from "./security-intrusion-fixture"
+import { mockNetwork } from "./network-fixture"
 
 /**
  * The design system's rules, checked in a browser rather than in a document.
@@ -873,3 +878,80 @@ test("the wordmark's version stands inside a landmark", async ({ page }) => {
   await expect(banner).toContainText(/\d+\.\d+\.\d+/)
   await expect(banner.getByRole("button", { name: "Search" })).toBeVisible()
 })
+
+/**
+ * Nothing already on a page moves while the page loads. Eight pages did: a
+ * block was a skeleton shorter than what replaced it, or was not there until
+ * its read answered, and everything under it was pushed down when it landed,
+ * past a quarter of the window on Certificates. The fixtures answer every
+ * read at once, which hides it, so the reads are made to land apart, in one
+ * order and then in the other (`watchShifts`), and the browser's own measure
+ * of what moved is held to the budget, at a desk's width and at a phone's.
+ */
+const ARRIVING: [path: string, mock: (page: Page) => Promise<unknown>][] = [
+  ["/audit", mockShell],
+  ["/backups", (page) => mockWorkbench(page)],
+  ["/deploy/credentials", mockShell],
+  ["/proxy/certificates", (page) => mockProxy(page, { included: true })],
+  ["/security/intrusion", (page) => mockIntrusion(page)],
+  [
+    "/network/firewall",
+    // With a way in to preserve: the block that lists them is not on the page
+    // until its read answers, and stands over the rules.
+    (page) =>
+      mockNetwork(page, [], {
+        overrides: {
+          "/firewall/access": {
+            checks: [
+              {
+                name: "This dashboard",
+                port: 18443,
+                protocol: "tcp",
+                family: "ipv4",
+                source: "100.64.0.0/10",
+                required: true,
+                verdict: "admitted",
+                reason: "rule 2 admits it",
+              },
+              {
+                name: "SSH",
+                port: 22,
+                protocol: "tcp",
+                family: "ipv4",
+                source: "Anywhere",
+                required: true,
+                verdict: "admitted",
+                reason: "rule 1 admits it",
+              },
+            ],
+          },
+        },
+      }),
+  ],
+  ["/network/dns", (page) => mockNetwork(page)],
+  ["/network/interfaces", (page) => mockNetwork(page)],
+]
+
+for (const [label, viewport] of [
+  ["", { width: 1280, height: 800 }],
+  [" on a phone", { width: 390, height: 844 }],
+] as const) {
+  for (const [path, mock] of ARRIVING) {
+    test(`nothing on ${path} moves while its reads land${label}`, async ({ page }) => {
+      test.setTimeout(90_000)
+      await page.setViewportSize(viewport)
+      await mock(page)
+      const shifts = await watchShifts(page)
+      for (const order of ["forward", "backward"] as const) {
+        shifts.arrive(order)
+        await page.goto(path)
+        await expect(page.locator("[data-slot=page]").first()).toBeVisible()
+        const { total, shifts: moved } = await shifts.moved()
+        expect(
+          total,
+          `${path} moved by ${total.toFixed(3)} with its reads landing ${order}: ${JSON.stringify(moved)}`,
+        ).toBeLessThan(SHIFT_BUDGET)
+      }
+    })
+  }
+}

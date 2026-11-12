@@ -15,7 +15,7 @@ import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Hold, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -52,7 +52,10 @@ export function BackupKeyPanel({
   const [importOpen, setImportOpen] = useState(false)
   const data = key.data
   const imported = data?.imported ?? []
-  if (!encrypting && !importing && !data?.exists && imported.length === 0 && !key.error) return null
+  // Whether there is a key decides whether this block is on the page at all,
+  // and what it says decides how tall it is: what is under it waits for that.
+  const hold = <Hold until={!key.loading} />
+  if (!encrypting && !importing && !data?.exists && imported.length === 0 && !key.error) return hold
   const mayExport = can("system.admin") && can("destructive")
   const mayImport = can("system.admin")
 
@@ -192,6 +195,7 @@ export function BackupKeyPanel({
           />
         </Modal>
       )}
+      {hold}
     </Panel>
   )
 }
