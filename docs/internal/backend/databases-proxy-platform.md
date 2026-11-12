@@ -6011,6 +6011,24 @@ which end when `internal/dockerx` moves to `github.com/moby/moby/client`). `rele
 steps it prints and does not run it, because a release must be cuttable offline;
 `scripts/test_deps_check.py` checks what it makes of a report.
 
+The same moment moves the images. The five images the stack is built from (`golang`, `debian` twice,
+`oven/bun`, `node` twice) and the one it runs as it is (`caddy`) are named `name:tag@sha256:...` in
+`backend/Dockerfile`, `frontend/Dockerfile` and `docker-compose.yml`: Docker uses the digest, and the tag
+stays to say which line of releases the digest follows. `scripts/pin-images.py` asks Docker Hub what
+each tag names today and rewrites the digests; `--check` (and `scripts/test_pin_images.py`, which
+`test-changed.sh` runs for a change to any of the three files) fails when a reference has none. Named
+by tag alone, what an update built was whatever the registry served that day, and Caddy was never
+fetched again after the first install, because Compose pulls a tag only when it is missing; a server
+installed with 2.11.7 was still on it under 0.8.5 with 2.11.9 out. With a digest neither the installer
+nor the updater needs `--pull`: a digest that is not on the machine is fetched, by the build for a base
+image and by `compose up` for Caddy, and one that is there is not asked about, so an update no longer
+needs Docker Hub at all unless the release moved an image. Run it, then `docker compose build`, before
+the release is merged: no check builds the images (OPS-10's job is a proposal), so this is the one
+place a moved base is tried. A release cut without it keeps the previous release's images, which is
+safe and is how base images age: nothing forces the step. Not covered: the Caddy containers
+`internal/proxysvc` starts by name for the deployments' ingress and the tailnet gate
+(`docker run ... caddy:2-alpine`), which keep the image they were created from until they are removed.
+
 A note added to a release whose version is already bumped — every change merged into an open patch
 branch after its release was cut — is in `changelog.json`, and so in every install's notice, but not
 in `CHANGELOG.md` until the markdown is generated again. Nothing fails meanwhile:

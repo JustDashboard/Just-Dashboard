@@ -80,6 +80,11 @@ worth knowing what stands behind that:
   `main`. A tag is not yet signed, so anyone who could push to the repository could make one. The
   dashboard can already require a signature from a release key built into the version you are running;
   that is switched off until the project publishes its key.
+- **Docker Hub, for exact images.** The images the dashboard is built on (Debian, Go, Node, Bun) and
+  the Caddy that fronts it are named in the release by digest, so every install of a version builds on
+  and runs the same bytes, whatever the registry serves under those names later. An update contacts
+  Docker Hub only when the release moved one of them, and that is also how a newer Caddy reaches a
+  server: up to 0.8.5 the proxy stayed on the Caddy of the day you installed.
 - **Your own checkout.** The update fast-forwards it and never resets it, so your edits stay; it
   refuses, changing nothing, when one of them collides with the new version.
 

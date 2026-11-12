@@ -216,7 +216,11 @@ services:
       retries: 3
 
   proxy:
-    image: caddy:2-alpine
+    # By digest, moved by scripts/pin-images.py when a release is cut. Compose
+    # pulls a tag only when it is missing, so `caddy:2-alpine` alone was for
+    # ever the Caddy of the day the server was installed; a digest that is not
+    # on the machine is pulled, which is how an update brings a newer one.
+    image: caddy:2-alpine@sha256:78bd35025c7ba85961dd149ae670315129954e77abe2383ac47c89106b35ade9
     restart: unless-stopped
     logging: *logging
     security_opt:
