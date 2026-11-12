@@ -806,7 +806,10 @@ test("screenshots of each state @shots", async ({ page }) => {
     await page.waitForLoadState("networkidle")
     await page.evaluate(() =>
       Promise.all(
-        document.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+        document
+          .getAnimations()
+          .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+          .map((animation) => animation.finished.catch(() => undefined)),
       ),
     )
   }
@@ -859,7 +862,12 @@ test("screenshots of each state @shots", async ({ page }) => {
   const dialog = caught.getByRole("dialog", { name: "Cut over" })
   await dialog.getByRole("switch", { name: "Nothing is writing to the source any more" }).click()
   await dialog.evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
   )
   await caught.screenshot({ path: `${out}/cutover-1440.png` })
   await caught.close()
@@ -938,7 +946,12 @@ test("screenshots of each state @shots", async ({ page }) => {
   await page.getByRole("option", { name: /shop-replica/ }).click()
   await copy.getByLabel("Name of the copy").fill("shop_copy")
   await copy.evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
   )
   await shot("copy-to-server-1440")
 

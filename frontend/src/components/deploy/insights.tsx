@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useViewState } from "@/lib/view-state"
 import { get } from "@/lib/api"
-import { relativeTime } from "@/lib/format"
+import { dayAt, relativeTime, weekdayAt } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentInsights } from "@/lib/types"
@@ -60,19 +60,12 @@ function seconds(value: number) {
 
 /** "Aug 25" for a `YYYY-MM-DD` day, read as that calendar day wherever the reader is. */
 function dayLabel(date: string) {
-  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  })
+  return dayAt(new Date(`${date}T00:00:00`))
 }
 
 /** "Wed, Oct 28": the weekday is what a day's releases are usually remembered by. */
 function dayHeading(date: string) {
-  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  })
+  return weekdayAt(new Date(`${date}T00:00:00`))
 }
 
 type Day = DeploymentInsights["daily"][number]

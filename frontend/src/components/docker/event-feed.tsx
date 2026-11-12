@@ -4,7 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { ChevronRight, Terminal } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { clock, relativeTime, timestamp } from "@/lib/format"
+import { clock, minuteAt, relativeTime, timestamp, weekdayAt } from "@/lib/format"
 import { eventKey, spanWords, type FeedEntry } from "@/lib/docker-events"
 import { hueFor, LANES } from "@/lib/hue"
 import type { DockerEvent } from "@/lib/types"
@@ -337,18 +337,9 @@ function byHour(entries: FeedEntry[]) {
       group.entries.push(entry)
       continue
     }
-    const time = hour.toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    })
+    const time = minuteAt(hour)
     const day = hour.toDateString()
-    const dayName =
-      day === today
-        ? "Today"
-        : day === yesterday
-          ? "Yesterday"
-          : hour.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })
+    const dayName = day === today ? "Today" : day === yesterday ? "Yesterday" : weekdayAt(hour)
     groups.push({ key, label: days.size > 1 ? `${dayName} · ${time}` : time, entries: [entry] })
   }
   return groups

@@ -1,6 +1,6 @@
 "use client"
 
-import { Logs } from "@/components/database/ops"
+import { Logs } from "@/components/database/ops/logs"
 import { SectionPage } from "@/components/database/shell/section-page"
 
 export default function LogsPage() {

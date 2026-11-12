@@ -17,7 +17,10 @@ import { KIND_STYLE } from "@/components/update/release-notes"
  * zooms in as it opens cannot leave it pointing at where its ends used to be.
  *
  * `still` is the line with nothing on it: an update that finished, or failed,
- * carries nothing any more. Reduced motion draws it still too.
+ * carries nothing any more. Reduced motion draws it still too. The pulse is a
+ * CSS animation of `transform` (`jd-wire`), so the notice, which sits in the
+ * sidebar of every page for as long as an update is waiting, costs the page
+ * nothing while it does.
  */
 export function UpdateWire({
   tone = "brand",
@@ -28,7 +31,6 @@ export function UpdateWire({
   still?: boolean
   className?: string
 }) {
-  const reduced = useReducedMotion()
   return (
     <span
       aria-hidden
@@ -40,18 +42,8 @@ export function UpdateWire({
         className,
       )}
     >
-      {!still && !reduced && (
-        <motion.span
-          className="absolute inset-y-0 left-0 w-2/3 rounded-full bg-linear-to-r from-transparent via-brand to-signal"
-          initial={{ x: "-100%" }}
-          animate={{ x: "160%" }}
-          transition={{
-            repeat: Infinity,
-            duration: 1.8,
-            repeatDelay: 0.5,
-            ease: [0.16, 1, 0.3, 1],
-          }}
-        />
+      {!still && (
+        <span className="absolute inset-y-0 left-0 w-2/3 animate-[jd-wire_2.3s_infinite] rounded-full bg-linear-to-r from-transparent via-brand to-signal motion-reduce:hidden" />
       )}
     </span>
   )

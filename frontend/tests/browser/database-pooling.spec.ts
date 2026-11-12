@@ -639,7 +639,12 @@ test("every state of the Pooling page, for the pull request @shots", async ({ pa
   await popover.getByRole("radio", { name: "The pooler" }).click()
   await settle(page)
   await popover.evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
   )
   await page.screenshot({ path: `${shots}/connect-pooled-1440.png` })
   await page.keyboard.press("Escape")
@@ -648,7 +653,12 @@ test("every state of the Pooling page, for the pull request @shots", async ({ pa
   await page.getByRole("button", { name: "Turn off" }).click()
   await expect(dialog(page)).toContainText("Turn off pooling for shop")
   await dialog(page).evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
   )
   await page.screenshot({ path: `${shots}/turn-off-1440.png` })
   await page.keyboard.press("Escape")

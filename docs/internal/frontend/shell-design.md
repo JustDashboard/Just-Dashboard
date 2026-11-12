@@ -5,6 +5,17 @@ security, and deployment workflows plus `/login` and `/welcome`. Most page modul
 deployment detail/new wrappers remain server components and hand interaction to client components under
 `components/deploy/`.
 
+**A route imports its page from a module that is that page's alone.** The bundler keeps a module
+whole: it drops neither the exports a route never names nor what they import. So a folder index that
+re-exports several pages, or one file that holds several, hands every one of them to each route that
+names one. The database section did both until 0.8.6 (`ops/index.tsx` over thirteen pages, the eight
+settings pages in one `ops/settings.tsx`, `mongo/index.tsx` and `redis/index.tsx` over the engines'
+pages): a settings page loaded 2.2 MB of entry JavaScript, half of it other pages and recharts. Each
+route now names its page's own file (`ops/settings-version-page.tsx`), what the settings pages share
+is `ops/settings-frame.tsx`, and `ops/page-modules.test.js` walks every database route's imports and
+fails when two routes share a page module or one reaches another's. An index over small shared parts
+(`database/kit`) is not this: every page that imports it uses most of it.
+
 ## The shell
 
 `(dashboard)/layout.tsx` owns `CommandPaletteProvider`, `SelfUpdateProvider`, `NavScopeProvider`,
@@ -756,6 +767,9 @@ series.
   instant; Left/Right and Home/End inspect samples, Escape releases it, and pinned overlays show
   each chart's values without pointer movement changing the instant. The Metrics page adds sample
   controls and a journal History link for the surrounding two-minute window.
+  The component is the chart's frame, in the page at its height from the first render; the recharts
+  tree is `Plot` inside it, drawn once the chart is within 600px of the view, memoised, and held
+  still while out of reach (`plot-held.ts`), so a page of charts pays for the ones on screen.
 - `chart-panel.tsx` — the header/chart/legend shape and the empty state. A series with no numbers anywhere
   in the window is **dropped rather than drawn flat at zero**, which is what makes a kernel without PSI
   say so instead of reporting three healthy zeroes.
@@ -776,3 +790,15 @@ series.
 a pointer crossing a chart fires continuously, and a context above the router would re-render the terminal
 and the log tail on every mousemove. The value is a **timestamp**, not a row index — charts on a page do
 not share a row array.
+
+**A date is printed through a format built once**, on an axis and everywhere else. `toLocaleString`,
+`toLocaleDateString` and `toLocaleTimeString` build a fresh `Intl.DateTimeFormat` on every call that
+carries options (about 75 µs, against 2 µs to ask one that exists), and recharts asks for a label for
+every candidate tick of every render: on Metrics that construction was the largest single cost of the
+page while nobody touched it. `dateFormatter(options)` in `lib/format.ts` builds the format on first
+use and keeps it, rebuilding only when the zone's offset moves under an open tab; the shapes several
+modules print are exported beside it (`clockAt`, `minuteAt`, `dayAt`, `weekdayAt`, `dayMinuteAt`), and
+`timestamp`, `clock`, `clockMinute`, `calendarDate` and `minuteSpan` go through the same. A shape one
+module prints is declared at the top of that module. `eslint.config.mjs` refuses
+`toLocale…String(undefined, { … })` on a date (`no-restricted-syntax`); a named locale with a zone
+known only when it is drawn (a schedule's next run, read in the schedule's own zone) is left alone.

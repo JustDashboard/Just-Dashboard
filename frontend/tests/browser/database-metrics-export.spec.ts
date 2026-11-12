@@ -97,7 +97,12 @@ async function open(page: Page) {
 /** A dialog caught mid-animation shows the page through it. */
 const settled = (dialog: Locator) =>
   dialog.evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished),
+    ),
   )
 
 test.describe("metrics export", () => {

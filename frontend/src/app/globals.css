@@ -619,6 +619,58 @@
   }
 }
 
+/* The pulse on a wire (`ui/animated-beam.tsx`): a band a tenth of the picture
+ * wide crossing it behind a mask cut to the line. Percentages are of the
+ * picture (an SVG element's `transform-box` is its view box), the pass eases
+ * out as the release path's does, and the last sixth is the rest between
+ * passes, spent off the far edge. Transform only, so the compositor runs it
+ * and a page of wires is idle. `-back` is the same pass the other way. */
+@keyframes jd-beam {
+  0% {
+    transform: translateX(10%);
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  83.333%,
+  100% {
+    transform: translateX(110%);
+  }
+}
+
+@keyframes jd-beam-back {
+  0% {
+    transform: translateX(-10%);
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  83.333%,
+  100% {
+    transform: translateX(-110%);
+  }
+}
+
+/* The same pulse on a line that is laid out rather than measured, the update
+ * notice's (`update/update-art.tsx`): the light is two thirds of the line and
+ * crosses it in 1.8 of every 2.3 seconds. */
+@keyframes jd-wire {
+  0% {
+    transform: translateX(-100%);
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  78.26%,
+  100% {
+    transform: translateX(160%);
+  }
+}
+
+/* The band of light along a word that names a wait (`ui/text-shimmer.tsx`). */
+@keyframes jd-shimmer {
+  from {
+    background-position: 100% center;
+  }
+  to {
+    background-position: 0% center;
+  }
+}
+
 @keyframes jd-drill {
   from {
     opacity: 0;

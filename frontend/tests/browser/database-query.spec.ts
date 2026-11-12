@@ -2492,7 +2492,12 @@ async function openPlanTab(page: Page, sql: string) {
 
 async function settled(dialog: ReturnType<Page["getByRole"]>) {
   await dialog.evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished),
+    ),
   )
 }
 

@@ -360,7 +360,14 @@ async function writeBody(page: Page, dialog: Locator, text: string) {
 }
 
 const settle = (dialog: Locator) =>
-  dialog.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)))
+  dialog.evaluate((el) =>
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
+  )
 
 /* -------------------------------------------------------------- functions */
 

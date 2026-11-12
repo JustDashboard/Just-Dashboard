@@ -1,4 +1,4 @@
-import { bytes, duration, percent, plural } from "@/lib/format"
+import { bytes, clockAt, duration, percent, plural } from "@/lib/format"
 import { utilisationTone } from "@/components/meter"
 import type { Tone } from "@/components/tone"
 import type { EngineNouns } from "@/components/database/engine"
@@ -117,10 +117,7 @@ export function composition(
  * drawn as if it were now is the one thing a live tile must not do.
  */
 export function staled(readings: Reading[], at: number | undefined): Reading[] {
-  const when =
-    at === undefined
-      ? "Not updating"
-      : `as of ${new Date(at).toLocaleTimeString(undefined, { hour12: false })} · not updating`
+  const when = at === undefined ? "Not updating" : `as of ${clockAt(at)} · not updating`
   return readings.map((reading) =>
     reading.value === undefined ? reading : { ...reading, stale: true, hint: when },
   )

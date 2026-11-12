@@ -4,6 +4,7 @@ import { answerSystemUsers } from "./system-users-fixture"
 import { mockProject } from "./deploy-fixture"
 import { overview as remoteDesktopOverview } from "./remote-desktop-fixture"
 import { busyMap } from "./server-map-fixture"
+import { risen } from "./risen"
 
 /**
  * The design system's rules, checked in a browser rather than in a document.
@@ -593,6 +594,8 @@ test("a centred row sets every item's text on its centre line", async ({ page })
   for (const path of SURFACES) {
     await page.goto(path)
     await page.waitForLoadState("networkidle")
+    // A figure that has just landed is four pixels into its rise, and off any line.
+    await risen(page)
     expect(await offCentreText(page), `text off its row's centre line on ${path}`).toEqual([])
   }
 })
@@ -678,6 +681,76 @@ test("reduced motion is honoured globally", async ({ page }) => {
     return bad
   })
   expect(moving, "animations still running under prefers-reduced-motion").toEqual([])
+})
+
+/**
+ * §11: a wire's pulse says *live* for as long as its page is open, which on a
+ * dashboard is all day. So it is the browser's own animation of `transform`,
+ * which runs off the main thread, and no script's: until 0.8.6 a JavaScript
+ * frame loop rewrote a gradient sixty times a second on every page with a
+ * wire on it, and a page that looked still was never idle. The page here has
+ * wires pulsing and asks for no animation frames at all.
+ */
+test("a wire pulses as the browser's animation, and its page asks for no frames", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const counted = window as unknown as { frames: number }
+    counted.frames = 0
+    const request = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = (callback) => {
+      counted.frames++
+      return request(callback)
+    }
+  })
+  await mockShell(page)
+  // A session seen this minute: its line to the account is one that pulses.
+  const seen = new Date().toISOString()
+  await page.route("**/api/v1/account/sessions", (route) =>
+    json(route, [
+      {
+        id: "session-1",
+        userId: 1,
+        authMethod: "passkey",
+        twoFactorPassed: true,
+        ip: "100.64.0.7",
+        userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/141.0 Safari/537.36",
+        createdAt: seen,
+        lastSeenAt: seen,
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        current: true,
+      },
+    ]),
+  )
+  await page.goto("/account")
+  const pulse = page.locator("[data-slot=beam-pulse] rect").first()
+  await expect(pulse).toBeAttached()
+  const moves = await pulse.evaluate((band) =>
+    band.getAnimations().map((pass) => ({
+      name: (pass as CSSAnimation).animationName,
+      endless: pass.effect?.getComputedTiming().iterations === Infinity,
+      moves: [
+        ...new Set(
+          (pass.effect as KeyframeEffect)
+            .getKeyframes()
+            .flatMap((frame) => Object.keys(frame))
+            .filter((key) => !["offset", "computedOffset", "easing", "composite"].includes(key)),
+        ),
+      ],
+    })),
+  )
+  expect(moves).toEqual([{ name: "jd-beam", endless: true, moves: ["transform"] }])
+
+  // What arrives with the page (a rise, a figure counting up) has arrived.
+  await risen(page)
+  await page.waitForTimeout(1500)
+  await page.evaluate(() => {
+    ;(window as unknown as { frames: number }).frames = 0
+  })
+  await page.waitForTimeout(1000)
+  const frames = await page.evaluate(() => (window as unknown as { frames: number }).frames)
+  // The loop asked for sixty a second. A poll landing in the second may ask for a few.
+  expect(frames, "animation frames asked for in an idle second").toBeLessThan(10)
 })
 
 /**
