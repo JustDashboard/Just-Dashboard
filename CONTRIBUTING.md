@@ -204,7 +204,8 @@ never into `docs/audits/`.
   Browser specs do not pass through Caddy; `src/lib/passkeys.test.js` reads `deploy/Caddyfile` to hold
   its `Permissions-Policy` to allowing passkeys.
 - Installer and terminal-admin changes also run `python3 scripts/test_manage.py`,
-  `python3 scripts/test_preflight.py`, `python3 scripts/test_build_stamp.py` and
+  `python3 scripts/test_preflight.py`, `python3 scripts/test_build_stamp.py`,
+  `python3 scripts/test_install_dependencies.py`, `python3 scripts/test_dotenv.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.
 - **`bun run build` is the final frontend type-check gate.** `frontend/Dockerfile`
@@ -970,7 +971,10 @@ the editor), `database-explain.spec.ts` (the Plan tree's measured, estimated and
 editor, its answers streamed by the mock, and Ask from another page),
 `database-schema.spec.ts`, `database-programs.spec.ts` (functions, procedures and triggers), `database-rls.spec.ts` (row-level
 security, the role test, and function and column grants), `database-redis.spec.ts`, `database-mongo.spec.ts`,
-`database-performance.spec.ts` and `database-logos.spec.ts`.
+`database-performance.spec.ts` and `database-logos.spec.ts`, and the rest of the areas' own:
+`database-alerts`, `-creation`, `-extensions`, `-import`, `-metrics-export`, `-operate`, `-pitr`,
+`-pooling`, `-provisioning-catalogue`, `-reach`, `-resources`, `-seed`, `-statements-setup`, `-tls` and
+`-upgrade.spec.ts`.
 `scripts/test-changed.sh` picks the ones a change can reach: it follows a
 changed file through its imports to the pages that use it and runs the specs
 that name those pages' addresses. A generator's file reaches the Generate page
