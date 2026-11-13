@@ -13,7 +13,7 @@ pane shortcuts, tab switching, fullscreen and a narrow viewport are covered by b
 
 ## Recorded proof
 
-The [2-minute-40-second recording](native-pty-proof.webm) uses the production frontend and real held
+The [2-minute-40-second recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/native-pty-proof.webm) uses the production frontend and real held
 PTYs with fixture agent commands. It shows a live `cd`, both exact launch commands, nested splits,
 pointer and keyboard resizing, pane focus and typed input, fullscreen and a narrow viewport.
 Kernel PTY rows/columns must match every visible emulator after each completed resize, and every
@@ -22,12 +22,12 @@ captures are fixtures; they do not show an authenticated Codex or Claude coding 
 
 | Check | Capture |
 | --- | --- |
-| Supplied original toolbar | [Before](before-toolbar.png) |
-| Launch flags and live directory | [Codex](native-codex-fixture-agent.png), [Claude](native-claude-fixture-agent.png) |
-| Three independent PTYs | [Initial split](native-three-pty-splits.png), [Resized](native-resized-splits.png) |
-| Display during a held pointer drag | [Width](native-drag-width.png), [Height](native-drag-height.png) |
-| Input sent to the selected pane | [Focused input](native-focused-input.png) |
-| Different viewport sizes | [Fullscreen](native-fullscreen.png), [Phone](native-mobile.png) |
+| Supplied original toolbar | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/before-toolbar.png) |
+| Launch flags and live directory | [Codex](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/native-codex-fixture-agent.png), [Claude](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/native-claude-fixture-agent.png) |
+| Three independent PTYs | [Initial split](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/native-three-pty-splits.png), [Resized](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/native-resized-splits.png) |
+| Display during a held pointer drag | [Width](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/native-drag-width.png), [Height](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/native-drag-height.png) |
+| Input sent to the selected pane | [Focused input](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/native-focused-input.png) |
+| Different viewport sizes | [Fullscreen](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/native-fullscreen.png), [Phone](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/native-mobile.png) |
 
 Controlled pane fitting now runs in a layout effect: the separate fit animation frame could clear
 WebGL after xterm painted during dragging. Recorded samples at 45/60 seconds during width changes

@@ -97,13 +97,13 @@ attention rows and their controls.
 
 | Evidence | Artifact |
 | --- | --- |
-| Before, database Home at 1280 | [Screenshot](database-before-1280.png) |
-| After, database Home at 1280 / 1720 / 390 | [1280](database-after-1280.png), [1720](database-after-1720.png), [390](database-after-390.png) |
-| Attention rows at 1280 / 1720 / 390 | [1280](attention-after-1280.png), [1720](attention-after-1720.png), [390](attention-after-390.png) |
-| Docker priority findings at 1280 / 1720 | [1280](docker-after-1280.png), [1720](docker-after-1720.png) |
-| Deployment findings at 1280 / 1720 | [1280](deployment-after-1280.png), [1720](deployment-after-1720.png) |
-| Proxy priority findings at 1280 / 1720 | [1280](proxy-after-1280.png), [1720](proxy-after-1720.png) |
-| Review a statement, return, open this database's Backups | [Interaction recording](finding-actions.webm) |
+| Before, database Home at 1280 | [Screenshot](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/database-before-1280.png) |
+| After, database Home at 1280 / 1720 / 390 | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/database-after-1280.png), [1720](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/database-after-1720.png), [390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/database-after-390.png) |
+| Attention rows at 1280 / 1720 / 390 | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/attention-after-1280.png), [1720](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/attention-after-1720.png), [390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/attention-after-390.png) |
+| Docker priority findings at 1280 / 1720 | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/docker-after-1280.png), [1720](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/docker-after-1720.png) |
+| Deployment findings at 1280 / 1720 | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/deployment-after-1280.png), [1720](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/deployment-after-1720.png) |
+| Proxy priority findings at 1280 / 1720 | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/proxy-after-1280.png), [1720](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/proxy-after-1720.png) |
+| Review a statement, return, open this database's Backups | [Interaction recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-actionable-findings/finding-actions.webm) |
 
 Browser checks mock server responses. They verify the offered controls and requests; they do not
 perform mutations on a live operator's server.

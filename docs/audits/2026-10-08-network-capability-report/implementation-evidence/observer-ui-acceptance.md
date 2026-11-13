@@ -50,11 +50,11 @@ JD_BROWSER_BASE_URL=http://127.0.0.1:43136 bunx playwright test \
 ## Visual inspection and boundaries
 
 The observer overview and expanded quality were inspected at
-[390 px](kernel-observer-quality-390.png), [1280 px](kernel-observer-quality-1280.png) and
-[1720 px](kernel-observer-quality-1720.png). Long cgroup identities and decimal counters remain
+[390 px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/kernel-observer-quality-390.png), [1280 px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/kernel-observer-quality-1280.png) and
+[1720 px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/kernel-observer-quality-1720.png). Long cgroup identities and decimal counters remain
 contained; the phone layout stacks controls and quality, and desktop readings use the available
-width. The ordinary overview captures are [390 px](kernel-observer-390.png),
-[1280 px](kernel-observer-1280.png) and [1720 px](kernel-observer-1720.png).
+width. The ordinary overview captures are [390 px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/kernel-observer-390.png),
+[1280 px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/kernel-observer-1280.png) and [1720 px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/kernel-observer-1720.png).
 
 Browser fixtures establish rendered behavior and submitted requests, using simulated private API
 responses. They do not establish kernel attachment, coverage, attribution or overhead. Those have

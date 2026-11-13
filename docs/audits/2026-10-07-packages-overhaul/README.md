@@ -36,18 +36,18 @@ was changed during validation.
 
 | Surface | Before | After |
 | --- | --- | --- |
-| Page, 1440 | [Before](before-page-1440.png) | [After](after-page-1440.png) |
-| Page, 1280 | [Before](before-page-1280.png) | [After](after-page-1280.png) |
-| Page, phone | [Before](before-page-390.png) | [After](after-page-390.png) |
-| Package sheet, 1440 | [Before](before-sheet-1440.png) | [After](after-sheet-1440.png) |
-| Package sheet, phone | [Before](before-sheet-390.png) | [After](after-sheet-390.png) |
-| Updates | [Before](before-updates.png) | [After](after-updates.png) |
-| Catalogue | [Before](before-catalogue.png) | [After](after-catalogue.png) |
-| Search results | [Before](before-search.png) | [After](after-search.png) |
+| Page, 1440 | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/before-page-1440.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-page-1440.png) |
+| Page, 1280 | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/before-page-1280.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-page-1280.png) |
+| Page, phone | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/before-page-390.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-page-390.png) |
+| Package sheet, 1440 | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/before-sheet-1440.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-sheet-1440.png) |
+| Package sheet, phone | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/before-sheet-390.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-sheet-390.png) |
+| Updates | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/before-updates.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-updates.png) |
+| Catalogue | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/before-catalogue.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-catalogue.png) |
+| Search results | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/before-search.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-search.png) |
 
-Also recorded: [1720-wide page](after-page-1720.png), [software filter](after-software-filter.png),
-[phone inventory](after-table-phone.png), [removal confirmation](after-confirmation.png), and
-[workspace interaction recording](workspace.webm).
+Also recorded: [1720-wide page](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-page-1720.png), [software filter](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-software-filter.png),
+[phone inventory](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-table-phone.png), [removal confirmation](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/after-confirmation.png), and
+[workspace interaction recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-packages-overhaul/workspace.webm).
 
 Capture screenshots and the recording against a running production build:
 

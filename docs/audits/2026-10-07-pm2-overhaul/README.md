@@ -1,8 +1,8 @@
 # PM2 overhaul and merge verification
 
 The screenshots in this directory record the PM2 redesign in PR #165, including
-[the page](after-page-1440.png), [an application](after-sheet-api-1440.png), and
-[the start dialog](after-start-1440.png).
+[the page](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-pm2-overhaul/after-page-1440.png), [an application](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-pm2-overhaul/after-sheet-api-1440.png), and
+[the start dialog](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-pm2-overhaul/after-start-1440.png).
 
 ## Files history regression
 
@@ -17,8 +17,8 @@ rows can belong to the previous folder. Pure tests cover router rewrites, anothe
 marker replacement and clearing. The production build and five consecutive runs of the existing
 browser history test passed.
 
-[Before interaction replay](files-history-before.trace.zip) ·
-[After interaction replay](files-history-after.trace.zip)
+[Before interaction replay](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-pm2-overhaul/files-history-before.trace.zip) ·
+[After interaction replay](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-pm2-overhaul/files-history-after.trace.zip)
 
 Both recordings use the mocked Files API and its fictitious `/home/operator` inventory. They cover
 opening a folder, its parent, native Back, reload, and toolbar and keyboard Back/Forward. Open a replay

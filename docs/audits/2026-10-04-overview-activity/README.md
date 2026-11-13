@@ -7,9 +7,9 @@ identifiers and targets are fixture data; these captures contain no live server 
 
 | Viewport | Before | After |
 | --- | --- | --- |
-| 1720px | [Before](before-1720.png) | [After](after-1720.png) |
-| 1280px | [Before](before-1280.png) | [After](after-1280.png) |
-| 390px | — | [After](after-390.png) |
+| 1720px | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-overview-activity/before-1720.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-overview-activity/after-1720.png) |
+| 1280px | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-overview-activity/before-1280.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-overview-activity/after-1280.png) |
+| 390px | — | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-overview-activity/after-390.png) |
 
 Both desktop panels retain their original 421px height. The list scrolls to the remaining backup and
 reboot events. Full-page captures were also inspected at both desktop widths; the processes and

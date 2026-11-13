@@ -26,7 +26,7 @@ The screenshot uses the browser suite's **mocked API**, served by this worktree'
 It verifies that the fleet no longer offers **Import existing** and points **See what is already
 running** to Docker stacks. It is not live-server adoption evidence.
 
-![Fleet after removing existing-workload import](fleet-without-import.png)
+![Fleet after removing existing-workload import](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-05-revert-deployment-import/fleet-without-import.png)
 
 ## Verification
 

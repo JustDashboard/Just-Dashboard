@@ -6,7 +6,7 @@ on screen, and only then scrolls its rows. Every `Table` in the product gets thi
 `ui/table.tsx`; see the shell notes in
 [`docs/internal/frontend/shell-design.md`](../../internal/frontend/shell-design.md).
 
-[Recording (MP4, 28 s)](processes-table-reveal.mp4) · [Inline GIF](processes-table-reveal.gif)
+[Recording (MP4, 28 s)](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-05-table-scroll-reveal/processes-table-reveal.mp4) · [Inline GIF](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-05-table-scroll-reveal/processes-table-reveal.gif)
 
 The recording runs on `/processes` at 1280×800 against this branch's production build with the
 labelled API fixtures from `frontend/tests/browser/processes-ui.spec.ts` (80 mocked processes). The

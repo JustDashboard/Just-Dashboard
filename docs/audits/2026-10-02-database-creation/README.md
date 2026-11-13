@@ -8,13 +8,13 @@ Retries continue the container that was already created.
 
 Screenshots use mocked API responses and production builds. Before is commit `2fe48306`; after is this
 change. Settings and progress were inspected on both pages at 1280, 1720 and 390 pixels wide. These are
-representative captures; the animation itself is demonstrated by [the recording](creation.webm).
+representative captures; the animation itself is demonstrated by [the recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-database-creation/creation.webm).
 
 | View | Before | After |
 | --- | --- | --- |
-| Deploy's creation form | [Settings](before-deploy-1280.png) | [Settings](after-deploy-1280.png) |
-| Databases startup | [Progress](before-databases-progress-1280.png) | [Progress](after-databases-progress-1280.png) |
-| Deploy startup | — | [Desktop](after-deploy-progress-1280.png), [Phone](after-deploy-progress-390.png) |
+| Deploy's creation form | [Settings](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-database-creation/before-deploy-1280.png) | [Settings](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-database-creation/after-deploy-1280.png) |
+| Databases startup | [Progress](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-database-creation/before-databases-progress-1280.png) | [Progress](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-database-creation/after-databases-progress-1280.png) |
+| Deploy startup | — | [Desktop](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-database-creation/after-deploy-progress-1280.png), [Phone](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-database-creation/after-deploy-progress-390.png) |
 
 Verification includes `bun run build`, `scripts/test-changed.sh patch/0.7.1`, and browser coverage in
 `database-creation.spec.ts` for both pages: full form submissions, API-driven stages, a failed first-boot

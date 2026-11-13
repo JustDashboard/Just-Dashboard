@@ -29,18 +29,18 @@ JD_BROWSER_BASE_URL=http://127.0.0.1:<port> bun docs/audits/2026-10-11-log-filte
 
 | | Before | After |
 | --- | --- | --- |
-| `/logs`, Live | ![](before-logs-live-1440.png) | ![](after-logs-live-1440.png) |
-| `/logs`, History | ![](before-logs-history-1440.png) | ![](after-logs-history-1440.png) |
-| `/logs`, Insights | ![](before-logs-insights-1440.png) | ![](after-logs-insights-1440.png) |
-| Deployment Insights | ![](before-deploy-insights-1440.png) | ![](after-deploy-insights-1440.png) |
-| Phone, History | ![](before-logs-history-390.png) | ![](after-logs-history-390.png) |
-| Phone, deployment Insights | ![](before-deploy-insights-390.png) | ![](after-deploy-insights-390.png) |
+| `/logs`, Live | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/before-logs-live-1440.png) | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-logs-live-1440.png) |
+| `/logs`, History | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/before-logs-history-1440.png) | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-logs-history-1440.png) |
+| `/logs`, Insights | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/before-logs-insights-1440.png) | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-logs-insights-1440.png) |
+| Deployment Insights | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/before-deploy-insights-1440.png) | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-deploy-insights-1440.png) |
+| Phone, History | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/before-logs-history-390.png) | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-logs-history-390.png) |
+| Phone, deployment Insights | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/before-deploy-insights-390.png) | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-deploy-insights-390.png) |
 
-After only: [the time window](after-logs-window-1440.png), [Options](after-logs-options-1440.png),
-[errors narrowed](after-logs-errors-1440.png), [the visitors' breakdowns](after-deploy-visitors-1440.png),
-[the most active visitors](after-deploy-people-1440.png), [the lists under them](after-deploy-lists-1440.png)
-[the DNS page's new log](after-network-dns-log-1440.png), and the scanners notice laid out as ranked
-lists ([wide](after-scanners-1440.png), [phone](after-scanners-390.png)).
+After only: [the time window](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-logs-window-1440.png), [Options](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-logs-options-1440.png),
+[errors narrowed](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-logs-errors-1440.png), [the visitors' breakdowns](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-deploy-visitors-1440.png),
+[the most active visitors](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-deploy-people-1440.png), [the lists under them](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-deploy-lists-1440.png)
+[the DNS page's new log](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-network-dns-log-1440.png), and the scanners notice laid out as ranked
+lists ([wide](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-scanners-1440.png), [phone](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-11-log-filters-insights/after-scanners-390.png)).
 
 ## Per-page log sources
 

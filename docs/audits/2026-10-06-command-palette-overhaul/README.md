@@ -44,13 +44,13 @@ Production build of this branch against the labelled API fixtures in
 
 | | Before | After |
 | --- | --- | --- |
-| Opened with no search | ![](before-empty.png) | ![](after-empty.png) |
-| `shop` across every kind | ![](before-shop.png) | ![](after-shop.png) |
-| `container:` scope | ![](before-containers.png) | ![](after-containers.png) |
-| Pages for `proc` | ![](before-pages.png) | ![](after-pages.png) |
-| Phone, 390 × 844 | ![](before-phone.png) | ![](after-phone.png) |
+| Opened with no search | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-command-palette-overhaul/before-empty.png) | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-command-palette-overhaul/after-empty.png) |
+| `shop` across every kind | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-command-palette-overhaul/before-shop.png) | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-command-palette-overhaul/after-shop.png) |
+| `container:` scope | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-command-palette-overhaul/before-containers.png) | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-command-palette-overhaul/after-containers.png) |
+| Pages for `proc` | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-command-palette-overhaul/before-pages.png) | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-command-palette-overhaul/after-pages.png) |
+| Phone, 390 × 844 | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-command-palette-overhaul/before-phone.png) | ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-command-palette-overhaul/after-phone.png) |
 
-A repository and what shares its folder: ![](after-connected.png)
+A repository and what shares its folder: ![](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-command-palette-overhaul/after-connected.png)
 
 ## Verification
 

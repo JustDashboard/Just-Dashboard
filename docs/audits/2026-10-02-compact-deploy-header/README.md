@@ -17,10 +17,10 @@ The page's own content starts 110 pixels higher at 1440 and 115 pixels higher at
 
 | View | Before | After |
 | --- | --- | --- |
-| Logs, 1440 | [before](before-logs-desktop.png) | [after](after-logs-desktop.png) |
-| Overview, 1440 | [before](before-overview-desktop.png) | [after](after-overview-desktop.png) |
-| Run in flight, 1440 | [before](before-deploying-desktop.png) | [after](after-deploying-desktop.png) |
-| Logs, 390 | [before](before-logs-phone.png) | [after](after-logs-phone.png) |
+| Logs, 1440 | [before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-compact-deploy-header/before-logs-desktop.png) | [after](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-compact-deploy-header/after-logs-desktop.png) |
+| Overview, 1440 | [before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-compact-deploy-header/before-overview-desktop.png) | [after](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-compact-deploy-header/after-overview-desktop.png) |
+| Run in flight, 1440 | [before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-compact-deploy-header/before-deploying-desktop.png) | [after](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-compact-deploy-header/after-deploying-desktop.png) |
+| Logs, 390 | [before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-compact-deploy-header/before-logs-phone.png) | [after](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-compact-deploy-header/after-logs-phone.png) |
 
 Captures use the browser fixture's showcase project (`mockProject(page, { showcase: true })`).
 `frontend/tests/browser/deploy-header.spec.ts` holds the header to 64 pixels at 1280 and 1720,

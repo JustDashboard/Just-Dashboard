@@ -6,15 +6,15 @@ storage rules are in [the interaction contract](../../internal/frontend/workspac
 
 ## Proof
 
-- [Packages recording](packages.webm): arrows and Enter inspect a package; Back closes its sheet and
+- [Packages recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-03-workspace-interactions/packages.webm): arrows and Enter inspect a package; Back closes its sheet and
   restores the row; local Find, Escape, shortcut help and the command palette keep the page's context.
-- [Metrics recording](metrics.webm): keyboard pinning, adjacent samples, a journal handoff, mouse
+- [Metrics recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-03-workspace-interactions/metrics.webm): keyboard pinning, adjacent samples, a journal handoff, mouse
   pinning that survives pointer leave, and explicit release.
-- [Phone Audit recording](audit-phone.webm): visible row navigation, help, dismissal, local Find and
+- [Phone Audit recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-03-workspace-interactions/audit-phone.webm): visible row navigation, help, dismissal, local Find and
   typing in the filter without invoking page shortcuts.
-- [Package inspector](package-inspector.png) and [shortcut reference](package-shortcuts.png).
-- [Shared pinned readings](metrics-pinned.png).
-- [Phone Audit row focus](audit-phone.png), 390×844 with reduced motion.
+- [Package inspector](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-03-workspace-interactions/package-inspector.png) and [shortcut reference](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-03-workspace-interactions/package-shortcuts.png).
+- [Shared pinned readings](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-03-workspace-interactions/metrics-pinned.png).
+- [Phone Audit row focus](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-03-workspace-interactions/audit-phone.png), 390×844 with reduced motion.
 
 Captures use synthetic API fixtures against the task worktree's production build. They contain no
 operator data. Chromium on Linux exercises browser history directly; physical mouse side buttons and

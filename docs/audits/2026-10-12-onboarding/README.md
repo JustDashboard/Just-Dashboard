@@ -5,10 +5,10 @@
 > dashboard*. The sections screen is gone from the first sign-in (Account → Workspace keeps it), and
 > Workspace's rail preview lost its label. This audit describes 0.7.3; the current design is in
 > [`shell-design.md`](../../internal/frontend/shell-design.md#the-first-run-question). Screenshots:
-> [question at 1280](0.7.4-question-1280.png), [at 390](0.7.4-question-390.png),
-> [answer at 1280](0.7.4-answer-1280.png), [1720 with three](0.7.4-answer-1720.png),
-> [390](0.7.4-answer-390.png), [Workspace](0.7.4-workspace-1280.png); the walk as
-> `frontend/scripts/record-onboarding.ts` now records it: [0.7.4-onboarding.webm](0.7.4-onboarding.webm).
+> [question at 1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-question-1280.png), [at 390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-question-390.png),
+> [answer at 1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-answer-1280.png), [1720 with three](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-answer-1720.png),
+> [390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-answer-390.png), [Workspace](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-workspace-1280.png); the walk as
+> `frontend/scripts/record-onboarding.ts` now records it: [0.7.4-onboarding.webm](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/0.7.4-onboarding.webm).
 
 The operator asked for an onboarding step after sign-in that learns what an account uses the
 dashboard for and gives it only the pages it needs. They also warned that many pages have buttons
@@ -72,14 +72,14 @@ The answer is stored on the account, not in the browser, so it follows the perso
 
 | What | Where |
 | --- | --- |
-| The whole walk: sign-in, the three steps, the dashboard, a project's domain opening the hidden proxy, search, Workspace — recorded before sign-in and the three steps were redrawn | [Recording (mp4)](onboarding.mp4) · [GIF](onboarding.gif) |
-| Sign-in, its code step, and a forced password change on a phone | [1280](sign-in-1280.png), [390](sign-in-390.png), [code at 1280](sign-in-code-1280.png), [new password at 390](sign-in-new-password-390.png) |
-| Step 1 at 1280 / 1720 / 390 | [1280](purpose-1280.png), [1720](purpose-1720.png), [390](purpose-390.png) |
-| Step 2, section tiles beside the preview, at 1280 / 1720 / 390 | [1280](sidebar-1280.png), [1720](sidebar-1720.png), [390](sidebar-390.png) |
-| Step 3 at 1280 / 390 | [1280](ready-1280.png), [390](ready-390.png) |
-| The Overview with Proxy, Network, Security and the rest hidden | [1280](overview-1280.png) |
-| A deployment's domain opening the hidden proxy, the rail's note | [1280](hidden-section-1280.png), [1720](hidden-section-1720.png) |
-| Account → Workspace | [1280](workspace-1280.png), [1720](workspace-1720.png) |
+| The whole walk: sign-in, the three steps, the dashboard, a project's domain opening the hidden proxy, search, Workspace — recorded before sign-in and the three steps were redrawn | [Recording (mp4)](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/onboarding.mp4) · [GIF](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/onboarding.gif) |
+| Sign-in, its code step, and a forced password change on a phone | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/sign-in-1280.png), [390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/sign-in-390.png), [code at 1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/sign-in-code-1280.png), [new password at 390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/sign-in-new-password-390.png) |
+| Step 1 at 1280 / 1720 / 390 | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/purpose-1280.png), [1720](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/purpose-1720.png), [390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/purpose-390.png) |
+| Step 2, section tiles beside the preview, at 1280 / 1720 / 390 | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/sidebar-1280.png), [1720](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/sidebar-1720.png), [390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/sidebar-390.png) |
+| Step 3 at 1280 / 390 | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/ready-1280.png), [390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/ready-390.png) |
+| The Overview with Proxy, Network, Security and the rest hidden | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/overview-1280.png) |
+| A deployment's domain opening the hidden proxy, the rail's note | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/hidden-section-1280.png), [1720](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/hidden-section-1720.png) |
+| Account → Workspace | [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/workspace-1280.png), [1720](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-12-onboarding/workspace-1720.png) |
 
 `frontend/scripts/record-onboarding.ts` records the walk and the 1280 screenshots against the
 browser fixture (`tests/browser/onboarding-fixture.ts`). The sign-in and step screenshots were

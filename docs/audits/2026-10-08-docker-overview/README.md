@@ -6,14 +6,14 @@ The screenshots in this directory record the `/docker` overview before and after
 
 ## Before
 
-[The page](before-page-1440.png) opened on four tiles — running, runtime health, attention and
+[The page](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-overview/before-page-1440.png) opened on four tiles — running, runtime health, attention and
 compose stacks — over a list of the containers that were not running, the attention list and the
 compose projects. Nothing on it moved, the containers that were running were not on it at all, and
 nothing said which container was using the machine or what had just happened.
 
 ## After
 
-[The page](after-page-1440.png) opens on Docker's identity line: its version, the host, the storage
+[The page](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-overview/after-page-1440.png) opens on Docker's identity line: its version, the host, the storage
 driver and cgroup version, the running containers, the compose projects up and the images, with two
 verdicts at its end — the containers failing, which narrows the table to them, and the attention
 issues, which goes to the list. Under it:
@@ -29,8 +29,8 @@ issues, which goes to the list. Under it:
   and health or how it stopped (*killed for memory* rather than a bare 137), its last hour of CPU as
   a sparkline beside the live figure, memory against its limit or the heaviest, its published ports
   and its verbs. Failing containers come first. State chips count and narrow; project chips narrow.
-  [Pressing the failing verdict](after-failing-1440.png) narrows the table to those containers.
-  [On a phone](after-page-phone.png) each row is drawn down rather than across, with nothing dropped.
+  [Pressing the failing verdict](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-overview/after-failing-1440.png) narrows the table to those containers.
+  [On a phone](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-overview/after-page-phone.png) each row is drawn down rather than across, with nothing dropped.
 - **Attention**, unchanged, then the **compose projects** as lit cards, each with its services as a
   strip of their states, beside **Disk**.
 

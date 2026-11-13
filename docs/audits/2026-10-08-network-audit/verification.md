@@ -45,10 +45,10 @@ browser suite and `go test ./...` were not run, per the contributor workflow.
 
 ## UI review artifacts
 
-A [21-second recording](review/network-controls.webm) and screenshots show the final forms:
-[route preferred source](review/routing-preferred-source.png),
-[policy outgoing interface/note](review/routing-outgoing-interface-note.png), and
-[DNS fallback/cache confirmation](review/dns-fallback-cache-confirmation.png).
+A [21-second recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-audit/review/network-controls.webm) and screenshots show the final forms:
+[route preferred source](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-audit/review/routing-preferred-source.png),
+[policy outgoing interface/note](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-audit/review/routing-outgoing-interface-note.png), and
+[DNS fallback/cache confirmation](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-audit/review/dns-fallback-cache-confirmation.png).
 All three screenshots were inspected at original size without clipped fields/buttons. The
 [recording metadata](review/review-metadata.json) includes the source revision and exact intercepted
 API payloads. These use the existing network fixtures on the final production frontend; no host write

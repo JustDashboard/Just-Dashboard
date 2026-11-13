@@ -197,10 +197,10 @@ namespaces; after each run no `jdt*` namespace and no host WireGuard link remain
 ### Screenshots
 
 Captured from the same production build with the maturity fixture (settled after the sheet's
-entry animation): [VPN page, 1440](network-vpn-maturity/vpn-page-1440.png),
-[site sheet, 390](network-vpn-maturity/vpn-site-sheet-390.png),
-[budget and history, 1440](network-vpn-maturity/vpn-site-budget-1440.png) and
-[tunnel history, 1440](network-vpn-maturity/vpn-tunnel-history-1440.png).
+entry animation): [VPN page, 1440](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-vpn-maturity/vpn-page-1440.png),
+[site sheet, 390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-vpn-maturity/vpn-site-sheet-390.png),
+[budget and history, 1440](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-vpn-maturity/vpn-site-budget-1440.png) and
+[tunnel history, 1440](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-vpn-maturity/vpn-tunnel-history-1440.png).
 
 ## Proposed ledger statuses
 

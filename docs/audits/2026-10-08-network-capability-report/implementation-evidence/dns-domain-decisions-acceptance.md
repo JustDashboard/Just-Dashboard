@@ -22,10 +22,10 @@ TMP entries.
 
 | Check | Wrapper / test time | Evidence |
 | --- | --- | --- |
-| Required changed-file gate against `17aeaae3` | 8.178s / DNS 0.748s | [raw](dns-domain-decisions/required.log.raw.gz), [result](dns-domain-decisions/required.result.json) |
-| Focused decision/helper race selection | 14.812s / 10.004s + 1.018s | [raw](dns-domain-decisions/focused-race.log.raw.gz), [result](dns-domain-decisions/focused-race.result.json) |
-| Pi-hole FTL 6.7.1, 186 questions | 95.588s / 94.56s | [raw](dns-domain-decisions/native-pihole.log.raw.gz), [result](dns-domain-decisions/native-pihole.result.json) |
-| AdGuard Home 0.107.71, 184 questions | 79.426s / 78.39s | [raw](dns-domain-decisions/native-adguard.log.raw.gz), [result](dns-domain-decisions/native-adguard.result.json) |
+| Required changed-file gate against `17aeaae3` | 8.178s / DNS 0.748s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-domain-decisions/required.log.raw.gz), [result](dns-domain-decisions/required.result.json) |
+| Focused decision/helper race selection | 14.812s / 10.004s + 1.018s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-domain-decisions/focused-race.log.raw.gz), [result](dns-domain-decisions/focused-race.result.json) |
+| Pi-hole FTL 6.7.1, 186 questions | 95.588s / 94.56s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-domain-decisions/native-pihole.log.raw.gz), [result](dns-domain-decisions/native-pihole.result.json) |
+| AdGuard Home 0.107.71, 184 questions | 79.426s / 78.39s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-domain-decisions/native-adguard.log.raw.gz), [result](dns-domain-decisions/native-adguard.result.json) |
 
 Each engine's two current-phase native history reads corroborated the selected allow and deny
 rules for A and AAAA. AdGuard retained its plain-DNS encryption marker; Pi-hole does not report
@@ -39,14 +39,14 @@ The parent fixture's last attempt, at `053f0951`, failed after the owned restart
 post-restart questions was refused before exec. Its receipts show Moby gave the restarted engine a
 fresh endpoint ID, MAC and PID while every other captured identity, including the IPv4 target,
 the sidecar and the two-endpoint roster, was unchanged
-([raw](dns-domain-decisions/restart-diagnostic-adguard-failed.log.raw.gz),
+([raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-domain-decisions/restart-diagnostic-adguard-failed.log.raw.gz),
 [result](dns-domain-decisions/restart-diagnostic-adguard-failed.result.json)). Source `17aeaae3`
 admits exactly that one transition after the fixture's own restart. Nine pure cases refuse an
 unchanged PID, changed engine IPv4, malformed or split MAC, changed configuration, restarted or
 changed client, extra endpoint, and later endpoint drift.
 
-With that source, AdGuard passed ([raw](dns-domain-decisions/superseded-invalid-adguard-pass.log.raw.gz))
-but Pi-hole's first question failed ([raw](dns-domain-decisions/superseded-invalid-pihole-failed.log.raw.gz)).
+With that source, AdGuard passed ([raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-domain-decisions/superseded-invalid-adguard-pass.log.raw.gz))
+but Pi-hole's first question failed ([raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-domain-decisions/superseded-invalid-pihole-failed.log.raw.gz)).
 Pinned FTL always generates `server=/invalid/`, so it answered the `.invalid` fixture names locally
 and never asked the helper. Source `8301171b` uses reserved `.example` names, which RFC 6761 tells
 caching resolvers to forward normally. The `17aeaae3` AdGuard pass is superseded rather than

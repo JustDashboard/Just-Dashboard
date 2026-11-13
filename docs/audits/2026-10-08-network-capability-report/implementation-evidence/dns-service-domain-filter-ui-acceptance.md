@@ -68,9 +68,9 @@ for the actual sheet rectangle to settle within the viewport and require interna
 overflow of at most one pixel. The [12 captures](dns-service-domain-filter-ui/screenshots.json)
 include six visually inspected examples: both phone forms and reviews and both wide reviews.
 Long fingerprints wrap; vertical scrolling remains available. Examples are the
-[Pi-hole phone form](dns-service-domain-filter-ui/domain-filter-form-pihole-390.png),
-[AdGuard phone review](dns-service-domain-filter-ui/domain-filter-review-adguard-390.png) and
-[wide Pi-hole review](dns-service-domain-filter-ui/domain-filter-review-pihole-1720.png).
+[Pi-hole phone form](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-domain-filter-ui/domain-filter-form-pihole-390.png),
+[AdGuard phone review](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-domain-filter-ui/domain-filter-review-adguard-390.png) and
+[wide Pi-hole review](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-domain-filter-ui/domain-filter-review-pihole-1720.png).
 These are controlled browser fixtures, distinct from actual native engine evidence.
 
 ## Actual assembled native engine validation

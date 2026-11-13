@@ -919,9 +919,9 @@ addresses are offered a Block, saved denies clearing only the action notice, sav
 reloads and view changes, per-address concurrency, duplicate verification, readable refusal messages
 and disabled/read-only firewall feedback. `components/deploy/request-blocks.test.js` covers the scope
 and address-family matching of saved source denies and the firewall availability gate. The
-[before](../../audits/2026-10-06-deploy-logs/scanner-before.png),
-[after](../../audits/2026-10-06-deploy-logs/scanner-after.png) and
-[recording](../../audits/2026-10-06-deploy-logs/scanner-block.webm) show the scanner action clearing while
+[before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-deploy-logs/scanner-before.png),
+[after](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-deploy-logs/scanner-after.png) and
+[recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-06-deploy-logs/scanner-block.webm) show the scanner action clearing while
 the historical client stays in the list.
 The saved-deny journey and the multi-width screenshot walkthrough use `test.slow()` for their page
 changes, reloads and captures; assertion timeouts remain unchanged.

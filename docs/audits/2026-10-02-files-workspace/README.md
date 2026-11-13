@@ -10,12 +10,12 @@ API fixtures from `frontend/tests/browser/files-ui.spec.ts`, with a signed-in fi
 
 | Surface | Evidence |
 | --- | --- |
-| Original folder tile and command strip | [Tile](before-tile.png), [toolbar](before-toolbar.png) |
+| Original folder tile and command strip | [Tile](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-workspace/before-tile.png), [toolbar](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-workspace/before-toolbar.png) |
 | README gallery, using an expanded sample project and Compose preview | [1720px](../../files.png) |
-| Compact tiles and normalized commands | [1280px](after-tiles-1280.png), [1720px](after-tiles-1720.png) |
-| Immediate fuzzy name results | [Search palette](after-find-1720.png) |
-| Full text workspace and collapsible tree | [1280px](after-editor-1280.png), [1720px](after-editor-1720.png), [375px](after-editor-phone.png) |
-| Shared image editor | [1720px](after-image-editor-1720.png), [375px](after-image-editor-phone.png) |
+| Compact tiles and normalized commands | [1280px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-workspace/after-tiles-1280.png), [1720px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-workspace/after-tiles-1720.png) |
+| Immediate fuzzy name results | [Search palette](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-workspace/after-find-1720.png) |
+| Full text workspace and collapsible tree | [1280px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-workspace/after-editor-1280.png), [1720px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-workspace/after-editor-1720.png), [375px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-workspace/after-editor-phone.png) |
+| Shared image editor | [1720px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-workspace/after-image-editor-1720.png), [375px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-workspace/after-image-editor-phone.png) |
 
 Browser coverage opens a fuzzy result from the keyboard, rejects a delayed stale content response,
 reveals a matching line, transfers unsaved text and image drafts to the full editor, saves text,

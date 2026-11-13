@@ -19,7 +19,7 @@ refreshes, the proxy request tester and job consoles — keep their own feedback
 toasts, transcripts) and draw no working bar.
 
 The [operation progress audit](../../audits/2026-10-14-operation-progress/README.md) records the
-original placements; [dialog progress](../../audits/2026-10-16-dialog-progress/) has the current
+original placements; [dialog progress](https://github.com/JustDashboard/Just-Dashboard/tree/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-16-dialog-progress) has the current
 footer recordings.
 
 Network pages retain useful readings when a poll fails and mark them with
