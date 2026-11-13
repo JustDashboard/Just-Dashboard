@@ -266,17 +266,6 @@ func describeTable(ctx context.Context, db *sql.DB, driver Driver, schema, table
 	return detail, nil
 }
 
-// PrimaryKeyColumns returns the ordered primary-key columns. Row editing refuses
-// to run without one, so this is a security-relevant answer as much as a
-// descriptive one: it is what bounds an UPDATE or DELETE to a single row.
-func PrimaryKeyColumns(ctx context.Context, db *sql.DB, driver Driver, schema, table string) ([]string, error) {
-	d, err := DialectFor(driver)
-	if err != nil {
-		return nil, err
-	}
-	return d.PrimaryKey(ctx, db, schema, table)
-}
-
 // Relations returns every foreign key in a schema, keyed by TableKey of the
 // table that holds it.
 //

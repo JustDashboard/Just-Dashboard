@@ -152,8 +152,8 @@ passed; `go build ./...`, `go vet` and the selected tests of `./internal/api` (2
 `./internal/netx` (36 s) and `./internal/store` ok; browser specs `design-system`, `navigation` and
 `network-egress`: **90 passed**, 3 skipped (the review screenshots, which need `JD_EGRESS_SHOTS`),
 0 failed. The screenshots were then taken from the same build
-([390](network-egress-groups/egress-390.png), [1280](network-egress-groups/egress-1280.png),
-[1720](network-egress-groups/egress-1720.png)) and inspected. No namespace, server or lock holder of
+([390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-egress-groups/egress-390.png), [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-egress-groups/egress-1280.png),
+[1720](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-egress-groups/egress-1720.png)) and inspected. No namespace, server or lock holder of
 this work was left running.
 
 ## Proposed ledger status

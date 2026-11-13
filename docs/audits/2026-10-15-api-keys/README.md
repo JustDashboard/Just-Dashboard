@@ -52,16 +52,16 @@ Before images were captured from the unchanged `a38fc259` frontend build using t
 
 | Before | After |
 | --- | --- |
-| ![Before, 1280 pixels](before-1280.png) | ![After, 1280 pixels](after-1280.png) |
-| ![Before, 1720 pixels](before-1720.png) | ![After, 1720 pixels](after-1720.png) |
-| ![Before, phone](before-390.png) | ![After, phone](after-390.png) |
+| ![Before, 1280 pixels](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-15-api-keys/before-1280.png) | ![After, 1280 pixels](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-15-api-keys/after-1280.png) |
+| ![Before, 1720 pixels](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-15-api-keys/before-1720.png) | ![After, 1720 pixels](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-15-api-keys/after-1720.png) |
+| ![Before, phone](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-15-api-keys/before-390.png) | ![After, phone](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-15-api-keys/after-390.png) |
 
-![Inactive records and separate deletion](after-history.png)
-![Delete only the inactive record, preserving the audit trail](after-delete-confirmation.png)
-![Replace an owned key](after-replace.png)
-![Copy the replacement before revoking the previous key](after-handoff.png)
+![Inactive records and separate deletion](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-15-api-keys/after-history.png)
+![Delete only the inactive record, preserving the audit trail](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-15-api-keys/after-delete-confirmation.png)
+![Replace an owned key](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-15-api-keys/after-replace.png)
+![Copy the replacement before revoking the previous key](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-15-api-keys/after-handoff.png)
 
-[Watch replacement and inactive-record cleanup](replacement-and-cleanup.webm). The credential shown
+[Watch replacement and inactive-record cleanup](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-15-api-keys/replacement-and-cleanup.webm). The credential shown
 is synthetic. The recording demonstrates the handoff and separate confirmations; updating an external
 tool is the operator’s step between creating the new key and revoking the previous one.
 

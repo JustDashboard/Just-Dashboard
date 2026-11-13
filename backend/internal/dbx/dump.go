@@ -1067,7 +1067,7 @@ const sqliteFileHeader = "SQLite format 3\x00"
 // restoreSQLite replaces the contents of the live database with a dump's. The
 // previous contents are kept alongside as <name>.bak-<stamp> rather than
 // discarded, so a restore from the wrong dump is recoverable — the same guard
-// WriteComposeFile applies.
+// WriteComposeFileChecked applies.
 //
 // The dump is loaded through SQLite's own online backup, into the file that is
 // already there, under the engine's locks. Writing over that file by hand is

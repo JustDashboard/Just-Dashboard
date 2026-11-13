@@ -118,19 +118,6 @@ export function statRows(samples: readonly StatSample[]): StatRow[] {
   })
 }
 
-/** One series of the rows, without the moments it has no reading for. */
-export function seriesOf(rows: readonly StatRow[], key: Exclude<keyof StatRow, "ts">): number[] {
-  return rows.map((row) => row[key]).filter((value): value is number => value !== null)
-}
-
-/** Hits as a share of every lookup since the server started, 0–100; `null` before the first. */
-export function lifetimeHitRate(counters: StatSample["counters"]): number | null {
-  const hits = counters.keyspace_hits
-  const misses = counters.keyspace_misses
-  if (hits === undefined || misses === undefined || hits + misses <= 0) return null
-  return (hits / (hits + misses)) * 100
-}
-
 /**
  * An axis for a count of things — clients, connections — that cannot be had
  * in halves: whole-number ticks from zero to a round figure at or above the

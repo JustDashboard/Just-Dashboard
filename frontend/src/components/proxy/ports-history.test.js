@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { newExposureFindings } from "./findings/ports-history"
 import { foldDualStack } from "./ports"
 import {
   changeAddresses,
@@ -222,74 +221,5 @@ describe("grouping and counting", () => {
       ]),
     )
     expect(tally).toEqual({ all: 4, internet: 1, private: 1, local: 2 })
-  })
-})
-
-describe("newExposureFindings", () => {
-  const redis = socket({ level: "critical", firstSeen: new Date(2026, 8, 28, 9, 5).toISOString() })
-
-  test("a database that began answering today is a finding at the posture's level", () => {
-    expect(
-      newExposureFindings(
-        [redis, socket({ family: "ipv6", address: "::", level: "critical" })],
-        NOW,
-      ),
-    ).toEqual([
-      {
-        id: "ports.new-exposure",
-        level: "critical",
-        title: "Redis began answering on every interface at 09:05",
-        detail: "6379/tcp redis-server on every interface, first seen at 09:05",
-        advice:
-          "Nothing was listening there the sample before. If nobody meant to open it, stop the program or bind it to 127.0.0.1. The Changes list on the ports page shows when it opened and, with the search cleared, what else changed then.",
-        meta: "ports",
-        href: "/proxy/ports?q=port:6379",
-      },
-    ])
-  })
-
-  test("several are counted, each with where and when", () => {
-    const postgres = socket({
-      port: 5432,
-      process: "postgres",
-      address: "100.110.34.31",
-      scope: "interface",
-      reach: "network",
-      network: "tailnet",
-      level: "warning",
-      firstSeen: new Date(2026, 8, 27, 21, 10).toISOString(),
-    })
-    const [finding] = newExposureFindings([postgres, redis], NOW)
-    expect(finding.level).toBe("critical")
-    expect(finding.title).toBe(
-      "2 database or control ports began answering off this machine in the last day",
-    )
-    expect(finding.detail).toBe(
-      "5432/tcp postgres on 100.110.34.31, first seen yesterday at 21:10; 6379/tcp redis-server on every interface, first seen at 09:05",
-    )
-    expect(finding.href).toBe("/proxy/ports?q=port:5432,6379")
-  })
-
-  test("nothing for a database that was there before, or a new port that is no database", () => {
-    expect(newExposureFindings([socket({ level: "critical" })], NOW)).toEqual([])
-    expect(
-      newExposureFindings([socket({ level: "critical", firstSeen: ago(60 * 25) })], NOW),
-    ).toEqual([])
-    expect(newExposureFindings([socket({ port: 8080, firstSeen: ago(5) })], NOW)).toEqual([])
-    // Loopback carries no level: the posture raises nothing for it.
-    expect(
-      newExposureFindings(
-        [
-          socket({
-            address: "127.0.0.1",
-            scope: "loopback",
-            reach: "loopback",
-            exposed: false,
-            firstSeen: ago(5),
-          }),
-        ],
-        NOW,
-      ),
-    ).toEqual([])
   })
 })

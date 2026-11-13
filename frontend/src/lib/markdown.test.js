@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import {
   isForgeMedia,
   markdownMedia,
-  markdownText,
   onlyMedia,
   parseInline,
   parseMarkdown,
@@ -42,9 +41,8 @@ describe("reading a pull request's description", () => {
     expect(blocks[2].rows[0][1]).toEqual([{ t: "text", v: "2" }])
   })
 
-  test("template HTML is dropped and nothing else becomes markup", () => {
+  test("HTML in the source does not become markup", () => {
     const blocks = parseMarkdown("<!-- fill this in -->\nHello<br>world <script>x</script>")
-    expect(markdownText("<!-- fill this in -->\nHello<br>world")).toBe("Hello world")
     expect(JSON.stringify(blocks)).toContain("<script>x</script>")
   })
 })

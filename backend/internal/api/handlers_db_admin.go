@@ -700,7 +700,7 @@ func (s *Server) saveSiblingConnection(w http.ResponseWriter, r *http.Request, c
 }
 
 // existingConnections is every saved connection with its address decoded, for
-// the checks that need more than the host:port map existingDSNs keeps.
+// the checks that need more than its host:port.
 func (s *Server) existingConnections(ctx context.Context) ([]*dbConnection, error) {
 	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id FROM db_connections`)
 	if err != nil {

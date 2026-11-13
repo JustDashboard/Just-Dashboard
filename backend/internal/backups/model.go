@@ -1,6 +1,9 @@
-// Package backups runs scheduled and manual backups of files and directories
-// to local disk, S3-compatible object storage (AWS S3, Backblaze B2), an SFTP
-// server, or any storage service rclone speaks.
+// Package backups runs scheduled and manual backups of files and directories,
+// with the database dumps and SQLite snapshots a job names and the Docker
+// volumes among its sources (database_dumps.go, sqlite_snapshots.go,
+// volumes.go), to local disk, S3-compatible object storage (AWS S3, Backblaze
+// B2), an SFTP server, or any storage service rclone speaks; and it restores,
+// verifies and imports what it wrote.
 //
 // Provider credentials never touch the database in the clear: they are sealed
 // with the dashboard's master key and opened only for the duration of a

@@ -1,7 +1,10 @@
-// Package dbx provides database administration across Postgres, MySQL, SQLite
-// and MongoDB: browsing schemas and tables, introspecting a table's full
+// Package dbx provides database administration across the engines it has a
+// Driver for (Postgres, MySQL, SQLite, SQL Server, ClickHouse, Oracle, MongoDB
+// and Redis): browsing schemas and tables, introspecting a table's full
 // structure, editing rows through safe generated statements, running arbitrary
 // queries, exporting data, generating ORM schemas, and dumping or restoring.
+// Each SQL engine is one Dialect (dialect_*.go); MongoDB and Redis have their
+// own surfaces (mongo_*.go, redis_*.go).
 //
 // Connection strings are secrets — they carry credentials — so they are held
 // encrypted at rest and never returned to a client. Two rules keep the write
@@ -19,7 +22,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -345,13 +347,6 @@ func ListColumns(ctx context.Context, db *sql.DB, driver Driver, schema, table s
 	}
 	return tableColumns(ctx, db, d, schema, table)
 }
-
-// identifierRe is the strict form, used where a name becomes a path segment or
-// a shell argument rather than a quoted SQL identifier — a database name headed
-// for a dump filename, say. SQL identifiers use validateIdent plus the
-// dialect's own quoting, which is both safer and permissive enough for the
-// hyphens and non-ASCII letters real schemas contain.
-var identifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]{0,62}$`)
 
 // qualify renders a validated, quoted schema.table reference for a dialect.
 // An empty schema — the normal case for SQLite, and for an engine where the

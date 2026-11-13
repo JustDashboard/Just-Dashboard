@@ -1,5 +1,5 @@
 import { duration, plural } from "@/lib/format"
-import type { ProxyDiagnostic, ProxyValidation } from "@/lib/types"
+import type { ProxyValidation } from "@/lib/types"
 import type { ProxyStatus } from "@/components/proxy/proxy-context"
 
 /**
@@ -57,28 +57,6 @@ export function testMeaning(
 export function testedLabel(checkedAt: number, now: number): string {
   const age = Math.max(0, (now - checkedAt) / 1000)
   return age < 5 ? "tested just now" : `tested ${duration(age).split(" ")[0]} ago`
-}
-
-/** A diagnostic as one line of prose: its words, and where, when it says. */
-export function diagnosticLine(diagnostic: ProxyDiagnostic): string {
-  if (!diagnostic.file) return diagnostic.message
-  return `${diagnostic.message} in ${diagnostic.file}${diagnostic.line ? `:${diagnostic.line}` : ""}`
-}
-
-/** Levels that pass a test: anything else is a reason it failed. */
-const PASSING = new Set<ProxyDiagnostic["level"]>(["warn", "notice", "info"])
-
-/** The line a failed test failed on, or its warnings, as the finding names them. */
-export function testReason(validation: ProxyValidation): string {
-  const diagnostics = validation.diagnostics ?? []
-  if (!validation.valid) {
-    const reason = diagnostics.find((d) => !PASSING.has(d.level)) ?? diagnostics[0]
-    return reason ? diagnosticLine(reason) : validation.output.split("\n", 1)[0]
-  }
-  const warnings = diagnostics.filter((d) => d.level === "warn")
-  if (warnings.length === 0) return ""
-  const first = diagnosticLine(warnings[0])
-  return warnings.length > 1 ? `${first}, and ${warnings.length - 1} more` : first
 }
 
 /**

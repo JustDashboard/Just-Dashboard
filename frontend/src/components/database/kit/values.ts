@@ -120,10 +120,3 @@ export function jsonPath(segments: readonly (string | number)[]): string {
     return IDENTIFIER.test(segment) ? `${path}.${segment}` : `${path}[${JSON.stringify(segment)}]`
   }, "$")
 }
-
-/** A container's size in its own word: "3 keys", "1 item". */
-export function sizeWord(value: object): string {
-  const n = Array.isArray(value) ? value.length : Object.keys(value).length
-  const word = Array.isArray(value) ? "item" : "key"
-  return `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`
-}

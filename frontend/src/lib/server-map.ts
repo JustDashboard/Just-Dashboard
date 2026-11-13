@@ -1,5 +1,3 @@
-import type { MapItem, ServerMap } from "@/lib/types"
-
 /**
  * What the map calls each kind of thing it draws, and what the reader kept of
  * their arrangement. The systems themselves — which things make up a
@@ -47,20 +45,6 @@ export function kindLabel(kind: string, itemId: string) {
   if (itemId === "dashboard:site") return "Dashboard address"
   if (itemId === "dashboard:store") return "Dashboard store"
   return kindOf(kind)?.label ?? kind
-}
-
-const indexes = new WeakMap<ServerMap, Map<string, { item: MapItem; kind: string }>>()
-
-/** Every thing on the reading by its id, built once per reading. */
-export function itemIndex(map: ServerMap) {
-  let index = indexes.get(map)
-  if (!index) {
-    index = new Map()
-    for (const kind of map.kinds)
-      for (const item of kind.items) index.set(item.id, { item, kind: kind.key })
-    indexes.set(map, index)
-  }
-  return index
 }
 
 // ---------------------------------------------------------------------------

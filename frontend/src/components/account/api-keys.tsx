@@ -108,11 +108,6 @@ function subscribeNever() {
   return () => {}
 }
 
-/** What the keys are for, as products, each once — for a reading that counts them. */
-export function keyProducts(tokens: ApiToken[]) {
-  return [...new Set(tokens.map((k) => keyProduct(k.name)).filter((id) => id !== undefined))]
-}
-
 export function curlExample(origin: string, key = "vpsd_…", scope?: ApiToken["scope"]) {
   if (scope === "mcp") return clientConfig("claude-code", origin, key)
   if (scope === "deploy") return jdLogin(origin, key)

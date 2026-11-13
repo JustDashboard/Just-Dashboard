@@ -93,14 +93,3 @@ func TestDescribePortsHandlesMultipleHostMappingsAndNoPorts(t *testing.T) {
 		t.Errorf("both families are kept and distinguished: %+v", got)
 	}
 }
-
-func TestPublicBindingsExcludesLoopbackAndUnpublished(t *testing.T) {
-	got := PublicBindings([]Port{
-		{IP: "127.0.0.1", PublicPort: 3000, PrivatePort: 3000, Type: "tcp"},
-		{IP: "0.0.0.0", PublicPort: 443, PrivatePort: 443, Type: "tcp"},
-		{PrivatePort: 9000, Type: "tcp"},
-	})
-	if len(got) != 1 || got[0].HostPort != 443 {
-		t.Fatalf("only the public binding counts: %+v", got)
-	}
-}

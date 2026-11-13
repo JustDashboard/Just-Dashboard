@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { Archive, Check, Heart, Key, Route, ShieldCheck } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { Disclosure, FormFact, FormFacts, FormNote, FormSection } from "@/components/form"
+import { FormNote, FormSection } from "@/components/form"
 import { Group } from "@/components/panel"
 import { ProductLogo, variableProduct } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"

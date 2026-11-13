@@ -65,30 +65,3 @@ export function upstreamsOf(report: UpstreamReport | undefined, path: string): U
 export function isDown(target: UpstreamTarget): boolean {
   return target.state !== "up" && target.state !== "dynamic"
 }
-
-/** What a visitor gets from a route whose every upstream is in this state. */
-export function visitorOutcome(target: UpstreamTarget): string {
-  if (target.kind === "stream") return "visitors' connections are closed"
-  switch (target.state) {
-    case "timeout":
-      return "visitors wait, then get 504"
-    default:
-      return "visitors get 502"
-  }
-}
-
-/** "refuses connections", "does not answer within 1.5 s". */
-export function upstreamFailure(target: UpstreamTarget): string {
-  switch (target.state) {
-    case "refused":
-      return "refuses connections"
-    case "missing":
-      return "has no socket at that path"
-    case "timeout":
-      return "does not answer a connection within 1.5 s"
-    case "unresolvable":
-      return "does not resolve"
-    default:
-      return "cannot be reached"
-  }
-}

@@ -15,8 +15,10 @@ instead, and credentials that fail are counted per address (below).
 - **Allowlist before auth** (`httpx.AllowlistCIDRs`): an off-network attacker cannot reach the login
   handler at all. `httpx.RealIP` trusts `X-Forwarded-For` only from `JD_TRUSTED_PROXIES`, or the
   allowlist could be spoofed past.
-- **Three limiters**, `NewLimiter(perMinute, burst)`: `loginLim` (10/5, per address, on top of the
+- **Five limiters**, `NewLimiter(perMinute, burst)`: `loginLim` (10/5, per address, on top of the
   per-account lockout), `apiLim` (600/120, per credential), `destrLim` (30/10, destructive routes).
+  The other two are narrower and described where they apply, below: `passkeyLim` (60/20, a passkey
+  sign-in's begin) and `streamLim` (3000/600, Remote Desktop's stream bridge).
   `apiLim` is `PerCredential`: a browser session and each API key have a bucket of their own
   (`httpx.credentialKey`), so a CI job's key cannot empty the bucket an open page polls from, even
   where an SSH tunnel puts them both on one address. The assistant is not a credential: it works
@@ -81,7 +83,7 @@ instead, and credentials that fail are counted per address (below).
   credential and the MCP key's principal in its context (`httpx.WithMCPDelegate`): it passes the same
   layers, and the feature group's `AuthenticateFeatures` admits it only as the deploy key gate admits
   a deploy key, marking it `Principal.ViaMCP` (every other group refuses it); see
-  [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
+  [the MCP server](../backend/databases.md#the-mcp-server).
 - The dashboard's assistant makes its calls the same way, through the root router from inside the process, but as
   the person: their own session principal, read again for the call, is carried in the context
   (`httpx.WithAssistant`), and every group's authentication takes it in place of a credential, marked
@@ -133,7 +135,7 @@ instead, and credentials that fail are counted per address (below).
   ambient cookies and are deliberately outside that check. The one browser-session group without it
   is Remote Desktop's stream bridge (`/remote-desktop/bridge/*`), whose own page cannot know the
   header: there every write and every socket must carry this dashboard's `Origin` instead
-  (`wsx.Upgrader.SameSite`), on a rate limit of its own.
+  (`wsx.Upgrader.SameSite`), on a rate limit of its own (`streamLim`, 3000/600).
 - **WebSocket origins** are checked by `wsx` against the request host, port and the scheme Caddy serves:
   HTTPS for `JD_TLS=internal` or `tailscale`, HTTP for `JD_TLS=off` or local development. An explicit
   `JD_ALLOWED_ORIGINS` entry remains the only cross-origin exception. The backend's loopback HTTP hop
@@ -165,8 +167,9 @@ deliberately blind to the store: [the dashboard's own health](runtime-boundaries
 `GET /api/v1/hub/hello` (the Just Hub discovery probe: unauthenticated, but behind the allowlist and the
 per-address API limit, a fixed body naming only the product, the protocol and whether this server can be
 connected, and not mounted with `JD_HUB_LINK=false` or in agent mode; [hub-link.md](../backend/hub-link.md#local-api)),
-`/api/v1/hooks/deploy/{hookID}` (HMAC over the raw body, still allowlisted, still audited so
-enumerating hook ids is not silent), and `GET /api/v1/tailnet/whois`, which a tailnet-only
+the webhooks, `/api/v1/hooks/*` and `POST /api/v1/deploy/{id}/hooks/{triggerID}` (each checked
+against its hook's secret, an HMAC over the raw body or GitLab's token header, still allowlisted,
+still audited so enumerating hook ids is not silent), and `GET /api/v1/tailnet/whois`, which a tailnet-only
 deployment's gate asks about every request: still behind the allowlist, outside the API rate limit,
 and answering only a loopback caller that no other proxy forwarded — the dashboard's own Caddy says it
 did in `X-Forwarded-For` — with every refusal audited as `deploy.tailnet.refused`
@@ -291,7 +294,7 @@ Some routes serve a routine request and a destructive one on the same path, beca
 know which it was handed. Their handlers read the request, decide, and apply the capability and the
 `destrLim` budget by hand, as `s.destructive` would have. Every one fails closed: a request its reader
 cannot classify is the destructive kind. The Databases routes among them are marked `by content` in
-the [route table](../backend/databases-proxy-platform.md#routes).
+the [route table](../backend/databases.md#routes).
 
 - **SQL statements.** `POST /databases/{id}/query`, `…/script` and an analysed `…/explain` classify
   their SQL by the rules of the connection's own engine (`dbx.ParseScript`, which gives every
@@ -551,7 +554,7 @@ The rule guards the dashboard's own controls and is exactly as strong as the cla
 `SELECT` that calls a function of the operator's own which writes is a read to anything that judges
 a statement by its text. An operator who needs the engine itself to refuse writes gives the connection an account that
 cannot make them. The per-route answers, the neighbour rule and what it does not follow are in
-[Databases](../backend/databases-proxy-platform.md#protected-connections).
+[Databases](../backend/databases.md#protected-connections).
 
 Files: `api/handlers_*.go`, one per feature, each with `mount<Feature>Routes` called from `Routes()`.
 `handlers_domains.go` and `handlers_docker_manage.go` own no mount function — they are mounted from the

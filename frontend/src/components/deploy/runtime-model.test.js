@@ -113,8 +113,6 @@ describe("wantsFailureReading", () => {
   })
 })
 
-describe("failureTone", () => {})
-
 describe("runtimeContainer", () => {
   const service = {
     containerId: "abc123",

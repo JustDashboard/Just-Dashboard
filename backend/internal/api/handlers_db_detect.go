@@ -154,34 +154,6 @@ func (s *Server) hostCandidates(ctx context.Context, known []detectedServer) []d
 	return out
 }
 
-// existingDSNs maps an address already covered by a saved connection to that
-// connection's name. It opens each stored DSN, which is why it lives behind
-// the same capability as the rest of this file.
-func (s *Server) existingDSNs(ctx context.Context) (map[string]string, error) {
-	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id FROM db_connections`)
-	if err != nil {
-		return nil, httpx.Internal(err)
-	}
-	defer rows.Close()
-	ids := []int64{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, httpx.Internal(err)
-		}
-		ids = append(ids, id)
-	}
-	out := map[string]string{}
-	for _, id := range ids {
-		conn, _, err := s.dbConnRow(ctx, id)
-		if err != nil {
-			continue
-		}
-		out[addressKey(conn.Host, atoiDefault(conn.Port, 0))] = conn.Name
-	}
-	return out, nil
-}
-
 // addressKey names a server's address so that two spellings of it agree:
 // localhost, 127.0.0.1 and [::1] are one place on this machine, and a
 // connection typed with one must cover a server found at another.

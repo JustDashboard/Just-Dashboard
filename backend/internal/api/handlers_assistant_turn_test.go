@@ -982,8 +982,3 @@ func TestSeveralProvidersOneActive(t *testing.T) {
 		t.Fatalf("an unknown mode = %d", rec.Code)
 	}
 }
-
-func mustMarshal(v any) json.RawMessage {
-	raw, _ := json.Marshal(v)
-	return raw
-}

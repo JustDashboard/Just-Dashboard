@@ -541,19 +541,6 @@ func blueprintVolumePrefix(name, blueprintID string) string {
 	return fmt.Sprintf("%s-%x", slug, hash[:8])
 }
 
-// BlueprintGeneratedSecrets names the variables the server must generate before
-// this plan can run. Values are produced by the planning store's own generator,
-// never by rendering.
-func BlueprintGeneratedSecrets(rendered *blueprint.Plan) []blueprint.RenderedVariable {
-	generated := []blueprint.RenderedVariable{}
-	for _, variable := range rendered.Variables {
-		if variable.Generated {
-			generated = append(generated, variable)
-		}
-	}
-	return generated
-}
-
 // BlueprintSchedules translates a blueprint's automation presets into the
 // scheduler's own closed action vocabulary. Only presets the blueprint marked
 // as defaults are returned; the rest are offered in the workspace, because a

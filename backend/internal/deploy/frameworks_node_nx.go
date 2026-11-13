@@ -33,7 +33,6 @@ type nxProject struct {
 	production     bool
 	inferred       string
 	viteOutput     string
-	viteSPAOff     bool
 	configurations []string
 	// bundle is the file esbuild writes: outputFileName, else main's name
 	// as JavaScript. ssr says an Angular application build also writes its

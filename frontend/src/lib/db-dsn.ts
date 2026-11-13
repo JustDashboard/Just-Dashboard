@@ -32,15 +32,6 @@ export const DEFAULT_PORT: Record<DbDriver, string> = {
   redis: "6379",
 }
 
-export const EMPTY_FIELDS: DsnFields = {
-  host: "127.0.0.1",
-  port: "",
-  user: "",
-  password: "",
-  database: "",
-  option: "",
-}
-
 /** IPv6 literals need brackets before a port can follow them. */
 function hostPort(fields: DsnFields, driver: DbDriver) {
   const host = fields.host.trim() || "127.0.0.1"
@@ -80,30 +71,5 @@ export function buildDsn(driver: DbDriver, fields: DsnFields): string {
     }
     case "redis":
       return `redis://${credentials(fields.user, fields.password)}${at}/${db.replace(/^db/, "") || "0"}`
-  }
-}
-
-/** The same string with the password hidden, for showing what will be saved. */
-export function maskDsn(driver: DbDriver, fields: DsnFields): string {
-  if (!fields.password) return buildDsn(driver, fields)
-  return buildDsn(driver, { ...fields, password: "••••••" }).replace(
-    encodeURIComponent("••••••"),
-    "••••••",
-  )
-}
-
-/** What each engine calls the thing the `database` field names. */
-export function databaseLabel(driver: DbDriver): string {
-  switch (driver) {
-    case "sqlite":
-      return "Database file"
-    case "redis":
-      return "Database index"
-    case "oracle":
-      return "Service name"
-    case "clickhouse":
-      return "Database"
-    default:
-      return "Database"
   }
 }

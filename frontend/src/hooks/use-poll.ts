@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
-import { ApiError } from "@/lib/api"
 import { pollLoop, type PollHandle } from "@/hooks/poll-loop"
 import { NO_SHARED_ANSWER, sharedPoll, type SharedReader } from "@/hooks/poll-share"
 
@@ -185,8 +184,4 @@ export function usePoll<T>(
     loading: enabled && !current,
     refresh,
   }
-}
-
-export function isAuthError(error: Error | undefined) {
-  return error instanceof ApiError && error.isAuthProblem
 }

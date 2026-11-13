@@ -6,6 +6,8 @@
 - [`features-terminal.md`](features-terminal.md) — feature-specific UI and the terminal workspace.
 - [`feature-map.md`](feature-map.md) — all App Router feature areas and their component ownership.
 - [`data-theming.md`](data-theming.md) — API/socket state, metrics state, confirmations, and updates.
+- [`workspace-interactions.md`](workspace-interactions.md) — page-owned keyboard commands, refresh,
+  row movement and place memory from `components/workspace/`.
 
 Read [`design-system.md`](design-system.md) before adding a component that any other page could also
 want. `eslint-rules/design-system.mjs` and `tests/browser/design-system.spec.ts` enforce the parts of
@@ -17,5 +19,5 @@ this codebase are off or configured there with the reason beside them. Where a r
 place (a row that is the pointer's larger target for the link inside it), fix the markup if a
 keyboard really is left out, and otherwise say why on the line's own disable comment.
 
-`docs/design-system-audit-report.html` predates the unification pass and describes primitives
+`docs/audits/2026-08-28-design-system-audit/report.html` predates the unification pass and describes primitives
 (`StatusBadge`, `card.tsx`, `ui/badge.tsx`) that no longer exist.

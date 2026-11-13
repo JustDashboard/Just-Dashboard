@@ -57,16 +57,6 @@ func AlertKinds(d Driver, flavor string) []string {
 	return append(out, AlertBackupFailed, AlertBackupMissed)
 }
 
-// AlertKindKnown reports whether kind is one of the kinds at all.
-func AlertKindKnown(kind string) bool {
-	for _, known := range AlertKindOrder {
-		if kind == known {
-			return true
-		}
-	}
-	return false
-}
-
 func init() {
 	RegisterCapabilities(
 		// GET/POST /databases/alerts: what a rule for one of these databases

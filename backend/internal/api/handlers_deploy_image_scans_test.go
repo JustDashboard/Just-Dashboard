@@ -14,7 +14,6 @@ import (
 )
 
 var (
-	scanTestImage = "sha256:" + strings.Repeat("a", 64)
 	scanTestBase  = "sha256:" + strings.Repeat("b", 64)
 	scanTestNewer = "sha256:" + strings.Repeat("c", 64)
 )

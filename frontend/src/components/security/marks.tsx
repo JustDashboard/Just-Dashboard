@@ -1,9 +1,7 @@
 "use client"
 
-import { Connection, NetworkDevice, Router, Servers, type Icon } from "@/components/icons"
 import { networkOf } from "@/lib/clients"
 import { cn } from "@/lib/utils"
-import type { NetInterface } from "@/lib/types"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import {
   ProductGlyph,
@@ -14,9 +12,8 @@ import {
 
 /**
  * What the Security pages are about, drawn as the products they are (§14): a
- * fail2ban jail as the service it watches, a network device as what made it,
- * an address as the network it is on, a peer's processes as the programs
- * they are. Each names nothing it cannot read off the thing itself — a jail
+ * fail2ban jail as the service it watches, an address as the network it is
+ * on, a peer's processes as the programs they are. Each names nothing it cannot read off the thing itself — a jail
  * called `sshd` keeps a glyph, because OpenSSH has no mark in the collection
  * and a guessed one would be the drawing lying about the row.
  */
@@ -60,39 +57,6 @@ export function jailProduct(name: string): string | undefined {
     .map((word) => JAIL_WORDS[word])
     .find(Boolean)
   return hasProductLogo(id) ? id : undefined
-}
-
-/**
- * What made a network device, from its name: Tailscale's tunnel, Docker's
- * bridge and the virtual pair it gives every container, a Kubernetes CNI.
- * A physical port, a WireGuard tunnel and the loopback are no product.
- */
-export function interfaceProduct(name: string): string | undefined {
-  const device = name.toLowerCase()
-  if (/^tailscale/.test(device)) return "tailscale"
-  if (/^(docker|br-|veth)/.test(device)) return "docker"
-  if (/^(cni|flannel|cali|kube)/.test(device)) return "kubernetes"
-  return undefined
-}
-
-/** The glyph for a kind of device, on the same tile a product's mark takes. */
-export const INTERFACE_GLYPH: Record<NetInterface["kind"], Icon> = {
-  physical: NetworkDevice,
-  tunnel: Connection,
-  bridge: Router,
-  virtual: Router,
-  loopback: Servers,
-}
-
-/** A network device as what made it, else as its kind. */
-export function InterfaceMark({ device }: { device: NetInterface }) {
-  return (
-    <ProductLogo
-      id={interfaceProduct(device.name)}
-      size="sm"
-      fallback={INTERFACE_GLYPH[device.kind] ?? NetworkDevice}
-    />
-  )
 }
 
 /**

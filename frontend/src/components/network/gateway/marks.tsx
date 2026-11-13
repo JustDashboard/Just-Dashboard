@@ -5,7 +5,7 @@ import type { NetworkLink } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { WireMark } from "@/components/deploy/wire"
-import { LinkGlyph, LinkMark, linkProduct } from "@/components/network/marks"
+import { LinkGlyph, linkProduct } from "@/components/network/marks"
 import { targetProduct } from "@/components/network/gateway/reading"
 
 /**
@@ -75,11 +75,4 @@ export function TargetMark({ ports, targetPort }: { ports: string; targetPort: s
 /** The same two marks on the smaller tile a list row carries. */
 export function TargetLogo({ ports, targetPort }: { ports: string; targetPort: string }) {
   return <ProductLogo id={targetProduct({ ports, targetPort })} size="sm" fallback={Servers} />
-}
-
-/** A device on the tile a list row carries: what made it, else its kind. */
-export function DeviceLogo({ device, links }: { device: string; links: NetworkLink[] }) {
-  const link = links.find((l) => l.name === device)
-  if (!link) return <ProductLogo size="sm" fallback={Globe} />
-  return <LinkMark link={link} />
 }

@@ -668,17 +668,16 @@ func (s *Server) handleDBConsumers(w http.ResponseWriter, r *http.Request) error
 }
 
 type topoBinding struct {
-	connID       int64
-	envID        int64
-	project      string
-	projectID    int64
-	environment  string
-	container    string
-	compose      string
-	status       string
-	detail       string
-	checkedAt    int64
-	deploymentID int64
+	connID      int64
+	envID       int64
+	project     string
+	projectID   int64
+	environment string
+	container   string
+	compose     string
+	status      string
+	detail      string
+	checkedAt   int64
 }
 
 func (s *Server) topologyBindings(ctx context.Context) ([]topoBinding, error) {

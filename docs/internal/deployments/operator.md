@@ -373,7 +373,7 @@ and its deployments by id, name and last run, and, for a chat opened with **Ask*
 address, with "this" most likely meaning what it shows. `assistant.DatabaseSystemPrompt` is told the connection —
 its name and id, engine and version, host, database, what it serves and the operator's notes — and, for a SQL
 engine that answers within eight seconds, the structure of its schema in focus, never a row
-([a connection's assistant](../backend/databases-proxy-platform.md#a-connections-assistant)). Every prompt (`writeAPI`) tells the model it has the whole
+([a connection's assistant](../backend/databases.md#a-connections-assistant)). Every prompt (`writeAPI`) tells the model it has the whole
 dashboard through `api_request` and `find_routes`, lists the API's areas — each first path segment with its
 count of routes, a sentence (`agentAreaBlurbs`) and a few reads, built from `chi.Walk` when the catalogue is —
 says how to learn a body's shape (GET the resource first, or read the 400 the route answers), how to query a

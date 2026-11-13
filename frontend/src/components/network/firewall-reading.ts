@@ -136,11 +136,6 @@ export function accessLosses(checks: FirewallAccessComparison[]) {
   )
 }
 
-/** The checks the firewall could not decide, which the page names rather than counts as fine. */
-export function accessUnknowns(checks: FirewallAccessCheck[] | undefined) {
-  return (checks ?? []).filter((check) => check.verdict === "unknown")
-}
-
 /** A staged plan's operations as the server reads them. */
 export type StagedChange =
   | { op: "add"; rule: Record<string, unknown>; label: string }

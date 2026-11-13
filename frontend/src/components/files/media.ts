@@ -31,7 +31,6 @@ export function mediaKind(name: string): MediaKind | null {
 }
 
 export const isImage = (name: string) => mediaKind(name) === "image"
-export const isVideo = (name: string) => mediaKind(name) === "video"
 
 /** Archives the backend can extract in place. */
 const EXTRACTABLE_RE = /\.(zip|tar|tar\.gz|tgz)$/i

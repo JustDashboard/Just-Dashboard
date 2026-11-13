@@ -18,7 +18,6 @@ import {
   previewStatus,
   promotionOrigin,
   previewURL,
-  pullChecksTone,
   pullOfPreview,
   shownBranches,
   unavailableReason,
@@ -51,18 +50,6 @@ const run = (state, operation = "preview_create") => ({
   state,
   operation,
   requestedAt: "2026-09-22T12:00:00Z",
-})
-
-describe("the dot for a pull request's checks", () => {
-  test("gh's three words map onto the three tones", () => {
-    expect(pullChecksTone({ checks: "success" })).toBe("running")
-    expect(pullChecksTone({ checks: "failure" })).toBe("danger")
-    expect(pullChecksTone({ checks: "pending" })).toBe("warning")
-  })
-  test("no checks is not a verdict", () => {
-    expect(pullChecksTone({})).toBe("unknown")
-    expect(pullChecksTone({ checks: "" })).toBe("unknown")
-  })
 })
 
 describe("whether a preview is out of date", () => {

@@ -17,8 +17,3 @@ export function unusableReason(
   if (!connection.broken) return undefined
   return connection.brokenReason || "This saved connection cannot be opened."
 }
-
-/** How many of the saved connections cannot be opened. */
-export function unusableCount(connections: Pick<DbConnection, "broken">[] | undefined): number {
-  return (connections ?? []).filter((connection) => connection.broken).length
-}

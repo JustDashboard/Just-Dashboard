@@ -358,14 +358,6 @@ func releaseBaseImages(release *ReleaseWithArtifacts) []ResolvedImage {
 	return out
 }
 
-func releaseBuildMethod(release *ReleaseWithArtifacts) BuildMethod {
-	var provenance struct {
-		Builder PreparedBuild `json:"builder"`
-	}
-	_ = json.Unmarshal(release.Release.Provenance, &provenance)
-	return provenance.Builder.Method
-}
-
 // ImageDigestResolver is the registry read the base check makes: what a
 // tag names now. The artifact builder's backend is one.
 type ImageDigestResolver interface {

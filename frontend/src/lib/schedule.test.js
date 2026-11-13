@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  axisHours,
   calendarToCron,
   clockLabel,
   countdown,
@@ -165,12 +164,6 @@ describe("scheduleLanes", () => {
     expect(byKey["cron:2"].next).toBeUndefined()
     expect(byKey["cron:3"].next).toBeUndefined()
   })
-})
-
-test("axisHours marks every step hours on the hour", () => {
-  const from = new Date(2026, 9, 7, 0, 10).getTime()
-  const hours = axisHours(from, from + 24 * H, 3).map((t) => new Date(t).getHours())
-  expect(hours).toEqual([3, 6, 9, 12, 15, 18, 21, 0])
 })
 
 test("countdown is to the second under an hour", () => {

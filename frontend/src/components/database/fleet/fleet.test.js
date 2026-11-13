@@ -9,7 +9,6 @@ import {
   groupFleet,
   matchesQuery,
   powerOffers,
-  pushSample,
   reachWord,
   sortFleet,
   STALE_BACKUP_MS,
@@ -351,17 +350,6 @@ describe("the readings across the top", () => {
 
   test("an empty fleet reads as zeros", () => {
     expect(fleetReadings(undefined).total).toBe(0)
-  })
-})
-
-describe("the samples a tile keeps", () => {
-  test("one per reading, none for a reading already held, never more than asked", () => {
-    let samples = pushSample([], "t1", 3)
-    samples = pushSample(samples, "t1", 9)
-    expect(samples).toEqual([{ at: "t1", value: 3 }])
-    samples = pushSample(samples, "t2", 4, 2)
-    samples = pushSample(samples, "t3", 5, 2)
-    expect(samples.map((sample) => sample.value)).toEqual([4, 5])
   })
 })
 

@@ -1,3 +1,9 @@
+// Package audit keeps the record of who did what: one Entry per audited
+// action, written to the audit_log table and mirrored to the process log
+// (Record), and the filtered read the Audit log page makes (List). It records
+// and never decides: which requests are audited is httpx.AuditMutations'
+// business, and nothing here changes or removes an entry. See "Auth, secrets,
+// state" in docs/internal/architecture/runtime-boundaries.md.
 package audit
 
 import (

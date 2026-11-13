@@ -15,12 +15,6 @@ import type { Tone } from "@/components/tone"
 const WARNING_BELOW = 0.999
 const DANGER_BELOW = 0.99
 
-export const WINDOW_LABELS: Record<string, string> = {
-  "24h": "Last 24 hours",
-  "7d": "Last 7 days",
-  "30d": "Last 30 days",
-}
-
 /**
  * "99.93%". Two decimals, because the difference between 99.9 and 99.99 is
  * the whole point of the figure — and "100%" only for no downtime at all:

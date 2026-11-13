@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
   JsonSyntaxError,
-  base64Bytes,
   cellOf,
   dotted,
   fromJson,
@@ -343,6 +342,4 @@ test("sizes in words", () => {
   expect(sizeWord(nodeAt(root, ["a"]))).toBe("1 field")
   expect(sizeWord(nodeAt(root, ["b"]))).toBe("2 elements")
   expect(sizeWord(nodeAt(root, ["c"]))).toBe("0 elements")
-  expect(base64Bytes("AAEC")).toBe(3)
-  expect(base64Bytes("AA==")).toBe(1)
 })

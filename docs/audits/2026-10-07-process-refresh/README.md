@@ -19,11 +19,11 @@ in place; new rows retain their arrival animation. Cron toggle controls keep key
 These are production frontend browser runs against the mocked host in
 [`processes-ui.spec.ts`](../../../frontend/tests/browser/processes-ui.spec.ts).
 
-- [Automatic focus](automatic-focus.webm): a deliberately delayed ranking retains the same table
+- [Automatic focus](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-process-refresh/automatic-focus.webm): a deliberately delayed ranking retains the same table
   and scroll position, with the previous ranking named until its replacement answers.
-- [Services](services.webm): background state changes and failed polls retain inspected row order
+- [Services](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-process-refresh/services.webm): background state changes and failed polls retain inspected row order
   and the open menu; leaving inspection applies the latest ranking.
-- [Cron toggle](cron-toggle.webm): disabling a job updates the same row and button with focus intact.
+- [Cron toggle](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-07-process-refresh/cron-toggle.webm): disabling a job updates the same row and button with focus intact.
 
 ## Verification
 

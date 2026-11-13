@@ -1,5 +1,7 @@
 // Package netsec exposes the host's firewall, intrusion prevention and active
-// login sessions.
+// login sessions, and with them how the machine can be reached: the
+// dashboard's own exposure (exposure.go), sshd's settings (sshd*.go), the
+// connection table (connections.go) and the diagnostic probes (diag*.go).
 //
 // Editing firewall rules from a web UI carries an obvious hazard: a bad rule
 // can lock the operator out of the very machine they are administering — and

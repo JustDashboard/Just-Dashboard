@@ -5,15 +5,15 @@ deploy that went live: *Ready*, a lit Start stage with a *Start new release* ste
 ready" with the address, Redeploy, "rolls back to release #2" (the Stop's `targetReleaseId` is the
 live release it acts on), and confetti if the reader watched it finish.
 
-![Before: a Stop drawn as a release that went live](stop-run-before.png)
+![Before: a Stop drawn as a release that went live](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-05-stop-run-page/stop-run-before.png)
 
 It now reads as the runtime it left: *Stopped*, a Stop stage whose step is *Stop live release*, "Your
 release is stopped" with when and what it means for visitors, and Start beside the state. Once a newer
 run has started the release again the outcome says so, and Start goes away.
 
-![After: the Stop reads as stopped and offers Start](stop-run-after.png)
+![After: the Stop reads as stopped and offers Start](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-05-stop-run-page/stop-run-after.png)
 
-![After: Details names the step for the live release](stop-run-details.png)
+![After: Details names the step for the live release](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-05-stop-run-page/stop-run-details.png)
 
 The screenshots are this branch's production build at 1440×820 against the labelled API fixtures of
 `frontend/tests/browser/deploy-run.spec.ts`, whose "a Stop that succeeded reads as stopped…" scenario

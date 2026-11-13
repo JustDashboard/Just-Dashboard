@@ -388,11 +388,3 @@ func (s *Server) overviewGateway(ctx context.Context, client string) (overviewGa
 	}
 	return g, gwErr, protErr
 }
-
-// conntrackPercent is the table's fullness, negative where it cannot be read.
-func conntrackPercent(c netx.Conntrack) float64 {
-	if !c.Available {
-		return -1
-	}
-	return c.Percent
-}

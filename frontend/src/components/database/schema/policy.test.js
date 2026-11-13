@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { spendsBudget } from "./changes"
 import {
   BLANK_POLICY,
   TEMPLATES,
@@ -127,14 +126,13 @@ describe("changing a policy", () => {
     expect(body.withCheck).toBe("false")
   })
 
-  test("is a DELETE for a drop, which spends the destructive budget", () => {
+  test("is a DELETE for a drop", () => {
     const request = dropPolicyRequest("app", "notes", "mine")
     expect(request).toEqual({
       method: "DELETE",
       path: "/ddl/policy",
       body: { schema: "app", table: "notes", name: "mine" },
     })
-    expect(spendsBudget(request)).toBe(true)
   })
 })
 
@@ -168,12 +166,6 @@ describe("the switches", () => {
         { enabled: false, forced: false },
       ).body,
     ).toEqual({ schema: "app", table: "notes", enabled: false, force: false })
-  })
-
-  test("a change that is a PATCH does not spend the destructive budget at a preview", () => {
-    expect(
-      spendsBudget(rowSecurityRequest("app", "notes", now, { enabled: true, forced: false })),
-    ).toBe(false)
   })
 
   test("are said as a sentence about who is held", () => {

@@ -1,10 +1,26 @@
-// Package deploy turns a webhook or a button press into a git pull plus a
-// container rebuild, and keeps enough history to put the previous commit back.
+// Package deploy owns deployments: the desired configuration of a project
+// and its environments, immutable releases, persistent runs with their
+// steps, queue leases and sequenced events, the triggers that start a run
+// without a person (webhooks, Git pushes, schedules, pull request previews),
+// and the relationships a deployment has with the other features.
+//
+// It decides order, persistence, cancellation and recovery (engine.go,
+// orchestration_*.go) and reads a checkout to propose how it builds
+// (detect_*.go, frameworks_*.go, build_*.go, preflight*.go). The work of a
+// step belongs to the feature package that owns it (Docker, Git, the proxy,
+// backups), reached through StepExecutor; that package stays the one
+// authority for what it renders, runs and validates. The local-checkout and
+// Compose path that shipped first is kept beside the normalized one
+// (legacy_engine.go, deployer.go).
 //
 // Webhooks are the one part of the API that is not authenticated by a
-// dashboard session — CI has no session. They are authenticated instead by an
-// HMAC signature over the request body using a per-project secret, and they
-// still sit behind the network allowlist like everything else.
+// dashboard session, since CI has none. They are authenticated by the hook's
+// own secret instead (an HMAC signature over the request body, or GitLab's
+// token compared in constant time), and they still sit behind the network
+// allowlist like everything else.
+//
+// docs/internal/deployments/implementation.md describes the model, and
+// docs/internal/deployments/README.md indexes the guides beside it.
 package deploy
 
 import (
@@ -87,7 +103,7 @@ var (
 // Validate checks a project against the configured deploy roots.
 //
 // "Absolute" was the only rule the repository path had to satisfy, so a deploy
-// project could name any directory on the filesystem and the JD_DEPLOY_ROOT
+// project could name any directory on the filesystem and the JD_DEPLOY_ROOTS
 // setting that was supposed to bound it went unread. Every other place the
 // dashboard takes a host path from a client — files, git, compose, logs — is
 // bounded by a configured root, and this is now one of them.

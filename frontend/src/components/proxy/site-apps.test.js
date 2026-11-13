@@ -237,5 +237,3 @@ describe("certRows", () => {
     expect(certCounts(rows)).toEqual({ valid: 1, due: 2, expired: 1 })
   })
 })
-
-describe("sitesVerdict", () => {})

@@ -5,12 +5,6 @@ import "database/sql"
 // Templates bind the schema and selected table names. They deliberately use the
 // same catalogues, type spelling, constraint order and referential actions as
 // each dialect's table reads. No user text is interpolated into SQL.
-const standardSchemaColumns = `SELECT table_name, column_name, data_type, is_nullable,
- character_maximum_length, numeric_precision, numeric_scale
- FROM information_schema.columns
- WHERE table_schema = {schema} AND table_name IN ({tables})
- ORDER BY table_name, ordinal_position`
-
 const standardSchemaPrimary = `SELECT tc.table_name, kcu.column_name
  FROM information_schema.table_constraints tc
  JOIN information_schema.key_column_usage kcu

@@ -1,13 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  diagnosticLine,
-  engineRoots,
-  testedLabel,
-  testMeaning,
-  testReason,
-  testVerdict,
-  warningCount,
-} from "./config-test"
+import { engineRoots, testedLabel, testMeaning, testVerdict, warningCount } from "./config-test"
 
 const conflict = {
   level: "warn",
@@ -87,28 +79,6 @@ describe("the verdict", () => {
     expect(testedLabel(at, at - 2_000)).toBe("tested just now")
   })
 })
-
-describe("the reason a finding gives", () => {
-  test("is the line a failed test stopped on, with its place", () => {
-    expect(testReason(failed([conflict, unknown]))).toBe(
-      'unknown directive "frobnicate" in /etc/nginx/sites-available/app:3',
-    )
-    // Output nothing could be read from is still a reason.
-    expect(testReason(failed([]))).toBe(
-      "nginx: configuration file /etc/nginx/nginx.conf test failed",
-    )
-  })
-
-  test("is the first warning, and how many more there are", () => {
-    expect(testReason(passed([conflict]))).toBe(conflict.message)
-    expect(testReason(passed([conflict, deprecated]))).toBe(`${conflict.message}, and 1 more`)
-    expect(diagnosticLine(deprecated)).toBe(
-      `${deprecated.message} in /etc/nginx/sites-available/app:4`,
-    )
-  })
-})
-
-describe("the last config test in Needs attention", () => {})
 
 describe("which files a diagnostic may open", () => {
   const status = {

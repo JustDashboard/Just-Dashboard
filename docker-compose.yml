@@ -115,7 +115,8 @@ services:
       # Updating the dashboard itself. False disables update discovery;
       # deployment Git branch monitoring remains automatic and independent.
       # JD_UPDATE_DIR is normally empty — the dashboard asks Docker where this
-      # stack was deployed from, which is why the label below is not needed.
+      # stack was deployed from, by the working_dir label Compose puts on this
+      # container, so nothing in this file has to name the directory.
       JD_UPDATE_CHECK: ${JD_UPDATE_CHECK:-true}
       JD_UPDATE_REPO: ${JD_UPDATE_REPO:-JustDashboard/Just-Dashboard}
       JD_UPDATE_BRANCH: ${JD_UPDATE_BRANCH:-main}

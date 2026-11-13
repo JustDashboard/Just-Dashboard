@@ -80,7 +80,7 @@ the full local browser result. The recording was refreshed against the compatibi
 
 ### Recorded workflow
 
-[Watch the keyboard workflow](evidence/keyboard-workflow.webm) (24 seconds, 1280 × 800, WebM).
+[Watch the keyboard workflow](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-command-search/evidence/keyboard-workflow.webm) (24 seconds, 1280 × 800, WebM).
 From the account page, keyboard events open search, type `domain: shop.example.com`,
 open the site's inspection page, type `container: shop-web`, open its real detail view,
 return to the exact previous site with Ctrl+K → Enter, and search `shop` across related resources.
@@ -90,10 +90,10 @@ The browser tests and recording use explicitly labelled API fixtures against the
 They verify rendering, keyboard behavior and navigation; live-host/backend integration was not
 exercised. No private host inventory appears in the recording.
 
-- [Scoped domain search, 1280px](evidence/domain-search-1280.png)
-- [Global results, 1280px](evidence/global-search-1280.png)
-- [Global results, 1720px](evidence/global-search-1720.png)
-- [Global results, mobile](evidence/global-search-mobile.png)
+- [Scoped domain search, 1280px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-command-search/evidence/domain-search-1280.png)
+- [Global results, 1280px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-command-search/evidence/global-search-1280.png)
+- [Global results, 1720px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-command-search/evidence/global-search-1720.png)
+- [Global results, mobile](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-command-search/evidence/global-search-mobile.png)
 
 To reproduce the evidence against an already built/running frontend:
 

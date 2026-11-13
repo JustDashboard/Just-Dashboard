@@ -56,7 +56,6 @@ export { useGridLayout } from "./use-grid-layout"
 export {
   EMPTY_LAYOUT,
   moveColumn,
-  pruneLayout,
   setColumnHidden,
   setColumnPinned,
   setColumnWidth,

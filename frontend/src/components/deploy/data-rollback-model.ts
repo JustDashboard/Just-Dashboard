@@ -163,11 +163,6 @@ export function copyLine(copy: DataCopy, now: number) {
   return parts.join(" · ")
 }
 
-/** The copies a run's page links: the ones that waited for that run. */
-export function copiesOfRun(copies: DataCopy[] | undefined, runId: number) {
-  return (copies ?? []).filter((copy) => copy.afterRunId === runId)
-}
-
 /** Active copies first, each group newest first: what is the operator's now leads. */
 export function orderCopies(copies: DataCopy[] | undefined) {
   return [...(copies ?? [])].sort((a, b) => {

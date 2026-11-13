@@ -3,7 +3,6 @@ import {
   DEFAULT_CHOICE,
   execQuery,
   healthReading,
-  readChoice,
   restartsLabel,
   runsAsRoot,
 } from "./console-session"
@@ -26,14 +25,6 @@ describe("execQuery", () => {
   test("root sends user, and only root does", () => {
     expect(execQuery({ shell: "auto", runAs: "root" }).user).toBe("root")
     expect("user" in execQuery({ shell: "bash", runAs: "default" })).toBe(false)
-  })
-})
-
-describe("readChoice", () => {
-  test("falls back to the default for anything it does not offer", () => {
-    expect(readChoice(undefined)).toEqual(DEFAULT_CHOICE)
-    expect(readChoice({ shell: "zsh", runAs: "www-data" })).toEqual(DEFAULT_CHOICE)
-    expect(readChoice({ shell: "ash", runAs: "root" })).toEqual({ shell: "ash", runAs: "root" })
   })
 })
 

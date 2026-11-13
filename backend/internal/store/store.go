@@ -1,3 +1,11 @@
+// Package store is the dashboard's one SQLite database (vpsd.db in the data
+// directory): the schema (store.go, and a schema file per later feature), the
+// columns added since a table shipped (addedColumns), the pools Open makes
+// (DB, Bulk, Reader) and the settings table. Schema changes are additive: a
+// new column is an addedColumns entry with a DEFAULT, and a shipped entry is
+// never removed. It imports no feature package; each feature keeps its own
+// queries. See "The store's connections" in
+// docs/internal/architecture/runtime-boundaries.md.
 package store
 
 import (

@@ -12,20 +12,6 @@ export type Sample = {
   gauges: Record<string, number>
 }
 
-/** How many readings a page-local performance window holds. */
-export const WINDOW = 60
-
-/**
- * The run with one more sample, oldest dropped past `max`. A sample that is
- * not newer than the last — a poll answered from a cache, a clock that
- * stepped back — is not a new reading, and the run is handed back as it was.
- */
-export function pushSample(held: readonly Sample[], next: Sample, max = WINDOW): readonly Sample[] {
-  const last = held[held.length - 1]
-  if (last && next.at <= last.at) return held
-  return [...held, next].slice(-max)
-}
-
 function total(sample: Sample, keys: readonly string[]): number | undefined {
   let sum = 0
   for (const key of keys) {
@@ -66,23 +52,6 @@ export function rateBetween(
   return delta === undefined ? undefined : delta / seconds
 }
 
-/** One rate per interval of the run, aligned with its second sample onward. */
-export function rates(
-  samples: readonly Sample[],
-  keys: string | readonly string[],
-): (number | undefined)[] {
-  return samples.slice(1).map((sample, index) => rateBetween(samples[index], sample, keys))
-}
-
-/** The newest interval's rate. */
-export function lastRate(
-  samples: readonly Sample[],
-  keys: string | readonly string[],
-): number | undefined {
-  if (samples.length < 2) return undefined
-  return rateBetween(samples[samples.length - 2], samples[samples.length - 1], keys)
-}
-
 /**
  * What share of two counters' movement the first one is, as a percentage: a
  * cache's hits of its hits and misses. `undefined` for an interval in which
@@ -100,60 +69,10 @@ export function shareBetween(
   return (hit / (hit + miss)) * 100
 }
 
-export function shares(
-  samples: readonly Sample[],
-  hits: string | readonly string[],
-  misses: string | readonly string[],
-): (number | undefined)[] {
-  return samples.slice(1).map((sample, index) => shareBetween(samples[index], sample, hits, misses))
-}
-
-/**
- * The share over everything held, and failing that over the server's whole
- * life: an idle minute moves neither counter, and the tile still has a true
- * figure to show — the one the totals themselves give — as long as it says
- * which of the two it is.
- */
-export function heldShare(
-  samples: readonly Sample[],
-  hits: string | readonly string[],
-  misses: string | readonly string[],
-): { value: number; over: "window" | "lifetime" } | undefined {
-  const newest = samples[samples.length - 1]
-  if (!newest) return undefined
-  if (samples.length > 1) {
-    const value = shareBetween(samples[0], newest, hits, misses)
-    if (value !== undefined) return { value, over: "window" }
-  }
-  const hit = total(newest, list(hits))
-  const miss = total(newest, list(misses))
-  if (hit === undefined || miss === undefined || hit + miss <= 0) return undefined
-  return { value: (hit / (hit + miss)) * 100, over: "lifetime" }
-}
-
-/** A gauge across the run, where it was reported. */
-export function gauges(samples: readonly Sample[], key: string): number[] {
-  return samples.flatMap((sample) => {
-    const value = sample.gauges[key]
-    return typeof value === "number" && Number.isFinite(value) ? [value] : []
-  })
-}
-
 /** The newest sample's reading of a gauge. */
 export function gauge(samples: readonly Sample[], key: string): number | undefined {
   const value = samples[samples.length - 1]?.gauges[key]
   return typeof value === "number" && Number.isFinite(value) ? value : undefined
-}
-
-/** The newest sample's total of a counter. */
-export function counter(samples: readonly Sample[], key: string): number | undefined {
-  const value = samples[samples.length - 1]?.counters[key]
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined
-}
-
-/** A series with its holes left out, for a trend that only wants a shape. */
-export function drawn(values: readonly (number | undefined)[]): number[] {
-  return values.filter((value): value is number => value !== undefined)
 }
 
 /** How long the held run covers, in seconds. */
@@ -321,16 +240,6 @@ export function mongoSample(stats: MongoStats): Sample | undefined {
     }),
   }
 }
-
-/** Every operation counter MongoDB keeps, as one rate. */
-export const MONGO_OPS = [
-  "ops.insert",
-  "ops.query",
-  "ops.update",
-  "ops.delete",
-  "ops.getmore",
-  "ops.command",
-] as const
 
 /** Use the recorder's clock for every engine, leaving outages as explicit gaps. */
 export function historySamples<T>(

@@ -20,4 +20,7 @@
 - [`processes-terminal-github.md`](processes-terminal-github.md) — processes, PTYs, terminal organization, and GitHub.
 - [`git-backups-users.md`](git-backups-users.md) — Git, backup execution/restore, host users, and SSH keys.
 - [`remote-desktop.md`](remote-desktop.md) — guacd as an owned loopback container, the server-side Guacamole handshake and relay, sealed sign-ins and the session history; Stream mode's Moonlight Web bridge, proxied, and Sunshine pairing.
-- [`databases-proxy-platform.md`](databases-proxy-platform.md) — databases, proxy, jobs, configuration, releases, self-update, and the dashboard's own settings.
+- [`databases.md`](databases.md) — the Databases section: inventory, connections, the SQL workbench, schema and operations, Redis, MongoDB, transfer, the MCP server and the `/databases` route table.
+- [`proxy.md`](proxy.md) — nginx sites, certificates and TLS, DNS, streams and ports.
+- [`platform.md`](platform.md) — streaming, jobs, secrets, agent mode, configuration, releases, self-update, the dashboard's own settings and uninstalling.
+- [`databases-proxy-platform.md`](databases-proxy-platform.md) — where the three documents above were one; kept so older links land.

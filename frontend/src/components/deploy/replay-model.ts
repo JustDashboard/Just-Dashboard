@@ -204,11 +204,6 @@ export function driftAnswer(drift: ReplayDrift) {
     : `no answer (${drift.error ?? "none"})`
 }
 
-/** The verdict as a tone: a line crossed is the reason the release stopped. */
-export function replayTone(report: ReplayReport) {
-  return report.verdict.tripped ? "danger" : "success"
-}
-
 /**
  * The step row's line while another step is open: how many were replayed,
  * how many drifted, and the two p95s — what the replay is for.

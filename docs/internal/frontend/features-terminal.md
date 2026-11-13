@@ -46,9 +46,7 @@ tester run on the page and draw no working bar.
 - `tabs.tsx` gives selection, hover and focus three different mechanisms. They had two: the accent
   outline meant both "this filter is on" and "the keyboard is here", so a keyboard user could not tell
   which filters were applied and tabbing looked like the selection moving.
-- `exposure.tsx` draws a published port so the two cases that matter look different, and `RouteRow`
-  shows the full trace — binding, reverse proxy, firewall — with the reasoning behind each verdict and
-  an explicit *inferred* where one was worked out rather than read.
+- `exposure.tsx` draws a published port so the two cases that matter look different.
 - `container-cells.tsx` holds the three cells that were saying something other than what they meant:
   memory against an explicit container limit, CPU with its denominator stated (Docker counts one core
   as 100%), and Docker's runtime state. The security finding underneath that state was removed.

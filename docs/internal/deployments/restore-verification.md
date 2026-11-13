@@ -89,7 +89,7 @@ owner and recorded manifests, including jobs with no filesystem source; see
 external-service recovery remain outside this implementation. Point-in-time recovery of a PostgreSQL
 server is not part of it either: it is the database Backups page's own archive of the write-ahead log,
 recovered into a new container, described in
-[Databases → Point-in-time recovery](../backend/databases-proxy-platform.md#point-in-time-recovery). Copying live database data
+[Databases → Point-in-time recovery](../backend/databases.md#point-in-time-recovery). Copying live database data
 directories is not promoted to an application-consistent backup by this feature. Application checker
 coverage and actual production RPO/RTO must be established for each supported workload.
 

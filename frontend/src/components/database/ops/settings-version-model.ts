@@ -48,21 +48,6 @@ export type DbUpgradeReport = {
   checkedAt: string
 }
 
-/** The last `result` line of an upgrade. */
-export type DbUpgradeResult = {
-  from: string
-  to: string
-  server: string
-  container: string
-  previous: string
-  volume: string
-  safetyDump?: string
-  databases: number
-  tables: number
-  rows: number
-  summary: string
-}
-
 export type DbUpgradeState = "running" | "upgraded" | "finished" | "reverted" | "failed"
 
 /** One upgrade of this server, as `GET /databases/{id}/upgrade` describes it. */
@@ -142,13 +127,6 @@ export function reportOf(lines: readonly Pick<JobLine, "stream" | "text">[]) {
   return report && Array.isArray(report.checks) && typeof report.ready === "boolean"
     ? report
     : undefined
-}
-
-/** An upgrade's result, from its job's last line. */
-export function upgradeResultOf(lines: readonly Pick<JobLine, "stream" | "text">[]) {
-  const result: unknown = transferResult(lines)
-  const done = result as DbUpgradeResult | undefined
-  return done && typeof done.previous === "string" && typeof done.to === "string" ? done : undefined
 }
 
 /** The checks that stop the upgrade. */

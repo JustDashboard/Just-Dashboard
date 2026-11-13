@@ -333,19 +333,6 @@ export function fleetReadings(
   }
 }
 
-/** One reading of a figure the page keeps while it is open. */
-export type Sample = { at: string; value: number }
-
-/**
- * A figure's samples with the newest reading laid in: nothing when the stamp
- * is the one already held (a poll that was answered from the server's cache),
- * and never more than `keep` of them.
- */
-export function pushSample(samples: Sample[], at: string, value: number, keep = 60): Sample[] {
-  if (samples.length > 0 && samples[samples.length - 1].at === at) return samples
-  return [...samples, { at, value }].slice(-keep)
-}
-
 /**
  * What each database feeds, read off the map: the things with a link from
  * it, their products for the marks, and how many there are.

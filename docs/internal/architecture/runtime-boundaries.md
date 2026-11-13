@@ -3,14 +3,17 @@
 ## Server, modules, degradation
 
 `api.Server` holds config, logger, store, auth service, sealer, audit logger, authenticator, WS
-upgrader, the three limiters, and in agent mode the `agent.Identity`. `api/modules.go` (`moduleSet`)
+upgrader, the five limiters, and in agent mode the `agent.Identity`. `api/modules.go` (`moduleSet`)
 holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEvents`, `pm2`, `systemd`,
 `table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `forge`, `updates`, `selfUpdate`, `proxy`, `dbs`,
 `linuxUsers`, `netsec`, `captures` (`netcapture`), `flowAccounting` (`netflows`), `networkVantages` (`netvantage`),
 `dnsServices` (`dnsservice`, [native DNS connections and owned engines](../backend/network-dns-services.md)),
 `remoteDesktop` (`remotedesk`, [Remote Desktop](../backend/remote-desktop.md)), `ipam` (`netipam`), `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
-monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
+monitoring and managed database networks. Beside them: `storeHealth`, `selfConfig`, `uninstall`,
+`certKeeper`, `accountLink`, `hubLink`, `usagePing`, `hostFiles`, `diagnostics` (`netdiag`), `blocks`,
+`tunnel` (`cftunnel`), `requests` (`accesslog`), `logDrains`, `secretStores`, the alert evaluators
+(`trafficAlerts`, `dbAlerts`, `hostAlerts`), `imageScans`, `githubApp` and `gameVersions`. The backup runner delegates native SQLite snapshots to
 Databases and disposable application checks to a Docker adapter; Backups owns their evidence and cleanup.
 
 **Every module is optional.** A host with no Docker socket, no systemd or no fail2ban serves everything
@@ -52,7 +55,13 @@ purpose is to have been running while nobody was looking), the database activity
 of connections sealed under another master key (`database_stranded.go`), the Docker event log, the host alerts' pass once a minute (`hostAlerts.Start`, after both of those it reads), the network module's interface sampler and its daily blocklist refresh, the self-update
 check, the backup scheduler, `selfupdate.Installer.Reconcile`,
 `selfcfg.Applier.Reconcile`, Remote Desktop's `Reconcile` (closing the history of sessions a restart cut
-off) and the Tailscale certificate keeper. `Shutdown` releases what outlives a request:
+off) and the Tailscale certificate keeper. It also starts the route history, database TLS renewal,
+the proxies' CrowdSec list, the settling of an interrupted uninstall, the point-in-time recovery
+schedule, the Docker Caddy ingress upkeep, the proxy pages' own work (`startProxyExtras`), the
+deployment side (preview quarantine, schedules, traffic alerts, log drains, the engine, the rollback
+watcher, the Cloudflare tunnel, sleep, data copies, preview branches, image scans, Git monitoring,
+the preview reconciler, managed database networks and poolers), and last the account link, the hub
+link and the usage count. `Shutdown` releases what outlives a request:
 samplers, scheduler, live PTYs, database pools, Docker clients (Remote Desktop's engine and stream bridge clients among them;
 both containers keep running). A held terminal session is let go rather
 than ended — its holder is a systemd unit of its own on the host — and module setup takes every
@@ -127,7 +136,7 @@ That outlives the process, not the container: a host command started through `ns
 backend container's cgroup and is killed when the container stops. Package commands can stop it
 themselves (docker-ce's maintainer script restarts Docker), so they run as transient units of the host's
 systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
-[streaming and jobs](../backend/databases-proxy-platform.md#streaming-jobs-secrets-agent-mode).
+[streaming and jobs](../backend/platform.md#streaming-jobs-secrets-agent-mode).
 
 ## Background work survives its own panics
 
@@ -454,8 +463,9 @@ sorted without repeats, and clears `needs_onboarding`. The list narrows what the
 nothing the account may do; every route still answers by role. See
 [the shell](../frontend/shell-design.md#sections-an-account-keeps-out-of-its-sidebar).
 
-State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` block in
-`internal/store/store.go` with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`
+State is SQLite in `JD_DATA_DIR`, schema as `CREATE TABLE IF NOT EXISTS` blocks in `internal/store`
+(the `schema` block in `store.go`, joined from per-feature schema files, and the few `Open` applies after
+`applyAddedColumns`) with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`
 through the rename: moving it would strand every existing install's accounts, audit log and secrets.
 For as long as the store is open it holds open file description locks on SQLite's shared-lock range and
 on the `-shm` dead-man switch (`store/wal_guard.go`). SQLite's own locks belong to the process, so a
@@ -496,9 +506,21 @@ resource owner identity (`network_dns_services`, `network_dns_service_changes`,
 `network_dns_service_provisions`, `network_dns_service_settings`), socket-hour/coverage records
 (`network_flow_buckets`, `network_flow_cycles`), and gateway counter totals across table generations
 with seven days of per-minute protection samples (`network_gateway_counters`,
-`network_protection_samples`). What the network module makes on the host is kept in
+`network_protection_samples`). The other owners' tables are the assistant's chats
+(`assistant_chats`, `assistant_chat_lines`, `assistant_chat_images`); the account link's and hub link's
+commands (`account_link_commands`, `hub_link_commands`) and hub sign-in (`hub_signin_grants`,
+`hub_signin_tickets`); the alert rules, state and events of databases, the host and the proxy
+(`db_alert_*`, `host_alert_*`, `proxy_alert_*`); the databases' `db_online_imports` and `db_poolers`;
+`github_app`; volume samples and the containers' short ids (`metric_volume_samples`,
+`metric_container_ids`); the proxy pages'
+`proxy_config_revisions`, `proxy_cloudflare_tunnel`, `tls_scans`, `acme_eab`, `listener_observations`
+and `listener_history`; and the network module's routing, firewall, traffic, egress and WireGuard
+records (`network_route_*`, `firewall_rule_events`, `network_shaping_applied`,
+`network_interface_quotas`, `network_address_blocks`, `network_congestion_snapshots`,
+`network_egress_*`, `network_wg_*`). `proxy_finding_snoozes` and `network_incidents` stay so an upgrade
+keeps them, though nothing reads them since 0.7.5. What the network module makes on the host is kept in
 `/etc/just-dashboard/network/spec.json` instead, because it describes the host and has to outlive the
-dashboard ([network module](../backend/network.md#three-rules)). The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
+dashboard ([network module](../backend/network.md#three-rules)). The schema in `internal/store` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old
 columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract. A test that takes
 that fixture through `Open` calls `t.Parallel()` first, and `parallel_test.go` fails one that does

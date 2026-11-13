@@ -61,12 +61,12 @@ their Reading-register sections; fingerprints wrap; longer native inventories sc
 The phone cases also capture custom-rule sections, retaining
 [all 12 final captures and hashes](dns-service-filter-ui/closed-groups-final/screenshots.json).
 
-Inspected examples include the [phone Pi-hole inventory](dns-service-filter-ui/closed-groups-final/native-filters-pihole-390.png),
-[phone AdGuard rules](dns-service-filter-ui/closed-groups-final/native-filter-rules-adguard-390.png),
-[phone Technitium inventory](dns-service-filter-ui/closed-groups-final/native-filters-technitium-390.png),
-[desktop Pi-hole inventory](dns-service-filter-ui/closed-groups-final/native-filters-pihole-1280.png),
-[wide AdGuard inventory](dns-service-filter-ui/closed-groups-final/native-filters-adguard-1720.png) and
-[desktop Technitium inventory](dns-service-filter-ui/closed-groups-final/native-filters-technitium-1280.png).
+Inspected examples include the [phone Pi-hole inventory](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/closed-groups-final/native-filters-pihole-390.png),
+[phone AdGuard rules](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/closed-groups-final/native-filter-rules-adguard-390.png),
+[phone Technitium inventory](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/closed-groups-final/native-filters-technitium-390.png),
+[desktop Pi-hole inventory](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/closed-groups-final/native-filters-pihole-1280.png),
+[wide AdGuard inventory](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/closed-groups-final/native-filters-adguard-1720.png) and
+[desktop Technitium inventory](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/closed-groups-final/native-filters-technitium-1280.png).
 These are mocked metadata and browser layout evidence, separate from actual engine observations.
 
 ## Closed native shapes and final engine proof
@@ -98,9 +98,9 @@ manifests are retained beside it. All three exit zero without skips or image pul
 
 | Engine / authenticated version | Wrapper / test child | Raw byte record / cleanup |
 | --- | --- | --- |
-| AdGuard Home `v0.107.71` | 43.324s / 42.29s | [raw](dns-service-filter-ui/closed-groups-final/native-adguard.log.raw.gz), [result](dns-service-filter-ui/closed-groups-final/native-adguard.result.json) |
-| Pi-hole FTL `v6.7.1` | 72.962s / 71.92s | [raw](dns-service-filter-ui/closed-groups-final/native-pihole.log.raw.gz), [result](dns-service-filter-ui/closed-groups-final/native-pihole.result.json) |
-| Technitium `15.6` | 26.033s / 25.00s | [raw](dns-service-filter-ui/closed-groups-final/native-technitium.log.raw.gz), [result](dns-service-filter-ui/closed-groups-final/native-technitium.result.json) |
+| AdGuard Home `v0.107.71` | 43.324s / 42.29s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/closed-groups-final/native-adguard.log.raw.gz), [result](dns-service-filter-ui/closed-groups-final/native-adguard.result.json) |
+| Pi-hole FTL `v6.7.1` | 72.962s / 71.92s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/closed-groups-final/native-pihole.log.raw.gz), [result](dns-service-filter-ui/closed-groups-final/native-pihole.result.json) |
+| Technitium `15.6` | 26.033s / 25.00s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/closed-groups-final/native-technitium.log.raw.gz), [result](dns-service-filter-ui/closed-groups-final/native-technitium.result.json) |
 
 Actual native proof includes read-only known empty subscriptions, AdGuard/Pi-hole local-rule
 metadata changing and persisting across restart, explicit valid Pi-hole client memberships,
@@ -125,9 +125,9 @@ No package, dependency or lockfile change is part of this checkpoint.
 The [initial direct browser run](dns-service-filter-ui/browser-initial.log) passes all 17 cases in
 29.3 seconds. Its width assertion checked internal overflow but did not wait for the opening
 transition or verify actual viewport containment. Review finds clipped opening-transition captures
-at [390 pixels](dns-service-filter-ui/initial-native-filters-pihole-390.png) and
-[1720 pixels](dns-service-filter-ui/initial-native-filters-pihole-1720.png); the later
-[phone custom-rule capture](dns-service-filter-ui/initial-native-filter-rules-pihole-390.png)
+at [390 pixels](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/initial-native-filters-pihole-390.png) and
+[1720 pixels](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/initial-native-filters-pihole-1720.png); the later
+[phone custom-rule capture](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui/initial-native-filter-rules-pihole-390.png)
 has already settled. The [initial capture manifest](dns-service-filter-ui/initial-screenshots.json)
 retains all 12 original hashes and workspace locations. They are not relabeled as corrected layout
 proof. The later rectangle wait and viewport assertions produce the final captures above.

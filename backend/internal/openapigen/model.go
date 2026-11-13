@@ -110,16 +110,6 @@ type API struct {
 	ErrorFields []Field
 }
 
-// Decl finds a declaration by name.
-func (a *API) Decl(name string) *Decl {
-	for _, d := range a.Decls {
-		if d.Name == name {
-			return d
-		}
-	}
-	return nil
-}
-
 type parser struct {
 	doc        map[string]any
 	components map[string]any

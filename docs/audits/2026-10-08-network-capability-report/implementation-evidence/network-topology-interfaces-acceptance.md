@@ -297,9 +297,9 @@ browser worker, and stopped the server afterwards.
 
 The 19 cases of `network-topology-interfaces.spec.ts` are part of that gate. Review screenshots at
 390 and 1440 pixels of the Overview, the ens3/jd-lab/vlan30/vx42 device sheets and the lab namespace
-sheet were reviewed; four are kept: [Overview, 1440](network-topology-interfaces/overview-1440.png),
-[Overview, 390](network-topology-interfaces/overview-390.png), [VXLAN readiness sheet, 390](network-topology-interfaces/device-vx42-390-mid.png) and
-[lab namespace sheet, 1440](network-topology-interfaces/namespace-lab-1440.png) (fixture data).
+sheet were reviewed; four are kept: [Overview, 1440](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-topology-interfaces/overview-1440.png),
+[Overview, 390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-topology-interfaces/overview-390.png), [VXLAN readiness sheet, 390](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-topology-interfaces/device-vx42-390-mid.png) and
+[lab namespace sheet, 1440](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-topology-interfaces/namespace-lab-1440.png) (fixture data).
 
 The final gate ran on the committed head `5d66048b` (code identical to the validation run):
 `scripts/test-changed.sh 4338e6cc` passed — Prettier, ESLint, `tsc`, 3,277 Bun tests; `go build ./...`,

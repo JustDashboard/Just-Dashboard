@@ -1,5 +1,7 @@
-// Package logsx unifies the log sources on a host — syslog, nginx, PM2,
-// application files and the journal — behind one tailing and search API.
+// Package logsx unifies the log sources on a host — syslog and the kernel log,
+// nginx, PM2, application files, Docker containers and Compose stacks, and the
+// journal (sources.go) — behind one tailing and search API, and reads each
+// kind of line through a lens that names its event and values (lens*.go).
 package logsx
 
 import (

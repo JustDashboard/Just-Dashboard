@@ -58,6 +58,10 @@ as described under [Security issues](#security-issues).
 
 ## Before you open a pull request
 
+New to the tree? [`docs/internal/reference/finding-things.md`](docs/internal/reference/finding-things.md)
+says which route, components, handler files, package, specs and document belong to each page, and
+`backend/`, `frontend/`, `scripts/` and `docs/` each open on a short README.
+
 Keep the PR focused and use the template to explain what changed, why, and how you verified it. Link
 related issues and include before/after screenshots for visual changes or a recording for interaction
 changes. Record validation limits and whether documentation needed updating; submitting the PR agrees
@@ -99,7 +103,7 @@ never into `docs/audits/`.
   route added or removed also adds or removes an MCP tool generated from it:
   `TestEveryDeployKeyRouteIsAnMCPTool` fails until `api.MCPGeneratedTools` and the counts quoted in
   the MCP server's documentation, `docs/features/databases.md` and the deployment implementation notes follow
-  ([the generated tools](docs/internal/backend/databases-proxy-platform.md#the-mcp-server)).
+  ([the generated tools](docs/internal/backend/databases.md#the-mcp-server)).
 - Docker remedy changes run the live resource/policy acceptance: first make `alpine:3.20` available
   locally, then run from `backend/`:
   `JD_ADVISOR_DOCKER_LIVE=1 go test ./internal/dockerx -run '^TestLiveAdvisor' -count=1 -v`.
@@ -204,7 +208,8 @@ never into `docs/audits/`.
   Browser specs do not pass through Caddy; `src/lib/passkeys.test.js` reads `deploy/Caddyfile` to hold
   its `Permissions-Policy` to allowing passkeys.
 - Installer and terminal-admin changes also run `python3 scripts/test_manage.py`,
-  `python3 scripts/test_preflight.py`, `python3 scripts/test_build_stamp.py` and
+  `python3 scripts/test_preflight.py`, `python3 scripts/test_build_stamp.py`,
+  `python3 scripts/test_install_dependencies.py`, `python3 scripts/test_dotenv.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.
 - **`bun run build` is the final frontend type-check gate.** `frontend/Dockerfile`
@@ -255,7 +260,7 @@ never into `docs/audits/`.
   with no `v<version>` tag is neither offered nor installed (`selfupdate.TagsOnly`), so a merge whose
   Verify run fails ships to nobody until a later run is green. Release tags can also be required to be
   signed (`backend/internal/selfupdate/allowed_signers`, which names no key yet, so nothing is checked);
-  "Signed releases" in `docs/internal/backend/databases-proxy-platform.md` has the order to turn it on in.
+  "Signed releases" in `docs/internal/backend/platform.md` has the order to turn it on in.
   Do not add a key to that file as part of other work. Never tag or publish a release by hand; a manual run of the
   workflow on `main` retries one that failed.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
@@ -401,7 +406,7 @@ never into `docs/audits/`.
   the store's own words. It removes everything it made. Changes to the AWS Secrets Manager client or the
   SigV4 signer (`secretstore/aws.go`, `sigv4.go`) also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSecretsManagerReferenceReachesTheContainer -count=1 -v`,
-  which starts a real LocalStack (`localstack/localstack:2026.10.3`, pulled beforehand, Secrets Manager
+  which starts a real LocalStack (`localstack/localstack:4.14.0`, pulled beforehand, Secrets Manager
   only) on loopback, reads a JSON secret's field, its `AWSPREVIOUS` staging label and a whole plain secret
   into a real container through the dashboard's own signed client, then stops LocalStack and checks the
   next run fails in the store's words; it removes what it made. LocalStack accepts any signature, so the
@@ -970,7 +975,12 @@ the editor), `database-explain.spec.ts` (the Plan tree's measured, estimated and
 editor, its answers streamed by the mock, and Ask from another page),
 `database-schema.spec.ts`, `database-programs.spec.ts` (functions, procedures and triggers), `database-rls.spec.ts` (row-level
 security, the role test, and function and column grants), `database-redis.spec.ts`, `database-mongo.spec.ts`,
-`database-performance.spec.ts` and `database-logos.spec.ts`.
+`database-performance.spec.ts` and `database-logos.spec.ts`, and the rest of the areas' own:
+`database-alerts.spec.ts`, `database-creation.spec.ts`, `database-extensions.spec.ts`,
+`database-import.spec.ts`, `database-metrics-export.spec.ts`, `database-operate.spec.ts`,
+`database-pitr.spec.ts`, `database-pooling.spec.ts`, `database-provisioning-catalogue.spec.ts`,
+`database-reach.spec.ts`, `database-resources.spec.ts`, `database-seed.spec.ts`,
+`database-statements-setup.spec.ts`, `database-tls.spec.ts` and `database-upgrade.spec.ts`.
 `scripts/test-changed.sh` picks the ones a change can reach: it follows a
 changed file through its imports to the pages that use it and runs the specs
 that name those pages' addresses. A generator's file reaches the Generate page

@@ -89,29 +89,6 @@ type checkoutRefusal struct {
 func (e checkoutRefusal) Error() string { return e.text }
 func (e checkoutRefusal) Unwrap() error { return e.cause }
 
-// inspectDeploymentSource reads the commit plan.Identity names through a
-// temporary planning checkout. A source without files reads as nothing; one
-// that cannot be read says why, and the evaluation falls back to what was
-// stored when the plan was saved.
-func inspectDeploymentSource(ctx context.Context, inspector SourceInspector, plan deploymentPlan) (sourceReading, SourceIdentity) {
-	if inspector == nil || !sourceHasTree(plan.Source) {
-		return sourceReading{}, plan.Identity
-	}
-	var reading sourceReading
-	identity := plan.Identity
-	err := inspector.InspectRevision(ctx, plan.Source, plan.Identity, func(root string, inspected SourceIdentity) error {
-		identity = inspected
-		inspectedPlan := plan
-		inspectedPlan.Identity = inspected
-		reading = readDeploymentSource(ctx, root, inspectedPlan)
-		return nil
-	})
-	if err != nil {
-		reading = sourceReading{unavailable: sourceInspectionUnavailable(err)}
-	}
-	return reading, identity
-}
-
 // sourceInspectionUnavailable words why a commit could not be read, without
 // Git's own output, which never leaves the planning boundary.
 func sourceInspectionUnavailable(err error) string {

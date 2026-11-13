@@ -19,9 +19,6 @@ export function isDisabled(v: VHost) {
 export function isParked(v: VHost) {
   return isDisabled(v) && !v.package
 }
-export function waiting(v: VHost) {
-  return isBroken(v) || isPlain(v) || isParked(v)
-}
 
 /**
  * Worst first, then by name. The order *is* the page's answer to "which of

@@ -48,13 +48,13 @@ IDs and their existing statuses remain unchanged.
 
 | Check | Wrapper / test time | Evidence |
 | --- | --- | --- |
-| Focused query tests | 3.204s / 0.769s | [raw](dns-query-history-shapes/focused.log.raw.gz), [result](dns-query-history-shapes/focused.result.json) |
-| Required changed-file gate | 70.061s / DNS 29.461s | [raw](dns-query-history-shapes/required.log.raw.gz), [result](dns-query-history-shapes/required.result.json) |
-| Seven selected query/privacy/transport races | 13.688s / no skips | [raw](dns-query-history-shapes/race.log.raw.gz), [result](dns-query-history-shapes/race.result.json) |
-| Private DNS API capability/sealing/audit race | 81.444s / 4.350s | [raw](dns-query-history-shapes/api-race.log.raw.gz), [result](dns-query-history-shapes/api-race.result.json) |
-| AdGuard Home v0.107.71 | 69.079s / 68.04s | [raw](dns-query-history-shapes/native-adguard.log.raw.gz), [result](dns-query-history-shapes/native-adguard.result.json) |
-| Pi-hole FTL v6.7.1 | 91.024s / 90.00s | [raw](dns-query-history-shapes/native-pihole.log.raw.gz), [result](dns-query-history-shapes/native-pihole.result.json) |
-| Technitium 15.6 | 30.340s / 29.30s | [raw](dns-query-history-shapes/native-technitium.log.raw.gz), [result](dns-query-history-shapes/native-technitium.result.json) |
+| Focused query tests | 3.204s / 0.769s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-query-history-shapes/focused.log.raw.gz), [result](dns-query-history-shapes/focused.result.json) |
+| Required changed-file gate | 70.061s / DNS 29.461s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-query-history-shapes/required.log.raw.gz), [result](dns-query-history-shapes/required.result.json) |
+| Seven selected query/privacy/transport races | 13.688s / no skips | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-query-history-shapes/race.log.raw.gz), [result](dns-query-history-shapes/race.result.json) |
+| Private DNS API capability/sealing/audit race | 81.444s / 4.350s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-query-history-shapes/api-race.log.raw.gz), [result](dns-query-history-shapes/api-race.result.json) |
+| AdGuard Home v0.107.71 | 69.079s / 68.04s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-query-history-shapes/native-adguard.log.raw.gz), [result](dns-query-history-shapes/native-adguard.result.json) |
+| Pi-hole FTL v6.7.1 | 91.024s / 90.00s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-query-history-shapes/native-pihole.log.raw.gz), [result](dns-query-history-shapes/native-pihole.result.json) |
+| Technitium 15.6 | 30.340s / 29.30s | [raw](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-query-history-shapes/native-technitium.log.raw.gz), [result](dns-query-history-shapes/native-technitium.result.json) |
 
 All eight copied logs retain their original bytes in both display and deterministic gzip form;
 [copy validation](dns-query-history-shapes/log-copy-validation.json) records every digest and roundtrip.

@@ -83,10 +83,6 @@ func TestOwnedFirewallRequestsAreValidated(t *testing.T) {
 
 const ownedListing = `{"nftables":[{"metainfo":{}},{"table":{"family":"inet","name":"jd_firewall"}},{"chain":{"family":"inet","table":"jd_firewall","name":"input","type":"filter","hook":"input","prio":10,"policy":"%s"}},{"rule":{"family":"inet","table":"jd_firewall","chain":"input","comment":"jd-fw-established"}}%s]}`
 
-func ownedRule(id string) string {
-	return `,{"rule":{"family":"inet","table":"jd_firewall","chain":"input","comment":"jd-fw-` + id + `"}}`
-}
-
 func TestChangeOwnedFirewallLoadsVerifiesAndPersists(t *testing.T) {
 	rec := rtHost(t).
 		on("nft -f", "").

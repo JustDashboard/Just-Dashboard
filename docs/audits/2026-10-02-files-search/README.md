@@ -11,11 +11,11 @@ motion shows the next state immediately. The search body remains visible during 
 All captures use the production frontend with mocked Files API responses, without a live host or
 private files. The baseline screenshot is from `2fe48306`, the active `patch/0.7.1` branch at task start.
 
-- [Before](before.png) and [after with the same query](after.png).
-- Names: [30 results](names-many.png), [one result](names-single.png), [complete video](names.webm).
-- Contents: [30 results](contents-many.png), [one result](contents-single.png), [complete video](contents.webm).
-- [Phone](phone.png) and [short landscape window](landscape.png).
-- [Animation preview](interaction.gif), cropped from the original Names video; the full videos preserve
+- [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-search/before.png) and [after with the same query](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-search/after.png).
+- Names: [30 results](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-search/names-many.png), [one result](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-search/names-single.png), [complete video](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-search/names.webm).
+- Contents: [30 results](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-search/contents-many.png), [one result](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-search/contents-single.png), [complete video](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-search/contents.webm).
+- [Phone](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-search/phone.png) and [short landscape window](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-search/landscape.png).
+- [Animation preview](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files-search/interaction.gif), cropped from the original Names video; the full videos preserve
   the complete sequence and timings.
 
 The six state-sequence tests exercise both modes at 1280×960, 375×812 and 640×375. On every animation

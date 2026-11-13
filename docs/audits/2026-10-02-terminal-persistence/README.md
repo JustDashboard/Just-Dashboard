@@ -45,4 +45,4 @@ layout is unchanged. The after image includes the new reason and keeps the same 
 
 | Before: failure is silent | After: failure is explained, existing work remains accessible |
 | --- | --- |
-| ![Before](before.png) | ![After](after.png) |
+| ![Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-terminal-persistence/before.png) | ![After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-terminal-persistence/after.png) |

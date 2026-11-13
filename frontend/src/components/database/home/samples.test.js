@@ -1,18 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import {
   TRANSACTIONS,
-  WINDOW,
   chartRows,
-  drawn,
   gauge,
   heldSeconds,
-  heldShare,
   joinRecorded,
-  lastRate,
   mongoSample,
-  pushSample,
   rateBetween,
-  rates,
   redisSample,
   shareBetween,
   sourced,
@@ -20,22 +14,6 @@ import {
 } from "./samples"
 
 const at = (seconds, counters = {}, gauges = {}) => ({ at: seconds * 1000, counters, gauges })
-
-describe("the run of samples a home holds", () => {
-  test("keeps the newest sixty", () => {
-    let held = []
-    for (let i = 0; i < WINDOW + 5; i++) held = pushSample(held, at(i))
-    expect(held).toHaveLength(WINDOW)
-    expect(held[0].at).toBe(5000)
-    expect(held[WINDOW - 1].at).toBe((WINDOW + 4) * 1000)
-  })
-
-  test("a reading that is not newer than the last is not a reading", () => {
-    const held = pushSample([], at(10))
-    expect(pushSample(held, at(10))).toBe(held)
-    expect(pushSample(held, at(9))).toBe(held)
-  })
-})
 
 describe("a rate is two totals and the clock between them", () => {
   test("divides the difference by the seconds the answers state", () => {
@@ -60,14 +38,6 @@ describe("a rate is two totals and the clock between them", () => {
   test("a clock that did not move has no rate", () => {
     expect(rateBetween(at(5, { queries: 1 }), at(5, { queries: 9 }), "queries")).toBeUndefined()
   })
-
-  test("one rate per interval, with the restart left as a hole", () => {
-    const run = [at(0, { q: 0 }), at(5, { q: 50 }), at(10, { q: 5 }), at(15, { q: 25 })]
-    expect(rates(run, "q")).toEqual([10, undefined, 4])
-    expect(drawn(rates(run, "q"))).toEqual([10, 4])
-    expect(lastRate(run, "q")).toBe(4)
-    expect(lastRate(run.slice(0, 1), "q")).toBeUndefined()
-  })
 })
 
 describe("a hit rate", () => {
@@ -80,15 +50,6 @@ describe("a hit rate", () => {
   test("an interval in which nothing was asked has none — it is not zero", () => {
     const a = at(0, { hit: 100, miss: 10 })
     expect(shareBetween(a, at(5, { hit: 100, miss: 10 }), "hit", "miss")).toBeUndefined()
-  })
-
-  test("over the window while something moved, over the server's life when nothing did", () => {
-    const moving = [at(0, { hit: 0, miss: 0 }), at(5, { hit: 3, miss: 1 })]
-    expect(heldShare(moving, "hit", "miss")).toEqual({ value: 75, over: "window" })
-    const idle = [at(0, { hit: 80, miss: 20 }), at(5, { hit: 80, miss: 20 })]
-    expect(heldShare(idle, "hit", "miss")).toEqual({ value: 80, over: "lifetime" })
-    expect(heldShare([at(0, { hit: 0, miss: 0 })], "hit", "miss")).toBeUndefined()
-    expect(heldShare([], "hit", "miss")).toBeUndefined()
   })
 })
 

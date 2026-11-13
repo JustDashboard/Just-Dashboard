@@ -377,7 +377,7 @@ Security or deployment lifecycle.
 
 Sources: [Docker network implementation](../../../backend/internal/dockerx/resources.go),
 [Docker network UI](../../../frontend/src/components/docker/networks-tab.tsx),
-[Proxy implementation guide](../../internal/backend/databases-proxy-platform.md#proxy),
+[Proxy implementation guide](../../internal/backend/proxy.md#proxy),
 [security/observability implementation](../../internal/backend/observability-security.md),
 [security invariants](../../internal/security/invariants.md).
 

@@ -39,7 +39,7 @@ docker compose up -d --build
 docker compose logs backend | grep "bootstrap admin"   # generated password, printed once
 ./scripts/manage.sh --help           # local account recovery and stack operations
 python3 scripts/test_manage.py       # isolated terminal-tool and installer fixtures
-scripts/release.sh 0.6               # see backend/databases-proxy-platform.md#cutting-a-release
+scripts/release.sh 0.6               # see backend/platform.md#cutting-a-release
 ```
 
 CONTRIBUTING requires `scripts/test-changed.sh` to pass before a PR. It runs only what the diff can
@@ -59,7 +59,7 @@ and `--port` and listens on loopback when no host is named. Rebuild after fronte
 browser tests alone. `JD_BROWSER_BASE_URL` selects an explicitly managed test frontend instead.
 Generated Playwright reports and traces are excluded from source linting.
 
-**Backend testing.** All 49 internal packages carry unit and integration tests. Unit fixtures are isolated;
+**Backend testing.** 68 of 69 internal packages carry unit and integration tests. Unit fixtures are isolated;
 live database and Docker tests can contact reachable services, so configure disposable test targets.
 Integration families skip rather than fail when their dependencies are absent:
 
@@ -111,7 +111,7 @@ Deployment foundation checks can be isolated while iterating:
 
 ```bash
 go test ./internal/store -run TestOpenMigratesPopulated066DeploymentsIdempotently -count=1
-go test ./internal/deploy -run 'Test(RunTransitionMatrix|StepTransitionMatrix|C0AdapterTranscripts)' -count=1
+go test ./internal/deploy -run 'Test(RunTransitionTable|StepTransitionTable|C0AdapterTranscripts)' -count=1
 go test ./internal/hostexec ./internal/config -count=1
 ```
 

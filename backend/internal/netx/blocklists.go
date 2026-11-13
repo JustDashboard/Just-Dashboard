@@ -169,14 +169,6 @@ func parseFeed(data []byte) (nets []netip.Prefix, skipped int) {
 	return nets, skipped
 }
 
-// fetch reads one URL, bounded in time, redirects and size. A body over the
-// cap is refused, not cut off: half a feed loaded as if it were the whole is
-// a list that silently stops protecting.
-func fetch(ctx context.Context, url string) ([]byte, int, error) {
-	r, err := fetchHTTP(ctx, url, nil, maxFeedBytes)
-	return r.body, r.status, err
-}
-
 type httpFetch struct {
 	body         []byte
 	status       int
@@ -184,8 +176,10 @@ type httpFetch struct {
 	lastModified string
 }
 
-// fetchHTTP is fetch with request headers (a feed's validators) and its own
-// size cap; a 304 answers with no body and no error.
+// fetchHTTP reads one URL, bounded in time, redirects and size, with request
+// headers (a feed's validators) and its own size cap; a 304 answers with no
+// body and no error. A body over the cap is refused, not cut off: half a feed
+// loaded as if it were the whole is a list that silently stops protecting.
 func fetchHTTP(ctx context.Context, url string, headers map[string]string, limit int) (httpFetch, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

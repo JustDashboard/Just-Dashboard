@@ -2,7 +2,7 @@
 
 This records the proxy and certificates package of the feature-by-feature maturity work, branch
 `implement/network-proxy-certs-maturity` from PR head `122c153a`. The behaviour and its boundaries are
-documented in [the Proxy guide](../../../internal/backend/databases-proxy-platform.md#proxy), [the
+documented in [the Proxy guide](../../../internal/backend/proxy.md#proxy), [the
 connection investigator](../../../internal/backend/network-investigator.md#native-streams-on-the-path)
 and [watched probes](../../../internal/backend/network-diagnostics.md#watched-probes); the pages that
 show them are named in the [feature map](../../../internal/frontend/feature-map.md). It changes no

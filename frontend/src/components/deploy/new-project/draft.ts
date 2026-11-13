@@ -159,18 +159,6 @@ export async function discardAbandoned(id: string | undefined) {
   }
 }
 
-export async function importEnvironment(
-  projectId: number,
-  environmentId: number,
-  revision: number,
-  dotenv: string,
-) {
-  return post<{ desiredRevision: number }>(
-    `/deploy/${projectId}/environments/${environmentId}/variables/import`,
-    { revision, dotenv, sensitivity: "secret", scopes: ["runtime", "build"] },
-  )
-}
-
 export async function enqueueDeploy(
   projectId: number,
   environmentId: number,

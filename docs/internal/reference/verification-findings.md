@@ -8,7 +8,8 @@ They remain open engineering findings; documenting them does not relax
 
 Invariant 6 requires host commands to use `hostexec` with explicit argv. The normalized deployment and
 proxy paths do, but the repository still contains direct `os/exec` calls in `gitx`, `ghx`,
-`selfupdate`, `procs`, and `dockerx`, in addition to the documented stored deployment shell exception.
+`selfupdate`, `procs`, and `dockerx`, and since that audit in `selfcfg`, `uninstall`, `ptyhold` and
+`netx`'s standalone recovery runners, in addition to the documented stored deployment shell exception.
 Many direct calls intentionally use binaries pinned in the backend image against bind-mounted host paths
 or the Docker socket, and Git/GitHub apply `hostexec.AsOwner`, but they do not all pass through
 `hostexec.Command*`. This boundary needs an architecture decision or implementation convergence; do not
@@ -42,40 +43,15 @@ routes instead use `gitx.Resolve`, which independently cleans, resolves symlinks
 validate sources/local targets through `files.Resolve`; artifact reads and retention validate their
 stored paths under current roots as well. Git's parallel resolver remains a design-convergence item.
 
-## PostgreSQL statement statistics keep utility literals
-
-Found on 2026-10-17. The Databases reference holds the statement statistics
-(`GET /databases/{id}/statements`, read capability) to a statement's shape, never one execution. On
-PostgreSQL the text was `pg_stat_statements.query` as the extension keeps it, and the extension replaces
-constants only in the statements it plans (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`); utility
-statements are kept as they were sent while `pg_stat_statements.track_utility` is on, its default.
-Checked against PostgreSQL 17.11: `CREATE ROLE … PASSWORD '…'` and `ALTER ROLE … PASSWORD '…'` were
-listed with the password in clear, as were a `SET` value (a bare word as well as a quoted one), a
-`COMMENT`, a column `DEFAULT` and a `DO` body. The dashboard's own role form sends a new password that
-way (`dbx.passwordLiteral`), so an account that may only read could be shown a password an
-administrator set from the dashboard.
-
-That finding is closed. PostgreSQL's text is shaped before it leaves `dbx` by `pgStatementShape`, which
-reads it by PostgreSQL's own lexical rules, replaces every literal with `?`, keeps the extension's `$n`
-markers, and masks a role's password and a setting's value however they are written; a plain string is
-read both with and without backslash escapes, since the text does not record whether
-`standard_conforming_strings` was on ([Databases reference](../backend/databases-proxy-platform.md),
-*Statement statistics*). The role form also keeps its statement out of `pg_stat_statements` where the
-account may turn `track_utility` off for the transaction, which a superuser may. `TestPostgresStatementShapeDropsEveryLiteralAndKeepsTheMarkers` holds
-the rule over a table of statements; `TestLivePostgresStatementsShowAShapeAndNoValue` and
-`TestLiveAPIPostgresStatementsShowAViewerNoPassword` hold it on a server, the second as a viewer reads
-the list. `/activity` and `/querylog` still return statement text with its literals at read capability,
-as documented; that is their contract, not this finding.
-
 ## Verified inventory drift corrected in this documentation change
 
-- The audit remediation raises `backend/go.mod` and the backend Docker build to Go 1.26.8 for standard-library security fixes.
-- 33 `backend/internal` packages contained tests at that audit. 38 of the 39 do now, every one but
-  `audit`.
+- The audit remediation raises `backend/go.mod` and the backend Docker build to Go 1.26.8 for standard-library security fixes; both name 1.26.11 now.
+- 33 `backend/internal` packages contained tests at that audit. 68 of the 69 do now, every one but
+  `sessioncookie`.
 - `frontend/src/app` contained 48 page entry files at that audit, not 18; three deployment wrappers
-  are server components. The count is 90 since the Databases rebuild; the
+  are server components. The
   [repository map](repository-map.md#frontend) carries the current figure.
-- `api.moduleSet` contains ten deployment components, not two.
+- `api.moduleSet` contains ten deployment components, not two; 23 fields of `deploy` types now.
 - The historical 0.6.7 delivery ledger is absent from this checkout; C0–C7 completion claims cannot be verified from that ledger. See the deployment guide for current runtime limits.
 - The SQLite inventory now includes saved database queries/history and the expanded normalized deployment
   tables instead of describing only the earlier schema.

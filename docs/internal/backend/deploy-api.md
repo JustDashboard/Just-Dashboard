@@ -192,7 +192,7 @@ named for its operationId in snake case, its input schema read from this documen
 query parameters, and the body with the components it refers to copied into the schema's `$defs`).
 The tools are read off the same router and the same description, so a route described here and given
 a deploy key line is a tool with nothing else written. How they are offered, called and audited is in
-[the MCP server](databases-proxy-platform.md#the-mcp-server).
+[the MCP server](databases.md#the-mcp-server).
 
 ## Who reads it
 

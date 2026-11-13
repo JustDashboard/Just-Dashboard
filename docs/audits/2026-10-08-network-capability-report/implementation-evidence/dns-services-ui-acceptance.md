@@ -48,11 +48,11 @@ The page, inventory, connection form, owned setup form and retained setup review
 390, 1280 and 1720 pixels. All 15 captured surface/width measurements had equal horizontal client and
 scroll widths; see [dimensions](dns-services-ui-dimensions.json) and the
 [final capture output](dns-services-ui-capture-final.txt). The inspected images include the
-[desktop service lists](dns-service-page-1720.png), [phone service lists](dns-service-page-390.png),
-[native inventory](dns-service-inventory-1280.png), [phone native views](dns-service-views-390.png),
-[connection form](dns-service-connect-1280.png), [phone setup form](dns-service-provision-390.png),
-and retained owned resources on [phone](dns-service-owned-review-390.png) and
-[desktop](dns-service-owned-review-1720.png).
+[desktop service lists](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-page-1720.png), [phone service lists](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-page-390.png),
+[native inventory](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-inventory-1280.png), [phone native views](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-views-390.png),
+[connection form](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-connect-1280.png), [phone setup form](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-provision-390.png),
+and retained owned resources on [phone](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-owned-review-390.png) and
+[desktop](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-owned-review-1720.png).
 
 These are explicitly mocked UI fixtures. The final inventory images use a Technitium fixture for
 authoritative zone/view examples; they are not proof that another engine supports those roles.

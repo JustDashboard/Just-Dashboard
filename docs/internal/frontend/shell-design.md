@@ -673,6 +673,11 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   `RowActions` (the cluster of them that appears on hover, stays on keyboard focus and on an open menu,
   and is always visible on touch) and `DimActions`, the same cluster for a row whose controls have a
   column to themselves: always drawn, dimmed until the pointer arrives.
+- Copying has two kinds of feedback. `copyText` (`lib/clipboard.ts`), called directly with the words
+  to announce, raises a toast that says *what* was copied (340 rows as SQL); `useCopy`
+  (`hooks/use-copy.ts`) sets a `copied` flag for 1.6 s, for an inline tick that says *that* it worked
+  without moving the reader's eye (a chip about to be pasted) or where a toast would sit on what was
+  copied (a set of recovery codes).
 - `components/finding-list.tsx` renders results in requested diagnostic tools, including TLS/network
   reports, config lint and issuance diagnostics. Automatic attention panels, routine settings
   recommendations and navigation attention marks were removed in 0.7.5. Pending-edit marks still

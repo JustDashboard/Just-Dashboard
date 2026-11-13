@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  STREAM_STATES,
   blocksReloads,
   byUrgency,
   carries,
@@ -15,14 +14,12 @@ import {
   moduleMissing,
   moduleRemedy,
   parseDuration,
-  portOwnerName,
   protocolLabel,
   runningInstall,
   saveBlocked,
   saveOutcome,
   stateCounts,
   stateStatus,
-  stateTitle,
   streamBody,
   streamOutage,
   streamSpecOf,
@@ -471,14 +468,6 @@ describe("stream states", () => {
       verdict: "critical",
       label: "unreadable",
     })
-    expect(STREAM_STATES.map(stateTitle)).toEqual([
-      "Live",
-      "Not listening",
-      "Shadowed",
-      "Not read",
-      "Unknown",
-      "Paused",
-    ])
   })
 
   test("counts every stream once, under its state", () => {
@@ -507,24 +496,6 @@ describe("stream states", () => {
     expect(blocksReloads(entry({ state: "shadowed", blocker: { ...site, kind: "stream" } }))).toBe(
       false,
     )
-  })
-
-  test("what holds a port is named as the backend's sentences name it", () => {
-    const at = { port: 5432, proto: "tcp" }
-    expect(portOwnerName({ ...at, kind: "stream", name: "replica" })).toBe("the stream replica")
-    expect(portOwnerName({ ...at, kind: "stream", file: "/etc/nginx/nginx.conf" })).toBe(
-      "a stream server in /etc/nginx/nginx.conf",
-    )
-    expect(portOwnerName({ ...at, kind: "site", name: "app.example.com" })).toBe(
-      "the site app.example.com",
-    )
-    expect(portOwnerName({ ...at, kind: "site", file: "/etc/nginx/nginx.conf" })).toBe(
-      "an http server in /etc/nginx/nginx.conf",
-    )
-    expect(portOwnerName({ ...at, kind: "program", name: "postgres", pid: 900 })).toBe(
-      "postgres (pid 900)",
-    )
-    expect(portOwnerName({ ...at, kind: "program" })).toBe("another program")
   })
 })
 

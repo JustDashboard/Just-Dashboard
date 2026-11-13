@@ -2,7 +2,7 @@
 
 > **Superseded on 2026-10-16.** The working bar now appears only inside dialogs, drawn into `Modal`'s
 > footer; the page panel, the job-console overlay, `OperationOverlay` and `use-operations` were
-> removed. See the [dialog progress recordings](../2026-10-16-dialog-progress/). What follows is the
+> removed. See the [dialog progress recordings](https://github.com/JustDashboard/Just-Dashboard/tree/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-16-dialog-progress). What follows is the
 > record of the earlier placements.
 
 Long waits now keep an action name, elapsed time and a visible working track above the content.
@@ -33,7 +33,7 @@ area. Forms, listings and workbench columns retain their bounds while the readin
 and disappears. Network tools and the proxy tester retain their empty results area during a request.
 Cancellation, dismissal, byte/count semantics and request ownership are unchanged.
 
-Only one new recording was taken for this revision: [files-overlay.gif](files-overlay.gif). It shows
+Only one new recording was taken for this revision: [files-overlay.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/files-overlay.gif). It shows
 copying a file with the listing stationary before, during and after the floating feedback. The 42
 recordings below are retained from the original implementation and show its earlier placement.
 
@@ -71,78 +71,78 @@ These original GIFs show the command before starting, the earlier working UI, th
 
 | Flow | Recording |
 | --- | --- |
-| docker reclaim | [docker-reclaim.gif](docker-reclaim.gif) |
-| docker images | [docker-images.gif](docker-images.gif) |
-| docker build cache | [docker-build-cache.gif](docker-build-cache.gif) |
-| docker containers | [docker-containers.gif](docker-containers.gif) |
-| docker untagged | [docker-untagged.gif](docker-untagged.gif) |
-| docker volumes | [docker-volumes.gif](docker-volumes.gif) |
-| docker networks | [docker-networks.gif](docker-networks.gif) |
-| docker overview cleanup | [docker-overview-cleanup.gif](docker-overview-cleanup.gif) |
-| docker compose | [docker-compose.gif](docker-compose.gif) |
+| docker reclaim | [docker-reclaim.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/docker-reclaim.gif) |
+| docker images | [docker-images.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/docker-images.gif) |
+| docker build cache | [docker-build-cache.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/docker-build-cache.gif) |
+| docker containers | [docker-containers.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/docker-containers.gif) |
+| docker untagged | [docker-untagged.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/docker-untagged.gif) |
+| docker volumes | [docker-volumes.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/docker-volumes.gif) |
+| docker networks | [docker-networks.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/docker-networks.gif) |
+| docker overview cleanup | [docker-overview-cleanup.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/docker-overview-cleanup.gif) |
+| docker compose | [docker-compose.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/docker-compose.gif) |
 
 ### Files
 
 | Flow | Recording |
 | --- | --- |
-| files copy | [files-copy.gif](files-copy.gif) |
-| files move | [files-move.gif](files-move.gif) |
-| files duplicate | [files-duplicate.gif](files-duplicate.gif) |
-| files extract | [files-extract.gif](files-extract.gif) |
-| files delete | [files-delete.gif](files-delete.gif) |
+| files copy | [files-copy.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/files-copy.gif) |
+| files move | [files-move.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/files-move.gif) |
+| files duplicate | [files-duplicate.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/files-duplicate.gif) |
+| files extract | [files-extract.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/files-extract.gif) |
+| files delete | [files-delete.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/files-delete.gif) |
 
 ### Git
 
 | Flow | Recording |
 | --- | --- |
-| git clone | [git-clone.gif](git-clone.gif) |
-| git fetch | [git-fetch.gif](git-fetch.gif) |
-| git pull | [git-pull.gif](git-pull.gif) |
-| git push | [git-push.gif](git-push.gif) |
-| git submodule | [git-submodule.gif](git-submodule.gif) |
-| git lfs | [git-lfs.gif](git-lfs.gif) |
+| git clone | [git-clone.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/git-clone.gif) |
+| git fetch | [git-fetch.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/git-fetch.gif) |
+| git pull | [git-pull.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/git-pull.gif) |
+| git push | [git-push.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/git-push.gif) |
+| git submodule | [git-submodule.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/git-submodule.gif) |
+| git lfs | [git-lfs.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/git-lfs.gif) |
 
 ### Backups
 
 | Flow | Recording |
 | --- | --- |
-| backup run | [backup-run.gif](backup-run.gif) |
-| backup files | [backup-files.gif](backup-files.gif) |
-| backup database | [backup-database.gif](backup-database.gif) |
-| backup verify | [backup-verify.gif](backup-verify.gif) |
+| backup run | [backup-run.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/backup-run.gif) |
+| backup files | [backup-files.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/backup-files.gif) |
+| backup database | [backup-database.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/backup-database.gif) |
+| backup verify | [backup-verify.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/backup-verify.gif) |
 
 ### Database transfers
 
 | Flow | Recording |
 | --- | --- |
-| database table export | [database-table-export.gif](database-table-export.gif) |
-| database query export | [database-query-export.gif](database-query-export.gif) |
-| database mongo export | [database-mongo-export.gif](database-mongo-export.gif) |
-| database sql import | [database-sql-import.gif](database-sql-import.gif) |
-| database mongo import | [database-mongo-import.gif](database-mongo-import.gif) |
+| database table export | [database-table-export.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/database-table-export.gif) |
+| database query export | [database-query-export.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/database-query-export.gif) |
+| database mongo export | [database-mongo-export.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/database-mongo-export.gif) |
+| database sql import | [database-sql-import.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/database-sql-import.gif) |
+| database mongo import | [database-mongo-import.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/database-mongo-import.gif) |
 
 ### Network and proxy tools
 
 | Flow | Recording |
 | --- | --- |
-| network diagnostic | [network-diagnostic.gif](network-diagnostic.gif) |
-| network blocklist | [network-blocklist.gif](network-blocklist.gif) |
-| network dns apply | [network-dns-apply.gif](network-dns-apply.gif) |
-| network dns create | [network-dns-create.gif](network-dns-create.gif) |
-| network dns remove | [network-dns-remove.gif](network-dns-remove.gif) |
-| proxy request test | [proxy-request-test.gif](proxy-request-test.gif) |
+| network diagnostic | [network-diagnostic.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/network-diagnostic.gif) |
+| network blocklist | [network-blocklist.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/network-blocklist.gif) |
+| network dns apply | [network-dns-apply.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/network-dns-apply.gif) |
+| network dns create | [network-dns-create.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/network-dns-create.gif) |
+| network dns remove | [network-dns-remove.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/network-dns-remove.gif) |
+| proxy request test | [proxy-request-test.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/proxy-request-test.gif) |
 
 ### Shared job consoles
 
 | Flow | Recording |
 | --- | --- |
-| packages job | [packages-job.gif](packages-job.gif) |
-| proxy certificate job | [proxy-certificate-job.gif](proxy-certificate-job.gif) |
-| security suricata job | [security-suricata-job.gif](security-suricata-job.gif) |
-| security ssh job | [security-ssh-job.gif](security-ssh-job.gif) |
-| network install job | [network-install-job.gif](network-install-job.gif) |
-| remote desktop install job | [remote-desktop-install-job.gif](remote-desktop-install-job.gif) |
-| remote desktop stream job | [remote-desktop-stream-job.gif](remote-desktop-stream-job.gif) |
+| packages job | [packages-job.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/packages-job.gif) |
+| proxy certificate job | [proxy-certificate-job.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/proxy-certificate-job.gif) |
+| security suricata job | [security-suricata-job.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/security-suricata-job.gif) |
+| security ssh job | [security-ssh-job.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/security-ssh-job.gif) |
+| network install job | [network-install-job.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/network-install-job.gif) |
+| remote desktop install job | [remote-desktop-install-job.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/remote-desktop-install-job.gif) |
+| remote desktop stream job | [remote-desktop-stream-job.gif](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-operation-progress/remote-desktop-stream-job.gif) |
 
 ## Reproduce
 

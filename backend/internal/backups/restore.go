@@ -188,10 +188,6 @@ func (f *pathFilter) wants(name string) bool {
 	return false
 }
 
-func extractArchive(ctx context.Context, archivePath, dest string, runID int64) (*RestoreResult, error) {
-	return extractArchiveBounded(ctx, ArchiveFile{Path: archivePath}, dest, runID, 0, restorePlan{})
-}
-
 func extractArchiveBounded(ctx context.Context, archive ArchiveFile, dest string, runID int64, maxBytes int64, plan restorePlan) (*RestoreResult, error) {
 	tr, release, err := archive.entries()
 	if err != nil {

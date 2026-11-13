@@ -12,12 +12,12 @@ shortcuts call the existing operations and capability guards; backend routes are
 
 ## Proof
 
-The [recording](interactions.webm) shows keyboard name navigation and Enter, Back into the previous
+The [recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-03-files-native/interactions.webm) shows keyboard name navigation and Enter, Back into the previous
 folder, tile navigation/selection, local Find, shortcut help and phone Back/Forward.
 
-- [Desktop](desktop.png) — 1280×960.
-- [Phone](phone.png) — 390×844, reduced motion.
-- [Shortcut reference](shortcuts.png).
+- [Desktop](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-03-files-native/desktop.png) — 1280×960.
+- [Phone](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-03-files-native/phone.png) — 390×844, reduced motion.
+- [Shortcut reference](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-03-files-native/shortcuts.png).
 
 Captures use the task worktree's production build with synthetic API fixtures. The transparent image
 and pending video poster are fixtures, not a real server's media. The recording contains no host data.

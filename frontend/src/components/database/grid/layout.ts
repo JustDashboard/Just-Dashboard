@@ -195,21 +195,6 @@ export function setColumnPinned(layout: GridLayout, key: string, pinned: boolean
   }
 }
 
-/**
- * Drops what a layout says about columns that no longer exist. Worth doing
- * before storing one, so a table that is altered every week does not grow a
- * layout that names every column it ever had.
- */
-export function pruneLayout(columns: readonly GridColumn[], layout: GridLayout): GridLayout {
-  const known = new Set(columns.map((column) => column.key))
-  return {
-    order: layout.order.filter((key) => known.has(key)),
-    hidden: layout.hidden.filter((key) => known.has(key)),
-    pinned: layout.pinned.filter((key) => known.has(key)),
-    widths: Object.fromEntries(Object.entries(layout.widths).filter(([key]) => known.has(key))),
-  }
-}
-
 /** Whether a stored value is a layout at all — it comes back from localStorage. */
 export function isLayout(value: unknown): value is GridLayout {
   if (typeof value !== "object" || value === null) return false

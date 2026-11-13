@@ -1,3 +1,11 @@
+// Package auth owns who a request comes from and what that identity may do:
+// accounts and password hashing (service.go, crypto.go), sessions (session.go,
+// hub_signin.go), TOTP and recovery codes (totp.go), passkeys (passkeys.go),
+// API, deploy and MCP keys (tokens*.go), roles and capabilities (roles.go),
+// and the Sealer that encrypts stored secrets under the master key. It serves
+// no HTTP: reading a credential off a request and refusing it is httpx's, and
+// the host's Linux accounts are linuxusers. See "Auth, secrets, state" in
+// docs/internal/architecture/runtime-boundaries.md.
 package auth
 
 import (

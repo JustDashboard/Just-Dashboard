@@ -57,9 +57,8 @@ const ACTION =
  * or a key to rename it, add a key to an object or an item to an array, move
  * an item up or down its array, take one out.
  *
- * It is drawn like the section's `JsonTree` and differs from it in what it is
- * a tree *of*: the document's own text, not the values JavaScript makes of
- * it. A number is printed with the digits it was stored with, and an edit
+ * It is a tree of the document's own text, not of the values JavaScript
+ * makes of it. A number is printed with the digits it was stored with, and an edit
  * hands back the same text with one node rewritten, so nothing the reader did
  * not touch is changed on its way back to the database.
  */

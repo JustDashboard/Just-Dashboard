@@ -287,22 +287,6 @@ export function timerRuns(
   return only
 }
 
-/** The hours an axis from `from` to `until` marks, every `step` hours on the hour. */
-export function axisHours(from: number, until: number, step: number): number[] {
-  const first = new Date(from)
-  first.setMinutes(0, 0, 0)
-  first.setHours(first.getHours() + 1)
-  while (first.getHours() % step !== 0) first.setHours(first.getHours() + 1)
-  const out: number[] = []
-  for (let at = first.getTime(); at < until;) {
-    out.push(at)
-    const next = new Date(at)
-    next.setHours(next.getHours() + step)
-    at = next.getTime()
-  }
-  return out
-}
-
 /**
  * "4m 12s", "2h 05m", "3d 4h": a countdown that is read at a glance, to the
  * second while it is under an hour, since that is when it is watched.

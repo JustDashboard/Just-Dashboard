@@ -93,14 +93,13 @@ type cargoFile struct {
 	bins                                     []cargoTarget
 	// deps are [dependencies] and every target's; all adds dev- and
 	// build-dependencies, which the lockfile resolves too.
-	deps, all       map[string]cargoDependency
-	features        map[string][]string
-	members         []string
-	exclude         []string
-	workspaceDeps   map[string]cargoDependency
-	leptos          []cargoLeptos
-	lto, codegen    string
-	unreadableTable bool
+	deps, all     map[string]cargoDependency
+	features      map[string][]string
+	members       []string
+	exclude       []string
+	workspaceDeps map[string]cargoDependency
+	leptos        []cargoLeptos
+	lto, codegen  string
 }
 
 var cargoTableHeaderRE = regexp.MustCompile(`^\[\s*([^\[\]]+?)\s*\]$`)

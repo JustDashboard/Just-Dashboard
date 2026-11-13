@@ -50,10 +50,6 @@ export function fromBytes(bytes: Uint8Array): RedisBytes {
   }
 }
 
-export function byteLength(value: RedisBytes): number {
-  return toBytes(value).length
-}
-
 /** Several windows of one value, in order, as one. */
 export function joinBytes(parts: readonly RedisBytes[]): RedisBytes {
   if (parts.every((part) => typeof part === "string")) return (parts as string[]).join("")

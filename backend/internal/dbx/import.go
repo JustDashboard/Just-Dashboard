@@ -3,7 +3,6 @@ package dbx
 import (
 	"context"
 	"database/sql"
-	"encoding/csv"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -1829,40 +1828,4 @@ func sortStrings(s []string) {
 			s[j], s[j-1] = s[j-1], s[j]
 		}
 	}
-}
-
-// ParseImportPreview reads the first few records of a CSV so the UI can show
-// the operator what it thinks the columns are before anything is written.
-func ParseImportPreview(r io.Reader, hasHeader bool, limit int) ([]string, [][]string, error) {
-	if limit <= 0 || limit > 50 {
-		limit = 10
-	}
-	cr := csv.NewReader(r)
-	cr.FieldsPerRecord = -1
-	var header []string
-	if hasHeader {
-		rec, err := cr.Read()
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, h := range rec {
-			header = append(header, strings.TrimSpace(strings.TrimPrefix(h, "\ufeff")))
-		}
-	}
-	sample := [][]string{}
-	for len(sample) < limit {
-		rec, err := cr.Read()
-		if err != nil {
-			break
-		}
-		sample = append(sample, rec)
-	}
-	if header == nil && len(sample) > 0 {
-		// With no header the columns are positional; naming them by index gives
-		// the mapping UI something to point at.
-		for i := range sample[0] {
-			header = append(header, "column "+strconv.Itoa(i+1))
-		}
-	}
-	return header, sample, nil
 }

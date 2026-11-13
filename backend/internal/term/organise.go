@@ -46,11 +46,6 @@ const (
 // an arbitrary value would be.
 var Colours = []string{"slate", "red", "amber", "green", "cyan", "blue", "violet", "pink"}
 
-// NormaliseColour is normaliseColour for callers outside this package — the
-// folder record, which stores the same palette against a name that has no
-// tmux session to hang off.
-func NormaliseColour(v string) string { return normaliseColour(v) }
-
 // SanitiseName applies the same rules to a folder name that a session title
 // gets. A folder name is compared against the value stored on a tmux session,
 // so it has to survive the same round trip through a tmux format or the two

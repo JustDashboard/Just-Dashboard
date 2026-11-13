@@ -290,7 +290,9 @@ volume's recorded labels when it does not exist, after the archive has been fetc
 a byte is written; without Docker such a restore is refused rather than made as a bare directory Docker
 would not know. `GET /backups/runs/{runID}/restore-plan` answers, from the manifest alone, where each
 source would go and what the restore would make (`creates: "volume"` or `"directory"`) or overwrite, and
-the restore dialog shows it before its confirmation. Database dumps are never
+the restore dialog shows it before its confirmation. `GET /backups/runs/{runID}/contents` (read)
+lists what a run's archive holds without extracting it (`Runner.ListArchive`, `?limit=`, 2000 by
+default). Database dumps are never
 written to disk by an in-place restore; they go back through the Databases owner as before.
 `GET /backups/runs/{runID}/download` streams the verified artifact (`Runner.OpenArtifact`: the local
 file, or a private download of a remote one, checksum proven first, decrypted when the run was
@@ -684,7 +686,7 @@ A backup job's destination can also be given to a PostgreSQL server's point-in-t
 archive's own record, and a directory gets a `wal` folder beside the job's archives. WAL-G writes only
 to a directory or an object store, so a job whose destination is SFTP or rclone is refused there. The archive is not
 a run of the job and is not pruned by its retention; see
-[Databases → Point-in-time recovery](databases-proxy-platform.md#point-in-time-recovery).
+[Databases → Point-in-time recovery](databases.md#point-in-time-recovery).
 
 ## Backup presentation in 0.7.5
 

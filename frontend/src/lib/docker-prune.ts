@@ -71,10 +71,6 @@ export function pruneContainers() {
   return post<PruneReport>("/docker/containers/prune")
 }
 
-export function pruneNetworks() {
-  return post<PruneReport>("/docker/networks/prune")
-}
-
 /**
  * Images alone, tagged ones included. The sweep reaches stopped containers and
  * networks as well, so a Reclaim beside the Images line that ran it removed

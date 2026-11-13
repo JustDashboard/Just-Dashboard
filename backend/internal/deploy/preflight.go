@@ -1714,12 +1714,3 @@ func hostMemory() (available, swap int64) {
 	}
 	return available, swap
 }
-
-func stableFindingCodes(findings []PreflightFinding) []string {
-	codes := make([]string, 0, len(findings))
-	for _, item := range findings {
-		codes = append(codes, item.Code)
-	}
-	sort.Strings(codes)
-	return codes
-}

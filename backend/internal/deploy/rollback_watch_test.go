@@ -285,8 +285,6 @@ type warmFixture struct {
 	proxy    *routingProxy
 	record   *sampledRecord
 	executor *NormalizedStepExecutor
-	first    *ReleaseWithArtifacts
-	second   *ReleaseWithArtifacts
 	enqueued []RollbackVerdict
 }
 

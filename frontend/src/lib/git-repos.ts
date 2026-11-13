@@ -92,11 +92,6 @@ export function shelfOf(repo: GitRepo): Omit<RepoShelf, "repos"> {
   }
 }
 
-/** A repository with anything outstanding: work, commits either way, or a detached HEAD. */
-export function waiting(repo: GitRepo): boolean {
-  return repo.dirty || repo.ahead > 0 || repo.behind > 0 || repo.detached || Boolean(repo.gone)
-}
-
 /** How wrong a checkout is, lowest first: a conflict outranks everything. */
 export function urgency(repo: GitRepo): number {
   if (repo.conflicts > 0) return 0

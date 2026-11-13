@@ -269,10 +269,6 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 	}
 }
 
-func (r *Runner) archive(ctx context.Context, job *Job, dest string, logBuf *bytes.Buffer) (int64, int, error) {
-	return r.archiveWithSnapshots(ctx, job, dest, logBuf, nil, nil)
-}
-
 // archiveWithSnapshots writes the archive to dest: through seal's encryption
 // when it has one, so no plaintext copy of an encrypted archive is ever on disk.
 func (r *Runner) archiveWithSnapshots(ctx context.Context, job *Job, dest string, logBuf *bytes.Buffer, seal *archiveSeal, snapshots map[string]string, extras ...archiveExtra) (int64, int, error) {
