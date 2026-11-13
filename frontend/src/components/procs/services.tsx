@@ -39,6 +39,7 @@ import type { SystemdList, SystemdUnit } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { MiniBar } from "@/components/procs/process-table"
+import { NoSystemd } from "@/components/procs/no-systemd"
 import { ServiceBand } from "@/components/procs/service-band"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
 import { cpuTone } from "@/components/procs/shared"
@@ -208,7 +209,7 @@ export function Services() {
     return (
       <Page>
         {header}
-        <EmptyState icon={Servers} title="systemd is not available on this host" />
+        <NoSystemd reader="services" />
       </Page>
     )
   }

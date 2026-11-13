@@ -33,6 +33,7 @@ import { useUnitControl } from "@/components/procs/unit-actions"
 import { useNow } from "@/components/deploy/vocabulary"
 import { Countdown } from "@/components/procs/schedule-band"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
+import { NoSystemd } from "@/components/procs/no-systemd"
 
 type ConfirmFn = (request: ConfirmRequest) => void
 
@@ -131,9 +132,7 @@ export function TimersPanel({
       <PanelBody flush>
         {timers.loading && !timers.data && <LoadingRows rows={3} className="pt-3" />}
         {timers.error && !timers.data && <ErrorState error={timers.error} className="mt-3" />}
-        {timers.data && !timers.data.available && (
-          <EmptyNote>systemd is not available on this host.</EmptyNote>
-        )}
+        {timers.data && !timers.data.available && <NoSystemd reader="timers" size="block" />}
         {timers.data?.available && list.length === 0 && <EmptyNote>No timers.</EmptyNote>}
         {list.length > 0 && shown.length === 0 && <EmptyNote>No timer is {state}.</EmptyNote>}
         {shown.length > 0 && (
