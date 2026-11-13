@@ -64,14 +64,14 @@ Proxy rules likewise send `proxy.alert.firing` and `proxy.alert.recovered` to th
 names, or every enabled channel when it names none. A webhook receives the envelope's `proxy` block;
 chat and e-mail render the kind, subject and reading. Kinds include failed certbot renewal, served
 certificate drift and a watched endpoint below its chosen minimum TLS grade. The Proxy Alerts panel
-owns these rules and their history; see [Proxy alerts](../backend/databases-proxy-platform.md).
+owns these rules and their history; see [Proxy alerts](../backend/proxy.md).
 
 Database alert rules send `database.alert.firing` and `database.alert.recovered` the same way: to the
 channels the rule names, or every enabled one. A webhook receives the envelope's `database` block
 (rule, kind, connection or backup job, label, the reading with its line, since when, `test`); chat and
 e-mail render "Database disk filling up — shop" with the reading as the summary, and an e-mail's link
 line reads "Open it in Just Dashboard" rather than "Open the run". A database's Alerts page owns these
-rules and their history; see [Alerts](../backend/databases-proxy-platform.md#alerts-told-when-a-server-or-its-backups-go-wrong).
+rules and their history; see [Alerts](../backend/databases.md#alerts-told-when-a-server-or-its-backups-go-wrong).
 Like the proxy's and the traffic alerts' messages they are run-less deliveries (run 0), recorded in a
 channel's history and never deduplicated or retried.
 

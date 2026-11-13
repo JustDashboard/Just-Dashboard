@@ -4,7 +4,7 @@
 // container's half (RunUninstall, the binary's -self-uninstall mode), which
 // takes the stack down and deletes the files. The typed phrase and capability
 // are the route's to check (api/handlers_uninstall.go), not this package's.
-// See docs/internal/backend/databases-proxy-platform.md.
+// See docs/internal/backend/platform.md.
 package uninstall
 
 import (

@@ -1782,7 +1782,7 @@ only renderer/executor/validation authority for their feature.
   changes under `deploy`, the routes behind `s.destructive` only for an owner who may take
   destructive actions. 100 tools generated, 113 tools in all; previews' approvals, reveals, saved
   credentials and every other session-only route stay out. See
-  [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
+  [the MCP server](../backend/databases.md#the-mcp-server).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
   managed environment labels at the daemon before inspecting matching containers once each — running
   or stopped, since the set is one environment's (`ListContainersWithLastRun`; the plain labelled

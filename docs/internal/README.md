@@ -94,12 +94,16 @@ strategy, and feature ownership behind those rules.
   backup scheduling/storage/restore, and host accounts/SSH keys.
 - [`backend/git-workspace-expansion.md`](backend/git-workspace-expansion.md) — conflict resolution,
   partial staging, recovery, local rebase, worktrees, provider reviews, LFS and patch exchange.
-- [`backend/databases-proxy-platform.md`](backend/databases-proxy-platform.md) — the Databases section:
-  the inventory of what is on the machine, connections and protected connections, the capability table,
-  the SQL workbench, schema and operations, the Redis and MongoDB surfaces, code generation, transfer,
-  and the complete `/databases` route table; then nginx/proxy/TLS/DNS, streaming, jobs, secrets, agent
-  mode, configuration, releases, self-update, and the dashboard's own settings (restart, rebuild,
-  rollback, Tailscale certificates) and uninstalling it.
+- [`backend/databases.md`](backend/databases.md) — the Databases section: the inventory of what is on
+  the machine, connections and protected connections, the capability table, the SQL workbench, schema
+  and operations, the Redis and MongoDB surfaces, code generation, transfer, the MCP server, and the
+  complete `/databases` route table.
+- [`backend/proxy.md`](backend/proxy.md) — nginx sites, certificates and TLS, DNS, streams and ports.
+- [`backend/platform.md`](backend/platform.md) — streaming, jobs, secrets, agent mode, configuration,
+  releases, self-update, and the dashboard's own settings (restart, rebuild, rollback, Tailscale
+  certificates) and uninstalling it.
+- [`backend/databases-proxy-platform.md`](backend/databases-proxy-platform.md) — where those three were
+  one document until 2026-11-13; kept as a pointer so older links land.
 - [`boards.md`](boards.md) — the Excalidraw page: the embedded editor, server-side drawing storage,
   images stored apart, the derived preview and the list, save conflicts and merge saves, the live
   room, live resource cards and embeds, the server-kept library and its download, text to diagram,
@@ -146,6 +150,10 @@ strategy, and feature ownership behind those rules.
   confirmations, and self-update state.
 
 ## Contributor reference
+
+- [`../audits/README.md`](../audits/README.md) — the index of every dated audit, redesign and
+  verification record, and where their pictures and recordings are kept. The entries below pick out
+  the records the guides lean on.
 
 - [`../audits/2026-10-15-api-keys/README.md`](../audits/2026-10-15-api-keys/README.md)
   — researched key lifecycle improvements, discovery filters, replacement handoff, inactive-record

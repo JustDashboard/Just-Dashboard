@@ -148,7 +148,7 @@ The host's **Alerts** page (`/metrics/alerts`, under Monitoring beside Metrics, 
 Metrics' identity line links there with the firing count) holds rules that tell the deployments'
 notification channels — through `deploy.AutomationStore.DeliverNotification`, so a channel is set up
 once on `/deploy/notifications` — when the machine is in trouble, and when that is over. It is the
-proxy alerts' shape ([Proxy alerts](databases-proxy-platform.md#proxy)): rules, subjects, mutes and a
+proxy alerts' shape ([Proxy alerts](proxy.md#proxy)): rules, subjects, mutes and a
 bounded history, a picture of what is watched wired to the channels, and a test per channel and per
 rule. Source: `api/host_alerts.go` (rules, the pass, `stepHostAlert`, history), `api/host_alert_readings.go`
 (each kind's source and judge), `api/handlers_host_alerts.go` (routes); tables `host_alert_rules`,
@@ -193,7 +193,7 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   is MongoDB 8 (by its tag), on a kernel MongoDB 8 refuses (Linux 6.19 to 7.0.13) and without the
   dashboard's mitigation label, has why added to its detail: MongoDB SERVER-121912 and that the
   Databases page applies the fix (`mongoKernelAlertLine`; *MongoDB 8 and the kernel* in
-  [Databases](databases-proxy-platform.md)). It is the same kind, not a new one.
+  [Databases](databases.md)). It is the same kind, not a new one.
 - **Every backup job** — files, volumes and database dumps alike — is a `backup_failed` subject
   (`job:<id>`), judged by its newest finished run in the database alerts' own words (`judgeBackupJob`
   over `readAlertBackupJobs`, the reader both share): it stays failed until a run succeeds. A job an
@@ -512,7 +512,7 @@ Cross-cutting:
   The rules the database reach route writes here — one from anywhere, or one per listed network,
   commented `just-dashboard database <port>`, as firewall plans inside `protectFirewall` and filed in the
   history — are for this page's own listing and the traffic the firewall does see: docker-proxy's, and a
-  native listener's ([databases](databases-proxy-platform.md)).
+  native listener's ([databases](databases.md)).
 - `SetDefaultPolicy` refuses an inbound deny on a host admitting nobody. With the request's access
   context (below) it also refuses a default that would refuse a required way in.
 - `ServiceCatalogue` (`GET /security/services`) is the rule form's teaching layer, served from the server

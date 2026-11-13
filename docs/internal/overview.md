@@ -39,7 +39,7 @@ docker compose up -d --build
 docker compose logs backend | grep "bootstrap admin"   # generated password, printed once
 ./scripts/manage.sh --help           # local account recovery and stack operations
 python3 scripts/test_manage.py       # isolated terminal-tool and installer fixtures
-scripts/release.sh 0.6               # see backend/databases-proxy-platform.md#cutting-a-release
+scripts/release.sh 0.6               # see backend/platform.md#cutting-a-release
 ```
 
 CONTRIBUTING requires `scripts/test-changed.sh` to pass before a PR. It runs only what the diff can

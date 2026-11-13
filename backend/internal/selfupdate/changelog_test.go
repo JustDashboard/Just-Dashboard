@@ -235,7 +235,7 @@ func TestTheChangelogStaysWhereInstallsInTheFieldCanReadIt(t *testing.T) {
 			"Before this file reaches that size: keep the recent releases here, move the older ones to a file "+
 			"beside it that only this build embeds (CHANGELOG.md stays complete), and raise this number only "+
 			"once no install older than 0.8.6 is worth reaching. See \"The published changelog\" in "+
-			"docs/internal/backend/databases-proxy-platform.md.",
+			"docs/internal/backend/platform.md.",
 			ManifestPath, len(changelogJSON), FieldManifestCap)
 	}
 }

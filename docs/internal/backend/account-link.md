@@ -146,7 +146,7 @@ and, if the site still has the command open, reported.
 
 ## Configuration
 
-Four places, per [the configuration rule](databases-proxy-platform.md#configuration-version-release-self-update):
+Four places, per [the configuration rule](platform.md#configuration-version-release-self-update):
 `config.go`, `.env.example`, `docker-compose.yml` (the explicit `environment:` map) and the table in `docs/guides/configuration.md`.
 
 | Variable | Default | Meaning |
@@ -347,7 +347,7 @@ commands and keep their exit status.
 | `JD_ACCOUNT_URL` changed after linking | The connector goes idle and says so; set it back or unlink. Nothing is sent to the new site on the old link's account: a manual sync is refused (`site_changed`), an unlink clears the link without telling anyone, and a heartbeat's answer is never merged into keys pinned for another site |
 | The scope is narrowed while a heartbeat is being built or waiting for the rate window | The scope is read again after the machine has been read and the body is cut to it, and says so; a link that ended meanwhile sends nothing |
 | The dashboard restarts mid-command | The row is closed as failed on the next start and reported; the effect, if any, shows in the next snapshot |
-| `dashboard.update.install` or `dashboard.restart` while the daemon at `JD_DOCKER_HOST` does not answer | `failed` with `the update was not started` / `the restart was not started` and the host and the CLI's reason; no run is recorded and no sibling is touched on any daemon (see [the lifecycle siblings](databases-proxy-platform.md#the-dashboards-own-settings)) |
+| `dashboard.update.install` or `dashboard.restart` while the daemon at `JD_DOCKER_HOST` does not answer | `failed` with `the update was not started` / `the restart was not started` and the host and the CLI's reason; no run is recorded and no sibling is touched on any daemon (see [the lifecycle siblings](platform.md#the-dashboards-own-settings)) |
 
 ## Verification
 

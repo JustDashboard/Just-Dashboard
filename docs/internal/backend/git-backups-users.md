@@ -686,7 +686,7 @@ A backup job's destination can also be given to a PostgreSQL server's point-in-t
 archive's own record, and a directory gets a `wal` folder beside the job's archives. WAL-G writes only
 to a directory or an object store, so a job whose destination is SFTP or rclone is refused there. The archive is not
 a run of the job and is not pruned by its retention; see
-[Databases → Point-in-time recovery](databases-proxy-platform.md#point-in-time-recovery).
+[Databases → Point-in-time recovery](databases.md#point-in-time-recovery).
 
 ## Backup presentation in 0.7.5
 

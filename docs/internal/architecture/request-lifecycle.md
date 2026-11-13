@@ -83,7 +83,7 @@ instead, and credentials that fail are counted per address (below).
   credential and the MCP key's principal in its context (`httpx.WithMCPDelegate`): it passes the same
   layers, and the feature group's `AuthenticateFeatures` admits it only as the deploy key gate admits
   a deploy key, marking it `Principal.ViaMCP` (every other group refuses it); see
-  [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
+  [the MCP server](../backend/databases.md#the-mcp-server).
 - The dashboard's assistant makes its calls the same way, through the root router from inside the process, but as
   the person: their own session principal, read again for the call, is carried in the context
   (`httpx.WithAssistant`), and every group's authentication takes it in place of a credential, marked
@@ -294,7 +294,7 @@ Some routes serve a routine request and a destructive one on the same path, beca
 know which it was handed. Their handlers read the request, decide, and apply the capability and the
 `destrLim` budget by hand, as `s.destructive` would have. Every one fails closed: a request its reader
 cannot classify is the destructive kind. The Databases routes among them are marked `by content` in
-the [route table](../backend/databases-proxy-platform.md#routes).
+the [route table](../backend/databases.md#routes).
 
 - **SQL statements.** `POST /databases/{id}/query`, `…/script` and an analysed `…/explain` classify
   their SQL by the rules of the connection's own engine (`dbx.ParseScript`, which gives every
@@ -554,7 +554,7 @@ The rule guards the dashboard's own controls and is exactly as strong as the cla
 `SELECT` that calls a function of the operator's own which writes is a read to anything that judges
 a statement by its text. An operator who needs the engine itself to refuse writes gives the connection an account that
 cannot make them. The per-route answers, the neighbour rule and what it does not follow are in
-[Databases](../backend/databases-proxy-platform.md#protected-connections).
+[Databases](../backend/databases.md#protected-connections).
 
 Files: `api/handlers_*.go`, one per feature, each with `mount<Feature>Routes` called from `Routes()`.
 `handlers_domains.go` and `handlers_docker_manage.go` own no mount function — they are mounted from the

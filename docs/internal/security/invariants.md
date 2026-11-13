@@ -278,7 +278,7 @@ A change that weakens any of these has to say so explicitly.
    explicit choice, in the destructive group and audited as `database.access.change`. A list is kept by
    the network module's gateway table, whose prerouting drop runs before Docker's translation, never by
    a host firewall rule that a published port's traffic does not meet
-   ([databases](../backend/databases-proxy-platform.md)).
+   ([databases](../backend/databases.md)).
    Scale to zero's wake ([sleep when idle](../deployments/scale-to-zero.md#the-wake-socket)) binds no
    address at all: the proxy asks over a Unix socket beside host nginx's sites or inside the Docker Caddy
    ingress's own `/config` volume, and the dashboard answers only a peer whose process is nginx or Caddy

@@ -320,7 +320,7 @@ own: `file:<the path the site's access_log names>`, resolved from the site's fil
 held to `JD_LOG_ROOTS` — generations included, before each open — or, for a deployment's own site and a
 Docker Caddy route, the deployment's route itself, so one record is never held twice. Rotated files are
 the names logrotate gives (`logsx.Archives`: `.N` and dated) for sites and deployments alike, compressed
-ones skipped. The contract is in [the proxy's](../backend/databases-proxy-platform.md#proxy).
+ones skipped. The contract is in [the proxy's](../backend/proxy.md#proxy).
 
 ## Traffic alerts
 

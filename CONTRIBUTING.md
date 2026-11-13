@@ -103,7 +103,7 @@ never into `docs/audits/`.
   route added or removed also adds or removes an MCP tool generated from it:
   `TestEveryDeployKeyRouteIsAnMCPTool` fails until `api.MCPGeneratedTools` and the counts quoted in
   the MCP server's documentation, `docs/features/databases.md` and the deployment implementation notes follow
-  ([the generated tools](docs/internal/backend/databases-proxy-platform.md#the-mcp-server)).
+  ([the generated tools](docs/internal/backend/databases.md#the-mcp-server)).
 - Docker remedy changes run the live resource/policy acceptance: first make `alpine:3.20` available
   locally, then run from `backend/`:
   `JD_ADVISOR_DOCKER_LIVE=1 go test ./internal/dockerx -run '^TestLiveAdvisor' -count=1 -v`.
@@ -260,7 +260,7 @@ never into `docs/audits/`.
   with no `v<version>` tag is neither offered nor installed (`selfupdate.TagsOnly`), so a merge whose
   Verify run fails ships to nobody until a later run is green. Release tags can also be required to be
   signed (`backend/internal/selfupdate/allowed_signers`, which names no key yet, so nothing is checked);
-  "Signed releases" in `docs/internal/backend/databases-proxy-platform.md` has the order to turn it on in.
+  "Signed releases" in `docs/internal/backend/platform.md` has the order to turn it on in.
   Do not add a key to that file as part of other work. Never tag or publish a release by hand; a manual run of the
   workflow on `main` retries one that failed.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that

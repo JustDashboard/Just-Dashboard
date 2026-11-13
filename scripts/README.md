@@ -44,7 +44,7 @@ last component (`manage.sh`, `docker-compose.yml`), or a change to that script r
   (`CHANGELOG.md` is generated; tags and releases are never made by hand).
 - [`terminal-tools.md`](../docs/internal/operations/terminal-tools.md): `manage.sh` and the
   installer's helpers.
-- [`databases-proxy-platform.md`](../docs/internal/backend/databases-proxy-platform.md): cutting a
+- [`platform.md`](../docs/internal/backend/platform.md): cutting a
   release, the dependency check and the image pins.
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md): what a pull request runs, the race lane and the live
   test lanes.

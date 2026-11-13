@@ -106,7 +106,7 @@ thing they hold.
 | `source`, `release`, `planning` | 15 | Fetching a source, immutable releases, drafts and plans |
 
 **`dbx`** (174 source files), described in
-[`databases-proxy-platform.md`](../backend/databases-proxy-platform.md):
+[`databases.md`](../backend/databases.md):
 
 | Group | Count | What it holds |
 | --- | --- | --- |
@@ -122,7 +122,7 @@ thing they hold.
 | `*_capabilities.go` | 18 | What each engine supports, one file per feature; they cut across the groups above |
 
 **`proxysvc`** (142 source files), described in
-[`databases-proxy-platform.md`](../backend/databases-proxy-platform.md):
+[`proxy.md`](../backend/proxy.md):
 
 | Group | Count | What it holds |
 | --- | --- | --- |
@@ -165,7 +165,7 @@ segment under `/api/v1`.
 | Logs | `logs/` | `logs/` | `/logs` → `handlers_logs*.go` | `logsx` | `logs-*.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
 | **Apps** | | | | | | |
 | Deployments | `deploy/` | `deploy/` | `/deploy` → `handlers_deploy*.go`, `deployment_*.go` | `deploy`, `blueprint`, and the ones below | `deploy-*.spec.ts` | [the deployment guides](../deployments/README.md), [`implementation.md`](../deployments/implementation.md) |
-| Databases | `databases/` | `database/` | `/databases` → `handlers_db*.go`, `database_*.go` | `dbx`, `dbtls` | `database-*.spec.ts` | [`databases-proxy-platform.md`](../backend/databases-proxy-platform.md) |
+| Databases | `databases/` | `database/` | `/databases` → `handlers_db*.go`, `database_*.go` | `dbx`, `dbtls` | `database-*.spec.ts` | [`databases.md`](../backend/databases.md) |
 | Docker | `docker/` | `docker/` | `/docker` → `handlers_docker*.go`, `docker_*.go` | `dockerx`, `imagescan` | `docker-*.spec.ts`, `stacks-ui.spec.ts`, `stack-detail.spec.ts`, `container-page.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
 | **Workspace** | | | | | | |
 | Excalidraw | `excalidraw/` | `boards/` | `/boards` → `handlers_boards.go`, `boards_*.go` | none: lives in `api/` | `boards-ui.spec.ts` | [`boards.md`](../boards.md) |
@@ -176,7 +176,7 @@ segment under `/api/v1`.
 | **Network** | | | | | | |
 | Network (19 pages) | `network/` | `network/` | `/network` → `handlers_network*.go` | `netx`, and the ones below | `network-*.spec.ts` | [`network.md`](../backend/network.md) |
 | … Firewall, Connections | `network/firewall/`, `network/connections/` | `network/`, `security/` | `/firewall` → `handlers_netsec.go`, `handlers_firewall.go`; `/connections` → `handlers_security.go`, `handlers_connections.go` | `netsec` | `network-routing-firewall.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
-| Proxy & TLS | `proxy/` | `proxy/` | `/proxy`, `/certificates`, `/ports` → `handlers_proxy*.go`, `handlers_certificates*.go`, `handlers_tls*.go`, `handlers_ports*.go` | `proxysvc`, `cftunnel`, `accesslog` | `proxy-*.spec.ts` | [`databases-proxy-platform.md`](../backend/databases-proxy-platform.md) |
+| Proxy & TLS | `proxy/` | `proxy/` | `/proxy`, `/certificates`, `/ports` → `handlers_proxy*.go`, `handlers_certificates*.go`, `handlers_tls*.go`, `handlers_ports*.go` | `proxysvc`, `cftunnel`, `accesslog` | `proxy-*.spec.ts` | [`proxy.md`](../backend/proxy.md) |
 | **Protection** | | | | | | |
 | Security | `security/` | `security/` | `/security`, `/ssh`, `/ssh-sessions`, `/fail2ban`, `/logins` → `handlers_security*.go`, `handlers_netsec.go` | `netsec` | `security-*.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
 | Backups | `backups/` | `backups/` | `/backups` → `handlers_backups.go`, `backup_*.go` | `backups` | `backups-ui.spec.ts`, `backup-*.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md) |
@@ -185,8 +185,8 @@ segment under `/api/v1`.
 | System users | `system-users/` | `system-users/` | `/system-users`, `/system-accounts` → `handlers_linuxusers.go` | `linuxusers` | `system-users.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md) |
 | Audit log | `audit/` | `audit/` | `/audit` → mounted in `routes.go`, handled in `handlers_auth.go` | `audit` | `system-ui.spec.ts` | [`runtime-boundaries.md`](../architecture/runtime-boundaries.md) |
 | **System** | | | | | | |
-| Settings → Version | `dashboard/` | `update/` | `/dashboard` → `handlers_selfupdate.go`, which mounts everything under `/dashboard` | `selfupdate`, `version` | `dashboard-ui.spec.ts` | [`databases-proxy-platform.md`](../backend/databases-proxy-platform.md) |
-| Settings → Configuration | `dashboard/configuration/` | `config/` | `/dashboard` → `handlers_selfconfig.go`, `handlers_uninstall.go` | `selfcfg`, `uninstall`, `stackports` | `dashboard-ui.spec.ts` | [`databases-proxy-platform.md`](../backend/databases-proxy-platform.md) |
+| Settings → Version | `dashboard/` | `update/` | `/dashboard` → `handlers_selfupdate.go`, which mounts everything under `/dashboard` | `selfupdate`, `version` | `dashboard-ui.spec.ts` | [`platform.md`](../backend/platform.md) |
+| Settings → Configuration | `dashboard/configuration/` | `config/` | `/dashboard` → `handlers_selfconfig.go`, `handlers_uninstall.go` | `selfcfg`, `uninstall`, `stackports` | `dashboard-ui.spec.ts` | [`platform.md`](../backend/platform.md) |
 | Settings → Connect | `dashboard/link/` | `account-link/` | `/dashboard/link` → `handlers_accountlink.go` | `accountlink` | `account-link.spec.ts` | [`account-link.md`](../backend/account-link.md) |
 | Settings → Hub | `dashboard/hub/` | `hub-link/` | `/dashboard/hub` → `handlers_hublink.go`, `handlers_hubsignin.go` | `hublink` | `hub-link.spec.ts`, `hub-signin.spec.ts` | [`hub-link.md`](../backend/hub-link.md) |
 | **Account** (footer menu) | | | | | | |
@@ -299,13 +299,13 @@ Read [`../security/invariants.md`](../security/invariants.md) before changing an
 | The stack | `docker-compose.yml`, `deploy/Caddyfile`, `deploy/proxy-entrypoint.sh`, `backend/Dockerfile`, `frontend/Dockerfile` | [`implementation.md`](../deployments/implementation.md), [`overview.md`](../overview.md) |
 | Installer | `install.sh`, and the helpers it sources: `scripts/preflight.sh`, `scripts/install-dependencies.sh`, `scripts/dotenv.sh`, `scripts/password.sh` | [`terminal-tools.md`](../operations/terminal-tools.md), [`install.md`](../../guides/install.md) |
 | Operator's terminal tools | `scripts/manage.sh`; its account and link commands run `backend/internal/admin/` | [`terminal-tools.md`](../operations/terminal-tools.md) |
-| Release | `scripts/release.sh`, `backend/internal/selfupdate/changelog.json`, `backend/scripts/gen-changelog.go`, `backend/internal/version/`, `.github/workflows/release.yml` | [`databases-proxy-platform.md`](../backend/databases-proxy-platform.md) |
-| Self-update | `backend/internal/selfupdate/`; the `-self-update` mode in `backend/cmd/server/main.go` | [`databases-proxy-platform.md`](../backend/databases-proxy-platform.md) |
+| Release | `scripts/release.sh`, `backend/internal/selfupdate/changelog.json`, `backend/scripts/gen-changelog.go`, `backend/internal/version/`, `.github/workflows/release.yml` | [`platform.md`](../backend/platform.md) |
+| Self-update | `backend/internal/selfupdate/`; the `-self-update` mode in `backend/cmd/server/main.go` | [`platform.md`](../backend/platform.md) |
 | Local checks and CI | `scripts/test-changed.sh`, `scripts/ci-plan.py`, `.github/workflows/verify.yml` | [`AGENTS.md`](../../../AGENTS.md#required-checks), [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) |
 | The `jd` command line | `backend/cmd/jd/`; `backend/internal/clihost/` keeps the server's copy current; `api/handlers_cli.go` serves it | [`cli.md`](../../guides/cli.md) |
 | OpenAPI description | Generated by `api/deploy_openapi.go`, committed as `docs/api/deploy-openapi.json` | [`deploy-api.md`](../backend/deploy-api.md) |
 | SDKs | `sdk/go/`, `sdk/typescript/`, generated by `backend/internal/openapigen/` | [`deploy-api.md`](../backend/deploy-api.md), [`sdk/README.md`](../../../sdk/README.md) |
-| MCP server | `backend/internal/mcp/` (the protocol), `api/handlers_mcp*.go` (the endpoint, tools and keys) | [`databases-proxy-platform.md`](../backend/databases-proxy-platform.md) |
+| MCP server | `backend/internal/mcp/` (the protocol), `api/handlers_mcp*.go` (the endpoint, tools and keys) | [`databases.md`](../backend/databases.md) |
 | Assistant | `backend/internal/assistant/`, `api/handlers_assistant*.go`, `components/assistant/` | [`operator.md`](../deployments/operator.md) |
 | Go test support | `testdata/` in a package; `backend/internal/store/storetest/`, `backend/internal/auth/passkeytest/`, `backend/internal/proxysvc/acmetest/` | [`overview.md`](../overview.md) |
 | Browser fixtures | `frontend/tests/browser/*-fixture.ts`, `frontend/tests/browser/fixtures/` | [`overview.md`](../overview.md) |
