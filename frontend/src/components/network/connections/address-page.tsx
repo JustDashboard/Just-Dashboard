@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ChevronDown, ChevronUp, LockOpen } from "@/components/icons"
+import { ArrowLeft, ChevronDown, ChevronUp, LockOpen, Slash } from "@/components/icons"
 import { del, get } from "@/lib/api"
 import { networkOf } from "@/lib/clients"
 import { plural } from "@/lib/format"
@@ -28,7 +28,8 @@ import { EmptyState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { tabClasses } from "@/components/tabs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { VerbBar, type Verb } from "@/components/verbs"
+import { VerbMenu, type Verb } from "@/components/verbs"
+import { Button } from "@/components/ui/button"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { addressVerbs } from "@/components/security/address-verbs"
 import { useSecurity } from "@/components/security/security-context"
@@ -286,25 +287,20 @@ function AddressMain({
       },
     })
 
-  const verbs: Verb[] = [
-    ...addressVerbs({
-      ip: address,
-      block: mayBlock ? () => setBlocking(true) : undefined,
-      blocking,
-      navigate: (href) => router.push(href),
-    }),
-    ...(block && can("destructive")
-      ? [
-          {
-            key: "lift",
-            label: "Lift the block",
-            icon: LockOpen,
-            inline: true,
-            run: () => lift(block),
-          } satisfies Verb,
-        ]
-      : []),
-  ]
+  // The lookups go behind the menu; the block, or lifting it, is the line's
+  // one command, because it is what the page is opened to decide.
+  const lookups: Verb[] = addressVerbs({ ip: address, navigate: (href) => router.push(href) })
+  const command = mayBlock ? (
+    <Button size="sm" variant="destructive" disabled={blocking} onClick={() => setBlocking(true)}>
+      <Slash className="size-3.5" />
+      Block at the firewall
+    </Button>
+  ) : block && can("destructive") ? (
+    <Button size="sm" variant="outline" onClick={() => lift(block)}>
+      <LockOpen className="size-3.5" />
+      Lift the block
+    </Button>
+  ) : undefined
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
@@ -314,7 +310,6 @@ function AddressMain({
           title={address}
           actions={
             <>
-              <VerbBar verbs={verbs} menuLabel={`Actions for ${address}`} />
               <span className="flex items-center">
                 <IconAction
                   label="Previous address"
@@ -339,6 +334,8 @@ function AddressMain({
           listed={list !== undefined}
           block={block}
           oldest={oldestSocket(detail.data)}
+          command={command}
+          menu={<VerbMenu verbs={lookups} label={`Actions for ${address}`} />}
         />
         <NetworkReadWarning error={listError} refresh={refreshList} lastSuccess={listLastSuccess} />
       </div>
@@ -422,22 +419,26 @@ function AddressIdentity({
   listed,
   block,
   oldest,
+  command,
+  menu,
 }: {
   address: string
   peer?: Peer
   listed: boolean
   block?: AddressBlock
   oldest?: string
+  command?: React.ReactNode
+  menu: React.ReactNode
 }) {
   const now = useNow(30_000)
   const network = networkOf(address)
   return (
     <HostIdentity
-      className="animate-rise border-b-0 pb-0"
+      className="animate-rise"
       logo={
         <AddressMark
           address={address}
-          className="size-12 rounded-xl [&_img]:size-7 [&_svg]:size-6"
+          className="size-10 rounded-lg [&_img]:size-6 [&_svg]:size-5"
         />
       }
       title={<span className="font-mono">{address}</span>}
@@ -472,18 +473,18 @@ function AddressIdentity({
           )}
         </>
       }
-      aside={
+      command={command}
+      menu={menu}
+      state={
         block ? (
-          <Status
-            tone="danger"
-            label={`blocked · ${blockStanding(block, now).toLowerCase()}`}
-            className="text-body"
-          />
+          <Status tone="danger" label={`blocked · ${blockStanding(block, now).toLowerCase()}`} />
         ) : peer ? (
-          <Status state="running" live label="connected" className="text-body" />
+          <Status state="running" live label="connected" />
         ) : listed ? (
-          <Status state="stopped" label="not connected" className="text-body" />
-        ) : undefined
+          <Status state="stopped" label="not connected" />
+        ) : (
+          <Status tone="unknown" label="reading" />
+        )
       }
     />
   )

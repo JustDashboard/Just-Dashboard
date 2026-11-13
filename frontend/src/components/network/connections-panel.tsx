@@ -147,7 +147,7 @@ export function ConnectionsPanel() {
     >
       <PageContext eyebrow="Network" title="Connections" />
       <HostIdentity
-        className="animate-rise border-b-0 pb-0"
+        className="animate-rise"
         fallback={NetworkDevice}
         title="Connections"
         facts={
@@ -180,12 +180,16 @@ export function ConnectionsPanel() {
             </span>
           )
         }
-        aside={
+        // Drawn in every state, so the line has its one shape before the
+        // first read lands.
+        state={
           error ? (
-            <Status tone="warning" label="read failed" className="text-body" />
+            <Status tone="warning" label="read failed" />
           ) : data ? (
-            <Status state="running" live label="every 10s" className="text-body" />
-          ) : undefined
+            <Status state="running" live label="live · every 10s" />
+          ) : (
+            <Status tone="unknown" label="reading" />
+          )
         }
       />
 
