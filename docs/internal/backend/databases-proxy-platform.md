@@ -4702,8 +4702,9 @@ volume with the tunable, the label and its restart policy, and the fleet must th
   reset-failed need `system.admin`; restart and stop are destructive as well; each is audited as
   `proxy.engine.<action>`, a refusal with `result: refused` and the 422. There is no disable: taking
   the proxy out of the boot sequence is the Services page's. The unit's state, `UnitFileState`,
-  `Result` and `NRestarts` are still read from `/systemd/{unit}`, and a failed unit's last lines from
-  `/systemd/{unit}/journal?lines=30`, so the Services page and the overview never disagree about it.
+  `Result` and `NRestarts` are still read from `/systemd/{unit}`, and a failed unit's last 30 lines
+  from `GET /logs/search` on its `journal:` source (`engine-failure.tsx`), so the Services page
+  and the overview never disagree about it.
 - **`ParseSiteSpec` reads what hand-written files actually look like.** A line holding a whole
   block — `location / { proxy_pass http://x; }` — is split into statements before it is read
   (`splitInline`, quote-aware, since a Content-Security-Policy value carries semicolons of its
