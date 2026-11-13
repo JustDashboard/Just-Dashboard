@@ -336,13 +336,11 @@ test("an install is followed by configured, active and verified phases, not by a
   ).toBeVisible()
 })
 
-test("a peer opens into its tuples, ages, closes and the layers it crosses", async ({ page }) => {
+test("a peer opens its own page with its tuples, closes and the layers it crosses", async ({
+  page,
+}) => {
   await open(page, [])
   await visit(page, "/network/connections")
-  const row = page.getByRole("row").filter({ hasText: "198.51.100.23" })
-  await expect(row).toContainText(
-    "TCP/UDP · from 51022, 51023, 51024 +15 · 14 established, 3 time-wait, 1 connected",
-  )
   await expect(page.getByLabel("What this read cannot see")).toContainText(
     "Read 10s after the last",
   )
@@ -352,23 +350,26 @@ test("a peer opens into its tuples, ages, closes and the layers it crosses", asy
   await expect(page.getByLabel("What this read cannot see")).toContainText(
     "7 unconnected UDP sockets",
   )
-  await row.getByRole("button", { name: "Inspect 198.51.100.23" }).click()
-  const sheet = page.getByRole("dialog")
-  const tuples = sheet.getByLabel("Connections with 198.51.100.23", { exact: true })
+  await page.getByRole("link", { name: "Open 198.51.100.23" }).click()
+  await expect(page).toHaveURL(/\/network\/connections\/198\.51\.100\.23$/)
+  await expect(page.getByLabel("What the summary folded")).toContainText(
+    "TCP/UDP · from 51022, 51023, 51024 +15 · 14 established, 3 time-wait, 1 connected",
+  )
+  const tuples = page.getByLabel("Connections with 198.51.100.23", { exact: true })
   await expect(tuples).toContainText("203.0.113.10:443")
   await expect(tuples).toContainText("51022")
   // The fixture's ages are fixed when it loads, so a long run reads a little older.
   await expect(tuples).toContainText(/≥ 1h \d+m/)
   await expect(tuples).toContainText("2.0 GB")
   await expect(tuples).toContainText("no counters")
-  await expect(sheet.getByLabel("Closed connections with 198.51.100.23")).toContainText(
+  await expect(page.getByLabel("Closed connections with 198.51.100.23")).toContainText(
     "open at least 10m",
   )
-  const layers = sheet.getByLabel("Across the layers")
+  const layers = page.getByLabel("Across the layers")
   await expect(layers).toContainText("deny in from 198.51.100.0/24 to port 22")
   await expect(layers).toContainText("Answered through ens3 via 203.0.113.1 from 203.0.113.10")
   await expect(layers).toContainText("2 socket rows in the last day")
-  await expect(sheet.getByRole("link", { name: "Trace the route" })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "Trace the route" })).toHaveAttribute(
     "href",
     "/network/tools?tool=traceroute&target=198.51.100.23",
   )
@@ -400,18 +401,13 @@ test("a block asks why and until when, opens an incident, and is listed with its
     `/network/runs?run=${blocks[0].incidentRunId}`,
   )
   // Already blocked: no second block is offered.
-  await expect(
-    page
-      .getByRole("row")
-      .filter({ hasText: "203.0.113.77" })
-      .getByRole("button", { name: "Block at the firewall" }),
-  ).toHaveCount(0)
+  await page.getByRole("button", { name: "Actions for 203.0.113.77" }).click()
+  await expect(page.getByRole("menuitem", { name: "Who owns this address" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Block at the firewall" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
 
-  await page
-    .getByRole("row")
-    .filter({ hasText: "192.0.2.145" })
-    .getByRole("button", { name: "Block at the firewall" })
-    .click()
+  await page.getByRole("button", { name: "Actions for 192.0.2.145" }).click()
+  await page.getByRole("menuitem", { name: "Block at the firewall" }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog.getByLabel("Reason")).toHaveValue("connected to SSH on 22")
   await dialog.getByLabel("Reason").fill("")
@@ -449,20 +445,21 @@ test("a past hour is read from the socket history in the live table's shape", as
   })
   await open(page, [])
   await visit(page, "/network/connections")
-  await page.getByRole("radio", { name: "A past hour" }).click()
+  await page.getByRole("tab", { name: "A past hour" }).click()
   const recorded = page.getByLabel("Recorded connections")
-  await expect(recorded.getByRole("row").filter({ hasText: "198.51.100.23" })).toContainText(
-    "2.0 GiB",
-  )
-  await expect(recorded.getByRole("row").filter({ hasText: "203.0.113.200" })).toContainText("sshd")
+  const card = (address: string) =>
+    recorded.locator("[data-slot=choice-row]").filter({ hasText: address })
+  await expect(card("198.51.100.23")).toContainText("2.0 GiB")
+  await expect(card("203.0.113.200")).toContainText("sshd")
   await expect(recorded).toContainText(
     "Sockets that opened and closed between two samples are not in the record",
   )
   const asked = flows.find((u) => u.searchParams.get("from") && !u.searchParams.get("address"))!
   expect(asked.searchParams.get("from")).toMatch(/:00:00Z$/)
   await expect(page).toHaveURL(/when=recorded/)
-  await recorded.getByRole("button", { name: "Inspect 203.0.113.200" }).click()
-  await expect(page.getByRole("dialog")).toBeVisible()
+  await recorded.getByRole("link", { name: "Open 203.0.113.200" }).click()
+  await expect(page).toHaveURL(/\/network\/connections\/203\.0\.113\.200\?tab=past&hour=/)
+  await expect(page.getByLabel("Recorded sockets")).toBeVisible()
 })
 
 test.describe("at a phone's width", () => {
@@ -495,19 +492,9 @@ test.describe("at a phone's width", () => {
 
     await visit(page, "/network/connections")
     expect(await overflow(), "horizontal overflow on /network/connections").toBeLessThanOrEqual(0)
-    await page
-      .getByRole("row")
-      .filter({ hasText: "198.51.100.23" })
-      .getByRole("button", { name: "Inspect 198.51.100.23" })
-      .click()
-    await expect(page.getByRole("dialog").getByLabel("Across the layers")).toBeVisible()
-    // Settled after the sheet's entry animation, so the picture is the sheet.
-    await page.waitForFunction(() =>
-      document
-        .getAnimations()
-        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
-        .every((a) => a.playState !== "running"),
-    )
-    await page.screenshot({ path: testInfo.outputPath("peer-sheet-390.png") })
+    await page.getByRole("link", { name: "Open 198.51.100.23" }).click()
+    await expect(page.getByLabel("Across the layers")).toBeVisible()
+    expect(await overflow(), "horizontal overflow on an address's page").toBeLessThanOrEqual(0)
+    await page.screenshot({ path: testInfo.outputPath("address-390.png"), fullPage: true })
   })
 })

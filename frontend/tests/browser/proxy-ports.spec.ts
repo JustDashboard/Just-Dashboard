@@ -778,7 +778,7 @@ test("a connection's service port opens what listens on it; a port the kernel pi
   await mockHost(page)
   await mockConnections(page)
   await page.goto("/network/connections")
-  const row = page.getByRole("row").filter({ hasText: "203.0.113.50" })
+  const row = page.locator("[data-slot=choice-row]").filter({ hasText: "203.0.113.50" })
   await expect(row.getByText("51234")).toBeVisible()
   await expect(row.getByRole("link", { name: "What listens on port 51234" })).toHaveCount(0)
   await row.getByRole("link", { name: "What listens on port 22" }).click()
@@ -787,21 +787,21 @@ test("a connection's service port opens what listens on it; a port the kernel pi
   await expect(rowsOf(page).first()).toContainText("sshd")
 })
 
-test("the Listening tile opens every socket, not the port a link opened a moment ago", async ({
+test("the listening count opens every socket, not the port a link opened a moment ago", async ({
   page,
 }) => {
   await mockHost(page)
   await mockConnections(page)
   await page.goto("/network/connections")
   await page
-    .getByRole("row")
+    .locator("[data-slot=choice-row]")
     .filter({ hasText: "203.0.113.50" })
     .getByRole("link", { name: "What listens on port 22" })
     .click()
   await expect(page).toHaveURL(/\/proxy\/ports\?q=:22$/)
   await expect(rowsOf(page)).toHaveCount(1)
 
-  // The tab now remembers `:22`; the tile asks for the whole list anyway.
+  // The tab now remembers `:22`; the count on the identity line asks for the whole list anyway.
   await page.goBack()
   await page.getByRole("link", { name: "Listening ports" }).click()
   await expect(page.getByLabel("Search sockets")).toHaveValue("")
