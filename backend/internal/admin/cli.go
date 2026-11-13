@@ -1,5 +1,8 @@
-// Package admin provides local account recovery for the host operator. It has
-// no HTTP surface and never starts the dashboard's modules or listeners.
+// Package admin is the server binary's --admin mode, which manage.sh runs for
+// the host operator: local account recovery (users, create-user,
+// reset-password, revoke-sessions), and linking this server to a site account
+// or a Just Hub and reading the link's state (link.go, hub.go). It has no HTTP
+// surface and never starts the dashboard's modules or listeners.
 package admin
 
 import (

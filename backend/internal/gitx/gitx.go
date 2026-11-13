@@ -1,6 +1,6 @@
-// Package gitx exposes the read side of the git repositories on a server:
-// which ones exist, what state each working tree is in, and what its history
-// and branches look like.
+// Package gitx reads and changes the git repositories on a server: which ones
+// exist, what state each working tree is in, what its history and branches
+// look like, and the operations an operator runs on them.
 //
 // Everything here runs `git` with an explicit argument vector — never through
 // a shell — and every value that reaches an argument is either validated
@@ -8,8 +8,9 @@
 // branch called `--upload-pack=…` cannot turn into an option.
 //
 // Read and write are deliberately separated: this file and refs.go answer
-// questions, while mutating operations live in ops.go behind their own
-// capability check.
+// questions, while mutating operations live in ops.go and the files beside it
+// (conflicts.go, partial.go, rebase.go, workspace.go, extras.go, removal.go),
+// each behind its route's own capability check.
 package gitx
 
 import (

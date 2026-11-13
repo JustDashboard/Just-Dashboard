@@ -1,13 +1,16 @@
 // Package dockerx talks to the Docker Engine API over its unix socket through
-// the official Go SDK. Nothing here shells out to the docker CLI: the socket
-// is the interface, and shelling out would both lose typed errors and widen
-// the command-injection surface.
+// the official Go SDK. The socket is the interface for everything the Engine
+// API offers: shelling out would both lose typed errors and widen the
+// command-injection surface. What the API does not offer runs the docker CLI
+// with an explicit argument vector, never a shell string: Compose
+// (composeops.go, compose_ports.go, compose_storage.go) and image builds
+// (imagedetail.go, buildkit.go).
 //
 // Access to /var/run/docker.sock is root-equivalent — a caller who can create
 // a container can bind-mount the host root and escape. Every route that
 // reaches this package therefore sits behind authentication, a capability
-// check and the audit trail, and the destructive ones behind a typed
-// confirmation as well.
+// check and the audit trail, and the destructive ones behind the destructive
+// capability and its tighter rate budget as well.
 package dockerx
 
 import (

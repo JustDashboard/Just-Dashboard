@@ -3,6 +3,9 @@
 // container, speaks RDP and VNC to the computer; the backend speaks the
 // Guacamole protocol to guacd and relays it to the page. Computers are
 // usually reached over the tailnet, so neither RDP nor VNC is ever exposed.
+// Stream mode is the other way to a screen: Sunshine on the computer and a
+// Moonlight Web bridge the dashboard runs or is pointed at (stream.go,
+// remote_bridge.go).
 package remotedesk
 
 import (

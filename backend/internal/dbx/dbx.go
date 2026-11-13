@@ -1,7 +1,10 @@
-// Package dbx provides database administration across Postgres, MySQL, SQLite
-// and MongoDB: browsing schemas and tables, introspecting a table's full
+// Package dbx provides database administration across the engines it has a
+// Driver for (Postgres, MySQL, SQLite, SQL Server, ClickHouse, Oracle, MongoDB
+// and Redis): browsing schemas and tables, introspecting a table's full
 // structure, editing rows through safe generated statements, running arbitrary
 // queries, exporting data, generating ORM schemas, and dumping or restoring.
+// Each SQL engine is one Dialect (dialect_*.go); MongoDB and Redis have their
+// own surfaces (mongo_*.go, redis_*.go).
 //
 // Connection strings are secrets — they carry credentials — so they are held
 // encrypted at rest and never returned to a client. Two rules keep the write

@@ -1,6 +1,9 @@
 // Package ghx is the GitHub half of the git page: which account this server is
-// signed in as, how it got signed in, and the one operation git itself has no
-// verb for — opening a pull request.
+// signed in as, how it got signed in, and what git itself has no verb for:
+// pull requests (list, diff, conversation, create, review, merge, check out)
+// and workflow runs with their logs (pulls.go, review.go), a pull request's
+// checks and a commit's status (checks.go, status.go), issues and their
+// comments (issues.go), and the account's repositories (repos.go).
 //
 // Everything here drives the `gh` binary with an explicit argument vector,
 // never through a shell, and runs it in the repository's directory as the
