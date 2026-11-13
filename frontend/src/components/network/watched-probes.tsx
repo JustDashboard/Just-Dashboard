@@ -19,7 +19,14 @@ import { CheckTrend } from "@/components/proxy/watched-domains"
  * history and alerts, asked only whether the endpoint takes a connection.
  * There is no second monitor; a probe is a watched endpoint of its own kind.
  */
-export function WatchedProbes({ admin }: { admin: boolean }) {
+export function WatchedProbes({
+  admin,
+  empty,
+}: {
+  admin: boolean
+  /** Drawn in place of the sentence when nothing is watched, by a page that designs its own. */
+  empty?: React.ReactNode
+}) {
   const watched = usePoll(
     (signal) => get<WatchedEndpoint[]>("/certificates/watched", undefined, signal),
     60_000,
@@ -71,11 +78,13 @@ export function WatchedProbes({ admin }: { admin: boolean }) {
         {watched.error && !watched.data ? (
           <ErrorState error={watched.error} onRetry={watched.refresh} />
         ) : probes.length === 0 ? (
-          <p className="text-body text-muted-foreground">
-            No probe is watched. Run a TCP port check on the Tools page and watch it to have the
-            server connect on the watch list&rsquo;s schedule, keep each connect time and alert when
-            it stops answering.
-          </p>
+          (empty ?? (
+            <p className="text-body text-muted-foreground">
+              No probe is watched. Run a TCP port check on the Tools page and watch it to have the
+              server connect on the watch list&rsquo;s schedule, keep each connect time and alert
+              when it stops answering.
+            </p>
+          ))
         ) : (
           <ul className="divide-y divide-hairline">
             {probes.map((row) => {
