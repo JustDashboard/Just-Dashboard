@@ -138,7 +138,7 @@ export function missingFromError(
         : undefined
     case "terminal_disabled":
       return moduleOff(
-        { name: "The web terminal", setting: "Features" },
+        { name: "The web terminal", thing: "terminal", setting: "Features" },
         context.canConfigure ?? false,
       )
     default:

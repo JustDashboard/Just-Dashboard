@@ -91,7 +91,11 @@ describe("the absence behind a failed read", () => {
   })
 
   test("a terminal that is off is a module, and the step is an administrator's", () => {
-    expect(missingFromError({ code: "terminal_disabled" })?.steps).toEqual([])
+    expect(missingFromError({ code: "terminal_disabled" })).toMatchObject({
+      thing: "terminal",
+      title: "The web terminal is turned off",
+      steps: [],
+    })
     expect(missingFromError({ code: "terminal_disabled" }, { canConfigure: true })?.steps).toEqual([
       { kind: "link", label: "Open Configuration", href: "/dashboard/configuration" },
     ])
