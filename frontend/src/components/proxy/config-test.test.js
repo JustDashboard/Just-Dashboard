@@ -80,8 +80,6 @@ describe("the verdict", () => {
   })
 })
 
-describe("the last config test in Needs attention", () => {})
-
 describe("which files a diagnostic may open", () => {
   const status = {
     nginx: true,

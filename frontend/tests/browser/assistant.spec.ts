@@ -127,13 +127,6 @@ const readRuns = {
   kind: "read",
   input: { limit: 10 },
 }
-const readLogs = {
-  id: "b",
-  tool: "container_logs",
-  label: "Read the last 120 lines the live containers wrote",
-  kind: "read",
-  input: { lines: 120 },
-}
 const setPort = {
   id: "c",
   tool: "call_operation",

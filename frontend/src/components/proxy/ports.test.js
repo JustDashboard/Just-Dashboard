@@ -407,8 +407,6 @@ describe("databases off this machine are counted per port", () => {
   })
 })
 
-describe("a database off this machine", () => {})
-
 // Owners as this host names them: Docker's Caddy ingress publishing 80 in
 // both families through two docker-proxy processes, a deployment's container,
 // socket-activated sshd, nginx under systemd, a PM2 app whose node calls its

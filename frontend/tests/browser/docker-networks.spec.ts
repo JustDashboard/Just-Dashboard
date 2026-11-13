@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test } from "@playwright/test"
 import { NETS, mockNetworks } from "./docker-networks-fixture"
 import { risen } from "./risen"
 
