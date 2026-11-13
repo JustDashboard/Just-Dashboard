@@ -31,7 +31,9 @@
   the plan that never deletes, the dry-run and write routes, what was written and by whom, preflight's
   `dns_record_writable` / `dns_record_missing` and the Domains sheet's Create the record.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
-  logs, the request readings, container lifecycle events, and the three container-output fixes.
+  logs, trace context, the request readings, traffic alerts, the traffic replay before a cutover,
+  security intel and blocking, container lifecycle events, availability and the Prometheus
+  exposition, the three container-output fixes, and a project's Logs page.
 - [`image-vulnerabilities.md`](image-vulnerabilities.md) — each release's image and the bases it was
   pinned on, scanned by Trivy offline after the build and daily: the database fetched and checked by the
   dashboard, what is kept per release, the newer-base check, the terms, the `image_vulnerable` alert and
