@@ -581,19 +581,6 @@ port_taken() {
 	return 1
 }
 
-# who_has is for the message only. Being unable to name the process is not a
-# reason to stay quiet about the port — hence the `|| true`, which is
-# load-bearing: this runs under `set -e` and its result is consumed by a bare
-# assignment, so a grep that matches nothing would take the whole installer
-# down at precisely the moment a port turned out to be in use.
-who_has() {
-	if command -v ss >/dev/null 2>&1; then
-		ss -lntpH "sport = :$1" 2>/dev/null |
-			grep -o '"[^"]*"' | head -1 | tr -d '"' || true
-	fi
-	return 0
-}
-
 # Reserve choices across the three services before any container is started.
 PICKED=""
 ALLOCATED_PORTS=" "
