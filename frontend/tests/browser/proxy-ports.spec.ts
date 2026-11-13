@@ -801,7 +801,7 @@ test("the listening count opens every socket, not the port a link opened a momen
   await expect(page).toHaveURL(/\/proxy\/ports\?q=:22$/)
   await expect(rowsOf(page)).toHaveCount(1)
 
-  // The tab now remembers `:22`; the count on the identity line asks for the whole list anyway.
+  // The tab now remembers `:22`; the count on the picture's hub asks for the whole list anyway.
   await page.goBack()
   await page.getByRole("link", { name: "Listening ports" }).click()
   await expect(page.getByLabel("Search sockets")).toHaveValue("")

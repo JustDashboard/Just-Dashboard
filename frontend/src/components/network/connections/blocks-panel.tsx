@@ -15,6 +15,7 @@ import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
 import { addressHref } from "@/components/network/connections/model"
+import { AddressName } from "@/components/network/connections/rows"
 
 /**
  * The blocks made from the connection table: active first, each with why,
@@ -87,9 +88,9 @@ export function BlocksPanel({
                   <Link
                     href={addressHref(b.address)}
                     aria-label={`Open ${b.address}`}
-                    className="rounded-sm font-mono focus-ring hover:underline"
+                    className="rounded-sm focus-ring hover:underline"
                   >
-                    {b.address}
+                    <AddressName address={b.address} />
                   </Link>
                 }
                 subtitle={

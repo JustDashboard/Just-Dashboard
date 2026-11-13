@@ -30,6 +30,18 @@ export function addressHref(address: string, view?: { tab?: string; hour?: strin
   return `/network/connections/${encodeURIComponent(address)}${search ? `?${search}` : ""}`
 }
 
+/**
+ * An address in a column too narrow for it, cut in the middle: an IPv6
+ * address is told from its neighbours by its prefix and its last groups, and
+ * a line cut at its end keeps only the half they share. An address that fits
+ * is itself.
+ */
+export function shortAddress(address: string, room: number) {
+  if (address.length <= room) return address
+  const kept = Math.max(2, room - 1)
+  return `${address.slice(0, Math.ceil(kept / 2))}…${address.slice(-Math.floor(kept / 2))}`
+}
+
 const V4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
 
 /**

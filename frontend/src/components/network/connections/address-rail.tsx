@@ -8,7 +8,7 @@ import { SearchInput } from "@/components/page"
 import { LoadingRows } from "@/components/state"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { AddressMark } from "@/components/network/connections/rows"
-import { reached } from "@/components/network/connections/model"
+import { reached, shortAddress } from "@/components/network/connections/model"
 
 /**
  * The live list, folded into a column beside the address it opened: the same
@@ -131,6 +131,7 @@ function RailRow({
         data-workspace-name={address}
         aria-current={current ? "page" : undefined}
         aria-label={address}
+        title={address}
         onClick={() => onOpen(address)}
         className={cn(
           "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
@@ -145,7 +146,8 @@ function RailRow({
               current ? "font-semibold" : "font-medium",
             )}
           >
-            {address}
+            {/* The column holds some twenty characters; an IPv6 address keeps both ends. */}
+            {shortAddress(address, 21)}
           </span>
           <span className="block truncate text-hint text-muted-foreground">
             {peer ? reached(peer) : networkOf(address).label}

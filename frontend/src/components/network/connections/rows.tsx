@@ -20,7 +20,7 @@ import {
 import { chosenPort, portsHref } from "@/components/proxy/ports-list"
 import { RX, TX } from "@/components/network/rate-pair"
 import { VerbActions, type Verb } from "@/components/verbs"
-import { addressHref, reached } from "@/components/network/connections/model"
+import { addressHref, reached, shortAddress } from "@/components/network/connections/model"
 
 /** An address drawn as the network it is on: Tailscale's mark for the tailnet, a glyph for the rest. */
 export function AddressMark({ address, className }: { address: string; className?: string }) {
@@ -104,6 +104,22 @@ export function Carried({
   )
 }
 
+/**
+ * An address as a card's name: whole from `sm`, and on a phone, where an
+ * IPv6 address is wider than the line, both of its ends (`shortAddress`) —
+ * the card's link and the address's own page say it whole.
+ */
+export function AddressName({ address }: { address: string }) {
+  const short = shortAddress(address, 17)
+  if (short === address) return <span className="font-mono">{address}</span>
+  return (
+    <span className="font-mono" title={address}>
+      <span className="sm:hidden">{short}</span>
+      <span className="max-sm:hidden">{address}</span>
+    </span>
+  )
+}
+
 /** A figure and its word, right-aligned in a column of its own width. */
 function Figure({
   value,
@@ -149,7 +165,7 @@ export function PeerRow({
     <ChoiceRow
       workspaceItem={{ id: peer.address, name: peer.address }}
       leading={<AddressMark address={peer.address} />}
-      title={<span className="font-mono">{peer.address}</span>}
+      title={<AddressName address={peer.address} />}
       verb={`Open ${peer.address}`}
       href={addressHref(peer.address)}
       description={
@@ -206,7 +222,7 @@ export function RecordedRow({ peer, hour }: { peer: HistoricalPeer; hour: string
     <ChoiceRow
       workspaceItem={{ id: peer.address, name: peer.address }}
       leading={<AddressMark address={peer.address} />}
-      title={<span className="font-mono">{peer.address}</span>}
+      title={<AddressName address={peer.address} />}
       verb={`Open ${peer.address}`}
       href={addressHref(peer.address, { tab: "past", hour })}
       description={

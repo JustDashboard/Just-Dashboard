@@ -6,6 +6,7 @@ import {
   foldPeers,
   matchPeers,
   parseAddress,
+  shortAddress,
   socketState,
   stateWords,
   stepAddress,
@@ -56,6 +57,15 @@ describe("an address's page", () => {
     ]) {
       expect(parseAddress(bad)).toBeNull()
     }
+  })
+})
+
+describe("an address in a narrow column", () => {
+  test("keeps both ends of one that does not fit, and all of one that does", () => {
+    expect(shortAddress("198.51.100.200", 17)).toBe("198.51.100.200")
+    expect(shortAddress("fd7a:115c:a1e0::9", 17)).toBe("fd7a:115c:a1e0::9")
+    expect(shortAddress("2001:db8:85a3:8d3:1319:8a2e:370:7348", 17)).toBe("2001:db8…370:7348")
+    expect(shortAddress("2001:db8:85a3:8d3:1319:8a2e:370:7348", 17)).toHaveLength(17)
   })
 })
 

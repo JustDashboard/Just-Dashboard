@@ -13,7 +13,13 @@ import { portsHref } from "@/components/proxy/ports-list"
 import { WireHost, WireMark } from "@/components/deploy/wire"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
-import { beat, foldPeers, type Place, type Program } from "@/components/network/connections/model"
+import {
+  PLACES,
+  beat,
+  foldPeers,
+  type Place,
+  type Program,
+} from "@/components/network/connections/model"
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
@@ -43,6 +49,11 @@ const PROGRAMS = 5
  * place, and under each the counts of every read since the page opened as a
  * line — the backend keeps no history of connections, and a count that is
  * only ever "now" cannot show that the burst was ten minutes ago.
+ *
+ * Before the first read it is drawn at the height it will have: the three
+ * places and as many programs as the last visit drew, each a grey node on the
+ * very lines its words will stand on (`ghostNode`), so the list under the
+ * picture does not move when the read lands.
  */
 export function ConnectionsPicture({
   data,
@@ -60,34 +71,44 @@ export function ConnectionsPicture({
   const { places, programs } = useMemo(() => foldPeers(data?.peers ?? []), [data?.peers])
   const history = useReadings(data, places)
   // How many programs the last read drew, kept for the next visit: the
-  // picture waits at the height it had, so the list under it does not move
-  // when the read lands.
+  // picture waits at the height it had.
   const [drawn, setDrawn] = useViewState("network.connections.programs", 4)
   const rows = Math.max(1, Math.min(programs.length, PROGRAMS + 1))
   useEffect(() => {
     if (data && rows !== drawn) setDrawn(rows)
   }, [data, rows, drawn, setDrawn])
+  const waiting = loading && !data
 
   return (
     <WireFlow
       className="animate-rise"
       phone="marks"
-      loading={loading && !data}
       start={{
         title: "Where the callers are",
-        nodes: places.map((place) =>
-          placeNode(place, history.places[place.kind] ?? [], {
-            pressed: place.kind === "internet" && internetOnly,
-            onPress: place.kind === "internet" && place.peers.length > 0 ? onInternet : undefined,
-          }),
-        ),
-        loadingRows: places.length,
+        nodes: waiting
+          ? PLACES.map((place) => ghostNode(`place:${place.kind}`, "place"))
+          : places.map((place) =>
+              placeNode(place, history.places[place.kind] ?? [], {
+                pressed: place.kind === "internet" && internetOnly,
+                onPress:
+                  place.kind === "internet" && place.peers.length > 0 ? onInternet : undefined,
+              }),
+            ),
       }}
       hub={{
         mark: <WireHost />,
         eyebrow: "This server",
-        title: data ? plural(data.total, "socket") : undefined,
-        hint: data && (
+        title: data ? plural(data.total, "socket") : <Ghost className="w-20" />,
+        hint: !data ? (
+          <>
+            <span className="block">
+              <Ghost className="w-32" />
+            </span>
+            <span className="block lg:hidden">
+              <Ghost className="w-40" />
+            </span>
+          </>
+        ) : (
           <>
             <span className="numeric block">
               {/* Listening goes to the page that names each socket: this page
@@ -115,14 +136,60 @@ export function ConnectionsPicture({
       }}
       end={{
         title: "What they reached",
-        nodes: programs.map((program) => programNode(program, onProgram)),
+        nodes: waiting
+          ? Array.from({ length: drawn }, (_, i) => ghostNode(`program:waiting:${i}`, "program"))
+          : programs.map((program) => programNode(program, onProgram)),
         max: PROGRAMS,
         more: { words: (hidden) => `${hidden} more programs` },
         empty: "Nothing reached",
-        loadingRows: drawn,
       }}
     />
   )
+}
+
+/**
+ * A line of words not read yet: a grey bar on the line the words will stand
+ * on, taking no height of its own, so a waiting node is exactly as tall as
+ * the node that replaces it.
+ */
+function Ghost({ className }: { className?: string }) {
+  return (
+    <span aria-hidden className={cn("relative inline-block", className)}>
+      {"\u00a0"}
+      <span
+        data-slot="skeleton"
+        className="absolute inset-x-0 top-1/2 h-2.5 -translate-y-1/2 animate-pulse rounded-md bg-muted"
+      />
+    </span>
+  )
+}
+
+/** A place or a program before the first read: its tile and its lines, grey. */
+function ghostNode(id: string, kind: "place" | "program"): WireFlowNode {
+  return {
+    id,
+    placeholder: true,
+    mark: (size) => (
+      <span
+        data-slot="skeleton"
+        className={cn(
+          "block animate-pulse rounded-xl bg-muted",
+          size === "sm" ? "size-9" : "size-11",
+        )}
+      />
+    ),
+    eyebrow: <Ghost className="w-24" />,
+    title: <Ghost className="w-20" />,
+    hint: (
+      <>
+        <span className="block">
+          <Ghost className="w-28" />
+        </span>
+        {kind === "place" && <Trend values={[]} label="" align="end" />}
+      </>
+    ),
+    line: { state: "up" },
+  }
 }
 
 /** A place in the phone's one line under the hub. */

@@ -352,9 +352,10 @@ test("a peer opens its own page with its tuples, closes and the layers it crosse
   )
   await page.getByRole("link", { name: "Open 198.51.100.23" }).click()
   await expect(page).toHaveURL(/\/network\/connections\/198\.51\.100\.23$/)
-  await expect(page.getByLabel("What the summary folded")).toContainText(
-    "TCP/UDP · from 51022, 51023, 51024 +15 · 14 established, 3 time-wait, 1 connected",
-  )
+  const reached = page.getByLabel("Where it connects")
+  await expect(reached).toContainText("TCP/UDP")
+  await expect(reached).toContainText("from 51022, 51023, 51024 +15")
+  await expect(reached).toContainText("14 established, 3 time-wait, 1 connected")
   const tuples = page.getByLabel("Connections with 198.51.100.23", { exact: true })
   await expect(tuples).toContainText("203.0.113.10:443")
   await expect(tuples).toContainText("51022")
@@ -459,7 +460,7 @@ test("a past hour is read from the socket history in the live table's shape", as
   await expect(page).toHaveURL(/when=recorded/)
   await recorded.getByRole("link", { name: "Open 203.0.113.200" }).click()
   await expect(page).toHaveURL(/\/network\/connections\/203\.0\.113\.200\?tab=past&hour=/)
-  await expect(page.getByLabel("Recorded sockets")).toBeVisible()
+  await expect(page.getByLabel("Recorded sockets with 203.0.113.200")).toContainText("sshd")
 })
 
 test.describe("at a phone's width", () => {

@@ -90,11 +90,11 @@ export function AddressPicture({
   const states = peer && stateWords(peer)
   const transports = peer && transportWords(peer)
   return (
-    <section aria-label="What it reached" className="min-w-0">
+    <section aria-label="Where it connects" className="min-w-0">
       <WireFlow
         // The hub's cell keeps room for the words that hang under its mark,
-        // and the same room above it is empty: the picture gives it back.
-        className="animate-rise lg:-my-6"
+        // and the same room above it is empty: the picture gives some back.
+        className="animate-rise lg:-mt-8"
         loading={!listed}
         // A narrow hub column: its words hang centred under the mark and may
         // run past it, while the address beside the rail needs its line whole.
@@ -140,7 +140,7 @@ export function AddressPicture({
           ),
           // The hub's words hang under its mark, and one address is a single
           // row: the cell keeps the room they need.
-          className: "lg:py-14",
+          className: "lg:py-20",
         }}
         end={{
           title: "What it reached",
