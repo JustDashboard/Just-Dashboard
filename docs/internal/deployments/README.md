@@ -3,6 +3,12 @@
 - [`Deployment creation audit`](../../audits/2026-09-22-deploy-new/README.md) — wizard state, template
   usability, encrypted draft inputs, database connections and local acceptance evidence.
 - [`implementation.md`](implementation.md) — current implementation, invariants, feature joins, automation, and topology.
+- [`caddy-ingress.md`](caddy-ingress.md) — the decision to share a public Docker Caddy as the deployments'
+  ingress: provisioning and ownership, access logging, replicas, canaries, skew protection, the route's
+  limits, headers, maintenance and error pages, sleep, sign-in, certificates, Cloudflare Tunnel, and the
+  live test.
+- [`redesign-plan.md`](redesign-plan.md) — the dated record of the deployment pages' redesign passes
+  (2026-09-16 to 2026-09-24): what each pass changed and what replaced it.
 - [`game-servers.md`](game-servers.md) — the Minecraft templates as releases: install-time files and pinned artifacts written into a managed volume by a helper container before start, UDP published on the plan's bind address (loopback until the operator opens it), the `game_handshake` and `udp_probe` readiness checks, the reach readout and the Console, Players and Server settings pages.
 - [`tailnet-apps.md`](tailnet-apps.md) — environments published on the tailnet alone, and access per person from Tailscale identity: the plan's list of logins and tags, the address from the previews' range, the gate (nginx or the dashboard's loopback Caddy) that asks the whois route about every request, the route itself, audit, and what the pages say.
 - [`edge-rules.md`](edge-rules.md) — what a deployment's route decides at the proxy before the application sees a request: an ordered list of edge rules (path, method, user agent and address matches; block, status, allow or redirect), a rate limit per client address (nginx's 429 with Retry-After; host-level on the Docker Caddy ingress), CrowdSec's bans refused at the route, and the per-rule hits read from the request record.
