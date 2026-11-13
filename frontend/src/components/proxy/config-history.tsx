@@ -20,7 +20,6 @@ import { unifiedDiff } from "@/components/files/diff"
 import { Modal } from "@/components/modal"
 import { Pane, Well } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { SidePanel } from "@/components/side-panel"
 import {
   EmptyNote,
   EmptyState,
@@ -132,30 +131,21 @@ type Compare = "previous" | "current"
  * before it, or against the file as it is now — which is what Restore would
  * change. Restore writes the revision through the config editor's own save,
  * so the engine tests it in place and a refusal leaves the file as it was.
+ *
+ * It was a sheet of its own, opened beside the editor's sheet; it is the
+ * editor's History view now, so a file is one thing with two views and the
+ * buffer being edited knows when a restore changed the file under it.
  */
-export function ConfigHistorySheet({
+export function ConfigFileHistory({
   path,
   root,
-  onOpenChange,
   onRestored,
 }: {
-  path: string | null
+  path: string
   root: string
-  onOpenChange: (open: boolean) => void
   onRestored?: () => void
 }) {
-  return (
-    <SidePanel
-      open={path !== null}
-      onOpenChange={onOpenChange}
-      width="xl"
-      title={path ? `History of ${path.split("/").pop()}` : "History"}
-      description={path ?? undefined}
-      bodyClassName="flex min-h-0 flex-1 flex-col gap-3 p-4"
-    >
-      {path && <HistoryBody key={path} path={path} root={root} onRestored={onRestored} />}
-    </SidePanel>
-  )
+  return <HistoryBody key={path} path={path} root={root} onRestored={onRestored} />
 }
 
 function HistoryBody({
