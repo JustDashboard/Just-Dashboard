@@ -5,14 +5,14 @@ import { del, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { ProtectionBlocklist, ProtectionException } from "@/lib/types"
-import { Trash } from "@/components/icons"
+import { LockOpen, Plus, Trash } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field, FieldRow } from "@/components/form"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyNote } from "@/components/state"
-import { Tag } from "@/components/tag"
+import { EmptyState } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select"
 import { Cidr } from "@/components/network/address"
 import { compact } from "@/components/network/gateway/reading"
-import { EXPIRY_CHOICES, expiryFrom } from "@/components/network/protection/reading"
+import { EXPIRY_CHOICES, exceptionState, expiryFrom } from "@/components/network/protection/reading"
 import { useAuth } from "@/hooks/use-auth"
 
 /**
@@ -34,18 +34,26 @@ import { useAuth } from "@/hooks/use-auth"
  * honouring it then whether or not the dashboard is running; the dashboard
  * only tidies it away afterwards. What each has let through is counted.
  *
+ * A row is one line at one height: the address over why and for what, then
+ * what it let through and how it stands — ending, ended, or held until it is
+ * removed — as a state word in a column of its own.
+ *
  * Making one gives part of a list away and removing one can refuse someone
  * who relies on it, so both ask for the destructive capability.
  */
 export function ExceptionList({
   exceptions,
   onChanged,
+  onNew,
 }: {
   exceptions: ProtectionException[]
   onChanged: () => void
+  /** Opens the form that makes one, for an account that may. */
+  onNew?: () => void
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
+  const removable = can("system.admin") && can("destructive")
   const remove = (e: ProtectionException) =>
     confirm({
       title: `Remove the exception for ${e.address}`,
@@ -60,61 +68,85 @@ export function ExceptionList({
         await del(`/network/protection/exceptions/${e.id}`)
         notify.success(`The exception for ${e.address} is removed`)
         onChanged()
+        return "reported"
       },
     })
   if (exceptions.length === 0) {
-    return <EmptyNote>No network is excepted from the drops.</EmptyNote>
+    return (
+      <EmptyState
+        className="py-8"
+        icon={LockOpen}
+        title="No network is excepted from the drops"
+        action={
+          onNew && (
+            <Button size="sm" variant="outline" onClick={onNew}>
+              <Plus aria-hidden />
+              New exception
+            </Button>
+          )
+        }
+      />
+    )
   }
   return (
     <>
       <RowList>
-        {exceptions.map((e) => (
-          <Row
-            key={e.id}
-            title={
-              <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
-                <Cidr cidr={e.address} />
-                {e.expired && <Tag tone="warning">expired</Tag>}
-              </span>
-            }
-            subtitle={[
-              e.reason,
-              e.scope === "all" ? "every list and limit" : e.scopeName,
-              e.expiresAt
-                ? e.expired
-                  ? `ended ${relativeTime(e.expiresAt)}`
-                  : `ends ${relativeTime(e.expiresAt)}`
-                : "until removed",
-              e.createdBy ? `made by ${e.createdBy}` : undefined,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-            trailing={
-              <>
-                <span className="numeric font-mono text-micro text-muted-foreground">
-                  {compact(e.packets)} let through
-                </span>
-                {can("system.admin") && can("destructive") ? (
-                  <DimActions>
-                    <IconAction
-                      label={`Remove the exception for ${e.address}`}
-                      onClick={() => remove(e)}
-                    >
-                      <Trash aria-hidden />
-                    </IconAction>
-                  </DimActions>
-                ) : (
-                  <span aria-hidden className="size-8 shrink-0" />
-                )}
-              </>
-            }
-          />
-        ))}
+        {exceptions.map((e) => {
+          const state = exceptionState(e, relativeTime)
+          return (
+            <Row
+              key={e.id}
+              className={ROW_HEIGHT}
+              title={<Cidr cidr={e.address} />}
+              subtitle={
+                <>
+                  {[
+                    e.reason,
+                    e.scope === "all" ? "every list and limit" : e.scopeName,
+                    e.createdBy ? `made by ${e.createdBy}` : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  <span className="numeric sm:hidden">
+                    {" · "}
+                    {compact(e.packets)} let through
+                  </span>
+                </>
+              }
+              trailing={
+                <>
+                  <span className="numeric w-28 text-right font-mono text-micro text-muted-foreground max-sm:hidden">
+                    {compact(e.packets)} let through
+                  </span>
+                  <span className="flex sm:w-44">
+                    <Status tone={state.tone} label={state.label} />
+                  </span>
+                  {removable && (
+                    <DimActions>
+                      <IconAction
+                        label={`Remove the exception for ${e.address}`}
+                        onClick={() => remove(e)}
+                      >
+                        <Trash aria-hidden />
+                      </IconAction>
+                    </DimActions>
+                  )}
+                </>
+              }
+            />
+          )
+        })}
       </RowList>
       {dialog}
     </>
   )
 }
+
+/**
+ * A row of an address list at one height, whether or not it has a second
+ * line: its title and a line under it, and the row's own padding.
+ */
+export const ROW_HEIGHT = "min-h-[3.75rem]"
 
 const ALL = "all"
 

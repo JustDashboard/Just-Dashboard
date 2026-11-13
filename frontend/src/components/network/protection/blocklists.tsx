@@ -11,17 +11,19 @@ import type {
   ProtectionException,
   ProtectionView,
 } from "@/lib/types"
-import { Globe, ListUnordered, RefreshClockwise } from "@/components/icons"
+import { Globe, ListUnordered, Pencil, RefreshClockwise, Trash } from "@/components/icons"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
-import { useConfirm } from "@/components/confirm-dialog"
+import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { Field, FormFacts, FormNote } from "@/components/form"
-import { IconAction, DimActions } from "@/components/icon-action"
+import { Field, FormNote } from "@/components/form"
+import { DimActions } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { ProductLogo } from "@/components/product-logo"
-import { Tag } from "@/components/tag"
+import { Status } from "@/components/status-dot"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -37,19 +39,20 @@ import { compact, splitList, totalWord } from "@/components/network/gateway/read
 import {
   BlocklistPreviewView,
   Geography,
+  ListStanding,
   Provenance,
   SessionRevoke,
 } from "@/components/network/protection/blocklist-detail"
 import {
   blocklistRequest,
   countriesWord,
-  coverageWord,
-  diffWord,
+  coverageShort,
   feedName,
+  fetchWords,
   isFetched,
+  listState,
   listWhat,
   REFRESH_CHOICES,
-  refreshWord,
   type BlocklistRequest,
 } from "@/components/network/protection/reading"
 
@@ -70,15 +73,41 @@ function ListMark({ list }: { list: Pick<ProtectionBlocklist, "kind" | "countrie
   return <ProductLogo size="sm" fallback={list.kind === "feed" ? Globe : ListUnordered} />
 }
 
+/** The confirmation that removes a list, asked from its row's menu and from its editor. */
+function removal(list: ProtectionBlocklist, done: () => void): ConfirmRequest {
+  return {
+    title: `Remove ${list.name}`,
+    confirmLabel: "Remove",
+    description: (
+      <p>
+        The {list.count.toLocaleString()} networks in it are let through again and the list is
+        forgotten.
+      </p>
+    ),
+    action: async () => {
+      await del(`/network/protection/blocklists/${list.id}`)
+      notify.success("Blocklist removed")
+      done()
+      return "reported"
+    },
+  }
+}
+
 /**
- * Every blocklist as a lit card that opens its editor: what it holds (its
- * countries with their flags, the feed it is read from, the addresses typed),
- * how many networks that came to and when it was last fetched, what it has
- * dropped, and the switch that puts it in force. A fetched list carries a
- * refresh in its actions, and while one is being fetched its card runs a light
- * round its edge. An error from the last fetch is said on the card in red,
- * The cache and actual kernel set are reported separately: a failed refresh
- * does not itself prove that the previously loaded protection disappeared.
+ * Every blocklist as a lit card that opens its editor, one line and one
+ * height whatever the list carries: what it holds and how much address space
+ * that is on the line under its name, then in columns when it was fetched and
+ * when it next is, how many networks it came to and what it dropped, the one
+ * state worth saying (`listState`: a failed fetch in red before a stale copy
+ * before a verified set), and the switch that puts it in force.
+ *
+ * The coverage, the fetch's error and the enforcement evidence each hung
+ * under the row as a line of their own, so a list with all three stood five
+ * lines taller than one with none. The error's own words, the evidence and
+ * everything the columns have no room for are in the editor the row opens.
+ *
+ * Refresh, Edit and Remove are the row's menu. While a list is being fetched
+ * its card runs a light round its edge.
  */
 export function BlocklistList({
   lists,
@@ -93,6 +122,7 @@ export function BlocklistList({
 }) {
   const { confirm, dialog } = useConfirm()
   const { can } = useAuth()
+  const admin = can("system.admin")
   const [refreshing, setRefreshing] = useState<number>()
   const [switching, setSwitching] = useState<number>()
   const refresh = async (list: ProtectionBlocklist) => {
@@ -143,126 +173,141 @@ export function BlocklistList({
       },
     })
   }
+  const verbs = (list: ProtectionBlocklist): Verb[] => [
+    ...(isFetched(list)
+      ? [
+          {
+            key: "refresh",
+            label: "Refresh now",
+            icon: RefreshClockwise,
+            disabled: refreshing !== undefined,
+            run: () => void refresh(list),
+          },
+        ]
+      : []),
+    { key: "edit", label: "Edit", icon: Pencil, run: () => onOpen(list) },
+    ...(can("destructive")
+      ? [
+          {
+            key: "remove",
+            label: "Remove",
+            icon: Trash,
+            danger: true,
+            run: () => confirm(removal(list, onChanged)),
+          },
+        ]
+      : []),
+  ]
   return (
     <>
       <ChoiceList>
-        {lists.map((list, index) => (
-          <ChoiceRow
-            key={list.id}
-            index={index}
-            busy={refreshing === list.id}
-            leading={<ListMark list={list} />}
-            title={
-              <span className="inline-flex min-w-0 items-center gap-2">
-                <span className={list.enabled ? "truncate" : "truncate text-muted-foreground"}>
+        {lists.map((list, index) => {
+          const state = listState(list)
+          const fetch = fetchWords(list, relativeTime)
+          const figures = `${list.count.toLocaleString()} networks · ${compact(list.packets)} dropped`
+          return (
+            <ChoiceRow
+              key={list.id}
+              index={index}
+              busy={refreshing === list.id}
+              leading={<ListMark list={list} />}
+              title={
+                <span className={list.enabled ? undefined : "text-muted-foreground"}>
                   {list.name}
                 </span>
-                {list.containsYou && <Tag tone="warning">holds your address</Tag>}
-                {list.integrity === "signed" && <Tag tone="success">signed</Tag>}
-                {list.stale && list.enabled && <Tag tone="warning">stale</Tag>}
-                {list.enabled && list.enforcement && (
-                  <Tag tone={list.enforcement === "verified" ? "success" : "warning"}>
-                    {list.enforcement === "verified"
-                      ? "Verified set"
-                      : list.enforcement === "degraded"
-                        ? "Degraded enforcement"
-                        : "Enforcement unknown"}
-                  </Tag>
-                )}
-              </span>
-            }
-            verb={`Edit ${list.name}`}
-            description={
-              <>
-                {[
-                  listWhat(list, presets),
-                  isFetched(list)
-                    ? list.refreshed
-                      ? `fetched ${relativeTime(list.refreshed)}`
-                      : "not fetched yet"
-                    : undefined,
-                  isFetched(list) && list.enabled ? refreshWord(list, relativeTime) : undefined,
-                  diffWord(list.lastDiff),
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-                {/* The figures have a column of their own from `sm`; on a phone
-                    that column would take the title's width, so they join the line. */}
-                <span className="numeric sm:hidden">
-                  {" · "}
-                  {list.count.toLocaleString()} networks · {compact(list.packets)} dropped
-                </span>
-              </>
-            }
-            trailing={
-              <span className="flex items-center gap-4">
-                <span
-                  className="numeric hidden min-w-[4.5rem] text-right leading-tight sm:grid"
-                  title={totalWord(list.total, calendarDate)}
-                >
-                  <span className="text-body font-medium">{list.count.toLocaleString()}</span>
-                  <span className="font-mono text-micro text-muted-foreground">
-                    {compact(list.packets)} dropped
+              }
+              verb={admin ? `Edit ${list.name}` : `Open ${list.name}`}
+              description={
+                <>
+                  <span className="max-sm:hidden">
+                    {[listWhat(list, presets), coverageShort(list.coverage)]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </span>
-                </span>
-                <Switch
-                  checked={list.enabled}
-                  disabled={!can("system.admin") || switching === list.id}
-                  onCheckedChange={(next) => toggle(list, next)}
-                  aria-label={`${list.name} in force`}
-                />
-              </span>
-            }
-            actions={
-              isFetched(list) && (
-                <DimActions>
-                  <IconAction
-                    label={`Refresh ${list.name}`}
-                    onClick={() => void refresh(list)}
-                    disabled={!can("system.admin") || refreshing !== undefined}
+                  {/* The columns start at `sm`; on a phone the state leads the
+                      line and the figures follow it. The switch beside it
+                      already says in force or off, unless there is none. */}
+                  <span className="numeric sm:hidden">
+                    {(!state.plain || !admin) && (
+                      <>
+                        <span className={STATE_INK[state.tone]}>{state.label}</span>
+                        {" · "}
+                      </>
+                    )}
+                    {figures}
+                  </span>
+                </>
+              }
+              trailing={
+                <span className="flex items-center gap-4">
+                  <span className="hidden w-40 text-right leading-tight xl:grid">
+                    <span className="truncate text-hint">{fetch?.fetched ?? "typed here"}</span>
+                    <span className="truncate font-mono text-micro text-muted-foreground">
+                      {fetch?.next ?? "kept as typed"}
+                    </span>
+                  </span>
+                  <span
+                    className="numeric hidden min-w-[4.5rem] text-right leading-tight sm:grid"
+                    title={totalWord(list.total, calendarDate)}
                   >
-                    <RefreshClockwise aria-hidden />
-                  </IconAction>
-                </DimActions>
-              )
-            }
-            onSelect={() => onOpen(list)}
-          >
-            {list.error && <p className="text-hint text-destructive">{list.error}</p>}
-            {coverageWord(list.coverage) && (
-              <p className="text-hint text-muted-foreground">
-                Covers {coverageWord(list.coverage)}
-              </p>
-            )}
-            {list.cache && (
-              <div
-                className="space-y-1 text-hint text-muted-foreground"
-                aria-label={`${list.name} enforcement evidence`}
-              >
-                <p>
-                  Cache {list.cache.status}: {list.cache.count.toLocaleString()} networks
-                  {list.savedCount !== undefined && list.savedCount !== list.cache.count
-                    ? ` · last fetched count ${list.savedCount.toLocaleString()}`
-                    : ""}
-                  {list.runtime
-                    ? ` · kernel ${list.runtime.status}: ${list.runtime.count === null ? "unknown" : list.runtime.count.toLocaleString()} networks`
-                    : " · kernel unknown"}
-                </p>
-                {list.cache.error && <p role="alert">{list.cache.error}</p>}
-                {list.runtime?.error && <p role="alert">{list.runtime.error}</p>}
-                <details>
-                  <summary className="cursor-pointer focus-ring">Policy generations</summary>
-                  <p className="break-all">Cache: {list.cache.generation || "unavailable"}</p>
-                  <p className="break-all">Render: {list.renderedGeneration || "unavailable"}</p>
-                  <p className="break-all">Kernel: {list.runtime?.generation || "unavailable"}</p>
-                </details>
-              </div>
-            )}
-          </ChoiceRow>
-        ))}
+                    <span className="text-body font-medium">{list.count.toLocaleString()}</span>
+                    <span className="font-mono text-micro text-muted-foreground">
+                      {compact(list.packets)} dropped
+                    </span>
+                  </span>
+                  <span className="hidden w-40 md:flex" title={list.error || undefined}>
+                    <Status tone={state.tone} label={state.label} />
+                  </span>
+                  {admin && (
+                    <Switch
+                      checked={list.enabled}
+                      // Switching off gives protection away, which the server
+                      // asks the destructive capability for.
+                      disabled={switching === list.id || (list.enabled && !can("destructive"))}
+                      onCheckedChange={(next) => toggle(list, next)}
+                      aria-label={`${list.name} in force`}
+                    />
+                  )}
+                </span>
+              }
+              actions={
+                admin && (
+                  <DimActions>
+                    <VerbMenu verbs={verbs(list)} label={`${list.name} actions`} />
+                  </DimActions>
+                )
+              }
+              onSelect={() => onOpen(list)}
+            />
+          )
+        })}
       </ChoiceList>
       {dialog}
     </>
+  )
+}
+
+const STATE_INK = {
+  running: "text-success",
+  stopped: "text-muted-foreground",
+  warning: "text-warning",
+  danger: "text-destructive",
+} as const
+
+/**
+ * Grey rows at a card's height, for a list whose first read is still out: as
+ * many as it held at the last visit, so the sections under it start where
+ * they will.
+ */
+export function CardRowsSkeleton({ rows }: { rows: number }) {
+  return (
+    <ul className="flex min-w-0 flex-col gap-2" aria-hidden>
+      {Array.from({ length: rows }, (_, i) => (
+        <li key={i}>
+          <Skeleton className="h-[3.625rem] w-full rounded-xl" />
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -307,6 +352,9 @@ export function BlocklistModal({
   onSaved: () => void
 }) {
   const { can } = useAuth()
+  // A reader opens a list to read what its row has no room for; nothing in
+  // the form answers them, so nothing in it looks as if it would.
+  const writable = can("system.admin")
   const { confirm, dialog } = useConfirm()
   const initial = list ? blocklistRequest(list, presets) : undefined
   const [kind, setKind] = useState<Kind>(list?.kind ?? "country")
@@ -403,22 +451,12 @@ export function BlocklistModal({
   }
   const remove = () => {
     if (!list) return
-    confirm({
-      title: `Remove ${list.name}`,
-      confirmLabel: "Remove",
-      description: (
-        <p>
-          The {list.count.toLocaleString()} networks in it are let through again and the list is
-          forgotten.
-        </p>
-      ),
-      action: async () => {
-        await del(`/network/protection/blocklists/${list.id}`)
-        notify.success("Blocklist removed")
+    confirm(
+      removal(list, () => {
         onOpenChange(false)
         onSaved()
-      },
-    })
+      }),
+    )
   }
 
   return (
@@ -431,6 +469,7 @@ export function BlocklistModal({
         description="Networks this server refuses before anything answers"
         actions={
           list &&
+          writable &&
           can("destructive") && (
             <Button size="sm" variant="outline" onClick={remove}>
               Remove
@@ -438,22 +477,23 @@ export function BlocklistModal({
           )
         }
         footer={
-          <>
-            {kind !== "manual" && (
-              <FormNote className="mr-auto max-sm:hidden">Fetched before it is saved.</FormNote>
-            )}
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-              Cancel
+          writable ? (
+            <>
+              {kind !== "manual" && (
+                <FormNote className="mr-auto max-sm:hidden">Fetched before it is saved.</FormNote>
+              )}
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button type="submit" form="blocklist-form" disabled={!ready || busy} pending={busy}>
+                {list ? "Save list" : "Make list"}
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Close
             </Button>
-            <Button
-              type="submit"
-              form="blocklist-form"
-              disabled={!can("system.admin") || !ready || busy}
-              pending={busy}
-            >
-              {list ? "Save list" : "Make list"}
-            </Button>
-          </>
+          )
         }
       >
         <form
@@ -461,20 +501,11 @@ export function BlocklistModal({
           className="flex min-w-0 flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault()
-            if (ready && !busy) void submit()
+            if (writable && ready && !busy) void submit()
           }}
         >
           {list ? (
-            <FormFacts>
-              <span>
-                {list.kind === "country"
-                  ? "Countries"
-                  : list.kind === "feed"
-                    ? "Feed"
-                    : "Typed addresses"}{" "}
-                list · the kind cannot change
-              </span>
-            </FormFacts>
+            <ListStanding list={list} presets={presets} />
           ) : (
             <ChoiceGrid className="sm:grid-cols-3">
               {KINDS.map((k) => (
@@ -486,154 +517,164 @@ export function BlocklistModal({
             </ChoiceGrid>
           )}
 
-          {kind === "country" && (
-            <Field label="Countries" hint="Everything these countries are allocated is refused.">
-              <CountryPicker value={countries} onChange={setCountries} />
-            </Field>
-          )}
-
-          {kind === "feed" && (
-            <>
-              <ChoiceGrid className="sm:grid-cols-3">
-                {presets.map((p) => (
-                  <ChoiceCard key={p.id} selected={preset === p.id} onClick={() => setPreset(p.id)}>
-                    <ChoiceCardTitle>{p.name}</ChoiceCardTitle>
-                    <ChoiceCardHint className="line-clamp-3">{p.description}</ChoiceCardHint>
-                  </ChoiceCard>
-                ))}
-                <ChoiceCard selected={preset === ""} onClick={() => setPreset("")}>
-                  <ChoiceCardTitle>Another feed</ChoiceCardTitle>
-                  <ChoiceCardHint>Any address that serves one network per line.</ChoiceCardHint>
-                </ChoiceCard>
-              </ChoiceGrid>
-              {preset === "" && (
-                <Field label="Feed address" htmlFor="blocklist-url" hint="An https address.">
-                  <Input
-                    id="blocklist-url"
-                    value={url}
-                    placeholder="https://example.net/blocklist.txt"
-                    onChange={(event) => setUrl(event.target.value)}
-                    className="font-mono"
-                    autoComplete="off"
-                  />
-                </Field>
-              )}
-            </>
-          )}
-
-          {kind === "feed" && preset === "" && (
-            <>
-              <Field
-                label="Signature address"
-                htmlFor="blocklist-signature"
-                hint="Optional: an https file holding a detached Ed25519 signature of the list, base64 or hex."
-              >
-                <Input
-                  id="blocklist-signature"
-                  value={signatureUrl}
-                  placeholder="https://example.net/blocklist.txt.sig"
-                  onChange={(event) => setSignatureUrl(event.target.value)}
-                  className="font-mono"
-                  autoComplete="off"
-                />
+          {/* One fieldset, so a reader's copy of the form is switched off in
+              one place; it lays its fields out as the form does. */}
+          <fieldset disabled={!writable} className="flex min-w-0 flex-col gap-5">
+            {kind === "country" && (
+              <Field label="Countries" hint="Everything these countries are allocated is refused.">
+                <CountryPicker value={countries} onChange={setCountries} />
               </Field>
-              {signatureUrl.trim() && (
+            )}
+
+            {kind === "feed" && (
+              <>
+                <ChoiceGrid className="sm:grid-cols-3">
+                  {presets.map((p) => (
+                    <ChoiceCard
+                      key={p.id}
+                      selected={preset === p.id}
+                      onClick={() => setPreset(p.id)}
+                    >
+                      <ChoiceCardTitle>{p.name}</ChoiceCardTitle>
+                      <ChoiceCardHint className="line-clamp-3">{p.description}</ChoiceCardHint>
+                    </ChoiceCard>
+                  ))}
+                  <ChoiceCard selected={preset === ""} onClick={() => setPreset("")}>
+                    <ChoiceCardTitle>Another feed</ChoiceCardTitle>
+                    <ChoiceCardHint>Any address that serves one network per line.</ChoiceCardHint>
+                  </ChoiceCard>
+                </ChoiceGrid>
+                {preset === "" && (
+                  <Field label="Feed address" htmlFor="blocklist-url" hint="An https address.">
+                    <Input
+                      id="blocklist-url"
+                      value={url}
+                      placeholder="https://example.net/blocklist.txt"
+                      onChange={(event) => setUrl(event.target.value)}
+                      className="font-mono"
+                      autoComplete="off"
+                    />
+                  </Field>
+                )}
+              </>
+            )}
+
+            {kind === "feed" && preset === "" && (
+              <>
                 <Field
-                  label="Publisher's public key"
-                  htmlFor="blocklist-key"
-                  hint={
-                    list?.integrity === "signed" && signatureUrl.trim() === list.signatureUrl
-                      ? "A key is pinned. Leave this empty to keep it, or give a new one."
-                      : "The 32-byte Ed25519 key in base64. Every fetch must verify against it."
-                  }
+                  label="Signature address"
+                  htmlFor="blocklist-signature"
+                  hint="Optional: an https file holding a detached Ed25519 signature of the list, base64 or hex."
                 >
                   <Input
-                    id="blocklist-key"
-                    value={publicKey}
-                    placeholder="base64"
-                    onChange={(event) => setPublicKey(event.target.value)}
+                    id="blocklist-signature"
+                    value={signatureUrl}
+                    placeholder="https://example.net/blocklist.txt.sig"
+                    onChange={(event) => setSignatureUrl(event.target.value)}
                     className="font-mono"
                     autoComplete="off"
                   />
                 </Field>
-              )}
-            </>
-          )}
+                {signatureUrl.trim() && (
+                  <Field
+                    label="Publisher's public key"
+                    htmlFor="blocklist-key"
+                    hint={
+                      list?.integrity === "signed" && signatureUrl.trim() === list.signatureUrl
+                        ? "A key is pinned. Leave this empty to keep it, or give a new one."
+                        : "The 32-byte Ed25519 key in base64. Every fetch must verify against it."
+                    }
+                  >
+                    <Input
+                      id="blocklist-key"
+                      value={publicKey}
+                      placeholder="base64"
+                      onChange={(event) => setPublicKey(event.target.value)}
+                      className="font-mono"
+                      autoComplete="off"
+                    />
+                  </Field>
+                )}
+              </>
+            )}
 
-          {kind !== "manual" && (
-            <Field
-              label="Fetched again"
-              htmlFor="blocklist-refresh"
-              hint="After a failure it retries sooner, backing off."
-            >
-              <Select value={refresh} onValueChange={setRefresh}>
-                <SelectTrigger id="blocklist-refresh" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {REFRESH_CHOICES.map((c) => (
-                    <SelectItem key={c.value} value={c.value}>
-                      {c.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          )}
+            {kind !== "manual" && (
+              <Field
+                label="Fetched again"
+                htmlFor="blocklist-refresh"
+                hint="After a failure it retries sooner, backing off."
+              >
+                <Select value={refresh} onValueChange={setRefresh}>
+                  <SelectTrigger id="blocklist-refresh" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REFRESH_CHOICES.map((c) => (
+                      <SelectItem key={c.value} value={c.value}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
 
-          {kind === "manual" && (
+            {kind === "manual" && (
+              <Field
+                label="Addresses and networks"
+                htmlFor="blocklist-entries"
+                hint={`One per line or comma-separated: 198.51.100.7, 203.0.113.0/24. ${typed.length.toLocaleString()} so far.`}
+              >
+                <Textarea
+                  id="blocklist-entries"
+                  value={entries}
+                  rows={6}
+                  placeholder={"198.51.100.7\n203.0.113.0/24"}
+                  onChange={(event) => setEntries(event.target.value)}
+                  className="font-mono"
+                  spellCheck={false}
+                />
+              </Field>
+            )}
+
             <Field
-              label="Addresses and networks"
-              htmlFor="blocklist-entries"
-              hint={`One per line or comma-separated: 198.51.100.7, 203.0.113.0/24. ${typed.length.toLocaleString()} so far.`}
+              label="Name"
+              htmlFor="blocklist-name"
+              hint={
+                suggestion && !name.trim()
+                  ? `Called “${suggestion}” if you leave it empty.`
+                  : "What it is called in the list."
+              }
             >
-              <Textarea
-                id="blocklist-entries"
-                value={entries}
-                rows={6}
-                placeholder={"198.51.100.7\n203.0.113.0/24"}
-                onChange={(event) => setEntries(event.target.value)}
-                className="font-mono"
-                spellCheck={false}
+              <Input
+                id="blocklist-name"
+                value={name}
+                placeholder={suggestion || "Blocked networks"}
+                onChange={(event) => setName(event.target.value)}
+                autoComplete="off"
               />
             </Field>
+          </fieldset>
+
+          {writable && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void runPreview()}
+                disabled={!ready || previewing}
+                pending={previewing}
+              >
+                Preview what it blocks
+              </Button>
+              {kind !== "manual" && (
+                <span className="text-hint text-muted-foreground">
+                  Fetches the list to look; nothing is saved or loaded.
+                </span>
+              )}
+            </div>
           )}
-
-          <Field
-            label="Name"
-            htmlFor="blocklist-name"
-            hint={
-              suggestion && !name.trim()
-                ? `Called “${suggestion}” if you leave it empty.`
-                : "What it is called in the list."
-            }
-          >
-            <Input
-              id="blocklist-name"
-              value={name}
-              placeholder={suggestion || "Blocked networks"}
-              onChange={(event) => setName(event.target.value)}
-              autoComplete="off"
-            />
-          </Field>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => void runPreview()}
-              disabled={!can("system.admin") || !ready || previewing}
-              pending={previewing}
-            >
-              Preview what it blocks
-            </Button>
-            {kind !== "manual" && (
-              <span className="text-hint text-muted-foreground">
-                Fetches the list to look; nothing is saved or loaded.
-              </span>
-            )}
-          </div>
           {preview && <BlocklistPreviewView preview={preview} />}
           {!preview && kind === "country" && countries.length > 0 && (
             <Geography
@@ -657,7 +698,7 @@ export function BlocklistModal({
               Change these under Exceptions.
             </p>
           )}
-          {list && list.enabled && <SessionRevoke list={list} />}
+          {list && list.enabled && writable && <SessionRevoke list={list} />}
 
           {error && (
             <p role="alert" className="animate-rise text-body text-destructive">
