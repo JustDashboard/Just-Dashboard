@@ -194,3 +194,5 @@ through an unproven member, boot restore of the decided member with the start ch
 journaled repair, recovery by a fresh process after the switching process dies, sticky connections
 surviving a failback and being flushed with their member, and a full simulation run. `bun test
 src/lib/network-egress.test.js` covers the page's pure logic and `network-egress.spec.ts` the page.
+The words and wires of the list's cards and a group's picture are in
+`components/network/egress/reading.test.js`.
