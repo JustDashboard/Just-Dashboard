@@ -337,13 +337,28 @@ service state. The pages that moved keep their behaviour:
   the address (`connections/block-dialog.tsx`); the blocks made here are listed under the table with
   their end, their incident and whether the rule is still in the firewall, and an administrator with
   the destructive capability lifts one after confirmation (`connections/blocks-panel.tsx`).
-- **Tools** (`/network/tools`): 26 probes plus the browser-only IPv4/IPv6 subnet calculator occupy a two-pane
-  workbench (the four counts that stood over it are gone; where probes are sent from is a fact in the
-  result pane's head). The searchable chooser selects one labelled form and result area; below `md` they
-  are one full-height pane at a time with a bar at the foot (`phone-panes.tsx`), opening on the tool. Other probes
-  stay mounted while hidden, preserving drafts, results and in-flight requests when switching. A new
-  query-string arrival reseeds only the requested probe. Arriving with `?tool=asn&target=…` never runs
-  it; sending traffic remains an explicit Run action.
+- **Tools** (`/network/tools`): 26 probes, the connection path investigator and the browser-only
+  IPv4/IPv6 subnet calculator occupy one workbench held to the window (`<Page fill>`), drawn as the Git
+  workspace is: a strip across the top of the frame (the server's mark, "sent from this server", Saved
+  runs as a quiet link, Every tool), a searchable rail and the chosen tool's pane, each scrolling
+  inside the frame. Every diagnostic has a mark, its glyph on its group's hue (`tools/tool-marks.tsx`:
+  the glyphs the DNS, Certificates, SSH and Ports pages already wear). A tool with nothing run opens on
+  its mark, what it does in one sentence and an example target as a button, which fills the field and
+  sends nothing (`tools/tool-frame.tsx`); the sentence that stood under every tool's title is that
+  empty pane and the title's tip. Below `md` the rail and the pane are one full-height pane at a time
+  with a bar at the foot (`phone-panes.tsx`), opening on the tool. Other tools stay mounted while
+  hidden, preserving drafts, results and in-flight requests when switching, but only the tool in view
+  has its form fields in the page. A new query-string arrival reseeds only the requested tool. Arriving
+  with `?tool=asn&target=…` never runs it; sending traffic remains an explicit Run action.
+- **Connection path** is the rail's `path` tool (`tools/path-tool.tsx`), among the reachability tools
+  after Route lookup. It was a page of its own: `/network/investigate` now redirects to
+  `/network/tools?tool=path` with every parameter it carried (`target`, `port`, `protocol`, `family`,
+  `measure`, `container`; `tools/tool-links.ts`), and the Network rail no longer lists it. Its report
+  (`network/path-report.tsx`, also drawn by Saved runs and a published port's trace) is a chain of
+  wired hops, one per layer, each mark in the colour of what the layer rests on (a snapshot, the
+  model's prediction, a measurement; no colour for unknown, and none of them success's green), with
+  the wire dashed where either end is unknown. The four counts that were a tile row are the key to
+  those colours.
 - The tools now include route/path-MTU checks, host prerequisites, bounded packet summaries and
   local Wake-on-LAN. All server probes remain administrator-only; decoded packet fields may be
   sensitive. Network forms expose IPv6 GRE/bridge membership, preferred route source, rule outgoing

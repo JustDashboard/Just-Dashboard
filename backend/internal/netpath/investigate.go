@@ -76,7 +76,7 @@ func Investigate(ctx context.Context, request Request, p Providers) (*Result, er
 	}
 	result.Evidence = append(result.Evidence, dns)
 	if address == "" {
-		for _, item := range []struct{ id, title, owner, path string }{{"rules", "Policy rules", "Linux kernel", "/network/routing"}, {"route", "Kernel route", "Linux kernel", "/network/routing"}, {"firewall", "Firewall", "Host firewall", "/network/firewall"}, {"nat", "NAT", "Gateway / Docker", "/network/gateway"}, {"tunnel", "Tunnel / interface", "Interface manager", "/network/interfaces"}, {"proxy", "Proxy", "Proxy owner", "/proxy"}, {"owner", "Destination owner", "Listener owner", "/ports"}, {"probe", "Connection measurement", "Diagnostics", "/network/tools"}} {
+		for _, item := range []struct{ id, title, owner, path string }{{"rules", "Policy rules", "Linux kernel", "/network/routing"}, {"route", "Kernel route", "Linux kernel", "/network/routing"}, {"firewall", "Firewall", "Host firewall", "/network/firewall"}, {"nat", "NAT", "Gateway / Docker", "/network/gateway"}, {"tunnel", "Tunnel / interface", "Interface manager", "/network/interfaces"}, {"proxy", "Proxy", "Proxy owner", "/proxy"}, {"owner", "Destination owner", "Listener owner", "/proxy/ports"}, {"probe", "Connection measurement", "Diagnostics", "/network/tools"}} {
 			e := evidence(item.id, item.title, sourceName, item.owner, item.path)
 			e.State, e.Summary = "skipped", "No selected destination address is available; this step was not queried."
 			result.Evidence = append(result.Evidence, e)
@@ -202,7 +202,7 @@ func Investigate(ctx context.Context, request Request, p Providers) (*Result, er
 	// streamName is the native stream that owns the matched listener, whose
 	// configuration and backend legs are joined below.
 	streamName := ""
-	owner := evidence("owner", "Destination owner", "local host sockets", "Listener owner", "/ports")
+	owner := evidence("owner", "Destination owner", "local host sockets", "Listener owner", "/proxy/ports")
 	proxy.Summary, owner.Summary = "Remote or foreign proxy configuration is unknown.", "Remote service/process ownership is unknown."
 	if req.SourceKind == "container" && selected.Local {
 		owner.Scope, owner.Summary = sourceName, "The destination is local to this container namespace. Host socket ownership was not substituted for container attribution."
