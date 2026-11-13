@@ -34,6 +34,8 @@ strategy, and feature ownership behind those rules.
   the contract between a dashboard and a Just Hub on its tailnet (the URL rule, signing, the hub's endpoints,
   the heartbeat reply's fleet and notices, commands, the dashboard's routes and terminal commands, hub sign-in),
   with its vectors in [`backend/hub-link-vectors.json`](backend/hub-link-vectors.json).
+- [`backend/hub-link-errata.md`](backend/hub-link-errata.md) — the Just Hub repository's record of the
+  2026-11-05 amendments to that protocol and hub sign-in, entry by entry, with who implements each.
 - [`backend/hub-link.md`](backend/hub-link.md) — how the dashboard implements it: the account link's engine run
   as a second instance with the hub's profile and sharing none of its state, the tailnet rule and the tailnet-only
   dialer, the hub's pinned machine and the idle link, the test origin, the cached fleet and notices, the discovery
