@@ -1814,8 +1814,9 @@ test("a TCP stream traces its connection path on the Network page", async ({ pag
 
   await page.getByRole("button", { name: "More actions for bastion" }).click()
   await page.getByRole("menuitem", { name: "Trace in Network" }).click()
+  // The investigator's address lands on its tool in the workbench, tuple intact.
   await expect(page).toHaveURL(
-    /\/network\/investigate\?target=127\.0\.0\.1&port=2222&protocol=tcp&family=inet&measure=1$/,
+    /\/network\/tools\?tool=path&target=127\.0\.0\.1&port=2222&protocol=tcp&family=inet&measure=1$/,
   )
   await expect(page.getByLabel("Destination", { exact: true })).toHaveValue("127.0.0.1")
   await expect(page.getByLabel("Port", { exact: true })).toHaveValue("2222")

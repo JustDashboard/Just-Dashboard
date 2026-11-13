@@ -3,30 +3,44 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import {
-  Crosshair,
-  Globe,
-  ListUnordered,
-  NetworkDevice,
-  SecureConnection,
-  Servers,
-  Wrench,
-} from "@/components/icons"
+import { ListUnordered, Wrench } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { PageContext, SearchInput } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { ChoiceCard } from "@/components/choice-card"
+import { WireHost } from "@/components/deploy/wire"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/hooks/use-auth"
-import { SubnetTool } from "./tools/subnet-panel"
+import { PATH_HINT, PathTool } from "./tools/path-tool"
+import { SUBNET_HINT, SubnetTool } from "./tools/subnet-panel"
 import { TOOL_GROUPS } from "./tools/tool-defs"
+import { PATH_TOOL } from "./tools/tool-links"
+import { GROUP_HUE, ToolMark } from "./tools/tool-marks"
 import { ToolPanel } from "./tools/tool-panel"
 import type { ToolPrefill } from "./tools/use-tool-run"
 
-const tools = TOOL_GROUPS.flatMap((group) => group.tools)
-const GROUP_MARK = [NetworkDevice, Crosshair, SecureConnection, Globe, Servers]
+const probes = TOOL_GROUPS.flatMap((group) => group.tools)
+
+/**
+ * The rail: every probe in its group, with Connection path among the
+ * Reachability tools, after the route lookup it extends. It is not a probe
+ * (`POST /network/investigate` rather than `/network/probe`), so it has a
+ * pane of its own rather than a definition in `TOOL_GROUPS`.
+ */
+type RailEntry = { key: string; label: string; hint: string }
+const RAIL = TOOL_GROUPS.map((group, index) => ({
+  title: group.title,
+  hue: GROUP_HUE[index],
+  tools: group.tools.flatMap((tool): RailEntry[] =>
+    tool.key === "route"
+      ? [tool, { key: PATH_TOOL, label: "Connection path", hint: PATH_HINT }]
+      : [tool],
+  ),
+}))
+const DIAGNOSTICS = RAIL.reduce((sum, group) => sum + group.tools.length, 0)
+const KNOWN = new Set([...RAIL.flatMap((group) => group.tools.map((tool) => tool.key)), "subnet"])
 
 /** A phone's two panes: the tool in use, and the catalogue to pick another. */
 type ToolsPane = "tool" | "catalogue"
@@ -35,17 +49,23 @@ const TOOLS_STOPS: PaneStop<ToolsPane>[] = [
   { key: "catalogue", label: "Every tool", icon: <ListUnordered /> },
 ]
 
-/** One diagnostic in focus. Hidden tools stay mounted so their work and drafts survive a switch. */
+/**
+ * The diagnostics workbench, drawn as the Git workspace is: one frame held to
+ * the window, a strip across its top saying where every probe is sent from
+ * with Saved runs as a quiet link at its end, the rail of tools and the
+ * chosen tool's pane beside it. Each tool is scanned by its mark, in its
+ * group's hue. Hidden tools stay mounted so their drafts, results and
+ * requests in flight survive a switch.
+ */
 export function ToolsPanel() {
   const { can } = useAuth()
   const admin = can("system.admin")
-  const availableTools = admin ? tools : []
   const params = useSearchParams()
   const arrival = useMemo(() => {
     const tool = params.get("tool")
-    if (tool !== "subnet" && !tools.some((entry) => entry.key === tool)) return null
+    if (!tool || !KNOWN.has(tool)) return null
     return {
-      tool: tool!,
+      tool,
       prefill: {
         target: params.get("target") ?? undefined,
         record: params.get("record") ?? undefined,
@@ -59,14 +79,14 @@ export function ToolsPanel() {
       : (arrival?.tool ?? "dns")
     : "subnet"
   const [query, setQuery] = useState("")
-  const selectedGroup = TOOL_GROUPS.find((group) => group.tools.some((tool) => tool.key === active))
-  const groups = TOOL_GROUPS.map((group, index) => ({
+  const needle = query.trim().toLowerCase()
+  const groups = RAIL.map((group) => ({
     ...group,
-    mark: GROUP_MARK[index],
     tools: (admin ? group.tools : []).filter((tool) =>
-      `${tool.label} ${tool.hint}`.toLowerCase().includes(query.trim().toLowerCase()),
+      `${tool.label} ${tool.hint}`.toLowerCase().includes(needle),
     ),
   }))
+  const subnetShown = `subnet calculator ${SUBNET_HINT}`.toLowerCase().includes(needle)
   // On a phone the catalogue and the tool are one pane at a time, and the
   // page opens on the tool: the one a link asked for, or the first.
   const [pane, setPane] = useState<ToolsPane>("tool")
@@ -78,139 +98,169 @@ export function ToolsPanel() {
 
   return (
     <>
-      <PageContext
-        eyebrow="Network"
-        title="Tools"
-        actions={
-          admin && (
-            <Button asChild variant="outline" size="sm">
-              <Link href="/network/runs">Saved runs</Link>
-            </Button>
-          )
-        }
-      />
+      <PageContext eyebrow="Network" title="Tools" />
       {!admin && (
-        <Notice title="Server diagnostics need the admin capability">
+        <Notice title="Server diagnostics need the admin capability" className="max-md:m-4">
           The subnet calculator runs locally in your browser and is available with read access.
         </Notice>
       )}
-      {/* The chooser and result own their scrolling; this is one framed
-          workbench. Below `md` it is held to the window and runs to its
-          edges, one pane at a time with a bar at the foot: stacked, a phone
-          had the catalogue in a 278px box over the tool. */}
+      {/* One frame around the whole workbench: the strip, then the rail and
+          the pane with a hairline between them. Below `md` it runs to the
+          window's edges, one pane at a time with a bar at the foot. */}
       <div
         data-slot="security-tools"
-        className="grid min-w-0 overflow-hidden rounded-xl border bg-card max-md:-mx-5 max-md:-mb-6 max-md:flex max-md:min-h-0 max-md:flex-1 max-md:flex-col max-md:rounded-none max-md:border-x-0 max-md:border-b-0 lg:h-[min(46rem,calc(100svh-16rem))] lg:min-h-[30rem] lg:grid-cols-[17rem_minmax(0,1fr)]"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card md:rounded-xl md:border"
       >
-        <Pane
-          flush
-          className={cn(
-            "border-hairline max-md:flex-1 md:max-h-80 md:border-b lg:max-h-none lg:border-r lg:border-b-0",
-            paneShown(pane === "catalogue", "md"),
+        <PaneHeader className="h-auto min-h-12 gap-3 px-3 py-1.5">
+          <WireHost size="sm" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-body font-semibold">Tools</p>
+            {/* Where every probe is sent from is what its answer can and
+                cannot say: an open port seen from here is not one the
+                internet can reach. */}
+            <p className="truncate text-micro text-muted-foreground">
+              {active === "subnet"
+                ? "calculated in this browser"
+                : `sent from this server · ${DIAGNOSTICS} diagnostics`}
+            </p>
+          </div>
+          {admin && (
+            <Button asChild size="xs" variant="ghost" className="text-muted-foreground">
+              <Link href="/network/runs">Saved runs</Link>
+            </Button>
           )}
-        >
-          <PaneHeader>
-            <SearchInput
-              dense
-              aria-label="Filter tools"
-              placeholder="Find a diagnostic"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              containerClassName="w-full"
-            />
-          </PaneHeader>
-          <nav aria-label="Diagnostics" className="min-h-0 space-y-5 overflow-y-auto p-3">
-            {groups.map(
-              (group) =>
-                group.tools.length > 0 && (
-                  <div key={group.title} className="space-y-2">
-                    <div className="flex items-center justify-between px-1">
-                      <h2 className="eyebrow">{group.title}</h2>
-                      <span className="numeric text-micro text-muted-foreground">
-                        {group.tools.length}
-                      </span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {group.tools.map((tool) => (
-                        <ChoiceCard
-                          key={tool.key}
-                          selected={active === tool.key}
-                          onClick={() => choose(tool.key)}
-                          className="min-h-0 flex-row items-center gap-2.5 px-3 py-2"
-                        >
-                          <group.mark
-                            aria-hidden
-                            className="size-3.5 shrink-0 text-muted-foreground"
+          {/* A phone has this as a stop on the bar at the foot. */}
+          <Button
+            size="xs"
+            variant="ghost"
+            className="text-muted-foreground max-md:hidden"
+            onClick={() => {
+              setQuery("")
+              document.querySelector<HTMLInputElement>('[aria-label="Filter tools"]')?.focus()
+            }}
+          >
+            Every tool
+          </Button>
+        </PaneHeader>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
+          <Pane
+            flush
+            className={cn(
+              "border-hairline max-md:flex-1 md:max-h-64 md:shrink-0 md:border-b lg:max-h-none lg:border-r lg:border-b-0",
+              paneShown(pane === "catalogue", "md"),
+            )}
+          >
+            <div className="shrink-0 p-3 pb-1">
+              <SearchInput
+                dense
+                aria-label="Filter tools"
+                placeholder="Find a diagnostic"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                containerClassName="w-full"
+              />
+            </div>
+            <nav aria-label="Diagnostics" className="min-h-0 space-y-4 overflow-y-auto p-3 pt-2">
+              {groups.map(
+                (group) =>
+                  group.tools.length > 0 && (
+                    <div key={group.title} className="space-y-1.5">
+                      <div className="flex items-center justify-between px-1">
+                        <h2 className="eyebrow">{group.title}</h2>
+                        <span className="numeric text-micro text-muted-foreground">
+                          {group.tools.length}
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {group.tools.map((tool) => (
+                          <RailRow
+                            key={tool.key}
+                            tool={tool.key}
+                            label={tool.label}
+                            hue={group.hue}
+                            selected={active === tool.key}
+                            onChoose={() => choose(tool.key)}
                           />
-                          <span className="text-body font-medium">{tool.label}</span>
-                        </ChoiceCard>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ),
-            )}
-            {"subnet calculator".includes(query.trim().toLowerCase()) && (
-              <ChoiceCard
-                selected={active === "subnet"}
-                onClick={() => choose("subnet")}
-                className="min-h-0 flex-row items-center gap-2.5 px-3 py-2"
-              >
-                <NetworkDevice aria-hidden className="size-3.5 text-muted-foreground" />
-                <span className="text-body font-medium">Subnet calculator</span>
-              </ChoiceCard>
-            )}
-            {groups.every((group) => group.tools.length === 0) &&
-              !"subnet calculator".includes(query.trim().toLowerCase()) && (
+                  ),
+              )}
+              {subnetShown && (
+                <div className="space-y-1.5">
+                  <h2 className="eyebrow px-1">Address planning</h2>
+                  <RailRow
+                    tool="subnet"
+                    label="Subnet calculator"
+                    selected={active === "subnet"}
+                    onChoose={() => choose("subnet")}
+                  />
+                </div>
+              )}
+              {groups.every((group) => group.tools.length === 0) && !subnetShown && (
                 <p className="p-2 text-body text-muted-foreground">No matching diagnostics.</p>
               )}
-          </nav>
-        </Pane>
-        <Pane flush className={cn("max-md:flex-1 md:min-h-80", paneShown(pane === "tool", "md"))}>
-          <PaneHeader className="justify-between">
-            <span className="flex min-w-0 items-baseline gap-2">
-              <span className="text-body font-medium">
-                {selectedGroup?.title ?? "Address planning"}
-              </span>
-              {/* Where every probe is sent from, which is what its answer can
-                  and cannot say: an open port seen from here is not one the
-                  internet can reach. It was a tile; a fact read with the
-                  result belongs beside it. */}
-              <span className="hidden truncate text-hint text-muted-foreground sm:inline">
-                {active === "subnet"
-                  ? "calculated in this browser"
-                  : `sent from this server · ${tools.length} diagnostics`}
-              </span>
-            </span>
-            {/* A phone has this as a stop on the bar at the foot. */}
-            <Button
-              size="xs"
-              variant="ghost"
-              className="max-md:hidden"
-              onClick={() => {
-                setQuery("")
-                document.querySelector<HTMLInputElement>('[aria-label="Filter tools"]')?.focus()
-              }}
-            >
-              Every tool
-            </Button>
-          </PaneHeader>
-          <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
-            {availableTools.map((tool) => (
-              <div key={tool.key} hidden={active !== tool.key}>
-                <ToolPanel
-                  def={tool}
-                  prefill={arrival?.tool === tool.key ? arrival.prefill : undefined}
-                  active={active === tool.key}
-                />
+            </nav>
+          </Pane>
+          <Pane
+            flush
+            className={cn("min-h-0 flex-1 max-md:flex-1", paneShown(pane === "tool", "md"))}
+          >
+            <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
+              {admin &&
+                probes.map((tool) => (
+                  <div key={tool.key} data-tool={tool.key} hidden={active !== tool.key}>
+                    <ToolPanel
+                      def={tool}
+                      hue={RAIL.find((g) => g.tools.some((t) => t.key === tool.key))?.hue}
+                      prefill={arrival?.tool === tool.key ? arrival.prefill : undefined}
+                      active={active === tool.key}
+                    />
+                  </div>
+                ))}
+              {admin && (
+                <div data-tool={PATH_TOOL} hidden={active !== PATH_TOOL}>
+                  <PathTool
+                    arrival={arrival?.tool === PATH_TOOL ? params : undefined}
+                    active={active === PATH_TOOL}
+                    hue={RAIL[0].hue}
+                  />
+                </div>
+              )}
+              <div data-tool="subnet" hidden={active !== "subnet"}>
+                <SubnetTool />
               </div>
-            ))}
-            <div hidden={active !== "subnet"}>
-              <SubnetTool />
             </div>
-          </div>
-        </Pane>
+          </Pane>
+        </div>
         <PaneBar label="Tools" until="md" stops={TOOLS_STOPS} active={pane} onPick={setPane} />
       </div>
     </>
+  )
+}
+
+/** One tool in the rail: its mark in its group's hue, and its name, which is the button's. */
+function RailRow({
+  tool,
+  label,
+  hue,
+  selected,
+  onChoose,
+}: {
+  tool: string
+  label: string
+  hue?: string
+  selected: boolean
+  onChoose: () => void
+}) {
+  return (
+    <ChoiceCard
+      selected={selected}
+      onClick={onChoose}
+      className="min-h-0 flex-row items-center gap-2.5 px-2 py-1.5"
+    >
+      <ToolMark tool={tool} hue={hue} />
+      <span className="truncate text-body font-medium">{label}</span>
+    </ChoiceCard>
   )
 }
