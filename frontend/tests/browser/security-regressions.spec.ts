@@ -377,7 +377,7 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
     sockets: URL[] = [],
     legacy: URL[] = [],
     reads: URL[] = []
-  // The sheet reads a process's logs as one of the host's log sources; the
+  // The page reads a process's logs as one of the host's log sources; the
   // id it asks for is built from the daemon's account and the process id the
   // list keyed the row on, never from the name alone.
   await page.routeWebSocket("**/api/v1/logs/stream**", (ws) => {
@@ -450,16 +450,19 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
   await expect.poll(() => actions.length).toBe(1)
   expect(actions[0].searchParams.get("user")).toBe("bob")
   expect(actions[0].searchParams.get("id")).toBe("0")
+  // The row opens the application's own page, and the account is in the
+  // address because the name alone would not say whose it is.
   await row.getByRole("button", { name: "same-name", exact: true }).click()
-  await expect(page.getByRole("dialog")).toContainText("bob #0")
+  await expect(page).toHaveURL(/\/processes\/pm2\/same-name\?account=bob$/)
+  await expect(page.locator("[data-slot='pm2-app-identity']")).toContainText("bob")
   await page.getByRole("tab", { name: "Logs", exact: true }).click()
   await expect.poll(() => sockets.length).toBe(1)
   expect(sockets[0].searchParams.get("source")).toBe("pm2:bob/0/same-name")
-  await page.keyboard.press("Escape")
-  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await page.goto("/processes/pm2")
   const alice = page.getByRole("row").filter({ hasText: "alice" })
   await alice.getByRole("button", { name: "same-name", exact: true }).click()
-  await expect(page.getByRole("dialog")).toContainText("alice #0")
+  await expect(page).toHaveURL(/\/processes\/pm2\/same-name\?account=alice/)
+  await expect(page.locator("[data-slot='pm2-app-identity']")).toContainText("alice")
   await page.getByRole("tab", { name: "Logs", exact: true }).click()
   await expect(
     page.getByText("Add this daemon's log directory to JD_LOG_ROOTS.", { exact: true }),
