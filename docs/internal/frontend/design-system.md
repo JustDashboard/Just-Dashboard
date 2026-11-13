@@ -3825,6 +3825,43 @@ family facts and a paragraph. Where each went (`components/network/vpn/`):
 - **A verb the session would be refused is not drawn**: taking a tunnel down, removing it, removing a
   peer, forgetting its saved copy, clearing a budget and withdrawing an offer are destructive routes,
   and are shown to an account that holds `destructive`.
+**Protection took the exit in 0.8.7** (2026-11-13). It opened on four tiles with no header over
+five sections, the last of them fifteen kernel settings in two columns, and a `LoadingPanel` stood
+where all of it would land. Where each figure went (`components/network/protection/`):
+
+- **The identity line** (`HostIdentity` as a project's header): in force, not loaded or nothing in
+  force as its state, a list whose fetch failed beside it in red, then how many lists and limits
+  and what they dropped and refused since the table was loaded. New blocklist is its command; New
+  limit, New exception and Refresh are its menu. The bytes and the totals since a date are each
+  section's own fact on its title line.
+- **A picture of what is refused and what gets through** (`picture.tsx`, on `WireFlow`): each
+  blocklist as its flag or its kind with its networks and what it dropped, this server with whether
+  its filter is loaded and how full the connection table is (the old tile's meter, in its level's
+  colour), then each limited port as the product that listens there, the exceptions and the
+  addresses never refused. A wire pulses when its counter grew since the last read and is dashed
+  while its entry is off. It keeps one height: three lists and "N more", one or two limits, in a
+  frame with room for four rows, so the lists under it never move. Its grey state is nodes of its
+  own on the drawn nodes' lines, because `WireFlow`'s `loading` draws a phone's hub without the
+  lines under its name.
+- **Rows at one height.** A blocklist's coverage is on the line under its name; when it was fetched
+  and when it next is, its networks and drops, and its one state (`listState`: a failed fetch in
+  red before a stale copy before a verified set) are columns; the error's words, the enforcement
+  evidence and the rest are the head of its editor (`ListStanding`). An exception's or a trusted
+  address's standing is a state word in a column, and a row with no second line is as tall as one
+  with. A row's other verbs are its `⋯`.
+- **Views in the address.** `?tab=table` is the connection table for an administrator: a
+  `BarReading` of what it tracks against its size, by state, drawn from the page's own reading
+  before the breakdown lands, then the charts, the shares as `RankList`s and what they point at;
+  its closing paragraph became the line under the band and an `InfoTip`. `?tab=kernel` is the
+  kernel's protections as §7's settings column: `SettingSection`s of full-width rows (a switch for
+  an off/on setting, `Segments`, a number field), a line under each control that says one thing at
+  a time (the range, what is running under a staged value, kept for boot) so no state changes a
+  row's height, and the product's one save bar, which asks for the confirmation that lists each
+  change. The draft is the page's, so it outlives a look at another view and the tab counts it.
+- **Its shape before its read.** The line, the tabs, the picture and each section's head stand
+  where they will, with as many grey rows as each list held at the last visit (`useViewState`).
+- **A reader is shown no control**: no command, switch, menu or field; a row says in force or off
+  in words and still opens, to be read.
 
 **A container's page took the Overview's line in 0.7.1** (2026-10-08), at the operator's request,
 because it was the page with no life: a strip of four grey label-and-value pairs (container, image,
