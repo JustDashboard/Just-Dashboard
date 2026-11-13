@@ -195,7 +195,7 @@ A phone writes nothing to the account's arrangement.
   | Spec | Sources | Holds | Waits |
   | --- | --- | --- | --- |
   | fast | containers, projects | 10 s | 2.5 s |
-  | steady | images, volumes, networks, databases (the fleet's own dial, shared through its cache), bindings, the deployments' references, dependencies and poolers (`relations`), the listening sockets and their owners (`listeners`, as `GET /proxy/ports` reads them), sites, backups, PM2, channels, drawings, API keys, alert rules, accounts, computers | 30 s | 2.5 s |
+  | steady | images, volumes, networks, databases (the fleet's own dial, shared through its cache), bindings, the deployments' references, dependencies and poolers (`relations`), the listening sockets and their owners (`listeners`, as `GET /ports` reads them), sites, backups, PM2, channels, drawings, API keys, alert rules, accounts, computers | 30 s | 2.5 s |
   | slow | the databases topology (`uses`: every running container inspected for the addresses it names, every engine asked for its sessions), certificates, streams, timers, systemd units, the system's cron files, VPN, firewall | 2 min | 1.2 s |
   | rare | repositories (a walk of the Git roots), Linux accounts, this dashboard's version | 5 min | 1.2 s |
   | holding | open shells (in memory) | 3 s | 1 s |
