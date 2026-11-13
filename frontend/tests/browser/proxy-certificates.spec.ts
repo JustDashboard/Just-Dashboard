@@ -35,6 +35,30 @@ async function capture(page: Page, pattern: string, answer: (body: unknown) => u
   return bodies
 }
 
+/** A certificate's row in the inventory. */
+const certRow = (page: Page, text: string) =>
+  page
+    .getByRole("list", { name: "Installed certificates" })
+    .locator("[data-slot='choice-row']")
+    .filter({ hasText: text })
+
+/** A verb of a certificate's row, which is in the row's menu. */
+async function rowVerb(page: Page, name: string, verb: string | RegExp) {
+  await certRow(page, name)
+    .getByRole("button", { name: `Actions for ${name}` })
+    .click()
+  await page.getByRole("menuitem", { name: verb }).click()
+}
+
+/** The identity line's menu: Import and Paste a certificate. */
+async function moreVerb(page: Page, verb: string) {
+  await page.getByRole("button", { name: "More certificate actions" }).click()
+  await page.getByRole("menuitem", { name: verb, exact: true }).click()
+}
+
+/** The identity line's renewal fact, its reading's detail as its title. */
+const renewalFact = (page: Page) => page.locator("[data-slot='renewal-fact']")
+
 /** Holds each job's stream open so the test decides when the job ends. */
 async function holdJobStreams(page: Page) {
   const sockets: WebSocketRoute[] = []
@@ -100,7 +124,7 @@ test("certbot's verbs wait while a certbot run is on screen, and come back when 
     target: "app.example.com",
   })
   const renewals = await capture(page, "**/api/v1/certificates/renew", () => running)
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
 
   const lineages = page.getByRole("list", { name: "certbot lineages" })
   await lineages.getByRole("button", { name: "Renew", exact: true }).click()
@@ -143,7 +167,7 @@ test("another tab's certbot run is refused by the server, and the page says what
       }),
     }),
   )
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   await page.getByRole("button", { name: "Renew", exact: true }).click()
   await expect(page.getByText(/Certbot is already running \(Issuing a certificate/)).toBeVisible()
 })
@@ -266,7 +290,7 @@ test("a staging lineage reads as a test certificate, and its verb is the real is
       target: "test.example.com, www.test.example.com",
     }),
   )
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   const row = page
     .getByRole("list", { name: "certbot lineages" })
     .getByRole("listitem")
@@ -310,7 +334,7 @@ test("a test certificate's lineage fits a phone with its verb", async ({ page })
   await page.setViewportSize({ width: 390, height: 844 })
   await mockProxy(page, { included: true })
   await mockStagingLineage(page)
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   const verb = page.getByRole("button", { name: "Replace with a real certificate" })
   await verb.scrollIntoViewIfNeeded()
   await expect(verb).toBeInViewport({ ratio: 1 })
@@ -344,14 +368,17 @@ test("a test certificate in the inventory reads as one, without the Let's Encryp
   await page.goto("/proxy/certificates")
 
   // Refused like an expired one, and not counted as expiring.
-  const refused = page.locator("[data-slot='stat-grid']")
-  await expect(refused.getByText("Refused", { exact: true })).toBeVisible()
-  await expect(refused.getByText("1 expired · 1 test certificate")).toBeVisible()
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("2 refused", { exact: true })).toHaveAttribute(
+    "title",
+    "1 expired · 1 test certificate",
+  )
+  await expect(identity.getByText(/expiring in/)).toHaveText("1 expiring in 29 days")
 
   const inventory = page
     .getByRole("list", { name: "Installed certificates" })
     .locator("[data-slot='choice-row']")
-  const card = inventory.filter({ hasText: "(STAGING) Riddling Rhubarb R12" })
+  const card = inventory.filter({ hasText: "www.test.example.com" })
   // Refused, so ahead of the one merely expiring: after the expired one,
   // whose days are fewer, and before app.example.com's twenty-nine.
   await expect(inventory.nth(0)).toContainText("old.example.com")
@@ -360,19 +387,24 @@ test("a test certificate in the inventory reads as one, without the Let's Encryp
   await expect(card.getByText("test certificate", { exact: true })).toBeVisible()
   await expect(card.getByText("80d left")).toHaveCount(0)
   await expect(card.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(0)
+
+  // Its page says why, with the same verb as its one command.
+  await card.getByRole("link", { name: "Open test.example.com" }).click()
+  await expect(page).toHaveURL(/\/proxy\/certificates\/test\.example\.com$/)
+  await expect(page.getByText("A test certificate", { exact: true })).toBeVisible()
   await expect(
-    card.getByText(
+    page.getByText(
       "A staging authority signed it, so browsers refuse it. A real issuance for the same names replaces it.",
     ),
   ).toBeVisible()
-  await expect(card.getByRole("meter").locator(".bg-destructive")).toHaveCount(1)
-
-  // The detail surface says it too, with the same verb as its one command.
-  await card.getByRole("button", { name: "Inspect test.example.com" }).click()
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByText("A test certificate")).toBeVisible()
-  await expect(sheet.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(0)
-  await sheet.getByRole("button", { name: "Replace with a real certificate" }).click()
+  await expect(page.getByRole("meter").first().locator(".bg-destructive")).toHaveCount(1)
+  await expect(
+    page.locator("[data-slot='host-identity'] img[src='/logos/lets-encrypt.svg']"),
+  ).toHaveCount(0)
+  await page
+    .locator("[data-slot='page-context']")
+    .getByRole("button", { name: "Replace with a real certificate" })
+    .click()
 
   const dialog = page.getByRole("dialog", { name: "Issue a certificate" })
   await expect(dialog.getByLabel("Domains")).toHaveValue("test.example.com www.test.example.com")
@@ -386,8 +418,9 @@ test("a test certificate in the inventory reads as one, without the Let's Encryp
     domains: ["test.example.com", "www.test.example.com"],
   })
 
-  // The card's own verb opens the same issuance.
-  await card.getByRole("button", { name: "Replace with a real certificate" }).click()
+  // The row's own verb opens the same issuance.
+  await page.goto("/proxy/certificates")
+  await rowVerb(page, "test.example.com", "Replace with a real certificate")
   await expect(
     page.getByRole("dialog", { name: "Issue a certificate" }).getByLabel("Domains"),
   ).toHaveValue("test.example.com www.test.example.com")
@@ -406,13 +439,18 @@ test("a test certificate a site names outside certbot is issued for, not replace
   const card = page
     .getByRole("list", { name: "Installed certificates" })
     .getByRole("listitem")
-    .filter({ hasText: "(STAGING) Riddling Rhubarb R12" })
-  await expect(card.getByText(/point the site at it/)).toBeVisible()
-  await expect(card.getByRole("button", { name: "Replace with a real certificate" })).toHaveCount(0)
-  await card.getByRole("button", { name: "Issue a real certificate" }).click()
+    .filter({ hasText: "www.test.example.com" })
+  await card.getByRole("button", { name: "Actions for test.example.com" }).click()
+  await expect(page.getByRole("menuitem", { name: "Replace with a real certificate" })).toHaveCount(
+    0,
+  )
+  await page.getByRole("menuitem", { name: "Issue a real certificate" }).click()
   await expect(page.getByRole("dialog").getByLabel("Domains")).toHaveValue(
     "test.example.com www.test.example.com",
   )
+  await page.keyboard.press("Escape")
+  await card.getByRole("link", { name: "Open test.example.com" }).click()
+  await expect(page.getByText(/point the site at it/)).toBeVisible()
 })
 
 test("replacing a test certificate says so while it runs, then offers the reload its sites need", async ({
@@ -439,18 +477,23 @@ test("replacing a test certificate says so while it runs, then offers the reload
   const card = page
     .getByRole("list", { name: "Installed certificates" })
     .getByRole("listitem")
-    .filter({ hasText: "(STAGING) Riddling Rhubarb R12" })
-  await card.getByRole("button", { name: "Replace with a real certificate" }).click()
+    .filter({ hasText: "www.test.example.com" })
+  await rowVerb(page, "test.example.com", "Replace with a real certificate")
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Contact email").fill("ops@example.com")
   await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
   await dialog.getByRole("button", { name: "Issue", exact: true }).click()
   await expect(dialog).toBeHidden()
 
-  // The card and the lineage both say what is happening, and neither can
+  // The row and the lineage both say what is happening, and neither can
   // start a second certbot run.
   await expect(card.getByText("Replacing…")).toBeVisible()
-  await expect(card.getByRole("button", { name: "Replace with a real certificate" })).toBeDisabled()
+  await card.getByRole("button", { name: "Actions for test.example.com" }).click()
+  await expect(
+    page.getByRole("menuitem", { name: "Replace with a real certificate" }),
+  ).toHaveAttribute("aria-disabled", "true")
+  await page.keyboard.press("Escape")
+  await page.getByRole("tab", { name: "Renewal" }).click()
   const lineage = page
     .getByRole("list", { name: "certbot lineages" })
     .getByRole("listitem")
@@ -495,10 +538,7 @@ test("a replacement a deploy hook already reloaded nginx for offers no reload", 
     }),
   )
   await page.goto("/proxy/certificates")
-  await page
-    .getByRole("list", { name: "Installed certificates" })
-    .getByRole("button", { name: "Replace with a real certificate" })
-    .click()
+  await rowVerb(page, "test.example.com", "Replace with a real certificate")
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Contact email").fill("ops@example.com")
   await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
@@ -525,10 +565,7 @@ test("a reload that leaves a site on the test certificate says so and keeps the 
     }),
   )
   await page.goto("/proxy/certificates")
-  await page
-    .getByRole("list", { name: "Installed certificates" })
-    .getByRole("button", { name: "Replace with a real certificate" })
-    .click()
+  await rowVerb(page, "test.example.com", "Replace with a real certificate")
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Contact email").fill("ops@example.com")
   await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
@@ -560,7 +597,7 @@ test("an old replacement opened from the recent runs raises nothing once nginx s
   })
   await page.route("**/api/v1/jobs/", (route) => json(route, [old]))
   await page.route("**/api/v1/jobs/job-old", (route) => json(route, { job: old, lines: [] }))
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   await page
     .getByRole("button", { name: /test\.example\.com, www\.test\.example\.com/ })
     .first()
@@ -583,7 +620,7 @@ test("a replaced test certificate nothing serves asks for no reload", async ({ p
     }),
   )
   await page.goto("/proxy/certificates")
-  await page.getByRole("button", { name: "Replace with a real certificate" }).click()
+  await rowVerb(page, "test.example.com", "Replace with a real certificate")
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Contact email").fill("ops@example.com")
   await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
@@ -609,40 +646,45 @@ test("a read-only account reads a test certificate for what it is, with nothing 
   const card = page
     .getByRole("list", { name: "Installed certificates" })
     .getByRole("listitem")
-    .filter({ hasText: "(STAGING) Riddling Rhubarb R12" })
+    .filter({ hasText: "www.test.example.com" })
   await expect(card.getByText("test certificate", { exact: true })).toBeVisible()
+  await card.getByRole("button", { name: "Actions for test.example.com" }).click()
+  await expect(page.getByRole("menuitem", { name: "Copy path" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: /real certificate/ })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await card.getByRole("link", { name: "Open test.example.com" }).click()
   await expect(
-    card.getByText("A staging authority signed it, so browsers refuse it.", { exact: true }),
+    page.getByText("A staging authority signed it, so browsers refuse it.", { exact: true }),
   ).toBeVisible()
-  await expect(card.getByRole("button", { name: /real certificate/ })).toHaveCount(0)
-  await page.getByRole("button", { name: "Inspect test.example.com" }).click()
-  await expect(
-    page.getByRole("dialog").getByRole("button", { name: /real certificate/ }),
-  ).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /real certificate/ })).toHaveCount(0)
 })
 
-test("a test certificate's card fits a phone with its verb", async ({ page }) => {
+test("a test certificate's row fits a phone with its verb", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockProxy(page, { included: true })
   await mockStagingInventory(page)
   await page.goto("/proxy/certificates")
-  const verb = page
-    .getByRole("list", { name: "Installed certificates" })
-    .getByRole("button", { name: "Replace with a real certificate" })
-  await verb.scrollIntoViewIfNeeded()
+  await certRow(page, "test.example.com")
+    .getByRole("button", { name: "Actions for test.example.com" })
+    .click()
+  const verb = page.getByRole("menuitem", { name: "Replace with a real certificate" })
   await expect(verb).toBeInViewport({ ratio: 1 })
+  await page.keyboard.press("Escape")
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
     ),
   ).toBe(true)
-  await page.getByRole("button", { name: "Inspect test.example.com" }).click()
-  const sheet = page.getByRole("dialog")
-  const command = sheet.getByRole("button", { name: "Replace with a real certificate" })
+  await certRow(page, "test.example.com").getByRole("link").click()
+  const command = page
+    .locator("[data-slot='page-context']")
+    .getByRole("button", { name: "Replace with a real certificate" })
   await expect(command).toBeInViewport({ ratio: 1 })
-  expect(await sheet.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
-    true,
-  )
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    ),
+  ).toBe(true)
 })
 
 test("with its own ACME authority the issue form names it, and quotes no Let's Encrypt limits", async ({
@@ -667,24 +709,25 @@ test("with its own ACME authority the issue form names it, and quotes no Let's E
 test("with a staging authority configured nothing offers a real certificate, and the form says what it signs", async ({
   page,
 }) => {
+  // Three pages: the lineage, the certificate and the form.
+  test.slow()
   await mockProxy(page, { included: true })
   await mockStagingInventory(page)
   await mockStagingLineage(page, { testAuthority: true })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   const lineage = page
     .getByRole("list", { name: "certbot lineages" })
     .getByRole("listitem")
     .filter({ hasText: "test.example.com" })
   await expect(lineage.getByText("test certificate")).toBeVisible()
   await expect(page.getByRole("button", { name: /real certificate/ })).toHaveCount(0)
-  const card = page
-    .getByRole("list", { name: "Installed certificates" })
-    .getByRole("listitem")
-    .filter({ hasText: "(STAGING) Riddling Rhubarb R12" })
+  await page.goto("/proxy/certificates/test.example.com")
   await expect(
-    card.getByText("A staging authority signed it, so browsers refuse it.", { exact: true }),
+    page.getByText("A staging authority signed it, so browsers refuse it.", { exact: true }),
   ).toBeVisible()
+  await expect(page.getByRole("button", { name: /real certificate/ })).toHaveCount(0)
 
+  await page.goto("/proxy/certificates")
   await page.getByRole("button", { name: "Issue certificate", exact: true }).click()
   const dialog = page.getByRole("dialog")
   await expect(
@@ -715,11 +758,11 @@ test("lineages that cannot be read say so, and the renewal reading still stands"
       }),
     ),
   )
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   await expect(page.getByText("certbot's lineages could not be read")).toBeVisible()
   await expect(page.getByText(/permission denied/)).toBeVisible()
   await expect(page.getByText("certbot manages no certificates yet")).toHaveCount(0)
-  await expect(page.getByText("Scheduled", { exact: true })).toBeVisible()
+  await expect(renewalFact(page)).toHaveText("renewal scheduled")
 })
 
 test("importing under a name in use asks to replace it, keeps the old pair, and offers the reload", async ({
@@ -752,7 +795,7 @@ test("importing under a name in use asks to replace it, keeps the old pair, and 
   const reloads = await capture(page, "**/api/v1/proxy/reload", () => ({ reloaded: true }))
 
   await page.goto("/proxy/certificates")
-  await page.getByRole("button", { name: "Import", exact: true }).click()
+  await moreVerb(page, "Import")
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Name").fill("shop")
   await dialog
@@ -796,7 +839,7 @@ test("editing the name after an inspection asks to inspect again", async ({ page
     }),
   )
   await page.goto("/proxy/certificates")
-  await page.getByRole("button", { name: "Import", exact: true }).click()
+  await moreVerb(page, "Import")
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Name").fill("shop")
   await dialog.getByLabel("Certificate").fill("cert")
@@ -923,12 +966,13 @@ test("an active timer whose last run failed reads failing, with certbot's reason
 }, testInfo) => {
   await mockProxy(page, { included: true })
   await mockFailingRenewal(page)
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
 
-  const tile = page.locator("[data-slot='stat-grid']")
-  await expect(tile.getByText("Failing", { exact: true })).toBeVisible()
-  await expect(tile.getByText(/^last run (yesterday )?\d\d:\d\d · 1 failed$/)).toBeVisible()
-  await expect(tile.getByText("Scheduled", { exact: true })).toHaveCount(0)
+  await expect(renewalFact(page)).toHaveText("renewal failing")
+  await expect(renewalFact(page)).toHaveAttribute(
+    "title",
+    /^last run (yesterday )?\d\d:\d\d · 1 failed$/,
+  )
 
   const notice = page.getByText("The last renewal failed").locator("..")
   await expect(notice).toContainText(/certbot\.service exited 1 (yesterday )?at \d\d:\d\d\./)
@@ -944,10 +988,11 @@ test("an active timer whose last run failed reads failing, with certbot's reason
 
   await page.screenshot({ path: testInfo.outputPath("renewal-failing.png") })
   await lineages.getByRole("button", { name: "Show log", exact: true }).click()
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByText("Renewal log")).toBeVisible()
-  await expect(sheet.getByRole("region")).toHaveCount(2)
-  const newest = sheet.getByRole("region").first()
+  // Each run as certbot printed it, in the Renewal view rather than a sheet.
+  const runs = page.getByRole("region", { name: "Renewal runs" })
+  await expect(runs).toBeInViewport()
+  await expect(runs.getByRole("region")).toHaveCount(2)
+  const newest = runs.getByRole("region").first()
   await expect(
     newest.getByText(
       "Failed to renew certificate app.example.com with error: Some challenges have failed.",
@@ -972,9 +1017,8 @@ test("a failure renewed since reads recovered, and a passing run healthy until t
     }),
     certs: [certbotLineage()],
   })
-  await page.goto("/proxy/certificates")
-  const tiles = page.locator("[data-slot='stat-grid']")
-  await expect(tiles.getByText("Recovered", { exact: true })).toBeVisible()
+  await page.goto("/proxy/certificates?tab=renewal")
+  await expect(renewalFact(page)).toHaveText("renewal recovered")
   await expect(page.getByText("The last renewal failed")).toHaveCount(0)
   await expect(page.getByText("renewed since", { exact: true })).toBeVisible()
   await expect(page.getByText("Last renewal failed:")).toHaveCount(0)
@@ -984,8 +1028,8 @@ test("a failure renewed since reads recovered, and a passing run healthy until t
     certs: [certbotLineage()],
   })
   await page.reload()
-  await expect(tiles.getByText("Healthy", { exact: true })).toBeVisible()
-  await expect(tiles.getByText(/^next run (tomorrow )?\d\d:\d\d$/)).toBeVisible()
+  await expect(renewalFact(page)).toHaveText("renewal healthy")
+  await expect(renewalFact(page)).toHaveAttribute("title", /^next run (tomorrow )?\d\d:\d\d$/)
   await expect(page.getByText(/^Last run (yesterday )?\d\d:\d\d passed$/)).toBeVisible()
 })
 
@@ -1005,7 +1049,7 @@ test("Run now starts the timer's service, holds every certbot verb while it runs
   page.on("request", (request) => {
     if (request.url().endsWith("/api/v1/certificates/certbot")) reads++
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   await expect(page.getByText("The last renewal failed")).toBeVisible()
   const before = reads
 
@@ -1056,7 +1100,7 @@ test("the reload switch installs the hook, and removing it asks first", async ({
     hook = reloadHook(route.request().method() === "DELETE" ? "missing" : "installed")
     await json(route, hook)
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
 
   const lineages = page.getByRole("list", { name: "certbot lineages" })
   await expect(lineages.getByText("/var/www/app")).toBeVisible()
@@ -1094,7 +1138,7 @@ test("a hook changed by hand offers its restore, and somebody else's file is lef
     state = reloadHook("installed", ["reload-haproxy"])
     return state
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   await expect(page.getByText(/was changed by hand, or is no longer executable/)).toBeVisible()
   await expect(page.getByText(/certbot also runs reload-haproxy after each renewal/)).toBeVisible()
   await page.getByRole("button", { name: "Restore the hook" }).click()
@@ -1133,7 +1177,7 @@ test("a lineage reports whether the configured renewal can run", async ({ page }
       }),
     ),
   )
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   const lineages = page.getByRole("list", { name: "certbot lineages" })
   await expect(lineages.getByText("The next renewal will fail")).toBeVisible()
   await expect(lineages.getByText(reason)).toBeVisible()
@@ -1188,7 +1232,7 @@ for (const viewport of [
         }),
       ),
     )
-    await page.goto("/proxy/certificates")
+    await page.goto("/proxy/certificates?tab=dns")
     const panel = page
       .locator("[data-slot=panel]")
       .filter({ has: page.getByRole("heading", { name: "DNS challenge providers" }) })
@@ -1236,7 +1280,7 @@ test("a read-only account reads the failure, with nothing to press", async ({ pa
   await page.route("**/api/v1/auth/session", (route) =>
     json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
   )
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   await expect(page.getByText("The last renewal failed")).toBeVisible()
   await expect(page.getByText("Last renewal failed: Some challenges have failed.")).toBeVisible()
   for (const name of ["Run now", "Show log", "Dry run", "Renew"]) {
@@ -1267,7 +1311,7 @@ test("the failing renewal, its lineage and the switch fit a phone", async ({ pag
       }),
     ],
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   await page.getByText("The last renewal failed").scrollIntoViewIfNeeded()
   await expect(page.getByText("The last renewal failed")).toBeInViewport()
   await page.screenshot({ path: testInfo.outputPath("renewal-record-phone.png") })
@@ -1301,10 +1345,10 @@ test("the failing renewal, its lineage and the switch fit a phone", async ({ pag
   await expect(showLog).toBeInViewport({ ratio: 1 })
   await page.screenshot({ path: testInfo.outputPath("renewal-phone.png"), fullPage: true })
   await showLog.click()
-  const sheet = page.getByRole("dialog")
-  await expect(sheet).toBeInViewport({ ratio: 1 })
-  const sheetOverflow = await sheet.evaluate((el) => el.scrollWidth - el.clientWidth)
-  expect(sheetOverflow).toBeLessThanOrEqual(1)
+  const runs = page.getByRole("region", { name: "Renewal runs" })
+  await expect(runs).toBeInViewport()
+  const runsOverflow = await runs.evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(runsOverflow).toBeLessThanOrEqual(1)
   await page.screenshot({ path: testInfo.outputPath("renewal-log-phone.png") })
 })
 
@@ -1331,10 +1375,8 @@ test("a completed renewal retains its hook failure and native output", async ({
     certs: [certbotLineage({ servedBy: ["app.example.com"] })],
     reloadHook: reloadHook("installed"),
   })
-  await page.goto("/proxy/certificates")
-  const tiles = page.locator("[data-slot='stat-grid']")
-  await expect(tiles.getByText("Hook failed", { exact: true })).toBeVisible()
-  await expect(tiles.getByText("Healthy", { exact: true })).toHaveCount(0)
+  await page.goto("/proxy/certificates?tab=renewal")
+  await expect(renewalFact(page)).toHaveText("renewal hook failed")
   const notice = page.getByText("A renewal hook failed").locator("..")
   await expect(notice).toContainText(
     /certbot\.service passed (yesterday )?at \d\d:\d\d, but certbot only warns when a hook it runs fails\./,
@@ -1360,7 +1402,7 @@ test("a completed renewal retains its hook failure and native output", async ({
   await page.setViewportSize({ width: 1280, height: 900 })
 })
 
-test("recent renewal runs wrap in the renewal column, each told apart by its time, and Renew all due stays inside it", async ({
+test("recent renewal runs wrap in the renewal schedule, each told apart by its time, and Renew all due stays inside it", async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 })
@@ -1376,7 +1418,7 @@ test("recent renewal runs wrap in the renewal column, each told apart by its tim
       startedAt: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(),
     })
   await page.route("**/api/v1/jobs/", (route) => json(route, [run(1), run(2), run(3), run(4)]))
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
 
   const chips = page.getByRole("button", { name: /^certbot\.service \d\d:\d\d$/ })
   await expect(chips).toHaveCount(4)
@@ -1433,7 +1475,7 @@ test("a failed renewal says where validation failed and whose it is to fix", asy
       ],
     }),
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   const where = page.getByRole("region", { name: "Where it failed" })
   await expect(where).toBeVisible()
   const connect = where.getByRole("listitem").filter({ hasText: "app.example.com" })
@@ -1495,7 +1537,7 @@ test("a failed issuance says where validation failed, read from the job's own ou
       ],
     })
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
   await page.getByRole("button", { name: "Issue certificate", exact: true }).click()
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Domains").fill("app.example.com")
