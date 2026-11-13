@@ -38,7 +38,12 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  * when it applies, then leaves. ⌘S (Ctrl+S) is Save while the bar is up.
  */
 
-export type SettingApplies = "next-deployment" | "immediately"
+/**
+ * When a saved form takes effect. `restart` is a file a running server reads
+ * only when it starts — a game's own settings file — so its save is written
+ * at once and applied by the next restart.
+ */
+export type SettingApplies = "next-deployment" | "immediately" | "restart"
 
 type EntryState = {
   name: string
@@ -197,6 +202,7 @@ export function useSaveBarEntry(
 
 function appliesLine(dirty: EntryState[]) {
   const kinds = new Set(dirty.map((entry) => entry.applies))
+  if (kinds.size === 1 && kinds.has("restart")) return "Applies when the server restarts"
   if (kinds.size > 1) return "Some apply now, the rest on your next deployment"
   return kinds.has("immediately") ? "Applies immediately" : "Applies on your next deployment"
 }
