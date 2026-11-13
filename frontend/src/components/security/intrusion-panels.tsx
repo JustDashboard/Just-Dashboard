@@ -204,8 +204,12 @@ export function IntrusionPanels() {
             </span>
             {blocks.data && blocks.data.duplicated > 0 && (
               <>
-                <FactDot />
-                <span className="numeric">{blocks.data.duplicated} held more than once</span>
+                {/* Not on a phone: three facts wrap to a second line there, which
+                    the line does not have while the engines are still out. */}
+                <span className="contents max-sm:hidden">
+                  <FactDot />
+                  <span className="numeric">{blocks.data.duplicated} held more than once</span>
+                </span>
               </>
             )}
             {exposure?.client && (

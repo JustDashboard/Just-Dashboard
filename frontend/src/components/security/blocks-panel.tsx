@@ -48,7 +48,7 @@ export function BlocksPanel({
   const [which, setWhich] = useState<"all" | "twice" | "covered">("all")
   const [all, setAll] = useState(false)
 
-  if (error && !data) return <ErrorState error={error} onRetry={onRetry} />
+  if (error && !data) return <ErrorState error={error} onRetry={onRetry} retryable />
 
   const entries = data?.entries ?? []
   const twice = entries.filter((e) => e.sources.length > 1)

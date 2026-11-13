@@ -1776,18 +1776,46 @@ a `--tag-*` hue down the row's edge, ending on the default as its last row. SSH'
 (`ssh-picture.tsx`) draws the port, password authentication, root login and the keyed accounts as
 the doors a login can take, following the draft as it is edited; it replaced four tiles that said
 the same facts one at a time. Firewall's policy controls sit beside its bounded rule table; SSH
-lays its directive groups out two to a row from `xl`, as Configuration does, each head over its
-fields with *Edited* in `--git-modified` while it holds a staged change, and its apply bar follows
-the reader and names what changed. Intrusion's jail choices carry their watched service's mark,
-state and comparable readings. SSH, Firewall and
+sets its directives in one centred column of `SettingSection`s behind the product's save bar, and
+Intrusion's jail choices carry their watched service's mark, state and comparable readings (both
+are described in the next paragraph). SSH, Firewall and
 Intrusion each end on their own log — the auth log, the firewall's log, fail2ban's Activity — read
 through its lens in one `Pane` under a title across the page, since a log needs the width a rail or a
-half row does not have; the last day's counts join the page's one `StatGrid` rather than drawing a
-second, and an attacker's address is blocked from the line it is on. Repeat offenders therefore take
-Intrusion's row alone. Connections, Logins and Network combine related facts into fewer,
+half row does not have; the last day's counts join Firewall's one `StatGrid` and are `ReadingLine`s
+on SSH and Intrusion, and an attacker's address is blocked from the line it is on. Repeat offenders
+therefore take Intrusion's row alone. Connections, Logins and Network combine related facts into fewer,
 richer columns: a peer and its network, a service and its ports, an account and its terminal, an
 interface and its kind. Their action columns are always drawn. Tools is a two-pane working surface,
 with a searchable choice rail and one visible form/result, retaining every other probe's work.
+
+**Intrusion and SSH read like a project's pages (0.8.7).** Intrusion stacked a merged table and three
+engines, fifteen tiles and four framed tables, into one column nearly six thousand pixels long. It
+opens on an identity line (`HostIdentity` laid out as a project's header) whose state is the worst
+thing true of any engine (`posture` in `security/intrusion-model.ts`, unit-tested) and whose one
+command bans by hand through either engine (`ban-dialog.tsx`), then on a `WireFlow` picture
+(`intrusion-picture.tsx`): who knocks, this server with how many addresses it refuses, and each
+engine on the line it reads along with what it holds. The picture has one hub and the hub is the
+machine, since no engine is in the packet's path; an engine that is not installed keeps its place
+as a dashed ring, so the picture is one height in every state. Under it one engine is on screen at
+a time as a view in the address (`?tab=fail2ban|crowdsec|suricata`, the first installed engine
+without one), and the addresses every engine and the firewall refuse are the fourth view,
+`?tab=blocked`. Each engine's view opens on its own line (`engine-head.tsx`). Its tiles are
+`ReadingLine`s, a log lens's reading among them through `lens-reading-line.tsx`, which keeps the
+press that narrows the log; Suricata's severities are one `BarReading`; repeat offenders are a
+`RankList`. A blocked address, a decision and an alert are one line a row at one height
+(`line-list.tsx`: a grid every row shares where the list has 42rem of its own width, two fixed
+lines where it has not, measured on the list and not the window). A jail's detail is a page of its
+own, `/security/intrusion/jails/[jail]`, with the other jails as a rail from `xl` and Alt+↑ and
+Alt+↓ to walk them; tuning a jail stays a dialog, because it is a form. A fail2ban that is installed
+and silent is a state with **Start** (its unit is asked after first, as Docker's is), its client's
+error under a fold, and an absent one hands off to its package as CrowdSec and Suricata do.
+SSH's four readings are lines on a hue each (`--tag-green` for a login, amber for a failure, red
+for an unknown account, violet for the addresses behind them), and its directives are one centred
+column of `SettingSection`s: a switch for a yes or no, `Segments` for three short words, a list
+otherwise, each row one height with *sshd runs …* under a staged value. The floating save bar
+(`save-bar.tsx`) replaced an apply bar of the page's own; **Save** opens a review that lists each old
+and new value, what the change does to the dashboard's access boundary and which recovery stands
+behind it, and a change that would cut the way in holds the review's button.
 The diagram and the workbench have edges for §7's reasons; tables keep theirs, and forms and
 findings remain plain. `components/security/marks.tsx` supplies the inline address, `PeerIdentity`,
 process and interface marks. A product is named only when it can be identified; no logo is guessed
@@ -2912,7 +2940,7 @@ The passes, in order. Each one is a diff you can review on its own.
    bans per day as its `TileTrend`; over them, the posture is its seven checks as a coloured strip;
    under them, the ways onto the machine are a wiring picture. SSH took the exit for four of its
    eight tiles — the port, passwords, root login and the keyed accounts went into the picture of
-   sshd's doors, which reads them as one answer — and kept the auth log's four. Firewall kept its
+   sshd's doors, which reads them as one answer — and kept the auth log's four (lines since 0.8.7). Firewall kept its
    tiles and gained the picture of its inbound path over them. The three pictures are described
    under *The Security section draws what it watches*.
 

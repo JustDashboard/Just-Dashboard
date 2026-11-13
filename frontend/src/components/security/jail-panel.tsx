@@ -217,6 +217,9 @@ export function JailPolicySection({ policy }: { policy: PollState<JailPolicy> })
           <EmptyNote>The policy could not be read.</EmptyNote>
         ) : data?.error ? (
           <EmptyNote>{data.error}</EmptyNote>
+        ) : data && !Array.isArray(data.findings) ? (
+          // An answer that is not a policy is not one to draw half of.
+          <EmptyNote>The policy could not be read.</EmptyNote>
         ) : data ? (
           <>
             {data.findings.map((finding) => (

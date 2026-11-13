@@ -66,7 +66,7 @@ export function SuricataPanel({ view }: { view: PollState<SuricataView> }) {
     )
   }
   if (loading && !data) return <EngineWaiting id="suricata" name="Suricata" lines={0} />
-  if (error && !data) return <ErrorState error={error} onRetry={refresh} />
+  if (error && !data) return <ErrorState error={error} onRetry={refresh} retryable />
   if (!data) return null
 
   if (!data.installed) {

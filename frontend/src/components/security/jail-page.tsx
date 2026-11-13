@@ -166,7 +166,7 @@ export function JailPage() {
           <PageContext eyebrow={BACK} title={name} actions={walk} />
 
           {status.error && !status.data ? (
-            <ErrorState error={status.error} onRetry={status.refresh} />
+            <ErrorState error={status.error} onRetry={status.refresh} retryable />
           ) : missing ? (
             <EmptyState
               icon={Slash}

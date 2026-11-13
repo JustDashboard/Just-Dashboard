@@ -1199,6 +1199,16 @@ available. SSH edits are reviewed and protected by lockout guards; intrusion con
 capabilities, confirmation and audit. Automatic posture findings and settings recommendation
 comparisons were removed in 0.7.5
 
+Intrusion (0.8.7) is an identity line, a picture of the internet, this server and the three
+engines, and one engine at a time as a view in the address: `?tab=fail2ban`, `crowdsec`, `suricata`
+or `blocked` (every engine's refused addresses folded by address). Without `tab` it opens on the
+first engine that is installed. A jail is a page, `/security/intrusion/jails/[jail]`: what it holds
+with Unban and Never ban again on each address, its policy, and Ban an address, Tune and Release
+every ban as its verbs. One form bans through CrowdSec or a jail. A stopped fail2ban is started
+from the page (`POST /systemd/fail2ban.service/start`, `service.control`) and an absent one is
+installed from it. SSH (0.8.7) stages its directives in one column and applies them through the
+shared save bar and a review dialog; `?setting=<key>` still lands on a directive.
+
 **Implementation:** `app/(dashboard)/security/`, `components/security/`; backend in
 [`../backend/observability-security.md`](../backend/observability-security.md)
 

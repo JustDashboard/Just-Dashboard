@@ -224,7 +224,7 @@ export function SSHPanel() {
     return (
       <>
         {header}
-        <ErrorState error={error} onRetry={refresh} />
+        <ErrorState error={error} onRetry={refresh} retryable />
       </>
     )
   }
@@ -530,7 +530,8 @@ export function SSHPanel() {
                         {account.keys} {account.keys === 1 ? "key" : "keys"}
                       </span>
                     }
-                    className="py-2.5"
+                    // No inset: the faces stand on the section's own edge.
+                    className="px-0 py-2.5"
                   />
                 ))}
               </RowList>
@@ -773,7 +774,7 @@ function sshGroup(key: string) {
 }
 
 /** The width a row's control and the line under it share. */
-const CONTROL = "w-40 sm:w-52"
+const CONTROL = "w-44 sm:w-52"
 
 /** How a choice is drawn: a switch for yes or no, segments for three short words, else a list. */
 function choiceControl(setting: SSHSetting): "switch" | "segments" | "select" {

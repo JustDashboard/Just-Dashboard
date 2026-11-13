@@ -684,27 +684,28 @@ test("ssh changes are staged as a page state and applied together", async ({ pag
   await expect(doors).toContainText("keys only")
   await expect(doors).toContainText("2 keys")
   await expect(page.getByText("held by ssh.socket")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Test and apply" })).toHaveCount(0)
+  const bar = page.getByRole("region", { name: "Save changes" })
+  await expect(bar).toHaveCount(0)
 
-  await page
-    .getByRole("radiogroup", { name: "Password authentication" })
-    .getByRole("radio", { name: "no" })
-    .click()
-  await expect(page.getByText("edited", { exact: true })).toBeVisible()
+  await page.getByRole("switch", { name: "Password authentication" }).click()
+  const row = page.locator("[data-slot=ssh-setting]").filter({ hasText: "Password authentication" })
+  await expect(row).toHaveAttribute("data-edited", "true")
+  await expect(row).toContainText("sshd runs yes")
   await expect(doors.getByText("accepted — a guessed one is a shell")).toHaveCount(0)
-  // The section holding it says so, and the apply bar names what changed.
-  await expect(page.getByText("Edited", { exact: true }).first()).toBeVisible()
-  await expect(page.getByText("1 unsaved change", { exact: true })).toBeVisible()
+  // The section holding it says so, and the save bar counts what changed.
+  await expect(
+    page.locator("[data-slot=setting]").filter({ hasText: "Authentication" }).first(),
+  ).toContainText("Unsaved changes")
+  await expect(bar).toContainText("1 unsaved change")
   await page.getByRole("button", { name: /^Edited/ }).click()
-  await expect(page.getByRole("radiogroup", { name: "Password authentication" })).toBeVisible()
+  await expect(page.getByRole("switch", { name: "Password authentication" })).toBeVisible()
   await expect(page.getByLabel("Attempts per connection")).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Test and apply" })).toBeVisible()
-  await page.getByRole("button", { name: "Discard" }).click()
-  await expect(page.getByRole("button", { name: "Test and apply" })).toHaveCount(0)
+  await bar.getByRole("button", { name: "Discard" }).click()
+  await expect(bar).toHaveCount(0)
   await expect(doors).toContainText("accepted — a guessed one is a shell")
 })
 
-test("a jail's sheet bans an address by hand and the tuning offers the caller's own", async ({
+test("a jail's page bans an address by hand and the tuning offers the caller's own", async ({
   page,
 }) => {
   const mutations: Mutation[] = []
@@ -712,22 +713,27 @@ test("a jail's sheet bans an address by hand and the tuning offers the caller's 
   await page.goto("/security/intrusion")
   await loaded(page)
 
-  await expect(page.locator("[data-slot=stat-grid]")).toContainText("Banned now")
-  // fail2ban as its own mark, and each jail a card that opens its sheet.
+  // No row of figures: fail2ban as its own mark, and each jail a card that
+  // opens its page.
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
   await expect(
-    page.locator("[data-slot=host-identity]").locator('img[src="/logos/fail2ban.webp"]'),
+    page.locator("[data-slot=engine-head]").locator('img[src="/logos/fail2ban.webp"]'),
   ).toHaveCount(1)
   const jail = page.locator("[data-slot=choice-row]").filter({ hasText: "sshd" })
   await expect(jail).toHaveCount(1)
   await expect(jail).toContainText("banned now")
-  await page.getByRole("button", { name: "sshd", exact: true }).click()
-  await page.getByLabel("Ban an address now").fill("192.0.2.200")
-  await page.getByRole("button", { name: "Ban", exact: true }).click()
+  await jail.getByRole("link", { name: "sshd", exact: true }).click()
+  await expect(page).toHaveURL(/\/security\/intrusion\/jails\/sshd$/)
+  await page.getByRole("button", { name: "Ban an address" }).click()
+  const ban = page.getByRole("dialog", { name: "Ban an address" })
+  await ban.getByLabel("Address", { exact: true }).fill("192.0.2.200")
+  await ban.getByRole("button", { name: "Ban", exact: true }).click()
   await expect
     .poll(() => mutations.find((m) => m.path === "/fail2ban/sshd/ban")?.body)
     .toEqual({ ip: "192.0.2.200" })
 
-  await page.getByRole("button", { name: "Tune", exact: true }).click()
+  await page.getByRole("button", { name: "Actions for sshd" }).click()
+  await page.getByRole("menuitem", { name: "Tune" }).click()
   await page.getByRole("button", { name: "Never ban my address" }).click()
   await expect
     .poll(() => mutations.find((m) => m.path === "/fail2ban/sshd/ignore")?.body)
@@ -742,7 +748,10 @@ test("an offender is blocked with a plain deny and looked up on the tools page",
   await page.goto("/security/intrusion")
   await loaded(page)
 
-  const row = page.getByRole("row").filter({ hasText: "203.0.113.9" }).first()
+  // A ranked list with its figures in columns, no bar under a name.
+  const row = page.locator("[data-slot=rank-row]").filter({ hasText: "203.0.113.9" }).first()
+  await expect(row.locator("[data-slot=rank-value]")).toContainText("bans")
+  await expect(page.getByRole("tabpanel").getByRole("meter")).toHaveCount(0)
   await row.getByRole("button", { name: "Block at the firewall" }).click()
   await expect
     .poll(() => mutations.find((m) => m.path === "/firewall/rules")?.body)
@@ -796,31 +805,38 @@ test("the logins page folds the failed record into attackers", async ({ page }) 
 })
 
 /** A figure in the page's one grid, by its name. */
+/** One of a page's reading lines, by its name: what a tile became on Intrusion and SSH. */
+function reading(page: Page, label: string) {
+  return page
+    .locator("[data-slot=reading-line]")
+    .filter({ has: page.getByText(label, { exact: true }) })
+}
+
 function tile(page: Page, label: string) {
   return page
     .locator("[data-slot=stat-grid] [data-slot=stat-tile]")
     .filter({ has: page.getByText(label, { exact: true }) })
 }
 
-test("the ssh page reads its auth log through the lens, the day's counts in its one grid", async ({
+test("the ssh page reads its auth log through the lens, the day's counts as its lines", async ({
   page,
 }) => {
   const logs = await mockSecurity(page)
   await page.goto("/security/ssh")
   await loaded(page)
 
-  // One grid (§15): what the log says the last day made of the doors drawn
-  // above it, whose first line carries the same day's failures.
-  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(1)
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(4)
+  // No grid of tiles: what the log says the last day made of the doors drawn
+  // above it, whose first line carries the same day's failures, is four lines.
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  await expect(page.locator("[data-slot=reading-line]")).toHaveCount(4)
   await expect(page.getByRole("list", { name: "How a login reaches a shell" })).toContainText(
     "8 failed attempts today",
   )
-  await expect(tile(page, "Accepted logins")).toContainText("2")
+  await expect(reading(page, "Accepted logins")).toContainText("2 in the last 24 hours")
   // Wrong passwords, unknown accounts and a connection that ran out of tries.
-  await expect(tile(page, "Failed attempts")).toContainText("8")
-  await expect(tile(page, "Invalid users")).toContainText("2")
-  await expect(tile(page, "Attackers")).toContainText("3")
+  await expect(reading(page, "Failed attempts")).toContainText("8 in the last 24 hours")
+  await expect(reading(page, "Invalid users")).toContainText("2 in the last 24 hours")
+  await expect(reading(page, "Attackers")).toContainText("3 in the last 24 hours")
 
   // The lines as what they record, the lens's noise hidden as a chip.
   const lines = page.getByLabel("Log lines")
@@ -843,7 +859,7 @@ test("the ssh page reads its auth log through the lens, the day's counts in its 
   expect(logs.requests).not.toContain("/logs/sources")
   expect(logs.requests.filter((path) => path === "/logs/source")).toHaveLength(2)
 
-  // The grid's readings are the last day's, through the auth lens.
+  // The lines' readings are the last day's, through the auth lens.
   const readings = logs.searches.filter((search) => search.get("lens") === "auth")
   expect(readings.length).toBeGreaterThan(0)
   for (const search of readings) {
@@ -859,8 +875,8 @@ test("the ssh page reads its auth log through the lens, the day's counts in its 
     .toEqual(["event:ssh_failed", "event:ssh_invalid_user", "event:ssh_max_attempts"])
   await expect(lines.getByText("sudo", { exact: true })).toHaveCount(0)
 
-  // A figure in the page's grid is a press away from the lines it counts,
-  // asked of the pane further down.
+  // A reading's line is a press away from the lines it counts, asked of the
+  // pane further down.
   await page.getByRole("button", { name: "Show the lines behind accepted logins" }).click()
   await expect.poll(() => logs.sockets.at(-1)?.getAll("f")).toEqual(["event:ssh_accepted"])
   await expect(page.getByRole("button", { name: /^Accepted\b/ })).toHaveAttribute(
@@ -1069,10 +1085,11 @@ test("intrusion's activity is fail2ban's own log, strikes and repeat offenders i
   await page.goto("/security/intrusion")
   await loaded(page)
 
-  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(1)
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(8)
-  await expect(tile(page, "Strikes")).toContainText("8")
-  await expect(tile(page, "Bans")).toContainText("3")
+  // The log's last day as four lines, no grid of tiles.
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  await expect(page.getByRole("tabpanel").locator("[data-slot=reading-line]")).toHaveCount(4)
+  await expect(reading(page, "Strikes")).toContainText("8 in the last 24 hours")
+  await expect(reading(page, "Bans")).toContainText("3 in the last 24 hours")
 
   const activity = page
     .locator("[data-slot=panel]")
@@ -1114,7 +1131,7 @@ test("with no fail2ban.log the activity is read from its unit's journal", async 
   // at Activity rather than saying nothing was ever banned.
   await expect(page.getByText("No bans in fail2ban.log")).toBeVisible()
   await expect(page.getByText("Nothing has been banned yet")).toHaveCount(0)
-  // With no table to hold, the fold draws no frame (§2).
+  // The fold draws no frame (§2).
   expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
 })
 
@@ -1198,7 +1215,8 @@ test.describe("screenshots", () => {
         await page.screenshot({ path: `${dir}/rule-source-${width}.png` })
         await page.getByRole("button", { name: "Cancel", exact: true }).click()
         await page.goto("/security/intrusion")
-        await page.getByRole("button", { name: "Tune sshd", exact: true }).click()
+        await page.getByRole("button", { name: "Actions for sshd" }).click()
+        await page.getByRole("menuitem", { name: "Tune" }).click()
         await expect(page.getByRole("textbox", { name: "Failures", exact: true })).toHaveValue("5")
         await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeInViewport()
         await page.screenshot({ path: `${dir}/jail-dialog-${width}.png` })
@@ -1211,7 +1229,8 @@ test("jail policy inputs keep edits and send all three values together", async (
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
   await page.goto("/security/intrusion")
-  await page.getByRole("button", { name: "Tune sshd", exact: true }).click()
+  await page.getByRole("button", { name: "Actions for sshd" }).click()
+  await page.getByRole("menuitem", { name: "Tune" }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog.getByRole("textbox", { name: "Failures", exact: true })).toHaveValue("5")
   await dialog.getByRole("textbox", { name: "Failures", exact: true }).fill("3")
@@ -1228,11 +1247,12 @@ test("jail policy inputs keep edits and send all three values together", async (
 test("reverting an SSH setting removes the pending change", async ({ page }) => {
   await mockSecurity(page)
   await page.goto("/security/ssh")
-  const password = page.getByRole("radiogroup", { name: "Password authentication" })
-  await password.getByRole("radio", { name: "no", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Test and apply", exact: true })).toBeVisible()
-  await password.getByRole("radio", { name: "yes", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Test and apply", exact: true })).toHaveCount(0)
+  const password = page.getByRole("switch", { name: "Password authentication" })
+  const bar = page.getByRole("region", { name: "Save changes" })
+  await password.click()
+  await expect(bar).toContainText("1 unsaved change")
+  await password.click()
+  await expect(bar).toHaveCount(0)
 })
 
 test("a source-only firewall deny stays editable and preserves its source", async ({ page }) => {
@@ -1560,11 +1580,11 @@ test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {
   expect(mutations).toEqual([])
   await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click()
   await page.goto("/security/ssh")
+  await page.getByRole("switch", { name: "Password authentication" }).click()
   await page
-    .getByRole("radiogroup", { name: "Password authentication" })
-    .getByRole("radio", { name: "no", exact: true })
+    .getByRole("region", { name: "Save changes" })
+    .getByRole("button", { name: "Save" })
     .click()
-  await page.getByRole("button", { name: "Test and apply", exact: true }).click()
   await expect(page.getByRole("dialog").getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await expect(
     page.getByRole("dialog").getByRole("button", { name: "Test and apply", exact: true }),
@@ -1610,7 +1630,7 @@ test("empty merged blocks describe only listed evidence when an engine is unread
       ],
     }),
   )
-  await page.goto("/security/intrusion")
+  await page.goto("/security/intrusion?tab=blocked")
   await expect(page.getByText("No blocked addresses are listed in this reading.")).toBeVisible()
   await expect(page.getByText(/Not read: CrowdSec/)).toBeVisible()
   await expect(page.getByText(/4 community decisions/)).toBeVisible()

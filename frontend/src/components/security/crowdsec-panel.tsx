@@ -76,7 +76,7 @@ export function CrowdSecPanel({
   const { data, error, loading } = view
 
   if (loading && !data) return <EngineWaiting id="crowdsec" name="CrowdSec" lines={2} />
-  if (error && !data) return <ErrorState error={error} onRetry={view.refresh} />
+  if (error && !data) return <ErrorState error={error} onRetry={view.refresh} retryable />
   if (!data) return null
 
   if (!data.installed) {

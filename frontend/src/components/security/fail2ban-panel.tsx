@@ -112,7 +112,7 @@ export function Fail2banPanel({
   )
 
   if (loading && !data) return <EngineWaiting id="fail2ban" name="fail2ban" lines={4} />
-  if (error && !data) return <ErrorState error={error} onRetry={view.refresh} />
+  if (error && !data) return <ErrorState error={error} onRetry={view.refresh} retryable />
   if (!data) return null
 
   if (!data.available) {
