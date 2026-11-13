@@ -4,10 +4,18 @@ import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ChevronDown, ChevronUp, LockOpen, Slash } from "@/components/icons"
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  Crosshair,
+  Inspect,
+  LockOpen,
+  Slash,
+} from "@/components/icons"
 import { del, get } from "@/lib/api"
 import { networkOf } from "@/lib/clients"
-import { plural } from "@/lib/format"
+import { duration, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import {
   blockStanding,
@@ -36,8 +44,12 @@ import { useSecurity } from "@/components/security/security-context"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { BlockDialog } from "@/components/network/connections/block-dialog"
 import { AddressRail } from "@/components/network/connections/address-rail"
-import { AddressLive, AddressPast, Folded } from "@/components/network/connections/address-views"
-import { AddressMark, ProgramGlyph } from "@/components/network/connections/rows"
+import {
+  AddressLive,
+  AddressPast,
+  AddressPicture,
+} from "@/components/network/connections/address-views"
+import { AddressMark } from "@/components/network/connections/rows"
 import {
   ADDRESS_TABS,
   CONNECTIONS_FILTER_DEFAULTS,
@@ -47,7 +59,6 @@ import {
   blockable,
   matchPeers,
   parseAddress,
-  reached,
   stepAddress,
   type AddressTab,
   type ConnectionsFilters,
@@ -173,7 +184,7 @@ export function AddressPage() {
               onQuery={(q) => setFilters((previous) => ({ ...previous, q }))}
               scope={scope}
               onScope={(next) => setFilters((previous) => ({ ...previous, scope: next }))}
-              fromInternet={(list.data?.peers ?? []).filter((p) => !p.private).length}
+              fromInternet={list.data?.peers.filter((p) => !p.private).length}
               onOpen={open}
             />
           )}
@@ -269,6 +280,9 @@ function AddressMain({
   const block = (blocks.data ?? []).find((b) => b.address === address && b.state === "active")
   const isPrivate = peer?.private ?? detail.data?.private
   const mayBlock = admin && blockable(address, isPrivate) && !block
+  // Whether it is blocked already is not known until the blocks are read: the
+  // command stands in its place meanwhile, and cannot be pressed.
+  const blocksRead = blocks.data !== undefined || blocks.error !== undefined
 
   const lift = (b: AddressBlock) =>
     confirm({
@@ -287,18 +301,41 @@ function AddressMain({
       },
     })
 
-  // The lookups go behind the menu; the block, or lifting it, is the line's
-  // one command, because it is what the page is opened to decide.
-  const lookups: Verb[] = addressVerbs({ ip: address, navigate: (href) => router.push(href) })
+  // The lookups and the pages that go further are behind the menu; the
+  // block, or lifting it, is the line's one command, because it is what the
+  // page is opened to decide.
+  const lookups: Verb[] = [
+    ...addressVerbs({ ip: address, navigate: (href) => router.push(href) }),
+    {
+      key: "investigate",
+      label: "Investigate a path",
+      icon: Inspect,
+      run: () => router.push("/network/investigate"),
+    },
+    {
+      key: "capture",
+      label: "Capture packets",
+      icon: Crosshair,
+      run: () => router.push("/network/captures"),
+    },
+  ]
+  // One word on the button, as a verb is; its full name is what a screen
+  // reader and the list's menu call it.
   const command = mayBlock ? (
-    <Button size="sm" variant="destructive" disabled={blocking} onClick={() => setBlocking(true)}>
+    <Button
+      size="sm"
+      variant="destructive"
+      disabled={blocking || !blocksRead}
+      aria-label="Block at the firewall"
+      onClick={() => setBlocking(true)}
+    >
       <Slash className="size-3.5" />
-      Block at the firewall
+      Block
     </Button>
   ) : block && can("destructive") ? (
-    <Button size="sm" variant="outline" onClick={() => lift(block)}>
+    <Button size="sm" variant="outline" aria-label="Lift the block" onClick={() => lift(block)}>
       <LockOpen className="size-3.5" />
-      Lift the block
+      Lift
     </Button>
   ) : undefined
 
@@ -358,6 +395,7 @@ function AddressMain({
               <AddressLive
                 address={address}
                 peer={peer}
+                listed={list !== undefined}
                 detail={detail}
                 firewall={firewall}
                 block={block}
@@ -372,15 +410,15 @@ function AddressMain({
           </TabsContent>
         </Tabs>
       ) : (
-        <div className="border-t border-hairline pt-6">
-          {peer ? (
-            <Folded peer={peer} range={range} />
-          ) : (
-            <p className="text-body text-muted-foreground">
-              {list ? `${address} holds no socket with this server now.` : "Reading…"}
-            </p>
-          )}
-        </div>
+        // Without the detail's capability the summary is all there is of the
+        // address: its picture, and no views to choose between.
+        <AddressPicture
+          address={address}
+          peer={peer}
+          listed={list !== undefined}
+          block={block}
+          range={range}
+        />
       )}
 
       {blocking && (
@@ -408,10 +446,10 @@ function oldestSocket(detail: ConnectionDetail | undefined) {
 
 /**
  * The line the page opens on: the address on its network (Tailscale's mark
- * for the tailnet), and after it what it holds now — its sockets and the
- * established ones, the program it reached drawn as that product with its
- * ports — and its standing at the line's end: blocked with when the block
- * ends, connected, or gone from the table.
+ * for the tailnet), and after it what it holds now — its sockets, the
+ * established ones and how long the oldest has been seen — with its standing
+ * beside the name: blocked with when the block ends, connected, or gone from
+ * the table. What it reached is the picture under the line.
  */
 function AddressIdentity({
   address,
@@ -426,6 +464,7 @@ function AddressIdentity({
   peer?: Peer
   listed: boolean
   block?: AddressBlock
+  /** When the oldest live socket was first seen, for an administrator. */
   oldest?: string
   command?: React.ReactNode
   menu: React.ReactNode
@@ -441,35 +480,29 @@ function AddressIdentity({
           className="size-10 rounded-lg [&_img]:size-6 [&_svg]:size-5"
         />
       }
-      title={<span className="font-mono">{address}</span>}
+      // An IPv6 address is longer than a phone's line: it breaks rather than
+      // run under the command beside it.
+      title={<span className="min-w-0 font-mono break-all">{address}</span>}
       facts={
         <>
           <span>{network.label}</span>
-          <FactDot />
+          {(peer || !listed) && <FactDot />}
           {peer ? (
             <>
               <span className="numeric">
                 {plural(peer.count, "socket")}, {peer.established} active
               </span>
-              <FactDot />
-              <span className="inline-flex min-w-0 items-center gap-1.5 text-foreground">
-                <ProgramGlyph name={reached(peer)} />
-                <span className="truncate">{reached(peer)}</span>
-                {peer.ports.length > 0 && (
-                  <span className="font-mono text-muted-foreground">:{peer.ports.join(", :")}</span>
-                )}
-              </span>
               {oldest && (
                 <>
                   <FactDot />
-                  <span className="numeric">
-                    first seen {new Date(oldest).toLocaleTimeString()}
+                  <span className="numeric" title={new Date(oldest).toLocaleString()}>
+                    seen for {duration(Math.max(0, (now - Date.parse(oldest)) / 1000))}
                   </span>
                 </>
               )}
             </>
           ) : (
-            <span>{listed ? "no socket now" : "reading…"}</span>
+            !listed && <span>reading…</span>
           )}
         </>
       }
@@ -479,7 +512,7 @@ function AddressIdentity({
         block ? (
           <Status tone="danger" label={`blocked · ${blockStanding(block, now).toLowerCase()}`} />
         ) : peer ? (
-          <Status state="running" live label="connected" />
+          <Status state="running" label="connected" />
         ) : listed ? (
           <Status state="stopped" label="not connected" />
         ) : (

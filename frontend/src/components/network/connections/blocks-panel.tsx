@@ -14,13 +14,15 @@ import { ErrorState } from "@/components/state"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
+import { addressHref } from "@/components/network/connections/model"
 
 /**
  * The blocks made from the connection table: active first, each with why,
  * until when, which incident it belongs to and whether the firewall still
  * lists its rule — a rule removed outside the dashboard reads as gone rather
  * than as protection. Lifting one removes exactly its rule, so it takes the
- * destructive capability like deleting a rule does.
+ * destructive capability like deleting a rule does. Each is two lines whatever
+ * it carries, and its address opens that address's page.
  */
 export function BlocksPanel({
   blocks,
@@ -81,30 +83,38 @@ export function BlocksPanel({
             {(blocks ?? []).slice(0, 20).map((b) => (
               <Row
                 key={b.id}
-                title={<span className="font-mono">{b.address}</span>}
+                title={
+                  <Link
+                    href={addressHref(b.address)}
+                    aria-label={`Open ${b.address}`}
+                    className="rounded-sm font-mono focus-ring hover:underline"
+                  >
+                    {b.address}
+                  </Link>
+                }
                 subtitle={
-                  <span className="flex flex-col gap-0.5">
-                    <span>{b.reason}</span>
-                    <span className="text-hint text-muted-foreground">
-                      {b.createdBy ? `by ${b.createdBy} ` : ""}
-                      {relativeTime(b.createdAt)}
-                      {b.incidentRunId && (
-                        <>
-                          {" · "}
-                          <Link
-                            href={`/network/runs?run=${encodeURIComponent(b.incidentRunId)}`}
-                            className="underline underline-offset-4"
-                          >
-                            incident
-                          </Link>
-                        </>
-                      )}
-                      {b.state === "active" &&
-                        b.rulePresent === false &&
-                        " · its rule is no longer in the firewall"}
-                      {b.endError && ` · could not be lifted yet: ${b.endError}`}
-                    </span>
-                  </span>
+                  <>
+                    {b.state === "active" && b.rulePresent === false && (
+                      <span className="text-warning">its rule is no longer in the firewall · </span>
+                    )}
+                    {b.endError && (
+                      <span className="text-warning">could not be lifted yet: {b.endError} · </span>
+                    )}
+                    {/* The link first: the line is cut at its end on a phone. */}
+                    {b.incidentRunId && (
+                      <>
+                        <Link
+                          href={`/network/runs?run=${encodeURIComponent(b.incidentRunId)}`}
+                          className="rounded-sm underline underline-offset-4 focus-ring"
+                        >
+                          incident
+                        </Link>
+                        {" · "}
+                      </>
+                    )}
+                    {b.reason} · {b.createdBy ? `by ${b.createdBy} ` : ""}
+                    {relativeTime(b.createdAt)}
+                  </>
                 }
                 trailing={
                   <span className="flex items-center gap-3">

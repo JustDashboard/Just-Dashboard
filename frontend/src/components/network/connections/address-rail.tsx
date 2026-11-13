@@ -37,7 +37,8 @@ export function AddressRail({
   onQuery: (value: string) => void
   scope: "all" | "public"
   onScope: (scope: "all" | "public") => void
-  fromInternet: number
+  /** Undefined until the list is read: the chip has no count to show before. */
+  fromInternet: number | undefined
   onOpen: (address: string) => void
   className?: string
 }) {

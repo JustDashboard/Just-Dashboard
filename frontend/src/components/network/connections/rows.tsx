@@ -50,7 +50,16 @@ export function ProgramGlyph({ name }: { name: string }) {
  * unless the kernel picked it for an outgoing call, where nothing listens and
  * the ports page could only say so.
  */
-export function PortLinks({ ports, range }: { ports: number[]; range?: PortRange | null }) {
+export function PortLinks({
+  ports,
+  range,
+  colon,
+}: {
+  ports: number[]
+  range?: PortRange | null
+  /** Each port written as an address ends: ":443". */
+  colon?: boolean
+}) {
   if (ports.length === 0) return <>—</>
   return (
     <>
@@ -63,14 +72,35 @@ export function PortLinks({ ports, range }: { ports: number[]; range?: PortRange
               aria-label={`What listens on port ${port}`}
               className="rounded-sm underline-offset-4 focus-ring hover:text-foreground hover:underline"
             >
+              {colon && ":"}
               {port}
             </Link>
           ) : (
-            port
+            <>
+              {colon && ":"}
+              {port}
+            </>
           )}
         </Fragment>
       ))}
     </>
+  )
+}
+
+/** What TCP carried each way, each in its direction's colour. */
+export function Carried({
+  rx,
+  tx,
+  className,
+}: {
+  rx: React.ReactNode
+  tx: React.ReactNode
+  className?: string
+}) {
+  return (
+    <span className={cn("numeric font-mono text-hint whitespace-nowrap", className)}>
+      <span style={{ color: RX }}>↓ {rx}</span> <span style={{ color: TX }}>↑ {tx}</span>
+    </span>
   )
 }
 
@@ -126,6 +156,7 @@ export function PeerRow({
         <>
           {network.label}
           {blocked && <span className="text-destructive"> · blocked</span>}
+          {/* Narrower than the destination's column, the line names what it reached. */}
           <span className="md:hidden"> · {program}</span>
         </>
       }
@@ -182,14 +213,15 @@ export function RecordedRow({ peer, hour }: { peer: HistoricalPeer; hour: string
         <>
           {network.label}
           <span className="md:hidden"> · {owners}</span>
+          <span className="max-md:hidden">
+            {" "}
+            · seen {relativeTime(peer.firstSeen)} to {relativeTime(peer.lastSeen)}
+          </span>
         </>
       }
       trailing={
         <span className="flex items-center gap-5">
-          <span
-            className="hidden w-60 min-w-0 items-center gap-2 text-body md:flex lg:w-72"
-            title={`seen ${relativeTime(peer.firstSeen)} to ${relativeTime(peer.lastSeen)}`}
-          >
+          <span className="hidden w-60 min-w-0 items-center gap-2 text-body md:flex lg:w-72">
             <ProgramGlyph name={peer.owners[0] ?? ""} />
             <span className="min-w-0 truncate font-medium">{owners}</span>
             <span className="shrink-0 font-mono text-hint text-muted-foreground">
@@ -201,10 +233,11 @@ export function RecordedRow({ peer, hour }: { peer: HistoricalPeer; hour: string
             word={peer.sockets === 1 ? "socket" : "sockets"}
             className="w-20"
           />
-          <span className="numeric w-36 shrink-0 text-right font-mono text-hint whitespace-nowrap max-sm:hidden">
-            <span style={{ color: RX }}>↓ {flowBytes(peer.rxBytes)}</span>{" "}
-            <span style={{ color: TX }}>↑ {flowBytes(peer.txBytes)}</span>
-          </span>
+          <Carried
+            rx={flowBytes(peer.rxBytes)}
+            tx={flowBytes(peer.txBytes)}
+            className="w-36 shrink-0 text-right max-sm:hidden"
+          />
         </span>
       }
     />

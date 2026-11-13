@@ -1,18 +1,24 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { Servers } from "@/components/icons"
 import type { NetworkKind } from "@/lib/clients"
 import type { Connections } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useViewState } from "@/lib/view-state"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { ProductGlyph, hasProductLogo, processProduct } from "@/components/product-logo"
+import { portsHref } from "@/components/proxy/ports-list"
 import { WireHost, WireMark } from "@/components/deploy/wire"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
 import { beat, foldPeers, type Place, type Program } from "@/components/network/connections/model"
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/** The programs drawn before the rest fold into "N more programs". */
+const PROGRAMS = 5
 
 /**
  * Who is connected, drawn on the shared picture (`wire-flow.tsx`): where the
@@ -23,13 +29,17 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
  * side holds an established connection, quicker the more it holds. Loopback
  * never left the machine and is not drawn.
  *
+ * The three places are always drawn, a quiet one with a still dashed wire:
+ * the picture keeps one shape from an empty server to a busy one, and
+ * "nobody on the tailnet" is said rather than left out.
+ *
  * The list under it is the same peers one address at a time; this is their
  * shape at once, which is what an incident asks first: is this the internet,
  * and what is it hitting? So the internet is the list's "From the internet"
  * chip, and a program narrows the list to the addresses that reached it.
  *
- * The figures that four tiles once carried live on its nodes: the server's
- * sockets, listening and loopback on the hub, each place's addresses on the
+ * The figures that four tiles once carried live on its nodes: what listens
+ * and what never left the machine on the hub, each place's addresses on the
  * place, and under each the counts of every read since the page opened as a
  * line — the backend keeps no history of connections, and a count that is
  * only ever "now" cannot show that the burst was ten minutes ago.
@@ -49,6 +59,14 @@ export function ConnectionsPicture({
 }) {
   const { places, programs } = useMemo(() => foldPeers(data?.peers ?? []), [data?.peers])
   const history = useReadings(data, places)
+  // How many programs the last read drew, kept for the next visit: the
+  // picture waits at the height it had, so the list under it does not move
+  // when the read lands.
+  const [drawn, setDrawn] = useViewState("network.connections.programs", 4)
+  const rows = Math.max(1, Math.min(programs.length, PROGRAMS + 1))
+  useEffect(() => {
+    if (data && rows !== drawn) setDrawn(rows)
+  }, [data, rows, drawn, setDrawn])
 
   return (
     <WireFlow
@@ -60,11 +78,10 @@ export function ConnectionsPicture({
         nodes: places.map((place) =>
           placeNode(place, history.places[place.kind] ?? [], {
             pressed: place.kind === "internet" && internetOnly,
-            onPress: place.kind === "internet" ? onInternet : undefined,
+            onPress: place.kind === "internet" && place.peers.length > 0 ? onInternet : undefined,
           }),
         ),
-        loadingRows: 3,
-        empty: "Nobody from outside is connected",
+        loadingRows: places.length,
       }}
       hub={{
         mark: <WireHost />,
@@ -73,7 +90,24 @@ export function ConnectionsPicture({
         hint: data && (
           <>
             <span className="numeric block">
-              {data.listening} listening · {data.loopback} on loopback
+              {/* Listening goes to the page that names each socket: this page
+                  is who arrived, that one is what was open for them. */}
+              <Link
+                href={portsHref({})}
+                aria-label="Listening ports"
+                className="rounded-sm underline-offset-4 focus-ring hover:text-foreground hover:underline"
+              >
+                {data.listening} listening
+              </Link>{" "}
+              · {data.loopback} on loopback
+            </span>
+            {/* Down a phone the places are marks without their words, so the
+                hub says who is on each. */}
+            <span className="numeric block lg:hidden">
+              {places
+                .filter((place) => place.peers.length > 0)
+                .map((place) => `${place.peers.length} ${PLACE_WORD[place.kind] ?? place.kind}`)
+                .join(" · ")}
             </span>
             <Trend values={history.total} label="Sockets since the page opened" align="centre" />
           </>
@@ -82,12 +116,20 @@ export function ConnectionsPicture({
       end={{
         title: "What they reached",
         nodes: programs.map((program) => programNode(program, onProgram)),
-        max: 5,
+        max: PROGRAMS,
         more: { words: (hidden) => `${hidden} more programs` },
         empty: "Nothing reached",
+        loadingRows: drawn,
       }}
     />
   )
+}
+
+/** A place in the phone's one line under the hub. */
+const PLACE_WORD: Partial<Record<NetworkKind, string>> = {
+  internet: "from the internet",
+  tailscale: "on the tailnet",
+  local: "local",
 }
 
 function placeNode(
@@ -96,15 +138,18 @@ function placeNode(
   press: { pressed: boolean; onPress?: () => void },
 ): WireFlowNode {
   const Glyph = NETWORK_GLYPH[place.kind]
+  const quiet = place.peers.length === 0
   return {
     id: `place:${place.kind}`,
-    mark: (
-      <WireMark tone="logo" shape="square" size="md">
+    mark: (size) => (
+      <WireMark tone={quiet ? "neutral" : "logo"} shape="square" size={size === "sm" ? "sm" : "md"}>
         {place.kind === "tailscale" ? <ProductGlyph id="tailscale" /> : <Glyph aria-hidden />}
       </WireMark>
     ),
-    eyebrow: `${plural(place.peers.length, "address", "addresses")} · ${plural(place.sockets, "socket")}`,
-    title: place.title,
+    eyebrow: quiet
+      ? "nobody"
+      : `${plural(place.peers.length, "address", "addresses")} · ${plural(place.sockets, "socket")}`,
+    title: <span className={cn(quiet && "font-normal text-muted-foreground")}>{place.title}</span>,
     name: place.title,
     label: press.onPress
       ? press.pressed
@@ -114,11 +159,14 @@ function placeNode(
     onPress: press.onPress,
     hint: (
       <>
+        {/* A quiet place keeps the line its addresses would stand on. */}
         <span className="block truncate font-mono">
-          {place.peers
-            .slice(0, 2)
-            .map((p) => p.address)
-            .join(", ")}
+          {quiet
+            ? "\u00a0"
+            : place.peers
+                .slice(0, 2)
+                .map((p) => p.address)
+                .join(", ")}
           {place.peers.length > 2 && (
             <span className="ml-1.5 font-sans">+{place.peers.length - 2}</span>
           )}
@@ -130,7 +178,9 @@ function placeNode(
         />
       </>
     ),
-    line: { state: "up", moving: place.active > 0, duration: beat(place.active) },
+    line: quiet
+      ? { state: "idle" }
+      : { state: "up", moving: place.active > 0, duration: beat(place.active) },
   }
 }
 
@@ -138,8 +188,8 @@ function programNode(program: Program, onProgram: (name: string) => void): WireF
   const product = processProduct(program.name)
   return {
     id: `program:${program.key}`,
-    mark: (
-      <WireMark tone="logo" shape="square" size="md">
+    mark: (size) => (
+      <WireMark tone="logo" shape="square" size={size === "sm" ? "sm" : "md"}>
         {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Servers aria-hidden />}
       </WireMark>
     ),

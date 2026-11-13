@@ -4,10 +4,12 @@ import {
   blockContext,
   blockable,
   foldPeers,
-  foldedWords,
   matchPeers,
   parseAddress,
+  socketState,
+  stateWords,
   stepAddress,
+  transportWords,
 } from "./model"
 
 const peer = (address, over = {}) => ({
@@ -73,17 +75,25 @@ describe("the list", () => {
   })
 
   test("says what folding kept of a peer's sockets", () => {
-    expect(
-      foldedWords(
-        peer("198.51.100.23", {
-          protocols: ["tcp", "udp"],
-          remotePorts: [51022, 51023, 51024],
-          morePorts: 15,
-          states: { TIME_WAIT: 3, ESTABLISHED: 14, CONNECTED: 1 },
-        }),
-      ),
-    ).toBe("TCP/UDP · from 51022, 51023, 51024 +15 · 14 established, 3 time-wait, 1 connected")
-    expect(foldedWords(peer("198.51.100.23"))).toBeUndefined()
+    const folded = peer("198.51.100.23", {
+      protocols: ["tcp", "udp"],
+      remotePorts: [51022, 51023, 51024],
+      morePorts: 15,
+      states: { TIME_WAIT: 3, ESTABLISHED: 14, CONNECTED: 1 },
+    })
+    expect(transportWords(folded)).toEqual({
+      protocols: "TCP/UDP",
+      ports: "from 51022, 51023, 51024 +15",
+    })
+    expect(stateWords(folded)).toBe("14 established, 3 time-wait, 1 connected")
+    expect(transportWords(peer("198.51.100.23"))).toBeUndefined()
+    expect(stateWords(peer("198.51.100.23"))).toBeUndefined()
+    expect(transportWords(peer("198.51.100.23", { protocols: ["tcp"] }))).toEqual({
+      protocols: "TCP",
+      ports: undefined,
+    })
+    expect(socketState("FIN_WAIT_1")).toBe("fin-wait-1")
+    expect(socketState("")).toBe("connected")
   })
 
   test("walks the rows and starts over from an address the list lost", () => {
@@ -130,9 +140,23 @@ describe("the picture", () => {
       ["tailscale", 1, 12, 12],
       ["local", 1, 22, 20],
     ])
+    expect(places[0].peers.map((p) => p.address)).toEqual(["198.51.100.23", "203.0.113.77"])
     expect(programs.map((p) => [p.name, p.ports, p.sockets])).toEqual([
       ["caddy", [80, 443, 8443], 39],
       ["postgres", [5432], 22],
     ])
+  })
+
+  test("keeps every place on a quiet server, so the picture has one shape", () => {
+    const quiet = foldPeers([])
+    expect(quiet.places.map((p) => [p.kind, p.peers.length])).toEqual([
+      ["internet", 0],
+      ["tailscale", 0],
+      ["local", 0],
+    ])
+    expect(quiet.programs).toEqual([])
+    const tailnet = foldPeers([peer("100.110.34.9"), peer("::1")])
+    expect(tailnet.places.map((p) => p.peers.length)).toEqual([0, 1, 0])
+    expect(tailnet.programs.map((p) => p.name)).toEqual(["caddy"])
   })
 })

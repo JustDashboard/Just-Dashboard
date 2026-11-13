@@ -161,18 +161,6 @@ export function ConnectionsPanel() {
                   {fromInternet} from the internet
                 </span>
               </span>
-              <FactDot />
-              {/* Listening goes to the page that names each socket: this page
-                  is who arrived, that one is what was open for them. */}
-              <Link
-                href={portsHref({})}
-                aria-label="Listening ports"
-                className="numeric rounded-sm focus-ring hover:text-foreground hover:underline"
-              >
-                {data.listening} listening
-              </Link>
-              <FactDot />
-              <span className="numeric">{data.loopback} never left the machine</span>
             </>
           ) : (
             <span>
@@ -186,7 +174,7 @@ export function ConnectionsPanel() {
           error ? (
             <Status tone="warning" label="read failed" />
           ) : data ? (
-            <Status state="running" live label="live · every 10s" />
+            <Status state="running" label="read every 10s" />
           ) : (
             <Status tone="unknown" label="reading" />
           )
@@ -199,9 +187,9 @@ export function ConnectionsPanel() {
         lastSuccess={lastSuccess}
       />
 
-      {!data && error ? (
-        <ErrorState error={error} onRetry={refresh} />
-      ) : (
+      {/* A first read that failed has no shape to draw: the Live view says
+          so where its list would be, and a past hour is still a press away. */}
+      {(data || !error) && (
         <ConnectionsPicture
           data={data}
           loading={loading}
@@ -265,6 +253,8 @@ export function ConnectionsPanel() {
             query={query}
             search={search}
           />
+        ) : !data && error ? (
+          <ErrorState error={error} onRetry={refresh} retryable />
         ) : (
           <>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -280,16 +270,14 @@ export function ConnectionsPanel() {
                   Everything
                 </ToggleGroupItem>
                 <ToggleGroupItem value="public" className="px-2.5 text-hint">
-                  From the internet {fromInternet}
+                  From the internet {data && fromInternet}
                 </ToggleGroupItem>
               </ToggleGroup>
               <span className="flex-1" />
               {search}
             </div>
             {!data ? (
-              error ? null : (
-                <LoadingRows rows={4} />
-              )
+              <LoadingRows rows={4} />
             ) : peers.length === 0 ? (
               query.trim() ? (
                 <EmptyNote>No connection matches &ldquo;{query.trim()}&rdquo;.</EmptyNote>
@@ -302,7 +290,7 @@ export function ConnectionsPanel() {
                   description={
                     scope === "public"
                       ? "Every caller is on a private network or the tailnet."
-                      : "Nothing outside this machine holds a socket with it right now."
+                      : undefined
                   }
                   action={
                     <Link
@@ -338,8 +326,12 @@ export function ConnectionsPanel() {
             )}
             {data && (
               <p className="text-hint text-muted-foreground">
-                {peers.length} of {data.peers.length} addresses · grouped by remote address · socket
-                counts include connections still opening or closing.
+                {data.peers.length > 0 && (
+                  <>
+                    {peers.length} of {data.peers.length} addresses · grouped by remote address ·
+                    socket counts include connections still opening or closing.
+                  </>
+                )}
                 {data.quality && (
                   <span className="block" aria-label="What this read cannot see">
                     {data.quality.intervalSeconds > 0

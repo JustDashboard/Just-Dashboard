@@ -8,7 +8,9 @@ import { flowOwnerName, type FlowReport } from "@/lib/network-flows"
 import { foldHistoricalFlows } from "@/lib/network-traffic"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceList } from "@/components/flow"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ClockRewind } from "@/components/icons"
+import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { Button } from "@/components/ui/button"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import {
   Select,
@@ -61,11 +63,12 @@ export function RecordedConnections({
   const coverage = report.data?.coverageHours.find((c) =>
     c.hour.startsWith(chosen.from.slice(0, 13)),
   )
+  const off = report.data && !report.data.settings.enabled && report.data.rows.length === 0
   return (
     <div aria-label="Recorded connections" role="region" className="flex min-w-0 flex-col gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Select value={chosen.from} onValueChange={onHour}>
-          <SelectTrigger className="w-72 max-w-full font-mono" size="sm" aria-label="Which hour">
+          <SelectTrigger className="w-full font-mono sm:w-72" size="sm" aria-label="Which hour">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -76,7 +79,7 @@ export function RecordedConnections({
             ))}
           </SelectContent>
         </Select>
-        {report.data && (
+        {report.data && !off && (
           <span className="numeric text-hint text-muted-foreground">
             {plural(peers.length, "address", "addresses")} · from socket history
           </span>
@@ -94,18 +97,12 @@ export function RecordedConnections({
       )}
       {!report.data ? (
         report.error ? (
-          <ErrorState error={report.error} onRetry={report.refresh} />
+          <ErrorState error={report.error} onRetry={report.refresh} retryable />
         ) : (
           <LoadingRows rows={4} />
         )
-      ) : !report.data.settings.enabled && report.data.rows.length === 0 ? (
-        <Notice title="Socket history is off">
-          Nothing is kept of connections once they close, so there is no past hour to read.{" "}
-          <Link href="/network/flows" className="underline underline-offset-4">
-            Turn on socket history
-          </Link>{" "}
-          to record from now on.
-        </Notice>
+      ) : off ? (
+        <HistoryOff />
       ) : peers.length === 0 ? (
         <EmptyNote>No remote address was recorded in this hour.</EmptyNote>
       ) : (
@@ -115,7 +112,7 @@ export function RecordedConnections({
           ))}
         </ChoiceList>
       )}
-      {report.data && (
+      {report.data && !off && (
         <p className="text-hint text-muted-foreground">
           {coverage
             ? `${plural(coverage.samples, "sample")} in this hour${coverage.failedSources ? `, ${plural(coverage.failedSources, "failed source")}` : ""}${coverage.discardedIntervals ? `, ${plural(coverage.discardedIntervals, "discarded interval")}` : ""}. `
@@ -126,5 +123,24 @@ export function RecordedConnections({
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * Socket history is off and kept nothing of the hour: there is no past to
+ * read, and the next step is the page that turns it on.
+ */
+export function HistoryOff() {
+  return (
+    <EmptyState
+      icon={ClockRewind}
+      title="Socket history is off"
+      description="Nothing is kept of connections once they close, so there is no past hour to read."
+      action={
+        <Button asChild size="sm" variant="outline">
+          <Link href="/network/flows">Turn on socket history</Link>
+        </Button>
+      }
+    />
   )
 }

@@ -80,25 +80,33 @@ export function reached(peer: Pick<Peer, "processes" | "service">) {
 }
 
 /**
- * What folding by address kept of a peer's sockets, as one line: its
- * transports, the far end's ports and the states its sockets are in, busiest
- * state first — "TCP/UDP · from 51022, 51023 +15 · 14 established, 3 time-wait".
+ * What folding by address kept of the far end of a peer's sockets: its
+ * transports and the ports it called from — "TCP/UDP", "from 51022, 51023 +15".
  */
-export function foldedWords(peer: Peer): string | undefined {
+export function transportWords(peer: Pick<Peer, "protocols" | "remotePorts" | "morePorts">) {
   if (!peer.protocols || peer.protocols.length === 0) return undefined
-  const parts = [peer.protocols.join("/").toUpperCase()]
-  if (peer.remotePorts && peer.remotePorts.length > 0) {
-    parts.push(`from ${peer.remotePorts.join(", ")}${peer.morePorts ? ` +${peer.morePorts}` : ""}`)
+  return {
+    protocols: peer.protocols.join("/").toUpperCase(),
+    ports:
+      peer.remotePorts && peer.remotePorts.length > 0
+        ? `from ${peer.remotePorts.join(", ")}${peer.morePorts ? ` +${peer.morePorts}` : ""}`
+        : undefined,
   }
-  if (peer.states) {
-    parts.push(
-      Object.entries(peer.states)
-        .sort(([, a], [, b]) => b - a)
-        .map(([state, n]) => `${n} ${state.toLowerCase().replace("_", "-")}`)
-        .join(", "),
-    )
-  }
-  return parts.join(" · ")
+}
+
+/** The states a peer's sockets are in, busiest first: "14 established, 3 time-wait". */
+export function stateWords(peer: Pick<Peer, "states">) {
+  const states = Object.entries(peer.states ?? {})
+  if (states.length === 0) return undefined
+  return states
+    .sort(([, a], [, b]) => b - a)
+    .map(([state, n]) => `${n} ${socketState(state)}`)
+    .join(", ")
+}
+
+/** A socket's state as the kernel names it, in the page's case: "time-wait". */
+export function socketState(state: string | undefined) {
+  return (state || "connected").toLowerCase().replaceAll("_", "-")
 }
 
 /**
@@ -142,20 +150,22 @@ export type Program = {
 
 /**
  * The peers folded by where they are and by what they reached, busiest first.
- * Loopback never left the machine and is in neither.
+ * Every place is there whether or not anybody is on it, so the picture has
+ * one shape on a quiet server and a busy one and says "nobody from the
+ * tailnet" rather than leaving the tailnet out. Loopback never left the
+ * machine and is in neither.
  */
 export function foldPeers(peers: Peer[]): { places: Place[]; programs: Program[] } {
-  const byKind = new Map<NetworkKind, Place>()
+  const byKind = new Map<NetworkKind, Place>(
+    PLACES.map((p) => [p.kind, { ...p, peers: [], sockets: 0, active: 0 }]),
+  )
   const byProgram = new Map<string, Program>()
   for (const peer of peers) {
-    const kind = networkOf(peer.address).kind
-    if (kind === "server") continue
-    const title = PLACES.find((p) => p.kind === kind)?.title ?? kind
-    const place = byKind.get(kind) ?? { kind, title, peers: [], sockets: 0, active: 0 }
+    const place = byKind.get(networkOf(peer.address).kind)
+    if (!place) continue
     place.peers.push(peer)
     place.sockets += peer.count
     place.active += peer.established
-    byKind.set(kind, place)
 
     const name = reached(peer)
     const program = byProgram.get(name) ?? { key: name, name, ports: [], sockets: 0, active: 0 }
@@ -164,7 +174,7 @@ export function foldPeers(peers: Peer[]): { places: Place[]; programs: Program[]
     program.active += peer.established
     byProgram.set(name, program)
   }
-  const places = PLACES.map((p) => byKind.get(p.kind)).filter((g): g is Place => !!g)
+  const places = [...byKind.values()]
   for (const g of places) g.peers.sort((a, b) => b.count - a.count)
   const programs = [...byProgram.values()]
     .map((s) => ({ ...s, ports: s.ports.sort((a, b) => a - b) }))
