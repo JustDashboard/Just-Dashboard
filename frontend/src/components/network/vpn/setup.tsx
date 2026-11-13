@@ -53,7 +53,8 @@ const RESOLVERS = [
  * picks — the first free name and port, a /24 that collides with nothing
  * here, this server's public address as the endpoint — so the one decision
  * left is whether its clients' internet goes out through here, and which
- * resolver they are told to use. The server opens the port in the firewall
+ * resolver they are told to use. What a field takes when it is left empty
+ * is behind its ⓘ rather than under it: the form read as a page of captions. The server opens the port in the firewall
  * when the firewall would otherwise refuse it, and says so either way.
  */
 export function WireGuardSetup({
@@ -181,7 +182,7 @@ export function WireGuardSetup({
       <Field
         label="Tunnel name"
         htmlFor="wg-name"
-        hint="The first available native name when empty; a selected plan requires its exact name."
+        info="The first available native name when empty; a selected plan requires its exact name."
       >
         <Input
           id="wg-name"
@@ -231,7 +232,7 @@ export function WireGuardSetup({
         <Field
           label="Endpoint"
           htmlFor="wg-endpoint"
-          hint="Where clients dial; this server's public address when empty"
+          info="Where clients dial; this server's public address when empty. Public endpoint and provider reachability need testing from another network: a generated configuration does not establish them."
         >
           <Input
             id="wg-endpoint"
@@ -244,7 +245,7 @@ export function WireGuardSetup({
         <Field
           label="Port"
           htmlFor="wg-port"
-          hint="UDP; the first free from 51820 when empty"
+          info="UDP; the first free from 51820 when empty"
           error={portError}
         >
           <Input
@@ -257,31 +258,46 @@ export function WireGuardSetup({
           />
         </Field>
       </FieldRow>
-      <Field
-        label="IPv6 addressing"
-        hint="Opt in for new peers. Existing IPv4 client profiles stay unchanged."
-      >
-        <label className="flex h-9 items-center gap-2 text-body">
-          <Switch
-            checked={ipv6}
-            onCheckedChange={(value) => {
-              setIPv6(value)
-              if (!value) {
-                detachSeed()
-                setReservations((rows) => rows.filter((row) => row.family !== "inet6"))
-              }
+      <FieldRow>
+        <Field label="Tunnel network" htmlFor="wg-subnet" info="A /24 nothing here uses when empty">
+          <Input
+            id="wg-subnet"
+            value={subnet}
+            placeholder="10.8.0.0/24"
+            onChange={(event) => {
+              detachSeed()
+              setSubnet(event.target.value)
+              setReservations((rows) => rows.filter((row) => row.family !== "inet"))
             }}
-            aria-label="IPv6 addressing"
+            className="font-mono"
           />
-          {ipv6 ? "Dual stack" : "IPv4 only"}
-        </label>
-      </Field>
+        </Field>
+        <Field
+          label="IPv6 addressing"
+          info="Opt in for new peers. Existing IPv4 client profiles stay unchanged."
+        >
+          <label className="flex h-9 items-center gap-2 text-body">
+            <Switch
+              checked={ipv6}
+              onCheckedChange={(value) => {
+                setIPv6(value)
+                if (!value) {
+                  detachSeed()
+                  setReservations((rows) => rows.filter((row) => row.family !== "inet6"))
+                }
+              }}
+              aria-label="IPv6 addressing"
+            />
+            {ipv6 ? "Dual stack" : "IPv4 only"}
+          </label>
+        </Field>
+      </FieldRow>
       {ipv6 && (
         <FieldRow>
           <Field
             label="IPv6 tunnel network"
             htmlFor="wg-subnet6"
-            hint="A random unique-local /64 when empty; host and peer overlaps are refused"
+            info="A random unique-local /64 when empty; host and peer overlaps are refused"
             error={ipv6Error}
           >
             <Input
@@ -299,7 +315,7 @@ export function WireGuardSetup({
           </Field>
           <Field
             label="IPv6 exit"
-            hint="NAT66 through the IPv6 uplink; requires both forwarding switches and verified rules"
+            info="NAT66 through the IPv6 uplink; requires both forwarding switches and verified rules"
           >
             <label className="flex h-9 items-center gap-2 text-body">
               <Switch
@@ -313,31 +329,6 @@ export function WireGuardSetup({
           </Field>
         </FieldRow>
       )}
-      <p className="text-hint text-muted-foreground">
-        Public endpoint and provider reachability need testing from another network. A generated
-        configuration does not establish them.
-      </p>
-      <FieldRow>
-        <Field label="Tunnel network" htmlFor="wg-subnet" hint="A /24 nothing here uses when empty">
-          <Input
-            id="wg-subnet"
-            value={subnet}
-            placeholder="10.8.0.0/24"
-            onChange={(event) => {
-              detachSeed()
-              setSubnet(event.target.value)
-              setReservations((rows) => rows.filter((row) => row.family !== "inet"))
-            }}
-            className="font-mono"
-          />
-        </Field>
-        <Field label="Exit node" hint="Masquerade the tunnel's traffic out of the uplink">
-          <label className="flex h-9 items-center gap-2 text-body">
-            <Switch checked={exitNode} onCheckedChange={setExitNode} aria-label="Exit node" />
-            {exitNode ? "On" : "Off"}
-          </label>
-        </Field>
-      </FieldRow>
       <Disclosure
         summary="Advanced"
         facts={[mtu.trim() && `MTU ${mtu.trim()}`, custom.length > 0 && "own resolvers"]
@@ -348,7 +339,7 @@ export function WireGuardSetup({
           <Field
             label="MTU"
             htmlFor="wg-mtu"
-            hint="1420 when empty, which fits WireGuard over IPv6 on a 1500-byte link"
+            info="1420 when empty, which fits WireGuard over IPv6 on a 1500-byte link"
             error={mtuError}
           >
             <Input
@@ -363,7 +354,7 @@ export function WireGuardSetup({
           <Field
             label="Own resolvers"
             htmlFor="wg-dns"
-            hint="Addresses clients are told to resolve with, in place of the choice above"
+            info="Addresses clients are told to resolve with, in place of the choice above"
             error={dnsError}
           >
             <Input
