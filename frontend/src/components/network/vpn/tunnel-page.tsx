@@ -16,6 +16,8 @@ import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChipCount, tabClasses } from "@/components/tabs"
+import { ProductGlyph } from "@/components/product-logo"
+import { WireMark } from "@/components/deploy/wire"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { WireFlow } from "@/components/wire-flow"
@@ -185,7 +187,13 @@ export function TunnelPage() {
                       loading
                       start={{ title: "Devices", nodes: [] }}
                       end={{ title: "Sites", nodes: [], loadingRows: 2 }}
-                      hub={{ mark: null }}
+                      hub={{
+                        mark: (
+                          <WireMark tone="neutral" shape="square">
+                            <ProductGlyph id="wireguard" />
+                          </WireMark>
+                        ),
+                      }}
                     />
                   </>
                 )}
@@ -291,7 +299,7 @@ function LiveTunnel({
   const views: View[] = [
     { key: "overview", label: "Overview" },
     { key: "traffic", label: "Traffic" },
-    { key: "history", label: "History", count: history.data?.events.length },
+    { key: "history", label: "History", count: history.data?.events?.length },
   ]
   const shown = views.some((view) => view.key === tab) ? tab : "overview"
 
@@ -369,13 +377,14 @@ function RemovedTunnel({
   const history = useHistory(name, undefined, span)
   const { restore, dialog } = useRestore(onChanged)
   const views: View[] = [
-    { key: "history", label: "History", count: history.data?.events.length },
+    { key: "history", label: "History", count: history.data?.events?.length },
     { key: "traffic", label: "Traffic" },
   ]
   const shown = views.some((view) => view.key === tab) ? tab : "history"
   const refused =
     history.error instanceof ApiError && [400, 404].includes(history.error.status) && !history.data
-  const unknown = !archived && !reading && (refused || history.data?.events.length === 0)
+  const unknown =
+    !archived && !reading && (refused || (history.data && !history.data.events?.length))
 
   if (!archived && (reading || (!history.data && !history.error)))
     return (
@@ -425,13 +434,13 @@ function RemovedTunnel({
             archived ? (
               <>
                 <HostFact>
-                  <span className="font-mono">{archivedLine(archived)}</span>
+                  <span className="block truncate font-mono">{archivedLine(archived)}</span>
                 </HostFact>
                 {archived.restorable && archived.endpoint && (
                   <>
                     <FactDot />
                     <HostFact>
-                      <span className="font-mono">{archived.endpoint}</span>
+                      <span className="block truncate font-mono">{archived.endpoint}</span>
                     </HostFact>
                   </>
                 )}

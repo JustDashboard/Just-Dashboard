@@ -214,7 +214,7 @@ export function WireGuardSetup({
       </ChoiceGrid>
       <div>
         <p className="mb-2 text-body font-medium">Names are resolved with</p>
-        <ChoiceGrid columns="compact">
+        <ChoiceGrid columns={2}>
           {RESOLVERS.map((r) => (
             <ChoiceCard
               key={r.id}

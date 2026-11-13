@@ -3568,8 +3568,8 @@ reading page, and what makes them alive is the sanctioned five, held hard:
   cannot be read as a state), an address's prefix the port hue (`network/address.tsx`), in and out
   their chart colours everywhere they are drawn.
 - **The lit edge on what is taken.** Devices, peers, forwards and lists open their sheets and are lit
-  rows; route tables, rule lists, peers on the tailnet and shaping are readings and stay framed
-  tables.
+  rows; route tables, rule lists and shaping are readings and stay framed tables. (The tailnet's
+  machines were a framed table until 0.8.7; they are cards now, below.)
 
 What the guard refuses is drawn, not hidden: a control the server would refuse stays, disabled,
 with the guard's sentence beside it (a device's *Set down* on the uplink, forwarding that Docker
@@ -3623,6 +3623,46 @@ what took their place (`components/network/drift/`):
   read without guessing. **Each blocklist** is its publisher with its cache, render and kernel set
   as a chain, a link amber where the later one has fallen behind. **The repair plan** is cards you
   pick, lit (§16), and the review shows each change as a diff of its before and after.
+
+**The VPN page lost its tiles on 2026-11-13**, in the run that brought the older pages to the deploy
+pages' look. It opened on four figures (WireGuard 2/5, Tailnet 4/6, Exit, Moved), each said again a
+screen lower, over a tunnel whose head was a row of small grey buttons, a box of alerts, a list of
+family facts and a paragraph. Where each went (`components/network/vpn/`):
+
+- **Each VPN opens on its own line** (`HostIdentity` in the project's layout, `tunnel-identity.tsx`):
+  WireGuard's mark, the tunnel's name with who is online and how many things need a look, then its
+  network, its port and what it has moved; **Add a device** is the one command and Join a site,
+  History, Take down or Bring up, Create another tunnel and Remove are its menu. The tailnet's line is
+  Tailscale's mark, this server's name there, the daemon's state in words (`tailnetState`: "Needs
+  sign-in", never `NeedsLogin`) and its facts; while it waits to be signed in, the address it waits
+  at is the line's command. A Headscale this server runs opens on a third. The "Moved" and "Exit"
+  tiles are a fact on the tunnel's line and the hub of its picture.
+- **The picture is straight under the line, on `WireFlow`** (`tunnel-picture.tsx`, 250 hand-laid
+  lines before): devices, the tunnel with where its clients dial, sites. What the alert box listed is
+  a mark on the peer it is about (an amber corner on its tile and the finding in a few words,
+  `findingWords`), with the sentence in that peer's sheet. The VPN page draws six peers a side and
+  sends the rest to the tunnel's page, the ones that need a look first (`drawnPeers`).
+- **Internet exit is a row per address family** (`tunnel-exit.tsx`): the family's network, where
+  its exit leaves, the connections it translated, whether its rules were verified, and the switch
+  that turns that family's exit on or off. Two lines in every state. What the readings do not prove
+  is behind the title's ⓘ.
+- **A tunnel is a page** (`tunnel-page.tsx`, `/network/vpn/<name>`), on the process page's shape:
+  the way back, the same line, Overview, Traffic and History as the underlined strip (`?tab=`), the
+  other tunnels in a rail from `xl`, Alt+↑ and Alt+↓ carrying the view. It replaced a sheet opened
+  by a "History" button. A removed tunnel keeps its page: its record outlives it, and **Restore** is
+  that page's command while its file is in the archive.
+- **Machines are cards of one height** (`tailnet-machines.tsx`): the system's mark, the name over
+  its address in mono, how it is reached, what it moved and its state in columns that line up; under
+  1180px the readings take a second line on every card alike. The list's count and its All, Online
+  and Offline chips say what the "4 / 6" tile said. Headscale's nodes are the same card.
+- **What this server offers the tailnet is a settings form** (`tailscale-offers.tsx`):
+  `SettingSection`s in the fields' column, the exit node as `Segments`, the subnet routes as a list
+  with a field under it, the helper sentences behind an ⓘ, and the page's one floating save bar. A
+  save is worked out against the preferences read at that moment (`offerRequest`), so a retry after
+  a lost answer sends only what still differs.
+- **A verb the session would be refused is not drawn**: taking a tunnel down, removing it, removing a
+  peer, forgetting its saved copy, clearing a budget and withdrawing an offer are destructive routes,
+  and are shown to an account that holds `destructive`.
 
 **A container's page took the Overview's line in 0.7.1** (2026-10-08), at the operator's request,
 because it was the page with no life: a strip of four grey label-and-value pairs (container, image,

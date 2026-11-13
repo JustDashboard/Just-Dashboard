@@ -44,6 +44,7 @@ export function MachineRow({
   tags,
   line,
   readings,
+  narrow,
   state,
 }: {
   logo: React.ReactNode
@@ -52,6 +53,8 @@ export function MachineRow({
   line: React.ReactNode
   /** The columns between the name and the state, each of a fixed width. */
   readings: { key: string; className: string; node: React.ReactNode }[]
+  /** The second line of a narrow card, where the columns side by side would be cut short. */
+  narrow?: React.ReactNode
   state: React.ReactNode
 }) {
   const wide = useMediaQuery(WIDE)
@@ -83,12 +86,15 @@ export function MachineRow({
       }
     >
       {!wide && (
-        <p className="flex min-w-0 items-center gap-x-3 text-xs">
-          {readings.map((reading) => (
-            <span key={reading.key} className="min-w-0 truncate">
-              {reading.node}
-            </span>
-          ))}
+        // One line box whatever is on it: a mono address beside the UI face
+        // made its card a pixel taller than a card that says "not reached".
+        <p className="flex h-4 min-w-0 items-center gap-x-3 overflow-hidden text-xs leading-4">
+          {narrow ??
+            readings.map((reading) => (
+              <span key={reading.key} className="min-w-0 truncate">
+                {reading.node}
+              </span>
+            ))}
         </p>
       )}
     </ChoiceRow>

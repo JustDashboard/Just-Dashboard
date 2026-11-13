@@ -204,7 +204,7 @@ export function TunnelIdentity({
       facts={
         <>
           <HostFact>
-            <span className="font-mono">
+            <span className="block truncate font-mono">
               {tunnel.subnet || tunnel.addresses[0] || "no network"}
             </span>
           </HostFact>
@@ -244,8 +244,18 @@ export function IdentitySkeleton({ mark }: { mark: string }) {
   return (
     <HostIdentity
       mark={mark}
-      title={<Skeleton className="my-0.5 h-4 w-28" />}
-      state={<Skeleton className="h-3.5 w-24" />}
+      // Each grey bar stands in a box of the line it stands for, so the line
+      // is the height it will be and nothing under it moves when it is read.
+      title={
+        <span className="flex h-[1lh] items-center">
+          <Skeleton className="h-4 w-28" />
+        </span>
+      }
+      state={
+        <span className="flex h-4 items-center">
+          <Skeleton className="h-3 w-24" />
+        </span>
+      }
       facts={<Skeleton className="my-0.5 h-3 w-64 max-w-full" />}
     />
   )

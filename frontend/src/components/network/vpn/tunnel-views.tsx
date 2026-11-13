@@ -171,7 +171,7 @@ export function TunnelHistory({ name, history }: { name: string; history: Histor
         lastSuccess={history.lastSuccess}
         reading="WireGuard record"
       />
-      <EventList events={history.data.events} label={`${name} lifecycle`} />
+      <EventList events={history.data.events ?? []} label={`${name} lifecycle`} />
     </>
   )
 }

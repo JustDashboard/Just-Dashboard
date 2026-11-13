@@ -126,7 +126,9 @@ export function TailscaleBlock({
         facts={
           <>
             <HostFact>
-              <span className="font-mono">{self?.tailscaleIps.join(", ") || "no address"}</span>
+              <span className="block truncate font-mono">
+                {self?.tailscaleIps.join(", ") || "no address"}
+              </span>
             </HostFact>
             {tailscale.tailnet && (
               <>
@@ -189,8 +191,14 @@ export function TailscaleBlock({
         </Notice>
       )}
 
-      <TailscaleOffers tailscale={tailscale} onChanged={onChanged} />
-      <TailnetMachines machines={tailscale.peers} controlServer={tailscale.controlServer} />
+      {/* Alone in its box, so the form takes no section padding among the page's blocks. */}
+      <div className="min-w-0">
+        <TailscaleOffers tailscale={tailscale} onChanged={onChanged} />
+      </div>
+      {/* A daemon that is not running knows no machine; an empty list would say the tailnet has none. */}
+      {(tailscale.running || tailscale.peers.length > 0) && (
+        <TailnetMachines machines={tailscale.peers} controlServer={tailscale.controlServer} />
+      )}
       {(headscale.installed || headscale.container) && <Headscale headscale={headscale} />}
     </section>
   )
@@ -282,6 +290,25 @@ function Headscale({ headscale }: { headscale: HeadscaleView }) {
                     ),
                   },
                 ]}
+                narrow={
+                  // What waits on somebody comes first, where the line may be cut.
+                  <span className="min-w-0 truncate">
+                    {pending.length > 0 && (
+                      <span className="text-warning">
+                        awaiting approval <span className="font-mono">{pending.join(", ")}</span>
+                      </span>
+                    )}
+                    {pending.length > 0 && approved.length > 0 && " · "}
+                    {approved.length > 0 && (
+                      <>
+                        routes <span className="font-mono">{approved.join(", ")}</span>
+                      </>
+                    )}
+                    {pending.length + approved.length === 0 && (
+                      <span className="text-muted-foreground">no routes</span>
+                    )}
+                  </span>
+                }
                 state={
                   <Status
                     tone={expired ? "danger" : n.online ? "running" : "stopped"}

@@ -116,7 +116,10 @@ test("family evidence stays independent and IPv6 withdrawal is confirmed", async
   await expect(evidence).toContainText("Rules verified")
   await expect(evidence).toContainText("Exit configured through wan6")
   await expect(evidence).toContainText("Degraded")
-  await expect(evidence).toContainText("provider reachability")
+  await expect(evidence).toContainText("IPv6 admission could not be verified.")
+  // What the readings do not prove is one press away, not a paragraph under every tunnel.
+  await page.getByRole("button", { name: "What these readings prove" }).hover()
+  await expect(page.getByRole("tooltip")).toContainText("provider reachability")
   await page.getByRole("switch", { name: "wg0 IPv6 exit", exact: true }).click()
   expect(mutations).toEqual([])
   const dialog = page.getByRole("dialog")

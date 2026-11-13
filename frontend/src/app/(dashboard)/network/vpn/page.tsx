@@ -11,6 +11,8 @@ import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Modal } from "@/components/modal"
 import { Page, PageContext } from "@/components/page"
+import { ProductGlyph } from "@/components/product-logo"
+import { WireMark } from "@/components/deploy/wire"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -87,7 +89,15 @@ function NetworkVPNContent() {
       <Page className="animate-rise">
         <PageContext eyebrow="Network" title="VPN" />
         {vpn.error ? (
-          <ErrorState error={vpn.error} onRetry={vpn.refresh} retryable />
+          <>
+            <HostIdentity
+              mark="wireguard"
+              title="VPN"
+              state={<Status tone="danger" label="Not read" />}
+              facts={<HostFact>WireGuard and Tailscale on this server</HostFact>}
+            />
+            <ErrorState error={vpn.error} onRetry={vpn.refresh} retryable />
+          </>
         ) : (
           // The page's own shape while it is read: both lines and the picture
           // stand where they will, so nothing moves when the answer lands.
@@ -98,7 +108,13 @@ function NetworkVPNContent() {
                 loading
                 start={{ title: "Devices", nodes: [] }}
                 end={{ title: "Sites", nodes: [], loadingRows: 2 }}
-                hub={{ mark: null }}
+                hub={{
+                  mark: (
+                    <WireMark tone="neutral" shape="square">
+                      <ProductGlyph id="wireguard" />
+                    </WireMark>
+                  ),
+                }}
               />
             </section>
             <section aria-label="Tailscale" aria-busy className="flex min-w-0 flex-col gap-6">

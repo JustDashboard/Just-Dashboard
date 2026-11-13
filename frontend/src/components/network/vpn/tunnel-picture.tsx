@@ -176,7 +176,7 @@ function Findings({ findings, label }: { findings: WGAlert[]; label: string }) {
       role="note"
       aria-label={label}
       title={findings.map(findingSentence).join("\n")}
-      className="block truncate text-warning"
+      className="block text-warning"
     >
       {findings.map(findingWords).join(" · ")}
     </span>

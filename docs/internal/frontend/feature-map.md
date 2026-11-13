@@ -1145,12 +1145,17 @@ programs open into maps, attachments and cost with the dashboard's observer mark
 is followed by configured/active/verified phases (`components/network/traffic/`, `install.tsx`);
 Connections opens an address into its tuples, closes and layers, reads a past hour from socket
 history, and blocks with a reason, an end and an incident (`components/network/connections/`); VPN
-opts in to IPv6 addressing and separate egress with per-family evidence and translated-connection
-counts; each tunnel calls out stale always-on handshakes, captured transports and passed budgets,
-opens a record (endpoint evidence, trend, lifecycle with outcomes), and each peer's sheet adds its
-trend, endpoint history, alert-only budget, editing (a device's regenerated configuration), site
-verification and a Linux kill-switch download, with archived tunnels restorable and
-Tailscale/Headscale approval and key expiry read-only (`components/network/vpn/record.tsx`,
+opens each VPN on its own identity line with no tile row, opts in to IPv6 addressing and separate
+egress with per-family evidence and translated-connection counts on the row that switches that
+family's exit; each tunnel's picture marks stale always-on handshakes, captured transports and
+passed budgets on the peer they are about, a tunnel has a page of its own (`/network/vpn/<name>`:
+endpoint evidence, trend and what each peer moved, lifecycle with outcomes, kept for a removed
+tunnel beside its restore), and each peer's sheet adds its trend, endpoint history, alert-only
+budget, editing (a device's regenerated configuration), site verification and a Linux kill-switch
+download, with archived tunnels restorable, tailnet machines and Headscale nodes as one-line cards,
+the exit-node offer and subnet routes as settings on one save bar, a Tailscale that waits for
+sign-in offering the address it waits at, and Headscale approval and key expiry read-only
+(`components/network/vpn/`: `tunnel-page.tsx`, `tunnel-reading.ts`, `tailscale-offers.tsx`,
 `peer-actions.tsx`, `archive.tsx`). Twenty-six admin-only server diagnostics, each rendering one
 shared structured result (verdict, checks, findings with owners, facts with their basis, tables with
 in-product row links, metrics and limits) with raw output behind a disclosure, a server-held quick

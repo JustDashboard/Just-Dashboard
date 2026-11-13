@@ -1,6 +1,7 @@
 "use client"
 
 import type { WGFamilyState, WGInterface } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
@@ -106,16 +107,23 @@ function Family({
   const reading = state ? familyReading(state) : undefined
   const exit = [reading?.exit ?? fallback.exit, reading?.reason].filter(Boolean).join(" · ")
   return (
-    <li className="flex min-h-14 min-w-0 items-center gap-3 py-2 sm:gap-4">
+    <li className="flex min-h-14 min-w-0 items-center gap-3 py-2 max-sm:min-h-[4.5rem] sm:gap-4">
       <span className="eyebrow w-9 shrink-0">{label}</span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-body font-medium">
-          <span className="font-mono">{reading?.network ?? fallback.network}</span>
+          <span className={cn((!reading || state?.subnet) && "font-mono")}>
+            {reading?.network ?? fallback.network}
+          </span>
           {reading && (
             <span className="font-normal text-muted-foreground"> · {reading.runtime}</span>
           )}
         </span>
-        <span className="block truncate text-hint text-muted-foreground" title={exit}>
+        {/* Two lines on a phone, where the verdict and the switch leave the
+            sentence half a row; the row is that tall in every state there. */}
+        <span
+          className="block text-hint text-muted-foreground max-sm:line-clamp-2 sm:truncate"
+          title={exit}
+        >
           {exit}
         </span>
       </span>
