@@ -1095,7 +1095,11 @@ unit-tested); checked by `tests/browser/processes-ui.spec.ts` and
 ### `/proxy/*`
 
 Proxy overview, Sites and site details, Certificates, Streams, Ports, Configuration, TLS tools and
-Traffic show observed inventories and records. Alerts (`/proxy/alerts`, administrators) is its own
+Traffic show observed inventories and records. Certificates keeps its views in the address
+(`?tab=`: certificates, renewal, DNS challenge, ACME accounts, local CA, signing requests, watched
+domains), and a certificate is a page of its own, `/proxy/certificates/<name>` with `?path=` where
+two share a name (`certificate-page.tsx`, its rail and picture; the shared console, forms and verbs
+in `certificate-work.tsx`, the certificates layout); the sheet's old `?cert=<file>` lands there. Alerts (`/proxy/alerts`, administrators) is its own
 page: what the rules watch wired to the channels told, what fires with its mute, the rules edited in
 a sheet, and a test per channel (the parts that do not know the proxy's kinds are
 `components/alerts/alert-parts.tsx`, shared with `/metrics/alerts`); the overview's identity bar
