@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import { CheckCircle, Cpu, Globe, Layers, Warning } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, percent } from "@/lib/format"
@@ -9,6 +8,7 @@ import { useContainerLive } from "@/hooks/use-container-live"
 import { usePoll } from "@/hooks/use-poll"
 import type { ContainerHistory, TrafficPulse } from "@/lib/types"
 import { utilisationTone } from "@/components/meter"
+import { NoReading, ReadingLine } from "@/components/reading-line"
 import { StatusDot } from "@/components/status-dot"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { HUE } from "@/components/overview/readings"
@@ -16,54 +16,13 @@ import { NumberTicker } from "@/components/ui/number-ticker"
 import { WireMark } from "@/components/deploy/wire"
 import { failingTone } from "@/components/deploy/fleet"
 
-/**
- * The four readings under Production, as sentences on the wiring's own marks:
- * a tinted glyph, what the reading is, what it says in words, and its last hour
- * at the line's end. They were four `StatTile`s, a figure with a unit and a
- * caption the reader had to put together ("0.1 %", "100% is one core"), under a
- * picture that says everything else in words. Each line is a way to the page
- * that has the rest, and every state of a line is the same height, so a reading
- * landing moves nothing under it.
- */
-function ReadingLine({
-  href,
-  label,
-  mark,
-  name,
-  children,
-  hint,
-  trend,
-}: {
-  href: string
-  /** Where the line goes, as its accessible name. */
-  label: string
-  mark: React.ReactNode
-  name: React.ReactNode
-  children: React.ReactNode
-  hint: React.ReactNode
-  trend?: React.ReactNode
-}) {
-  return (
-    <Link
-      href={href}
-      aria-label={label}
-      data-slot="reading-line"
-      className="flex min-w-0 items-center gap-3.5 rounded-lg px-2 py-2.5 focus-ring transition-colors hover:bg-row-hover"
-    >
-      {mark}
-      <span className="block min-w-0 flex-1">
-        <span className="eyebrow flex items-center gap-1.5">{name}</span>
-        <span className="block truncate text-body leading-snug font-medium">{children}</span>
-        <span className="block truncate text-hint leading-snug text-muted-foreground">{hint}</span>
-      </span>
-      <span className="hidden w-32 shrink-0 sm:block 2xl:w-48">{trend}</span>
-    </Link>
-  )
-}
-
-function NoReading({ children }: { children: React.ReactNode }) {
-  return <span className="text-muted-foreground">{children}</span>
-}
+/*
+  The four readings under Production are `ReadingLine`s (`components/reading-line.tsx`):
+  sentences on the wiring's own marks. They were four `StatTile`s, a figure with a unit
+  and a caption the reader had to put together ("0.1 %", "100% is one core"), under a
+  picture that says everything else in words. Each line is a way to the page that has
+  the rest.
+*/
 
 /**
  * The last hour at the ingress, from the record the server holds, content with

@@ -48,6 +48,7 @@ import { Insights } from "@/components/deploy/insights"
 import { Availability } from "@/components/deploy/availability"
 import { RunRow } from "@/components/deploy/run-row"
 import { TrafficReadings, UsageReadings } from "@/components/deploy/live-readings"
+import { ReadingLines } from "@/components/reading-line"
 import { PreviewBranchLines } from "@/components/deploy/preview-branches"
 import { RightSizeCard } from "@/components/deploy/right-size"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
@@ -276,9 +277,7 @@ export function ProjectOverview() {
             live: its last socket frame would claim a reading of something that
             is not running (§11). */}
         <div className="mt-5 border-t border-hairline pt-3">
-          {/* Out by the lines' own inset, so their marks stand on the page's
-              edge under the wiring's and only the hover wash passes it. */}
-          <div className="-mx-2 grid min-w-0 gap-x-6 xl:grid-cols-2">
+          <ReadingLines>
             <TrafficReadings projectId={project.projectId} />
             <UsageReadings
               containerId={liveService?.state === "running" ? liveService.containerId : undefined}
@@ -290,7 +289,7 @@ export function ProjectOverview() {
               }
               href={`/deploy/${project.projectId}/runtime`}
             />
-          </div>
+          </ReadingLines>
         </div>
       </PanelBody>
     </Panel>,
