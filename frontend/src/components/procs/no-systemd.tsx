@@ -2,7 +2,8 @@
 
 import { Logs, Servers, Stopwatch } from "@/components/icons"
 import { MissingScreen, type MissingGain } from "@/components/missing-thing"
-import { noSystemd, type SystemdReader } from "@/components/missing-thing-model"
+import { missingFromError, noSystemd, type SystemdReader } from "@/components/missing-thing-model"
+import { ErrorState } from "@/components/state"
 
 /** What systemd's pages draw on a server that has it. */
 const GAINS: MissingGain[] = [
@@ -55,4 +56,33 @@ export function NoSystemd({
       className={className}
     />
   )
+}
+
+/**
+ * A read of systemd that failed: the same screen where the answer is that
+ * there is no systemd (a host with systemctl and another init answers the
+ * list with systemctl's own refusal), and the failure it is otherwise.
+ */
+export function NoSystemdOrError({
+  error,
+  reader,
+  size = "page",
+  onRetry,
+  className,
+  errorClassName,
+}: {
+  error: Error
+  reader: SystemdReader
+  size?: "page" | "block"
+  onRetry?: () => void
+  /** The screen's. */
+  className?: string
+  /** The failure box's, which is spaced as the box it replaced was. */
+  errorClassName?: string
+}) {
+  const missing = missingFromError(error, { systemd: reader })
+  if (missing?.reason !== "no-systemd") {
+    return <ErrorState error={error} onRetry={onRetry} className={errorClassName} />
+  }
+  return <NoSystemd reader={reader} size={size} raw={missing.raw} className={className} />
 }

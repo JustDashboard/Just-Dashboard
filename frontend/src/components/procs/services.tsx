@@ -16,7 +16,7 @@ import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/comp
 import { ProductLogo, platformProduct, unitProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, LoadingPanel } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions } from "@/components/verbs"
@@ -39,7 +39,7 @@ import type { SystemdList, SystemdUnit } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { MiniBar } from "@/components/procs/process-table"
-import { NoSystemd } from "@/components/procs/no-systemd"
+import { NoSystemd, NoSystemdOrError } from "@/components/procs/no-systemd"
 import { ServiceBand } from "@/components/procs/service-band"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
 import { cpuTone } from "@/components/procs/shared"
@@ -201,7 +201,7 @@ export function Services() {
     return (
       <Page>
         {header}
-        <ErrorState error={list.error} />
+        <NoSystemdOrError error={list.error} reader="services" />
       </Page>
     )
   }
