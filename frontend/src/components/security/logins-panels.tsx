@@ -330,8 +330,8 @@ function CurrentSessions({ poll }: { poll: PollState<LoginSession[]> }) {
                   description={
                     // The address keeps its width; the terminal gives way first.
                     <span className="flex min-w-0 items-center gap-1.5">
-                      <Address ip={session.from || "console"} className="shrink" />
-                      <span className="min-w-0 shrink-[20] truncate font-mono">
+                      <Address ip={session.from || "console"} className="max-w-full shrink-0" />
+                      <span className="min-w-0 flex-1 truncate font-mono">
                         · {session.tty} · {session.isSsh ? "ssh" : "local"}
                       </span>
                     </span>
