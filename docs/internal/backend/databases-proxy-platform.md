@@ -5582,6 +5582,24 @@ volume with the tunable, the label and its restart policy, and the fleet must th
   `GET /certificates/coverage`. The hygiene findings endpoint and its recommendation rules are removed
   in 0.7.5. Existing certificate issuance, renewal and lineage controls retain their own review and
   permission boundaries.
+- **Reloading after renewal** (`renewal_hooks.go`). nginx serves the certificate it read at its last
+  reload, and certbot reloads it after a renewal only for a lineage its nginx plugin installed. `PUT
+  /certificates/renewal-hook` (system.admin, audited as `certificates.renewal-hook.install`) writes one
+  managed deploy hook, `/etc/letsencrypt/renewal-hooks/deploy/50-just-dashboard-reload-nginx`, which
+  reloads nginx only after `nginx -t` passes; `DELETE` (inside `s.destructive`, no phrase) removes it.
+  A file at that name without the `# Managed by Just Dashboard` marker is `foreign` and is left alone
+  (409 `hook_foreign`). `CertbotState.reloadHook` carries the state (`installed`, `missing`,
+  `modified`, `foreign`) and the other deploy and post hooks certbot runs. The dashboard's own
+  issuance and renewal jobs reload the sites serving a lineage themselves (`SitesServingLineages`),
+  since certbot runs no deploy hook for a new lineage. `GET /certificates/renewal/log` reads the
+  renewal schedule's record (the timer's service journal, or certbot's log where cron renews), and
+  `POST /certificates/renewal/run` (system.admin, audited as `certificates.renewal.run`) starts that
+  service as a `certbot.renewal` job, 409 `renewal_not_systemd` where cron renews. `GET
+  /certificates/certbot` is `CertbotState` (503 `certbot_unavailable` without certbot); `POST
+  /certificates/certbot/install` (system.admin, `certificates.certbot.install`) installs certbot or one
+  DNS plugin through the host's package manager; `GET /certificates/dns-providers` lists the DNS
+  plugins with whether each is installed and has saved credentials; and `POST /certificates/revoke`
+  (inside `s.destructive`, `certificates.revoke`) runs `certbot revoke --delete-after-revoke` as a job.
 
 - **The proxy routes are mounted per area**, each from its own file beside its handlers, and composed in
   `mountProxyRoutes` (`api/handlers_proxy.go`): `mountEngineRoutes` (status, the raw config editor,
