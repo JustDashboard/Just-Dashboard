@@ -286,8 +286,8 @@ most persistent first, with `Capped` reported by the arithmetic `countWithin` us
 ran out inside the window is a floor rather than a total. A console attempt has no address; it is
 counted and not listed.
 
-The logins open now are `GET /ssh-sessions` (`netsec.Sessions`): `who`'s rows, each matched to its
-sshd process by user and terminal so it carries a PID. `POST /ssh-sessions/{pid}/disconnect`
+The logins open now are `GET /ssh-sessions` (`netsec.Sessions`): `who`'s rows, an SSH login matched
+to its sshd process by user and terminal so it carries a PID; a row with no such process has none. `POST /ssh-sessions/{pid}/disconnect`
 (`system.admin`, inside `s.destructive`, ordinary confirmation, audited as `ssh.session.disconnect`)
 sends that process `SIGHUP`, and only when the PID is on the list just built: anything else is
 refused, so the route cannot signal an arbitrary process.
