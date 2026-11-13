@@ -6,6 +6,8 @@
 - [`features-terminal.md`](features-terminal.md) — feature-specific UI and the terminal workspace.
 - [`feature-map.md`](feature-map.md) — all App Router feature areas and their component ownership.
 - [`data-theming.md`](data-theming.md) — API/socket state, metrics state, confirmations, and updates.
+- [`workspace-interactions.md`](workspace-interactions.md) — page-owned keyboard commands, refresh,
+  row movement and place memory from `components/workspace/`.
 
 Read [`design-system.md`](design-system.md) before adding a component that any other page could also
 want. `eslint-rules/design-system.mjs` and `tests/browser/design-system.spec.ts` enforce the parts of
