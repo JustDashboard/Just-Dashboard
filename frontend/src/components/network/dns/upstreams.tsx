@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { del, post, ApiError } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -369,7 +369,9 @@ export function ResolverSettings({
         }}
         applies="immediately"
         error={planError}
-        note={blocked && !readOnly ? blocked : undefined}
+        // The page says once, at the head of the column, that a reader's
+        // account changes nothing here; this is the narrower refusal.
+        note={blocked && !readOnly && can("system.admin") ? blocked : undefined}
       >
         <SettingSection
           id="dns-upstreams"
@@ -635,7 +637,9 @@ function ClearList({
   disabled: boolean
   onChange: (checked: boolean) => void
 }) {
-  if (!empty) return null
+  // A switch nobody here may turn is drawn only when it is on: then it is a
+  // fact about the drop-in, and off it is one more dead control.
+  if (!empty || (disabled && !checked)) return null
   return (
     <OptionRow
       title={CLEAR[list]}
@@ -652,9 +656,15 @@ function ClearList({
  * put back.
  */
 export function ResolverOutcomeNote({ outcome }: { outcome: ResolverOutcome }) {
+  // Save is pressed at the foot of the window and this lands at the head of
+  // the column, so it is brought into view when it arrives.
+  const note = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    note.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }, [outcome])
   if (outcome.kind === "put-back") {
     return (
-      <div className="flex min-w-0 animate-rise flex-col gap-3" role="alert">
+      <div ref={note} className="flex min-w-0 animate-rise scroll-mt-6 flex-col gap-3" role="alert">
         <Notice title="Put back: a required check failed" tone="danger">
           {outcome.reason}
         </Notice>
@@ -664,7 +674,7 @@ export function ResolverOutcomeNote({ outcome }: { outcome: ResolverOutcome }) {
   }
   const { applied } = outcome
   return (
-    <div className="flex min-w-0 animate-rise flex-col gap-3" role="status">
+    <div ref={note} className="flex min-w-0 animate-rise scroll-mt-6 flex-col gap-3" role="status">
       {applied.verified ? (
         <Status
           tone="running"

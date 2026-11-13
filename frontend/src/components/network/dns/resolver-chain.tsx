@@ -46,6 +46,14 @@ export function EncryptionNote({
   )
 }
 
+/**
+ * One line of a node's detail. What stands on it is set on the line's top
+ * edge: a mono address or a lock beside words of the body face sat on another
+ * baseline and made that line two pixels taller than its neighbours, so no
+ * two nodes were one height.
+ */
+const LINE = "block truncate [&>*]:align-top"
+
 /** A node not read yet, on the four lines an upstream's words stand on. */
 function ghost(id: string): WireFlowNode {
   return {
@@ -113,14 +121,14 @@ export function ResolverChain({
         name: "Programs on this server",
         hint: resolvConf ? (
           <>
-            <span className="block truncate">
+            <span className={LINE}>
               ask{" "}
               <span className="font-mono">
                 {resolvConf.nameservers.slice(0, 2).join(", ") || "nothing"}
               </span>
             </span>
             {/* Held when there is no search domain, so the node is one height either way. */}
-            <span className="block truncate">
+            <span className={LINE}>
               {resolvConf.search.length > 0 ? (
                 <>
                   search <span className="font-mono">{resolvConf.search.join(" ")}</span>
@@ -169,7 +177,7 @@ export function ResolverChain({
         name: identity.name,
         hint: (
           <>
-            <span className="block truncate">
+            <span className={LINE}>
               {!identity.bare || tlsName ? (
                 <span className="font-mono">
                   {address}
@@ -179,7 +187,7 @@ export function ResolverChain({
                 origin(up)
               )}
             </span>
-            <span className="block truncate">
+            <span className={LINE}>
               {identity.tunnel ? (
                 "inside the tailnet"
               ) : (
@@ -339,7 +347,7 @@ export function Port53({ view, shape }: { view?: DNSView; shape: DNSShape }) {
               </WireMark>
             }
             eyebrow={
-              <span className="font-mono normal-case">
+              <span className="align-top font-mono normal-case">
                 {node.address
                   ? `${node.address}:53 · ${node.protocols.join(" ")}`
                   : "not on port 53"}
@@ -348,8 +356,8 @@ export function Port53({ view, shape }: { view?: DNSView; shape: DNSShape }) {
             title={node.title}
             hint={
               <>
-                <span className="block truncate">{node.detail}</span>
-                <span className="block truncate">
+                <span className={LINE}>{node.detail}</span>
+                <span className={LINE}>
                   {node.blocker && (node.silent ? "ad-blocker, not answering" : "ad-blocker")}
                   {node.open && (
                     <span className="text-warning">{node.blocker ? " · " : ""}every interface</span>

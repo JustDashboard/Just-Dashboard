@@ -97,7 +97,7 @@ export function Adblock({
                       {blocker.image && (
                         <>
                           {" · "}
-                          <span className="font-mono">{blocker.image}</span>
+                          <span className="align-top font-mono">{blocker.image}</span>
                         </>
                       )}
                     </>

@@ -165,6 +165,8 @@ export function DNSPage() {
   const scrolled = useRef("")
   useEffect(() => {
     const id = hash.replace(/^#/, "")
+    // No anchor is the reader having moved on: the next arrival scrolls again.
+    if (!id) scrolled.current = ""
     if (!id || scrolled.current === id) return
     const target = document.getElementById(id)
     if (!target) return
@@ -172,13 +174,20 @@ export function DNSPage() {
     target.scrollIntoView({ block: "start" })
   }, [hash, view, data, hosts.data])
 
-  const [caret, setCaret] = useState(0)
+  // The command puts the caret in the name once the lookups are on screen:
+  // the address changes first, and the view a render or two after it.
+  const caret = useRef(false)
   useEffect(() => {
-    if (caret > 0) document.getElementById("lookup-name")?.focus()
-  }, [caret])
+    if (!caret.current || view !== "lookups") return
+    caret.current = false
+    document.getElementById("lookup-name")?.focus()
+  }, [view, search])
   const resolve = () => {
     show("lookups", { tool: "resolve" })
-    setCaret((held) => held + 1)
+    const field = document.getElementById("lookup-name")
+    // Already in front: nothing will render, so the caret moves now.
+    if (field?.offsetParent) field.focus()
+    else caret.current = true
   }
   const requestService = (request: DNSServiceAsk) => {
     setServiceRequest({ ...request, nonce: (serviceRequest?.nonce ?? 0) + 1 })
@@ -329,6 +338,13 @@ export function DNSPage() {
 }
 
 /**
+ * The facts' own box. On a phone the three of them take two lines, so two are
+ * held from the first frame: the read fills the line rather than adding one
+ * and pushing the strip and the picture down.
+ */
+const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-9"
+
+/**
  * The line the page opens on, laid out as a project's header: the resolver's
  * mark and name with its state beside it, then the address programs ask, where
  * a lookup goes from there, and the share answered from the cache. It is drawn
@@ -360,7 +376,18 @@ function Identity({
             <Status tone="unknown" label="Reading" />
           )
         }
-        facts={failed ? <span>the resolver could not be read</span> : <Bar className="w-56" />}
+        facts={
+          failed ? (
+            <span>the resolver could not be read</span>
+          ) : (
+            <span className={FACTS}>
+              {/* On a line of the facts' own height, so the read fills it rather than growing it. */}
+              <span className="inline-flex h-4 items-center">
+                <Bar className="w-56" />
+              </span>
+            </span>
+          )
+        }
         command={command}
         menu={menu}
       />
@@ -378,7 +405,7 @@ function Identity({
       title={resolver.path ? <span className="font-mono">{resolver.name}</span> : resolver.name}
       state={<Status tone={resolver.state.tone} label={resolver.state.label} />}
       facts={
-        <>
+        <span className={FACTS}>
           {resolver.address && (
             <>
               <span className="font-mono text-foreground">{resolver.address}</span>
@@ -392,7 +419,7 @@ function Identity({
               <span className="numeric">{Math.round(stats.hitPercent)}% from cache</span>
             </>
           )}
-        </>
+        </span>
       }
       command={command}
       menu={menu}

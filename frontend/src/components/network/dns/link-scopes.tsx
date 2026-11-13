@@ -110,10 +110,10 @@ function LinkRow({ link, onSplit }: { link: Link; onSplit?: () => void }) {
   return (
     <ChoiceRow
       leading={<ProductLogo id={interfaceProduct(link.name)} size="sm" fallback={NetworkDevice} />}
-      title={<span className="font-mono">{link.name}</span>}
+      title={<span className="align-top font-mono">{link.name}</span>}
       verb={`Edit split DNS for ${link.name}`}
       description={
-        <span className="font-mono">
+        <span className="align-top font-mono">
           {[
             link.servers.length > 0 ? link.servers.join(" ") : "no servers",
             routing.length > 0 && `routes ${routing.join(" ")}`,
@@ -122,7 +122,7 @@ function LinkRow({ link, onSplit }: { link: Link; onSplit?: () => void }) {
             .filter(Boolean)
             .join(" · ")}
           {/* On a phone the readings at the card's edge give way to its name. */}
-          <span className="font-sans sm:hidden"> · {route.toLowerCase()}</span>
+          <span className="align-top font-sans sm:hidden"> · {route.toLowerCase()}</span>
         </span>
       }
       disabled={!onSplit}

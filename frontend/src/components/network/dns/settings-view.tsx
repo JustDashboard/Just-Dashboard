@@ -3,7 +3,8 @@
 import { useState } from "react"
 import type { PollState } from "@/hooks/use-poll"
 import type { DNSView, HostRecords } from "@/lib/types"
-import { FormSection, FormSections } from "@/components/form"
+import { useAuth } from "@/hooks/use-auth"
+import { FormNote, FormSection, FormSections } from "@/components/form"
 import { ErrorState, Notice } from "@/components/state"
 import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
 import { Bar } from "@/components/network/dns/ghost"
@@ -42,6 +43,7 @@ export function SettingsView({
   hosts: PollState<HostRecords>
   onChanged: () => void
 }) {
+  const { can } = useAuth()
   const [outcome, setOutcome] = useState<ResolverOutcome>()
   if (!view) {
     return (
@@ -71,6 +73,11 @@ export function SettingsView({
       {/* The room at the foot is the save bar's, so it never lies over the last field. */}
       <div className="mx-auto w-full max-w-3xl min-w-0 space-y-8 pb-20">
         {outcome && <ResolverOutcomeNote outcome={outcome} />}
+        {!can("system.admin") && (
+          <FormNote>
+            Read only: changing the resolver or the host&rsquo;s records requires an administrator.
+          </FormNote>
+        )}
         {readOnly ? (
           <Notice title="These settings are read here, not written" tone="warning">
             {readOnly} {owner && <OwnerHandoff owner={owner} />}

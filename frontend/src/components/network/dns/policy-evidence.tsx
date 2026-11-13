@@ -379,7 +379,7 @@ export function DNSPolicyEvidence({
               {records.data.map((record) => (
                 <ChoiceRow
                   key={record.id}
-                  title={<span className="font-mono">{record.request.name}</span>}
+                  title={<span className="align-top font-mono">{record.request.name}</span>}
                   verb={`${record.request.name} · ${record.request.type} · ${record.status}`}
                   description={
                     <>

@@ -1272,23 +1272,43 @@ customization
 
 ## The Network pages in more detail
 
-The DNS page opens on the resolver chain and `resolver-owner.tsx`: who writes `/etc/resolv.conf`,
-what programs ask, whether the page's resolved drop-in reaches them, the owner's own place to change
-DNS (a link to the Interfaces page for a NetworkManager profile) and the evidence and conflicts behind
-the verdict. `link-scopes.tsx` lists each link's resolved scope and, for an administrator, edits a
-link's split DNS through its native profile as a temporary apply (`split-dns.ts`, unit-tested).
-`upstreams.tsx` offers clearing each list on purpose, up to eight verification names, the server's
-verification plan in the confirmation and every check's result — or the failed check of a change that
-was put back — after it (`verification.tsx`). `tls-check.tsx` checks each configured DoT server's
-certificate, `dnssec-chain.tsx` traces a name's chain of trust for administrators, the host records
-editor previews overlaps before saving and checks local NSS resolution after, the lookup race compares
-over DNS over TLS with the DO bit and asks before sending a private name to unseen forwarding, and the
-ad-blocking rows hand a detected AdGuard Home, Pi-hole or Technitium to its native connection
-(Inspect) or to a seeded connection form (Connect). Connection sheets add `service-dhcp.tsx`, the
-engine's read-only DHCP ranges and leases. Checked by `tests/browser/network-dns.spec.ts` and
+The DNS page (`components/network/dns/dns-page.tsx`) opens on the resolver's identity line: its name
+(systemd-resolved, or `/etc/resolv.conf` where programs do not ask the stub), the address programs
+ask, where a lookup goes in words ("Cloudflare over opportunistic TLS") and the share answered from
+the cache (`reading.ts`, unit-tested), with **Resolve a name** as the command and the engines' two
+verbs in the menu. Under it are five views named in the address (`?tab=`, `views.ts`); the anchors
+older links carry (`#dns-links`, `#dns-upstreams`) open the view their section moved to.
+
+- **Resolver**: the chain on `WireFlow` (`resolver-chain.tsx`), with the cache share and the lookup
+  count on the resolver's node and the failures and DNSSEC verdicts as two `ReadingLine`s under it;
+  what answers on port 53; each link's scope as a one-line card that, for an administrator, opens the
+  link's split DNS through its native profile as a temporary apply (`link-scopes.tsx`, `split-dns.ts`,
+  unit-tested); `tls-check.tsx`, each configured DoT server's certificate; and `resolver-owner.tsx`:
+  who writes `/etc/resolv.conf`, what programs ask, whether the page's resolved drop-in reaches them,
+  the owner's own place to change DNS and the evidence and conflicts behind the verdict.
+- **Lookups** (`lookups.tsx`, `?tool=`): one name shared by three lookups, each keeping its answer.
+  The lookup compares named resolvers over DNS over TLS with the DO bit and asks before sending a
+  private name to unseen forwarding, an acknowledgement that holds only for the name it was given
+  for; the policy investigation and `dnssec-chain.tsx` are an administrator's and are not offered to
+  anyone else.
+- **Settings** (`settings-view.tsx`): one column of `SettingSection`s on the page's one save bar.
+  `upstreams.tsx` is the resolver's form (public resolvers, servers, fallback, domains, clearing each
+  list on purpose, DNS over TLS, DNSSEC and the cache as `Segments`, up to eight verification names);
+  Save shows the server's verification plan in the confirmation, and every check's result, or the
+  failed check of a change that was put back, lands at the head of the column (`verification.tsx`).
+  It needs `system.admin` and `destructive`, as its routes do. The host records editor is the second
+  form: it previews overlaps before saving and checks local NSS resolution after.
+- **Services**: the ad-blocking cards hand a detected AdGuard Home, Pi-hole or Technitium to its
+  native connection (the card opens it) or to a seeded connection form (Connect), over the connected
+  engines and the owned setups. Connection sheets add `service-dhcp.tsx`, the engine's read-only DHCP
+  ranges and leases.
+- **Log**: resolved's unit, the resolver programs and the DNS containers (`log-sources.ts`).
+
+Every block waits for the first read at the height it had on the last visit (`ghost.tsx`,
+`shapeOf`). Checked by `tests/browser/network-dns.spec.ts`, `network-dns-evidence.spec.ts` and
 `network-dns-services.spec.ts`.
 
-The DNS page also mounts `components/network/dns/services.tsx` for administrators, including while
+The DNS page's Services view mounts `components/network/dns/services.tsx` for administrators, including while
 the host resolver reading is unavailable. Native connections default read-only; replacement requires
 the complete native credential and selected custom CA again. Engine sheets keep listeners, runtime,
 upstreams, client access/settings, authoritative zones, local overrides, native views, filtering groups,

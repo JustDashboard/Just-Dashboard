@@ -183,9 +183,6 @@ export function HostRecordsEditor({
       }}
       applies="immediately"
       error={refusal && refusal.row === undefined ? refusal.message : undefined}
-      note={
-        can("system.admin") ? undefined : "Changing the host's records requires an administrator."
-      }
     >
       <SettingSection
         id="dns-hosts"

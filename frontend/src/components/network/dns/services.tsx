@@ -130,7 +130,7 @@ function DNSServiceAdmin({ account, request }: { account: number; request?: DNSS
           title="Connected engines"
           actions={
             <>
-              {connections.data && (
+              {connections.data && connections.data.length > 0 && (
                 <span className="numeric text-hint text-muted-foreground">
                   {connections.data.length}
                 </span>
@@ -179,7 +179,7 @@ function DNSServiceAdmin({ account, request }: { account: number; request?: DNSS
                   description={
                     <>
                       {dnsEngineName(connection.engine)} ·{" "}
-                      <span className="font-mono">{connection.endpoint}</span>
+                      <span className="align-top font-mono">{connection.endpoint}</span>
                     </>
                   }
                   trailing={
@@ -239,7 +239,7 @@ function DNSServiceAdmin({ account, request }: { account: number; request?: DNSS
                   description={
                     <>
                       {dnsEngineName(setup.request.engine)} ·{" "}
-                      <span className="font-mono">127.0.0.1:{setup.request.dnsPort}</span>
+                      <span className="align-top font-mono">127.0.0.1:{setup.request.dnsPort}</span>
                     </>
                   }
                   trailing={
