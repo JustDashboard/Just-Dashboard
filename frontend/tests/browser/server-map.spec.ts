@@ -15,6 +15,18 @@ const rail = (page: Page) => page.getByRole("navigation", { name: "Systems" })
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" })
 const railRow = (page: Page, system: string) => rail(page).locator(`[data-system="${system}"]`)
 
+const daemon =
+  "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"
+/** The busy server with a Docker that does not answer: what it would have listed is unread. */
+const withoutDocker = {
+  ...busyMap,
+  kinds: busyMap.kinds.map((k) =>
+    ["containers", "stacks", "volumes"].includes(k.key)
+      ? { ...k, state: "unread", reason: daemon }
+      : k,
+  ),
+} as typeof busyMap
+
 async function open(page: Page, path = "/map", options?: Parameters<typeof mockServerMap>[1]) {
   await page.setViewportSize({ width: 1600, height: 1000 })
   const mock = await mockServerMap(page, options)
@@ -282,11 +294,41 @@ test.describe("on a phone", () => {
     const canvas = (await page.locator("[data-slot=server-map]").boundingBox())!
     expect(canvas.x).toBe(0)
     expect(canvas.width).toBe(390)
-    // The first system across its width, and at the top rather than centred under a gap.
+    // The first system from its head, at the top rather than centred under a
+    // gap, and at a size its names are read at: across the phone's width it
+    // was a fifth of its size.
     const first = await at(page, "frame:system:dashboard:self")
     expect(first.y - canvas.y).toBeLessThan(16)
     expect(first.x).toBeGreaterThanOrEqual(0)
-    expect(first.x + first.width).toBeLessThanOrEqual(390)
+    expect(first.x).toBeLessThan(16)
+    expect((await view(page)).zoom).toBeGreaterThanOrEqual(0.5)
+  })
+
+  test("a system asked for by its address is still drawn whole, across the phone", async ({
+    page,
+  }) => {
+    await openPhone(page, "/map?system=system:project:1")
+    const asked = await at(page, "frame:system:project:1")
+    expect(asked.x).toBeGreaterThanOrEqual(0)
+    expect(asked.x + asked.width).toBeLessThanOrEqual(390)
+  })
+
+  test("what went unread is one line at the top, with the first system under it", async ({
+    page,
+  }) => {
+    await mockServerMap(page, { map: withoutDocker })
+    await page.goto("/map")
+    await expect(page.locator(".react-flow__node").first()).toBeVisible()
+    await still(page)
+    const notes = page.locator("[data-slot=server-map]").getByRole("list", { name: "Not read" })
+    await expect(notes.getByRole("listitem")).toHaveCount(1)
+    await expect(notes).toContainText("Docker is not answering")
+    await expect(notes.getByRole("link", { name: "Open Docker" })).toBeVisible()
+    const line = (await notes.boundingBox())!
+    expect(line.x).toBeGreaterThanOrEqual(0)
+    expect(line.x + line.width).toBeLessThanOrEqual(390)
+    const first = await at(page, "frame:system:dashboard:self")
+    expect(first.y).toBeGreaterThanOrEqual(line.y + line.height)
   })
 
   test("a tap on a box floats the way to its page, and a tap on open ground takes it away", async ({
@@ -564,18 +606,6 @@ test("a server with nothing on it offers the first deployment, and says what it 
   )
   await expect(page.locator("[data-slot=server-map]").getByText(/Still reading/)).toHaveCount(0)
 })
-
-const daemon =
-  "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"
-/** The busy server with a Docker that does not answer: what it would have listed is unread. */
-const withoutDocker = {
-  ...busyMap,
-  kinds: busyMap.kinds.map((k) =>
-    ["containers", "stacks", "volumes"].includes(k.key)
-      ? { ...k, state: "unread", reason: daemon }
-      : k,
-  ),
-} as typeof busyMap
 
 test("with no place left behind, a crowded server opens on the dashboard's own system, readable", async ({
   page,

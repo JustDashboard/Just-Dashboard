@@ -65,6 +65,8 @@ const ZOOM = { min: 0.06, max: 2 }
 const READABLE = 0.4
 /** The least the system the canvas opens on by itself is drawn at. */
 const ARRIVE = 0.5
+/** The height a phone's canvas keeps clear for the line that says what went unread. */
+const UNREAD_ROOM = 96
 /** The room `fitView` leaves round what it fits, as a share of the canvas. */
 const FIT_PADDING = 0.06
 /** A system flown to fills the canvas, but a small one is not blown up past its own size. */
@@ -307,6 +309,12 @@ export function MapCanvas({
 
   useCanvasPinch(canvasRef, ZOOM)
 
+  // A board that says what went unread in its inspector: one line per cause.
+  const notices = useMemo(
+    () => (board.unread === "inspector" ? unreadNotices(unread) : null),
+    [board, unread],
+  )
+
   // The first view: the system the address or the last visit named, else
   // where the reader left the canvas, else every system at once. A phone opens
   // on a system whatever the desk left behind: every system at once is too
@@ -317,17 +325,26 @@ export function MapCanvas({
     restored.current = true
     window.setTimeout(() => {
       const wanted = initialSystem ?? doc.focus
+      const asked = wanted !== undefined && bySystem.has(wanted)
+      const home = board.home?.(placed.map((p) => p.system))
       const width = canvasRef.current?.clientWidth
       const rect = bare
-        ? frameRect(wanted && bySystem.has(wanted) ? wanted : placed[0].system.id)
+        ? frameRect(asked ? wanted : home && bySystem.has(home) ? home : placed[0].system.id)
         : null
       if (rect && width) {
         // Its width across the phone and its head at the top: a wide diagram
-        // centred on a tall screen leaves half of it empty above.
-        const zoom = clampZoom(Math.min(1, (width - 16) / rect.width))
+        // centred on a tall screen leaves half of it empty above. One nobody
+        // asked for is read before it is seen whole, as on the desk: a
+        // system five boxes wide across a phone is a fifth of its size.
+        const fit = Math.min(1, (width - 16) / rect.width)
+        const zoom = clampZoom(!asked && home ? Math.max(fit, ARRIVE) : fit)
         void flow.setViewport({
-          x: (width - rect.width * zoom) / 2 - rect.x * zoom,
-          y: 8 - rect.y * zoom,
+          x:
+            rect.width * zoom <= width - 16
+              ? (width - rect.width * zoom) / 2 - rect.x * zoom
+              : 8 - rect.x * zoom,
+          // Under the line that says what went unread, where there is one.
+          y: (notices?.length ? UNREAD_ROOM : 8) - rect.y * zoom,
           zoom,
         })
       } else if (wanted && bySystem.has(wanted)) flyTo(wanted, 0)
@@ -337,7 +354,6 @@ export function MapCanvas({
         // the answer while their names can be read; past that it is a
         // scatter of boxes, and the board's own system is where to start.
         // Looked at, not chosen: it is not written down as the reader's.
-        const home = board.home?.(placed.map((p) => p.system))
         const height = canvasRef.current?.clientHeight
         const rects = placed.map((p) => frameRect(p.system.id)).filter((r) => r !== null)
         const left = Math.min(...rects.map((r) => r.x))
@@ -378,6 +394,7 @@ export function MapCanvas({
     placed,
     bare,
     board,
+    notices,
     frameRect,
     initialSystem,
     doc.focus,
@@ -660,12 +677,6 @@ export function MapCanvas({
       setKinds(null)
     }
   }
-
-  // A board that says what went unread in its inspector: one line per cause.
-  const notices = useMemo(
-    () => (board.unread === "inspector" ? unreadNotices(unread) : null),
-    [board, unread],
-  )
 
   const tappedSystem = tapped ? bySystem.get(tapped)?.system : undefined
   // What a phone's one button opens: nothing draws "Everything else" a page of its own.
