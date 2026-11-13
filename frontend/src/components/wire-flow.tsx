@@ -197,7 +197,9 @@ export function WireFlow({
           {beams}
           {hub.eyebrow && <p className="eyebrow">{hub.eyebrow}</p>}
           {loading ? (
-            <Skeleton className="my-1 h-4 w-32" />
+            <p className="text-body leading-snug font-medium">
+              <WaitingWords className="w-32" />
+            </p>
           ) : (
             <>
               {hub.title && <p className="text-body leading-snug font-medium">{hub.title}</p>}
@@ -250,8 +252,8 @@ export function WireFlow({
               align="center"
               mark={draw(hub.mark, "lg")}
               eyebrow={hub.eyebrow}
-              title={loading ? <Skeleton className="my-0.5 h-4 w-28" /> : hub.title}
-              hint={loading ? <Skeleton className="mt-1 h-3 w-36" /> : hub.hint}
+              title={loading ? <WaitingWords className="w-28" /> : hub.title}
+              hint={loading ? <WaitingWords className="w-36" /> : hub.hint}
             />
           </div>
 
@@ -380,9 +382,9 @@ function Item({
           nodeRef={nodeRef}
           align={align}
           mark={<Skeleton className={cn("rounded-xl", SKELETON_SIZE[size])} />}
-          eyebrow={<Skeleton className="inline-block h-2.5 w-16" />}
-          title={<Skeleton className="my-1 inline-block h-3.5 w-28" />}
-          hint={<Skeleton className="inline-block h-3 w-20" />}
+          eyebrow={<WaitingWords className="w-16" />}
+          title={<WaitingWords className="w-28" />}
+          hint={<WaitingWords className="w-20" />}
         />
       </li>
     )
@@ -406,6 +408,26 @@ function Item({
 }
 
 const SKELETON_SIZE = { lg: "size-14", md: "size-11", sm: "size-9" } as const
+
+/**
+ * A grey bar where a line of words will be. It is an inline box shorter than
+ * the line it stands in, set on the line's middle, so the line keeps exactly
+ * the height its words will give it: a block-level `Skeleton` with margins
+ * made a waiting node 11px taller than a loaded one, and a picture with a
+ * dozen nodes shrank when its data landed. A `span`, because two of the three
+ * lines it stands in are paragraphs.
+ */
+function WaitingWords({ className }: { className?: string }) {
+  return (
+    <span
+      data-slot="skeleton"
+      className={cn(
+        "inline-block h-[0.7em] max-w-full animate-pulse rounded-md bg-muted align-middle",
+        className,
+      )}
+    />
+  )
+}
 
 /** A node's mark as the link or button it is, or as itself. */
 function Pressable({ node, children }: { node: Laid; children: React.ReactNode }) {
