@@ -320,18 +320,34 @@ service state. The pages that moved keep their behaviour:
   log (`ufw.log`, else `kern.log`, else the kernel ring, read as the firewall lens); while ufw or
   firewalld says logging is off, the section says so and its button brings the logging control
   beside the rules into view instead of drawing an empty pane.
-- **Connections** (`/network/connections`): opens on four live readings, each carrying every read
-  since the page opened as its trend, and a picture of who is connected (`connections-map.tsx`: the
-  callers by network, this server, the programs they reached), then the peers as before — address and
-  network in one column, process and ports in another, a socket count and a comparative meter — with
-  each peer's transports, far-end ports and socket states kept under its ports, and a footer saying
-  what the read could not see (time since the last read, closes noticed, unconnected UDP). An
-  administrator opens an address (`connections/peer-sheet.tsx`, `GET /connections/{address}`) into
-  its live tuples with how long each has been seen, TCP bytes and RTT, the tuples seen closing in the
-  last fifteen minutes, and the layers it crosses: the firewall rules naming it or its network (rules
-  for any source are counted, not listed) and its block, the kernel route that answers it, and the
-  socket history's last day, with the tools, investigator, captures and history as next steps. "A past
-  hour" reads the socket history for a chosen UTC hour in the same shape (`connections/recorded.tsx`).
+- **Connections** (`/network/connections`): opens on its identity line — the sockets, the remote
+  addresses and how many are from the internet — and a picture of who is connected
+  (`connections/picture.tsx`, on `WireFlow`: the callers by network, this server with what listens and
+  what never left the machine, the programs they reached). The three places are always drawn, a quiet
+  one with a still dashed wire; each node carries every read since the page opened as its trend; the
+  internet is the list's "From the internet" chip and a program narrows the list to its callers. Four
+  tiles stood over the picture until 0.8.7, every figure of theirs already on the page. Under it each
+  address is a one-line card of one height (`connections/rows.tsx`): its network's mark, the address
+  over the network, the program it reached as that product with its ports, sockets and active ones as
+  figures in columns of their own, and its verbs — the block among them — in the `⋯` menu. The footer
+  says what the read could not see (time since the last read, closes noticed, unconnected UDP). "Live"
+  and "A past hour" are the section's tab strip (`?when=recorded`, `?hour=`); the past hour reads the
+  socket history for a chosen UTC hour in the same cards (`connections/recorded.tsx`), and with the
+  history off it offers the page that turns it on.
+  **An address is a page of its own** (`/network/connections/[address]`, `connections/address-page.tsx`),
+  in place of the peer sheet, on the process page's shape: a way back, the identity line with the block
+  (or lifting it) as its one command and the lookups in the menu, "Live" and "A past hour" as an
+  underlined strip (`?tab=past`, `?hour=`), and from `xl` a rail of the live list with the list's own
+  search and chip (`connections/address-rail.tsx`; Alt+↑ and Alt+↓ walk it and carry the open view).
+  `?peer=<address>` on the list lands on it. The live view (`connections/address-views.tsx`) is a
+  picture of the address, this server's ports and the programs behind them — what the summary folded:
+  transports, far-end ports, socket states — then, for an administrator (`GET /connections/{address}`),
+  every live tuple as one line with how long it has been seen, TCP's round trip, its state and its
+  bytes, the tuples seen closing in the last fifteen minutes, and the layers it crosses as cards that
+  open the page that owns each: the firewall rules naming it or its network (rules for any source are
+  counted, not listed) and its block, the kernel route that answers it, and the socket history's last
+  day. A role without the detail's capability reads the picture alone. A long IPv6 address keeps both
+  of its ends in a phone's card and in the rail (`shortAddress`), and is whole on its page.
   "Block at the firewall" opens a dialog asking why, for how long (an hour to thirty days, or until
   lifted) and which incident — an existing saved run, or a new one that starts by recording who owns
   the address (`connections/block-dialog.tsx`); the blocks made here are listed under the table with
@@ -359,6 +375,18 @@ service state. The pages that moved keep their behaviour:
   model's prediction, a measurement; no colour for unknown, and none of them success's green), with
   the wire dashed where either end is unknown. The four counts that were a tile row are the key to
   those colours.
+  the address (`connections/block-dialog.tsx`); it is never offered for an address on the tailnet, a
+  local network or this machine. The blocks made here are listed under the list, two lines each, with
+  their end, their incident and whether the rule is still in the firewall; each opens its address, and
+  an administrator with the destructive capability lifts one after confirmation
+  (`connections/blocks-panel.tsx`).
+- **Tools** (`/network/tools`): 26 probes plus the browser-only IPv4/IPv6 subnet calculator occupy a two-pane
+  workbench (the four counts that stood over it are gone; where probes are sent from is a fact in the
+  result pane's head). The searchable chooser selects one labelled form and result area; below `md` they
+  are one full-height pane at a time with a bar at the foot (`phone-panes.tsx`), opening on the tool. Other probes
+  stay mounted while hidden, preserving drafts, results and in-flight requests when switching. A new
+  query-string arrival reseeds only the requested probe. Arriving with `?tool=asn&target=…` never runs
+  it; sending traffic remains an explicit Run action.
 - The tools now include route/path-MTU checks, host prerequisites, bounded packet summaries and
   local Wake-on-LAN. All server probes remain administrator-only; decoded packet fields may be
   sensitive. Network forms expose IPv6 GRE/bridge membership, preferred route source, rule outgoing

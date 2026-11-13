@@ -1787,9 +1787,11 @@ Intrusion each end on their own log — the auth log, the firewall's log, fail2b
 through its lens in one `Pane` under a title across the page, since a log needs the width a rail or a
 half row does not have; the last day's counts join the page's one `StatGrid` rather than drawing a
 second, and an attacker's address is blocked from the line it is on. Repeat offenders therefore take
-Intrusion's row alone. Connections, Logins and Network combine related facts into fewer,
-richer columns: a peer and its network, a service and its ports, an account and its terminal, an
-interface and its kind. Their action columns are always drawn. Tools is a two-pane working surface,
+Intrusion's row alone. Logins and Network combine related facts into fewer,
+richer columns: an account and its terminal, an
+interface and its kind. Their action columns are always drawn. Connections lists each address as a
+one-line card that opens the address's own page (`network/connections/`).
+Tools is a two-pane working surface,
 with a searchable choice rail and one visible form/result, retaining every other probe's work.
 The diagram and the workbench have edges for §7's reasons; tables keep theirs, and forms and
 findings remain plain. `components/security/marks.tsx` supplies the inline address, `PeerIdentity`,
@@ -3671,7 +3673,7 @@ reading page, and what makes them alive is the sanctioned five, held hard:
   deployment section's vocabulary: the Overview's topology (`network/topology.tsx`: the outside —
   the internet through the uplink, the tailnet, each tunnel — this server with its firewall and
   gateway as facts, and the inside — each Docker network with its containers' products, each bridge
-  made here), the Connections page's callers and what they reached (`connections-map.tsx`), Routing's
+  made here), the Connections page's callers and what they reached (`connections/picture.tsx`), Routing's
   decision (`routing/decision-map.tsx`: the policy rules in the order they are asked, each wired to
   the table it looks in, the one answering this browser lit), each WireGuard tunnel's devices and
   sites (`vpn/tunnel-picture.tsx`), the gateway's forwards, and DNS's resolver chain. A wire carries
