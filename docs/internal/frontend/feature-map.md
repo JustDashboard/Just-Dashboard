@@ -1188,6 +1188,37 @@ their service's log — the resolvers, tunnels and link daemons the page lists, 
 inventory](../../audits/2026-10-08-network-audit/README.md) distinguishes UI, API and inspection
 limits
 
+**The three evidence pages share one layout (0.8.7).** External checks, Address planning and Socket
+history each opened on four tiles over a paragraph, a form and a framed table, with their forms folded
+into disclosures. Each now opens on an identity line (`HostIdentity` in its project layout, its facts
+through `IdentityFacts`) whose state is the page's verdict and whose one command is its main verb, and
+none has a `StatGrid`:
+
+- **External checks** (`components/network/external/`): the picture is the enrolled sources, the
+  internet and this server's approved services, each line the last check's outcome (`reading.ts`:
+  reached, a measured stage refused, partly unknown, in flight, or no measurement, which is dashed and
+  never red). Checks are one framed table, a line each, the chosen one read out under it; sources are
+  `ChoiceRow`s whose press runs a check from them. Run a check, Enroll a source (the one-use credential
+  is shown in the sheet that made it and stays reachable from the source's menu until it expires) and
+  Compare are sheets. Revoke needs `destructive` as well as `system.admin`.
+- **Address planning** (`components/network/ipam/`): named as the rail names it. A pool is a card
+  holding one `BarReading` of planned, observed and free blocks with the server's exact counts and its
+  owners as logos (`reading.ts` joins a pool's held plans with the native observations inside its
+  network); the prefix preview is a field over the bands; reservations are `ChoiceRow`s that link to
+  the Docker or WireGuard creation form while they are only reserved (`?ipamReservation=`); coverage is
+  a framed table. New pool and Reserve are sheets. Retire and Release need `destructive`.
+- **Socket history** (`components/network/flows/`, `components/network/kernel-observer.tsx`): with the
+  recorder off and nothing kept, the page is the picture of what would be sampled and kept, one
+  sentence and Start recording. With a record, the picture is the latest sample's sources, the
+  recorder and what it keeps; the UTC day and the two filters are the table's toolbar; a socket hour
+  is one line and the chosen one is read out under the table; the totals of the rows shown are the
+  table's foot, native counters and kernel payload apart; the day's twenty-four hours are a strip
+  that reads one hour on a fixed line. Sampling policy is a sheet, Erase is in the menu, and the
+  kernel observer keeps its own reviewed activation.
+
+Every reading these pages gave as "Unknown" is still given as "Unknown": a check that expired or was
+cancelled measured nothing, a UDP row has no byte counters, and an hour with no block was not sampled.
+
 **Implementation:** network pages, `components/network/`, shared security firewall/connection
 components; checked by `network-*.spec.ts`, `security-ui.spec.ts` and `design-system.spec.ts`
 
