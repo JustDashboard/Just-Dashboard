@@ -475,7 +475,7 @@ test.describe("Traffic", () => {
 
   test("opens on the per-device charts, then who is moving the bytes", async ({ page }) => {
     await open(page, "/network/traffic", { charts: true })
-    await expect(page.getByRole("heading", { name: "Bandwidth by device" })).toBeVisible()
+    await expect(page.getByRole("region", { name: "Bandwidth by device" })).toBeVisible()
     await expect(page.getByRole("radio", { name: "24h" })).toBeVisible()
     const programs = page.getByRole("region", { name: "Traffic by program" })
     const line = programs.locator("[data-slot=reading-line]")
@@ -483,7 +483,7 @@ test.describe("Traffic", () => {
     await programs.getByRole("button", { name: "Who postgres talks to" }).hover()
     await expect(line).toContainText("postgres")
     const containers = page.getByRole("region", { name: "Traffic by container" })
-    await containers.getByRole("button", { name: "Open adguardhome's traffic" }).hover()
+    await containers.getByRole("link", { name: "Open adguardhome's traffic" }).hover()
     await expect(containers.locator("[data-slot=reading-line]")).toContainText("adguardhome")
   })
 
@@ -516,7 +516,7 @@ test.describe("Traffic", () => {
   })
 
   test("editing a device's limits posts kilobits", async ({ page }) => {
-    const mutations = await open(page, "/network/traffic")
+    const mutations = await open(page, "/network/traffic?tab=shaping")
     await page.getByRole("button", { name: "Edit the limits on ens3" }).click()
     const sheet = page.getByRole("dialog")
     await sheet.getByRole("button", { name: "Use cake" }).click()
@@ -534,7 +534,7 @@ test.describe("Traffic", () => {
   test("under a megabit on the uplink is refused in the form, and by the server when it is asked", async ({
     page,
   }) => {
-    await open(page, "/network/traffic", {
+    await open(page, "/network/traffic?tab=shaping", {
       refuse: {
         path: /\/network\/shaping\/tailscale0$/,
         status: 409,
@@ -560,8 +560,9 @@ test.describe("Traffic", () => {
   })
 
   test("clearing a shaped device asks first and sends a DELETE", async ({ page }) => {
-    const mutations = await open(page, "/network/traffic")
-    await page.getByRole("button", { name: "Clear the limits on wg0" }).click()
+    const mutations = await open(page, "/network/traffic?tab=shaping")
+    await page.getByRole("button", { name: "Queue on wg0" }).click()
+    await page.getByRole("menuitem", { name: "Clear limits" }).click()
     await page.getByRole("dialog").getByRole("button", { name: "Clear" }).click()
     await expect
       .poll(() => mutations.some((m) => m.method === "DELETE" && m.path === "/network/shaping/wg0"))
@@ -569,7 +570,7 @@ test.describe("Traffic", () => {
   })
 
   test("BBR is a switch that posts its state", async ({ page }) => {
-    const mutations = await open(page, "/network/traffic")
+    const mutations = await open(page, "/network/traffic?tab=shaping")
     await page.getByRole("switch", { name: "Use BBR congestion control" }).click()
     await expect
       .poll(() => mutations.find((m) => m.path === "/network/shaping/bbr")?.body)
@@ -577,15 +578,20 @@ test.describe("Traffic", () => {
   })
 
   test("a device that cannot be shaped says why instead of offering an Edit", async ({ page }) => {
-    await open(page, "/network/traffic")
-    await expect(page.getByText(/Shape the interface this one leads to/)).toBeVisible()
+    await open(page, "/network/traffic?tab=shaping")
+    const card = page.getByRole("listitem").filter({ hasText: "veth6e4f828" })
+    await expect(card).toContainText("cannot be shaped")
     await expect(page.getByRole("button", { name: "Edit the limits on veth6e4f828" })).toHaveCount(
       0,
     )
+    await card.getByRole("button", { name: "Open the queue on veth6e4f828" }).click()
+    const sheet = page.getByRole("dialog")
+    await expect(sheet.getByText(/Shape the interface this one leads to/)).toBeVisible()
+    await expect(sheet.getByRole("button", { name: "Apply" })).toHaveCount(0)
   })
 
   test("the eBPF programs are listed and the type chips narrow them", async ({ page }) => {
-    await open(page, "/network/traffic")
+    await open(page, "/network/traffic?tab=ebpf")
     const table = page.getByRole("table").last()
     await expect(table.getByRole("row")).toHaveCount(11)
     await expect(page.getByText("xdp_drop_bad").first()).toBeVisible()
@@ -594,14 +600,14 @@ test.describe("Traffic", () => {
   })
 
   test("without bpftool the eBPF section offers to install it", async ({ page }) => {
-    await open(page, "/network/traffic", { overrides: { "/network/ebpf": ebpfMissing } })
+    await open(page, "/network/traffic?tab=ebpf", { overrides: { "/network/ebpf": ebpfMissing } })
     await expect(page.getByRole("button", { name: "Install bpftool" })).toBeVisible()
   })
 
   test("every button on the page, and in the limits sheet, has an accessible name", async ({
     page,
   }) => {
-    await open(page, "/network/traffic")
+    await open(page, "/network/traffic?tab=shaping")
     await expect(page.getByRole("button", { name: "Edit the limits on ens3" })).toBeVisible()
     await expectNamedButtons(page, "[data-slot=page]")
     await page.getByRole("button", { name: "Edit the limits on wg0" }).click()

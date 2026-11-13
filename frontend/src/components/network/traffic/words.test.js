@@ -44,15 +44,15 @@ test("TCP's health is a sentence, and its round trip is in words, never a median
     truncated: false,
   }
   const words = tcpWords({ tcp: Array.from({ length: 30 }, () => step(30)), latency })
-  expect(words.reading).toBe("3.0% of segments sent again in the last minute")
+  expect(words.reading).toBe("3.0% resent · round trips half inside 23 ms")
   expect(words.warning).toBe(true)
-  expect(words.hint).toContain("round trips half inside 23 ms, 9 in 10 inside 118 ms")
-  expect(words.hint).toContain("across 37 sockets")
-  expect(words.hint).not.toMatch(/median|p90|RTT/)
+  expect(words.hint).toMatch(/^9 in 10 inside 118 ms · 37 sockets · 0 resets · read /)
+  expect(`${words.reading} ${words.hint}`).not.toMatch(/median|p90|RTT/)
 
   const calm = tcpWords({ tcp: [step(1, 0.5)], latency: { ...latency, sockets: 0 } })
   expect(calm.warning).toBe(false)
-  expect(calm.hint).toBe("1 reset · no non-loopback TCP socket to time")
+  expect(calm.reading).toBe("0.1% resent")
+  expect(calm.hint).toBe("no non-loopback TCP socket to time · 1 reset")
   expect(tcpWords({ tcp: [], latency: undefined })).toEqual({
     hint: "round trip being measured",
     warning: false,

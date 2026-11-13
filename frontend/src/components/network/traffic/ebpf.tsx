@@ -65,7 +65,7 @@ export function EBPFPrograms() {
 
   if (!ebpf.data) {
     return ebpf.error ? (
-      <ErrorState error={ebpf.error} onRetry={ebpf.refresh} />
+      <ErrorState error={ebpf.error} onRetry={ebpf.refresh} retryable />
     ) : (
       <Panel plain aria-label="eBPF programs">
         <PanelHeader title="Programs" />
@@ -189,16 +189,22 @@ export function EBPFPrograms() {
                           )}
                         </Link>
                         {observer.has(p.id) && (
-                          <Tag className="shrink-0">this dashboard&rsquo;s observer</Tag>
+                          <Tag className="shrink-0 max-sm:hidden">
+                            this dashboard&rsquo;s observer
+                          </Tag>
                         )}
                         {p.owners && p.owners.length > 0 && (
-                          <span className="min-w-0 truncate text-hint text-muted-foreground">
+                          <span className="min-w-0 truncate text-hint text-muted-foreground max-sm:hidden">
                             {p.owners.join(", ")}
                           </span>
                         )}
                       </span>
-                      <span className="block truncate font-mono text-hint text-muted-foreground sm:hidden">
-                        {p.type}
+                      {/* A phone has the name's column and little else: the
+                          type and whose it is are the line under the name. */}
+                      <span className="block truncate text-hint text-muted-foreground sm:hidden">
+                        <span className="font-mono">{p.type}</span>
+                        {observer.has(p.id) && " · this dashboard’s observer"}
+                        {p.owners && p.owners.length > 0 && ` · ${p.owners.join(", ")}`}
                       </span>
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground max-md:hidden">

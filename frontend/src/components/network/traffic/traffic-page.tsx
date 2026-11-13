@@ -83,13 +83,16 @@ export function TrafficPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Traffic" />
-      <TrafficIdentity
-        live={live}
-        links={links.data}
-        linksError={links.error}
-        recording={containers.data?.recording}
-      />
-      <Tabs value={tab} onValueChange={setTab} className="gap-6">
+      {/* The strip's hairline is the identity line's: one rule under the
+          header, as a process's page and a project's have. */}
+      <Tabs value={tab} onValueChange={setTab} className="gap-0">
+        <TrafficIdentity
+          className="border-b-0 pb-3"
+          live={live}
+          links={links.data}
+          linksError={links.error}
+          recording={containers.data?.recording}
+        />
         <TabsPrimitive.List
           aria-label="Views of the traffic"
           className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
@@ -140,7 +143,7 @@ function View({
   children: React.ReactNode
 }) {
   return (
-    <TabsContent value={tab} className="min-w-0">
+    <TabsContent value={tab} className="min-w-0 pt-6">
       {shown === tab && children}
     </TabsContent>
   )

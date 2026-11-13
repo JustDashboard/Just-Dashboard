@@ -165,7 +165,10 @@ for (const reading of [
       )
     })
     await page.clock.install()
-    await page.goto("/network/traffic")
+    // The programs are a view of their own; the rest are read by the first.
+    await page.goto(
+      reading.name === "eBPF inventory" ? "/network/traffic?tab=ebpf" : "/network/traffic",
+    )
     await loaded(page)
     await expect.poll(() => reads).toBe(1)
     await page.clock.fastForward(reading.name === "program traffic" ? 3100 : 30100)
@@ -174,11 +177,7 @@ for (const reading of [
       .filter({ hasText: `Showing the last known ${reading.name}` })
     await expect(warning).toBeVisible()
     if (reading.name === "link inventory") {
-      const bandwidth = page
-        .getByRole("heading", { name: "Bandwidth by device" })
-        .locator("..")
-        .locator("..")
-        .locator("..")
+      const bandwidth = page.getByRole("region", { name: "Bandwidth by device" })
       await expect(bandwidth.getByText("Live", { exact: true }).first()).toBeVisible()
     }
     await expect(warning.getByText(/Last successful read:/)).toBeVisible()

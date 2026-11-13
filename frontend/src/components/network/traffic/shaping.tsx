@@ -104,7 +104,7 @@ export function Shaping({ links }: { links: NetworkLink[] | undefined }) {
         <PanelBody>
           {!view ? (
             shaping.error ? (
-              <ErrorState error={shaping.error} onRetry={shaping.refresh} />
+              <ErrorState error={shaping.error} onRetry={shaping.refresh} retryable />
             ) : (
               <QueueGhosts rows={Math.max(1, remembered)} />
             )
@@ -275,7 +275,7 @@ function QueueGhosts({ rows }: { rows: number }) {
       {Array.from({ length: rows }, (_, i) => (
         <li
           key={i}
-          className="flex h-[58px] items-center gap-3 rounded-xl border bg-choice-surface px-3 max-sm:h-[86px]"
+          className="flex h-[60px] items-center gap-3 rounded-xl border bg-choice-surface px-3 max-sm:h-[94px] max-sm:items-start max-sm:pt-3"
         >
           <Skeleton className="size-8 rounded-lg" />
           <span className="flex flex-col gap-2">

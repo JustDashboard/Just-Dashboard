@@ -2,8 +2,8 @@
 
 import { useState } from "react"
 import { get, post } from "@/lib/api"
-import { bytes, relativeTime } from "@/lib/format"
-import { latencyHead, latencyTerm } from "@/lib/latency-words"
+import { bytes, plural, relativeTime } from "@/lib/format"
+import { latencyHead, latencyTerm, latencyWords } from "@/lib/latency-words"
 import { notify } from "@/lib/toast"
 import type { BBRState } from "@/lib/types"
 import {
@@ -77,7 +77,7 @@ export function CongestionPanel({
         {bbr ? (
           <BBRSwitch bbr={bbr} onChanged={onChanged} stale={stale} />
         ) : (
-          <div aria-hidden className="flex h-[52px] items-center justify-between">
+          <div aria-hidden className="flex h-[59px] items-center justify-between max-sm:h-[77px]">
             <Skeleton className="h-3.5 w-56" />
             <Skeleton className="h-[18px] w-8 rounded-full" />
           </div>
@@ -92,7 +92,7 @@ export function CongestionPanel({
         )}
         {!view.data ? (
           view.error ? (
-            <ErrorState error={view.error} onRetry={view.refresh} />
+            <ErrorState error={view.error} onRetry={view.refresh} retryable />
           ) : (
             <GroupsGhost />
           )
@@ -208,7 +208,30 @@ function Groups({
         <EmptyNote>No established non-loopback TCP socket to compare.</EmptyNote>
       ) : (
         <div className={FRAME}>
-          <Table>
+          {/* A phone has no room for seven columns, nor for four with the
+              other three under the first: there an algorithm is three lines. */}
+          <ul className="divide-y divide-hairline px-4 sm:hidden">
+            {comparison.groups.map((g) => (
+              <li key={g.algorithm} className="flex min-w-0 flex-col gap-0.5 py-3">
+                <span className="flex items-baseline justify-between gap-3">
+                  <span className="font-mono text-body font-medium">{g.algorithm}</span>
+                  <span className="numeric text-hint text-muted-foreground">
+                    {plural(g.sockets, "socket")}
+                  </span>
+                </span>
+                <span className="numeric text-hint">
+                  round trips {latencyWords("p50", millis(g.medianRttMs))},{" "}
+                  {latencyWords("p90", millis(g.p90RttMs))}
+                </span>
+                <span className="numeric text-hint text-muted-foreground">
+                  {shareLabel(g.retransmitShare)} resent
+                  {g.medianDeliveryMbit > 0 && ` · ${g.medianDeliveryMbit} Mbit/s`} ·{" "}
+                  {bytes(g.bytesSent)} sent
+                </span>
+              </li>
+            ))}
+          </ul>
+          <Table containerClassName="max-sm:hidden">
             <TableHeader>
               <TableRow>
                 <TableHead>Algorithm</TableHead>
@@ -235,8 +258,9 @@ function Groups({
                 <TableRow key={g.algorithm}>
                   <TableCell>
                     <span className="font-mono">{g.algorithm}</span>
-                    {/* A phone has room for four columns: the other three are
-                        said under the algorithm rather than dropped. */}
+                    {/* Between a phone and a laptop there is room for four
+                        columns: the other three are said under the algorithm
+                        rather than dropped. */}
                     <span className="numeric block text-hint text-muted-foreground md:hidden">
                       {latencyHead("p90").toLowerCase()} {millis(g.p90RttMs)}
                       {g.medianDeliveryMbit > 0 && ` · ${g.medianDeliveryMbit} Mbit/s`} ·{" "}

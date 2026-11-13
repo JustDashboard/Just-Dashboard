@@ -43,8 +43,9 @@ export const RESENT_WARNING = 0.02
 
 /**
  * TCP's health over the last minute as one sentence and one line of detail:
- * the share of segments sent again, then the round trip in the product's
- * words for latency (`lib/latency-words.ts`), never as a median or a p90.
+ * the share of segments sent again and the round trip half of them came back
+ * inside, then the rest. The round trip is in the product's words for
+ * latency (`lib/latency-words.ts`), never as a median or a percentile.
  */
 export function tcpWords({
   tcp,
@@ -57,20 +58,34 @@ export function tcpWords({
   latency?: TCPLatency
   stepSeconds?: number
 }): { reading?: string; hint: string; warning: boolean } {
+  if (tcpError) return { hint: `TCP counters unreadable: ${tcpError}`, warning: true }
   const share = retransmitShare(tcp, 30)
   const resets = Math.round(tcp.slice(-30).reduce((n, p) => n + p.resets, 0) * stepSeconds)
-  const trip = !latency
+  const timed = latency && !latency.error && latency.sockets > 0 ? latency : undefined
+  // What is missing is said where the reading would be: the line is short on
+  // a phone, and its first words are the ones that are never cut.
+  const untimed = !latency
     ? "round trip being measured"
     : latency.error
       ? latency.error
-      : latency.sockets === 0
-        ? "no non-loopback TCP socket to time"
-        : `round trips ${latencyWords("p50", millis(latency.medianMs))}, ${latencyWords("p90", millis(latency.p90Ms))} across ${plural(latency.sockets, "socket")}, read ${relativeTime(latency.at)}`
-  if (tcpError) return { hint: `TCP counters unreadable: ${tcpError}`, warning: true }
-  if (share === undefined) return { hint: trip, warning: false }
+      : "no non-loopback TCP socket to time"
+  const hint = [
+    timed ? latencyWords("p90", millis(timed.p90Ms)) : untimed,
+    timed && plural(timed.sockets, "socket"),
+    share !== undefined && plural(resets, "reset"),
+    timed && `read ${relativeTime(timed.at)}`,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+  if (share === undefined) return { hint, warning: false }
   return {
-    reading: `${shareLabel(share)} of segments sent again in the last minute`,
-    hint: `${plural(resets, "reset")} · ${trip}`,
+    reading: [
+      `${shareLabel(share)} resent`,
+      timed && `round trips ${latencyWords("p50", millis(timed.medianMs))}`,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    hint,
     warning: share > RESENT_WARNING,
   }
 }

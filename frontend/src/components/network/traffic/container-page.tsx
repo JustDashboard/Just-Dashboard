@@ -14,7 +14,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { ArrowUpRight, Box } from "@/components/icons"
 import { Segments } from "@/components/deploy/settings/segments"
 import { ChartPanel } from "@/components/metrics/chart-panel"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, imageProduct } from "@/components/product-logo"
@@ -36,6 +36,7 @@ import {
   steps,
   type Step,
 } from "./detail-shell"
+import { FactGroups, FactRowHeld } from "./facts"
 import { WINDOW_WORDS, type RecordedWindow } from "./span"
 
 const SERIES = [
@@ -49,8 +50,6 @@ const WINDOW_OPTIONS = (["1h", "6h", "24h", "7d"] as const).map((value) => ({
   label: value,
 }))
 const CHART_HEIGHT = 220
-/** The chart's title line and its legend, so the block is one height before and after its rows land. */
-const CHART_CHROME = 150
 
 function decoded(segment: string | undefined) {
   if (!segment) return null
@@ -251,29 +250,35 @@ function ContainerHeader({
           }
           facts={
             d ? (
-              <>
-                <HostFact>
-                  <span className="font-mono">{d.image ?? "image unknown"}</span>
-                </HostFact>
-                <FactDot />
-                <HostFact>
-                  <span className={d.project ? "font-mono" : undefined}>{service}</span>
-                </HostFact>
-                {d.networks.length > 0 && (
-                  <>
-                    <FactDot />
-                    <HostFact>
-                      on <span className="font-mono">{d.networks.join(", ")}</span>
-                    </HostFact>
-                  </>
-                )}
-                <FactDot />
-                <span>last sample {relativeTime(new Date(d.lastSeen * 1000).toISOString())}</span>
-              </>
+              <FactGroups
+                groups={[
+                  [
+                    <HostFact key="image">
+                      <span className="font-mono">{d.image ?? "image unknown"}</span>
+                    </HostFact>,
+                    <HostFact key="service">
+                      <span className={d.project ? "font-mono" : undefined}>{service}</span>
+                    </HostFact>,
+                  ],
+                  [
+                    d.networks.length > 0 && (
+                      <HostFact key="networks">
+                        on <span className="font-mono">{d.networks.join(", ")}</span>
+                      </HostFact>
+                    ),
+                    <span key="seen">
+                      last sample {relativeTime(new Date(d.lastSeen * 1000).toISOString())}
+                    </span>,
+                  ],
+                ]}
+              />
             ) : missing ? (
               <span>Nothing recorded in {WINDOW_WORDS[range]}</span>
             ) : (
-              <TextShimmer>Reading the recorded traffic…</TextShimmer>
+              <>
+                <TextShimmer>Reading the recorded traffic…</TextShimmer>
+                <FactRowHeld />
+              </>
             )
           }
           command={
@@ -349,7 +354,7 @@ function ContainerBody({
         action={picker}
       />
     ) : (
-      <ErrorState error={detail.error} onRetry={detail.refresh} />
+      <ErrorState error={detail.error} onRetry={detail.refresh} retryable />
     )
   }
 
@@ -362,30 +367,16 @@ function ContainerBody({
         reading="container traffic"
       />
       {d?.dockerError && <Notice title="Docker could not be read">{d.dockerError}</Notice>}
+      {/* The plot and what it stands on (title line, legend, the line under
+          it): one height before and after the samples land. */}
       <div
         data-slot="container-chart"
-        className="flex min-w-0 flex-col"
-        style={{ minHeight: CHART_HEIGHT + CHART_CHROME }}
+        className="flex min-h-[407px] min-w-0 flex-col sm:min-h-[391px]"
       >
         <ChartPanel
           plain
           title="Traffic"
-          actions={
-            <span className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
-              {d && (
-                <span
-                  className="numeric text-hint text-muted-foreground"
-                  aria-label={`What ${name} moved`}
-                >
-                  <span className="text-foreground">
-                    ↓ {bytes(d.rxBytes)} ↑ {bytes(d.txBytes)}
-                  </span>{" "}
-                  in {WINDOW_WORDS[range]} · now ↓ {rate(d.rxRate)} ↑ {rate(d.txRate)}
-                </span>
-              )}
-              {picker}
-            </span>
-          }
+          actions={picker}
           rows={rows}
           series={SERIES}
           format={formatRate}
@@ -393,6 +384,34 @@ function ContainerBody({
           showPeaks={false}
           height={CHART_HEIGHT}
           note={d ? "Nothing recorded for this container in this window." : "Reading the samples…"}
+          footer={
+            // Two lines on a phone and one from `sm`, in every state, so
+            // the first answer fills the line instead of adding it.
+            <p
+              aria-label={`What ${name} moved`}
+              className="numeric flex flex-col gap-x-2 text-hint text-muted-foreground sm:flex-row"
+            >
+              {d ? (
+                <>
+                  <span>
+                    <span className="text-foreground">
+                      ↓ {bytes(d.rxBytes)} ↑ {bytes(d.txBytes)}
+                    </span>{" "}
+                    in {WINDOW_WORDS[range]}
+                  </span>{" "}
+                  <span className="max-sm:hidden">·</span>{" "}
+                  <span>
+                    now ↓ {rate(d.rxRate)} ↑ {rate(d.txRate)}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span>&nbsp;</span>
+                  <span className="sm:hidden">&nbsp;</span>
+                </>
+              )}
+            </p>
+          }
         />
       </div>
       <Panel plain aria-label={`Who ${name} talked to`}>
@@ -418,7 +437,7 @@ function ContainerBody({
               Docker no longer lists this container, so its socket history cannot be matched to it.
             </EmptyNote>
           ) : flows.error && !flows.data ? (
-            <ErrorState error={flows.error} onRetry={flows.refresh} />
+            <ErrorState error={flows.error} onRetry={flows.refresh} retryable />
           ) : !flows.data ? (
             <LoadingRows rows={3} />
           ) : !flows.data.settings.enabled && flows.data.rows.length === 0 ? (

@@ -114,7 +114,7 @@ export function TrafficBudgets({ links }: { links: NetworkLink[] | undefined }) 
         )}
         {!list ? (
           budgets.error ? (
-            <ErrorState error={budgets.error} onRetry={budgets.refresh} />
+            <ErrorState error={budgets.error} onRetry={budgets.refresh} retryable />
           ) : (
             <ul aria-hidden className="divide-y divide-hairline">
               {Array.from({ length: Math.max(1, remembered) }, (_, i) => (

@@ -77,7 +77,7 @@ export function Bandwidth({
             />
           )}
           {!links.data && links.error ? (
-            <ErrorState error={links.error} onRetry={links.refresh} />
+            <ErrorState error={links.error} onRetry={links.refresh} retryable />
           ) : (
             <InterfaceCharts links={links.data} live={live.series} span={span} onSpan={onSpan} />
           )}

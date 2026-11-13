@@ -409,8 +409,10 @@ other way round, by the share past it ("more than 1 in 20 requests slower than 8
 between two readings is a *slowdown*. The lint rule `design-system/latency-words` refuses the
 notation in JSX text, in a string with other words around it and in a `label`, `title`, `name` or
 `hint`; a bare `"p95"` elsewhere is a key of the server's answer and stays. The interface charts on
-`/network/traffic` are outside it: their percentiles are of throughput, not of how long anything
-took. Sentences the server writes (a rollback watch's verdict, a canary's, a replay's, a traffic
+`/network/traffic` were outside it until 0.8.7, because their percentiles are of throughput, not of
+how long anything took; the notation asked the same learning of the reader either way, so they say
+their shares in the same words ("19 in 20 under ↓ 2.0 MB/s", `network/traffic/words.ts`) and the
+rule covers that file too. Sentences the server writes (a rollback watch's verdict, a canary's, a replay's, a traffic
 alert's notification) still say p95 and are shown as the server wrote them.
 
 ## 5. No descriptions under titles

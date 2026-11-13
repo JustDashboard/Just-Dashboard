@@ -27,7 +27,7 @@ test("read-only accounts see network state and cannot submit mutations", async (
   }
   await page.goto("/network/routing")
   await expect(page.getByRole("switch", { name: "IPv4 forwarding", exact: true })).toBeDisabled()
-  await page.goto("/network/traffic")
+  await page.goto("/network/traffic?tab=shaping")
   await expect(page.getByRole("switch", { name: /BBR/ })).toBeDisabled()
   expect(mutations).toEqual([])
 })

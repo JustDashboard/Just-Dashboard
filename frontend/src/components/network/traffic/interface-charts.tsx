@@ -279,7 +279,7 @@ export function InterfaceCharts({
     )
   }
   if (recorded && !history.data && history.error) {
-    return <ErrorState error={history.error} onRetry={history.refresh} />
+    return <ErrorState error={history.error} onRetry={history.refresh} retryable />
   }
   if (recorded && history.data && !history.data.recording) {
     return (
@@ -327,7 +327,7 @@ export function InterfaceCharts({
   return (
     <div className="flex min-w-0 flex-col gap-8">
       {history.data && history.error && (
-        <ErrorState error={history.error} onRetry={history.refresh} />
+        <ErrorState error={history.error} onRetry={history.refresh} retryable />
       )}
       {isRange(span) && retained && span.from < retained && (
         <Notice title="The start of this range is no longer kept">
@@ -363,7 +363,7 @@ const CHART_HEIGHT = 160
  * three lines and the footer's one. A block is held to the plot plus this in
  * every state, so a first reading fills the block instead of stretching it.
  */
-const CHART_CHROME = 172
+const CHART_CHROME = 157
 
 /** The uplink across the page, then two to a row. */
 function ChartGrid({ children }: { children: React.ReactNode }) {

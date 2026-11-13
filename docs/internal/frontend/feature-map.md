@@ -1134,12 +1134,18 @@ configuration. Address planning joins held reservations with fresh overlap cover
 handoffs; External checks retain scoped signed source evidence; Socket history defaults off and
 separates native TCP deltas from explicitly reviewed kernel TCP/UDP payload subtotals, retained
 ownership and coverage gaps. Traffic explicitly distinguishes download policing from owned IFB/CAKE
-SQM; its live window states the newest reading's age, uplink packets, TCP's resent share and round
-trip, recorded windows take a typed or dragged range with p50/p95/p99 and (admin) change/incident
-marks, devices carry alert-only transfer budgets, programs say what a read could not see and list
-UDP peers without bytes, every container opens into its chart, service and attributed peers, each
-queue says what the next change does with it (kernel default, preserved fq_codel, refused foreign
-tree) and drift names parameters changed in place, CAKE shows its measured per-class delay and takes
+SQM. It opens on the uplink's identity line (what it carries in words, the newest reading's age as
+its state, whether history is kept) over four views in the address (`?tab=`: Bandwidth, Budgets,
+Shaping, and the eBPF programs, each of which is a page, `/network/traffic/ebpf/[id]`, with the
+list as a rail). Uplink packets and TCP's resent share and round trip are two reading lines, the
+window is in the address (`?window=`, or a typed or dragged `?from=&to=`) and a recorded one says
+its throughput spread in words with (admin) change/incident marks, devices carry alert-only
+transfer budgets set in a sheet, programs say what a read could not see and list UDP peers without
+bytes, every container opens its own page (`/network/traffic/containers/[name]`: chart, service,
+attributed peers, the other containers as a rail), each queue is a one-line card whose sheet holds
+its evidence for any account and the form for an administrator: what the next change does with it
+(kernel default, preserved fq_codel, refused foreign tree) and the parameters drift changed in
+place, CAKE shows its measured per-class delay and takes
 an upload profile, congestion control is compared on live sockets before and after a switch, eBPF
 programs open into maps, attachments and cost with the dashboard's observer marked, and an install
 is followed by configured/active/verified phases (`components/network/traffic/`, `install.tsx`);

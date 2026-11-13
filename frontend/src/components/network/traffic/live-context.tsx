@@ -17,7 +17,7 @@ import { packetWords, tcpWords } from "./words"
  *
  * These were four tiles. How old the newest reading is went to the identity
  * line, where the state of the page's readings is said; the other three are
- * two lines here, each with its last five minutes at its end. A line is one
+ * two lines here, one to a row, each with its last five minutes at its end. A line is one
  * height in every state, so a first reading landing moves nothing under it.
  */
 export function LiveContext({ live, uplink }: { live: LiveTraffic; uplink: string | undefined }) {
@@ -31,7 +31,9 @@ export function LiveContext({ live, uplink }: { live: LiveTraffic; uplink: strin
   })
   const waiting = live.now === 0 && !live.error
   return (
-    <ReadingLines aria-label="Live context" role="group">
+    // One to a row at every width: beside each other, with their trends, a
+    // line had room for thirty characters and TCP's sentence is forty.
+    <ReadingLines aria-label="Live context" role="group" className="xl:grid-cols-1">
       <ReadingLine
         mark={
           <WireMark size="md" hue="var(--chart-1)">
@@ -66,7 +68,7 @@ export function LiveContext({ live, uplink }: { live: LiveTraffic; uplink: strin
             </WireMark>
           )
         }
-        name="TCP health"
+        name="TCP health · last minute"
         hint={waiting ? undefined : tcp.hint}
         trend={
           <TileTrend

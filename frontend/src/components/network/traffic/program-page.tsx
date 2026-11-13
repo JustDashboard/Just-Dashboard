@@ -10,7 +10,7 @@ import type { EBPFView } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { Code } from "@/components/icons"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Detail, DetailList, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/table"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { programHref, programId, trafficHref } from "./address"
+import { FactGroups, FactRowHeld } from "./facts"
 import {
   BackLink,
   DetailRail,
@@ -232,33 +233,34 @@ function ProgramHeader({
           }
           facts={
             d ? (
-              <>
-                <HostFact>
-                  <span className="font-mono">{d.type}</span>
-                </HostFact>
-                <FactDot />
-                <span className="numeric">ID {d.id}</span>
-                <FactDot />
-                <span>
-                  {d.loadedAt ? `loaded ${relativeTime(d.loadedAt)}` : "load time unknown"}
-                </span>
-                {d.owners && d.owners.length > 0 && (
-                  <>
-                    <FactDot />
-                    <HostFact>held by {d.owners.join(", ")}</HostFact>
-                  </>
-                )}
-                {d.observer && (
-                  <>
-                    <FactDot />
-                    <Tag>this dashboard&rsquo;s observer</Tag>
-                  </>
-                )}
-              </>
+              <FactGroups
+                groups={[
+                  [
+                    <HostFact key="type">
+                      <span className="font-mono">{d.type}</span>
+                    </HostFact>,
+                    <span key="id" className="numeric">
+                      ID {d.id}
+                    </span>,
+                  ],
+                  [
+                    <span key="loaded">
+                      {d.loadedAt ? `loaded ${relativeTime(d.loadedAt)}` : "load time unknown"}
+                    </span>,
+                    d.owners && d.owners.length > 0 && (
+                      <HostFact key="owners">held by {d.owners.join(", ")}</HostFact>
+                    ),
+                    d.observer && <Tag key="observer">this dashboard&rsquo;s observer</Tag>,
+                  ],
+                ]}
+              />
             ) : missing ? (
               <span>The kernel no longer lists it</span>
             ) : (
-              <TextShimmer>Reading the program…</TextShimmer>
+              <>
+                <TextShimmer>Reading the program…</TextShimmer>
+                <FactRowHeld />
+              </>
             )
           }
         />
@@ -291,7 +293,7 @@ function ProgramBody({
         }
       />
     ) : (
-      <ErrorState error={detail.error} onRetry={detail.refresh} />
+      <ErrorState error={detail.error} onRetry={detail.refresh} retryable />
     )
   }
   const places = d.devices.length + d.cgroups.length + d.links.length
