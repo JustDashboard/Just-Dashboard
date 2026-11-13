@@ -1,8 +1,9 @@
 # The design system
 
-The rules the linter cannot enforce. `eslint-rules/design-system.mjs` catches the two failures that
-are mechanical — typing a value where a token exists, and re-deriving a pattern a primitive owns —
-and `tests/browser/design-system.spec.ts` checks three structural properties in a browser. Everything
+The rules the linter cannot enforce. `eslint-rules/design-system.mjs` catches the three failures that
+are mechanical — typing a value where a token exists, re-deriving a pattern a primitive owns, and
+latency written as a percentile rather than in words — and `tests/browser/design-system.spec.ts`
+checks the structural properties a browser can see. Everything
 below is judgement, and this is where it is written down.
 
 There is one checkbox and one spinner: `Checkbox` (`components/ui/checkbox`) and `Spinner`
@@ -3746,7 +3747,7 @@ the reader through it.
 | Host Overview, metrics, Docker, Security, Network, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
 | Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
-| Databases — the control center, a database's home, Search, Compare, Generate, Performance, Advisor, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
+| Databases — the control center, a database's home, Search, Generate, Performance, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
 | `/databases/[id]/import` — bring a database over from another server | **Flow** | A sequence with an outcome: which server it is on now, how it should come over, and — for a replication — when to cut over, ending in a database here. The spine is taken from the import the server keeps, so a reload, or the next day, finds it where it was. |
 | A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
 | The server map (`/map`), and the databases map (`/databases/map`) on the same canvas with one diagram for each database | Reading, as a workbench | The reader arrives to find out what each thing the server runs is made of and wired to. One frame held to the window (`<Page fill>`) around the rail of systems, a canvas and its inspector, the way a database's Diagram is. Each system is its own diagram in a hairlined frame on a ground a step up from the canvas's, and its boxes are the product's own vocabulary — a `ProductLogo` tile, the name, a `Status` dot and word, the eyebrow voice for the kind — given, at the operator's request in 0.8.2, a workflow editor's wiring and an outline per kind: the deployment is the large card, where traffic arrives is rounded on its left like a trigger, a database is a cylinder, a volume a disk, a web container wears a browser's bar, a proxy is cut to a gateway's point, and what hangs under a box (its checkout, its logs, a certificate) is a round sub-node on a dashed line from a labelled port. No shadow, glow or gradient comes with them: the outline is a border and a step of ground, a state is a `rule-*` edge and the dot, and the chosen box's lines are the brand's blue with the §2 pulse travelling them where both ends are up. *Open* in the inspector is the surface's one command face, as is the button a tap floats on a phone, where the canvas is alone and edge to edge, and *Deploy a project* on a server with nothing to draw. No toolbar or minimap: the inspector's toggle and full screen float on the canvas, beside the panel they work. |
