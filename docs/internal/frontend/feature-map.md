@@ -453,31 +453,53 @@ localhost) and `api-keys.spec.ts`; key filtering, ordering and replacement roles
 
 ### `/audit`
 
-Four readings of the last day (changes with an hourly trend, failures, the people behind them as
-faces, sign-ins with the refused ones), read from their own `since` query so a filter does not
-narrow them; the filtered, paginated trail as a framed table shelved by day, each entry drawn with
-the mark of the section it touched, its actor as a face (a key in the corner for an API key, with
-the key named — "· key ci-deploy", its id in the tooltip — when the row recorded it; "· by the
-assistant" for the assistant; "· through Just Hub as <hub user>" for a session a hub sign-in ticket
-opened, the session's id in the tooltip, which is the `sessionId` of the `hub.signin` row that
-opened it; the webhook's and the dashboard's own marks for machines), its address as the network it
-is on, the method and path in the request log's hues and the outcome's code in its family's colour;
-section chips with their marks set the action filter; entries a poll brings rise into place
+An identity line saying how the last day went: what the server refused as its state ("1 of 10
+failed", and "1 sign-in refused" in amber), then this server, the changes in the last day, the
+people behind them as faces with the automated changes, and the sign-ins with where the last came
+from; `?` and a `⋯` menu at its end holding Export as CSV and Refresh. Under it the day as one
+strip, an hour to a stretch in the colour of how its changes went (green, amber where some were
+refused, red where all were, the track where nothing changed), with the busiest sections on the
+line under it and the pointed hour in their place (`components/audit/day-strip.tsx`, the model in
+the unit-tested `day.ts`). Both are read from their own `since` query, on the hour, so a filter
+does not narrow them, and both stand at their final height while the day is read. Then the
+filtered, paginated trail as a framed table shelved by day, one line to a row at every width: the
+time, the actor as a face (a key in the corner for an API key, with the key named — "· key
+ci-deploy", its id in the tooltip — when the row recorded it; "· by the assistant" for the
+assistant; "· through Just Hub as <hub user>" for a session a hub sign-in ticket opened, the
+session's id in the tooltip, which is the `sessionId` of the `hub.signin` row that opened it; the
+webhook's and the dashboard's own marks for machines) with its address as the network it is on, the
+action with the mark of the section it touched, the target with any detail after it, and the
+outcome's code in its family's colour. The action is the row's button and the keyboard's place on
+it: it opens the entry whole in a popover (`entry-detail.tsx`), with the method and path in the
+request log's hues, the key's record or the session's id, and whatever a one-line cell cut short.
+Below `2xl` a row that came through a key or a session says that in place of its address's digits.
+The user and action filters are on the frame's title line and one row of chips is under it
+(Failures only, then the sections with their marks, which set the action filter); entries a poll
+brings wait behind "N new entries · Show" beside the count and rise into place. Export as CSV
+downloads what the filters match, every page of it up to 20,000 rows and none newer than the press
+(`export.ts`, unit-tested; cells a spreadsheet would run as a formula are made text). An account
+without `system.admin`, or one the server refuses, is told the log is for administrators and is
+offered no filter
 
-**Implementation:** audit page, `components/audit/marks.tsx` (unit-tested); checked by
+**Implementation:** audit page, `components/audit/` (`marks.tsx`, `day.ts` and `export.ts`
+unit-tested); checked by `tests/browser/audit-ui.spec.ts` (fixture in `audit-fixture.ts`) and
 `tests/browser/system-ui.spec.ts`
 
 ### `/backups`
 
 Routes: `/backups`, `/backups/[job]`
 
-Backup coverage, jobs, destinations, schedules, next runs and recorded outcomes. Manual runs,
+Backup coverage, jobs, destinations, schedules, next runs and recorded outcomes. The page opens on
+an identity line: how the jobs stand as its state (a job that failed, one being taken, every job
+backed up, with paused ones after), the jobs, what they hold and the next backup as its facts
+(`components/backups/readings.ts`, unit-tested), New backup as its command for an administrator and
+a `⋯` menu holding Import from a destination… and Refresh. Manual runs,
 restore, retention and job configuration keep their confirmed controls. A job may encrypt its
 archives (on by default for S3 and B2): its card and identity line say so, an encrypted run carries
 a lock on the rail and an Encryption block in its inspector, and the Backup key panel under the jobs
 shows the server's key, what depends on it and whether a copy has been exported, with a confirmed
 Export key… for an administrator (`components/backups/backup-key.tsx`, `encryption.ts`), and Import
-key… for one exported elsewhere, listed beside it. Import… opens Import from a destination
+key… for one exported elsewhere, listed beside it. The menu's Import opens Import from a destination
 (`components/backups/import-dialog.tsx`, words in the unit-tested `import-model.ts`): this server's
 destinations as choices or another typed in with its keys, then the archives it did not write
 grouped by server and job, each with what it covers, its size, time and whether a key here opens it,
@@ -487,8 +509,10 @@ runs, offer only Test destination and Remove imported job, and its runs restore 
 dialogs, the in-place one saying per source what it overwrites and what it makes first (a volume
 through Docker, a directory) (`tests/browser/backup-import.spec.ts`). A job opens on its own page
 (`/backups/[job]`, `components/backups/job-detail.tsx`): its identity line, its picture narrowed to
-the one job, its readings, and its runs as a rail beside the run they show, with each run's log,
-archive and restores. Automatic overdue/attention recommendations were removed in 0.7.5
+the one job (its middle the schedule over the next run), one reading as a sentence (what it holds
+over how much is kept, with the archive sizes as its trend), and its runs as a rail beside the run
+they show, each run one height with its archive's size as a figure, with each run's log, archive
+and restores. Automatic overdue/attention recommendations were removed in 0.7.5
 
 **Implementation:** `components/backups/`; backend in
 [`../backend/git-backups-users.md`](../backend/git-backups-users.md)

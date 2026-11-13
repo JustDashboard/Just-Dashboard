@@ -1249,7 +1249,7 @@ above:
   the fleet's live and build-slot figures, the
   Overview's requests, the delivery insights, Automation's
   revisions awaiting review and alerts firing, the live usage tiles, the readings on
-  Packages and the audit log, and every lens's readings (`ReadingTile`) — the logs
+  Packages, and every lens's readings (`ReadingTile`) — the logs
   page's, a service page's and Security's alike. A figure that follows a
   draft as it is typed — Build's and Runtime's settings readings — does not count, because it would
   count again on every keystroke; it rises once when it lands instead;
@@ -1957,7 +1957,8 @@ of the product it touched (`auditSection`, `components/audit/marks.tsx`: Docker'
 GitHub's marks, PM2's, fail2ban's, the terminal's, Let's Encrypt's for an issued or renewed
 certificate, the dashboard's own for its settings, and the sidebar's glyph for every section that is
 no product), the action's first word in its `LANES` hue the way the log console draws a program, the
-route's method and path in the request log's hues, and who acted as their face — an API key's use
+route's method and path in the request log's hues (in the entry a row's action opens, since 0.8.7
+made a row one line), and who acted as their face — an API key's use
 with a key in the tile's corner and the key's name after the account's, a webhook as the webhook's
 mark and the dashboard's reconcilers as the dashboard.
 
@@ -2371,6 +2372,27 @@ The passes, in order. Each one is a diff you can review on its own.
    size over the runs as the Holding figure's trend, and its runs as a rail beside an inspector —
    the newest until one is picked, its failing log line washed red, what the archive holds by its
    manifest — where a table of runs had the chosen one's log two screens below it.
+
+   0.8.7 gave the Backups page the opening every page takes now: an identity line (`HostIdentity`
+   in a project's layout) with how the jobs stand as its state, the jobs, what they hold and the
+   next backup as its facts, New backup as its one command and Import behind its `⋯`; both sat on
+   the Jobs title line, under the picture. The picture's middle said the same three facts, so it
+   says only what is moving through it now, the job being taken, and nothing while nothing is. A
+   job's four readings became one `ReadingLine`, what it holds over how much is kept with the
+   trend at its end, because the other three tiles were a bare figure said elsewhere on the page:
+   how the last run went is the identity line's end and the rail's first row, and when it runs
+   next is its picture's middle, which says that for every job now (the containers a job pauses
+   stood there instead, and are named on the identity line). A run in the rail lost the bar of its
+   archive's size against the largest, the growing bar the standard retired, for the size as a
+   figure in a column of its own, so a run is one line under its date.
+
+   The audit log took the exit in 0.8.7 too. Its four tiles (changes, failed, people, sign-ins)
+   are the state and the facts of an identity line, and the day is one strip under it, an hour to
+   a stretch in the colour of how its changes went (`components/audit/day-strip.tsx`, the
+   availability ribbon's four hues), which says *when* something was refused where a tile said
+   only how often. The trail stayed a framed table of readings and became one line to a row: the
+   second line of every cell (how long ago, the address, the method and path, the detail) either
+   joined the first or went to the entry the row's action opens in a popover.
 
    The live Processes page took the exit in 0.7.1, because the operator found it still: four grey
    figures over a table, and nothing on it that answered *who* was using the machine. Each figure
