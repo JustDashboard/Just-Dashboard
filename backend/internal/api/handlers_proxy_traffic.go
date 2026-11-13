@@ -41,12 +41,15 @@ func windowSince(q url.Values, now time.Time) time.Time {
 // siteTrafficFilter is the deployment page's filter with ?window= in front:
 // an explicit since or until still wins, since a span dragged out of the
 // chart is more exact than a preset.
-func siteTrafficFilter(q url.Values) accesslog.Filter {
-	filter := requestFilterFrom(q)
+func siteTrafficFilter(q url.Values) (accesslog.Filter, error) {
+	filter, err := requestFilterFrom(q)
+	if err != nil {
+		return accesslog.Filter{}, err
+	}
 	if q.Get("since") == "" && q.Get("until") == "" {
 		filter.Since = windowSince(q, time.Now()).UTC()
 	}
-	return filter
+	return filter, nil
 }
 
 // siteAccessLog resolves the site in the URL to the log path the store is
@@ -80,9 +83,13 @@ func (s *Server) handleSiteTraffic(w http.ResponseWriter, r *http.Request) error
 		httpx.JSON(w, http.StatusOK, out)
 		return nil
 	}
+	filter, err := siteTrafficFilter(r.URL.Query())
+	if err != nil {
+		return err
+	}
 	ctx, cancel := timeoutCtx(r, 45*time.Second)
 	defer cancel()
-	window, err := s.modules.proxyExtras.siteTraffic.Window(ctx, logs.Access, siteTrafficFilter(r.URL.Query()))
+	window, err := s.modules.proxyExtras.siteTraffic.Window(ctx, logs.Access, filter)
 	if err != nil {
 		out.Reason = "The site's access log could not be read."
 		httpx.JSON(w, http.StatusOK, out)
@@ -121,7 +128,10 @@ func (s *Server) handleSiteTrafficTail(w http.ResponseWriter, r *http.Request) e
 			after = n
 		}
 	}
-	filter := requestFilterFrom(r.URL.Query())
+	filter, err := requestFilterFrom(r.URL.Query())
+	if err != nil {
+		return err
+	}
 	filter.Since, filter.Until = time.Time{}, time.Time{}
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
 	defer cancel()
@@ -141,6 +151,10 @@ func (s *Server) handleSiteTrafficExport(w http.ResponseWriter, r *http.Request)
 	if logs.Access == "" {
 		return httpx.Err(http.StatusConflict, "no_access_log", logs.AccessNote)
 	}
+	filter, err := siteTrafficFilter(r.URL.Query())
+	if err != nil {
+		return err
+	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
@@ -148,7 +162,7 @@ func (s *Server) handleSiteTrafficExport(w http.ResponseWriter, r *http.Request)
 		fmt.Sprintf("requests-%s-%s.csv", logs.Site, time.Now().UTC().Format("20060102-150405"))))
 	writer := csv.NewWriter(w)
 	_ = writer.Write(requestCSVHeader)
-	_, err = s.modules.proxyExtras.siteTraffic.Export(ctx, logs.Access, siteTrafficFilter(r.URL.Query()), 0, func(e accesslog.Entry) {
+	_, err = s.modules.proxyExtras.siteTraffic.Export(ctx, logs.Access, filter, 0, func(e accesslog.Entry) {
 		_ = writer.Write(requestCSVRow(e))
 	})
 	writer.Flush()

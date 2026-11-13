@@ -64,7 +64,7 @@ type Evidence struct {
 	Scope       string    `json:"scope"`
 	Owner       string    `json:"owner"`
 	OwnerPath   string    `json:"ownerPath,omitempty"`
-	CheckedAt   time.Time `json:"checkedAt"`
+	CheckedAt   time.Time `json:"checkedAt,omitzero"`
 	Summary     string    `json:"summary"`
 	Facts       []Fact    `json:"facts"`
 	Limitations []string  `json:"limitations"`
@@ -73,8 +73,8 @@ type Evidence struct {
 type Result struct {
 	Request     Request             `json:"request"`
 	Scope       Scope               `json:"scope"`
-	StartedAt   time.Time           `json:"startedAt"`
-	EndedAt     time.Time           `json:"endedAt"`
+	StartedAt   time.Time           `json:"startedAt,omitzero"`
+	EndedAt     time.Time           `json:"endedAt,omitzero"`
 	Addresses   []string            `json:"addresses"`
 	Evidence    []Evidence          `json:"evidence"`
 	Measurement *netsec.ProbeResult `json:"measurement,omitempty"`

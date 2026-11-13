@@ -24,11 +24,11 @@ All captures use synthetic API fixtures and a production build from the task wor
 1440×900; phone is 390×844 with reduced motion. The image fixture is a transparent pixel and the
 video fixture deliberately leaves its poster waiting; neither represents a real server's media.
 
-- [Compact desktop listing](desktop.png)
-- [Selection without moving the entries](selection.png)
-- [Background marquee](marquee.png)
-- [Phone selection actions](phone.png)
-- [Selection, marquee and native group-drag recording](interactions.webm)
+- [Compact desktop listing](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files/desktop.png)
+- [Selection without moving the entries](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files/selection.png)
+- [Background marquee](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files/marquee.png)
+- [Phone selection actions](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files/phone.png)
+- [Selection, marquee and native group-drag recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-02-files/interactions.webm)
 
 ## Verification
 

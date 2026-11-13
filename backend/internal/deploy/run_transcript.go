@@ -27,7 +27,7 @@ func (s *OrchestrationStore) RunTranscriptTail(ctx context.Context, runID int64,
 	if limit <= 0 {
 		return []RunTranscriptLine{}, false, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 		SELECT seq, step_id, stream, ts, text FROM deploy_log_chunks
 		 WHERE run_id = ? AND event_type = ? AND compacted = 0
 		 ORDER BY seq DESC LIMIT ?`, runID, EventStepLog, limit+1)
@@ -57,7 +57,7 @@ func (s *OrchestrationStore) RunTranscriptTail(ctx context.Context, runID int64,
 	}
 	if !earlier {
 		var compacted int
-		if err := s.db.QueryRowContext(ctx, `
+		if err := s.reader().QueryRowContext(ctx, `
 			SELECT COUNT(1) FROM deploy_log_chunks WHERE run_id = ? AND compacted = 1`, runID).
 			Scan(&compacted); err != nil {
 			return nil, false, err
@@ -69,7 +69,7 @@ func (s *OrchestrationStore) RunTranscriptTail(ctx context.Context, runID int64,
 	}
 	var legacy string
 	var ts int64
-	err = s.db.QueryRowContext(ctx, `SELECT log, requested_at FROM deploy_runs WHERE id = ?`, runID).Scan(&legacy, &ts)
+	err = s.reader().QueryRowContext(ctx, `SELECT log, requested_at FROM deploy_runs WHERE id = ?`, runID).Scan(&legacy, &ts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, ErrRunNotFound
 	}
@@ -91,7 +91,7 @@ func (s *OrchestrationStore) RunTranscriptTail(ctx context.Context, runID int64,
 
 // ProjectRunByNumber finds a project's run by the number its page shows.
 func (s *OrchestrationStore) ProjectRunByNumber(ctx context.Context, projectID, number int64) (*EngineRun, error) {
-	run, err := scanEngineRun(s.db.QueryRowContext(ctx, `SELECT `+engineRunColumns+`
+	run, err := scanEngineRun(s.reader().QueryRowContext(ctx, `SELECT `+engineRunColumns+`
 		FROM deploy_runs WHERE project_id = ? AND run_number = ?`, projectID, number))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrRunNotFound
@@ -114,7 +114,7 @@ func (s *OrchestrationStore) RunTranscriptAfter(ctx context.Context, runID, afte
 	if _, err := s.Run(ctx, runID); err != nil {
 		return nil, false, err
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 		SELECT seq, step_id, stream, ts, text FROM deploy_log_chunks
 		 WHERE run_id = ? AND event_type = ? AND compacted = 0 AND seq > ?
 		 ORDER BY seq LIMIT ?`, runID, EventStepLog, after, limit+1)

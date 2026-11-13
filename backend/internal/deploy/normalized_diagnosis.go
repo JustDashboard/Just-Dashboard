@@ -10,11 +10,28 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
 
-// lastLogSeq is the sequence of the line a step's output last persisted, when
-// the output is the engine's own; test outputs have none.
-func lastLogSeq(output StepOutput) int64 {
-	if sequenced, ok := output.(interface{ LastSeq() int64 }); ok {
-		return sequenced.LastSeq()
+// markedOutput is the engine's own output, which can say where in the
+// transcript a line it took ended up. Output is written in batches, so a line
+// has no sequence when it is logged; it has a mark, and the mark is turned
+// into the sequence once somebody needs it.
+type markedOutput interface {
+	LastMark() int64
+	SeqOf(mark int64) int64
+}
+
+// lastLogMark names the line a step's output last took, when the output is
+// the engine's own; test outputs have none.
+func lastLogMark(output StepOutput) int64 {
+	if marked, ok := output.(markedOutput); ok {
+		return marked.LastMark()
+	}
+	return 0
+}
+
+// logSeq is the transcript sequence of the line a mark names, or 0.
+func logSeq(output StepOutput, mark int64) int64 {
+	if marked, ok := output.(markedOutput); ok {
+		return marked.SeqOf(mark)
 	}
 	return 0
 }
@@ -41,6 +58,8 @@ func (e *NormalizedStepExecutor) buildFailure(
 	if cause == nil {
 		return nil
 	}
+	// The collector knew the decisive line by its mark.
+	cause.LineSeq = logSeq(execution.Output, cause.LineSeq)
 	message := cause.sentence()
 	_ = stepLog(execution, "status", "Diagnosis: "+message)
 	return &StepResult{

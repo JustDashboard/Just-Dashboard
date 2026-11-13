@@ -39,6 +39,7 @@ import { lastFleet, readFleet } from "@/components/database/fleet/read"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
+import { DashboardHealthNotice } from "@/components/overview/health-notice"
 import { UsagePingQuestion } from "@/components/overview/usage-ping-question"
 import { ActivityPanel } from "@/components/overview/activity"
 import { BackupsPanel, DatabasesPanel } from "@/components/overview/data"
@@ -159,6 +160,7 @@ export default function OverviewPage() {
     <Page className="animate-rise">
       <PageContext title={host.hostname} />
 
+      <DashboardHealthNotice />
       <UsagePingQuestion />
 
       {/* What this machine is, in one line: the distribution drawn as
@@ -412,7 +414,7 @@ function useModuleReads(
       (signal) => get<Record<string, TrafficPulse>>("/deploy/traffic", undefined, signal),
       60_000,
       [],
-      { enabled: shows("deploy") },
+      { enabled: shows("deploy"), key: "/deploy/traffic" },
     ),
     backups: usePoll<BackupJob[]>(
       (signal) => get<BackupJob[]>("/backups/", undefined, signal),

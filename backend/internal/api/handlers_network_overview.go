@@ -44,7 +44,7 @@ type networkOverview struct {
 	// Observations say which readings above arrived, so a failed one is shown
 	// as failed rather than as an empty answer.
 	Observations []netx.Observation `json:"observations"`
-	ReadAt       time.Time          `json:"readAt"`
+	ReadAt       time.Time          `json:"readAt,omitzero"`
 }
 
 // overviewDockerNet is a Docker network as the topology draws it: its bridge
@@ -387,12 +387,4 @@ func (s *Server) overviewGateway(ctx context.Context, client string) (overviewGa
 		}
 	}
 	return g, gwErr, protErr
-}
-
-// conntrackPercent is the table's fullness, negative where it cannot be read.
-func conntrackPercent(c netx.Conntrack) float64 {
-	if !c.Available {
-		return -1
-	}
-	return c.Percent
 }

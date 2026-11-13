@@ -28,7 +28,7 @@ type watchedDomain struct {
 	// Kind is "tls", a handshake and its certificate, or "tcp", a network
 	// probe that only connects.
 	Kind      string    `json:"kind"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 	// CheckedAt is when Cert, or a probe's Probe, was read; absent until the
 	// first check.
 	CheckedAt *time.Time            `json:"checkedAt,omitempty"`
@@ -107,11 +107,11 @@ func (s *Server) handleWatchDomain(w http.ResponseWriter, r *http.Request) error
 	}
 	target, err := proxysvc.ParseScanTarget(req.Domain, req.Port)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	ip, err := proxysvc.ParseWatchIP(req.IP)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	kind := req.Kind
 	if kind == "" {

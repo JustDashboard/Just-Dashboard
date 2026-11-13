@@ -74,10 +74,11 @@ func Recoverer(log *slog.Logger) func(http.Handler) http.Handler {
 					if rec == http.ErrAbortHandler {
 						panic(rec)
 					}
+					id := RequestIDFrom(r.Context())
 					log.Error("panic serving request",
-						"method", r.Method, "path", r.URL.Path, "panic", rec, "stack", string(debug.Stack()))
+						"method", r.Method, "path", r.URL.Path, "request", id, "panic", rec, "stack", string(debug.Stack()))
 					JSON(w, http.StatusInternalServerError, map[string]any{
-						"error": map[string]string{"code": "internal", "message": "internal error"},
+						"error": &APIError{Code: "internal", Message: "internal error", RequestID: id},
 					})
 				}
 			}()
@@ -94,7 +95,8 @@ func RequestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(sw, r)
 			log.Debug("request",
 				"method", r.Method, "path", r.URL.Path, "status", sw.Status(),
-				"bytes", sw.bytes, "dur", time.Since(start).String(), "ip", ClientIP(r))
+				"bytes", sw.bytes, "dur", time.Since(start).String(), "ip", ClientIP(r),
+				"request", RequestIDFrom(r.Context()))
 		})
 	}
 }

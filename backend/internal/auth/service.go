@@ -1,3 +1,11 @@
+// Package auth owns who a request comes from and what that identity may do:
+// accounts and password hashing (service.go, crypto.go), sessions (session.go,
+// hub_signin.go), TOTP and recovery codes (totp.go), passkeys (passkeys.go),
+// API, deploy and MCP keys (tokens*.go), roles and capabilities (roles.go),
+// and the Sealer that encrypts stored secrets under the master key. It serves
+// no HTTP: reading a credential off a request and refusing it is httpx's, and
+// the host's Linux accounts are linuxusers. See "Auth, secrets, state" in
+// docs/internal/architecture/runtime-boundaries.md.
 package auth
 
 import (
@@ -72,8 +80,8 @@ type User struct {
 	TOTPEnabled  bool      `json:"totpEnabled"`
 	Disabled     bool      `json:"disabled"`
 	MustChangePW bool      `json:"mustChangePassword"`
-	LastLoginAt  time.Time `json:"lastLoginAt"`
-	CreatedAt    time.Time `json:"createdAt"`
+	LastLoginAt  time.Time `json:"lastLoginAt,omitzero"`
+	CreatedAt    time.Time `json:"createdAt,omitzero"`
 	// AvatarVersion is when the picture was last set, or zero for none. It is
 	// the cache key a client appends to the avatar URL, so a new upload shows
 	// at once and an unchanged one is not fetched again.

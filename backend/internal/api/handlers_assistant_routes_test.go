@@ -181,3 +181,52 @@ func TestARoutesHandlerNameReadsAsWords(t *testing.T) {
 		}
 	}
 }
+
+// What a hub session is refused — a credential made, changed or read back, a
+// link, the dashboard's own settings — is what outlives whoever made it
+// (hubSessionRefused). The assistant reaches most of it, as the person does.
+// Outside full access every one of those waits for the person: none is a POST
+// read as a read, so nothing that makes lasting access runs on a read's terms.
+// Full access runs them unasked, which is the mode's recorded meaning (security
+// invariant 13): holding these routes alone would not keep an instruction the
+// model read from leaving access behind, since the shell and the files it also
+// runs unasked there can add a key or a sudo rule too. Changing that is changing
+// what full access is, in the invariant and where the person chooses it.
+func TestWhatOutlivesTheChatWaitsForThePersonOutsideFullAccess(t *testing.T) {
+	s := testServer(t)
+	s.Routes()
+	server := &agentScope{kind: agentScopeServer}
+	reached, closed := 0, 0
+	for _, key := range hubSessionRefused {
+		method, pattern, _ := strings.Cut(key, " ")
+		under := strings.TrimPrefix(pattern, "/api/v1")
+		route := s.apiCatalogue().byKey[method+" "+under]
+		switch {
+		case route == nil:
+			t.Errorf("%s is refused a hub session and is not a route the assistant's table has", key)
+			continue
+		case route.Excluded != "":
+			closed++
+			continue
+		case method == http.MethodGet:
+			// A stored secret read back, masked before the provider is sent it.
+			continue
+		}
+		reached++
+		view := agentCallView{Kind: s.apiRequestKind(t.Context(), route, under, nil)}
+		if view.Kind == agentKindRead {
+			t.Errorf("%s makes what outlives the chat, and is read as a read", key)
+		}
+		for _, mode := range []assistant.Mode{assistant.ModeAsk, assistant.ModeChanges} {
+			if !agentHolds(server, mode, view) {
+				t.Errorf("%s runs without the person's answer in %q", key, mode)
+			}
+		}
+		if agentHolds(server, assistant.ModeFull, view) {
+			t.Errorf("%s waits in full access, which runs everything the person's role allows (security invariant 13)", key)
+		}
+	}
+	if reached == 0 || closed == 0 {
+		t.Fatalf("%d reached and %d closed: the walk read nothing", reached, closed)
+	}
+}

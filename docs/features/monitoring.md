@@ -30,7 +30,12 @@ See what the server is doing right now, what it did this week, and what is about
 ## Processes and logs
 
 - Processes, PM2 apps, systemd services and scheduled jobs, each with its verbs
+- Every process has a page of its own: what supervises it, what it started and listens on, its threads, open files, limits, environment and the signals it handles, with the table beside it to move to the next one
+- Signals that say what they will do to that process before they are sent, sent to its children too when asked, plus its priority, its out-of-memory bias and its supervisor's restart and stop
+- Every systemd service has a page of its own too: what starts it and what it needs, its processes and ports, its journal and runs, its unit file and drop-ins, its environment and how exposed it is, with the services table beside it
+- Every verb on a service says what it does first: start, stop, restart, reload, freeze, enable, mask, signals sent through systemd, and its memory, processor and task limits
 - One log viewer for files, containers, stacks, PM2 and the journal, with insights
+- On a phone the log has the whole screen, and the sources are one tap away on a bar at the foot
 - Every service shows its own logs on its own page
 
 <table>
@@ -46,9 +51,9 @@ See what the server is doing right now, what it did this week, and what is about
 </tr>
 </table>
 
-<a href="../readme/processes.png"><img src="../readme/processes.png" alt="Scheduled work drawn over the next day, with cron jobs and systemd timers below"></a>
+<a href="../readme/processes.png"><img src="../readme/processes.png" alt="The next 24 hours of scheduled work as an hour-by-hour chart, with what runs next listed under it"></a>
 
-<p align="center"><sub><b>Scheduled jobs</b> — the next 24 hours of cron and timers, with their verbs</sub></p>
+<p align="center"><sub><b>Scheduled jobs</b> — the next 24 hours of cron and timers hour by hour, and what runs next in plain words</sub></p>
 
 ---
 

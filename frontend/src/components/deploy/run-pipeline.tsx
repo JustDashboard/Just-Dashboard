@@ -1,6 +1,5 @@
 "use client"
 
-import { motion, useReducedMotion } from "motion/react"
 import type { DeploymentStep, DeploymentStepState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -147,7 +146,6 @@ function stageReading(state: ReleaseNodeState, seconds: number | undefined) {
  * so it is quieter than a stage that is merely waiting.
  */
 export function Segment({ state }: { state: ReleaseNodeState }) {
-  const reduced = useReducedMotion()
   const track = "relative block h-1.5 w-full overflow-hidden rounded-full"
   if (state === "absent")
     return (
@@ -158,16 +156,10 @@ export function Segment({ state }: { state: ReleaseNodeState }) {
   if (state === "running")
     return (
       <span className={cn(track, "bg-plot-brand")}>
-        {reduced ? (
-          <span className="absolute inset-0 bg-brand/60" />
-        ) : (
-          <motion.span
-            className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-brand"
-            initial={{ x: "-100%" }}
-            animate={{ x: "300%" }}
-            transition={{ repeat: Infinity, duration: 1.4, ease: "easeInOut" }}
-          />
-        )}
+        {/* `animate-sweep` (§11) is this bar: a third of the track crossing
+            it in 1.4 seconds, on the compositor. Reduced motion fills it. */}
+        <span className="absolute inset-0 bg-brand/60 motion-safe:hidden" />
+        <span className="absolute inset-y-0 left-0 w-1/3 animate-sweep rounded-full bg-brand motion-reduce:hidden" />
       </span>
     )
   return (

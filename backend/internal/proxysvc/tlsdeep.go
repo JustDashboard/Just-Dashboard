@@ -39,7 +39,7 @@ import (
 type DeepScan struct {
 	Domain    string    `json:"domain"`
 	Port      int       `json:"port"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 	Reachable bool      `json:"reachable"`
 	Error     string    `json:"error,omitempty"`
 	// Address is where every probe went, and Where whose address it is:

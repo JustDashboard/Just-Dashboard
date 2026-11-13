@@ -37,7 +37,8 @@ export type DashboardUser = {
   totpEnabled: boolean
   disabled: boolean
   mustChangePassword: boolean
-  lastLoginAt: string
+  /** Absent for an account that has never signed in, and in the answer to its first sign-in. */
+  lastLoginAt?: string
   createdAt: string
   /** Not yet asked what the dashboard is for; the shell sends the account to `/welcome`. */
   needsOnboarding: boolean
@@ -1262,6 +1263,14 @@ export type SystemdTimer = {
   enabled: boolean
   next?: string
   last?: string
+  /** What the timer's unit says it is for. */
+  description?: string
+  /** Each `OnCalendar=` it fires on, as systemd normalises it. */
+  calendar?: string[]
+  /** Each interval it fires on, as the unit file spells it: `OnBootSec=15min`. */
+  monotonic?: string[]
+  /** `RandomizedDelaySec`, as systemd writes the span; absent for none. */
+  randomDelay?: string
 }
 
 export type SystemdUnit = {
@@ -1406,6 +1415,141 @@ export type ProcessTree = {
   children: ProcessLink[]
 }
 
+export type InspectID = { id: number; name?: string }
+
+/**
+ * Everything else the kernel keeps about one process, from
+ * `GET /processes/{pid}/inspect` — the process page's slower read. Each block
+ * carries `ready: false` where this account could not read it.
+ */
+export type ProcessInspect = {
+  pid: number
+  createTime: string
+  argv: string[]
+  exe?: string
+  /** The file it was started from has been replaced since: a restart picks up the new one. */
+  exeDeleted?: boolean
+  root?: string
+  waitChannel?: string
+  namespacePid?: number
+  identity: {
+    ready: boolean
+    user: InspectID
+    effectiveUser: InspectID
+    savedUser: InspectID
+    group: InspectID
+    effectiveGroup: InspectID
+    groups: InspectID[]
+    terminal?: string
+    session: number
+    processGroup: number
+    foreground?: boolean
+  }
+  scheduling: {
+    ready: boolean
+    policy: string
+    realtimePriority?: number
+    nice: number
+    cpus?: string
+    cpuCount: number
+    hostCpus: number
+    lastCpu: number
+    userSeconds: number
+    systemSeconds: number
+    childrenUserSeconds: number
+    childrenSystemSeconds: number
+    ioWaitSeconds: number
+    voluntarySwitches: number
+    involuntarySwitches: number
+    minorFaults: number
+    majorFaults: number
+  }
+  memory: {
+    ready: boolean
+    resident: number
+    anonymous: number
+    fileBacked: number
+    sharedMemory: number
+    peak: number
+    virtual: number
+    virtualPeak: number
+    data: number
+    stack: number
+    text: number
+    libraries: number
+    locked: number
+    pageTables: number
+    swap: number
+    proportional: number
+    unique: number
+    rollupReady: boolean
+    oomScore: number
+    oomScoreAdj: number
+    oomReady: boolean
+  }
+  io: {
+    ready: boolean
+    charsRead: number
+    charsWritten: number
+    readCalls: number
+    writeCalls: number
+    readBytes: number
+    writeBytes: number
+    cancelledWriteBytes: number
+  }
+  security: {
+    ready: boolean
+    capabilities: string[]
+    allCapabilities: boolean
+    boundingAll: boolean
+    noNewPrivs: boolean
+    seccomp: "off" | "strict" | "filter"
+    seccompFilters?: number
+    label?: string
+  }
+  signals: {
+    ready: boolean
+    caught: string[]
+    ignored: string[]
+    blocked: string[]
+    pending: string[]
+  }
+  namespaces: { kind: string; own: boolean }[]
+  cgroup: {
+    path?: string
+    memoryLimit?: number
+    memoryCurrent?: number
+    cpuLimit?: number
+    pidsLimit?: number
+    pidsCurrent?: number
+  }
+  limits: { name: string; soft: string; hard: string; unit?: string }[]
+  files: {
+    ready: boolean
+    total: number
+    files: number
+    sockets: number
+    pipes: number
+    devices: number
+    other: number
+    deleted: number
+    entries: {
+      fd: number
+      kind: "file" | "socket" | "pipe" | "device" | "other"
+      target: string
+      deleted?: boolean
+    }[]
+    truncated?: boolean
+  }
+  libraries: { path: string; deleted?: boolean }[]
+  connections: { proto: string; local: string; remote?: string; state?: string }[]
+  connectionsTotal: number
+  environment: string[]
+  environmentReadable: boolean
+  threads: { tid: number; name: string; state: string; cpuSeconds: number; lastCpu: number }[]
+  threadsTotal: number
+}
+
 export type ProcessFacet = {
   value: string
   label: string
@@ -1431,6 +1575,71 @@ export type ProcessList = {
 export type SystemdUnitDetail = {
   unit: SystemdUnit
   properties: Record<string, string>
+}
+
+/**
+ * `GET /systemd/{name}/files` — the unit file and its drop-ins as systemd
+ * loaded them (`FragmentPath`, then `DropInPaths` in the order they apply).
+ * Credential-shaped `Environment=` values are masked for anyone below
+ * system.admin.
+ */
+export type SystemdUnitFiles = {
+  files: SystemdUnitFile[]
+  /** The files changed on disk since systemd last read them. */
+  needDaemonReload: boolean
+}
+
+export type SystemdUnitFile = {
+  path: string
+  dropIn: boolean
+  content: string
+  size: number
+  /** Cut at 256 KiB. */
+  truncated: boolean
+  /** Why it could not be read: missing, not a regular file, masked to /dev/null. */
+  error?: string
+}
+
+/**
+ * `GET /systemd/{name}/security` — `systemd-analyze security`: how much of
+ * the host a service can reach, 0 (locked down) to 10 (nothing applied),
+ * and each setting that counts toward it, most exposed first.
+ */
+export type SystemdSecurity = {
+  available: boolean
+  score?: number
+  /** SAFE, OK, MEDIUM, EXPOSED or UNSAFE. */
+  verdict?: string
+  checks: SystemdSecurityCheck[]
+  reason?: string
+}
+
+export type SystemdSecurityCheck = {
+  /** The setting, as systemd names it: `ProtectSystem=`, `CapabilityBoundingSet=~CAP_SYS_ADMIN`. */
+  name: string
+  field: string
+  /** What the setting's current value means, in systemd's words. */
+  description: string
+  /** Whether it is applied; null where it does not apply to this unit. */
+  set: boolean | null
+  /** What it adds to the score while unapplied; null where it counts for nothing. */
+  exposure: number | null
+}
+
+/** `GET /systemd/{name}/related` — every unit it names in a dependency, with its state. */
+export type SystemdRelated = {
+  units: SystemdRelatedUnit[]
+}
+
+export type SystemdRelatedUnit = {
+  name: string
+  description: string
+  loadState: string
+  activeState: string
+  subState: string
+  unitFileState: string
+  /** The dependency properties that named it: `Requires`, `After`… */
+  relations?: string[]
 }
 
 export type CronJob = {
@@ -1666,13 +1875,6 @@ export type LogRotateRule = {
   maxSize?: string
   missingOk: boolean
   options: string[]
-}
-
-export type LogRotateStatus = {
-  available: boolean
-  rules: LogRotateRule[]
-  stateFile?: string
-  lastRun?: string
 }
 
 /** The verdict for one file: is anything actually trimming this. */
@@ -2143,80 +2345,6 @@ export type DbConnection = {
   capabilities?: DbCapabilities
 }
 
-/** One table, view or Mongo collection, as the schema browser lists it. */
-export type DbTable = {
-  schema: string
-  name: string
-  type: string
-  estimatedRows: number
-  size?: number
-  comment?: string
-}
-
-export type DbColumn = {
-  name: string
-  type: string
-  nullable: boolean
-  default?: string
-  key?: string
-  position: number
-}
-
-export type QueryResult = {
-  columns: string[]
-  types: string[]
-  rows: unknown[][]
-  rowCount: number
-  rowsAffected: number
-  duration: string
-  truncated: boolean
-  statement: string
-}
-
-export type QueryRisk = {
-  destructive: boolean
-  level: "read" | "medium" | "high" | "critical"
-  reasons: string[]
-}
-
-/** One index on a table, with the columns it covers in order. */
-export type DbIndex = {
-  name: string
-  columns: string[]
-  unique: boolean
-  primary: boolean
-}
-
-/** One outgoing foreign key. Composite keys keep columns paired in order. */
-export type DbForeignKey = {
-  name: string
-  columns: string[]
-  refSchema?: string
-  refTable: string
-  refColumns: string[]
-  onUpdate?: string
-  onDelete?: string
-}
-
-/** Everything the Structure tab shows and everything row editing needs. */
-export type DbTableDetail = {
-  schema: string
-  name: string
-  columns: DbColumn[]
-  primaryKey: string[]
-  indexes: DbIndex[]
-  foreignKeys: DbForeignKey[]
-  createSql?: string
-}
-
-/** A named SQL snippet kept against a connection. */
-export type DbSavedQuery = {
-  id: number
-  name: string
-  sql: string
-  createdAt: string
-}
-
 /** One entry in a connection's recent-statement history. */
 export type DbHistoryEntry = {
   id: number
@@ -2226,54 +2354,6 @@ export type DbHistoryEntry = {
   durationMs: number
   rowCount: number
   ranAt: string
-}
-
-export type OrmTarget = "prisma" | "drizzle" | "typescript" | "zod"
-
-/** A generator the server offers, with the filename its download will use. */
-export type OrmTargetInfo = {
-  id: OrmTarget
-  label: string
-  filename: string
-  description: string
-}
-
-/** One session the database server is currently running. */
-export type DbActivity = {
-  pid: string
-  user?: string
-  database?: string
-  state?: string
-  seconds: number
-  query?: string
-  client?: string
-  wait?: string
-  blockedBy?: string
-  /** True for the connection that answered this request — never offer to kill it. */
-  self?: boolean
-}
-
-export type DbActivityResponse = {
-  sessions: DbActivity[]
-  /** False on an engine with no server-side session list, e.g. SQLite. */
-  supported: boolean
-  reason?: string
-}
-
-/** One row found by the schema-wide value search. */
-export type DbSearchMatch = {
-  schema: string
-  table: string
-  column: string
-  value: string
-  row: Record<string, unknown>
-}
-
-export type DbSearchResult = {
-  matches: DbSearchMatch[]
-  tablesScanned: number
-  tablesSkipped?: string[]
-  truncated: boolean
 }
 
 /** What one table costs on disk. Row counts are the engine's estimate. */
@@ -2306,77 +2386,6 @@ export type DbOverview = {
   /** False where the engine cannot report bytes — show rows and say so. */
   sizesKnown: boolean
   pool: DbPoolStats
-}
-
-/** One condition in the data grid's filter row. */
-export type DbFilter = {
-  column: string
-  op: string
-  value: string
-}
-
-/** A column being created or added, as the DDL form describes it. */
-export type DbNewColumn = {
-  name: string
-  type: string
-  notNull?: boolean
-  primaryKey?: boolean
-  default?: string
-}
-
-export type DbImportResult = {
-  inserted: number
-  failed: number
-  errors: string[]
-  errorsTruncated: boolean
-  statement: string
-}
-
-/** Table name to column names, for editor completion. */
-export type DbOutline = {
-  schema: string
-  tables: Record<string, string[]>
-}
-
-/** table -> its outgoing foreign keys, for the entity diagram. */
-export type DbRelations = Record<string, DbForeignKey[]>
-
-// --- Redis ---------------------------------------------------------------
-
-export type RedisKeyInfo = {
-  key: string
-  type: string
-  /** Seconds; -1 means no expiry, -2 means the key is gone. */
-  ttl: number
-  size: number
-}
-
-export type RedisPage = {
-  keys: RedisKeyInfo[]
-  cursor: string
-  done: boolean
-}
-
-export type RedisZMember = { member: string; score: number }
-
-export type RedisValue = {
-  key: string
-  type: string
-  ttl: number
-  string?: string
-  list?: string[]
-  set?: string[]
-  hash?: Record<string, string>
-  zset?: RedisZMember[]
-  stream?: { id: string; values: Record<string, unknown> }[]
-  truncated: boolean
-}
-
-// --- MongoDB -------------------------------------------------------------
-
-export type MongoCollectionInfo = {
-  indexes: DbIndex[]
-  stats?: Record<string, unknown>
 }
 
 export type PasswordState = "set" | "locked" | "none" | "empty" | "unknown"
@@ -3497,17 +3506,6 @@ export type DeploymentRuntimeServices = {
   services: DeploymentRuntimeService[]
 }
 
-export type DockerTemplate = {
-  id: string
-  name: string
-  blurb: string
-  category: "http" | "database" | "tool" | "automation" | "game"
-  requires?: string
-  docsUrl: string
-  license: string
-  spec: ContainerSpec
-}
-
 /**
  * How the first person to open a deployed template gets in. The catalogue
  * declares it; the picker promises it before the deploy and the project's
@@ -3828,44 +3826,6 @@ export type GameProperties = {
   values?: Record<string, string>
   known: BlueprintProperty[]
   restartRequired?: boolean
-}
-
-export type BlueprintRenderedPlan = {
-  detection: { source: { kind: string; repository?: string; ref?: string; digest?: string } }
-  configuration: DeploymentConfiguration
-  rendered: {
-    blueprintId: string
-    blueprintVersion: string
-    profile: string
-    image: string
-    memoryMb: number
-    digest: string
-    variables: {
-      name: string
-      value?: string
-      sensitivity: string
-      generated?: boolean
-      length?: number
-      label?: string
-    }[]
-    ports: {
-      name: string
-      internal: number
-      protocol: string
-      exposure: string
-      purpose: string
-      primary?: boolean
-    }[]
-    volumes: { name: string; target: string; purpose: string; data: boolean; backup: boolean }[]
-    checks: { name: string; kind: string; phase: string; required: boolean }[]
-    domains?: string[]
-    acceptances?: { input: string; label: string; url: string }[]
-    stopCommands?: string[]
-  }
-  summary: BlueprintSummary
-  inputs: BlueprintInput[]
-  automation: BlueprintAutomation[]
-  files: BlueprintConfigFile[]
 }
 
 export type DeploymentDomainRoute = {
@@ -6662,12 +6622,6 @@ export type DeploymentRemovalPlan = {
   generatedAt: string
 }
 
-export type DeploymentRemovalExecution = {
-  deploymentId: number
-  removed: DeploymentRemovalTarget[]
-  remaining: DeploymentRemovalTarget[]
-}
-
 export type DeploymentBackupGateEvidence = {
   jobId: number
   runId?: number
@@ -6834,13 +6788,6 @@ export type SourceIdentity = {
   dirty?: boolean
   composeFiles?: string[]
   services?: string[]
-}
-
-export type EnvVar = {
-  key: string
-  value?: string
-  updatedAt: string
-  masked: string
 }
 
 export type AuditEntry = {
@@ -7702,29 +7649,6 @@ export type TerminalWindow = TerminalWindowSummary & {
 // --- detected and provisioned database servers ----------------------------
 
 /**
- * A database server found running on this host. It deliberately carries no
- * password: what reaches the browser is the description of a connection that
- * could be made, not the means to make it.
- */
-export type DbDetectedServer = {
-  driver: DbConnection["driver"]
-  container: string
-  image: string
-  host: string
-  port: number
-  user?: string
-  database?: string
-  /** Why this one cannot be connected to, when it cannot. */
-  reason?: string
-  /** The name of the connection already pointing at it, if there is one. */
-  adopted?: string
-  health?: string
-  status?: string
-}
-
-export type DbDetected = { servers: DbDetectedServer[] }
-
-/**
  * Where a connection's server can be reached from, as GET /databases/{id}/access
  * reads it off the container's port binding and the host's firewall.
  *
@@ -8038,14 +7962,6 @@ export type DbUnreachableServer = {
   reason: string
 }
 
-export type DbSyncResult = {
-  added: string[]
-  already: string[]
-  unreachable?: DbUnreachableServer[]
-  /** Servers running on the host itself, which nothing here can sign in to. */
-  needsCredentials?: DbCredentialServer[]
-}
-
 /**
  * A database installed on the machine rather than in a container.
  *
@@ -8075,50 +7991,6 @@ export type DbProvisionOption = {
 }
 
 // --- schema graph (the diagram) -------------------------------------------
-
-export type DbGraphColumn = {
-  name: string
-  type: string
-  nullable: boolean
-  primaryKey: boolean
-  foreignKey?: string
-  unique?: boolean
-}
-
-export type DbGraphTable = {
-  schema: string
-  name: string
-  type: string
-  rows: number
-  columns: DbGraphColumn[]
-}
-
-export type DbGraphEdge = {
-  name: string
-  fromTable: string
-  fromColumn: string
-  toTable: string
-  toColumn: string
-  onDelete?: string
-  cardinality: "one-to-one" | "many-to-one"
-}
-
-export type DbSchemaGraph = {
-  schema: string
-  tables: DbGraphTable[]
-  edges: DbGraphEdge[]
-  truncated: boolean
-}
-
-/**
- * How the operator arranged one schema's diagram, as the server hands it back.
- * The document itself is decoded by `components/database/diagram/memory.ts`;
- * the server stores it whole and says only when it was last saved.
- */
-export type DbDiagramLayoutResponse = {
-  layout: Record<string, unknown> | null
-  updatedAt?: string
-}
 
 // --- the fleet, the server behind a connection, and the map ----------------
 
@@ -8206,72 +8078,6 @@ export type DbFleet = {
   checkedAt: string
 }
 
-/** One account on the server, in the terms every engine shares. */
-export type DbRole = {
-  name: string
-  host?: string
-  login: boolean
-  superuser: boolean
-  createDb: boolean
-  createRole: boolean
-  connectionLimit: number
-  validUntil?: string
-  memberOf?: string[]
-  connections: number
-  locked?: boolean
-  system?: boolean
-}
-
-export type DbRoles = { roles: DbRole[]; supported: boolean; reason?: string }
-
-export type DbGrantLevel = "read" | "write" | "all"
-
-export type DbExtension = {
-  name: string
-  version?: string
-  availableVersion?: string
-  installed: boolean
-  schema?: string
-  comment?: string
-}
-
-export type DbExtensions = {
-  extensions: DbExtension[]
-  supported: boolean
-  editable?: boolean
-  reason?: string
-}
-
-export type DbSetting = {
-  name: string
-  value: string
-  unit?: string
-  category?: string
-  description?: string
-  source?: string
-  restartRequired?: boolean
-}
-
-export type DbSettings = { settings: DbSetting[]; supported: boolean }
-
-export type DbStatement = {
-  id: string
-  query: string
-  calls: number
-  totalMs: number
-  meanMs: number
-  maxMs?: number
-  rows: number
-  hitRatio: number
-}
-
-export type DbStatements = {
-  statements: DbStatement[]
-  supported: boolean
-  reason?: string
-  totalMs: number
-}
-
 /**
  * The logs a database's server writes, as GET /databases/{id}/logs/sources
  * follows the connection to them: its container, or the file its process
@@ -8311,22 +8117,24 @@ export type DbQueryLog = {
   supported: boolean
   reason?: string
   source: "log" | "slowlog" | "query_log" | "slow_log" | "statements_history" | ""
-  /** The setting that keeps the log empty, and the statement that changes it. */
-  enable?: { setting: string; current: string; sql: string }
+  /**
+   * The setting that keeps the log empty, the statement that changes it, and
+   * the same change as parameters for Turn on to set through
+   * `PUT /databases/{id}/settings`, in order.
+   */
+  enable?: {
+    setting: string
+    current: string
+    sql: string
+    changes?: { name: string; value: string }[]
+    /** Why the connecting account cannot make the change; Turn on is then not offered. */
+    blocked?: string
+  }
   /** How slow a statement has to be to be recorded, in the engine's words. */
   threshold?: string
   entries: DbQueryEntry[]
   truncated: boolean
 }
-
-export type DbBackupFile = {
-  file: string
-  size: number
-  takenAt: string
-  format: string
-}
-
-export type DbBackups = { dir: string; files: DbBackupFile[] }
 
 /** A node on the map of what talks to what. */
 export type DbTopoNode = {
@@ -8402,8 +8210,16 @@ export type UpdateRun = {
   image: string
   container: string
   health?: string
+  /** Installed from the repository's tag `v<toVersion>` or not at all. */
+  requireTag?: boolean
   fromCommit?: string
   toCommit?: string
+  /** `toCommit` is the commit that tag names, not wherever the branch was. */
+  tagged?: boolean
+  /** Where the dashboard's database was copied before the update, if it was. */
+  databaseCopy?: string
+  /** The images tagged `:previous` before the build replaced them. */
+  savedImages?: { current: string; previous: string }[]
   actor: string
   startedAt: string
   updatedAt: string
@@ -8411,14 +8227,29 @@ export type UpdateRun = {
   error?: string
 }
 
+/**
+ * Everything this build knows about its own past, newest first; needs no network. Served by
+ * `GET /dashboard/update/history`, apart from the report that is polled.
+ */
+export type UpdateHistory = {
+  history: Release[]
+}
+
 export type SelfUpdateReport = {
   version: string
+  /**
+   * The short commit this build was made from when it is not the release of
+   * `version` (a patch branch, a fork's head). Absent for a release.
+   */
+  commit?: string
   latest?: string
   available: boolean
+  /** The version on offer has a release tag; false is a fork's branch head. */
+  tagged: boolean
+  /** A newer version on the tracked branch with no tag yet. Not offered. */
+  pending?: string
   /** Releases newer than the installed version, newest first. */
   releases: Release[]
-  /** Everything this build knows about its own past; needs no network. */
-  history: Release[]
   breaking: boolean
   check: {
     enabled: boolean
@@ -8427,6 +8258,8 @@ export type SelfUpdateReport = {
     source?: string
     repo: string
     ref: string
+    /** Only tagged versions are offered and installed: the project's own repository. */
+    tagsOnly: boolean
   }
   install: {
     supported: boolean
@@ -8862,15 +8695,6 @@ export type UninstallPlan = {
   durableLog: string
 }
 
-/** A layer of the host's exposure the posture did not see: neither a finding nor a pass. */
-export type PostureUnknown = {
-  id: string
-  layer: "provider" | "nftables"
-  title: string
-  detail: string
-  subjects?: string[]
-}
-
 export type SSHSetting = {
   key: string
   label: string
@@ -8910,20 +8734,6 @@ export type SSHDConfig = {
   error?: string
 }
 
-export type SSHApplyResult = {
-  written: boolean
-  file: string
-  valid: boolean
-  output?: string
-  reloaded: boolean
-  reloadError?: string
-  applied: string[]
-  /** Whether the socket unit was moved onto the new port as well. */
-  socketMoved?: boolean
-  socketUnit?: string
-  socketError?: string
-}
-
 export type Peer = {
   address: string
   count: number
@@ -8958,23 +8768,6 @@ export type NetInterface = {
   bytesSent: number
   bytesRecv: number
   public: boolean
-}
-
-export type Route = {
-  destination: string
-  gateway?: string
-  interface?: string
-  source?: string
-  metric?: string
-  family: "ipv4" | "ipv6"
-  raw: string
-}
-
-export type NetworkInfo = {
-  interfaces: NetInterface[]
-  routes: Route[]
-  resolvers: string[]
-  search: string[]
 }
 
 export type ProbeResult = {
@@ -9212,28 +9005,6 @@ export type DeploymentRequests = {
   slowest?: RequestEntry[]
   summary: RequestSummary
   coverage: RequestCoverage
-}
-
-/** One window's worth of traffic, small enough to sit beside a release or on a card. */
-export type TrafficReading = {
-  requests: number
-  pages: number
-  perMinute: number
-  errorRate: number
-  p95?: number
-  from: string
-  until: string
-}
-
-/** What a release did to the traffic: the same reading either side of its activation. */
-export type RunTraffic = {
-  status: "available" | "unavailable"
-  reason?: string
-  activationCompletedAt?: string
-  windowMinutes: number
-  before?: TrafficReading
-  after?: TrafficReading
-  latency: boolean
 }
 
 /** A project's last hour on a card: alive, failing, and a line to draw. */
@@ -9755,9 +9526,6 @@ export type NetworkTopologyFlows = {
   accounting: boolean
   edges: NetworkFlowEdge[]
 }
-
-/** What a change to a device the dashboard did not make says about the next boot. */
-export type NetworkLinkChange = { persisted: boolean; note?: string }
 
 export type NetworkNamespace = {
   name: string
@@ -11583,8 +11351,8 @@ export type Passkey = {
   name: string
   rpId: string
   createdAt: string
-  /** Zero time when it has never signed in. */
-  lastUsedAt: string
+  /** Absent when it has never signed in. */
+  lastUsedAt?: string
   /** Backed up by a password manager or a phone's keychain rather than held on one device. */
   synced: boolean
   transports: string[]

@@ -4,6 +4,77 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.8.6 — 13 November 2026
+
+**Updates that wait for a tag, and a page for every process and service**
+
+An update is now offered only once its release is tagged, the dashboard copies its own database first, and an update cut off halfway is put back. Every process, service and schedule has a page or sheet of its own, the Databases map is drawn on the server map's canvas, and ranked lists read as figures. A full audit of the dashboard fixed 97 findings across the API, the store, the assistant and the pages.
+
+> **Needs attention before you upgrade.** About a minute after this version starts, each deployment environment keeps the whole output of its newest 200 runs and older runs are cut to their last 200 lines. That cannot be undone. To keep everything, set JD_DEPLOY_HISTORY_RUNS=0 in .env before updating. An install that follows another branch of this repository through JD_UPDATE_BRANCH is no longer updated in the app to that branch's head: it is offered tagged releases only.
+
+### Security
+
+- The dashboard's database files are private from the first start
+  - The store's file, its log and its index are readable by the owner only, and the data directory loses read and write for group and others.
+- The documents say plainly what each role can reach
+  - SECURITY.md and the role picker say that limited and admin are both root on the machine, and what read-only can read. The master key still cannot be rotated, and the documents record why.
+- Go 1.26.11 and three updated modules
+  - Advisories that reach the code go from six to two. The two left are in the Docker client and have no fixed version yet.
+
+### Added
+
+- The dashboard copies its own database before an update
+  - The copy is kept under pre-update/ in the data directory, the newest two kept. An update that was cut off halfway is put back at the next start, and build cache unused for a week is pruned after an update.
+- Update, roll back and read the version from a shell
+  - scripts/manage.sh gains update, rollback and version, and the administration guide says what an update trusts and how to recover one over SSH.
+- The installer looks at the server first
+  - install.sh stops on a host without systemd or on an architecture other than x86_64 and arm64, and warns with the numbers when memory plus swap or free disk is short.
+- Every process and every service has a page of its own
+  - Opening a process or a systemd service leads to its own page, with the table as a rail beside it, instead of a sheet over the list.
+- Turn slow-statement recording on from the Queries view in one press
+- The Overview says when the dashboard itself is in trouble
+  - A full disk under the dashboard or a background task that keeps failing is named on the Overview. A reserve keeps sign-in possible on a full disk, and a failing background task is restarted instead of restarting the dashboard.
+
+### Changed
+
+- An update is offered only once its release is tagged
+  - An install that follows the project's repository is offered, and installs, a version only when the tag v<version> exists, which is made after every check has passed. A fork named in JD_UPDATE_REPO still follows its branch.
+- Every base image is pinned to the one this release was tested with
+  - The images the stack is built from, Caddy included, are named by tag and digest, so an update no longer builds from whatever the registry serves that day.
+- Scheduled shows the next hours as a chart, with one sheet for every schedule
+  - An hour chart stands over Up next, cron jobs and timers open the same sheet, and the tables are plainer.
+- The Databases map is drawn on the server map's canvas
+  - One diagram per database, left to right: what reads it, a pooler, the database, what it runs in, the volume that keeps its data and the backups that cover it. It pans, zooms and drags like the server map. The overview keeps its cards; the cards and table switch is gone.
+- Ranked lists on the Databases and Logs pages read as figures, not bars
+  - Largest tables, busiest statements, Redis namespaces and MongoDB collections show each value with its share. The logs page's Insights is drawn the way a project's Logs Insights is.
+- What nothing claims stands in rows on the server map
+  - What no system claims used to stand in one long column.
+- "Ask before changes" asks more often
+  - A shell line counts as a read only when everything in it is known to be one, and a read that sends text to another machine (a certificate check, a DNS lookup, a ping, a database connection test) waits for an Allow too.
+- API errors say what happened
+  - Every answer carries X-Request-Id and a server error names it. A missing nginx, Docker or systemd is 503 not_installed everywhere, a fault on the server's side is no longer reported as the caller's mistake, and a 429 says the real wait, which jd and both SDKs wait out. A browser session and each API key have a rate budget of their own.
+- Pages hold still, name their item and read with a keyboard
+  - A browser tab names the item as well as the section, what sits under a loading block no longer jumps when it lands, the sidebar shows keyboard focus, faded text meets WCAG AA, and closing a dialog gives the keyboard back to what opened it. On a phone, Logs and the network tools show one pane at a time.
+- Build output is written in batches
+  - A build's lines are stored once and in batches, so long builds cost less. After a power cut the last moments of build output or metrics can be missing; accounts, sessions, audit entries and deployment state are still written at once.
+- A build that is not a release says so
+  - Anything built from a commit other than the tagged one reports its version with the commit, as 0.8.6+98c9349.
+
+### Fixed
+
+- A preview flag spelled the other way no longer runs the real change
+  - On two database routes a preview flag spelled a way the route did not expect ran the change. A boolean query flag is now 1, 0, true or false on every route, and anything else is refused.
+- Two reads that could stop every other request
+  - Both could hold every connection to the dashboard's own database at once. A test now calls every read of that shape with a single connection.
+- A slow or throttled session check no longer signs you out
+  - A throttled or failed check on page load used to send a signed-in person to the sign-in page. Pages also back off when the server asks them to, and a link opened while signed out returns to its page after sign-in.
+- Disks are measured as the host sees them
+  - /boot, /boot/efi and second disks appear with their own sizes. A filesystem alert may fire for the first time, and a chart can show a step until older samples age out.
+- Files stays quick in a large folder
+  - The page no longer redraws every row every two seconds or on every click.
+- Backup job cards no longer jump as the Backups page loads
+  - A card could be drawn in its narrow shape for one frame and then widen, moving every card under it.
+
 ## 0.8.5 — 6 November 2026
 
 **Just Hub, and an assistant on every page**

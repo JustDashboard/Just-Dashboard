@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { ROLE_HUE, ROLE_MARK } from "@/components/account/capabilities"
+import { ROLE_HUE, ROLE_MARK, ROLE_SUMMARY } from "@/components/account/capabilities"
 import {
   ROLES,
   inUserScope,
@@ -52,7 +52,12 @@ export function useDashboardUsers(enabled = true) {
   )
 }
 
-/** The role, changed where it is read: each option drawn with its mark. */
+/**
+ * The role, changed where it is read. Each option carries the sentence the
+ * new-user form shows for it: this is where a role is handed to an account
+ * that already exists, at one press, and the word alone let "limited" read as
+ * less than root.
+ */
 function RolePicker({
   label,
   value,
@@ -69,9 +74,9 @@ function RolePicker({
         <Mark aria-hidden className="size-3.5" style={{ color: ROLE_HUE[value] }} />
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className="w-72">
         {ROLES.map((r) => (
-          <SelectItem key={r} value={r}>
+          <SelectItem key={r} value={r} hint={ROLE_SUMMARY[r]}>
             {r}
           </SelectItem>
         ))}
@@ -114,7 +119,7 @@ function UserCard({
     <span className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
       {/* The options open in a portal, and React carries a press on one back
           up through the card, which would open the editor behind the menu. */}
-      <span onClick={(event) => event.stopPropagation()}>
+      <span role="presentation" onClick={(event) => event.stopPropagation()}>
         <RolePicker
           label={`Role of ${name}`}
           value={user.role}
@@ -206,7 +211,7 @@ function PeopleIdentity({
   const admins = active.filter((u) => u.role === "admin")
   const latest = users
     .filter((u) => !neverSignedIn(u))
-    .sort((a, b) => b.lastLoginAt.localeCompare(a.lastLoginAt))[0]
+    .sort((a, b) => (b.lastLoginAt ?? "").localeCompare(a.lastLoginAt ?? ""))[0]
   const verdict = peopleVerdict(users, require2fa)
   return (
     <HostIdentity

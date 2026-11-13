@@ -121,9 +121,6 @@ type Service struct {
 	congestion          congestionReader
 	independentRecovery bool
 	recoveryInstalled   bool
-	// incidentMu serialises the Overview's concurrent readers folding their
-	// findings into the incident history.
-	incidentMu sync.Mutex
 	// history is the route observer's last reading (route_history.go).
 	history routeObserver
 	// forwardingSample is the last forwarded-datagram reading per family,

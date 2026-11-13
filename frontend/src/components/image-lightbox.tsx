@@ -2,14 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Dialog as DialogPrimitive } from "radix-ui"
-import {
-  ChevronLeft,
-  ChevronRight,
-  Cross,
-  Download,
-  External,
-  LoaderCircle,
-} from "@/components/icons"
+import { ChevronLeft, ChevronRight, Cross, Download, External } from "@/components/icons"
+import { Spinner } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -168,6 +162,7 @@ export function ImageLightbox({
               </Button>
             </DialogPrimitive.Close>
           </div>
+          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- swipes, and a press on the ground beside the picture: the arrow keys and Escape do the same */}
           <div
             className="relative min-h-0 flex-1"
             onPointerDown={(event) => {
@@ -266,7 +261,10 @@ function Picture({ image, missingNote }: { image: LightboxImage; missingNote: st
   if (zoomed && shown) {
     return (
       <div className="absolute inset-0 flex overflow-auto px-2 pb-2" data-slot="lightbox-stage">
-        {/* eslint-disable-next-line @next/next/no-img-element -- a data address or our own route, already sized */}
+        {/* A data address or our own route, already sized. Zooming is the
+            pointer's for now: a keyboard reads the picture at the size it
+            fits (audit FE-15, left open). */}
+        {/* eslint-disable-next-line @next/next/no-img-element, jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
         <img
           src={shown}
           alt={image.alt}
@@ -311,7 +309,9 @@ function Picture({ image, missingNote }: { image: LightboxImage; missingNote: st
           />
         )}
         {shown && (
-          // eslint-disable-next-line @next/next/no-img-element -- a data address or our own route, already sized
+          // A data address or our own route, already sized; zooming is the
+          // pointer's for now, as on the zoomed picture above.
+          // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions
           <img
             ref={picture}
             src={shown}
@@ -333,10 +333,10 @@ function Picture({ image, missingNote }: { image: LightboxImage; missingNote: st
           />
         )}
         {state === "loading" && (
-          <LoaderCircle
-            aria-hidden
-            className="pointer-events-none absolute top-1/2 left-1/2 size-5 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/70"
-          />
+          // Centred by the wrapper: the spinner's own transform is its turn.
+          <span className="pointer-events-none absolute inset-0 grid place-items-center">
+            <Spinner className="size-5 text-white/70" />
+          </span>
         )}
       </div>
       {state === "missing" && (

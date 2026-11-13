@@ -225,7 +225,7 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 	if environmentID > 0 {
 		environmentFilter, environmentArgs = "e.id = ?", []any{environmentID}
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 		SELECT p.id, CASE WHEN p.archived_name != '' THEN p.archived_name ELSE p.name END, p.profile, p.updated_at,
 		       e.id, e.name, e.kind, e.desired_revision, e.live_release_id,
 		       e.strategy, e.expected_downtime,
@@ -332,7 +332,7 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 		if summary.LiveReleaseID == 0 || summary.LivePlanRevision == summary.DesiredRevision {
 			continue
 		}
-		pending, err := pendingState(ctx, s.db, summary.ID, summary.EnvironmentID)
+		pending, err := pendingState(ctx, s.reader(), summary.ID, summary.EnvironmentID)
 		if err != nil {
 			return nil, err
 		}
@@ -371,8 +371,20 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 		summary.RecentRuns = recentRuns[summary.ID]
 	}
 
-	activeRows, err := s.db.QueryContext(ctx, `
-		SELECT id FROM deploy_runs WHERE `+activeRunWhere+`
+	// One statement, with each run's names read beside it. This loop once
+	// loaded every run and its names with further queries while its cursor
+	// still held a connection, so a handful of concurrent reads each held one
+	// of the pool's connections and waited for another, and every other
+	// database call in the process waited behind them. Nothing in here may
+	// query: a cursor is read to its end and closed first. The names are two
+	// lookups by primary key for each run in flight, not a read of the fleet.
+	activeRows, err := s.reader().QueryContext(ctx, `
+		SELECT `+engineRunColumns+`,
+		       (SELECT CASE WHEN owner.archived_name != '' THEN owner.archived_name ELSE owner.name END
+		          FROM deploy_projects owner WHERE owner.id = deploy_runs.project_id),
+		       (SELECT target.name FROM deploy_environments target
+		         WHERE target.id = deploy_runs.environment_id AND target.project_id = deploy_runs.project_id)
+		  FROM deploy_runs WHERE `+activeRunWhere+`
 		 ORDER BY CASE WHEN state = 'queued' THEN 1 ELSE 0 END,
 		          priority DESC, requested_at, id`)
 	if err != nil {
@@ -381,22 +393,17 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 	defer activeRows.Close()
 	queuePosition := 0
 	for activeRows.Next() {
-		var runID int64
-		if err := activeRows.Scan(&runID); err != nil {
-			return nil, err
-		}
-		run, err := s.Run(ctx, runID)
+		var projectName, environment sql.NullString
+		run, err := scanEngineRun(withColumns{activeRows, []any{&projectName, &environment}})
 		if err != nil {
 			return nil, err
 		}
-		work := ActiveWork{Run: *run}
-		if err := s.db.QueryRowContext(ctx, `
-			SELECT CASE WHEN p.archived_name != '' THEN p.archived_name ELSE p.name END, e.name FROM deploy_projects p
-			JOIN deploy_environments e ON e.project_id = p.id
-			WHERE p.id = ? AND e.id = ?`, run.ProjectID, run.EnvironmentID).
-			Scan(&work.ProjectName, &work.Environment); err != nil {
-			return nil, err
+		if !projectName.Valid || !environment.Valid {
+			// What the separate lookup answered for a run whose deployment
+			// or environment is gone.
+			return nil, sql.ErrNoRows
 		}
+		work := ActiveWork{Run: *run, ProjectName: projectName.String, Environment: environment.String}
 		if run.State == RunQueued {
 			queuePosition++
 			work.QueuePosition = queuePosition
@@ -404,6 +411,9 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 		result.ActiveWork = append(result.ActiveWork, work)
 	}
 	if err := activeRows.Err(); err != nil {
+		return nil, err
+	}
+	if err := activeRows.Close(); err != nil {
 		return nil, err
 	}
 	// Every run a card shows in flight is one of the host's active runs, so
@@ -431,7 +441,7 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 			}
 		}
 	}
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.reader().QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(CASE WHEN slot_class = 'heavy' THEN 1 ELSE 0 END), 0),
 		       COALESCE(SUM(CASE WHEN slot_class = 'light' THEN 1 ELSE 0 END), 0)
 		  FROM deploy_queue_leases`).Scan(&result.Slots.HeavyUsed, &result.Slots.LightUsed); err != nil {
@@ -470,7 +480,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 	placeholders, args := inPlaceholders(wanted)
 
 	liveRuntimes := map[int64]bool{}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.reader().QueryContext(ctx,
 		`SELECT release_id FROM deploy_release_runtimes WHERE state = 'live' AND release_id IN `+placeholders, args...)
 	if err != nil {
 		return nil, nil, nil, err
@@ -497,7 +507,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 	// stopped release still has a runtime snapshot worth reading for its
 	// service count, even though it contributes no health evidence below.
 	releases := map[int64]*ReleaseWithArtifacts{}
-	rows, err = s.db.QueryContext(ctx, `SELECT `+releaseColumns+` FROM deploy_releases WHERE id IN `+placeholders, args...)
+	rows, err = s.reader().QueryContext(ctx, `SELECT `+releaseColumns+` FROM deploy_releases WHERE id IN `+placeholders, args...)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -512,7 +522,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 	if err := rows.Close(); err != nil {
 		return nil, nil, nil, err
 	}
-	rows, err = s.db.QueryContext(ctx, `
+	rows, err = s.reader().QueryContext(ctx, `
 		SELECT id, release_id, kind, reference, digest, metadata_json, size_bytes,
 		       retain_until, state, created_at
 		  FROM deploy_release_artifacts WHERE release_id IN `+placeholders+` ORDER BY id`, args...)
@@ -564,7 +574,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 	// The newest run of each release carries the evidence its checks produced.
 	healthRuns := map[int64]int64{}
 	runReleases := map[int64]int64{}
-	rows, err = s.db.QueryContext(ctx, `
+	rows, err = s.reader().QueryContext(ctx, `
 		SELECT release_id, id FROM (
 		  SELECT release_id, id,
 		         ROW_NUMBER() OVER (PARTITION BY release_id ORDER BY id DESC) AS rank
@@ -594,7 +604,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 	sort.Slice(runIDs, func(i, j int) bool { return runIDs[i] < runIDs[j] })
 	runPlaceholders, runArgs := inPlaceholders(runIDs)
 	evidence := map[int64]map[StepKey]json.RawMessage{}
-	rows, err = s.db.QueryContext(ctx, `
+	rows, err = s.reader().QueryContext(ctx, `
 		SELECT run_id, step_key, evidence_json FROM deploy_steps
 		 WHERE run_id IN `+runPlaceholders+`
 		   AND step_key IN ('verify_readiness','verify_smoke','activate')
@@ -687,7 +697,7 @@ func (s *OrchestrationStore) activeProjectRuns(
 	}
 	placeholders, args := inPlaceholders(projectIDs)
 	scope, scopeArgs := projectRunScope(environmentID)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 		SELECT `+engineRunColumns+` FROM (
 		  SELECT `+engineRunColumns+`,
 		         ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY requested_at DESC, id DESC) AS rank
@@ -726,7 +736,7 @@ func (s *OrchestrationStore) recentProjectRuns(
 	}
 	placeholders, args := inPlaceholders(projectIDs)
 	scope, scopeArgs := projectRunScope(environmentID)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 		SELECT `+engineRunColumns+` FROM (
 		  SELECT id AS ranked_id,
 		         ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY requested_at DESC, id DESC) AS rank
@@ -762,7 +772,7 @@ func (s *OrchestrationStore) currentSteps(ctx context.Context, runIDs []int64) (
 		return result, nil
 	}
 	placeholders, args := inPlaceholders(runIDs)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 		SELECT ranked.run_id, ranked.step_key, ranked.status, deploy_runs.operation FROM (
 		  SELECT run_id, step_key, status,
 		         ROW_NUMBER() OVER (
@@ -846,7 +856,7 @@ func displayRemote(remote string) string {
 // facts in one statement, keyed by project id. A legacy project without a
 // production environment is absent.
 func (s *OrchestrationStore) ArchivedDeploymentFacts(ctx context.Context) (map[int64]DeploymentFacts, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 		SELECT p.id, COALESCE(src.kind, ''),
 		       COALESCE(NULLIF(l.source_identity_json, '{}'), src.identity_json, '{}'),
 		       COALESCE(build.method, ''), COALESCE(build.config_json, '{}')
@@ -900,7 +910,7 @@ func inPlaceholders(values []int64) (string, []any) {
 
 func (s *OrchestrationStore) DeploymentBuildMethod(ctx context.Context, projectID int64) (BuildMethod, error) {
 	var method BuildMethod
-	err := s.db.QueryRowContext(ctx, `
+	err := s.reader().QueryRowContext(ctx, `
 		SELECT b.method FROM deploy_environments e
 		JOIN deploy_build_plans b ON b.environment_id = e.id AND b.revision = e.desired_revision
 		WHERE e.project_id = ? AND e.slug = 'production' AND e.archived_at = 0`, projectID).Scan(&method)
@@ -941,7 +951,7 @@ func (s *OrchestrationStore) ProjectRuns(ctx context.Context, projectID int64, l
 	if limit <= 0 || limit > 200 {
 		limit = 30
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+engineRunColumns+`
+	rows, err := s.reader().QueryContext(ctx, `SELECT `+engineRunColumns+`
 		FROM deploy_runs WHERE project_id = ? ORDER BY requested_at DESC, id DESC LIMIT ?`, projectID, limit)
 	if err != nil {
 		return nil, err
@@ -1018,7 +1028,7 @@ func (s *OrchestrationStore) ProjectRunsFiltered(
 	// One extra row reveals whether another page remains without a second
 	// round trip.
 	args = append(args, limit+1)
-	rows, err := s.db.QueryContext(ctx, `SELECT `+engineRunColumns+`
+	rows, err := s.reader().QueryContext(ctx, `SELECT `+engineRunColumns+`
 		FROM deploy_runs WHERE `+strings.Join(where, " AND ")+`
 		ORDER BY id DESC LIMIT ?`, args...)
 	if err != nil {
@@ -1055,20 +1065,4 @@ func (s *OrchestrationStore) ProjectRunsFiltered(
 		result[index].CurrentStep = steps[result[index].ID]
 	}
 	return result, nextBefore, nil
-}
-
-func (s *OrchestrationStore) latestProjectRun(ctx context.Context, projectID int64, active bool) (*EngineRun, error) {
-	query := `SELECT ` + engineRunColumns + ` FROM deploy_runs WHERE project_id = ?`
-	if active {
-		query += ` AND ` + activeRunWhere
-	}
-	query += ` ORDER BY requested_at DESC, id DESC LIMIT 1`
-	run, err := scanEngineRun(s.db.QueryRowContext(ctx, query, projectID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read deployment run: %w", err)
-	}
-	return run, nil
 }

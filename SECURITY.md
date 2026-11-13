@@ -5,6 +5,23 @@
 Please do not open a public issue. Report it privately through
 [**Security → Report a vulnerability**](https://github.com/JustDashboard/Just-Dashboard/security/advisories/new)
 on this repository. Fixes ship in the newest release, which **Update now** in the dashboard installs.
+Only the newest release is supported: there are no fixes for older versions, so the way to get one is to
+update.
+
+## How updates are verified
+
+An update builds and runs code as root, so this is what it relies on. The dashboard reads the changelog
+and the release tag over HTTPS from the project's repository on GitHub and from nowhere else; no other
+host can be configured, and `JD_UPDATE_REPO` only names a different repository there. The code itself
+is fetched from the `origin` of the checkout you installed from. A version is
+offered and installed only once it has a release tag (`v0.8.6`), which the project's release job makes
+after the checks pass on `main`, and the update installs exactly the tagged commit by fast-forwarding
+your checkout, never by resetting it. Release tags are **not signed yet**: the trust is in GitHub and
+in who can push to the repository. The updater can already require a tag signed by a release key built
+into the running version; it is switched off until that key is published, and this section will say so
+when it is on. Before it builds, an update keeps the running images and copies the dashboard's database,
+and it goes back by itself when the new version does not answer; see
+[If an update fails](docs/guides/administration.md#if-an-update-fails).
 
 ## How the dashboard protects your server
 
@@ -37,8 +54,12 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   terminal: the assistant and its model never see it, and it is not saved or logged. It cannot sign in, change your password, second factor, passkeys or sessions,
   let Just Hub sign you in (or stop it), make an API key, uninstall the dashboard, attach to your own terminal windows or a stream, or read a database
   connection you marked protected. It asks before any change unless you give it full access,
-  which runs everything your role allows without asking. Text it reads, such as a log line, can try to talk a
-  model into something, so leave "Ask before changes" on where someone else's text can reach it. Its chats
+  which runs everything your role allows without asking; for an administrator that includes what outlasts the
+  chat, such as a new account, an SSH key, a sudo rule or a VPN peer. Text it reads, such as a log line, can try to talk a
+  model into something, so leave "Ask before changes" on where someone else's text can reach it. In that mode
+  it also asks before a read that is sent to another machine, such as a DNS lookup, a certificate scan or a
+  ping, because a name to look up can carry what it has read off the server; what it reads still goes to the
+  model you chose. Its chats
   are yours alone, saved encrypted on the server.
 - The session cookie stays the dashboard's. It is `__Host-jd_session` — HttpOnly, SameSite=Strict,
   Secure and sent to no other name — and the previews and tailnet-only apps the dashboard publishes on
@@ -82,12 +103,48 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 
 | | `readonly` | `limited` | `admin` |
 | --- | :---: | :---: | :---: |
-| View everything | ✅ | ✅ | ✅ |
-| Start / stop / restart, Git, edit files | | ✅ | ✅ |
+| View everything, and read any file as root | ✅ | ✅ | ✅ |
+| Start / stop / restart, Git, write any file as root | | ✅ | ✅ |
 | Terminal, delete, prune, restore, updates, accounts, firewall | | | ✅ |
+| **Can become root on the server** | reads what root reads | **yes** | **yes** |
 
-`readonly` can read any file inside `JD_FILE_ROOTS`, so give it to someone you would let read the
-disk.
+**A role decides which buttons an account has, not how far it can be trusted.** There is no role for
+someone you would not trust with the server:
+
+- **`admin` is root.** It has the terminal.
+- **`limited` is root too.** The Files page writes as root, anywhere inside `JD_FILE_ROOTS`, which is
+  the whole server unless you narrowed it. A `limited` account can therefore add its own key to
+  `/root/.ssh/authorized_keys`, or write a sudo rule or a cron job, and from there do anything an
+  administrator can. What it lacks is the terminal, the delete buttons and the accounts page, not the
+  power. Give it only to someone you would give `admin`.
+- **`readonly` changes nothing and reads everything root can read**: `/etc/shadow`, SSH private keys,
+  every project's `.env`, and the dashboard's own `.env` and database (`/var/lib/just-dashboard`).
+  Those two together hold `JD_MASTER_KEY` and everything sealed with it, so a `readonly` account can
+  open every password, token and key the dashboard stores and every account's two-factor secret, and
+  it has every account's password hash to guess at. The pages mask secrets; the Files page reads the
+  files they are kept in. Give `readonly` only to someone you would let read the whole disk as root.
+
+An API key made with one of these roles reaches what the role reaches.
+
+This is how the dashboard is built, not something it overlooked, and it is the owner's decision to keep:
+it is one panel for the people who run one server. `JD_FILE_ROOTS` narrows the Files page, for every
+role at once, administrators included. Keeping the dashboard's own files and the paths that grant
+root away from the roles below `admin` is not built;
+[what that would take](docs/internal/security/invariants.md#what-a-role-is-and-what-it-is-not) is
+written down with the decision.
+
+### When someone who had an account should no longer be trusted
+
+Anyone who had an account, of any role, could read `JD_MASTER_KEY` and the database, and so everything
+stored in the dashboard, along with every file on the server. **`JD_MASTER_KEY` cannot be changed yet
+without losing what is sealed with it**: replacing it in `.env` makes every stored secret unreadable,
+and there is no command that seals them again under a new key. Removing the account is therefore not
+enough, and a new key would not be either, because what they could read was the secrets themselves.
+Change those: the passwords, tokens and keys saved in the dashboard (database connections, Git and DNS
+credentials, backup destinations, deployment secrets), the server's SSH keys and account passwords,
+and every dashboard account's password and authenticator. Backups of the dashboard made while they
+had access open with the same key. What changing the key safely has to do before it can ship is
+written down in [the master key](docs/internal/security/master-key.md).
 
 ## Read further
 

@@ -7,7 +7,7 @@
 Deploy apps, run Docker, manage databases, shape the network, open a real shell and keep it all
 backed up, behind one login that lives on your private network.
 
-**Version 0.8.5** · Free and self-hosted · AGPL-3.0
+**Version 0.8.6** · Free and self-hosted · AGPL-3.0
 
 [![Install](https://img.shields.io/badge/Install-CAE9FF?style=for-the-badge&logoColor=141414)](#install)
 [![Features](https://img.shields.io/badge/Features-1f2328?style=for-the-badge)](FEATURES.md)
@@ -29,10 +29,18 @@ browser. It needs no fleet, no cloud account and no paid tier: **every feature i
 
 ## Install
 
-You need a Linux server you have root on.
+You need a Linux server you have root on:
+
+- **x86_64 or arm64**, running **systemd**. It is tested on Debian and Ubuntu.
+- **2 GB of memory with 2 GB of swap, or 3 GB of memory.** Running the dashboard takes far less; building
+  it during setup and every update is what needs the room.
+- **10 GB of free disk** for the images.
+- Docker, which the installer installs when it is missing.
+
+The installer checks all of this before it changes anything.
 
 ```bash
-git clone https://github.com/JustDashboard/Just-Dashboard.git
+git clone --depth 1 --single-branch --branch main https://github.com/JustDashboard/Just-Dashboard.git
 cd Just-Dashboard && sudo ./install.sh
 ```
 

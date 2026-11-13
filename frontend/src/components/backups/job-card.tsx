@@ -158,7 +158,14 @@ export function JobCard({
             {last}
             {note}
           </div>
-          {strip}
+          {/* The strip's place, at the width of its fourteen squares, from the
+              first paint of a job that has run: the runs are a read of the
+              card's own, and a strip that took its place when they landed
+              pushed the schedule onto a line of its own and every card under
+              this one down. */}
+          {job.lastRun || runs.data?.runs.length ? (
+            <span className="flex w-27.5">{strip}</span>
+          ) : null}
           <span className="whitespace-nowrap">{next}</span>
           <span className="whitespace-nowrap">{stored}</span>
         </div>
@@ -172,21 +179,46 @@ export function JobCard({
  * project's runtime and in a settings page's 48rem column, so the window says
  * nothing about the room beside its name: at 1280 the runtime's half is about
  * 470px wide. The row is `ChoiceRow`'s list item, found from the mark inside
- * it, and measured before the first paint so a card never lands in one shape
- * and flips to the other.
+ * it, and measured before the paint so a card never lands in one shape and
+ * flips to the other.
+ *
+ * Measured on every commit, not only the first. A card is mounted while the
+ * page above it is still held (`Hold`: not displayed, so nothing wide), and
+ * the commit that lets the page go is the first in which it has a width. Left
+ * to the observer alone, that width arrived a frame late: the cards were drawn
+ * in their narrow shape, then flipped, and every card under the first moved
+ * up by a line (design-system.spec.ts caught it on about one load in seven).
+ * The observer stays for what no commit announces, a window being resized.
  */
 function useCardWidth() {
   const ref = useRef<HTMLSpanElement>(null)
   const [width, setWidth] = useState(0)
+  const measure = useCallback(() => {
+    const card = ref.current?.closest("[data-slot=choice-row]")
+    if (card) setWidth(contentWidth(card))
+  }, [])
   useLayoutEffect(() => {
     const card = ref.current?.closest("[data-slot=choice-row]")
     if (!card) return
-    setWidth(card.getBoundingClientRect().width)
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
+    const observer = new ResizeObserver(measure)
     observer.observe(card)
     return () => observer.disconnect()
-  }, [])
+  }, [measure])
+  // No dependencies on purpose. A width that has not changed is the same
+  // state, so the render this asks for ends the chain.
+  useLayoutEffect(() => measure())
   return [ref, width] as const
+}
+
+/** The room inside a card's padding and border: one measure for both readers, so they cannot disagree. */
+function contentWidth(card: Element) {
+  const style = getComputedStyle(card)
+  const frame =
+    parseFloat(style.paddingLeft) +
+    parseFloat(style.paddingRight) +
+    parseFloat(style.borderLeftWidth) +
+    parseFloat(style.borderRightWidth)
+  return Math.max(0, card.getBoundingClientRect().width - frame)
 }
 
 /**

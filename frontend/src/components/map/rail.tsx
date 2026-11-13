@@ -1,62 +1,66 @@
 "use client"
 
 import { StatusDot } from "@/components/status-dot"
-import { systemCensus, systemTitle, type System, type SystemKind } from "@/lib/server-systems"
+import { systemCensus, systemTitle, type System } from "@/lib/server-systems"
 import { cn } from "@/lib/utils"
+import type { MapBoard } from "@/components/map/board"
 import { SystemMark } from "@/components/map/inspector"
 import { TONE_DOT } from "@/components/map/marks"
 
-/** The rail's groups, in the order the systems are found. */
-const GROUPS: { label: string; kinds: SystemKind[] }[] = [
-  { label: "This dashboard", kinds: ["dashboard"] },
-  { label: "Deployments", kinds: ["project"] },
-  { label: "Compose stacks", kinds: ["stack"] },
-  { label: "Processes", kinds: ["pm2", "service"] },
-  { label: "On their own", kinds: ["container", "database"] },
-  { label: "Not wired", kinds: ["loose"] },
-]
-
-/** What a system holds, in a few words: "3 containers · 1 database · 2 domains". */
+/**
+ * What a system holds, in a few words: "3 containers · 1 database · 2 domains".
+ * What nothing claims has no anchor to read from, so it leads with what
+ * there is most of: eighteen checkouts before the one domain beside them.
+ */
 export function censusLine(system: System, most = 3) {
   const c = systemCensus(system)
-  const parts: string[] = []
+  const parts: { n: number; words: string }[] = []
   const say = (n: number, one: string, many: string) => {
-    if (n > 0) parts.push(`${n} ${n === 1 ? one : many}`)
+    if (n > 0) parts.push({ n, words: `${n} ${n === 1 ? one : many}` })
   }
   say(c.containers, "container", "containers")
   say(c.databases, "database", "databases")
   say(c.domains, "domain", "domains")
   say(c.volumes, "volume", "volumes")
   say(c.backups, "backup", "backups")
+  say(c.checkouts, "checkout", "checkouts")
   if (parts.length === 0)
     return `${system.nodes.length} ${system.nodes.length === 1 ? "thing" : "things"}`
-  return parts.slice(0, most).join(" · ")
+  if (system.kind === "loose") parts.sort((a, b) => b.n - a.n)
+  return parts
+    .slice(0, most)
+    .map((p) => p.words)
+    .join(" · ")
 }
 
 /**
- * Every system on the server, a row each, grouped by what anchors it: the
+ * Every system on the canvas, a row each, grouped the board's way — the
+ * server map's by what anchors a system, the databases map's by engine: the
  * contents of the canvas in the order a reader looks for them. A row flies the
  * canvas to its system; the one being read is marked.
  */
 export function SystemRail({
+  board,
   systems,
   focus,
   onFocus,
 }: {
+  board: MapBoard
   systems: System[]
   focus: string | null
   onFocus: (id: string) => void
 }) {
   return (
-    <nav aria-label="Systems" className="flex min-h-0 min-w-0 flex-col border-r border-hairline">
+    <nav
+      aria-label={board.rail.label}
+      className="flex min-h-0 min-w-0 flex-col border-r border-hairline"
+    >
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {systems.length === 0 && (
-          <p className="px-2 py-3 text-hint text-muted-foreground">
-            Nothing on this server makes a system yet.
-          </p>
+          <p className="px-2 py-3 text-hint text-muted-foreground">{board.rail.empty}</p>
         )}
-        {GROUPS.map((group) => {
-          const here = systems.filter((s) => group.kinds.includes(s.kind))
+        {board.rail.group(systems).map((group) => {
+          const here = group.systems
           if (here.length === 0) return null
           return (
             <section key={group.label} className="mb-3">
@@ -85,7 +89,7 @@ export function SystemRail({
                           {systemTitle(s)}
                         </span>
                         <span className="block truncate text-hint text-muted-foreground">
-                          {censusLine(s, 2)}
+                          {board.census(s, 2)}
                         </span>
                       </span>
                       {s.kind !== "loose" && <StatusDot tone={TONE_DOT[s.anchor.tone]} />}

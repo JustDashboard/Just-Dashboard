@@ -350,6 +350,106 @@ describe("detectSystems", () => {
     expect(loose.nodes.some((n) => n.itemId.startsWith("logs:"))).toBe(false)
   })
 
+  test("what nothing claims stands in rows, one kind after another, however much of it there is", () => {
+    const names = Array.from({ length: 30 }, (_, i) => `checkout-${String(i).padStart(2, "0")}`)
+    const map = serverMap(
+      [
+        reading("domains", [
+          item("domain:old.example.com", "old.example.com"),
+          item("domain:older.example.com", "older.example.com"),
+        ]),
+        reading("certificates", [item("cert:/le/old", "old.example.com")]),
+        reading(
+          "repositories",
+          names.map((name) => item(`repo:/srv/${name}`, name)),
+        ),
+        reading("volumes", [item("volume:uploads", "uploads")]),
+        reading("backups", [
+          item("backup:uploads", "uploads nightly"),
+          item("backup:etc", "etc configs"),
+        ]),
+      ],
+      [
+        link("domain:old.example.com", "cert:/le/old", "certificate"),
+        link("volume:uploads", "backup:uploads", "backup"),
+      ],
+    )
+    const [loose] = detectSystems(map)
+    expect(loose.kind).toBe("loose")
+    const at = (itemId) => loose.nodes.find((n) => n.itemId === itemId)
+
+    // Thirty checkouts in the one column their kind has were a tower.
+    expect(loose.width).toBeGreaterThan(loose.height)
+    const repos = loose.nodes.filter((n) => n.kind === "repositories")
+    const rows = [...new Set(repos.map((n) => n.y))].sort((a, b) => a - b)
+    expect(rows.length).toBeGreaterThan(1)
+    expect(rows.length).toBeLessThan(10)
+    // Read along each row and then down: the order the rail would list them in.
+    const read = [...repos].sort((a, b) => a.y - b.y || a.x - b.x).map((n) => n.item.name)
+    expect(read).toEqual(names)
+
+    for (const a of loose.nodes) {
+      for (const b of loose.nodes) {
+        if (a === b) continue
+        const apart =
+          a.x + a.width <= b.x ||
+          b.x + b.width <= a.x ||
+          a.y + a.height <= b.y ||
+          b.y + b.height <= a.y
+        expect(apart).toBe(true)
+      }
+      expect(a.x).toBeGreaterThanOrEqual(0)
+      expect(a.y).toBeGreaterThanOrEqual(0)
+      expect(a.x + a.width).toBeLessThanOrEqual(loose.width)
+      expect(a.y + a.height).toBeLessThanOrEqual(loose.height)
+    }
+
+    // One kind after another: the domains above the checkouts, the backups under them.
+    const domainFoot = Math.max(
+      ...["domain:old.example.com", "domain:older.example.com", "cert:/le/old"].map(
+        (id) => at(id).y + at(id).height,
+      ),
+    )
+    expect(rows[0]).toBeGreaterThanOrEqual(domainFoot)
+    expect(at("volume:uploads").y).toBeGreaterThan(rows[rows.length - 1])
+
+    // What a line joins is still one diagram: the certificate under its
+    // name, the backup to the right of the volume it takes, level with it.
+    const domain = at("domain:old.example.com")
+    const cert = at("cert:/le/old")
+    expect(cert.host).toBe(domain.id)
+    expect(cert.y).toBeGreaterThan(domain.y + domain.height)
+    expect(cert.x + cert.width / 2).toBeCloseTo(domain.x + domain.width / 2)
+    const volume = at("volume:uploads")
+    const backup = at("backup:uploads")
+    expect(backup.x).toBeGreaterThan(volume.x + volume.width)
+    expect(backup.y + backup.height / 2).toBeCloseTo(volume.y + volume.height / 2)
+    expect(loose.edges.map((e) => [e.source, e.target, e.shape])).toContainEqual([
+      volume.id,
+      backup.id,
+      "flow",
+    ])
+
+    expect(JSON.stringify(detectSystems(map))).toBe(JSON.stringify(detectSystems(map)))
+  })
+
+  test("a few things nothing claims share one row", () => {
+    const map = serverMap([
+      reading("domains", [item("domain:old.example.com", "old.example.com")]),
+      reading("repositories", [item("repo:/srv/dotfiles", "dotfiles")]),
+      reading("backups", [item("backup:etc", "etc configs")]),
+    ])
+    const [loose] = detectSystems(map)
+    expect(loose.nodes.map((n) => n.itemId)).toEqual([
+      "domain:old.example.com",
+      "repo:/srv/dotfiles",
+      "backup:etc",
+    ])
+    expect(new Set(loose.nodes.map((n) => n.y))).toEqual(new Set([0]))
+    const xs = loose.nodes.map((n) => n.x)
+    expect(xs).toEqual([...xs].sort((a, b) => a - b))
+  })
+
   test("a volume is left out only when it is unused and nothing is wired to it", () => {
     const map = serverMap(
       [

@@ -35,7 +35,7 @@ type ImageDetail struct {
 	RepoTags     []string          `json:"repoTags"`
 	RepoDigests  []string          `json:"repoDigests"`
 	Size         int64             `json:"size"`
-	Created      time.Time         `json:"created"`
+	Created      time.Time         `json:"created,omitzero"`
 	Architecture string            `json:"architecture,omitempty"`
 	OS           string            `json:"os,omitempty"`
 	Author       string            `json:"author,omitempty"`
@@ -77,7 +77,7 @@ type ImageDetail struct {
 // answer to "why is this image 1.8 GB" is written down.
 type ImageLayer struct {
 	ID      string    `json:"id"`
-	Created time.Time `json:"created"`
+	Created time.Time `json:"created,omitzero"`
 	// CreatedBy is the Dockerfile instruction, cleaned of the builder's
 	// `/bin/sh -c #(nop)` noise that makes the raw output unreadable.
 	CreatedBy string   `json:"createdBy"`
@@ -263,7 +263,7 @@ type UpdateStatus struct {
 	LocalDigest  string    `json:"localDigest,omitempty"`
 	RemoteDigest string    `json:"remoteDigest,omitempty"`
 	Reason       string    `json:"reason,omitempty"`
-	CheckedAt    time.Time `json:"checkedAt"`
+	CheckedAt    time.Time `json:"checkedAt,omitzero"`
 }
 
 // updateCacheTTL keeps a registry answer for long enough that opening the

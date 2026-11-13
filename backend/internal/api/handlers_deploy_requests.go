@@ -28,7 +28,12 @@ import (
 // the log filter beside it — a window, a set of chips, a substring — so that
 // moving between the Requests and Output views does not mean learning a second
 // set of controls.
-func requestFilterFrom(q url.Values) accesslog.Filter {
+//
+// The row limit, the pages flag and the window are refused when they are there
+// and cannot be read: a window left out answers a different question, with a
+// 200, and the caller cannot tell.
+func requestFilterFrom(q url.Values) (accesslog.Filter, error) {
+	query := httpx.QueryOf(q)
 	filter := accesslog.Filter{
 		Path:   strings.TrimSpace(q.Get("path")),
 		Host:   strings.TrimSpace(q.Get("host")),
@@ -38,7 +43,9 @@ func requestFilterFrom(q url.Values) accesslog.Filter {
 		// filter like every other list's.
 		Agent:   strings.TrimSpace(q.Get("agent")),
 		Referer: strings.TrimSpace(q.Get("referer")),
-		Limit:   atoiDefault(q.Get("limit"), 500),
+		Limit:   query.Int("limit", 500, 1, requestRowsMax),
+		Since:   query.Time("since"),
+		Until:   query.Time("until"),
 	}
 	if methods := q.Get("methods"); methods != "" {
 		filter.Methods = strings.Split(strings.ToUpper(methods), ",")
@@ -53,16 +60,9 @@ func requestFilterFrom(q url.Values) accesslog.Filter {
 	}
 	filter.MinMs, _ = strconv.ParseFloat(q.Get("minMs"), 64)
 	filter.MaxMs, _ = strconv.ParseFloat(q.Get("maxMs"), 64)
-	filter.PagesOnly = q.Get("pages") == "true"
-	if v := q.Get("since"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			filter.Since = t
-		}
-	}
-	if v := q.Get("until"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			filter.Until = t
-		}
+	filter.PagesOnly = query.Bool("pages")
+	if err := query.Err(); err != nil {
+		return accesslog.Filter{}, err
 	}
 	// An unbounded read walks the whole retained record to answer a question
 	// about "now", which on a busy deployment is tens of millions of lines.
@@ -71,11 +71,20 @@ func requestFilterFrom(q url.Values) accesslog.Filter {
 	if filter.Since.IsZero() && filter.Until.IsZero() {
 		filter.Since = time.Now().Add(-24 * time.Hour).UTC()
 	}
-	return filter
+	return filter, nil
 }
+
+// requestRowsMax is the most rows one window of the request record returns,
+// which is accesslog's own bound: more is refused rather than answered with
+// the default.
+const requestRowsMax = 5000
 
 func (s *Server) handleDeploymentRequests(w http.ResponseWriter, r *http.Request) error {
 	environmentID, err := s.deploymentEnvironment(r)
+	if err != nil {
+		return err
+	}
+	filter, err := requestFilterFrom(r.URL.Query())
 	if err != nil {
 		return err
 	}
@@ -85,7 +94,7 @@ func (s *Server) handleDeploymentRequests(w http.ResponseWriter, r *http.Request
 	if s.modules.requests != nil {
 		record = s.modules.requests
 	}
-	window := deploy.ObserveRequests(ctx, record, environmentID, requestFilterFrom(r.URL.Query()))
+	window := deploy.ObserveRequests(ctx, record, environmentID, filter)
 	httpx.JSON(w, http.StatusOK, window)
 	return nil
 }
@@ -126,7 +135,10 @@ func (s *Server) handleDeploymentRequestExport(w http.ResponseWriter, r *http.Re
 // and the store reads the file at most that often however many sockets and
 // pollers are open on the route.
 func (s *Server) followRequests(w http.ResponseWriter, r *http.Request, route, failure string) error {
-	filter := requestFilterFrom(r.URL.Query())
+	filter, err := requestFilterFrom(r.URL.Query())
+	if err != nil {
+		return err
+	}
 	// A live tail has no window: the rows are the ones arriving now, and a
 	// since bound copied from the history view would silently drop them all
 	// on a host whose clock differs from the browser's.
@@ -191,15 +203,18 @@ func (s *Server) followRequests(w http.ResponseWriter, r *http.Request, route, f
 // table's. A site's download and a deployment's share the columns, so they
 // open in the same spreadsheet.
 func (s *Server) exportRequests(w http.ResponseWriter, r *http.Request, route, stem string) error {
+	filter, err := requestFilterFrom(r.URL.Query())
+	if err != nil {
+		return err
+	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	filter := requestFilterFrom(r.URL.Query())
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q",
 		fmt.Sprintf("%s-%s.csv", stem, time.Now().UTC().Format("20060102-150405"))))
 	writer := csv.NewWriter(w)
 	_ = writer.Write(requestCSVHeader)
-	_, err := s.modules.requests.Export(ctx, route, filter, 0, func(e accesslog.Entry) {
+	_, err = s.modules.requests.Export(ctx, route, filter, 0, func(e accesslog.Entry) {
 		_ = writer.Write(requestCSVRow(e))
 	})
 	writer.Flush()
@@ -347,7 +362,7 @@ type lifecycleQuery struct {
 	since  time.Time
 }
 
-func lifecycleQueryFrom(q url.Values) lifecycleQuery {
+func lifecycleQueryFrom(q url.Values) (lifecycleQuery, error) {
 	out := lifecycleQuery{kinds: deploymentEventKinds, search: strings.TrimSpace(q.Get("search"))}
 	if raw := strings.TrimSpace(q.Get("kinds")); raw != "" {
 		out.kinds = strings.Split(raw, ",")
@@ -356,12 +371,17 @@ func lifecycleQueryFrom(q url.Values) lifecycleQuery {
 	// "restarts in the last hour" computed during render reads the clock on
 	// every re-render, which makes the figure depend on when React happened to
 	// paint. Asking the server for the window makes it one answer.
-	if v := q.Get("since"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			out.since = t
-		}
+	//
+	// A window that is there and cannot be read is refused. It used to be left
+	// out, on the reasoning that drawing the whole feed beats refusing to draw
+	// it; but "restarts since 09:00" answered with every restart on record is
+	// a figure nobody asked for, shown as the one they did.
+	since, _, err := httpx.QueryTimeOf(q, "since")
+	if err != nil {
+		return lifecycleQuery{}, err
 	}
-	return out
+	out.since = since
+	return out, nil
 }
 
 // ownedByEnvironment narrows a slice of the host's buffer to one deployment.
@@ -394,8 +414,7 @@ func ownedByEnvironment(events []dockerx.Event, environmentID int64, since time.
 // restart of this process. A store that cannot be read costs the history and
 // not the feed: the ring's answer stands alone, as it did before there was a
 // store.
-func (s *Server) deploymentLifecycleEvents(r *http.Request, environmentID int64, limit int) []dockerx.Event {
-	query := lifecycleQueryFrom(r.URL.Query())
+func (s *Server) deploymentLifecycleEvents(r *http.Request, environmentID int64, query lifecycleQuery, limit int) []dockerx.Event {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -446,6 +465,14 @@ func (s *Server) handleDeploymentLifecycle(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return err
 	}
+	query, err := lifecycleQueryFrom(r.URL.Query())
+	if err != nil {
+		return err
+	}
+	limit, err := httpx.QueryInt(r, "limit", 100, 1, eventScanWidth)
+	if err != nil {
+		return err
+	}
 	result := deploymentLifecycle{Status: "unavailable", Events: []dockerx.Event{}}
 	if s.modules.dockerEvents == nil {
 		result.Reason = "Docker is unavailable on this host, so container lifecycle cannot be observed."
@@ -461,7 +488,7 @@ func (s *Server) handleDeploymentLifecycle(w http.ResponseWriter, r *http.Reques
 	if since, err := s.modules.deployEvents.Since(r.Context()); err == nil && !since.IsZero() {
 		result.RecordSince = &since
 	}
-	result.Events = s.deploymentLifecycleEvents(r, target.EnvironmentID, atoiDefault(r.URL.Query().Get("limit"), 100))
+	result.Events = s.deploymentLifecycleEvents(r, target.EnvironmentID, query, limit)
 	s.correlateDeploymentEvents(r, result.Events, target.Name)
 	if !running {
 		result.Reason = "The Docker event stream is not connected, so this list stops at the last event heard."
@@ -487,6 +514,10 @@ func (s *Server) handleDeploymentLifecycleStream(w http.ResponseWriter, r *http.
 	if s.modules.dockerEvents == nil {
 		return httpx.BadRequest("Docker is unavailable on this host, so container lifecycle cannot be followed")
 	}
+	query, err := lifecycleQueryFrom(r.URL.Query())
+	if err != nil {
+		return err
+	}
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {
 		return nil
@@ -497,7 +528,7 @@ func (s *Server) handleDeploymentLifecycleStream(w http.ResponseWriter, r *http.
 	go conn.Keepalive(ctx)
 	go conn.DrainControl(cancel)
 
-	if recent := s.deploymentLifecycleEvents(r, environmentID, 200); len(recent) > 0 {
+	if recent := s.deploymentLifecycleEvents(r, environmentID, query, 200); len(recent) > 0 {
 		if err := conn.Send("events", recent); err != nil {
 			return nil
 		}

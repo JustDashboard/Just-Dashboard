@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Route history is observed, not reconstructed. Every routeHistoryEvery the
@@ -252,7 +254,7 @@ func (s *Service) StartRouteHistory(ctx context.Context) {
 	if s.db == nil {
 		return
 	}
-	go func() {
+	safego.Go(ctx, s.log, "route history", func(ctx context.Context) {
 		if !s.observeRoutes(ctx) {
 			return
 		}
@@ -271,7 +273,7 @@ func (s *Service) StartRouteHistory(ctx context.Context) {
 				}
 			}
 		}
-	}()
+	})
 }
 
 // observeRoutes takes one reading and records its changes, and says whether

@@ -94,7 +94,7 @@ type VHost struct {
 	// Owner is the deployment that writes this site, filled in by the API
 	// from the deploy store; the proxy knows only the file.
 	Owner    *VHostOwner `json:"owner,omitempty"`
-	Modified time.Time   `json:"modified"`
+	Modified time.Time   `json:"modified,omitzero"`
 	Size     int64       `json:"size"`
 	// Maintenance says the site answers with its maintenance page now.
 	Maintenance bool `json:"maintenance,omitempty"`
@@ -120,18 +120,46 @@ var (
 // rather than the check says whether it is on.
 var maintSwitchLineRe = regexp.MustCompile(`(?m)^\s*if\s*\(-f\s+(/\S+/maintenance\.on)\)`)
 
+// ListVHosts is every site this host serves: nginx's, the host Caddyfile's
+// and the Docker ingress's routes. It is the whole list or an error. A caller
+// that decides something from it (is this name served already, which
+// certificate does that route present) must not take the sites that could be
+// read for all there are, so a Docker ingress that cannot be looked up fails
+// it with the lookup's *IngressProblem.
 func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
+	hosts, problem, err := s.ReadVHosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if problem != nil {
+		return nil, problem
+	}
+	return hosts, nil
+}
+
+// ReadVHosts is ListVHosts for a page. nginx's sites and the host
+// Caddyfile's are read from files and owe Docker nothing, so a Docker
+// ingress that cannot be looked up takes none of them away: they are
+// answered, with the lookup's problem beside them. The Sites page used to be
+// replaced by "internal error" on a host whose Docker daemon did not answer,
+// and on a healthy one running a second public Caddy.
+//
+// An ingress that was found and then did not let its routes be read is still
+// an error (IngressUnreadable): the page would otherwise show a host with an
+// ingress and none of its routes, and say nothing.
+func (s *Service) ReadVHosts(ctx context.Context) ([]VHost, *IngressProblem, error) {
 	out := []VHost{}
 	out = append(out, s.nginxVHosts()...)
 	if caddy, err := s.caddySites(); err == nil {
 		out = append(out, caddy...)
 	}
+	var problem *IngressProblem
 	if edge, err := s.dockerCaddy(ctx); err != nil {
-		return nil, err
+		problem = asIngressProblem(err)
 	} else if edge != nil {
 		sites, err := edge.vhosts(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, ingressUnreadable(edge.Name, err)
 		}
 		out = append(out, sites...)
 	}
@@ -144,7 +172,7 @@ func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
 		}
 		return out[i].Layout < out[j].Layout
 	})
-	return out, nil
+	return out, problem, nil
 }
 
 // backupSuffixes are the files that live beside a configuration and are not

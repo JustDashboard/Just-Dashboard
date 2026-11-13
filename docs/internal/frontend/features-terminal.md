@@ -46,9 +46,7 @@ tester run on the page and draw no working bar.
 - `tabs.tsx` gives selection, hover and focus three different mechanisms. They had two: the accent
   outline meant both "this filter is on" and "the keyboard is here", so a keyboard user could not tell
   which filters were applied and tabbing looked like the selection moving.
-- `exposure.tsx` draws a published port so the two cases that matter look different, and `RouteRow`
-  shows the full trace — binding, reverse proxy, firewall — with the reasoning behind each verdict and
-  an explicit *inferred* where one was worked out rather than read.
+- `exposure.tsx` draws a published port so the two cases that matter look different.
 - `container-cells.tsx` holds the three cells that were saying something other than what they meant:
   memory against an explicit container limit, CPU with its denominator stated (Docker counts one core
   as 100%), and Docker's runtime state. The security finding underneath that state was removed.
@@ -341,7 +339,8 @@ service state. The pages that moved keep their behaviour:
   the destructive capability lifts one after confirmation (`connections/blocks-panel.tsx`).
 - **Tools** (`/network/tools`): 26 probes plus the browser-only IPv4/IPv6 subnet calculator occupy a two-pane
   workbench (the four counts that stood over it are gone; where probes are sent from is a fact in the
-  result pane's head). The searchable chooser selects one labelled form and result area. Other probes
+  result pane's head). The searchable chooser selects one labelled form and result area; below `md` they
+  are one full-height pane at a time with a bar at the foot (`phone-panes.tsx`), opening on the tool. Other probes
   stay mounted while hidden, preserving drafts, results and in-flight requests when switching. A new
   query-string arrival reseeds only the requested probe. Arriving with `?tool=asn&target=…` never runs
   it; sending traffic remains an explicit Run action.

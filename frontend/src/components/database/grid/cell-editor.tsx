@@ -661,6 +661,7 @@ function ListEditor({
           }}
         >
           {options.map((option, index) => (
+            // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus -- an option of a listbox that keeps the focus: its keys are handled on the list, which names the option with aria-activedescendant
             <div
               key={option.key}
               id={`${baseId}-${index}`}

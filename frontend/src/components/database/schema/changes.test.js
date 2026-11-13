@@ -17,12 +17,10 @@ import {
   renameColumnRequest,
   renameTableRequest,
   requestKey,
-  spendsBudget,
   tableLimits,
   tableProblems,
   tableRequest,
   truncateRequest,
-  dropColumnRequest,
   viewQuery,
   viewRequest,
   BLANK_INDEX,
@@ -350,12 +348,6 @@ describe("views and enum types", () => {
 })
 
 describe("what a request costs, and what an engine's forms cannot do", () => {
-  test("a preview of a drop or of emptying a table spends the destructive budget", () => {
-    expect(spendsBudget(dropColumnRequest("s", "t", "c"))).toBe(true)
-    expect(spendsBudget(truncateRequest("s", "t"))).toBe(true)
-    expect(spendsBudget(renameTableRequest("s", "t", "u"))).toBe(false)
-  })
-
   test("a request is its route and its body: the same form is the same question", () => {
     expect(requestKey(null)).toBe("")
     expect(requestKey(truncateRequest("s", "t"))).toBe(requestKey(truncateRequest("s", "t")))

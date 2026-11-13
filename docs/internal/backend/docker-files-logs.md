@@ -234,13 +234,13 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
 - **Compose.** `RunComposeStream` forwards output line by line, because a request that hangs for minutes
   is indistinguishable from a broken dashboard. `composeSteps` maps actions to commands; `update` is a
   pull **then** an up, so a registry that is down leaves the running stack alone. `ValidateCompose` feeds
-  the candidate to the parser on **stdin** so a syntax error never touches disk; `WriteComposeFile` goes
-  through a temp file in the same directory and keeps `<name>.bak`, guarding what validation cannot catch
-  — a correct file that says the wrong thing. `DeclaredServices` costs a subprocess per stack and is read
+  the candidate to the parser on **stdin** so a syntax error never touches disk;
+  `WriteComposeFileChecked` goes through a temp file in the same directory and keeps `<name>.bak`,
+  guarding what validation cannot catch — a correct file that says the wrong thing. `DeclaredServices` costs a subprocess per stack and is read
   on demand for administrators; other users receive the static declared-service list from discovery.
   Compose config reads return a SHA-256 `revision`, and config saves may carry
   `expectedRevision`. The editor retains that revision with a draft across view changes; a forced
-  save of invalid YAML still checks it. `WriteComposeFileChecked` shares the Files path lock,
+  save of invalid YAML still checks it. The write shares the Files path lock,
   compares the current bytes before staging and again before replacement, and refuses stale saves
   with `409 content_conflict`. A stale save does not update the source or its backup. A failure to
   write the backup also refuses replacement. The editor keeps the draft and offers **Review current
@@ -416,7 +416,8 @@ and cleanup of staging in the original moved directory.
 exact binary revisions, changes during staging, concurrent text/image writers and the HTTP contract;
 `files-ui.spec.ts` checks conflict retention, Save as, confirmed reload and full-editor handoff.
 
-Editor reads (`GET /files/read`) return a SHA-256 `revision` of the bytes they read. The Files
+Editor reads (`GET /files/read`) return a SHA-256 `revision` of the bytes they read
+(`internal/contentguard`, which Compose and crontab edits share). The Files
 and Git editors send it as `expectedRevision` to `PUT /files/write`, whose successful response
 returns the saved revision. `WriteChecked` serializes the content comparison and atomic publish
 with Compose saves to the same resolved path, checks the bytes before staging and immediately
@@ -590,7 +591,7 @@ format's colour, its kind and size, a folder's colour swatches, and its verbs: t
 want named and wide (Edit, View, Open folder, or Download for a binary or archive) beside glyphs for
 the rest (View, Crop, Download, Checksum). Under that, grouped sections: what is inside (the text
 head, the PDF, the archive, a folder's folder and file counts with Measure size and its largest
-entries as a `BarList`), Details (modified with the date, size with the byte count, lines, language,
+entries as a `RankList`, each with its share of the folder's total when the walk reached all of it), Details (modified with the date, size with the byte count, lines, language,
 owner and group, a link's target), Access (the mode as an owner/group/everyone grid and in one
 sentence, `access.ts`), and Location (the path as crumbs to walk up, with Copy path). It describes the
 folder being browsed while nothing in it is chosen. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a
@@ -865,7 +866,10 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
 
 Frontend `components/logs/`: the page is a workbench like the terminal — one frame, the source rail
 (`source-rail.tsx`, hideable and resizable, remembered through `view-state` and `panel-size`) beside
-`log-workspace.tsx`, a hairline between them. Over the frame the page reads as a deployment's Logs page
+`log-workspace.tsx`, a hairline between them. Below `md` the two are one full-height pane at a time, the
+log first, with a bar at the foot to reach the sources (`components/phone-panes.tsx`); from `md` to `lg`
+the rail stacks over the lines and the page scrolls. A request record's Requests view leaves its chart to
+Insights on a phone, where the pane is the window's height and the rows are what it is for. Over the frame the page reads as a deployment's Logs page
 does: the chosen source as an identity line (`SourceIdentity` in `source-facts.tsx`, the Overview's
 `HostIdentity` shape: the source drawn as its product, its name, and its kind, state, path, size and
 rotated set as facts), with Export and the shortcuts key at its end — a request record takes the same
@@ -889,7 +893,13 @@ because a window is a question about the past. Then `lens-bar.tsx`, the pane's o
 Options has set, as chips that clear it (hiding "…", ±N lines, with rotated files, this boot, read as
 …), the field predicates and the lens's defaults, the **level chips** with their counts (an error or
 critical count red, a warning amber), Fields, the quick views and the readings, and **Clear filters** at
-its end outside the scroll whenever anything narrows the lines. The levels used to sit on the strip above
+its end outside the scroll whenever anything narrows the lines. A field chip with one exact value draws
+it as what it is (`FieldMark` and `FieldValue`: an address with its network, a user in its hue), and a
+duration or size bound says its figure (`duration ≥ 1.84s`), as the request record's chips do. The level
+chips are only the levels the reading on screen holds and any the reader chose (`presentLevels`), as the
+record's class chips are; a log whose lines carry no level at all gets none, since a chip for "other"
+narrows nothing there. Their counts are of the lines the filter lets through, so choosing one leaves it,
+and the chosen chip is the way back. The levels used to sit on the strip above
 the lines with the chart between the two rows, so the narrowings were in two places. The histogram sits
 over History's lines; the strip above the lines starts with the reading's state — **Live** with the last
 minute's pace (`live-pulse.tsx`: thirty two-second columns by each line's own timestamp, errors red at
@@ -982,8 +992,15 @@ question's fields and levels; pressing it again lets them go. A lens whose defau
 (ClickHouse's "Info and above") shows them as the defaults chip too, and they go with it when the pane
 moves to a source in another lens, unless the reader changed them. `insights.tsx` is **Insights**, any lens's version of the request log's: one overview search
 (`facets`, the measure, `histogramBy=event`) and one per group, in parallel, over the window and the
-filter on screen, drawn as the events over time, a `BarList` per key (a press narrows and stays),
-the measure's figures where it is milliseconds, each group as a ranked table and the log's patterns last.
+filter on screen, drawn the way the request record's Insights is: the events over time under a block's
+head, the measure's figures where it is milliseconds, a `RankList` per key — the value as what it is, its
+lines and its share of the window, a press narrows and stays — with one `SplitBar` over a key every line
+has one of (the levels, the events, a status class) in the chart's colours, each group as a ranked table
+whose rows are one line (a group's samples sit beside the value and give way first), and the log's
+patterns last. A level list of one level is left out, and so is a level list that would be the only
+list: the tiles, the chart's legend and the level chips already count them. A new question keeps the
+last answer on screen, dimmed and `aria-busy`, until the new one lands, and nothing remounts; an answer
+is never held over a change of source.
 `lens-readings.tsx` is the readings: those on one key share a search, those on levels another, and a
 distinct count asks on its own (`lib/log-insights.ts`), read again each minute over the lens's window
 and independent of the filter on screen and of the view, so they hold still while the reader moves
@@ -992,8 +1009,11 @@ next minute's. Insights draws none of the lens's readings, which would be a seco
 window; it opens instead on what its own window adds up to (`Readings` in `insights.tsx`): the lines,
 the errors and the warnings among them (each narrowing to its levels on a press, with its line across
 the window — counted by level, or by the events the lens marks in that tone when the chart is split by
-event), the busiest minute, and the measure's p95 where the lens has one, or else how many distinct
-addresses the lens's first address key saw. A section that draws no metric cards — a database's Logs —
+event, and a flat line when there were none), the busiest minute (a strip of the chart's columns with the
+busiest lit; over lines that carry no time it says so rather than "nothing in the window"), and how many
+distinct addresses the lens's first address key saw, with the busiest of them as one strip. Every tile
+keeps one picture line so the names, figures and hints stand in rows, and none does when no tile has a
+picture to draw. The measure's p95 is not a tile: the measure's block under the chart says it. A section that draws no metric cards — a database's Logs —
 passes `insightTiles={false}` through `ServiceLogs`, and its Insights opens on the chart: the level chips,
 the chart's busiest column and the measure's figures already say what those tiles said. A
 page with a `StatGrid` of its own takes the tiles from `useLensReadings` (`only` names the ones it

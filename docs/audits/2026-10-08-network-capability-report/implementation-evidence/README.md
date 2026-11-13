@@ -171,8 +171,8 @@ The final production `bun run build` passed, including TypeScript. The screensho
 
 | Width | Base before implementation | Implementation |
 | --- | --- | --- |
-| Mobile, 390 px | [Before](routing-ipv6-before-390.png) | [After](routing-ipv6-after-390.png) |
-| Desktop, 1440 px | [Before](routing-ipv6-before-1440.png) | [After](routing-ipv6-after-1440.png) |
+| Mobile, 390 px | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/routing-ipv6-before-390.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/routing-ipv6-after-390.png) |
+| Desktop, 1440 px | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/routing-ipv6-before-1440.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/routing-ipv6-after-1440.png) |
 
 The same IPv6-only fixture leaves the old diagram empty; the new diagram selects IPv6, shows its
 rules/table/browser path, labels the highlight as inferred and offers a read-only kernel lookup.
@@ -220,7 +220,7 @@ external-vantage agent, shared IPAM and retained path artifacts still require th
 build and acceptance. The ledger keeps those projects open. Actual reboot and off-host/provider
 proof remain separate acceptance requirements.
 
-Saved runs' reading layout was also inspected at [375 px](saved-runs-375.png),
-[1280 px](saved-runs-1280.png) and [1720 px](saved-runs-1720.png). The focused screenshot cases all
+Saved runs' reading layout was also inspected at [375 px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/saved-runs-375.png),
+[1280 px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/saved-runs-1280.png) and [1720 px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/saved-runs-1720.png). The focused screenshot cases all
 pass; the desktop workbench separates independently scrolling history and evidence, and the mobile
 layout keeps controls and retained scope within the viewport.

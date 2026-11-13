@@ -211,7 +211,7 @@ type Entry struct {
 	IsSymlink  bool      `json:"isSymlink"`
 	LinkTarget string    `json:"linkTarget,omitempty"`
 	LinkBroken bool      `json:"linkBroken,omitempty"`
-	Modified   time.Time `json:"modified"`
+	Modified   time.Time `json:"modified,omitzero"`
 	Owner      string    `json:"owner"`
 	Group      string    `json:"group"`
 	UID        uint32    `json:"uid"`

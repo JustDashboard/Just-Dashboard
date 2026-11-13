@@ -6,10 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 const GitWatchInterval = 5 * time.Second
@@ -184,8 +188,14 @@ type gitWatchCursor struct {
 	Generation, RunID, CheckedAt                                     int64
 }
 
-func (s *OrchestrationStore) gitWatchTargets(ctx context.Context, projectID, environmentID int64) ([]GitWatchTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `
+// gitWatchTargetsQuery is asked every GitWatchInterval for as long as the
+// server runs, and deploy_runs is never pruned. Both subqueries therefore
+// read an environment's runs newest first from idx_deploy_runs_environment
+// (environment_id, id) and stop at the first that fits; without it the first
+// walked the whole table back to that environment's last deploy and the
+// second had SQLite build an index over the table on every execution.
+// TestTheGitWatcherReadsAnEnvironmentsRunsFromAnIndex holds the plan.
+const gitWatchTargetsQuery = `
 		SELECT p.id, p.name, e.id, e.desired_revision, e.live_release_id, src.config_json, src.identity_json,
 		       COALESCE((SELECT r.id FROM deploy_runs r WHERE r.environment_id = e.id
 		         AND r.operation IN ('deploy','force_build') ORDER BY r.id DESC LIMIT 1), 0),
@@ -198,7 +208,10 @@ func (s *OrchestrationStore) gitWatchTargets(ctx context.Context, projectID, env
 		JOIN deploy_build_plans b ON b.environment_id = e.id AND b.revision = e.desired_revision
 		WHERE p.archived_at = 0 AND e.archived_at = 0 AND e.kind IN ('production', 'staging')
 		  AND b.method <> 'legacy_compose' AND (? = 0 OR p.id = ?) AND (? = 0 OR e.id = ?)
-		ORDER BY e.id`, projectID, projectID, environmentID, environmentID)
+		ORDER BY e.id`
+
+func (s *OrchestrationStore) gitWatchTargets(ctx context.Context, projectID, environmentID int64) ([]GitWatchTarget, error) {
+	rows, err := s.db.QueryContext(ctx, gitWatchTargetsQuery, projectID, projectID, environmentID, environmentID)
 	if err != nil {
 		return nil, err
 	}
@@ -300,6 +313,8 @@ type GitWatcher struct {
 	dispatch GitWatchDispatch
 	cancel   context.CancelFunc
 	done     chan struct{}
+	// log is where the watch says a pass failed; nil is the process's default.
+	log *slog.Logger
 }
 
 func NewGitWatcher(store *OrchestrationStore, sources GitRevisionResolver, dispatch GitWatchDispatch) *GitWatcher {
@@ -312,19 +327,22 @@ func (w *GitWatcher) Start(ctx context.Context) {
 	}
 	ctx, w.cancel = context.WithCancel(ctx)
 	w.done = make(chan struct{})
-	go func() {
-		defer close(w.done)
+	safego.Go(ctx, w.log, "git branch watch", func(ctx context.Context) {
+		// A watch that cannot read its targets or write its cursor deploys
+		// nothing and used to say nothing: the first failure, a changed one
+		// and the recovery are logged.
+		passes := safego.NewPasses(w.log, "git branch watch")
 		ticker := time.NewTicker(GitWatchInterval)
 		defer ticker.Stop()
 		for {
-			_ = w.poll(ctx)
+			passes.Report(ctx, w.poll(ctx))
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
 			}
 		}
-	}()
+	}, safego.Close(w.done))
 }
 
 func (w *GitWatcher) Stop() {
@@ -341,7 +359,11 @@ func (w *GitWatcher) poll(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var group sync.WaitGroup
+	var (
+		group  sync.WaitGroup
+		mu     sync.Mutex
+		failed []string
+	)
 	slots := make(chan struct{}, 4)
 	for _, target := range targets {
 		// Creation/import may still be saving variables. Monitoring starts only
@@ -359,11 +381,26 @@ func (w *GitWatcher) poll(ctx context.Context) error {
 		go func() {
 			defer group.Done()
 			defer func() { <-slots }()
-			_ = w.check(ctx, target)
+			// One repository's answer must not end the watch of the others.
+			defer safego.Recover(w.log, "git branch check")
+			// What comes back is the store's failure only: a branch that
+			// could not be read, or a deployment that could not be queued,
+			// is written to the watch's row as its reason.
+			if err := w.check(ctx, target); err != nil && ctx.Err() == nil {
+				mu.Lock()
+				failed = append(failed, fmt.Sprintf("%s (environment %d): %v", target.ProjectName, target.EnvironmentID, err))
+				mu.Unlock()
+			}
 		}()
 	}
 	group.Wait()
-	return nil
+	if len(failed) == 0 {
+		return nil
+	}
+	// In one order whatever order the checks finished in, so the same
+	// failure reads the same from pass to pass.
+	sort.Strings(failed)
+	return errors.New("branch checks failed: " + strings.Join(failed, "; "))
 }
 
 func (w *GitWatcher) check(ctx context.Context, target GitWatchTarget) error {

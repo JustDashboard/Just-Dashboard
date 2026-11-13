@@ -1,6 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 
 /**
  * A ranked list that is read rather than measured: a name, a figure and the
@@ -124,6 +125,24 @@ export function RankList({
         )
       })}
     </ul>
+  )
+}
+
+/**
+ * A `RankList` that has not arrived: a name and a figure on rows of the list's
+ * own height, so nothing moves when the figures land. It is not bled as the
+ * list is: its rows have no wash, and the names already start on the edge.
+ */
+export function RankSkeleton({ rows = 5, className }: { rows?: number; className?: string }) {
+  return (
+    <div className={cn("flex flex-col", className)} aria-hidden data-slot="rank-skeleton">
+      {Array.from({ length: rows }).map((_, index) => (
+        <div key={index} className="flex h-8 items-center justify-between gap-3">
+          <Skeleton className="h-3" style={{ width: `${62 - ((index * 17) % 34)}%` }} />
+          <Skeleton className="h-3 w-12 shrink-0" />
+        </div>
+      ))}
+    </div>
   )
 }
 

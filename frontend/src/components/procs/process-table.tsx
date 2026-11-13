@@ -1,11 +1,11 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Cpu, Cross, Pause, Play, SettingsSliders } from "@/components/icons"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
-import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { HUE, LiveBytes, LiveFigure } from "@/components/overview/readings"
@@ -55,7 +55,7 @@ import { bytes, duration, percent, plural, relativeTime } from "@/lib/format"
 import type { ProcessList, ProcessRow, Snapshot } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import { ProcessDetailSheet } from "@/components/procs/process-detail"
+import { processHref } from "@/components/procs/process-facts"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import {
   useProcessControl,
@@ -75,7 +75,21 @@ import {
 import { WorkloadBand } from "@/components/procs/workloads"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
 
-type ProcessSort = "auto" | "cpu" | "memory" | "io" | "uptime"
+export type ProcessSort = "auto" | "cpu" | "memory" | "io" | "uptime"
+
+/**
+ * Where the table keeps its question. The process page's rail reads the same
+ * keys, so the list beside a process is the table it was opened from.
+ */
+export const PROCESS_FILTER_KEYS = {
+  query: "processes.live.query",
+  user: "processes.live.user",
+  state: "processes.live.state",
+  manager: "processes.live.manager",
+  group: "processes.live.group",
+  sort: "processes.table.sort.v2",
+  refresh: "processes.table.refresh",
+} as const
 
 const SORT_LABEL: Record<Exclude<ProcessSort, "auto">, string> = {
   cpu: "highest CPU",
@@ -84,7 +98,7 @@ const SORT_LABEL: Record<Exclude<ProcessSort, "auto">, string> = {
   uptime: "longest-running",
 }
 
-function automaticFocus(snapshot: Snapshot | undefined): {
+export function automaticFocus(snapshot: Snapshot | undefined): {
   sort: Exclude<ProcessSort, "auto">
   reason: string
 } {
@@ -135,15 +149,22 @@ function automaticFocus(snapshot: Snapshot | undefined): {
 export function LiveProcesses() {
   const [paused, setPaused] = useState(false)
   const { confirm, dialog } = useConfirm()
-  const [query, setQuery] = useSessionState("processes.live.query", "")
-  const [user, setUser] = useSessionState("processes.live.user", "")
-  const [state, setState] = useSessionState("processes.live.state", "")
-  const [manager, setManager] = useSessionState("processes.live.manager", "")
-  const [group, setGroup] = useSessionState("processes.live.group", "")
-  const [selectedPid, selectPid] = useQuerySelection("pid")
-  const [sort, setSort] = useViewState<ProcessSort>("processes.table.sort.v2", "auto")
+  const [query, setQuery] = useSessionState(PROCESS_FILTER_KEYS.query, "")
+  const [user, setUser] = useSessionState(PROCESS_FILTER_KEYS.user, "")
+  const [state, setState] = useSessionState(PROCESS_FILTER_KEYS.state, "")
+  const [manager, setManager] = useSessionState(PROCESS_FILTER_KEYS.manager, "")
+  const [group, setGroup] = useSessionState(PROCESS_FILTER_KEYS.group, "")
+  const router = useRouter()
+  const openPid = (pid: number) => router.push(processHref(pid))
+  // `?pid=` is where a process opened before it had a page of its own: the
+  // unit, PM2 and port pages linked there, and so did every shared link.
+  const legacy = useSearchParams().get("pid")
+  useEffect(() => {
+    if (legacy && /^\d+$/.test(legacy)) router.replace(processHref(Number(legacy)))
+  }, [legacy, router])
+  const [sort, setSort] = useViewState<ProcessSort>(PROCESS_FILTER_KEYS.sort, "auto")
   const [limit, setLimit] = useViewState("processes.table.limit", 200)
-  const [refreshSeconds, setRefreshSeconds] = useViewState("processes.table.refresh", 4)
+  const [refreshSeconds, setRefreshSeconds] = useViewState(PROCESS_FILTER_KEYS.refresh, 4)
   const appliedQuery = useDebounced(query, 250)
   const { host, snapshot } = useMetrics()
   const automatic = automaticFocus(snapshot)
@@ -191,9 +212,6 @@ export function LiveProcesses() {
   const memTotal = snapshot?.memory?.total ?? 0
   const facet = (list: ProcessList["states"] | undefined, value: string) =>
     list?.find((f) => f.value === value)?.count ?? 0
-  // A deep link is whatever was typed after `?pid=`; anything but a number
-  // addressed `/processes/NaN` and said the process had exited.
-  const pid = selectedPid && /^\d+$/.test(selectedPid) ? Number(selectedPid) : null
   const known = !!(host && snapshot?.cpu && snapshot.memory)
   // The workloads are the whole host's, whatever the table is filtered to, so
   // the band holds its last answer while a new filter's first read is out
@@ -438,8 +456,8 @@ export function LiveProcesses() {
                 pending={pending}
                 confirm={confirm}
                 signal={signal}
-                onOpen={(p) => selectPid(String(p.pid))}
-                onOpenPid={(next) => selectPid(String(next))}
+                onOpen={(p) => openPid(p.pid)}
+                onOpenPid={openPid}
               />
             )}
             {data && data.processes.length === 0 && (
@@ -478,13 +496,6 @@ export function LiveProcesses() {
           )}
         </Panel>
 
-        <ProcessDetailSheet
-          pid={pid}
-          memTotal={memTotal}
-          onOpenChange={(open) => !open && selectPid(null)}
-          onSelect={(next) => selectPid(String(next))}
-          onChanged={processList.refresh}
-        />
         {dialog}
       </Page>
     </Workspace>
@@ -697,6 +708,7 @@ function ProcessNarrowRow({
   })
   const busy = pending[processKey(process)]
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- the pointer's larger target: the row's name is the link or button a keyboard opens it by
     <li
       data-workspace-item={processKey(process)}
       data-workspace-name={process.name}

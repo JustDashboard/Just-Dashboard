@@ -104,7 +104,7 @@ type mapResponse struct {
 	Host      mapHost   `json:"host"`
 	Kinds     []mapKind `json:"kinds"`
 	Links     []mapLink `json:"links"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 }
 
 // mapItemCap is the most things one shelf is sent. A shelf draws its first
@@ -1144,7 +1144,7 @@ func mapUnit(u procs.Unit) mapItem {
 	name := strings.TrimSuffix(u.Name, ".service")
 	item := mapItem{
 		ID: "unit:" + u.Name, Name: name, Product: name, Detail: u.Description,
-		Href: "/processes/services?unit=" + url.QueryEscape(u.Name),
+		Href: "/processes/services/" + url.PathEscape(u.Name),
 	}
 	switch u.ActiveState {
 	case "failed":

@@ -118,17 +118,6 @@ func explainStatement(driver Driver, query string) (*SQLStatement, error) {
 	return st, nil
 }
 
-// ExplainStatement accepts a statement, never caller-provided EXPLAIN options.
-// Keeping ANALYZE outside this grammar prevents a read-only plan from
-// executing it.
-func ExplainStatement(query string) (string, error) {
-	st, err := explainStatement("", query)
-	if err != nil {
-		return "", err
-	}
-	return st.SQL, nil
-}
-
 // ClassifyFor classifies everything in a query for an engine and keeps the
 // strongest verdict. A query the lexer refuses is destructive: the capability
 // check is derived from this answer, so the unknown has to cost the most.

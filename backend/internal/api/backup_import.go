@@ -71,7 +71,7 @@ func (s *Server) backupDestination(ctx context.Context, req backupDestinationReq
 		// may list and an import may read.
 		resolved, err := s.modules.files.Resolve(target.Path)
 		if err != nil {
-			return backups.Destination{}, httpx.BadRequest("%v", err)
+			return backups.Destination{}, httpx.Refused(err)
 		}
 		target.Path = resolved
 	}
@@ -131,7 +131,7 @@ func (s *Server) handleBackupImport(w http.ResponseWriter, r *http.Request) erro
 	if strings.TrimSpace(req.CopyTo) != "" {
 		resolved, err := s.modules.files.Resolve(req.CopyTo)
 		if err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		copyTo = resolved
 	}
@@ -180,7 +180,7 @@ func (s *Server) handleBackupKeyImport(w http.ResponseWriter, r *http.Request) e
 	result, err := s.modules.backupStore.ImportArchiveKey(r.Context(), req.Key)
 	if err != nil {
 		httpx.SetAudit(r, "backup.key.import", "", map[string]any{"error": err.Error()})
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "backup.key.import", result.Recipient, map[string]any{"became": result.Became})
 	httpx.JSON(w, http.StatusOK, result)

@@ -374,20 +374,18 @@ export function BarReading({
               >
                 {drawn.slice(0, MARKS).map((part) => {
                   const isActive = active?.key === part.key && hovered !== REST && hovered !== FREE
+                  // The mark alone. A rule in the part's colour under each one
+                  // read as a row of tabs; the line's tick already carries the
+                  // colour, and the span lights when its mark is pointed at.
+                  // Scaled rather than resized, so every caller's mark grows
+                  // alike, whether a 14px glyph, a count or a tile.
                   const face = (
-                    <>
-                      <span className="flex min-w-3.5 items-center justify-center">
-                        {part.mark}
-                      </span>
-                      <i
-                        aria-hidden
-                        className="absolute inset-x-1.5 bottom-0.5 h-0.5 rounded-full [transition:opacity_150ms_ease-out]"
-                        style={{ background: part.color, opacity: isActive ? 1 : 0.55 }}
-                      />
-                    </>
+                    <span className="flex min-w-3.5 scale-115 items-center justify-center">
+                      {part.mark}
+                    </span>
                   )
                   const cell = cn(
-                    "relative flex h-6.5 min-w-6.5 items-center justify-center rounded-md px-1 pb-0.5 focus-ring-inset transition-colors",
+                    "flex h-6.5 min-w-6.5 items-center justify-center rounded-md px-1 focus-ring-inset transition-colors",
                     part.press?.pressed
                       ? "bg-accent"
                       : isActive && lit !== undefined
@@ -436,6 +434,7 @@ export function BarReading({
                       ) : (
                         // Nothing to press, but a keyboard and a thumb can still
                         // bring it onto the line.
+                        // eslint-disable-next-line jsx-a11y/click-events-have-key-events -- a thumb's way to what focus does for a keyboard: it brings the part's reading onto the line
                         <span
                           title={part.title}
                           tabIndex={part.markIsControl ? undefined : 0}
@@ -501,6 +500,7 @@ function Line({
 }) {
   const filtering = part?.press && !part.press.opens
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the part's mark in the strip above is the control a keyboard presses
     <div
       data-slot="reading-line"
       title={title}
@@ -545,7 +545,11 @@ function Line({
             <LandedFigures>{figure}</LandedFigures>
           </span>
         )}
-        {control && <span onClick={(event) => event.stopPropagation()}>{control}</span>}
+        {control && (
+          <span role="presentation" onClick={(event) => event.stopPropagation()}>
+            {control}
+          </span>
+        )}
       </span>
     </div>
   )

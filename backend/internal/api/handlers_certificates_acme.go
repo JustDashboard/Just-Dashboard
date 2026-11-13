@@ -77,7 +77,7 @@ func (s *Server) handleCertAccountEmail(w http.ResponseWriter, r *http.Request) 
 	}
 	account, args, err := proxysvc.UpdateAccountEmailArgs(req.Server, req.ID, req.Email)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "certificates.account.email", account.Server,
 		map[string]any{"account": account.ID, "email": req.Email, "streamed": true})
@@ -119,7 +119,7 @@ func (s *Server) planIssueBinding(ctx context.Context, req proxysvc.IssueRequest
 		}
 		eab, err := proxysvc.CheckEAB(req.EABKeyID, req.EABHMACKey)
 		if err != nil {
-			return binding, httpx.BadRequest("%v", err)
+			return binding, httpx.Refused(err)
 		}
 		binding.save = &eab
 		if !authority.Account {

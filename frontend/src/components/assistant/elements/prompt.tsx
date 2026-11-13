@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
-import { ArrowUp, Cross, Image as ImageGlyph, LoaderCircle } from "@/components/icons"
+import { ArrowUp, Cross, Image as ImageGlyph } from "@/components/icons"
+import { Spinner } from "@/components/state"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -114,6 +115,7 @@ export function PromptInput({
           {problem}
         </p>
       )}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- a press on the frame's own ground puts the caret in the box; the box is what a keyboard reaches */}
       <div
         data-slot="prompt-frame"
         data-dragging={dragging || undefined}
@@ -192,7 +194,7 @@ export function PromptInput({
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={image.src}
-                      alt={`Image ${at + 1}`}
+                      alt=""
                       className="block size-14 object-cover transition-[filter] duration-150 hover:brightness-90"
                     />
                   </button>
@@ -217,7 +219,7 @@ export function PromptInput({
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.16 }}
                 >
-                  <LoaderCircle aria-hidden className="size-4 animate-spin text-muted-foreground" />
+                  <Spinner className="text-muted-foreground" />
                 </motion.li>
               ))}
             </AnimatePresence>

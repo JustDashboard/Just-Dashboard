@@ -60,17 +60,17 @@ was touched.
 
 | Surface | Before | After |
 | --- | --- | --- |
-| Page, 1440 | [Before](before-page-1440.png) | [After](after-page-1440.png) |
-| Page, 1280 | [Before](before-page-1280.png) | [After](after-page-1280.png) |
-| Page, 1720 | [Before](before-page-1720.png) | [After](after-page-1720.png) |
-| Page, phone | [Before](before-page-390.png) | [After](after-page-390.png) |
-| Image sheet, 1440 | [Before](before-sheet-1440.png) | [After](after-sheet-1440.png) |
-| Image sheet, phone | [Before](before-sheet-390.png) | [After](after-sheet-390.png) |
-| Pull in progress | [Before](before-pull-1440.png) | [After](after-pull-1440.png) |
+| Page, 1440 | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/before-page-1440.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-page-1440.png) |
+| Page, 1280 | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/before-page-1280.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-page-1280.png) |
+| Page, 1720 | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/before-page-1720.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-page-1720.png) |
+| Page, phone | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/before-page-390.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-page-390.png) |
+| Image sheet, 1440 | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/before-sheet-1440.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-sheet-1440.png) |
+| Image sheet, phone | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/before-sheet-390.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-sheet-390.png) |
+| Pull in progress | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/before-pull-1440.png) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-pull-1440.png) |
 
-Also recorded: the table at [1440](after-table-1440.png), [1280](after-table-1280.png) and on a
-[phone](after-table-390.png), the [registry filter](after-filter-1440.png) and the
-[Tag dialog](after-tag-1440.png).
+Also recorded: the table at [1440](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-table-1440.png), [1280](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-table-1280.png) and on a
+[phone](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-table-390.png), the [registry filter](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-filter-1440.png) and the
+[Tag dialog](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-docker-images-overhaul/after-tag-1440.png).
 
 Capture them against a running production build:
 

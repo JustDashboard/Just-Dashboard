@@ -39,6 +39,7 @@ import { usePM2Control, usePM2Verbs } from "@/components/procs/pm2-actions"
 import { isCluster, memoryLimitShare, pm2AppKey, pm2Key } from "@/components/procs/pm2-shared"
 import { MiniBar } from "@/components/procs/process-table"
 import { cpuTone, reach } from "@/components/procs/shared"
+import { processHref } from "@/components/procs/process-facts"
 
 /**
  * The stretch "around the last start" covers: the crash before it — PM2's
@@ -290,7 +291,7 @@ function PM2Overview({
             </span>
             <Dot />
             <Link
-              href={`/processes?pid=${process.pid}`}
+              href={processHref(process.pid)}
               className="numeric inline-flex items-center gap-1 text-foreground hover:underline"
             >
               PID {process.pid}

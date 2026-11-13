@@ -135,14 +135,6 @@ export type DbInventory = {
   kernelProblems?: Record<string, DbKernelProblem>
 }
 
-export type DbInventoryConnectRequest = {
-  key: string
-  name?: string
-  user?: string
-  password?: string
-  database?: string
-}
-
 /** `POST /databases/sync`: what connecting everything that states its credentials did. */
 export type DbSyncReport = {
   added: string[]

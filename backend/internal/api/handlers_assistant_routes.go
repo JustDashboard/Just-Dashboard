@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -133,6 +134,7 @@ var agentExcludedAreas = []struct{ prefix, why string }{
 	{"/tailnet/", "the tailnet gate answers the proxy alone"},
 	{"/probe-agent/", "a probe agent's own routes, which take its certificate"},
 	{"/remote-desktop/bridge/", whyStream},
+	{"/dashboard/debug/", "a profile of the dashboard's own process is a binary file for a person's tools, and the CPU one answers only once it has sampled"},
 }
 
 // agentAreaBlurbs say what each area of the API is for, for the prompt and
@@ -443,6 +445,10 @@ func (c *apiCatalogue) findRoutes(in assistant.FindInput) agentResult {
 		case route.Method != http.MethodGet:
 			kind = agentKindChange
 		}
+		if _, reaches := agentReachingReads[route.Method+" "+strings.TrimSuffix(route.Pattern, "/")]; reaches {
+			// Said, so the model knows why a read of its waited.
+			kind += ", asked first: it reaches another machine"
+		}
 		fmt.Fprintf(&b, "- %s %s: %s [%s]\n", route.Method, route.Path, route.Words, kind)
 	}
 	if len(closed) > 0 {
@@ -522,6 +528,58 @@ var agentReadingPosts = map[string]bool{
 	"POST /network/protection/sessions/preview":     true,
 }
 
+// agentReachingReads are reads that are sent somewhere: the route answers by
+// sending what the request names — a name to look up, an address to connect to,
+// a document to resolve — to a machine of the request's choosing. Nothing on the
+// server changes, which is why each is a read, but a name looked up is a message
+// to whoever answers for it and a connection carries what it is told to, so this
+// is the way out for whatever a chat has read: text the model was shown can ask
+// it to put a row or a file into a name. In "Ask before changes" they wait for
+// the person as a change does; full access runs them unasked like the rest. A
+// test given the request's query says when only some requests of a route do.
+//
+// A read is not here when it reaches only where the server was already pointed:
+// a saved database connection, a deployment's own domain or repository, GitHub,
+// the registry an image came from, a resolver or hub the operator configured.
+// A route that takes a host, a domain or an address from its caller and reads
+// by reaching it goes here, as its capability comment says it goes behind
+// system.admin.
+var agentReachingReads = map[string]func(query url.Values) bool{
+	"GET /certificates/check":     nil,
+	"GET /certificates/scan":      nil,
+	"GET /certificates/scan/deep": nil,
+	"GET /certificates/dns":       nil,
+	"GET /remote-desktop/probe":   nil,
+	// Asked about a name of the caller's; a name suggested for a deployment is
+	// under the server's own domain.
+	"GET /deploy/hostname": func(query url.Values) bool { return query.Get("hostname") != "" },
+	"POST /databases/test": nil,
+	// The source it reads is another server's address, as a test's is.
+	"POST /databases/{id}/imports/inspect": nil,
+	"POST /network/dns/lookup":             nil,
+	"POST /network/dns/dnssec-chain":       nil,
+	// Compose resolves what a file includes, from a registry or a repository
+	// the file names.
+	"POST /docker/stacks/{name}/validate": nil,
+}
+
+// agentReaches reports whether a read is one of agentReachingReads.
+func agentReaches(method, pattern string, query url.Values) bool {
+	when, listed := agentReachingReads[method+" "+strings.TrimSuffix(pattern, "/")]
+	return listed && (when == nil || when(query))
+}
+
+// clickHouseReaching is a ClickHouse table function that reads from another
+// machine, or runs a program: a SELECT from one sends its arguments wherever
+// they say. The statement's classifier reads such a SELECT as a read (it changes
+// nothing in the database), so it is held here. The name may be quoted, and a
+// comment may stand between it and its bracket; a column of the same name, or
+// the word in a string, costs an Allow.
+var clickHouseReaching = regexp.MustCompile("(?is)\\b(url|urlCluster|remote|remoteSecure|cluster|clusterAllReplicas|s3|s3Cluster|gcs|oss|" +
+	"cosn|azureBlobStorage|azureBlobStorageCluster|hdfs|hdfsCluster|hive|mysql|postgresql|mongodb|redis|sqlite|jdbc|odbc|file|" +
+	"fileCluster|executable|iceberg\\w*|deltaLake\\w*|hudi\\w*|paimon\\w*|ytsaurus|arrowFlight)[\"`]?" +
+	"(\\s|/\\*.*?\\*/|--[^\n]*|#[^\n]*)*\\(")
+
 // apiRequestKind is what a request does, as the person's mode reads it. A SQL
 // statement is read for what it does: one that only reads runs the way any read
 // does, which is how a database is asked about without a press of Allow each time.
@@ -567,6 +625,9 @@ func (s *Server) agentSQLReads(ctx context.Context, path string, body json.RawMe
 	var driver string
 	err = s.Store.DB.QueryRowContext(ctx, `SELECT driver FROM db_connections WHERE id = ?`, id).Scan(&driver)
 	if err != nil {
+		return false
+	}
+	if dbx.Driver(driver) == dbx.DriverClickHouse && clickHouseReaching.MatchString(query.Query) {
 		return false
 	}
 	statement, err := dbx.SingleStatementFor(dbx.Driver(driver), query.Query)
@@ -639,9 +700,12 @@ var agentAPIPages = []struct {
 	{"/dashboard-users", "Users", "/account/users"},
 	{"/tokens", "API keys", "/account/keys"},
 	{"/packages", "Packages", "/packages"},
+	{"/systemd/daemon-reload", "Services", "/processes/services"},
+	{"/systemd/", "Service", "/processes/services/{1}"},
 	{"/systemd", "Services", "/processes/services"},
 	{"/cron", "Scheduled tasks", "/processes/scheduled"},
 	{"/pm2", "PM2", "/processes/pm2"},
+	{"/processes/", "Process", "/processes/{1}"},
 	{"/processes", "Processes", "/processes"},
 	{"/git", "Git", "/git"},
 	{"/boards/", "Drawing", "/excalidraw/{1}"},

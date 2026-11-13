@@ -134,7 +134,7 @@ test("a term the server would refuse is named under its field", () => {
     "The drift allowed is between 0 and 100.",
   )
   expect(replayRefusal({ ...on, latencyFactor: "0.5" })?.message).toBe(
-    "The p95 factor is between 1 and 10.",
+    "The slowdown factor is between 1 and 10.",
   )
   expect(replayRefusal({ ...on, timeoutSeconds: "301" })?.field).toBe("timeoutSeconds")
   expect(replayRefusal({ ...on, paths: "/ok\napi" })).toEqual({
@@ -149,11 +149,11 @@ test("the settings head says what the next release is held to", () => {
     "Off · releases go live on their health checks alone",
   )
   expect(replayPolicyLine({ enabled: true })).toBe(
-    "On · the last 50 requests, 2% drift, p95 within 2×",
+    "On · the last 50 requests, 2% drift, at most 2× slower",
   )
   expect(
     replayPolicyLine({ enabled: true, requests: 200, paths: ["/docs"], maxStatusDrift: 0.5 }),
-  ).toBe("On · the last 200 requests under 1 prefix, 0.5% drift, p95 within 2×")
+  ).toBe("On · the last 200 requests under 1 prefix, 0.5% drift, at most 2× slower")
 })
 
 test("a replayed request's time reads in the unit it was measured in", () => {
@@ -177,7 +177,9 @@ test("every replay step's evidence reads as a report", () => {
 })
 
 test("the step row says how many were replayed, drifted, and both p95s", () => {
-  expect(replaySummary(report)).toBe("50 requests · 2 drifted · p95 38 ms (42 ms recorded)")
+  expect(replaySummary(report)).toBe(
+    "50 requests · 2 drifted · 19 in 20 inside 38 ms (42 ms recorded)",
+  )
   expect(replaySummary({ ...report, drifted: 0, latencyJudged: false })).toBe(
     "50 requests · none drifted",
   )

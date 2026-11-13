@@ -930,26 +930,6 @@ func railpackFrontendFor(prepared PreparedBuild, tag string, secrets []BuildSecr
 	}
 }
 
-// railpackLabel is a provider's name as a reader knows it.
-func railpackLabel(provider string) string {
-	switch provider {
-	case "golang":
-		return "Go"
-	case "cpp":
-		return "C/C++"
-	case "dotnet":
-		return ".NET"
-	case "php":
-		return "PHP"
-	case "staticfile":
-		return "Staticfile"
-	}
-	if provider == "" {
-		return ""
-	}
-	return strings.ToUpper(provider[:1]) + provider[1:]
-}
-
 // refuseRailpackWithoutCheckout keeps Railpack to sources with a checkout to
 // read. A Compose source has its own files, which decide its build, and an
 // image, a template or an imported workload is not built here at all.

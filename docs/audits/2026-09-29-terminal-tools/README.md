@@ -16,7 +16,7 @@ these captures do not claim a new installation on a live host.
 
 | Before | After |
 | --- | --- |
-| ![Previous installer output](installer-before.png) | ![Installer stages and terminal command guide](installer-after.png) |
+| ![Previous installer output](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-09-29-terminal-tools/installer-before.png) | ![Installer stages and terminal command guide](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-09-29-terminal-tools/installer-after.png) |
 
 Full transcripts: [before](installer-before.txt), [after](installer-after.txt).
 

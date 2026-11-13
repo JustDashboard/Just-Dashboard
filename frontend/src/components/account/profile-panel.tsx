@@ -193,6 +193,9 @@ export function ProfilePanel({
             ref={fileInput}
             type="file"
             accept="image/*"
+            // Opened by the button beside it, which is what a keyboard reaches.
+            aria-label="Choose a picture to upload"
+            tabIndex={-1}
             className="sr-only"
             onChange={(e) => upload(e.target.files?.[0])}
           />

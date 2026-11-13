@@ -5,6 +5,17 @@ security, and deployment workflows plus `/login` and `/welcome`. Most page modul
 deployment detail/new wrappers remain server components and hand interaction to client components under
 `components/deploy/`.
 
+**A route imports its page from a module that is that page's alone.** The bundler keeps a module
+whole: it drops neither the exports a route never names nor what they import. So a folder index that
+re-exports several pages, or one file that holds several, hands every one of them to each route that
+names one. The database section did both until 0.8.6 (`ops/index.tsx` over thirteen pages, the eight
+settings pages in one `ops/settings.tsx`, `mongo/index.tsx` and `redis/index.tsx` over the engines'
+pages): a settings page loaded 2.2 MB of entry JavaScript, half of it other pages and recharts. Each
+route now names its page's own file (`ops/settings-version-page.tsx`), what the settings pages share
+is `ops/settings-frame.tsx`, and `ops/page-modules.test.js` walks every database route's imports and
+fails when two routes share a page module or one reaches another's. An index over small shared parts
+(`database/kit`) is not this: every page that imports it uses most of it.
+
 ## The shell
 
 `(dashboard)/layout.tsx` owns `CommandPaletteProvider`, `SelfUpdateProvider`, `NavScopeProvider`,
@@ -43,7 +54,10 @@ sidebar header closes it; Ctrl/Cmd+B still toggles that sheet.
 An address no page claims goes through `(dashboard)/[...missing]` to `(dashboard)/not-found.tsx`, inside
 the shell with the rail still there, and someone signed out is sent to sign in first. It answers HTTP 200:
 the shell draws its splash until the session probe returns, so the server never renders the page that
-throws the 404. `app/not-found.tsx` is the same page without a shell, for what the login and welcome pages
+throws the 404. The probe is started by an inline script in the document's head, so it is in flight
+while the shell's JavaScript downloads. A probe that fails for any reason but the server saying nobody is signed in keeps the
+splash and is asked again; from the first such failure the splash carries one sentence saying why it is
+still there ([data layer](data-theming.md), "The first probe of a page load"). `app/not-found.tsx` is the same page without a shell, for what the login and welcome pages
 throw.
 
 A render that throws under `(dashboard)` keeps the shell (`(dashboard)/error.tsx`). One from the dashboard's
@@ -52,11 +66,45 @@ replaces it (`app/global-error.tsx`), which brings its own document, stylesheet 
 script, because a client component cannot read the CSP nonce. The two share `RenderFailure`, whose way out
 is a full load rather than a router link back into what threw.
 
+### The document proxy and the build configuration
+
+`src/proxy.ts` runs for every document request and nothing under `/api`, `/_next/static` or the files
+`public/` serves by the dozen (`/monaco/`, `/logos/`, `/brand-logo/`, Excalidraw's fonts: its
+`matcher`). It mints the per-request nonce and the Content-Security-Policy that goes with it, and it
+is where the build's routing choices in `next.config.ts` are completed.
+
+**A trailing slash costs an API call nothing, and a page still loses it.** About 140 calls spell a
+list endpoint with its slash (`/jobs/`, `/deploy/`), which the backend's router accepts. Next answers
+any such path with a 308 to the path without the slash before it consults a rewrite, so wherever Next
+fronts the API (`bun dev`, the standalone server under the browser specs) each of those calls was two round
+trips. `skipTrailingSlashRedirect` turns that redirect off and the request reaches the `/api` rewrite as
+sent; `withoutTrailingSlash` in the proxy does the redirect for pages, so `/docker/` is still `/docker`
+and the rail's `pathname === href` still matches. In production Caddy routes `/api` to the backend and
+neither rule is met. The spelling of the calls is unchanged: the specs' mocks match it exactly.
+
 ### The tab's title
 
-The dashboard's layout renders a React `<title>` from `tabTitle(pathname, host)` in `components/nav.ts`:
-"Files · Just Dashboard", the section's name for a detail page, the product's alone for an address under no
-section. On a server linked to a Just Hub, `host` is this server's own host name (`useHostName` in
+The dashboard's layout renders a React `<title>` from `tabTitle(pathname, host, name)` in
+`components/nav.ts`: "Files · Just Dashboard", the product's alone for an address under no section.
+
+**The item leads.** The address of a detail page names only its section, so every page of every database
+read "Databases", every page of every project "Deployments" and a container "Docker", and four tabs or
+the Back menu's entries could not be told apart. The page knows the item, so the page says it
+(`components/tab-title.tsx`, a small store outside React that only the `<title>` reads):
+
+- `PageContext` hands the words of its `h1` to the tab as well as to a screen reader. The shell uses a
+  heading only where the nav has no row for the address, so a list page keeps its rail entry's word and
+  a detail page reads "nginx · Containers", "orders · Query · Databases", "shop · Logs · Deployments"
+  (a project's page is named from `PROJECT_NAV`), "New project · Deployments", "Page not found".
+- `useTabTitle("Deployment #42", "shop")` is for a page that wants more than its heading, most specific
+  first; it outranks a heading and is used on any address. The run page uses it.
+
+Two rail rows that share a word carry their section: "Alerts · Monitoring" and "Alerts · Proxy & TLS",
+and likewise Traffic, Map, Security and Configuration. `nav.test.js` fails when two rows of the rail
+would give their tabs one title. A word said twice is said once. `/login` is "Sign in · Just Dashboard"
+and `/welcome` "Welcome · Just Dashboard".
+
+On a server linked to a Just Hub, `host` is this server's own host name (`useHostName` in
 `hooks/use-metrics.ts`, the Overview's title from `/system/host`) and goes after the page — "Docker · atlas · Just
 Dashboard" — so five dashboard tabs can be told apart; unlinked, or before the name is read, the title is exactly
 what it was. It is never the name the hub lists the server under: that is the hub's text, which a hub that is taken
@@ -80,7 +128,7 @@ already inside the right section. The single piece of state is a look elsewhere 
 page you are on — the step back out, or a group opened from the list — and it is dropped on the next
 navigation. Three levels exist: the top-level list, a section, and one deployment inside Deployments
 or one database inside Databases — or, inside a group, the group, a section in it, and that section's
-pages (Monitoring → Processes → PM2; Server configuration → Proxy & TLS → Sites).
+pages (Monitoring → Processes → PM2; Administration → Proxy & TLS → Sites).
 
 `components/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
 `PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `sectionsFor`, `navLocation`, and for the sections an
@@ -94,8 +142,27 @@ shows** — "Browse", "Live", "Version", otherwise "Overview" — so every desti
 and "where am I" points at exactly one row. The palette skips the child whose href is the section's own,
 which is how one array serves both.
 
+A section with more pages than a reader scans as one list puts them under **headings**, as a project's
+rail does with *Settings*: a `NavChild` names its `group`, `groupedChildren` (`nav.ts`) turns the list
+into the panel's groups, and a section that names none is the single list it always was. Network is the
+one that does, since 0.8.6: Overview above every heading, then *Setup* (Interfaces, Routing, Egress
+groups, Firewall, Gateway, Protection, VPN, DNS, Address planning), *Activity* (Traffic, Socket history,
+Connections, Drift) and *Diagnostics* (Tools, Connection path, Packet captures, External checks, Saved
+runs). It was nineteen siblings with four glyphs each used twice. No two pages of one section share a
+glyph, which `nav.test.js` holds for every section: the glyph is what a row is found by before it is
+read.
+
+The group that holds Packages, System users and the Audit log is **Administration**. Until 0.8.6 it was
+"Server configuration", a synonym of Settings → Configuration two rows under it for a group whose audit
+log configures nothing. A button that opens a section says the rail's name for it in sentence case
+(*Open Deployments*, *Open Proxy & TLS*, *Open the database's Home*), never a shorter word the rail
+does not use. Excalidraw stays the page's name, the tool's own, and a document made there is a
+*drawing* everywhere; "board" is only the API's path. Pages of different sections that share a name
+(Traffic, Alerts, Map, Configuration, Security) are told apart by the panel they stand in and by the
+trail the palette prints beside each.
+
 A **group** (`NavGroup`) is a row with a chevron and no page: Monitoring holds Metrics, its Alerts
-(administrators only), Processes and Logs, and Server configuration holds Proxy & TLS, Packages, System users and Audit log. There is nothing
+(administrators only), Processes and Logs, and Administration holds Proxy & TLS, Packages, System users and Audit log. There is nothing
 that is "Monitoring" as such, so pressing the row opens its panel over the page you are on rather than
 navigating, and a group owns a path only through its entries (`navOwns`) — Metrics, Processes and Logs
 share no prefix. `sectionsFor` returns the chain of groups and sections a path sits inside, and the rail
@@ -124,7 +191,7 @@ without it. Packages, System users and the audit log can be, but every answer ke
 What a hidden section loses is exactly three things, each read through `useHiddenSections()`:
 
 - **Its row in the rail.** `shownFor` in `nav.ts` decides every row (and asks the role, so a group
-  whose remaining entries the role cannot open goes with them — Server configuration with Packages
+  whose remaining entries the role cannot open goes with them — Administration with Packages
   hidden, to an account without `system.admin`). A section's root is hidden, never a page inside it.
   **While you are inside a hidden section it is drawn anyway**: a deployment's domain links to
   `/proxy/sites?site=…`, about 150 such links cross sections, and the rail must still say where you
@@ -182,7 +249,7 @@ purpose is chosen when every section of it the role is offered is shown (`purpos
 chosen one takes its sections out and pressing any other brings them back whole (`pressPurpose`).
 Purposes share no section, so a press never moves another card. Beside it, *Sidebar* is the rail itself (`SidebarEditor`), walked
 from the same registry in its groups and order with a switch on every row the role may hide;
-Overview, Map, Monitoring and Settings say *Always* instead, and Server configuration heads the three
+Overview, Map, Monitoring and Settings say *Always* instead, and Administration heads the three
 sections it holds. A list of sections beside a separate picture of the rail was the same list twice.
 Both edit one draft, and an edit raises the settings pages' floating Save (`SaveBarProvider`,
 design system §7) rather than a disabled button sitting under the page. Accounts that predate the
@@ -269,7 +336,7 @@ row's slot made the heading read as one more row to press.
 The groups run in the order a day on the server runs, and the rail names each group:
 **Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
 then Databases, Docker), **Workspace** (Excalidraw, Terminal, Files, Git, Remote Desktop), **Protection** (Security, Backups),
-**Advanced** (Server configuration: Proxy & TLS, Packages, System users, Audit log) and **System**
+**Advanced** (Administration: Proxy & TLS, Packages, System users, Audit log) and **System**
 (Settings). The top-level list is twelve rows rather than seventeen: the three monitoring pages answer
 one question, and the four configuration pages are opened to change the server rather than to use it.
 Deployments open the second group because shipping something is the reason most visits happen; until
@@ -277,7 +344,11 @@ Deployments open the second group because shipping something is the reason most 
 
 Above the account card sits the update notice (`components/update/update-notice.tsx`), and only when
 there is something to say: a newer version, an update running, or one that finished and has not been
-dismissed. It is the account card's container (the same edge and ground, tinted green or red only
+dismissed. The rail imports only its slot (`update-notice-slot.tsx`), which reads the shell's one update
+poll and fetches the notice's code when `updateHasNews` says there is something to draw, so the notice,
+its progress and its confetti are in no route's chunks until then. The deployment vocabulary it draws
+with still loads with the shell, through the command palette's inventory
+(`command-search/inventory.ts`). It is the account card's container (the same edge and ground, tinted green or red only
 once a run has finished) with the dashboard's J,
 an eyebrow in the notice's tone, the installed version wired to the newest with a pulse running
 along the wire, the newest release's title and a band of what the releases bring by kind. An admin on
@@ -489,7 +560,8 @@ database engine navigation and mobile bounds. The design and recording are in th
 `components/workspace/` registers the active page's Find, read refresh, shortcuts and contextual
 actions in the existing command palette. The shell marks its scroll region, and participating pages
 restore row/field focus and scroll after navigation. Editors, terminals and portalled controls keep
-their own keys. `SidePanel` returns focus through a workspace when the sheet's trigger is gone.
+their own keys. `SidePanel` returns focus through a workspace when the sheet's trigger is gone, and
+otherwise, like `Modal`, to whatever opened it (`hooks/use-focus-return.ts`).
 See [`workspace-interactions.md`](workspace-interactions.md) for the page contracts and storage rules.
 
 ## The design system
@@ -601,6 +673,11 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   `RowActions` (the cluster of them that appears on hover, stays on keyboard focus and on an open menu,
   and is always visible on touch) and `DimActions`, the same cluster for a row whose controls have a
   column to themselves: always drawn, dimmed until the pointer arrives.
+- Copying has two kinds of feedback. `copyText` (`lib/clipboard.ts`), called directly with the words
+  to announce, raises a toast that says *what* was copied (340 rows as SQL); `useCopy`
+  (`hooks/use-copy.ts`) sets a `copied` flag for 1.6 s, for an inline tick that says *that* it worked
+  without moving the reader's eye (a chip about to be pasted) or where a toast would sit on what was
+  copied (a set of recovery codes).
 - `components/finding-list.tsx` renders results in requested diagnostic tools, including TLS/network
   reports, config lint and issuance diagnostics. Automatic attention panels, routine settings
   recommendations and navigation attention marks were removed in 0.7.5. Pending-edit marks still
@@ -614,6 +691,21 @@ whose blocks arrive plain, and `EmptyState`'s `mark` draws what the list would h
 place of the glyph. `min-w-0` on the frame and its children is load-bearing: a wide
 table's intrinsic width would otherwise widen the flex column and take the whole shell sideways instead
 of scrolling inside its panel.
+
+**A page arrives from the top.** A block whose answer is taller than its skeleton, or that is not on
+the page until its read answers, pushes everything under it down when it lands; eight pages moved that
+way while they loaded, past a quarter of the window on Certificates. `Hold` (also in `state.tsx`) is the
+answer where the loaded height cannot be reserved: `<Hold until={!read.loading} />` after the block
+leaves a marker until the read's first answer, and a rule in `globals.css` keeps what follows the marker,
+and every block of the `Page` under the one the marker is in, off the page until then. What is held is
+mounted, so its own reads start with the page; it is only not drawn, so when it appears nothing that
+was already there moves. Its children are what stands there meanwhile; `LoadingRows hold` and
+`LoadingPanel hold` are the same for a skeleton that already stands in the block. A hold lets go once
+and for good (a filter that makes the read load again takes nothing away) and after four seconds
+whatever the read is doing, so a read that hangs does not keep the page from its reader. A band is not
+a case for it: a band is drawn during load at its one height (design-system §10). `design-system.spec.ts`
+makes the reads of those eight pages land apart, in both orders, at 1280 and at 390, and holds what the
+browser's `layout-shift` observer reports under 0.02 (`tests/browser/layout-shift.ts`).
 
 **Nothing lifts.** Cards, buttons, tabs, tiles and the sign-in panel used to carry a `raised` utility —
 a gradient gloss, a light hairline on the top edge, a dark lip below, a drop shadow, and an inversion on
@@ -685,12 +777,34 @@ opened. Feature pieces live in `components/<feature>/`: `database/`, `docker/`, 
 ## The editor is served from here, not from a CDN
 
 `components/code-editor.tsx` wraps Monaco, and the line that matters is
-`loader.config({ paths: { vs: "/monaco/vs" } })`. `@monaco-editor/react` otherwise fetches the editor from
+`loader.config({ paths: { vs: MONACO_VS } })`, this origin's `/monaco/<version>/vs`. `@monaco-editor/react` otherwise fetches the editor from
 `cdn.jsdelivr.net` at runtime — third-party JavaScript in the same origin as a session that drives the
 Docker socket and a root shell, and a permanent spinner for an operator whose workstation has no egress,
 which is the workstation this is meant to be reached from. `scripts/sync-monaco.mjs` copies
-`monaco-editor/min/vs` into `public/monaco/vs` from the Bun `dev`/`build` scripts and explicitly in the
+`monaco-editor/min/vs` into `public/monaco/<version>/vs` from the Bun `dev`/`build` scripts and explicitly in the
 Dockerfile. The copy is gitignored and excluded from eslint.
+
+**What `public/` serves is cached, and is not a page.** A file in `public/` has no hash in its name, so
+Next answers it with `max-age=0`, and the proxy gave each one a nonce and a policy it never reads:
+opening an editor was dozens of conditional round trips over the tunnel this product is used through.
+The two copied runtimes therefore sit under the version of the package they came from
+(`/monaco/<version>/vs`, `/excalidraw/<version>/fonts`), which `next.config.ts` reads from the
+installed package exactly as the sync scripts do; it writes the two addresses into the build
+(`lib/vendored.ts`) and answers those paths with `public, max-age=31536000, immutable`. An update that
+brings another Monaco asks under another path. The logos (`/logos`, `/brand-logo`) keep their names
+when redrawn, so they get a day and a week of `stale-while-revalidate`. `src/proxy.ts` leaves all four
+prefixes alone (a drawing's own page, `/excalidraw/<id>`, still comes through), and
+`static-assets.spec.ts` reads the headers off the built server.
+
+**What the proxy leaves alone is still answered with a policy.** Where one of those prefixes names no
+file, the shell answers with its own page, and a page the proxy never saw would go out with no policy
+at all, free to be framed. `next.config.ts` therefore answers everything under the four prefixes with
+the policy of something that is not a page (`default-src 'none'; … frame-ancestors 'none'`), which is
+the one Caddy adds to an answer that has none, so the app answers the same with or without the proxy
+in front and nothing in `deploy/Caddyfile` changes. A script, a stylesheet, a font or an image is not
+governed by the policy it arrives with; Monaco starts its workers from blob URLs, which take the
+page's policy, and the spec opens an editor to hold that. A new prefix in the matcher needs its line
+in `headers()`.
 
 Files exposes Monaco's Find, Replace, Undo, Redo, Format and Commands actions, indentation, word wrap,
 minimap and font size. Models use the file path, search results reveal their matching line, and
@@ -734,6 +848,9 @@ series.
   instant; Left/Right and Home/End inspect samples, Escape releases it, and pinned overlays show
   each chart's values without pointer movement changing the instant. The Metrics page adds sample
   controls and a journal History link for the surrounding two-minute window.
+  The component is the chart's frame, in the page at its height from the first render; the recharts
+  tree is `Plot` inside it, drawn once the chart is within 600px of the view, memoised, and held
+  still while out of reach (`plot-held.ts`), so a page of charts pays for the ones on screen.
 - `chart-panel.tsx` — the header/chart/legend shape and the empty state. A series with no numbers anywhere
   in the window is **dropped rather than drawn flat at zero**, which is what makes a kernel without PSI
   say so instead of reporting three healthy zeroes.
@@ -754,3 +871,15 @@ series.
 a pointer crossing a chart fires continuously, and a context above the router would re-render the terminal
 and the log tail on every mousemove. The value is a **timestamp**, not a row index — charts on a page do
 not share a row array.
+
+**A date is printed through a format built once**, on an axis and everywhere else. `toLocaleString`,
+`toLocaleDateString` and `toLocaleTimeString` build a fresh `Intl.DateTimeFormat` on every call that
+carries options (about 75 µs, against 2 µs to ask one that exists), and recharts asks for a label for
+every candidate tick of every render: on Metrics that construction was the largest single cost of the
+page while nobody touched it. `dateFormatter(options)` in `lib/format.ts` builds the format on first
+use and keeps it, rebuilding only when the zone's offset moves under an open tab; the shapes several
+modules print are exported beside it (`clockAt`, `minuteAt`, `dayAt`, `weekdayAt`, `dayMinuteAt`), and
+`timestamp`, `clock`, `clockMinute`, `calendarDate` and `minuteSpan` go through the same. A shape one
+module prints is declared at the top of that module. `eslint.config.mjs` refuses
+`toLocale…String(undefined, { … })` on a date (`no-restricted-syntax`); a named locale with a zone
+known only when it is drawn (a schedule's next run, read in the schedule's own zone) is left alone.

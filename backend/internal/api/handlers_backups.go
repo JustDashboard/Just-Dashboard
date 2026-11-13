@@ -171,7 +171,7 @@ func mapBackupError(err error) error {
 	case errors.Is(err, backups.ErrNoArchiveKey), errors.Is(err, backups.ErrArchiveKey):
 		return httpx.Err(http.StatusConflict, "archive_key_unavailable", err.Error())
 	default:
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 }
 
@@ -675,7 +675,7 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request) err
 	// files.Resolve bounds where an archive may be unpacked, including symlink targets.
 	dest, err := s.modules.files.Resolve(req.Destination)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	ctx, cancel := timeoutCtx(r, 6*time.Hour)
 	defer cancel()

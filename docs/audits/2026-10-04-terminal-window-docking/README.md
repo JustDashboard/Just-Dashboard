@@ -8,7 +8,7 @@ as a whole. The Split terminal menu offers the same placement without dragging.
 
 ## Recorded proof
 
-The [28-second recording](native-drag-proof.webm) uses the production frontend and real held Linux
+The [28-second recording](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-window-docking/native-drag-proof.webm) uses the production frontend and real held Linux
 PTYs running the isolated resize-aware test program. It shows two panes with one window tab, the
 detach button restoring a second tab, a single held drag moving through all four overlay directions,
 a drop below, detaching the original group owner, and a drop to the right. The final screens show
@@ -16,12 +16,12 @@ different input received by the two shells. No agent command or operator workloa
 
 | Verified behavior | Screenshot |
 | --- | --- |
-| Two panes, one tab, detach and close controls on each pane | [Split panes](native-split-hidden-from-windows.png) |
-| Detached pane appears as its own selected window tab | [Separate window](native-detached-window.png) |
-| Live placement preview follows one held drag | [Left](native-drop-overlay-left.png), [Above](native-drop-overlay-up.png), [Right](native-drop-overlay-right.png), [Below](native-drop-overlay-down.png) |
-| Dropped shells resize and receive input | [Below](native-dropped-below.png), [Right](native-dropped-right.png) |
+| Two panes, one tab, detach and close controls on each pane | [Split panes](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-window-docking/native-split-hidden-from-windows.png) |
+| Detached pane appears as its own selected window tab | [Separate window](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-window-docking/native-detached-window.png) |
+| Live placement preview follows one held drag | [Left](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-window-docking/native-drop-overlay-left.png), [Above](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-window-docking/native-drop-overlay-up.png), [Right](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-window-docking/native-drop-overlay-right.png), [Below](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-window-docking/native-drop-overlay-down.png) |
+| Dropped shells resize and receive input | [Below](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-window-docking/native-dropped-below.png), [Right](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-window-docking/native-dropped-right.png) |
 
-For comparison, the [previous split capture](../2026-10-04-terminal-splits/native-three-pty-splits.png)
+For comparison, the [previous split capture](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-terminal-splits/native-three-pty-splits.png)
 shows each split leaf in the window strip and only Close in its pane header.
 
 The live browser assertions compare each visible xterm grid to kernel PTY rows/columns, require one

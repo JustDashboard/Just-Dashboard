@@ -5,14 +5,18 @@ import { useRouter } from "next/navigation"
 import {
   Backspace,
   Copy,
+  Cpu,
   FileText,
+  Lightning,
+  LockClosed,
+  LockOpen,
   Logs,
+  Pause,
   Play,
   RefreshClockwise,
   RotateClockwise,
-  StopCircle,
-  Lightning,
   Slash,
+  StopCircle,
 } from "@/components/icons"
 import { post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
@@ -33,6 +37,10 @@ const PAST: Record<string, string> = {
   enable: "enabled on boot",
   disable: "disabled on boot",
   "reset-failed": "failed state cleared",
+  mask: "masked",
+  unmask: "unmasked",
+  freeze: "frozen",
+  thaw: "thawed",
 }
 
 /**
@@ -81,13 +89,24 @@ export function useUnitVerbs({
   act,
   canReload,
   onOpenTab,
+  properties,
+  onDaemonReload,
 }: {
   unit: SystemdUnit
   confirm: ConfirmFn
   act: (unit: SystemdUnit, action: string, progressive: string, confirm?: string) => Promise<void>
   canReload?: boolean
-  /** Opens the detail sheet at a named tab; absent inside the sheet. */
+  /** Opens the unit's page at a named view. */
   onOpenTab?: (tab: string) => void
+  /**
+   * Its `systemctl show` properties, which the unit's own page has: with
+   * them the verbs only that read can offer join the list — freezing (when
+   * its cgroup can be frozen), masking, re-reading a changed unit file and
+   * the way to its main process.
+   */
+  properties?: Record<string, string>
+  /** Re-reads every unit file (`daemon-reload`), offered when this one changed on disk. */
+  onDaemonReload?: () => void
 }): Verb[] {
   const { can } = useAuth()
   const router = useRouter()
@@ -179,22 +198,114 @@ export function useUnitVerbs({
       })
     }
 
+    if (properties) {
+      const freezer = properties.FreezerState
+      if (can("service.control") && (freezer === "frozen" || freezer === "freezing")) {
+        verbs.push({
+          key: "thaw",
+          progressive: "Thawing",
+          label: "Thaw",
+          icon: Play,
+          group: "Pause",
+          run: () => void act(unit, "thaw", "Thawing").catch(() => undefined),
+        })
+      } else if (
+        can("destructive") &&
+        active &&
+        properties.CanFreeze === "yes" &&
+        freezer === "running"
+      ) {
+        verbs.push({
+          key: "freeze",
+          progressive: "Freezing",
+          label: "Freeze",
+          icon: Pause,
+          group: "Pause",
+          run: () =>
+            confirm({
+              title: "Freeze unit",
+              confirmLabel: "Freeze",
+              description: (
+                <p>
+                  Every process in <b>{unit.name}</b> is paused by its cgroup until it is thawed. It
+                  keeps its memory and its connections, and answers nothing in the meantime.
+                </p>
+              ),
+              action: (phrase) => act(unit, "freeze", "Freezing", phrase),
+            }),
+        })
+      }
+    }
+
     if (can("system.admin") && ["enabled", "enabled-runtime", "disabled"].includes(startup)) {
       verbs.push(
         unit.enabled
           ? {
               key: "disable",
+              group: properties ? "Startup" : undefined,
               label: "Disable on boot",
               icon: Slash,
               run: () => void act(unit, "disable", "Disabling").catch(() => undefined),
             }
           : {
               key: "enable",
+              group: properties ? "Startup" : undefined,
               label: "Enable on boot",
               icon: Lightning,
               run: () => void act(unit, "enable", "Enabling").catch(() => undefined),
             },
       )
+    }
+
+    if (properties) {
+      // A transient or generated unit has no file of its own to link away.
+      const maskable = ["enabled", "enabled-runtime", "disabled", "static", "indirect"]
+      if (can("system.admin") && (startup === "masked" || startup === "masked-runtime")) {
+        verbs.push({
+          key: "unmask",
+          label: "Unmask",
+          icon: LockOpen,
+          group: "Startup",
+          run: () => void act(unit, "unmask", "Unmasking").catch(() => undefined),
+        })
+      } else if (can("system.admin") && can("destructive") && maskable.includes(startup)) {
+        verbs.push({
+          key: "mask",
+          label: "Mask",
+          icon: LockClosed,
+          group: "Startup",
+          run: () =>
+            confirm({
+              title: "Mask unit",
+              confirmLabel: "Mask",
+              description: (
+                <p>
+                  <b>{unit.name}</b> is linked to /dev/null, so nothing can start it — not by hand,
+                  not another unit, not a boot — until it is unmasked.
+                  {active ? " It keeps running until it is stopped." : ""}
+                </p>
+              ),
+              action: (phrase) => act(unit, "mask", "Masking", phrase),
+            }),
+        })
+      }
+      if (onDaemonReload && can("system.admin") && properties.NeedDaemonReload === "yes") {
+        verbs.push({
+          key: "daemon-reload",
+          label: "Reload unit files",
+          icon: RefreshClockwise,
+          run: onDaemonReload,
+        })
+      }
+      if (unit.mainPid) {
+        const pid = unit.mainPid
+        verbs.push({
+          key: "main",
+          label: `Open its main process, ${pid}`,
+          icon: Cpu,
+          run: () => router.push(`/processes/${pid}`),
+        })
+      }
     }
 
     if (unit.fragmentPath) {
@@ -212,5 +323,5 @@ export function useUnitVerbs({
       run: () => void copyText(unit.name, "Unit name copied"),
     })
     return verbs
-  }, [unit, can, confirm, act, canReload, onOpenTab, router])
+  }, [unit, can, confirm, act, canReload, onOpenTab, properties, onDaemonReload, router])
 }

@@ -98,10 +98,10 @@ The record form/review/readback is captured at 390, 1280 and 1720 pixels; existi
 their before/readback are captured at 390 and 1280 pixels. These captures and width assertions are
 mocked browser evidence, separate from actual engine effects and client DNS answers.
 All 15 final captures and their hashes are retained in the [capture manifest](dns-service-policy-ui/screenshots.json).
-Inspected examples include the [phone record inventory](dns-service-policy-ui/dns-record-inventory-390.png),
-[desktop record review](dns-service-policy-ui/dns-record-review-1720.png),
-[phone client review](dns-service-policy-ui/dns-client-review-390.png) and
-[desktop client readback](dns-service-policy-ui/dns-client-readback-1280.png). Every tested document
+Inspected examples include the [phone record inventory](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-policy-ui/dns-record-inventory-390.png),
+[desktop record review](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-policy-ui/dns-record-review-1720.png),
+[phone client review](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-policy-ui/dns-client-review-390.png) and
+[desktop client readback](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-policy-ui/dns-client-readback-1280.png). Every tested document
 and sheet width assertion passed; the sheet uses vertical scrolling for longer native inventories.
 
 ## Original failures and remaining scope

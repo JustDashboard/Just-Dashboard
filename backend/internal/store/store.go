@@ -1,3 +1,11 @@
+// Package store is the dashboard's one SQLite database (vpsd.db in the data
+// directory): the schema (store.go, and a schema file per later feature), the
+// columns added since a table shipped (addedColumns), the pools Open makes
+// (DB, Bulk, Reader) and the settings table. Schema changes are additive: a
+// new column is an addedColumns entry with a DEFAULT, and a shipped entry is
+// never removed. It imports no feature package; each feature keeps its own
+// queries. See "The store's connections" in
+// docs/internal/architecture/runtime-boundaries.md.
 package store
 
 import (
@@ -6,13 +14,46 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	DB    *sql.DB
-	guard *walGuard
+	// DB is the pool everything uses unless it has a reason not to: reads and
+	// writes, every commit synced to disk before it returns.
+	DB *sql.DB
+	// bulk is the writer for what a power cut may take; see Bulk. It is read
+	// on every use rather than kept by whoever asked, so SingleConnection can
+	// take it away under a running test.
+	bulk atomic.Pointer[sql.DB]
+	// read is the pool for reads that take long; see Reader.
+	read atomic.Pointer[sql.DB]
+	// handles are the pools Open made beside DB, to close with the store.
+	handles []*sql.DB
+	guard   *walGuard
+}
+
+// Bulk is the writer for rows nobody would miss the last seconds of: metric
+// samples and the lines a build prints. It is the same database through a
+// connection that does not sync the write-ahead log on every commit
+// (synchronous=NORMAL, where DB is FULL).
+//
+// What that gives up is narrow. Neither setting can corrupt the database, and
+// neither loses anything when the process is killed or crashes: the operating
+// system already has the write. After a power cut or a kernel crash, the
+// commits made here since the log was last synced can be missing: the last
+// seconds of them, since any commit on DB syncs the log and so makes
+// everything written before it durable too. Whether a write may go here is
+// therefore one question: if the server lost power the moment after it, would
+// anybody act differently for not having the row? An audit entry, a password,
+// a session's end, a revoked key, a deployment's state all answer yes, and
+// stay on DB. A store that was not opened by Open has only DB, and gets it.
+func (s *Store) Bulk() *sql.DB {
+	if db := s.bulk.Load(); db != nil {
+		return db
+	}
+	return s.DB
 }
 
 // DatabaseFile is the SQLite file inside the data directory. It keeps its
@@ -931,6 +972,16 @@ CREATE TABLE IF NOT EXISTS deploy_log_chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_deploy_log_run ON deploy_log_chunks(run_id, seq);
 
+-- The runs whose output the history policy (deploy/run_history.go) has cut
+-- down to its end, so a pass does not look at one twice. A table of its own
+-- and not a column of deploy_runs: a pass finds its runs from an index and
+-- this table, and a column added to deploy_runs would sit behind the log
+-- tail, which is read through a chain of overflow pages to reach it.
+CREATE TABLE IF NOT EXISTS deploy_run_output_pruned (
+  run_id    INTEGER PRIMARY KEY REFERENCES deploy_runs(id) ON DELETE CASCADE,
+  pruned_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS deploy_dependencies (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   environment_id INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
@@ -1476,6 +1527,19 @@ CREATE TABLE IF NOT EXISTS metric_container_samples (
 -- first) cannot serve.
 CREATE INDEX IF NOT EXISTS idx_container_samples_ts ON metric_container_samples(ts);
 
+-- A container's id, written once. A sample spells the sixty-four characters
+-- out in its row and again in the index on them, which is about half of the
+-- table above; in the short form it holds this row's number (container_ref,
+-- with container_id left empty). metrics/container_ids.go reads either
+-- spelling from 0.8.6 and says why the recorder does not write the short one
+-- yet: the binary a rollback returns to cannot read it. AUTOINCREMENT, so a
+-- number is never given to a second container after the first one's row was
+-- pruned.
+CREATE TABLE IF NOT EXISTS metric_container_ids (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  container_id TEXT NOT NULL UNIQUE
+);
+
 -- Per-device traffic, recorded by the network module's sampler at the metrics
 -- interval (netx/sampler.go). Each row is the interval's mean and its busiest
 -- two seconds in each direction, and the errors and drops counted in it.
@@ -1639,12 +1703,21 @@ BEGIN
 END;
 CREATE INDEX IF NOT EXISTS idx_container_samples_identity_ts
   ON metric_container_samples(container_id, ts);
+-- The same lookup for a sample that holds its container's id as a number.
+-- Partial, so the rows that spell their id out cost it nothing.
+CREATE INDEX IF NOT EXISTS idx_container_samples_ref_ts
+  ON metric_container_samples(container_ref, ts) WHERE container_ref IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_deploy_runs_queue
   ON deploy_runs(state, priority, requested_at, id);
 -- Every fleet poll ranks each project's runs newest first; an index in that
 -- order lets the ranking read ids from the index alone instead of sorting rows.
 CREATE INDEX IF NOT EXISTS idx_deploy_runs_project_requested
   ON deploy_runs(project_id, requested_at DESC, id DESC);
+-- The git watcher asks for each environment's newest run every five seconds,
+-- and the table is never pruned; nothing else led on the environment, so
+-- that was a walk of the table and an index built for each execution.
+CREATE INDEX IF NOT EXISTS idx_deploy_runs_environment
+  ON deploy_runs(environment_id, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_deploy_runs_idempotency
   ON deploy_runs(project_id, environment_id, operation, idempotency_key)
   WHERE idempotency_key <> '';
@@ -1858,6 +1931,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Name continuity serves Docker charts; release attribution needs the exact
 	// observed container identity. Old samples deliberately remain unattributed.
 	{"metric_container_samples", "container_id", "TEXT NOT NULL DEFAULT ''"},
+	// The id as the number of its row in metric_container_ids: the short
+	// form, which 0.8.6 reads and does not write yet. NULL for a row that
+	// spells its id out, and for a container that reported none.
+	{"metric_container_samples", "container_ref", "INTEGER DEFAULT NULL"},
 	// Unknown for pre-upgrade rows: an absent measurement must not become an
 	// idle interface or an operator-configured limit during migration.
 	{"metric_container_samples", "network_available", "INTEGER DEFAULT NULL"},
@@ -2014,7 +2091,17 @@ func Open(dataDir string) (*Store, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
+	// MkdirAll leaves a directory that exists as it is, and the one Docker
+	// makes for the bind mount is 0755.
+	if err := tightenDataDir(dataDir); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(dataDir, DatabaseFile)
+	// Before the first connection, so that the log and the index SQLite makes
+	// beside the database are private from the moment they exist.
+	if err := prepareStoreFiles(path); err != nil {
+		return nil, err
+	}
 	// Transactions begin IMMEDIATE: a transaction that reads first and writes
 	// later under a deferred BEGIN fails at once with SQLITE_BUSY_SNAPSHOT
 	// when any other connection commits in between, and the busy timeout never
@@ -2022,12 +2109,20 @@ func Open(dataDir string) (*Store, error) {
 	// writer wait instead. A deployment worker's step transition racing a
 	// notification delivery or an operator's settings save is exactly that
 	// case, and a lost transition used to end the run as unrecoverable.
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate")
+	//
+	// synchronous is spelled out because it is a decision, not a default that
+	// happened: with FULL a commit returns once the write-ahead log is on
+	// disk, so what the dashboard has acknowledged (an audit entry, a changed
+	// password, a revoked key, a deployment's state) survives a power cut.
+	// The writes that do not need that go through Bulk instead.
+	db, err := sql.Open("sqlite", path+"?"+writerPragmas+"&_pragma=synchronous(FULL)")
 	if err != nil {
 		return nil, err
 	}
 	// SQLite tolerates a single writer; the pool is kept small so the WAL
-	// writer never contends with itself under WebSocket fan-out.
+	// writer never contends with itself under WebSocket fan-out. Four is for
+	// the writer's sake only: the reads that take long have a pool of their
+	// own (Reader), so they do not use these up.
 	db.SetMaxOpenConns(4)
 	if _, err := db.ExecContext(context.Background(), schema); err != nil {
 		db.Close()
@@ -2071,7 +2166,9 @@ func Open(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	// Again now that the log and the index exist: what prepareStoreFiles
+	// arranged through SQLite is checked here by name.
+	if err := keepStoreFilesPrivate(path); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -2080,12 +2177,85 @@ func Open(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{DB: db, guard: guard}, nil
+	st := &Store{DB: db, guard: guard}
+	// One connection: SQLite has one writer, and a second connection here
+	// would only wait for the first inside SQLite instead of in the pool.
+	bulk, err := st.openHandle(path, writerPragmas+"&_pragma=synchronous(NORMAL)", 1)
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("open the bulk writer: %w", err)
+	}
+	st.bulk.Store(bulk)
+	// Readers do not take the write lock, so they are not what the four
+	// connections of DB are rationed for; they get as many of their own.
+	// No _txlock here: a transaction on a connection that cannot write must
+	// not begin by asking for the write lock.
+	read, err := st.openHandle(path, "_pragma=busy_timeout(5000)&_pragma=query_only(1)", 4)
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("open the read pool: %w", err)
+	}
+	st.read.Store(read)
+	return st, nil
+}
+
+// writerPragmas are what every connection that writes is opened with. See
+// Open for why transactions begin IMMEDIATE.
+const writerPragmas = "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
+
+// openHandle opens one more pool on a database Open has already built, and
+// proves it connects: sql.Open alone reports nothing until first use.
+func (s *Store) openHandle(path, pragmas string, connections int) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", path+"?"+pragmas)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(connections)
+	if err := db.PingContext(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
+	s.handles = append(s.handles, db)
+	return db, nil
 }
 
 func (s *Store) Close() error {
+	// The other handles first: the guard is released only on the way to
+	// closing the last connection to the database.
+	for _, db := range s.handles {
+		db.Close()
+	}
 	s.guard.release()
 	return s.DB.Close()
+}
+
+// Reader is the pool for reads that take long or come in bursts: a week of
+// metric history, the deployments read model, a run's transcript, a page of
+// the audit trail. Its connections can only read (query_only), and they are
+// not DB's, so a few slow chart reads no longer stand between a request and
+// its session check, an audit row or the next metric sample: those wait for
+// DB, which the long reads have left alone.
+//
+// A read here sees every commit made before it began, on whichever handle,
+// as any SQLite reader in WAL mode does. What it must not be is part of a
+// write: a function that reads and then writes inside one transaction keeps
+// to that transaction. A store that was not opened by Open has only DB.
+func (s *Store) Reader() *sql.DB {
+	if db := s.read.Load(); db != nil {
+		return db
+	}
+	return s.DB
+}
+
+// SingleConnection leaves the store one connection for everything: every
+// handle answers with DB from now on, and DB keeps a single connection. It
+// exists for tests (storetest.OneConnection): on a store like this, a call
+// that needs a second connection from any handle while it still holds one can
+// never finish.
+func (s *Store) SingleConnection() {
+	s.bulk.Store(nil)
+	s.read.Store(nil)
+	s.DB.SetMaxOpenConns(1)
 }
 
 func (s *Store) Setting(ctx context.Context, key string) (string, bool, error) {

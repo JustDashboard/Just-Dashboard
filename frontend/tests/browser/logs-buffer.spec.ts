@@ -6,6 +6,9 @@ import { json, mockHost } from "./host-fixture"
 test.use({ trace: "off" })
 
 test("rolling eviction retains the marked line and its DOM identity", async ({ page }) => {
+  // Four thousand rows take a slow runner about five seconds to draw, which is
+  // the default wait: this checks what the buffer keeps, not how fast it draws.
+  test.setTimeout(90_000)
   await mockHost(page)
   await page.route("**/api/v1/logs/sources", (route) =>
     json(route, {
@@ -34,15 +37,15 @@ test("rolling eviction retains the marked line and its DOM identity", async ({ p
   })
   await page.goto("/logs?source=file:/var/log/auth.log")
   const rows = page.locator('[class*="content-visibility:auto"]')
-  await expect.poll(() => rows.count()).toBe(4000)
+  await expect.poll(() => rows.count(), { timeout: 30_000 }).toBe(4000)
   const retained = rows.nth(3990)
   await retained.click()
   await retained.evaluate((element) => {
     ;(window as Window & { retainedLine?: Element }).retainedLine = element
   })
   append(Array.from({ length: 50 }, (_, i) => ({ text: `next-arrival-${i}` })))
-  await expect(rows.last()).toContainText("next-arrival-49")
-  await expect.poll(() => rows.count()).toBe(4000)
+  await expect(rows.last()).toContainText("next-arrival-49", { timeout: 30_000 })
+  await expect.poll(() => rows.count(), { timeout: 30_000 }).toBe(4000)
   const shifted = rows.nth(3940)
   await expect(shifted).toContainText("arrival-3990")
   await expect(shifted).toHaveClass(/\bbg-accent\b/)

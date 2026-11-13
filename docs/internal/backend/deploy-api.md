@@ -139,7 +139,7 @@ not require a regeneration by itself.
 - **Go**, `sdk/go`: its own module, `github.com/Wayy01/Just-Dashboard/sdk/go`, package `jd`, with no
   dependency outside the standard library. It is a nested module rather than a package of the backend
   module because a consumer would otherwise download the backend's every dependency (Docker, the
-  AWS SDK, the database drivers) and its Go 1.26.10 floor to call an HTTP API, and could import
+  AWS SDK, the database drivers) and its Go 1.26.11 floor to call an HTTP API, and could import
   nothing under `internal/` anyway; its floor is Go 1.24 (`omitzero`). `types.go` has a struct per
   component and per object a route spells out inline (named for the operation and the property where
   it was met: `DeployGetResponse`), a string type and its constants per vocabulary (`RunState`,
@@ -192,7 +192,7 @@ named for its operationId in snake case, its input schema read from this documen
 query parameters, and the body with the components it refers to copied into the schema's `$defs`).
 The tools are read off the same router and the same description, so a route described here and given
 a deploy key line is a tool with nothing else written. How they are offered, called and audited is in
-[the MCP server](databases-proxy-platform.md#the-mcp-server).
+[the MCP server](databases.md#the-mcp-server).
 
 ## Who reads it
 

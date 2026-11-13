@@ -334,7 +334,7 @@ describe("the states around the rows", () => {
 
   test("a first load that failed shows the error in place of the rows", () => {
     const html = render({ rows: [], error: new Error("relation does not exist") })
-    expect(html).toContain("relation does not exist")
+    expect(html).toContain("Relation does not exist.")
     expect(html).not.toContain("data-row=")
   })
 

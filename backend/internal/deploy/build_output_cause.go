@@ -105,7 +105,10 @@ const (
 
 type collectedLine struct {
 	text string
-	seq  int64
+	// seq names the line: its mark in the step's output, which the step
+	// turns into the line's place in the transcript once the cause is known
+	// (output is written in batches, so the place is not known yet).
+	seq int64
 	// vertex is the BuildKit step that printed the line, 0 for the closing
 	// replay and anything else printed outside a step.
 	vertex int
@@ -181,10 +184,10 @@ var (
 	buildKitFrameRE = regexp.MustCompile(`^(?:-{3,}|\s*\d+ \|.*| > \[.*|Dockerfile(?::\d+)?|ERROR: .*process ".*" did not complete successfully.*)$`)
 )
 
-// buildOutputCollector reads a build's transcript as it is persisted, after
+// buildOutputCollector reads a build's transcript as it is logged, after
 // redaction, and keeps just enough of it to name a failure: a ring per open
 // BuildKit step and one over the stream, less the steps that finished. It is
-// fed by one goroutine.
+// fed by one goroutine. seq names the line that was just logged.
 type buildOutputCollector struct {
 	seq      func() int64
 	service  string

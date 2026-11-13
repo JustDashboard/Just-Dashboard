@@ -340,9 +340,14 @@ async function cursorAt(page: Page, lineNumber: number, column: number) {
 }
 
 const settled = (page: Page) =>
-  page
-    .getByRole("dialog")
-    .evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)))
+  page.getByRole("dialog").evaluate((el) =>
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
+  )
 
 const sideways = (page: Page) =>
   page.evaluate(() =>

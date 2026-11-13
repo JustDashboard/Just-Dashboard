@@ -422,7 +422,7 @@ function UsageView({
                 leading={<PackageMark name={service} />}
                 title={<span className="font-mono">{service}</span>}
                 verb={`Open ${service}`}
-                href={`/processes/services?unit=${encodeURIComponent(service)}`}
+                href={`/processes/services/${encodeURIComponent(service)}`}
               >
                 <CommandChip command={`systemctl start ${service}`} />
               </ChoiceRow>

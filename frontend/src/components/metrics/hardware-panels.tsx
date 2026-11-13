@@ -546,6 +546,7 @@ function Interface({
         <div className="flex min-w-0 items-baseline justify-between gap-3">
           <span className="flex min-w-0 items-center gap-2">
             <span
+              role="img"
               aria-label={iface.isUp ? "up" : "down"}
               className={cn(
                 "size-1.5 shrink-0 rounded-full",

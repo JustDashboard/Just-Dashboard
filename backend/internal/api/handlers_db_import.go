@@ -64,8 +64,8 @@ type importRecord struct {
 	PublicationMade bool         `json:"publicationMade"`
 	Detail          string       `json:"detail,omitempty"`
 	StartedBy       string       `json:"startedBy"`
-	CreatedAt       time.Time    `json:"createdAt"`
-	UpdatedAt       time.Time    `json:"updatedAt"`
+	CreatedAt       time.Time    `json:"createdAt,omitzero"`
+	UpdatedAt       time.Time    `json:"updatedAt,omitzero"`
 	FinishedAt      *time.Time   `json:"finishedAt,omitempty"`
 	// Job is the dump, load or cutover running for it now.
 	Job *jobs.Job `json:"job,omitempty"`
@@ -581,7 +581,7 @@ func (s *Server) handleImportStart(w http.ResponseWriter, r *http.Request) error
 	}
 	database := strings.TrimSpace(req.Database)
 	if err := newDatabaseName(conn, database); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	source := strings.TrimSpace(req.Source)
 	if source == "" {

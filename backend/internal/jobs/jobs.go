@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Status is where a job has got to.
@@ -58,7 +59,7 @@ type Line struct {
 	// command's output and should not be read as it.
 	Stream string    `json:"stream"`
 	Text   string    `json:"text"`
-	At     time.Time `json:"at"`
+	At     time.Time `json:"at,omitzero"`
 }
 
 // Job is one operation, past or present.
@@ -71,7 +72,7 @@ type Job struct {
 	Status    Status     `json:"status"`
 	ExitCode  int        `json:"exitCode"`
 	Error     string     `json:"error,omitempty"`
-	StartedAt time.Time  `json:"startedAt"`
+	StartedAt time.Time  `json:"startedAt,omitzero"`
 	EndedAt   *time.Time `json:"endedAt,omitempty"`
 	// StartedBy is the principal who asked for it. A job outlives its request,
 	// so the audit entry alone would not say who is responsible for something
@@ -245,7 +246,10 @@ func (m *Manager) registerLocked(job Job, cancel context.CancelFunc, exclusive b
 
 func (m *Manager) run(ctx context.Context, cancel context.CancelFunc, e *entry, run Runner) {
 	defer cancel()
-	err := run(ctx, &emitter{entry: e, manager: m})
+	// A runner that panics fails its own job, with the reason on it. Nothing
+	// else recovers this goroutine, so it used to end the dashboard and every
+	// other job with it.
+	err := safego.Try(m.log, "job", func() error { return run(ctx, &emitter{entry: e, manager: m}) })
 	e.finish(err, ctx.Err())
 	// Pruned here as well as at Start. A burst of jobs can finish after
 	// the last one began, and pruning only on the way in left the cap

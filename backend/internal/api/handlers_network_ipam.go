@@ -56,14 +56,14 @@ func (s *Server) handleNetworkIPAMPreview(w http.ResponseWriter, r *http.Request
 		return e
 	}
 	if _, e := netipam.Canonical(input.Prefix); e != nil {
-		return httpx.BadRequest("%s", e)
+		return httpx.Refused(e)
 	}
 	httpx.SetAudit(r, "network.ipam.preview", input.Prefix, nil)
 	ctx, cancel := timeoutCtx(r, 25*time.Second)
 	defer cancel()
 	preview, e := s.modules.ipam.Preview(ctx, input.Prefix)
 	if e != nil {
-		return httpx.BadRequest("%s", e)
+		return httpx.Refused(e)
 	}
 	httpx.JSON(w, 200, preview)
 	return nil
@@ -79,7 +79,7 @@ func (s *Server) handleNetworkIPAMPool(w http.ResponseWriter, r *http.Request) e
 	httpx.SetAudit(r, "network.ipam.pool", input.Name, map[string]any{"prefix": input.Prefix, "allocationBits": input.AllocationBits})
 	pool, e := s.modules.ipam.CreatePool(r.Context(), input)
 	if e != nil {
-		return httpx.BadRequest("%s", e)
+		return httpx.Refused(e)
 	}
 	httpx.JSON(w, 201, pool)
 	return nil

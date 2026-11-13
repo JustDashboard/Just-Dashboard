@@ -109,7 +109,7 @@ type Inventory struct {
 	// cannot answer, which is said on screen rather than guessed at.
 	IndexAge   *time.Time `json:"indexAge,omitempty"`
 	CanRefresh bool       `json:"canRefresh"`
-	ReadAt     time.Time  `json:"readAt"`
+	ReadAt     time.Time  `json:"readAt,omitzero"`
 	Error      string     `json:"error,omitempty"`
 }
 

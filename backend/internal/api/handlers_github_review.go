@@ -91,7 +91,11 @@ func (s *Server) handleGitHubRunLog(w http.ResponseWriter, r *http.Request) erro
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	q := r.URL.Query()
 	job, _ := strconv.ParseInt(q.Get("job"), 10, 64)
-	data, err := s.modules.github.RunLog(r.Context(), path, id, job, q.Get("step"), q.Get("failed") == "true")
+	failed, err := httpx.QueryBool(r, "failed")
+	if err != nil {
+		return err
+	}
+	data, err := s.modules.github.RunLog(r.Context(), path, id, job, q.Get("step"), failed)
 	if err != nil {
 		return ghError(err)
 	}

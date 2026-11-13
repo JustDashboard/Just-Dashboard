@@ -154,34 +154,6 @@ func (s *Server) hostCandidates(ctx context.Context, known []detectedServer) []d
 	return out
 }
 
-// existingDSNs maps an address already covered by a saved connection to that
-// connection's name. It opens each stored DSN, which is why it lives behind
-// the same capability as the rest of this file.
-func (s *Server) existingDSNs(ctx context.Context) (map[string]string, error) {
-	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id FROM db_connections`)
-	if err != nil {
-		return nil, httpx.Internal(err)
-	}
-	defer rows.Close()
-	ids := []int64{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, httpx.Internal(err)
-		}
-		ids = append(ids, id)
-	}
-	out := map[string]string{}
-	for _, id := range ids {
-		conn, _, err := s.dbConnRow(ctx, id)
-		if err != nil {
-			continue
-		}
-		out[addressKey(conn.Host, atoiDefault(conn.Port, 0))] = conn.Name
-	}
-	return out, nil
-}
-
 // addressKey names a server's address so that two spellings of it agree:
 // localhost, 127.0.0.1 and [::1] are one place on this machine, and a
 // connection typed with one must cover a server found at another.
@@ -338,7 +310,7 @@ func (s *Server) handleDBConnectHost(w http.ResponseWriter, r *http.Request) err
 		// The engine's own words. "password authentication failed for user
 		// postgres" is the entire diagnosis and names the account it refused;
 		// anything this layer said instead would be a worse version of it.
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 
 	// The same server, database and account is the same connection, and takes
@@ -1552,7 +1524,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	version, err := tmpl.version(strings.TrimSpace(req.Version))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if tmpl.recipe != "" && s.modules.docker != nil && !s.recipeBuild(r.Context(), tmpl, version).Ready {
 		// Never pulled: the name is this server's own, and a pull of it
@@ -1577,7 +1549,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	exposure, hostIP, err := provisionBinding(req.Exposure)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if problem := dbLimitsProblem(req.MemoryMB, req.CPUs, s.hostCapacity(r.Context())); problem != "" {
 		return httpx.BadRequest("%s", problem)
@@ -1610,7 +1582,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	user, err := provisionAccount(req.Engine, tmpl, req.User, req.Password)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	password := req.Password
 	if password == "" {
@@ -1631,7 +1603,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 
 	port, err := freeHostPort(tmpl.port, hostIP)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	spec := dockerx.ContainerSpec{
 		Name:  name,

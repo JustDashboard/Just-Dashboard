@@ -256,12 +256,6 @@ function isoFromMillis(digits: string): string {
   return new Date(ms).toISOString()
 }
 
-/** The size of base64 text in bytes. */
-export function base64Bytes(text: string): number {
-  const clean = text.replace(/=+$/, "")
-  return Math.floor((clean.length * 3) / 4)
-}
-
 function hexOfBase64(text: string): string | undefined {
   try {
     return Array.from(atob(text), (char) => char.charCodeAt(0).toString(16).padStart(2, "0")).join(

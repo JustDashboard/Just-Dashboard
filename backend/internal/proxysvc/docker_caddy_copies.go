@@ -311,21 +311,17 @@ func (c *dockerCaddy) writeCertificateCopy(ctx context.Context, plan certificate
 
 // pruneCertificateCopies removes the copies no route names any more, once
 // they are older than the grace: what a renewal or a deploy left behind.
-func (c *dockerCaddy) pruneCertificateCopies(ctx context.Context, referenced map[string]bool) error {
-	script := `if [ -d "$1" ]; then find "$1" -maxdepth 1 -type f \( -name '*.crt' -o -name '*.key' \) -mmin +"$2"; fi`
-	minutes := strconv.Itoa(int(certificateCopyGrace / time.Minute))
-	if certificateCopyGrace <= 0 {
-		script = `if [ -d "$1" ]; then find "$1" -maxdepth 1 -type f \( -name '*.crt' -o -name '*.key' \); fi`
-	}
-	raw, err := c.command(ctx, "", "sh", "-c", script, "sh", dockerCaddyCertsRoot, minutes)
-	if err != nil {
-		return err
-	}
-	stale := staleCertificateCopies(strings.Fields(string(raw)), referenced)
+//
+// aged is the copies that were old enough when the pass read its routes
+// (readRoutes), rather than a listing of its own at the end: a copy the pass
+// wrote since is younger than the grace and named by its route, so the two
+// listings prune the same files, and the pass is one exec shorter.
+func (c *dockerCaddy) pruneCertificateCopies(ctx context.Context, aged []string, referenced map[string]bool) error {
+	stale := staleCertificateCopies(aged, referenced)
 	if len(stale) == 0 {
 		return nil
 	}
-	_, err = c.command(ctx, "", append([]string{"rm", "-f"}, stale...)...)
+	_, err := c.command(ctx, "", append([]string{"rm", "-f"}, stale...)...)
 	return err
 }
 

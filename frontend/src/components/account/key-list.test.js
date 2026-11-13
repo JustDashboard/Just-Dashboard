@@ -16,11 +16,11 @@ const key = (over = {}) => ({
 })
 
 test("search matches visible key and owner facts, with every word required", () => {
-  const owner = { username: "ion", displayName: "Ion Moisei" }
+  const owner = { username: "ion", displayName: "Ion Popescu" }
   expect(matchesKey(key(), "  GITHUB   limited ")).toBe(true)
   expect(matchesKey(key(), "ab12")).toBe(true)
-  expect(matchesKey(key(), "ion moisei", owner)).toBe(true)
-  expect(matchesKey(key(), "moisei")).toBe(false)
+  expect(matchesKey(key(), "ion popescu", owner)).toBe(true)
+  expect(matchesKey(key(), "popescu")).toBe(false)
   expect(matchesKey(key(), "github admin")).toBe(false)
   expect(matchesKey(key(), "   ")).toBe(true)
 })

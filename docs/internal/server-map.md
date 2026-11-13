@@ -14,6 +14,9 @@ store holds `map_layouts`. The frontend is `app/(dashboard)/map/`, `components/m
 `lib/server-systems.ts` (which systems there are, and where every box in one goes) and
 `lib/server-map.ts` (what each kind is called, and the arrangement's document).
 
+The same canvas draws the databases map (`/databases/map`, [below](#the-databases-map)): one diagram
+for each database instead of each system.
+
 ## What the map is not
 
 - **Not a place to change the server.** Nothing on the map mutates anything. A box opens its own page,
@@ -95,13 +98,24 @@ where there is not. The same reading lays out the same diagram.
   image's product (Postgres is a database wherever it runs) and, for a language's image, from the
   container's name (`shop-worker-1`, `just-dashboard-backend-1`). It decides how a box looks and
   nothing else: no line is drawn from it.
+- **What nothing claims stands on shelves** (`shelve`), because it is not one flow: thirty checkouts
+  nobody builds from are thirty unrelated things, and in the one column their kind has they were a
+  tower taller than every other system put together. Each thing is laid out with what a line joins it
+  to — a domain over its certificate, a volume beside the backup that takes it — as a small diagram
+  of its own, and the diagrams stand in rows, one kind after another in the rail's order. A kind that
+  fills a row wraps under itself; kinds with a few things each share a row. A row runs to about one
+  and a half times the square the diagrams' areas make, and to no less than `SHELF.least`, so a
+  handful of things is one row. Its head and its rail row lead with what there is most of.
 - **The atlas** (`layoutAtlas`) puts every system's frame on one canvas, in rows that read in the
   rail's order, about one and a half times as wide as the square their areas make. A frame's head is
   the system's mark, name, kind, what it holds and its anchor's state.
 
 ## Moving it
 
-The canvas moves the way a whiteboard's does (Excalidraw's), set once in `MOVE` in `canvas.tsx`:
+The canvas moves the way a whiteboard's does (Excalidraw's), set once for every canvas of the product
+in `components/canvas-move.ts`: `CANVAS_MOVE` is spread into each `<ReactFlow>` and `useCanvasPinch`
+takes Safari's pinch, so the map and a database's Diagram answer one gesture the same way.
+`canvas-move.test.js` fails for a canvas that takes neither, or that sets one of the gestures itself.
 
 - **On a trackpad** two fingers slide it (`panOnScroll`, at the fingers' own pace) and a pinch zooms it
   about the fingers — a pinch arrives as a wheel with Ctrl held (`zoomOnPinch`). Safari sends its
@@ -114,7 +128,8 @@ The canvas moves the way a whiteboard's does (Excalidraw's), set once in `MOVE` 
   a slide. Double-clicking the canvas does not zoom.
 - **Keys**, wherever the page has the keyboard and not a field: Ctrl/⌘ `+` and `−` zoom, Ctrl/⌘ `0` is
   the real size, Shift+1 fits every system and Shift+2 what is chosen. The zoom buttons show the
-  percentage, which goes back to 100% when pressed.
+  percentage, which goes back to 100% when pressed. A database's Diagram has the three zoom keys
+  too (`zoomKey`), heard like its other keys only while the keyboard is in the diagram.
 - **Nothing changes size but by the zoom.** Every word, box and line is drawn once at its own size and
   the zoom scales the picture; from far out the boxes and their names are smaller, never re-lettered,
   faded or swapped for a title.
@@ -180,7 +195,7 @@ A phone writes nothing to the account's arrangement.
   | Spec | Sources | Holds | Waits |
   | --- | --- | --- | --- |
   | fast | containers, projects | 10 s | 2.5 s |
-  | steady | images, volumes, networks, databases (the fleet's own dial, shared through its cache), bindings, the deployments' references, dependencies and poolers (`relations`), the listening sockets and their owners (`listeners`, as `GET /proxy/ports` reads them), sites, backups, PM2, channels, drawings, API keys, alert rules, accounts, computers | 30 s | 2.5 s |
+  | steady | images, volumes, networks, databases (the fleet's own dial, shared through its cache), bindings, the deployments' references, dependencies and poolers (`relations`), the listening sockets and their owners (`listeners`, as `GET /ports` reads them), sites, backups, PM2, channels, drawings, API keys, alert rules, accounts, computers | 30 s | 2.5 s |
   | slow | the databases topology (`uses`: every running container inspected for the addresses it names, every engine asked for its sessions), certificates, streams, timers, systemd units, the system's cron files, VPN, firewall | 2 min | 1.2 s |
   | rare | repositories (a walk of the Git roots), Linux accounts, this dashboard's version | 5 min | 1.2 s |
   | holding | open shells (in memory) | 3 s | 1 s |
@@ -260,6 +275,43 @@ system last read; and the view. A version-1 document — the mind map this repla
 placed shelves round the server — is read as a fresh arrangement. Nothing in the page calls `DELETE`
 any more; the route stays for the API it has always been.
 
+Another canvas's arrangement is kept in the same document under `boards.<name>` — the databases
+map's under `boards.databases` — in the same `version: 2` shape (`boardLayout`, `composeLayout`). Each
+canvas writes the whole document with only its own part changed, so the server map keeps `boards` as
+it read it and the databases map keeps the top. A page reads the document only after the save the
+page before it sent on its way out has landed, and a canvas that could not read it reads it again
+before its first save rather than writing the others over; the keep-alive save on leaving is skipped
+for a document never read. No table or route was added for a second picture of the same server.
+
+## The databases map
+
+`/databases/map` (`components/database/fleet/map.tsx`) is this canvas with one diagram for each
+saved database (`lib/database-systems.ts`, unit-tested), held to the window as `/map` is. A
+database's diagram runs left to right from what reads it — deployments, containers, this server's own
+processes, another machine — through a pooler, the database itself, the container or service it
+runs in (`serves`), the volume that container keeps its data in (`mount`), to the backup jobs that dump
+the database or back that volume up. What two databases are wired to is drawn in each and marked
+shared, as on `/map`. The drafts and their own order of columns go through the same layout
+(`systemsFrom`, a `Draft`'s `column`); the server map's own systems are unchanged by it.
+
+It joins two readings. The server map's `GET /map` — the same held answers, read only for the kinds a
+database's diagram is made of — gives what each thing is and the lines it can prove. The databases
+topology (`GET /databases/topology`) gives who is connected now: *This server* and another machine
+(the `host` and `remote` kinds, drawn with the process face), how many sessions each line carries, a
+binding that broke or went stale, and a container that shares the database's stack or network.
+A deployment is the server map's project and a container is matched by name; a reader or a database
+the map has not read is drawn from the topology alone. A line with sessions open pulses whether or
+not it is lit, one known only as a stack or network shared is dashed, a broken or stale link is in
+the danger or warning colour, and the inspector names each with its sessions (`link broken`,
+`linked database · 3 sessions`). Either reading may fail and the other is still drawn, with what
+could not be read said over the canvas; both failing is the page's error state.
+
+What differs from `/map` is a `MapBoard` (`components/map/board.ts`): the rail grouped by engine and
+named *Databases*, a diagram summed up as what it feeds, the sessions open and where it runs, and the
+inspector's account of every database at once. `?database=<id>` opens on one. It replaced, in 0.8.6
+at the operator's request, a fixed two-lane picture with a list of readers beside it; the control
+center's own copy of that picture went at the same time.
+
 ## Tests
 
 - `lib/server-systems.test.js`: a container's role from its image and its name; a deployment taking
@@ -268,8 +320,9 @@ any more; the route stays for the API it has always been.
   overlapping and every box inside its system; determinism; a database two systems use drawn in each
   and marked shared; a stack of its own as a card wired to its members; this dashboard as a system
   (its tailnet, address, stack and store); services drawn only when wired, a native database named by
-  itself; what nothing claims as one system last; absent and unread kinds drawing nothing; the atlas's
-  rows; dragging (a box, its satellites following, a stack's frame redrawn); neighbours; and
+  itself; what nothing claims as one system last, in rows by kind however much of it there is, with
+  what a line joins kept together, and a few things on one row; absent and unread kinds drawing
+  nothing; the atlas's rows; dragging (a box, its satellites following, a stack's frame redrawn); neighbours; and
   the document decoder reading a version-1 document as fresh.
 - `api/map_build_test.go`: the joins, the measured states (exit codes, project states), unread and
   absent sources, worst-first capping, a box's facts and the per-role filter; `map_links_test.go`: every
@@ -296,5 +349,14 @@ any more; the route stays for the API it has always been.
   tidied away; a version-1 arrangement read as fresh; every word the same size far out; a trackpad's
   slide, its pinch and the zoom keys; a mouse sliding the canvas from inside a frame; a system carried
   by its head with everything in it, not taken for a click, kept across a reload and tidied away; no
-  box's words running out of it with every name and state stretched; and a fresh server's offer to
-  deploy with what it could not read. `/map` is one of `design-system.spec.ts`'s surfaces.
+  box's words running out of it with every name and state stretched; thirty checkouts nothing claims
+  drawn in rows inside their frame, none over another; and a fresh server's offer to deploy with
+  what it could not read. `/map` is one of `design-system.spec.ts`'s surfaces.
+- `lib/database-systems.test.js`: a diagram for each database holding only what it is wired to; its
+  columns from readers to backups; what two databases share drawn in each; the server map's own
+  systems unchanged by it; the topology's readers, sessions, broken links and could-reach lines; a
+  reading of the topology alone; the census line; and each board's part of the document kept when
+  the other is saved. `tests/browser/database-control-center.spec.ts` (*the map*): the rail by
+  engine, a diagram's columns and shapes, the inspector's link words, a diagram carried and kept under
+  `boards.databases` beside the server map's own arrangement, what could not be read, and a phone's
+  bare canvas.

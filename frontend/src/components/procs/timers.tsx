@@ -4,6 +4,7 @@ import { useMemo } from "react"
 import { Lightning, Play, Slash, StopCircle, Stopwatch } from "@/components/icons"
 import { post } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
+import { clockLabel, describeTimer, longClock } from "@/lib/schedule"
 import { notify } from "@/lib/toast"
 import type { SystemdTimer, SystemdUnit } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -17,7 +18,6 @@ import { ProductLogo, unitProduct } from "@/components/product-logo"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { Tag } from "@/components/tag"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
@@ -30,6 +30,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useUnitControl } from "@/components/procs/unit-actions"
+import { useNow } from "@/components/deploy/vocabulary"
 import { Countdown } from "@/components/procs/schedule-band"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
 
@@ -66,7 +67,10 @@ export function TimersPanel({
   confirm,
   onOpen,
   detailOpen = false,
+  zone,
 }: {
+  /** The host's zone, which a run's clock time is written in. */
+  zone?: string
   timers: PollState<TimerList>
   confirm: ConfirmFn
   onOpen: (unit: string) => void
@@ -89,7 +93,7 @@ export function TimersPanel({
   return (
     <Panel {...inspection.bindings}>
       <PanelHeader
-        title="systemd timers"
+        title="Timers"
         advanced
         actions={
           list.length > 0 && (
@@ -133,15 +137,18 @@ export function TimersPanel({
         {timers.data?.available && list.length === 0 && <EmptyNote>No timers.</EmptyNote>}
         {list.length > 0 && shown.length === 0 && <EmptyNote>No timer is {state}.</EmptyNote>}
         {shown.length > 0 && (
-          <Table containerClassName="w-auto max-h-[calc(100svh-22rem)] group-data-[plain]/panel:-mx-4">
+          <Table
+            className="table-fixed"
+            containerClassName="w-auto max-h-[calc(100svh-22rem)] group-data-[plain]/panel:-mx-4"
+          >
             <TableHeader className={stickyTableHeader}>
               <TableRow>
-                <TableHead className="w-full">Timer</TableHead>
-                <TableHead className="hidden md:table-cell">Next</TableHead>
-                <TableHead className="hidden lg:table-cell">Last</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead className="hidden xl:table-cell">Startup</TableHead>
-                <TableHead className="w-px" />
+                <TableHead>Timer</TableHead>
+                <TableHead className="hidden w-[30%] lg:table-cell">Schedule</TableHead>
+                <TableHead className="hidden w-36 md:table-cell">Next run</TableHead>
+                <TableHead className="hidden w-28 xl:table-cell">Last run</TableHead>
+                <TableHead className="w-24 md:w-32">State</TableHead>
+                <TableHead className="w-20 md:w-24" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -149,6 +156,7 @@ export function TimersPanel({
                 <TimerRow
                   key={timer.unit}
                   timer={timer}
+                  zone={zone}
                   arrived={arrived.has(timer.unit)}
                   busy={pending[timer.unit] ?? pending[timer.activates]}
                   confirm={confirm}
@@ -306,6 +314,7 @@ export function TimerState({ timer, busy }: { timer: SystemdTimer; busy?: string
 
 function TimerRow({
   timer,
+  zone,
   arrived,
   busy,
   confirm,
@@ -314,6 +323,7 @@ function TimerRow({
   onOpen,
 }: {
   timer: SystemdTimer
+  zone?: string
   arrived: boolean
   busy?: string
   confirm: ConfirmFn
@@ -322,6 +332,8 @@ function TimerRow({
   onOpen: () => void
 }) {
   const verbs = useTimerVerbs({ timer, confirm, act, onChanged })
+  const next = timer.next ? new Date(timer.next).getTime() : undefined
+  const schedule = describeTimer(timer)
 
   return (
     <TableRow
@@ -329,47 +341,77 @@ function TimerRow({
       className={cn("group", arrived && "animate-rise")}
       onActivate={onOpen}
     >
-      <TableCell>
-        <div className="flex max-w-[26rem] min-w-0 items-center gap-3">
+      <TableCell className="whitespace-normal">
+        <div className="flex min-w-0 items-center gap-3">
           <ProductLogo id={unitProduct(timer.unit)} size="sm" fallback={Stopwatch} />
           <div className="min-w-0">
             <button
               type="button"
               onClick={onOpen}
+              aria-label={timer.unit}
+              title={timer.unit}
               className="block max-w-full truncate text-left text-body font-medium hover:underline"
             >
-              {timer.unit}
+              {timer.unit.replace(/\.timer$/, "")}
             </button>
             <p className="truncate text-hint text-muted-foreground">
-              {timer.activates ? `runs ${timer.activates}` : "activates nothing"}
+              {timer.description || (timer.activates ? `runs ${timer.activates}` : "runs nothing")}
             </p>
           </div>
         </div>
       </TableCell>
+      <TableCell className="hidden whitespace-normal lg:table-cell">
+        <p className="line-clamp-2 text-xs" title={(timer.calendar ?? []).join(", ")}>
+          {schedule ?? <span className="text-muted-foreground">—</span>}
+        </p>
+      </TableCell>
       <TableCell className="hidden md:table-cell">
-        {timer.next ? (
-          <>
-            <p className="numeric">
-              <Countdown at={new Date(timer.next).getTime()} />
-            </p>
-            <p className="text-hint text-muted-foreground">{timestamp(timer.next)}</p>
-          </>
+        {next !== undefined ? (
+          <RunAt at={next} zone={zone} />
         ) : (
           <span className="text-muted-foreground">—</span>
         )}
       </TableCell>
-      <TableCell className="hidden text-muted-foreground lg:table-cell">
+      <TableCell
+        className="hidden text-muted-foreground xl:table-cell"
+        title={timer.last ? timestamp(timer.last) : undefined}
+      >
         {timer.last ? relativeTime(timer.last) : "never"}
       </TableCell>
       <TableCell>
-        <TimerState timer={timer} busy={busy} />
-      </TableCell>
-      <TableCell className="hidden xl:table-cell">
-        <Tag>{timer.unitFileState || "unknown"}</Tag>
+        <div className="space-y-0.5">
+          <TimerState timer={timer} busy={busy} />
+          {/* Armed again at boot is what a timer is expected to be; only
+              the exception is said. */}
+          {!timer.enabled && timer.activeState === "active" && (
+            <p className="text-hint text-muted-foreground">off after a reboot</p>
+          )}
+        </div>
       </TableCell>
       <TableCell>
         <VerbActions dim verbs={verbs} />
       </TableCell>
     </TableRow>
+  )
+}
+
+/**
+ * When a run falls, for a table's Next column: its countdown, with its clock
+ * time on the host's clock under it — "in 2h 23m" over "Tue 00:59" — where the
+ * column used to print the whole date and seconds of it.
+ */
+export function RunAt({ at, zone }: { at: number; zone?: string }) {
+  const now = useNow(1000)
+  const label = clockLabel(at, now, zone)
+  return (
+    <div title={longClock(at, zone)}>
+      <p className="numeric">
+        <Countdown at={at} />
+      </p>
+      <p className="numeric text-hint text-muted-foreground">
+        {label.day ? `${label.day} ` : "today "}
+        {label.time}
+      </p>
+    </div>
   )
 }

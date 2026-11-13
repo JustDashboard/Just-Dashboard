@@ -53,9 +53,6 @@ func TestAlertKindsPerEngine(t *testing.T) {
 			}
 		}
 	}
-	if !AlertKindKnown(AlertBackupMissed) || AlertKindKnown("cpu") {
-		t.Fatal("the kind vocabulary is not the closed list")
-	}
 }
 
 func TestMySQLReplicationLagIsTheReplicasOwn(t *testing.T) {

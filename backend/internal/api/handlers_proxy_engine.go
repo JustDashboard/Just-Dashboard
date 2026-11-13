@@ -24,7 +24,7 @@ func (s *Server) mountEngineRoutes(r chi.Router) {
 	// The nginx directory as a tree: names, sizes and whether nginx reads
 	// each file, never a password file's content — no more than the read
 	// above already gives every account, file by file.
-	r.Method(http.MethodGet, "/files", s.handle(s.handleProxyFiles))
+	r.With(nginxOnly).Method(http.MethodGet, "/files", s.handle(s.handleProxyFiles))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// Validation is not a read: nginx cannot test a config it cannot
@@ -43,13 +43,13 @@ func (s *Server) mountEngineRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/test/last", s.handle(s.handleProxyTestLast))
 		// What nginx loads, as `nginx -T` prints it: the host's binary run
 		// on request, gated with the test that runs it.
-		r.Method(http.MethodGet, "/effective", s.handle(s.handleProxyEffective))
+		r.With(nginxOnly).Method(http.MethodGet, "/effective", s.handle(s.handleProxyEffective))
 		// Server-wide directives and the linter read the same dump, so they
 		// carry its gate; writing a setting is the config editor's write.
-		r.Method(http.MethodGet, "/settings", s.handle(s.handleProxySettings))
-		r.Method(http.MethodPost, "/settings/preview", s.handle(s.handleProxySettingsPreview))
-		r.Method(http.MethodPut, "/settings", s.handle(s.handleProxySettingsWrite))
-		r.Method(http.MethodGet, "/lint", s.handle(s.handleProxyLint))
+		r.With(nginxOnly).Method(http.MethodGet, "/settings", s.handle(s.handleProxySettings))
+		r.With(nginxOnly).Method(http.MethodPost, "/settings/preview", s.handle(s.handleProxySettingsPreview))
+		r.With(nginxOnly).Method(http.MethodPut, "/settings", s.handle(s.handleProxySettingsWrite))
+		r.With(nginxOnly).Method(http.MethodGet, "/lint", s.handle(s.handleProxyLint))
 		r.Method(http.MethodPost, "/reload", s.handle(s.handleProxyReload))
 		// Every file the dashboard changed, as each change left it, and a
 		// restore of any of them through the same tested write.

@@ -103,6 +103,14 @@ A function takes the client, the path parameters in the path's order, the body w
 one, the query parameters as an object, and options (`headers`, `signal`). A browser cannot send a key
 to the dashboard from another origin, so call it from a server, a script or a CI job.
 
+## Rate limits
+
+A key has a budget of its own: 600 requests a minute with a burst of 120, shared with nothing else
+the person runs. A request past it is refused with `429 rate_limited` before anything ran, and
+`Retry-After` says the real wait in seconds; every answer carries `RateLimit-Remaining`. Both clients
+wait a `Retry-After` of ten seconds or less out and send the request again, twice at most, so a
+script sees the refusal only when the limit holds.
+
 ## Checks
 
 ```bash

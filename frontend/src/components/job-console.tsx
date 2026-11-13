@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CheckCircle, CrossCircle, Slash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
@@ -9,6 +9,7 @@ import { recentLabels } from "@/lib/recent-jobs"
 import { cn } from "@/lib/utils"
 import type { Job, JobLine } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
+import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/state"
@@ -248,30 +249,17 @@ export function RecentJobs({
   onOpen: (id: string) => void
   className?: string
 }) {
-  const [jobs, setJobs] = useState<Job[]>([])
   const key = kinds.join(",")
-
-  useEffect(() => {
-    let cancelled = false
+  // Keyed, so the page's own reading of the job list and this one are one
+  // request: the certificates page ran two five-second loops over `/jobs`.
+  // A failed read keeps the last list, as the loop this replaced did.
+  const all = usePoll<Job[]>((signal) => get<Job[]>("/jobs/", undefined, signal), 5000, [], {
+    key: "/jobs",
+  }).data
+  const jobs = useMemo(() => {
     const wanted = key.split(",")
-    const load = () =>
-      get<Job[]>("/jobs/")
-        .then(
-          (all) =>
-            !cancelled && setJobs(all.filter((j) => wanted.some((k) => j.kind.startsWith(k)))),
-        )
-        .catch(() => {})
-    load()
-    // Skipped while the tab is hidden, as usePoll does; this list is the one
-    // poller on these pages that kept fetching in a background tab.
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") load()
-    }, 5000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [key])
+    return (all ?? []).filter((j) => wanted.some((k) => j.kind.startsWith(k)))
+  }, [all, key])
 
   if (jobs.length === 0) return null
   const shown = jobs.slice(0, 6)

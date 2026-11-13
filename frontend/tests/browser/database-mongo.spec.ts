@@ -1367,7 +1367,7 @@ test.describe("documents", () => {
   }) => {
     const mongo = await mockMongo(page, { failing: /^\/mongo\/(collections|find|count)/ })
     await page.goto(collection("users"))
-    await expect(rail(page).getByRole("alert")).toContainText("the server did not answer")
+    await expect(rail(page).getByRole("alert")).toContainText("The server did not answer")
     mongo.heal()
     await rail(page).getByRole("button", { name: "Try again" }).click()
     await expect(rail(page).getByRole("link", { name: /users/ }).first()).toBeVisible()
@@ -2519,6 +2519,9 @@ function offCentreText(page: Page) {
         ? rowStyle.alignItems
         : style.alignSelf
       if (align !== "center" || style.display !== "block" || style.position === "absolute") continue
+      // A glyph that turns has no centre line to be off: its ink is wherever the
+      // turn has it at that instant, and under load this caught a spinner mid-turn.
+      if (style.animationName !== "none" && style.animationIterationCount === "infinite") continue
       const box = item.getBoundingClientRect()
       if (box.height < 2 || box.width < 2) continue
       const blocks = [...item.children].some((child) => {

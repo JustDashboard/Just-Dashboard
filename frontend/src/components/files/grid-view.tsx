@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
 import { FileSelection } from "@/components/files/file-selection"
@@ -7,7 +8,8 @@ import { useNearViewport } from "@/hooks/use-near-viewport"
 import type { RowCaps } from "@/components/files/file-actions"
 import { Thumbnail } from "@/components/files/thumbnail"
 import { rowReveal } from "@/components/icon-action"
-import { useDropTarget, type DropMode } from "@/components/files/dnd"
+import { useDropTarget } from "@/components/files/dnd"
+import type { EntryHandlers } from "@/components/files/entry-handlers"
 
 export type TileSize = "sm" | "md" | "lg"
 
@@ -30,13 +32,7 @@ export function GridView({
   dragging,
   caps,
   size,
-  onToggle,
-  onSelect,
-  onFocusEntry,
-  onOpen,
-  onDragStart,
-  onDropPaths,
-  onDropFiles,
+  handlers,
 }: {
   entries: FileEntry[]
   selected: Set<string>
@@ -47,13 +43,8 @@ export function GridView({
   dragging: Set<string>
   caps: RowCaps
   size: TileSize
-  onToggle: (entry: FileEntry, checked: boolean) => void
-  onSelect: (entry: FileEntry, event: React.MouseEvent) => void
-  onFocusEntry?: (entry: FileEntry) => void
-  onOpen: (entry: FileEntry) => void
-  onDragStart?: (entry: FileEntry, event: React.DragEvent) => void
-  onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
-  onDropFiles?: (transfer: DataTransfer, dir: string) => void
+  /** The page's, one object for its life: what lets a tile sit out a render that is not about it. */
+  handlers: EntryHandlers
 }) {
   const width = size === "sm" ? "5rem" : size === "lg" ? "8rem" : "6.5rem"
   return (
@@ -72,20 +63,15 @@ export function GridView({
           dragging={dragging.has(entry.path)}
           caps={caps}
           size={size}
-          onToggle={(checked) => onToggle(entry, checked)}
-          onSelect={(event) => onSelect(entry, event)}
-          onFocusEntry={() => onFocusEntry?.(entry)}
-          onOpen={() => onOpen(entry)}
-          onDragStart={onDragStart ? (event) => onDragStart(entry, event) : undefined}
-          onDropPaths={onDropPaths}
-          onDropFiles={onDropFiles}
+          handlers={handlers}
         />
       ))}
     </div>
   )
 }
 
-function Tile({
+/** `memo` for the reason `FileRow` is: a click draws the two tiles it is about. */
+const Tile = memo(function Tile({
   entry,
   selected,
   active,
@@ -93,13 +79,7 @@ function Tile({
   dragging,
   caps,
   size,
-  onToggle,
-  onSelect,
-  onFocusEntry,
-  onOpen,
-  onDragStart,
-  onDropPaths,
-  onDropFiles,
+  handlers,
 }: {
   entry: FileEntry
   selected: boolean
@@ -108,36 +88,34 @@ function Tile({
   dragging: boolean
   caps: RowCaps
   size: TileSize
-  onToggle: (checked: boolean) => void
-  onSelect: (event: React.MouseEvent) => void
-  onFocusEntry: () => void
-  onOpen: () => void
-  onDragStart?: (event: React.DragEvent) => void
-  onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
-  onDropFiles?: (transfer: DataTransfer, dir: string) => void
+  handlers: EntryHandlers
 }) {
   const [viewportRef, near] = useNearViewport<HTMLDivElement>()
   const drop = useDropTarget({
     dir: entry.isDir ? entry.path : null,
-    onDropPaths,
-    onDropFiles,
+    onDropPaths: caps.write ? handlers.onDropPaths : undefined,
+    onDropFiles: caps.write ? handlers.onDropFiles : undefined,
   })
+  const onOpen = () => handlers.onOpen(entry)
+  const onSelect = (event: React.MouseEvent) => handlers.onSelect(entry, event)
 
   // The name owns keyboard activation; the wrapper makes the whole tile
   // available to the pointer without nesting its checkbox in a button.
   return (
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- a tile of the grid: the arrows move between tiles and Enter opens one, here in onKeyDown, and its name is a button
     <div
       ref={viewportRef}
       data-entry-path={entry.path}
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a tile of the grid: the arrows move between tiles and Enter opens one, here in onKeyDown, and its name is a button
       tabIndex={active ? 0 : -1}
       data-state={selected ? "selected" : undefined}
       data-dragging={dragging || undefined}
-      draggable={caps.write && !!onDragStart}
-      onDragStart={onDragStart}
+      draggable={caps.write}
+      onDragStart={caps.write ? (event) => handlers.onDragStart(entry, event) : undefined}
       {...drop.handlers}
       onClick={onSelect}
       onFocusCapture={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node)) onFocusEntry()
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) handlers.onFocusEntry(entry)
       }}
       onDoubleClick={onOpen}
       onKeyDown={(event) => {
@@ -158,13 +136,14 @@ function Tile({
       title={entry.name}
     >
       <span
+        role="presentation"
         className={cn("absolute top-1.5 left-1.5 z-10", rowReveal(), selected && "opacity-100")}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
         <FileSelection
           checked={selected}
-          onCheckedChange={(v) => onToggle(v === true)}
+          onCheckedChange={(v) => handlers.onToggle(entry, v === true)}
           aria-label={`Select ${entry.name}`}
           className="bg-card"
         />
@@ -207,4 +186,4 @@ function Tile({
       </span>
     </div>
   )
-}
+})

@@ -19,7 +19,7 @@ import {
   type RunStep,
   type TabRun,
 } from "@/components/database/query/run-model"
-import { firstLine, type RunTarget } from "@/components/database/query/sql-text"
+import type { RunTarget } from "@/components/database/query/sql-text"
 import type {
   ClassifyResponse,
   ExplainResponse,
@@ -509,6 +509,3 @@ export function useRunner({
 
   return { runs, checking, asker, run, fetchMore, cancel, explain, forget }
 }
-
-/** A statement's first line as a run's title: "select * from orders…". */
-export const runTitle = (sql: string) => firstLine(sql, 60)

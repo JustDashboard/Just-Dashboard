@@ -1229,7 +1229,15 @@ test("settings are pages in the rail, each a form in sections, with only the pag
     expect(rail(page).getByRole("link")).toContainText(names, { useInnerText: true })
 
   await visit(page, "/databases/1/settings")
-  await listed(["General", "Network", "Resources", "Parameters", "Extensions", "Version", "Danger zone"])
+  await listed([
+    "General",
+    "Network",
+    "Resources",
+    "Parameters",
+    "Extensions",
+    "Version",
+    "Danger zone",
+  ])
   for (const id of ["address", "connection", "protection"]) {
     await expect(section(page, id)).toBeVisible()
   }
@@ -1244,7 +1252,7 @@ test("settings are pages in the rail, each a form in sections, with only the pag
     await expect(section(page, id)).toBeVisible()
   }
   await visit(page, "/databases/1/settings/parameters")
-  await expect(section(page, "parameters").getByRole("heading", { level: 3 })).toHaveText(
+  await expect(section(page, "parameters").getByRole("heading", { level: 2 })).toHaveText(
     "Server parameters",
   )
 
@@ -1253,7 +1261,7 @@ test("settings are pages in the rail, each a form in sections, with only the pag
   await listed(["General", "Parameters", "Danger zone"])
   await expect(rail(page).getByRole("link", { name: "Network", exact: true })).toHaveCount(0)
   await visit(page, "/databases/7/settings/parameters")
-  await expect(section(page, "parameters").getByRole("heading", { level: 3 })).toHaveText(
+  await expect(section(page, "parameters").getByRole("heading", { level: 2 })).toHaveText(
     "Parameters",
   )
   // Its address all the same says so, without a form the server would refuse.
@@ -1715,7 +1723,7 @@ test("a key–value server's parameters are its own configuration, and a secret 
 
   // It has modules where a SQL engine has extensions.
   await visit(page, "/databases/4/settings/extensions")
-  await expect(section(page, "extensions").getByRole("heading", { level: 3 })).toHaveText("Modules")
+  await expect(section(page, "extensions").getByRole("heading", { level: 2 })).toHaveText("Modules")
   await expect(section(page, "extensions")).toContainText("ReJSON")
 })
 
@@ -2634,6 +2642,9 @@ function offCentreText(page: Page) {
         ? rowStyle.alignItems
         : style.alignSelf
       if (align !== "center" || style.display !== "block" || style.position === "absolute") continue
+      // A glyph that turns has no centre line to be off: its ink is wherever the
+      // turn has it at that instant, and under load this caught a spinner mid-turn.
+      if (style.animationName !== "none" && style.animationIterationCount === "infinite") continue
       const box = item.getBoundingClientRect()
       if (box.height < 2 || box.width < 2) continue
       const blocks = [...item.children].some((child) => {

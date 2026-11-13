@@ -44,6 +44,9 @@ type dockerCaddy struct {
 	// (tailnet_gate.go). A snapshot is only ever restored into the Caddy
 	// that took it.
 	Driver string
+	// docker is where this Caddy's own lookups read containers from: the
+	// service's (Service.docker), and the docker CLI for one built bare.
+	docker dockerSource
 }
 
 // driver is the snapshot's name for this Caddy.
@@ -72,18 +75,35 @@ type ingressContainer struct {
 	}
 }
 
-func ingressContainers(ctx context.Context) ([]ingressContainer, error) {
-	ids, err := hostexec.Command(ctx, "docker", "ps", "-q").Output()
+// ContainerReader is how the service asks Docker what is running without
+// starting a process: the dashboard's own API client (dockerx.Client). Both
+// answers are the JSON `docker inspect` prints, an array of containers, so
+// one decoder reads them whichever way they came.
+type ContainerReader interface {
+	// InspectRunning is every running container.
+	InspectRunning(ctx context.Context) ([]byte, error)
+	// InspectOne is the one container of that name or id, running or not.
+	InspectOne(ctx context.Context, name string) ([]byte, error)
+}
+
+// dockerSource is where the lookups read containers from: the reader the
+// service was given, or the docker CLI without one.
+//
+// The CLI was the only way, and the lookup runs every thirty seconds and on
+// most reads of the proxy pages: `docker ps -q` and `docker inspect` of every
+// container, two processes each time, on every install whether or not it has
+// a Docker ingress. The CLI stays for a service built without a reader, which
+// is the tests' fake docker and the live fixtures.
+type dockerSource struct{ reader ContainerReader }
+
+// running is every running container.
+func (d dockerSource) running(ctx context.Context) ([]ingressContainer, error) {
+	raw, err := d.inspectRunning(ctx)
 	if err != nil {
 		return nil, err
 	}
-	list := strings.Fields(string(ids))
-	if len(list) == 0 {
+	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, nil
-	}
-	raw, err := hostexec.Command(ctx, "docker", append([]string{"inspect"}, list...)...).Output()
-	if err != nil {
-		return nil, err
 	}
 	var result []ingressContainer
 	if err := json.Unmarshal(raw, &result); err != nil {
@@ -92,15 +112,41 @@ func ingressContainers(ctx context.Context) ([]ingressContainer, error) {
 	return result, nil
 }
 
+func (d dockerSource) inspectRunning(ctx context.Context) ([]byte, error) {
+	if d.reader != nil {
+		return d.reader.InspectRunning(ctx)
+	}
+	ids, err := hostexec.Command(ctx, "docker", "ps", "-q").Output()
+	if err != nil {
+		return nil, err
+	}
+	list := strings.Fields(string(ids))
+	if len(list) == 0 {
+		return nil, nil
+	}
+	return hostexec.Command(ctx, "docker", append([]string{"inspect"}, list...)...).Output()
+}
+
+// inspect is `docker inspect --type container name`.
+func (d dockerSource) inspect(ctx context.Context, name string) ([]byte, error) {
+	if d.reader != nil {
+		return d.reader.InspectOne(ctx, name)
+	}
+	return hostexec.Command(ctx, "docker", "inspect", "--type", "container", name).Output()
+}
+
 // Docker's socket proxy is not the HTTP server. Resolve the published mapping,
 // and require a persistent Caddyfile/data layout before offering integration.
-func discoverDockerCaddy(ctx context.Context) (*dockerCaddy, error) {
+func discoverDockerCaddy(ctx context.Context, docker dockerSource) (*dockerCaddy, error) {
+	// Still asked of a service with a reader: the routes themselves are
+	// written and reloaded through `docker exec`, so a host without the CLI
+	// has no ingress this service could drive.
 	if !hostexec.Available("docker") {
 		return nil, nil
 	}
-	containers, err := ingressContainers(ctx)
+	containers, err := docker.running(ctx)
 	if err != nil {
-		return nil, errors.New("could not determine Docker ingress ownership")
+		return nil, ingressUnreachable(err)
 	}
 	return selectDockerCaddy(containers)
 }
@@ -126,14 +172,14 @@ func selectDockerCaddy(containers []ingressContainer) (*dockerCaddy, error) {
 			continue
 		}
 		if !public("443/tcp", "443") {
-			return nil, fmt.Errorf("Caddy container %s owns HTTP but does not publish HTTPS on port 443", strings.TrimPrefix(c.Name, "/"))
+			return nil, ingressWithoutHTTPS(strings.TrimPrefix(c.Name, "/"))
 		}
 		found, err := dockerCaddyFrom(c)
 		if err != nil {
 			return nil, err
 		}
 		if edge != nil {
-			return nil, errors.New("multiple public Caddy containers require an explicit ingress selection")
+			return nil, ingressAmbiguous()
 		}
 		edge = found
 	}
@@ -167,7 +213,7 @@ func dockerCaddyFrom(c ingressContainer) (*dockerCaddy, error) {
 		}
 	}
 	if found.Source == "" || !config || !data {
-		return nil, fmt.Errorf("Caddy container %s needs a persisted Caddyfile, /config and /data before deployments can share it", found.Name)
+		return nil, ingressNotPersisted(found.Name)
 	}
 	found.Identity = routeDigest(found.Source + "\x00" + storage["/config"] + "\x00" + storage["/data"])
 	found.ConfigSource = storage["/config"]
@@ -182,18 +228,21 @@ func dockerCaddyFrom(c ingressContainer) (*dockerCaddy, error) {
 // It inspects that one container by name rather than every running one: a
 // listing inspected a moment after it was taken fails whole when any other
 // container on the host went away in between.
-func namedDockerCaddy(ctx context.Context, name string) (*dockerCaddy, error) {
-	raw, err := hostexec.Command(ctx, "docker", "inspect", "--type", "container", name).Output()
+func namedDockerCaddy(ctx context.Context, docker dockerSource, name string) (*dockerCaddy, error) {
+	raw, err := docker.inspect(ctx, name)
 	if err != nil {
-		return nil, fmt.Errorf("the ingress container %s is not running", name)
+		return nil, ingressNotRunning(name, err)
 	}
 	var containers []ingressContainer
 	if json.Unmarshal(raw, &containers) != nil || len(containers) != 1 {
-		return nil, errors.New("could not read Docker ingress ownership")
+		return nil, ingressUnreachable(errors.New("could not read Docker ingress ownership"))
 	}
 	c := containers[0]
-	if !c.State.Running || !runsCaddyfile(c) {
-		return nil, fmt.Errorf("the ingress container %s is not a running Caddy serving /etc/caddy/Caddyfile", name)
+	if !c.State.Running {
+		return nil, ingressNotRunning(name, nil)
+	}
+	if !runsCaddyfile(c) {
+		return nil, ingressNotCaddy(name)
 	}
 	return dockerCaddyFrom(c)
 }
@@ -206,19 +255,22 @@ func (c *dockerCaddy) command(ctx context.Context, input string, args ...string)
 	return command.Output()
 }
 
+// read is a file in the container and whether it is there, in one exec: the
+// word, a newline, and the file's bytes as they are. It was two, a test and
+// then a cat, on every read of every route.
 func (c *dockerCaddy) read(ctx context.Context, path string) (string, bool, error) {
-	evidence, err := c.command(ctx, "", "sh", "-c", `if [ -e "$1" ]; then printf present; else printf absent; fi`, "sh", path)
+	out, err := c.command(ctx, "", "sh", "-c", `if [ -e "$1" ]; then printf 'present\n' && cat "$1"; else printf absent; fi`, "sh", path)
 	if err != nil {
 		return "", false, err
 	}
-	if string(evidence) == "absent" {
+	if string(out) == "absent" {
 		return "", false, nil
 	}
-	if string(evidence) != "present" {
+	content, present := strings.CutPrefix(string(out), "present\n")
+	if !present {
 		return "", false, errors.New("could not establish Caddy file ownership")
 	}
-	raw, err := c.command(ctx, "", "cat", path)
-	return string(raw), true, err
+	return content, true, nil
 }
 
 func (c *dockerCaddy) write(ctx context.Context, path, content string) error {
@@ -920,7 +972,12 @@ func (c *dockerCaddy) snapshot(ctx context.Context, name string) (DeploymentRout
 	if err != nil {
 		return DeploymentRouteSnapshot{}, err
 	}
-	return DeploymentRouteSnapshot{Version: 1, Driver: c.driver(), ContainerID: c.ID, IngressIdentity: c.Identity, Name: name, Path: path, Existed: exists, Content: content, ContentDigest: routeDigest(content), Mode: 0600}, nil
+	return c.snapshotOf(name, path, content, exists), nil
+}
+
+// snapshotOf is the snapshot of a route whose file has already been read.
+func (c *dockerCaddy) snapshotOf(name, path, content string, exists bool) DeploymentRouteSnapshot {
+	return DeploymentRouteSnapshot{Version: 1, Driver: c.driver(), ContainerID: c.ID, IngressIdentity: c.Identity, Name: name, Path: path, Existed: exists, Content: content, ContentDigest: routeDigest(content), Mode: 0600}
 }
 
 func (c *dockerCaddy) restore(ctx context.Context, snapshot DeploymentRouteSnapshot) error {
@@ -979,7 +1036,7 @@ func (c *dockerCaddy) findTarget(ctx context.Context, upstream string, everywher
 	if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Path != "" || net.ParseIP(parsed.Hostname()) == nil || !net.ParseIP(parsed.Hostname()).IsLoopback() || parsed.Port() == "" {
 		return dockerCaddyTarget{}, errors.New("Caddy requires a private deployment upstream")
 	}
-	containers, err := ingressContainers(ctx)
+	containers, err := c.docker.running(ctx)
 	if err != nil {
 		return dockerCaddyTarget{}, err
 	}

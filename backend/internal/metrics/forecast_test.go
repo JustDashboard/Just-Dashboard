@@ -164,7 +164,7 @@ func TestVolumeSizesAreRecordedAndExpire(t *testing.T) {
 	volumes.err = errors.New("docker is not running")
 	r.recordVolumes(ctx, time.Now().Add(time.Second))
 	var rows, unmeasured int
-	if err := r.db.QueryRow(`SELECT COUNT(*), COUNT(CASE WHEN name != 'shop-uploads' THEN 1 END) FROM metric_volume_samples`).Scan(&rows, &unmeasured); err != nil {
+	if err := r.st.DB.QueryRow(`SELECT COUNT(*), COUNT(CASE WHEN name != 'shop-uploads' THEN 1 END) FROM metric_volume_samples`).Scan(&rows, &unmeasured); err != nil {
 		t.Fatal(err)
 	}
 	if rows != 2 || unmeasured != 0 || volumes.calls != 3 {
@@ -173,7 +173,7 @@ func TestVolumeSizesAreRecordedAndExpire(t *testing.T) {
 	if err := r.prune(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM metric_volume_samples`).Scan(&rows); err != nil || rows != 1 {
+	if err := r.st.DB.QueryRow(`SELECT COUNT(*) FROM metric_volume_samples`).Scan(&rows); err != nil || rows != 1 {
 		t.Errorf("after prune %d rows, %v", rows, err)
 	}
 	if testRecorder(t, 15*time.Second, 0).WithVolumes(volumes).VolumeSampling() != 0 {

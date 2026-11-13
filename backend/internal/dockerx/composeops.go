@@ -606,8 +606,8 @@ func (c *Client) ComposeAvailable(ctx context.Context) bool {
 	return cmd.Run() == nil
 }
 
-// WriteComposeFile replaces a stack's compose file, keeping the previous
-// content beside it.
+// WriteComposeFileChecked replaces a stack's compose file, keeping the
+// previous content beside it.
 //
 // The backup is one file, overwritten each time, named so it is obviously not
 // a compose file itself — compose globs for specific names, and a
@@ -616,10 +616,6 @@ func (c *Client) ComposeAvailable(ctx context.Context) bool {
 // not a syntax error (validation catches those) but a correct file that says
 // the wrong thing, which is only discovered after the stack comes back up
 // wrong.
-func WriteComposeFile(path, content string) error {
-	return WriteComposeFileChecked(path, content, nil)
-}
-
 func WriteComposeFileChecked(path, content string, expected *string) error {
 	unlock := contentguard.Lock(path)
 	defer unlock()

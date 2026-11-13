@@ -1,4 +1,4 @@
-import { plural } from "@/lib/format"
+import { dateFormatter, plural } from "@/lib/format"
 import type { DotTone } from "@/components/status-dot"
 import type {
   DbPitr,
@@ -79,18 +79,20 @@ function failing(archivedAt?: string, failedAt?: string): boolean {
   return Date.parse(failedAt) > Date.parse(archivedAt)
 }
 
+const momentAt = dateFormatter({
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+})
+
 /** A moment as the page writes one: the date and the time to the second. */
 export function momentWords(iso: string | undefined): string {
   if (!iso) return ""
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ""
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  })
+  return momentAt(d)
 }
 
 /** What an archive covers, as one sentence. */
@@ -110,12 +112,6 @@ export function locationWords(
     .map((part) => (part ?? "").replace(/^\/+|\/+$/g, ""))
     .filter(Boolean)
   return `s3://${parts.join("/")}`
-}
-
-export const TARGET_LABEL: Record<PitrTargetKind, string> = {
-  local: "A directory on this server",
-  s3: "Amazon S3 or any S3-compatible bucket",
-  b2: "Backblaze B2",
 }
 
 /** How long an archive keeps what it holds. */

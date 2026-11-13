@@ -39,7 +39,7 @@ const TONE_DOT: Partial<Record<Tone, string>> = {
  * rather than hashed by name: a chart of five events needs five different
  * colours, and a hash only promises the same one per name.
  */
-const NEUTRAL = [
+export const SERIES_HUES = [
   "var(--tag-blue)",
   "var(--tag-violet)",
   "var(--tag-cyan)",
@@ -103,7 +103,7 @@ function seriesFor(buckets: LogBucket[], by: string | undefined, lens: string | 
       if (fixed) return { key, label, className: fixed }
       // Largest neutral series first in the hue order, so the busiest keeps blue.
       const at = neutral.length - 1 - neutral.indexOf(key)
-      return { key, label, color: NEUTRAL[at % NEUTRAL.length] }
+      return { key, label, color: SERIES_HUES[at % SERIES_HUES.length] }
     }),
   ]
 }
@@ -146,6 +146,7 @@ export function Histogram({
   by,
   lens,
   title = "Matches over time",
+  heading,
 }: {
   buckets: LogBucket[]
   bucketSeconds: number
@@ -157,6 +158,12 @@ export function Histogram({
   lens?: string
   /** What the chart counts, as its eyebrow and its accessible name. */
   title?: string
+  /**
+   * The title as a block's head rather than an eyebrow: on Insights the chart
+   * is one block among the lists under it, whose heads are 13px and semibold,
+   * as the request record's chart is; over History's lines it stays a label.
+   */
+  heading?: boolean
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
@@ -196,7 +203,11 @@ export function Histogram({
   return (
     <div className={cn("shrink-0 border-b border-hairline px-3 pt-2.5 pb-2", className)}>
       <div className="mb-2 flex min-h-4 items-baseline justify-between gap-3 text-hint">
-        <span className="eyebrow shrink-0">{title}</span>
+        {heading ? (
+          <h3 className="shrink-0 text-body font-semibold text-foreground">{title}</h3>
+        ) : (
+          <span className="eyebrow shrink-0">{title}</span>
+        )}
         <span className="numeric flex min-w-0 items-center justify-end gap-x-2.5 truncate text-muted-foreground">
           {drag && lo !== hi ? (
             <span>

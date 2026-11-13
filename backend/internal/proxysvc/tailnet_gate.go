@@ -389,7 +389,7 @@ func (s *Service) gateContainer(ctx context.Context) (*dockerCaddy, error) {
 	if !hostexec.Available("docker") {
 		return nil, nil
 	}
-	raw, err := hostexec.Command(ctx, "docker", "inspect", "--type", "container", s.gateContainerName()).Output()
+	raw, err := s.docker.inspect(ctx, s.gateContainerName())
 	if err != nil {
 		return nil, nil
 	}
@@ -423,6 +423,7 @@ func (s *Service) gateContainer(ctx context.Context) (*dockerCaddy, error) {
 		return nil, err
 	}
 	edge.Driver = TailnetGateDriver
+	edge.docker = s.docker
 	return edge, nil
 }
 

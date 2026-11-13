@@ -280,10 +280,3 @@ func portInSpec(port, spec string) bool {
 	}
 	return false
 }
-
-func addressLabel(addr string) string {
-	if addr == "" || addr == "0.0.0.0" || addr == "::" || addr == "*" {
-		return "every interface"
-	}
-	return addr
-}

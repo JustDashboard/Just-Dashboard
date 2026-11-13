@@ -33,7 +33,7 @@ func (s *Server) handleDeploymentPreviewFrame(w http.ResponseWriter, r *http.Req
 	}
 	u, err := deploymentPreviewURL(summary.Endpoint)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Frame-Options", "SAMEORIGIN")

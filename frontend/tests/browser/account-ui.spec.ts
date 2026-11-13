@@ -16,7 +16,7 @@ const DAY = 24 * HOUR
 const me = {
   id: 1,
   username: "ion",
-  displayName: "Ion Moisei",
+  displayName: "Ion Popescu",
   avatarVersion: 0,
   role: "admin",
   totpEnabled: true,
@@ -151,7 +151,7 @@ const users = [
     totpEnabled: false,
     disabled: false,
     mustChangePassword: true,
-    lastLoginAt: "0001-01-01T00:00:00Z",
+    // Never signed in: the server leaves the time out.
     createdAt: "2026-08-01T09:00:00Z",
   },
   {
@@ -188,7 +188,7 @@ test("the profile opens on the account's identity line and what is signed in as 
 }) => {
   await mockAccount(page)
   await page.goto("/account")
-  await expect(page.getByRole("heading", { name: "Ion Moisei" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Ion Popescu" })).toBeVisible()
   await expect(
     page.locator("[data-slot=host-identity]").getByText("@ion", { exact: true }),
   ).toBeVisible()
@@ -224,10 +224,10 @@ test("the profile opens on the account's identity line and what is signed in as 
   await expect(page.getByText("Granted.")).toHaveCount(6)
 
   // A rename raises the floating Save rather than a button under the fields.
-  await page.getByLabel("Name", { exact: true }).fill("Ion M.")
+  await page.getByLabel("Name", { exact: true }).fill("Ion P.")
   await expect(page.getByText("Edited", { exact: true })).toBeVisible()
   await expect(
-    page.getByRole("img", { name: /The rail draws this account as Ion M\./ }),
+    page.getByRole("img", { name: /The rail draws this account as Ion P\./ }),
   ).toBeVisible()
   await expect(page.getByRole("button", { name: /^Save/ })).toBeVisible()
 })
@@ -312,7 +312,9 @@ test("keys are drawn as what holds them, wired through their role", async ({ pag
   await page.getByLabel("Name").fill("uptime-kuma")
   await expect(page.getByRole("dialog").locator('img[src="/logos/uptime-kuma.svg"]')).toBeVisible()
   await expect(
-    page.getByRole("dialog").getByText("Look at everything, change nothing"),
+    page
+      .getByRole("dialog")
+      .getByText("Changes nothing, but reads every file as root, saved secrets included"),
   ).toBeVisible()
 })
 
@@ -331,7 +333,7 @@ test("users are cards drawn by their faces, under the line that counts them", as
   const cards = page.locator("[data-slot=choice-row]")
   await expect(cards).toHaveCount(4)
   // Administrators first.
-  await expect(cards.first()).toContainText("Ion Moisei")
+  await expect(cards.first()).toContainText("Ion Popescu")
   await expect(cards.nth(1)).toContainText("Maria Rusu")
   await expect(cards.filter({ hasText: "Deploy bot" })).toContainText("never signed in")
   await expect(page.getByRole("button", { name: "New user" })).toBeVisible()
@@ -342,6 +344,15 @@ test("users are cards drawn by their faces, under the line that counts them", as
   await expect(cards.filter({ hasText: "Guest" })).toHaveCount(0)
   await page.getByRole("group", { name: "Show" }).getByRole("button", { name: /^All/ }).click()
   await expect(cards).toHaveCount(4)
+
+  // The picker on a card says what each role is, not only its word.
+  await page.getByRole("combobox", { name: "Role of Deploy bot" }).click()
+  await expect(page.getByRole("option", { name: /limited/ })).toContainText("as good as root")
+  await expect(page.getByRole("option", { name: /readonly/ })).toContainText(
+    "saved secrets included",
+  )
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
 
   // Changing the role from its picker does not open the editor behind it.
   await page.getByRole("button", { name: "Edit Maria Rusu" }).click()
@@ -473,7 +484,7 @@ for (const required of [false, true]) {
     await expect(page.locator("[data-slot=choice-row]")).toHaveCount(2)
     await expect(page.locator("[data-slot=choice-row]", { hasText: "Guest" })).toHaveCount(0)
     await page.getByRole("group", { name: "Show" }).getByRole("button", { name: /^All/ }).click()
-    await page.getByRole("button", { name: "More actions for Ion Moisei" }).click()
+    await page.getByRole("button", { name: "More actions for Ion Popescu" }).click()
     await page.getByRole("menuitem", { name: "Reset two-factor" }).click()
     const reset = page.getByRole("dialog", { name: "Reset two-factor" })
     await expect(reset).toContainText(

@@ -1,6 +1,5 @@
 import { bytes, duration, plural } from "@/lib/format"
 import type { BackupJob, Job, JobLine } from "@/lib/types"
-import type { Outcome } from "@/components/outcome-strip"
 import type {
   DbBackupFile,
   DbDumpContents,
@@ -14,12 +13,6 @@ import type {
  * last operations ended, and what a restore will do. No React, so each
  * sentence can be held to its inputs.
  */
-
-/** A week: past it the newest dump is called old, as the control center calls it. */
-export const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
-
-/** How many operations the strip of outcomes draws. */
-export const STRIP = 14
 
 /**
  * The operations one connection runs one at a time: a dump, a restore, a
@@ -175,94 +168,12 @@ export function originWord(origin: DbDumpOrigin | undefined): string {
   return ""
 }
 
-/**
- * The newest dump taken of this database. One uploaded from elsewhere is a
- * dump the page keeps, not a backup of what is here now.
- */
-export function lastBackup(files: readonly DbBackupFile[]): DbBackupFile | undefined {
-  return files.find((file) => file.origin !== "upload")
-}
-
-/** How old the last backup is, and whether that is an answer to worry about. */
-export function backupAge(
-  file: DbBackupFile | undefined,
-  now: number,
-): { stale: boolean; never: boolean } {
-  if (!file) return { stale: true, never: true }
-  const taken = Date.parse(file.takenAt)
-  return { stale: Number.isFinite(taken) && now - taken > STALE_AFTER_MS, never: false }
-}
-
-/** What every kept dump adds up to. */
-export function keptBytes(files: readonly DbBackupFile[]): number {
-  return files.reduce((sum, file) => sum + (file.size || 0), 0)
-}
-
 /** How long a dump took, to the precision it deserves. */
 export function tookWords(ms: number | undefined): string {
   if (ms === undefined || ms < 0) return ""
   if (ms < 1000) return "under a second"
   if (ms < 10_000) return `${(ms / 1000).toFixed(1)} s`
   return duration(ms / 1000)
-}
-
-/**
- * The last operations as marks, oldest first: every dump that is kept, and
- * every dump, restore or copy the server still remembers that did not end
- * well — a failed dump leaves no file, so the list alone would say every
- * attempt succeeded. The one running now is last.
- */
-export function transferOutcomes(
-  files: readonly DbBackupFile[],
-  jobs: readonly Job[],
-  running: Job | undefined,
-  when: (iso: string) => string,
-  limit = STRIP,
-): Outcome[] {
-  type Mark = Outcome & { at: number }
-  const marks: Mark[] = files.map((file) => ({
-    key: `file:${file.file}`,
-    tone: "success" as const,
-    title: [
-      originWord(file.origin) || "dump",
-      when(file.takenAt),
-      bytes(file.size),
-      file.tool ?? file.format,
-    ].join(" · "),
-    at: Date.parse(file.takenAt) || 0,
-  }))
-  for (const job of jobs) {
-    if (job.status === "running" || job.status === "succeeded") continue
-    const kind = transferKind(job) ?? "operation"
-    marks.push({
-      key: `job:${job.id}`,
-      tone: job.status === "failed" ? "danger" : "muted",
-      title: `${kind} ${job.status} · ${when(job.endedAt ?? job.startedAt)}${job.error ? ` · ${job.error}` : ""}`,
-      at: Date.parse(job.endedAt ?? job.startedAt) || 0,
-    })
-  }
-  marks.sort((a, b) => a.at - b.at)
-  const shown: Outcome[] = marks.slice(-limit).map(({ key, tone, title }) => ({ key, tone, title }))
-  if (running) {
-    shown.push({
-      key: `job:${running.id}`,
-      tone: "running",
-      title: `${running.title}, running now`,
-    })
-  }
-  return shown
-}
-
-/** What the strip is, said once for a screen reader. */
-export function outcomesLabel(outcomes: readonly Outcome[]): string {
-  const failed = outcomes.filter((one) => one.tone === "danger").length
-  const running = outcomes.some((one) => one.tone === "running")
-  const ended = outcomes.length - (running ? 1 : 0)
-  return [
-    `The last ${plural(ended, "operation")}`,
-    failed > 0 ? `${failed} failed` : "none failed",
-    ...(running ? ["one running now"] : []),
-  ].join(", ")
 }
 
 /** A dump's name as the upload route takes it. */

@@ -29,11 +29,6 @@ export const VALUE_KIND_CLASS: Record<ValueKind, string> = {
   binary: KIND_HUE.binary,
 }
 
-/** Whether a kind is set against the right edge of a column, as figures are. */
-export function alignsRight(kind: ValueKind) {
-  return kind === "number"
-}
-
 /**
  * One value, drawn inline and typed: a cell of a grid, a field of a document,
  * a key's value in a list.

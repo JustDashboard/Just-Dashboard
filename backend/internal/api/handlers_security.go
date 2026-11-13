@@ -144,7 +144,7 @@ func (s *Server) handleSSHApply(w http.ResponseWriter, r *http.Request) error {
 			httpx.SetAudit(r, "ssh.config", "", map[string]any{"result": "refused_lockout"})
 			return httpx.Err(http.StatusConflict, "would_lock_you_out", err.Error())
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if pending {
 		return s.startPendingSSHApply(w, r, plan)
@@ -256,7 +256,7 @@ func (s *Server) handleDisconnectSession(w http.ResponseWriter, r *http.Request)
 	}
 	session, err := s.modules.netsec.Disconnect(r.Context(), int32(pid))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "ssh.session.disconnect", session.User,
 		map[string]any{"pid": pid, "tty": session.TTY, "from": session.From})
@@ -293,7 +293,7 @@ func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) erro
 	var err error
 	req, err = netsec.ValidateProbeRequest(req)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	detail := map[string]any{"target": req.Target}
 	if req.Option != "" {
@@ -308,7 +308,7 @@ func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) erro
 	started := time.Now()
 	res, err := s.executeNetworkProbe(ctx, req)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	res.ResultID = quickResults.keep(httpx.MustPrincipal(r).Username(), req, res, started, time.Now())
 	httpx.JSON(w, http.StatusOK, res)
@@ -393,7 +393,7 @@ func (s *Server) executeNetworkProbe(ctx context.Context, req netsec.ProbeReques
 func (s *Server) handleJailConfig(w http.ResponseWriter, r *http.Request) error {
 	cfg, err := s.modules.netsec.JailConfig(r.Context(), chi.URLParam(r, "jail"))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, cfg)
 	return nil
@@ -411,7 +411,7 @@ func (s *Server) handleJailPolicy(w http.ResponseWriter, r *http.Request) error 
 	}
 	policy, err := s.modules.netsec.JailPolicy(ctx, jail, ports)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, policy)
 	return nil
@@ -441,7 +441,7 @@ func (s *Server) handleJailParam(w http.ResponseWriter, r *http.Request) error {
 	jail := chi.URLParam(r, "jail")
 	res, err := s.modules.netsec.SetJailParams(r.Context(), jail, params)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "fail2ban.param", jail, map[string]any{
 		"params": params, "persisted": res.Persisted,
@@ -463,7 +463,7 @@ func (s *Server) handleJailIgnore(w http.ResponseWriter, r *http.Request) error 
 	jail := chi.URLParam(r, "jail")
 	out, err := s.modules.netsec.IgnoreIP(r.Context(), jail, req.IP, req.Add)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "fail2ban.ignore", jail, map[string]any{"ip": req.IP, "add": req.Add})
 	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
@@ -474,7 +474,7 @@ func (s *Server) handleJailUnbanAll(w http.ResponseWriter, r *http.Request) erro
 	jail := chi.URLParam(r, "jail")
 	count, err := s.modules.netsec.UnbanAll(r.Context(), jail)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "fail2ban.unban.all", jail, map[string]any{"count": count})
 	httpx.JSON(w, http.StatusOK, map[string]int{"unbanned": count})

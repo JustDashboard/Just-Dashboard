@@ -60,7 +60,7 @@ type ReleaseUpdateStatus struct {
 	State     string    `json:"state,omitempty"`
 	Local     string    `json:"localDigest,omitempty"`
 	Remote    string    `json:"remoteDigest,omitempty"`
-	CheckedAt time.Time `json:"checkedAt,omitempty"`
+	CheckedAt time.Time `json:"checkedAt"`
 }
 
 // ImageUpdateObserver is Docker's registry update check. Deployments asks it

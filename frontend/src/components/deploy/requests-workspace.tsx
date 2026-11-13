@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils"
 import { API_BASE, get } from "@/lib/api"
 import { plural, relativeTime, timestamp } from "@/lib/format"
+import { LATENCY_SHARE, latencyTerm } from "@/lib/latency-words"
 import { agentProduct, networkOf, refererProduct } from "@/lib/clients"
 import type { DeploymentRequests, RequestEntry, TrafficAlert } from "@/lib/types"
 import {
@@ -236,7 +237,7 @@ export function RequestsWorkspace({
         emptyAction
       ) : !data.driver ? (
         <Button size="sm" variant="outline" asChild>
-          <Link href="/proxy">Open Proxy</Link>
+          <Link href="/proxy">Open Proxy &amp; TLS</Link>
         </Button>
       ) : undefined
     const reason =
@@ -991,10 +992,10 @@ function WindowNotes({
     notes.push(
       <span key="p" className="numeric flex items-center gap-2 whitespace-nowrap max-sm:basis-full">
         {(["p50", "p95", "p99"] as const).map((name, i) => (
-          <span key={name} className="flex items-center gap-2">
+          <span key={name} className="flex items-center gap-2" title={latencyTerm(name)}>
             {i > 0 && <FactDot />}
             <span>
-              {name}{" "}
+              {i === 0 ? "Half inside" : LATENCY_SHARE[name]}{" "}
               <span
                 className={cn(
                   latencyTone(spread[name]) === "warning" && "font-medium text-warning",

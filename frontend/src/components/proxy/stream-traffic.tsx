@@ -5,6 +5,7 @@ import { Connection, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { bytes, plural } from "@/lib/format"
+import { latencyHead } from "@/lib/latency-words"
 import type {
   StreamEntry,
   StreamResult,
@@ -23,7 +24,7 @@ import {
   withClientRule,
 } from "@/lib/streams"
 import { usePoll, type PollState } from "@/hooks/use-poll"
-import { BarList, type BarListItem } from "@/components/bar-list"
+import { RankList, SplitBar, type RankItem } from "@/components/rank-list"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import type { ChartRowLike, Series } from "@/components/metrics/metric-chart"
@@ -219,6 +220,12 @@ function LogState({ traffic }: { traffic: StreamTraffic }) {
   return null
 }
 
+/** An outcome's colour on the strip: forwarded, turned away, or not forwarded. */
+function outcomeHue(code: string) {
+  if (code === "200") return "var(--success)"
+  return code === "403" || code === "400" ? "var(--warning)" : "var(--destructive)"
+}
+
 function TrafficView({ traffic }: { traffic: StreamTraffic }) {
   const rows: ChartRowLike[] = useMemo(
     () =>
@@ -230,17 +237,19 @@ function TrafficView({ traffic }: { traffic: StreamTraffic }) {
       })),
     [traffic.buckets],
   )
-  const statuses: BarListItem[] = useMemo(() => {
+  // Every session ended one way, so the outcomes are parts of one whole: one
+  // strip in their colours, and the list under it is the strip's legend.
+  const statuses: (RankItem & { count: number; swatch: string })[] = useMemo(() => {
     const entries = Object.entries(traffic.statuses).sort((a, b) => b[1] - a[1])
-    const top = entries[0]?.[1] ?? 1
+    const whole = entries.reduce((sum, [, n]) => sum + n, 0)
     return entries.map(([code, n]) => ({
       key: code,
       label: code,
       hint: STREAM_STATUSES[code] ?? "",
       value: count(n),
-      share: n / top,
-      signal: code === "200" ? 0 : 1,
-      tone: code === "403" || code === "400" ? "warning" : code === "200" ? "default" : "danger",
+      count: n,
+      share: whole > 0 ? n / whole : undefined,
+      swatch: outcomeHue(code),
     }))
   }, [traffic.statuses])
 
@@ -278,13 +287,24 @@ function TrafficView({ traffic }: { traffic: StreamTraffic }) {
       <Panel plain>
         <PanelHeader title="Outcome" />
         <PanelBody flush>
-          <BarList items={statuses} />
+          <SplitBar
+            className="mt-2 mb-1.5"
+            parts={statuses.map((status) => ({
+              key: status.key,
+              count: status.count,
+              color: status.swatch,
+            }))}
+            label={statuses
+              .map((status) => `${status.value} ended ${status.hint || status.key}`)
+              .join(", ")}
+          />
+          <RankList items={statuses} />
         </PanelBody>
       </Panel>
       <StatGrid columns={4} dense>
         <StatTile label="Median session" value={sessionLength(traffic.duration.p50)} />
-        <StatTile label="p90" value={sessionLength(traffic.duration.p90)} />
-        <StatTile label="p99" value={sessionLength(traffic.duration.p99)} />
+        <StatTile label={latencyHead("p90")} value={sessionLength(traffic.duration.p90)} />
+        <StatTile label={latencyHead("p99")} value={sessionLength(traffic.duration.p99)} />
         <StatTile label="Longest" value={sessionLength(traffic.duration.max)} />
       </StatGrid>
     </>
@@ -342,21 +362,21 @@ function ClientsView({
     })
   }
 
-  const top = traffic.clients[0]?.sessions ?? 1
-  const items: BarListItem[] = traffic.clients.map((c) => ({
+  // A client's share is of every session in the window, which the read counts.
+  const items: RankItem[] = traffic.clients.map((c) => ({
     key: c.address,
     label: c.address,
     value: count(c.sessions),
-    share: c.sessions / top,
-    signal: (c.denied + c.failed) / c.sessions,
-    tone: c.denied > 0 ? "warning" : c.failed > 0 ? "danger" : "default",
-    hint: [
-      bytes(c.bytes),
-      c.denied > 0 && `${count(c.denied)} denied`,
-      c.failed > 0 && `${count(c.failed)} not forwarded`,
-    ]
-      .filter(Boolean)
-      .join(" · "),
+    share: traffic.sessions > 0 ? c.sessions / traffic.sessions : undefined,
+    hint: (
+      <>
+        {bytes(c.bytes)}
+        {c.denied > 0 && <span className="text-warning"> · {count(c.denied)} denied</span>}
+        {c.failed > 0 && (
+          <span className="text-destructive"> · {count(c.failed)} not forwarded</span>
+        )}
+      </>
+    ),
     title: `${plural(c.sessions, "session")}, last ${new Date(c.last * 1000).toLocaleString()}`,
     trailing:
       editable && ruleableClient(c.address) ? (
@@ -374,7 +394,7 @@ function ClientsView({
     <Panel plain>
       <PanelHeader title="Busiest clients" />
       <PanelBody flush>
-        <BarList items={items} emptyLabel="No client connected in this window." />
+        <RankList items={items} emptyLabel="No client connected in this window." />
       </PanelBody>
       {dialog}
     </Panel>

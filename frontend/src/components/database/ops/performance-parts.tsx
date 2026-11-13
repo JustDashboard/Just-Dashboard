@@ -528,7 +528,7 @@ export function ServerDown({ what }: { what: string }) {
       action={
         <span className="flex flex-wrap justify-center gap-2">
           <Button size="sm" variant="outline" asChild>
-            <Link href={href("home")}>Open Home</Link>
+            <Link href={href("home")}>Open the database&apos;s Home</Link>
           </Button>
           <Button size="sm" variant="ghost" onClick={status.refresh}>
             Check again

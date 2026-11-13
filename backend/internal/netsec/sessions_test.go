@@ -5,14 +5,10 @@ import (
 	"time"
 )
 
-// Both rows are copied from `who -u` on Ubuntu 25.04 with OpenSSH 9.9. The
+// The rows below are copied from `who -u` on Ubuntu 25.04 with OpenSSH 9.9. The
 // first is the shape that broke the positional parser: the line column is two
 // words, so the terminal, the login time and — the one that matters — the PID
 // all landed a place to the left of where they were read.
-const whoOutput = `ubuntu   sshd pts/3   2026-08-27 02:07   .       2392157 (77.89.203.46)
-ubuntu   pts/2        2026-08-26 21:33 03:03     2262305
-root     pts/0        2026-08-26 09:12 00:41     1180 (10.0.0.9)
-`
 
 func TestParseWhoLineFindsTheColumnsAroundTheDate(t *testing.T) {
 	sess, ok := parseWhoLine("ubuntu   sshd pts/3   2026-08-27 02:07   .       2392157 (77.89.203.46)")

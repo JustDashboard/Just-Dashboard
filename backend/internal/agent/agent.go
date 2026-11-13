@@ -58,10 +58,10 @@ type state struct {
 	// TokenHash is the SHA-256 of the pending enrolment token, hex encoded.
 	// The token itself is printed once at startup and never stored.
 	TokenHash   string    `json:"tokenHash,omitempty"`
-	TokenExpiry time.Time `json:"tokenExpiry,omitempty"`
+	TokenExpiry time.Time `json:"tokenExpiry,omitzero"`
 
 	HubFingerprint string    `json:"hubFingerprint,omitempty"`
-	EnrolledAt     time.Time `json:"enrolledAt,omitempty"`
+	EnrolledAt     time.Time `json:"enrolledAt,omitzero"`
 }
 
 // Identity is the agent's keypair, its self-signed certificate, and whatever

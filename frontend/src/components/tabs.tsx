@@ -128,6 +128,9 @@ export function ChipStrip({ className, ...props }: React.ComponentProps<"div">) 
  * and inherited inside a selected one, so the number never competes with the
  * word — and plain tabular text rather than a second small container, because
  * a chip with a chip inside it is exactly the stacking this pass removed.
+ * One step behind the word, and no more: at 60% of an unselected tab's muted
+ * ink the count measured 3.4:1 at 10px, where WCAG AA asks 4.5:1. At 80% it
+ * is 5.2:1 on the page and 4.9:1 on the faintest ground a tab sits on.
  * A chip that is a legend — the request log's status families — passes its
  * colour for the chosen state, so "5xx 13" says which thirteen.
  */
@@ -139,6 +142,6 @@ export function ChipCount({
   className?: string
 }) {
   return (
-    <span className={cn("numeric text-micro tabular-nums opacity-60", className)}>{children}</span>
+    <span className={cn("numeric text-micro tabular-nums opacity-80", className)}>{children}</span>
   )
 }

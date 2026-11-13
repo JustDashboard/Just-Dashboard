@@ -25,7 +25,7 @@ import (
 type CertbotCert struct {
 	Name     string    `json:"name"`
 	Domains  []string  `json:"domains"`
-	Expiry   time.Time `json:"expiry"`
+	Expiry   time.Time `json:"expiry,omitzero"`
 	DaysLeft int       `json:"daysLeft"`
 	Valid    bool      `json:"valid"`
 	CertPath string    `json:"certPath,omitempty"`
@@ -38,7 +38,7 @@ type CertbotCert struct {
 	Error string `json:"error,omitempty"`
 	// NotBefore is when the certificate was issued: the other end of the
 	// meter, which a ninety-day guess drew wrong for any other term.
-	NotBefore time.Time `json:"notBefore"`
+	NotBefore time.Time `json:"notBefore,omitzero"`
 	// How certbot renews it, from its renewal configuration: the plugin
 	// that proves control ("nginx", "webroot", "dns-cloudflare"), the one
 	// that deploys the result, the webroot folders, and the DNS provider by

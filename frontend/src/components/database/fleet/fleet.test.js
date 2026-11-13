@@ -8,19 +8,12 @@ import {
   fleetReadings,
   groupFleet,
   matchesQuery,
-  nextSort,
   powerOffers,
-  pushSample,
   reachWord,
   sortFleet,
-  sortRows,
-  splitTopology,
   STALE_BACKUP_MS,
   storedBytes,
-  topologyReadings,
   whereWord,
-  wiredOrder,
-  worstStatus,
 } from "./fleet"
 
 const NOW = Date.parse("2026-09-25T12:00:00Z")
@@ -144,18 +137,13 @@ describe("what a database holds", () => {
     expect(storedBytes(entry({ id: 7, bytes: 10 }), new Map([[7, 99]]))).toBe(10)
   })
 
-  test("the table uses discovery's measurement when the engine reports no size", () => {
+  test("the readings use discovery's measurement when the engine reports no size", () => {
     const measured = new Map([[7, 4096]])
     const storedOf = (one) => storedBytes(one, measured)
     const list = [entry({ id: 1, name: "shop", bytes: 1024 }), file]
     const readings = fleetReadings({ connections: list }, { now: NOW, storedOf })
     expect(readings.bytes).toBe(5120)
     expect(readings.sized).toBe(2)
-    expect(
-      sortRows(list, { key: "size", dir: "desc" }, () => undefined, storedOf).map(
-        (one) => one.name,
-      ),
-    ).toEqual(["notes", "shop"])
   })
 })
 
@@ -365,44 +353,7 @@ describe("the readings across the top", () => {
   })
 })
 
-describe("the samples a tile keeps", () => {
-  test("one per reading, none for a reading already held, never more than asked", () => {
-    let samples = pushSample([], "t1", 3)
-    samples = pushSample(samples, "t1", 9)
-    expect(samples).toEqual([{ at: "t1", value: 3 }])
-    samples = pushSample(samples, "t2", 4, 2)
-    samples = pushSample(samples, "t3", 5, 2)
-    expect(samples.map((sample) => sample.value)).toEqual([4, 5])
-  })
-})
-
-describe("the table's order", () => {
-  const rows = [
-    entry({ id: 1, name: "b", bytes: 10, sessions: 1 }),
-    entry({ id: 2, name: "a", bytes: 30, sessions: 1 }),
-    entry({ id: 3, name: "c", bytes: 0, sizesKnown: false, sessions: 7 }),
-  ]
-  const names = (sort) => sortRows(rows, sort, (one) => one.lastBackup).map((one) => one.name)
-
-  test("unsorted is the order the rows came in", () => {
-    expect(sortRows(rows, null, () => undefined)).toBe(rows)
-  })
-
-  test("by a column, either way, with the name settling ties and an unknown size last", () => {
-    expect(names({ key: "name", dir: "asc" })).toEqual(["a", "b", "c"])
-    expect(names({ key: "size", dir: "desc" })).toEqual(["a", "b", "c"])
-    expect(names({ key: "sessions", dir: "desc" })).toEqual(["c", "a", "b"])
-  })
-
-  test("a heading goes natural, reversed, then off", () => {
-    expect(nextSort(null, "size")).toEqual({ key: "size", dir: "desc" })
-    expect(nextSort({ key: "size", dir: "desc" }, "size")).toEqual({ key: "size", dir: "asc" })
-    expect(nextSort({ key: "size", dir: "asc" }, "size")).toBeNull()
-    expect(nextSort({ key: "size", dir: "asc" }, "name")).toEqual({ key: "name", dir: "asc" })
-  })
-})
-
-describe("the map", () => {
+describe("what the databases feed", () => {
   const topology = {
     checkedAt: "2026-09-25T12:00:00Z",
     nodes: [
@@ -432,48 +383,6 @@ describe("the map", () => {
     ],
   }
 
-  test("databases on one side, everything else on the other, broken links first", () => {
-    const { databases, consumers, feeds, fedBy } = splitTopology(topology)
-    expect(databases.map((n) => n.id)).toEqual(["db:1", "db:2"])
-    expect(consumers.map((n) => n.id)).toEqual(["deploy:7", "host", "container:worker"])
-    expect(feeds.get("db:1")).toHaveLength(2)
-    expect(fedBy.get("deploy:7").map((f) => f.from.name)).toEqual(["shop", "cache"])
-  })
-
-  test("drawn, a reader stands across from the databases that feed it and the unread go last", () => {
-    const unread = { id: "db:0", kind: "database", name: "archive", product: "postgres", connId: 3 }
-    const { databases, consumers } = wiredOrder(
-      splitTopology({ ...topology, nodes: [unread, ...topology.nodes] }),
-    )
-    expect(databases.map((n) => n.id)).toEqual(["db:1", "db:2", "db:0"])
-    // shop feeds this server, shop and cache the deployment, cache the worker.
-    expect(consumers.map((n) => n.id)).toEqual(["host", "deploy:7", "container:worker"])
-  })
-
-  test("narrowed to some databases, the others leave with their links and their readers", () => {
-    const split = splitTopology(topology, (node) => node.connId === 2)
-    expect(split.databases.map((n) => n.id)).toEqual(["db:2"])
-    expect(split.consumers.map((n) => n.id)).toEqual(["deploy:7", "container:worker"])
-    expect(split.edges).toHaveLength(2)
-    expect(topologyReadings(split)).toEqual({
-      databases: 1,
-      consumers: 2,
-      links: 2,
-      sessions: 3,
-      wrong: 0,
-    })
-  })
-
-  test("the map's figures count readers that are fed, sessions carried and links that are wrong", () => {
-    expect(topologyReadings(splitTopology(topology))).toEqual({
-      databases: 2,
-      consumers: 3,
-      links: 4,
-      sessions: 5,
-      wrong: 1,
-    })
-  })
-
   test("what each database feeds, with the products for its marks", () => {
     const feeds = feedsByConnection(topology)
     expect(feeds.get(1)).toEqual({ products: ["nodejs"], count: 2, sessions: 2 })
@@ -484,13 +393,5 @@ describe("the map", () => {
   test("a link is described by how it is known", () => {
     expect(describeEdge(topology.edges[1])).toBe("named in its environment · 3 open sessions")
     expect(describeEdge(topology.edges[3])).toBe("same compose stack · shares a network")
-    expect(worstStatus(topology.edges)).toBe("broken")
-    expect(worstStatus([])).toBe("observed")
-  })
-
-  test("nothing yet is two empty lanes", () => {
-    const { databases, consumers } = splitTopology(undefined)
-    expect(databases).toEqual([])
-    expect(consumers).toEqual([])
   })
 })

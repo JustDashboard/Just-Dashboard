@@ -1,11 +1,11 @@
 // Package secretstore keeps the dashboard's connections to the secret
 // managers an operator already runs — HashiCorp Vault and OpenBao (KV
 // version 2), Infisical, Doppler, AWS Secrets Manager and Azure Key Vault —
-// and reads the values a deployment's variables reference in them. A connection's credentials are sealed like a
-// notification channel's or a log drain's, and only their names are read
-// back. A value read from a store is never written to the dashboard's
-// database, its audit log or a transcript: it lives in memory for the run
-// that asked for it.
+// and reads the values a deployment's variables reference in them. A
+// connection's credentials are sealed like a notification channel's or a log
+// drain's, and only their names are read back. A value read from a store is
+// never written to the dashboard's database, its audit log or a transcript:
+// it lives in memory for the run that asked for it.
 package secretstore
 
 import (
@@ -121,8 +121,8 @@ type Store struct {
 	AllowPreviews bool      `json:"allowPreviews"`
 	CreatedBy     string    `json:"createdBy"`
 	UpdatedBy     string    `json:"updatedBy"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	CreatedAt     time.Time `json:"createdAt,omitzero"`
+	UpdatedAt     time.Time `json:"updatedAt,omitzero"`
 	// Test is how the last Test went, if one was asked for.
 	Test *Outcome `json:"test,omitempty"`
 	// LastRead is how the last run that read this store went.
@@ -131,7 +131,7 @@ type Store struct {
 
 // Outcome is when something was tried against a store and what it answered.
 type Outcome struct {
-	At      time.Time `json:"at"`
+	At      time.Time `json:"at,omitzero"`
 	OK      bool      `json:"ok"`
 	Message string    `json:"message"`
 }

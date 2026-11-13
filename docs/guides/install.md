@@ -5,9 +5,43 @@
 Everything `install.sh` does, what happens at first sign-in, and how to upgrade.
 
 ```bash
-git clone https://github.com/JustDashboard/Just-Dashboard.git
+git clone --depth 1 --single-branch --branch main https://github.com/JustDashboard/Just-Dashboard.git
 cd Just-Dashboard && sudo ./install.sh
 ```
+
+The clone takes the one branch an install follows, without its history: about 150 MB to download where
+a plain `git clone` takes about 470 MB, most of it screenshots from pull requests on branches of their
+own and the evidence of past audits. Updates work from it as from a full clone, and fetch only that
+branch and the release tag. To work on the code, clone without `--depth` and `--single-branch`: the
+contributor checks compare a change with the branch it started from.
+
+## Requirements
+
+| | |
+| --- | --- |
+| Architecture | x86_64 (amd64) or arm64 (aarch64). Nothing else can build the images. |
+| Init system | systemd. The dashboard manages services and timers through it and uses it to uninstall itself. |
+| Distribution | Tested on Debian and Ubuntu. Others with systemd and a package manager the installer knows (`apt`, `dnf`, `yum`, `zypper`) usually work; Docker's own installer does not support Alpine or Arch. |
+| Memory | 2 GB of memory with 2 GB of swap, or 3 GB of memory. |
+| Disk | 10 GB free where Docker keeps its images (`/var/lib/docker`). |
+| Access | root, and outbound HTTPS to GitHub, Docker Hub and your distribution's packages. |
+
+The memory is for building, not for running: the running stack idles in a little over 100 MB, but setup
+and every update compile the frontend on the server, which peaks between 2.5 and 3 GB. A 1 GB server can
+run the dashboard and cannot install it. On a 2 GB server, add swap first:
+
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+`install.sh` checks these before it installs or writes anything. It **stops** on an architecture it
+cannot build for and on a server without systemd. It **warns**, with the numbers it measured, when memory
+plus swap is under about 3 GB or less than 10 GB is free, and goes on; if the build then fails it says so
+again, because that is almost always the reason.
+
+## What the installer does
 
 The installer asks one question that matters — how you will reach the dashboard — then does the
 rest in four labelled stages:

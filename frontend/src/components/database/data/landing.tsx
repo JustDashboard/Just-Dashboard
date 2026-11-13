@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { BarList } from "@/components/bar-list"
+import { RankList } from "@/components/rank-list"
 import { Metric, MetricStrip } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import { EngineMark } from "@/components/database/kit"
@@ -78,10 +78,11 @@ export function SchemaLanding({
             <h3 className="border-b border-hairline pb-2 text-title font-medium">
               Largest in {name}
             </h3>
-            {/* Bled on the left only, so the names start under the title and
-                the figures end on its hairline rather than past it. */}
-            <BarList
-              className="-ml-2 pt-1.5"
+            {/* Figures in a column and each one's share of the schema, not a
+                bar under every name: bars of different lengths left the
+                figures floating off the end of their rows. */}
+            <RankList
+              className="pt-1.5"
               items={summary.largest.map(({ object, group, share }) => {
                 const rows = object.estimatedRows
                 const counted = rows !== undefined && rows >= 0

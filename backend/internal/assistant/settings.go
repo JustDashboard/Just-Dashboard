@@ -1,14 +1,23 @@
-// Package assistant is the SQL editor's assistant: the model provider the
-// operator chose, what the dashboard tells it about a database, and how its
-// answer comes back to the page.
+// Package assistant is the dashboard's assistant: the model providers set up
+// once for every page with their sealed keys (keyring.go, settings.go), a
+// conversation with a provider (conversation.go, anthropic.go, openai.go),
+// and what each place tells the model and lets it do.
 //
-// It is off until an administrator sets a provider up, and what it sends is
-// decided here rather than by the page: the structure of the database —
-// names, types, keys and references — and nothing from inside a table unless
-// the person asking attached a result to the question themselves. Nothing it
-// answers is run. A statement it writes reaches the editor as text, and the
-// one thing it may ask to do on its own, reading more of the structure, waits
-// for that person to allow it.
+// The SQL editor's assistant is told a database's structure (schema.go:
+// names, types, keys and references, never a row) and writes statements
+// that reach the editor as text; the one thing it may ask for on its own,
+// more of the structure, waits for the person to allow it (tools.go). The
+// assistant of a deployment, a new deployment, a connection and the server
+// also acts (agent.go, operator.go): it makes the dashboard's own routes as
+// the person asking, so each route's capability check, audit entry and rate
+// limit apply, and for an account that holds the terminal capability it can
+// run a shell line (command.go) or type into a terminal window
+// (terminal.go).
+//
+// It is off until an administrator sets a provider up, and what a model is
+// sent is decided here and in api's assistant handlers, not by the page.
+//
+// docs/internal/deployments/operator.md describes it.
 package assistant
 
 import (

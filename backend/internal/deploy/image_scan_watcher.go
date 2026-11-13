@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/imagescan"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // ImageScanner is the scanner as the watch uses it: internal/imagescan's,
@@ -48,7 +49,7 @@ func (w *ImageScanWatcher) Start(ctx context.Context) {
 	if err := w.store.RequeueInterruptedImageScans(ctx); err != nil {
 		w.warn("interrupted image scans could not be requeued", err)
 	}
-	go func() {
+	safego.Go(ctx, nil, "image scan queue", func(ctx context.Context) {
 		// The first look waits a minute: a start-up is busy enough without
 		// a scan of every live release joining it.
 		timer := time.NewTimer(time.Minute)
@@ -81,7 +82,7 @@ func (w *ImageScanWatcher) Start(ctx context.Context) {
 			}
 			timer.Reset(w.interval)
 		}
-	}()
+	})
 }
 
 // Notify wakes the watch for a scan just asked for.

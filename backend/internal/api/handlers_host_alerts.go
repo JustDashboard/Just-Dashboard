@@ -82,7 +82,7 @@ func mapHostAlertError(err error) error {
 	case errors.Is(err, errHostAlertNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, errHostAlertInvalid):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	return httpx.Internal(err)
 }

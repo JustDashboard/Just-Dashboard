@@ -96,7 +96,11 @@ func (s *Server) handleNetworkLinks(w http.ResponseWriter, r *http.Request) erro
 func (s *Server) handleNetworkTrafficLive(w http.ResponseWriter, r *http.Request) error {
 	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 	view := s.modules.network.Sampler().LiveView(since, time.Now())
-	if r.URL.Query().Get("latency") == "1" {
+	latency, err := httpx.QueryBool(r, "latency")
+	if err != nil {
+		return err
+	}
+	if latency {
 		ctx, cancel := timeoutCtx(r, 5*time.Second)
 		defer cancel()
 		view.Latency = s.modules.network.TCPLatency(ctx)
@@ -264,10 +268,9 @@ func mapNetworkError(err error) error {
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, netx.ErrExists):
 		return httpx.Err(http.StatusConflict, "exists", err.Error())
-	case errors.Is(err, context.DeadlineExceeded):
-		return httpx.Err(http.StatusGatewayTimeout, "timeout", "the host did not answer in time").Retry()
 	}
-	return httpx.Wrap(http.StatusBadRequest, "bad_request", err)
+	// A deadline is httpx.Timeout from here, as it is from every mapper.
+	return httpx.Refused(err)
 }
 
 // networkClient is the address the network guards protect for a request

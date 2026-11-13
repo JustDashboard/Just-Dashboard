@@ -533,7 +533,7 @@ func (s *Server) planDBAccess(ctx context.Context, r *http.Request) (*dbAccessPl
 	case exposureAllowlist:
 		allow, err := netx.NormalizePortSources(req.Allow)
 		if err != nil {
-			return nil, httpx.BadRequest("%v", err)
+			return nil, httpx.Refused(err)
 		}
 		if keeper == nil {
 			return nil, httpx.Err(http.StatusConflict, "gateway_unavailable",

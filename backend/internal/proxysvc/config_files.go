@@ -22,7 +22,7 @@ type ConfigEntry struct {
 	// rest.
 	Kind     string    `json:"kind"`
 	Size     int64     `json:"size"`
-	Modified time.Time `json:"modified"`
+	Modified time.Time `json:"modified,omitzero"`
 	// Included says nginx reads the file: an include reaches it from
 	// nginx.conf, or, for a file a link points at, reaches the link.
 	Included   bool         `json:"included"`

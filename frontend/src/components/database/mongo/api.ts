@@ -4,7 +4,6 @@ import { recordedServers } from "@/components/database/mongo/performance/samples
 import type {
   MongoAggregateResult,
   MongoClassification,
-  MongoCollection,
   MongoCollections,
   MongoCommandResult,
   MongoCount,
@@ -73,17 +72,6 @@ export function mongoCollections(id: number, database: string, signal?: AbortSig
     { database: database || undefined },
     signal,
   ).then((answer) => shaped<MongoCollections>(answer, "collections", "the collections"))
-}
-
-export function mongoCollection(target: MongoTarget, signal?: AbortSignal) {
-  return get<unknown>(`${at(target.id)}/mongo/collection`, of(target), signal).then(
-    (answer) =>
-      shaped<{ database: string; collection: MongoCollection }>(
-        answer,
-        "collection",
-        "the collection",
-      ).collection,
-  )
 }
 
 export function createCollection(id: number, request: MongoCreateCollection) {

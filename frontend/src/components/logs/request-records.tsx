@@ -64,6 +64,8 @@ export function useRequestRecords() {
   const pulses = usePoll(
     (signal) => get<Record<string, TrafficPulse>>("/deploy/traffic", undefined, signal),
     60_000,
+    [],
+    { key: "/deploy/traffic" },
   )
   const vhosts = usePoll((signal) => get<VHost[]>("/proxy/vhosts", undefined, signal), 60_000)
   const deployments = fleet.data?.deployments
@@ -115,7 +117,17 @@ export function RecordColumn({
   className?: string
 }) {
   return (
-    <Pane flush className={cn("min-h-0 flex-1", className)}>
+    <Pane
+      flush
+      className={cn(
+        "min-h-0 flex-1",
+        // On a phone the record is one pane the height of the window, and
+        // the chart over the rows left two of them in view. The rows are
+        // what Requests is for; the chart is on Insights, where it scrolls.
+        view === "requests" && "max-md:[&_[data-slot=request-chart]]:hidden",
+        className,
+      )}
+    >
       <div className="flex min-h-10 shrink-0 items-stretch border-b border-hairline pr-1 pl-2">
         <div className="flex shrink-0 items-center pr-1">{leading}</div>
         <nav aria-label="Log mode" className="flex min-w-0 flex-1 items-stretch overflow-x-auto">

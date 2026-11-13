@@ -1,3 +1,9 @@
+// Package config resolves the dashboard's settings from the environment once
+// at boot (Load): each JD_* variable with its default and bounds, the VPSD_*
+// name an older install still carries (Env), and the refusals to start (no
+// allowlist on an address that is not loopback, a malformed value). It only
+// reads: changing a setting from the page is selfcfg's. The settings are
+// listed in docs/guides/configuration.md.
 package config
 
 import (
@@ -87,6 +93,11 @@ type Config struct {
 	// nothing to show for the time nobody was watching.
 	MetricsInterval  time.Duration
 	MetricsRetention time.Duration
+
+	// DeployHistoryRuns is how many of an environment's newest deployment
+	// runs keep everything they printed; an older one keeps the end of it and
+	// the rest of its record. 0 keeps every run whole.
+	DeployHistoryRuns int
 
 	// UpdateCheck is whether the dashboard may ask the repository whether a
 	// newer version exists. Turning it off leaves the compiled-in changelog
@@ -183,6 +194,7 @@ func Load() (*Config, error) {
 		HubLink:          l.boolean("JD_HUB_LINK", true),
 		HubSignIn:        l.boolean("JD_HUB_SIGNIN", false),
 	}
+	c.DeployHistoryRuns = l.integer("JD_DEPLOY_HISTORY_RUNS", 200, 0, 100000)
 	c.AccountURL = l.accountURL()
 	c.HubLinkTestOrigin = l.hubLinkTestOrigin()
 	if c.HubSignIn && c.HubLinkTestOrigin != "" && !hubSignInTestOriginAllowed {

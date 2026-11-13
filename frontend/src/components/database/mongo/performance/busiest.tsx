@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { usePoll } from "@/hooks/use-poll"
-import { BarList, type BarListItem } from "@/components/bar-list"
+import { RankList, type RankItem } from "@/components/rank-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, LoadingRows } from "@/components/state"
 import { mongoCollections, previewPipeline } from "@/components/database/mongo/api"
@@ -88,9 +88,9 @@ export function BusiestCollections({ mongo }: { mongo: Mongo }) {
   const sorted = [...rows].sort((a, b) =>
     live ? (b.perSecond ?? 0) - (a.perSecond ?? 0) || b.total - a.total : b.total - a.total,
   )
-  const top = Math.max(...sorted.map((row) => (live ? (row.perSecond ?? 0) : row.total)), 0)
+  const whole = sorted.reduce((sum, row) => sum + (live ? (row.perSecond ?? 0) : row.total), 0)
   const info = new Map((listed.data?.collections ?? []).map((entry) => [entry.name, entry]))
-  const items: BarListItem[] = sorted.map((row) => {
+  const items: RankItem[] = sorted.map((row) => {
     const amount = live ? (row.perSecond ?? 0) : row.total
     const entry = info.get(row.name)
     return {
@@ -98,7 +98,7 @@ export function BusiestCollections({ mongo }: { mongo: Mongo }) {
       label: row.name,
       mark: entry ? <CollectionMark kind={collectionKind(entry)} /> : undefined,
       value: live ? `${perSecond(amount)}/s` : grouped(row.total),
-      share: top > 0 ? amount / top : 0,
+      share: whole > 0 ? amount / whole : undefined,
       hint: live
         ? amount === 0
           ? "at rest"
@@ -137,7 +137,7 @@ export function BusiestCollections({ mongo }: { mongo: Mongo }) {
         ) : items.length === 0 ? (
           <EmptyNote>{database} holds no collection to watch.</EmptyNote>
         ) : (
-          <BarList items={items} className="-ml-2" />
+          <RankList items={items} />
         )}
       </PanelBody>
     </Panel>

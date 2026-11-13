@@ -351,8 +351,8 @@ type dbTLSStatus struct {
 type dbTLSAuthorityOut struct {
 	Subject     string    `json:"subject"`
 	Fingerprint string    `json:"fingerprint"`
-	NotAfter    time.Time `json:"notAfter"`
-	CreatedAt   time.Time `json:"createdAt"`
+	NotAfter    time.Time `json:"notAfter,omitzero"`
+	CreatedAt   time.Time `json:"createdAt,omitzero"`
 }
 
 // dbTLSClient is what somebody on another machine types to connect with the

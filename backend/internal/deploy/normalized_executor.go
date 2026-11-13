@@ -615,9 +615,9 @@ func (e *NormalizedStepExecutor) buildArtifact(
 			return normalizedStepFailure(err)
 		}
 	}
-	// The collector reads the transcript as it is persisted, after the
-	// builder has redacted it, so a failure can be named from its own output.
-	collector := newBuildOutputCollector(func() int64 { return lastLogSeq(execution.Output) })
+	// The collector reads the transcript as it is logged, after the builder
+	// has redacted it, so a failure can be named from its own output.
+	collector := newBuildOutputCollector(func() int64 { return lastLogMark(execution.Output) })
 	result, err := e.builder.Build(
 		ctx, preparedEvidence.BuildRoot,
 		releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID),
@@ -795,7 +795,7 @@ func (e *NormalizedStepExecutor) runReleaseTasksIn(
 			if err := stepLog(execution, line.Stream, line.Text); err != nil {
 				return err
 			}
-			output.add(collectedLine{text: truncateUTF8Prefix(line.Text, collectedLineBytes), seq: lastLogSeq(execution.Output)})
+			output.add(collectedLine{text: truncateUTF8Prefix(line.Text, collectedLineBytes)})
 			return nil
 		}
 		var taskEvidence ReleaseTaskEvidence

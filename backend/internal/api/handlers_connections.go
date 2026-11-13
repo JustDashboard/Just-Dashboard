@@ -82,7 +82,7 @@ func (s *Server) handleConnectionDetail(w http.ResponseWriter, r *http.Request) 
 	peer, err := s.modules.netsec.PeerDetail(ctx, address)
 	if err != nil {
 		if errors.Is(err, netsec.ErrInvalidAddress) {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		return httpx.Err(http.StatusServiceUnavailable, "connections_unavailable", "the host's connection table could not be read")
 	}
@@ -140,7 +140,7 @@ func mapBlockError(err error) error {
 	case errors.Is(err, netsec.ErrBlockNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, netsec.ErrBlockInvalid):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	return mapFirewallError(err)
 }

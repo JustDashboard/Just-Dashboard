@@ -543,7 +543,7 @@ export default function ContainersPage() {
                     ) : (
                       can("service.control") && (
                         <Button size="sm" asChild>
-                          <Link href="/deploy">Open Deploy</Link>
+                          <Link href="/deploy">Open Deployments</Link>
                         </Button>
                       )
                     )

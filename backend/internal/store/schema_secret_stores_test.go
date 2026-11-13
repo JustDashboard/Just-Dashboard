@@ -23,6 +23,7 @@ func TestSecretStoreSchemaOnlyAddsTables(t *testing.T) {
 // The table arrives on a new install and on one upgraded from 0.6.6, with one
 // connection per name, since a name is what a reference says.
 func TestSecretStoreSchemaReachesFreshAndUpgradedInstalls(t *testing.T) {
+	t.Parallel()
 	upgraded := t.TempDir()
 	script, err := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
 	if err != nil {

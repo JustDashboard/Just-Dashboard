@@ -4,12 +4,12 @@ import { useMemo, useState } from "react"
 import { CodeBracket, Copy } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { usePoll } from "@/hooks/use-poll"
-import { BarList, type BarListItem } from "@/components/bar-list"
+import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { Modal } from "@/components/modal"
 import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelHeader, Well } from "@/components/panel"
 import { Button } from "@/components/ui/button"
-import { BarsSkeleton, CouldNotRead, NotUpdating } from "@/components/database/home/blocks"
+import { CouldNotRead, NotUpdating } from "@/components/database/home/blocks"
 import { statementVerb } from "@/components/database/home/kinds"
 import { compact } from "@/components/database/home/readings"
 import { readStatements } from "@/components/database/ops/performance-api"
@@ -26,8 +26,8 @@ const TOP = 15
  * A session list says what is running now; this says what has been running
  * all week, which is the other question — a query that takes ten
  * milliseconds and runs ten thousand times an hour is never caught running
- * and is the top row here. Drawn as a ranked list with a bar, the honest way
- * to show a top fifteen, in the shape the request log's facets take. It is
+ * and is the top row here. Drawn as a ranked list of figures, its share of the
+ * runtime at the right, in the shape the request log's facets take. It is
  * the third reading of a server's Queries view, beside the statements the
  * server logged one by one — on the database's own page and on the host's
  * Logs page alike, which is why it asks for nothing but the connection's id.
@@ -55,13 +55,16 @@ export function StatementsPanel({
     [id],
   )
   const data = statements.data
-  const items = useMemo<BarListItem[]>(() => {
+  const items = useMemo<RankItem[]>(() => {
     const list = data?.statements ?? []
-    const longest = Math.max(...list.map((statement) => statement.share), 0)
     return list.map((statement) => {
       const line = oneLine(statement.query)
       const verb = statementVerb(line)
       const share = shareWords(statement.share)
+      // Reads that miss the cache are the part of a statement that is
+      // trouble: said in amber beside its calls, where the bar used to carry it.
+      const missed =
+        statement.hitRatio >= 0 && statement.hitRatio < 0.9 ? 1 - statement.hitRatio : 0
       return {
         key: statement.id || statement.query,
         label: verb ? (
@@ -74,11 +77,17 @@ export function StatementsPanel({
         ),
         title: `${line.slice(0, 60)} — ${share} of runtime. Open the statement`,
         value: share,
-        share: longest > 0 ? statement.share / longest : 0,
-        hint: `${compact(statement.calls)} ${statement.calls === 1 ? "call" : "calls"} · ${millis(statement.meanMs)} each`,
-        // Reads that miss the cache are the part of the bar that is trouble.
-        signal: statement.hitRatio >= 0 && statement.hitRatio < 0.9 ? 1 - statement.hitRatio : 0,
-        tone: "warning",
+        hint: (
+          <>
+            {`${compact(statement.calls)} ${statement.calls === 1 ? "call" : "calls"} · ${millis(statement.meanMs)} each`}
+            {missed > 0 && (
+              <span className="text-warning">
+                {" "}
+                · {shareWords(missed)} of reads missed the cache
+              </span>
+            )}
+          </>
+        ),
         onClick: () => setDetail(statement),
       }
     })
@@ -108,7 +117,7 @@ export function StatementsPanel({
               onRetry={statements.refresh}
             />
           ) : (
-            <BarsSkeleton rows={8} />
+            <RankSkeleton rows={8} />
           )
         ) : !data.supported ? (
           <p className="text-body leading-relaxed wrap-anywhere text-muted-foreground">
@@ -116,7 +125,7 @@ export function StatementsPanel({
           </p>
         ) : (
           <div className="animate-rise">
-            <BarList items={items} emptyLabel="Nothing has been counted yet." />
+            <RankList items={items} emptyLabel="Nothing has been counted yet." />
           </div>
         )}
       </div>

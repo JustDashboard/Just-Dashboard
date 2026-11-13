@@ -36,7 +36,7 @@ type draft struct {
 	} `json:"data"`
 	Findings        []finding `json:"findings"`
 	EnvironmentKeys []string  `json:"environmentKeys"`
-	ExpiresAt       time.Time `json:"expiresAt"`
+	ExpiresAt       time.Time `json:"expiresAt,omitzero"`
 }
 
 type finding struct {
@@ -94,8 +94,8 @@ func (a *app) draftsList(args []string) error {
 		Name        string    `json:"name"`
 		Source      string    `json:"source"`
 		CurrentStep string    `json:"currentStep"`
-		UpdatedAt   time.Time `json:"updatedAt"`
-		ExpiresAt   time.Time `json:"expiresAt"`
+		UpdatedAt   time.Time `json:"updatedAt,omitzero"`
+		ExpiresAt   time.Time `json:"expiresAt,omitzero"`
 	}
 	raw, err := a.client.getJSON("/deploy/drafts", nil, &list)
 	if err != nil {

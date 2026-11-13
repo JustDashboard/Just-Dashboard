@@ -15,7 +15,7 @@ import {
 describe("managerHref", () => {
   test("points at the unit, the app, or the container", () => {
     expect(managerHref({ manager: "systemd", managerName: "nginx.service" })).toBe(
-      "/processes/services?unit=nginx.service",
+      "/processes/services/nginx.service",
     )
     expect(managerHref({ manager: "pm2", managerName: "api" })).toBe("/processes/pm2?app=api")
     expect(managerHref({ manager: "container", managerName: "web" })).toBe("/docker/containers/web")

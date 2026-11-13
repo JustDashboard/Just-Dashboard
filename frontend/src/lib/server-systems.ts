@@ -302,16 +302,16 @@ const CLAIMS: Record<string, [kinds: string[], vias: string[]][]> = {
   backups: [],
 }
 
-type Entry = { item: MapItem; kind: string }
+export type Entry = { item: MapItem; kind: string }
 type Adjacent = { other: string; link: MapLink }
 
-type Graph = {
+export type Graph = {
   items: Map<string, Entry>
   adjacent: Map<string, Adjacent[]>
   links: MapLink[]
 }
 
-const vias = (link: MapLink) => [link.via, ...(link.also ?? [])]
+export const vias = (link: MapLink) => [link.via, ...(link.also ?? [])]
 
 function graphOf(map: ServerMap): Graph {
   const items = new Map<string, Entry>()
@@ -319,9 +319,17 @@ function graphOf(map: ServerMap): Graph {
     if (!SYSTEM_KINDS.has(kind.key) || kind.state === "absent") continue
     for (const item of kind.items) items.set(item.id, { item, kind: kind.key })
   }
+  return graphFrom(items, map.links)
+}
+
+/**
+ * The things and the lines between them, each thing with what it touches. A
+ * line to something not on the reading, or from a thing to itself, is left out.
+ */
+export function graphFrom(items: Map<string, Entry>, all: MapLink[]): Graph {
   const adjacent = new Map<string, Adjacent[]>()
   const links: MapLink[] = []
-  for (const link of map.links) {
+  for (const link of all) {
     if (!items.has(link.from) || !items.has(link.to) || link.from === link.to) continue
     links.push(link)
     for (const [a, b] of [
@@ -364,11 +372,23 @@ function claim(graph: Graph, anchor: string, stop: ReadonlySet<string>): string[
 
 const TONE_RANK: Record<MapTone, number> = { danger: 0, warning: 1, ok: 2, unknown: 3, idle: 4 }
 
-function byWorstThenName(a: Entry, b: Entry) {
+export function byWorstThenName(a: Entry, b: Entry) {
   return TONE_RANK[a.item.tone] - TONE_RANK[b.item.tone] || a.item.name.localeCompare(b.item.name)
 }
 
-type Draft = { id: string; kind: SystemKind; anchor: Entry; members: string[] }
+/**
+ * A system before it is laid out: what anchors it and what it takes. `column`
+ * is for a page that draws its systems in another order than the server
+ * map's (`columnOf`) — the databases map puts what reads a database on its
+ * left and where it runs on its right.
+ */
+export type Draft = {
+  id: string
+  kind: SystemKind
+  anchor: Entry
+  members: string[]
+  column?: (itemId: string, kind: string) => number
+}
 
 /**
  * Which systems the server has, each with what it holds, in the order the
@@ -490,6 +510,13 @@ export type SystemEdge = {
   also: string[]
   /** `flow` runs right to left between columns; `sub` drops to a satellite; `down` joins one column. */
   shape: "flow" | "sub" | "down"
+  /**
+   * What a page that read the line some other way knows of it: a link that
+   * broke or went stale, and the sessions open on it now. The server map's
+   * own reading says neither.
+   */
+  tone?: MapTone
+  sessions?: number
 }
 
 /** A Compose stack drawn as the frame round its containers. */
@@ -547,6 +574,12 @@ const COLUMN_GAP = 96
 const ROW_GAP = 24
 const SAT_GAP = 44
 const SAT_SPACE = 12
+/**
+ * Between two unrelated things on a shelf, between one kind's shelf and the
+ * next, and the least a row runs to before it wraps — about a small
+ * deployment's width, so a handful of things is one row and not a stack.
+ */
+const SHELF = { gap: 32, between: 64, least: 1024 }
 
 /**
  * Left to right: how the system is reached, what it is, what it runs, what
@@ -602,6 +635,11 @@ function faceOf(kind: string, item: MapItem): { face: Face; role?: Role } {
       return { face: "process", role: containerRole(item) }
     case "databases":
       return { face: "datastore" }
+    // What the databases map adds: processes on this machine with a session
+    // open, and another machine that has one.
+    case "host":
+    case "remote":
+      return { face: "process" }
     case "volumes":
       return { face: "volume" }
     case "backups":
@@ -807,7 +845,11 @@ function buildSystem(graph: Graph, draft: Draft, sharedBy: Map<string, string[]>
     })
   }
 
-  const laid = place(sid, [...nodes.values()], satellites, edges, framed, graph, anchorId)
+  const column = draft.column ?? ((itemId: string, kind: string) => columnOf(kind, itemId))
+  const laid =
+    draft.kind === "loose"
+      ? shelve(sid, [...nodes.values()], satellites, edges, graph, column)
+      : place(sid, [...nodes.values()], satellites, edges, framed, graph, anchorId, column)
   // A line runs from the left column to the right; one inside a column drops
   // from the upper box to the lower.
   const at = new Map(laid.nodes.map((n) => [n.id, n]))
@@ -865,6 +907,7 @@ function place(
   framed: Map<string, string>,
   graph: Graph,
   anchorId: string,
+  columnFor: (itemId: string, kind: string) => number,
 ) {
   const satsOf = new Map<string, SystemNode[]>()
   for (const s of satellites) {
@@ -884,8 +927,8 @@ function place(
 
   // The columns that hold something, packed so no gap is left by a kind the
   // system does not have.
-  const used = [...new Set(main.map((n) => columnOf(n.kind, n.itemId)))].sort((a, b) => a - b)
-  const col = (n: SystemNode) => used.indexOf(columnOf(n.kind, n.itemId))
+  const used = [...new Set(main.map((n) => columnFor(n.itemId, n.kind)))].sort((a, b) => a - b)
+  const col = (n: SystemNode) => used.indexOf(columnFor(n.itemId, n.kind))
 
   const blocks: Block[] = []
   const blockOf = new Map<string, Block>()
@@ -1074,11 +1117,124 @@ function place(
   }
 }
 
+/**
+ * What nothing claims, on shelves. It is not one flow: thirty checkouts nobody
+ * builds from are thirty unrelated things, and set in the one column their
+ * kind has they are a tower taller than every other system put together. So
+ * each thing is laid out with what a line joins it to — a domain and its
+ * certificate, a volume and the backup that takes it — as a small diagram of
+ * its own (`place`), and the diagrams stand in rows, one kind after another
+ * in the order the rail reads them. A kind that fills a row wraps under
+ * itself; kinds with a few things each share a row. The rows are as wide as
+ * the atlas's are for its systems — about one and a half times the square the
+ * diagrams' areas make — and never narrower than `SHELF.least`.
+ */
+function shelve(
+  sid: string,
+  main: SystemNode[],
+  satellites: SystemNode[],
+  edges: SystemEdge[],
+  graph: Graph,
+  columnFor: (itemId: string, kind: string) => number,
+) {
+  // Which things are one diagram. A satellite counts as the box it hangs
+  // under, and the earlier of two joined things leads, so the diagrams come
+  // out in the order their first things were listed.
+  const seat = new Map(main.map((n) => [n.id, n.id]))
+  for (const s of satellites) if (s.host && seat.has(s.host)) seat.set(s.id, s.host)
+  const index = new Map(main.map((n, i) => [n.id, i]))
+  const lead = new Map(main.map((n) => [n.id, n.id]))
+  const leader = (id: string) => {
+    let at = id
+    while (lead.get(at) !== at) at = lead.get(at)!
+    return at
+  }
+  for (const edge of edges) {
+    const a = seat.get(edge.source)
+    const b = seat.get(edge.target)
+    if (!a || !b) continue
+    const la = leader(a)
+    const lb = leader(b)
+    if (la === lb) continue
+    if (index.get(la)! < index.get(lb)!) lead.set(lb, la)
+    else lead.set(la, lb)
+  }
+  const joined = new Map<string, SystemNode[]>()
+  for (const n of main) {
+    const l = leader(n.id)
+    joined.set(l, [...(joined.get(l) ?? []), n])
+  }
+  const cells = [...joined.values()].map((nodes) => ({
+    kind: nodes[0].kind,
+    ...place(sid, nodes, satellites, edges, new Map(), graph, nodes[0].itemId, columnFor),
+  }))
+  if (cells.length === 0) return { nodes: [], frames: [], width: 0, height: 0 }
+
+  const area = cells.reduce((s, c) => s + (c.width + SHELF.gap) * (c.height + SHELF.gap), 0)
+  const limit = Math.max(SHELF.least, ...cells.map((c) => c.width), Math.sqrt(area) * 1.6)
+
+  // One kind's diagrams, in rows of their own.
+  type Shelf = {
+    kind: string
+    cells: { nodes: SystemNode[]; x: number; y: number }[]
+    width: number
+    height: number
+  }
+  const shelves: Shelf[] = []
+  let x = 0
+  let y = 0
+  let row = 0
+  for (const cell of cells) {
+    let shelf = shelves[shelves.length - 1]
+    if (!shelf || shelf.kind !== cell.kind) {
+      shelf = { kind: cell.kind, cells: [], width: 0, height: 0 }
+      shelves.push(shelf)
+      x = y = row = 0
+    }
+    if (x > 0 && x + cell.width > limit) {
+      x = 0
+      y += row + SHELF.gap
+      row = 0
+    }
+    shelf.cells.push({ nodes: cell.nodes, x, y })
+    row = Math.max(row, cell.height)
+    shelf.width = Math.max(shelf.width, x + cell.width)
+    shelf.height = y + row
+    x += cell.width + SHELF.gap
+  }
+
+  // The shelves, left to right while they fit and then under one another.
+  const nodes: SystemNode[] = []
+  x = y = row = 0
+  let width = 0
+  for (const shelf of shelves) {
+    if (x > 0 && x + shelf.width > limit) {
+      x = 0
+      y += row + SHELF.between
+      row = 0
+    }
+    for (const cell of shelf.cells) {
+      for (const n of cell.nodes) nodes.push({ ...n, x: n.x + x + cell.x, y: n.y + y + cell.y })
+    }
+    row = Math.max(row, shelf.height)
+    width = Math.max(width, x + shelf.width)
+    x += shelf.width + SHELF.between
+  }
+  return { nodes, frames: [] as StackFrame[], width, height: y + row }
+}
+
 /** Every system on the server, each laid out on its own. */
 export function detectSystems(map: ServerMap | undefined): System[] {
   if (!map) return []
   const graph = graphOf(map)
-  const drafts = draftSystems(graph)
+  return systemsFrom(graph, draftSystems(graph))
+}
+
+/**
+ * Drafted systems laid out, each on its own, with what more than one of them
+ * draws marked as shared in each.
+ */
+export function systemsFrom(graph: Graph, drafts: Draft[]): System[] {
   const sharedBy = new Map<string, string[]>()
   for (const d of drafts) {
     for (const id of d.members) sharedBy.set(id, [...(sharedBy.get(id) ?? []), d.id])
@@ -1139,6 +1295,7 @@ export function systemCensus(system: System) {
     domains: count((n) => n.kind === "domains" || n.itemId === "dashboard:site"),
     volumes: count((n) => n.kind === "volumes"),
     backups: count((n) => n.kind === "backups"),
+    checkouts: count((n) => n.kind === "repositories"),
   }
 }
 

@@ -37,6 +37,11 @@ needs a route fails rather than writing one somewhere else.
 - Discovery requires one running Caddy with wildcard public TCP 80 and 443 mappings, a bind-mounted
   `/etc/caddy/Caddyfile`, and writable persistent `/config` and `/data` mounts. Unsupported owners are
   left running. Docker inspection failures do not become permission to run standalone Certbot.
+  Every way the lookup can fail to name one Caddy is a `*proxysvc.IngressProblem` with its own code
+  (`ingress_unreachable`, `ingress_not_running`, `ingress_ambiguous`, `ingress_unusable`), sentence
+  and remedy, and what Docker said kept as its cause; a deployment step that needs the ingress
+  fails with that sentence, the proxy routes answer it as 503 or 409, and the Sites list goes on
+  listing what nginx serves ([runtime boundaries](../architecture/runtime-boundaries.md#server-modules-degradation)).
 - The fresh-host container has an explicit ownership label, restart policy, a persisted Caddyfile at
   `/etc/just-dashboard/ingress/Caddyfile`, and `just-dashboard-ingress-config` and
   `just-dashboard-ingress-data` volumes. Restart checks its label and exact persistent storage.
@@ -381,13 +386,39 @@ The application remains published on loopback. Proxy resolves that publication t
 container and an internal network address, then connects Caddy to that network. Managed route comments
 persist the exact candidate container ID, network, internal port and address — one comment per replica
 for a release that runs several. The lifecycle worker checks
-every 30 seconds and repairs a lost Caddy network attachment or changed candidate address; the same pass
+every 30 seconds, and a few seconds after Docker reports a container starting or dying (below), and
+repairs a lost Caddy network attachment or changed candidate address; the same pass
 adds the access-log block to a managed route written before request recording existed, so an upgrade
 turns recording on for every existing deployment within a tick rather than at its next deploy. It never
 follows a host port to a replacement container. Repairs are audited as `proxy.ingress.reconcile` with
-route name and success only. Read-only verification does not reconnect networks. Recovery can have up
-to one polling interval of interruption after container recreation; missing/replaced candidates require
+route name and success only. Read-only verification does not reconnect networks. Recovery follows
+container recreation by the few seconds the worker lets a burst of events settle, and by up to one
+polling interval where Docker's events do not reach the dashboard; missing/replaced candidates require
 the normal deployment activation path. Network memberships remain available for other managed routes.
+
+What a pass costs, since it runs on every install whether or not anybody is looking:
+
+- **The lookup starts no process.** The running containers are read through the dashboard's Docker
+  client (`proxysvc.ContainerReader`, which `dockerx.Client.InspectRunning` and `InspectOne` satisfy and
+  `api/modules.go` hands in with `WithContainerReader`): the daemon's own inspect JSON, so the decoder
+  is the one that read `docker inspect`. It was `docker ps -q` and `docker inspect` of every container
+  through the CLI, twice a pass and again on most reads of the proxy pages. A service built without a
+  reader (the tests' fake docker, the live fixtures) still asks the CLI. The lookups and the
+  `docker exec` calls below must reach the same daemon, as `JD_DOCKER_HOST` and the CLI's default
+  socket do in the shipped stack.
+- **A pass with nothing to repair is one `docker exec`.** `dockerCaddy.readRoutes`
+  (`docker_caddy_routes.go`) reads every managed route, and the certificate copies old enough to
+  prune, in one fixed `sh -c`: each file after a line of its own carrying a boundary that is random
+  per run, so a route's bytes come back exactly and nothing in a route can pass for the framing; any
+  output that is not exactly that framing is `ErrRouteRecovery` and nothing is repaired. It was a
+  test for the directory, a `find`, a test and a `cat` per route, and a `find` for the copies. The
+  site inventory (`dockerCaddy.vhosts`) reads its routes the same way, and `dockerCaddy.read` is one
+  exec where it was two.
+- **A container that starts or dies asks for a pass.** `Server.Start` hands the Docker event log a
+  keeper that calls `Service.IngressChanged` on a container's `start` and `die`; the loop waits
+  `ingressSettle` (five seconds, so a compose project or a restart loop is one pass) and looks, then
+  counts its thirty seconds from there. The tick stays: a certificate certbot renewed and a route
+  written before request recording are not Docker events.
 
 ## Cloudflare Tunnel
 

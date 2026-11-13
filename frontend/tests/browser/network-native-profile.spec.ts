@@ -119,9 +119,14 @@ test("native apply carries the exact intent and stays pending when the managed p
 }) => {
   await setup(page)
   await sheet(page).getByRole("button", { name: "Close", exact: true }).click()
+  // The preference is one row on the Network overview; turned off there, it
+  // stays off on the page that makes the change.
+  const rail = page.getByRole("navigation", { name: "Sidebar" })
+  await rail.getByRole("link", { name: "Overview", exact: true }).click()
   const preference = page.getByRole("switch", { name: "Require network reconnection confirmation" })
   await expect(preference).toBeChecked()
   await preference.uncheck()
+  await rail.getByRole("link", { name: "Interfaces", exact: true }).click()
   await page.getByRole("button", { name: "Open ens3", exact: true }).click()
   await edit(page)
   let body: unknown

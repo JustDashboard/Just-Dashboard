@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The WireGuard record: what the kernel's counters, handshakes and endpoints
@@ -170,7 +172,7 @@ func (r *wgRecord) start(ctx context.Context) {
 	}
 	r.stop, r.done = make(chan struct{}), make(chan struct{})
 	r.mu.Unlock()
-	go r.loop(ctx)
+	safego.Go(ctx, nil, "wireguard record", r.loop, safego.Close(r.done))
 }
 
 func (r *wgRecord) stopLoop() {
@@ -185,7 +187,6 @@ func (r *wgRecord) stopLoop() {
 }
 
 func (r *wgRecord) loop(ctx context.Context) {
-	defer close(r.done)
 	r.tick(ctx, wgNow())
 	t := time.NewTicker(wgSampleEvery)
 	defer t.Stop()

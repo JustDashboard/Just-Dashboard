@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { memo, useState } from "react"
 import { Download, Eye, Pencil } from "@/components/icons"
 import { downloadUrl } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
@@ -12,9 +12,10 @@ import { useNearViewport } from "@/hooks/use-near-viewport"
 import { IconAction, RowActions } from "@/components/icon-action"
 import { TableCell, TableRow } from "@/components/ui/table"
 import { Thumbnail } from "@/components/files/thumbnail"
-import type { FileActions, RowCaps } from "@/components/files/file-actions"
+import type { RowCaps } from "@/components/files/file-actions"
+import type { EntryHandlers } from "@/components/files/entry-handlers"
 import { mediaKind } from "@/components/files/media"
-import { useDropTarget, type DropMode } from "@/components/files/dnd"
+import { useDropTarget } from "@/components/files/dnd"
 
 export { isArchive, type RowCaps } from "@/components/files/file-actions"
 
@@ -46,22 +47,20 @@ export const COLUMN = {
  * for files dragged in from the desktop. The active row carries a brand-blue
  * rule at its edge: it is *where you are*, which is what the hue is for, and
  * that is how it stays distinct from the rows that are merely checked.
+ *
+ * `memo`, over props that change only when the row does: the entry, four
+ * booleans, and the page's `handlers`, which are one object for its life. A
+ * click moves `active` on two rows and those two are drawn; the other five
+ * hundred of a large folder are not.
  */
-export function FileRow({
+export const FileRow = memo(function FileRow({
   entry,
   selected,
   active,
   dimmed,
   dragging,
   caps,
-  onToggle,
-  onSelect,
-  onFocusEntry,
-  onOpen,
-  onDragStart,
-  onDropPaths,
-  onDropFiles,
-  actions,
+  handlers,
 }: {
   entry: FileEntry
   selected: boolean
@@ -71,14 +70,7 @@ export function FileRow({
   dimmed?: boolean
   dragging?: boolean
   caps: RowCaps
-  onToggle: (checked: boolean) => void
-  onSelect: (event: React.MouseEvent) => void
-  onFocusEntry?: () => void
-  onOpen: () => void
-  onDragStart?: (event: React.DragEvent) => void
-  onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
-  onDropFiles?: (transfer: DataTransfer, dir: string) => void
-  actions: FileActions
+  handlers: EntryHandlers
 }) {
   const [viewportRef, near] = useNearViewport<HTMLTableRowElement>()
   const [focusedControls, setFocusedControls] = useState<boolean | null>(null)
@@ -86,10 +78,16 @@ export function FileRow({
   const fullControls = focusedControls ?? (near || active)
   const drop = useDropTarget({
     dir: entry.isDir ? entry.path : null,
-    onDropPaths,
-    onDropFiles,
+    onDropPaths: caps.write ? handlers.onDropPaths : undefined,
+    onDropFiles: caps.write ? handlers.onDropFiles : undefined,
   })
   const media = !entry.isDir && mediaKind(entry.name)
+  const onOpen = () => handlers.onOpen(entry)
+  const onSelect = (event: React.MouseEvent) => handlers.onSelect(entry, event)
+  // The row's verbs are made when one is pressed: a set per row per render was
+  // five hundred objects of fifteen closures that nobody had asked for yet.
+  const onView = () => handlers.actionsFor(entry).onView()
+  const onEdit = () => handlers.actionsFor(entry).onEdit()
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTableRowElement>) => {
     if (e.target !== e.currentTarget) return
@@ -104,7 +102,7 @@ export function FileRow({
       ref={viewportRef}
       onFocusCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node)) {
-          onFocusEntry?.()
+          handlers.onFocusEntry(entry)
           setFocusedControls(!!(near || active))
         }
       }}
@@ -114,8 +112,8 @@ export function FileRow({
       data-entry-path={entry.path}
       data-state={selected ? "selected" : undefined}
       data-dragging={dragging || undefined}
-      draggable={caps.write && !!onDragStart}
-      onDragStart={onDragStart}
+      draggable={caps.write}
+      onDragStart={caps.write ? (event) => handlers.onDragStart(entry, event) : undefined}
       {...drop.handlers}
       className={cn(
         "group cursor-pointer focus-ring-inset transition-opacity duration-150 select-none",
@@ -142,7 +140,7 @@ export function FileRow({
       >
         <FileSelection
           checked={selected}
-          onCheckedChange={(v) => onToggle(v === true)}
+          onCheckedChange={(v) => handlers.onToggle(entry, v === true)}
           aria-label={`Select ${entry.name}`}
         />
       </TableCell>
@@ -205,11 +203,11 @@ export function FileRow({
             <>
               {fullControls ? (
                 media ? (
-                  <IconAction label="View" onClick={actions.onView}>
+                  <IconAction label="View" onClick={onView}>
                     <Eye />
                   </IconAction>
                 ) : (
-                  <IconAction label={caps.write ? "Edit" : "Open"} onClick={actions.onEdit}>
+                  <IconAction label={caps.write ? "Edit" : "Open"} onClick={onEdit}>
                     <Pencil />
                   </IconAction>
                 )
@@ -218,7 +216,7 @@ export function FileRow({
                   size="icon-sm"
                   variant="ghost"
                   aria-label={media ? "View" : caps.write ? "Edit" : "Open"}
-                  onClick={media ? actions.onView : actions.onEdit}
+                  onClick={media ? onView : onEdit}
                 >
                   {media ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
                 </Button>
@@ -242,4 +240,4 @@ export function FileRow({
       </TableCell>
     </TableRow>
   )
-}
+})

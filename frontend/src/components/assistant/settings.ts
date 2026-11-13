@@ -84,14 +84,16 @@ export function announceAssistantChange() {
 
 /**
  * The settings, read once and again when they are saved. They change when an
- * administrator changes them, so the read is slow.
+ * administrator changes them, so the read is slow. The rail, the dock, the
+ * palette and the page each ask, so the read is keyed: one request and one
+ * answer for all of them (the Overview used to read it three times at once).
  */
 export function useAssistantSettings(enabled: boolean) {
   const poll = usePoll<AssistantSettings>(
     (signal) => get<AssistantSettings>("/assistant", undefined, signal),
     120_000,
     [],
-    { enabled },
+    { enabled, key: "/assistant" },
   )
   const { refresh } = poll
   useEffect(() => {
@@ -136,6 +138,7 @@ export const MODE_LABEL: Record<AssistantMode, string> = {
 /** What each mode lets it do, in the words the choice is made on. */
 export const MODE_DETAIL: Record<AssistantMode, string> = {
   ask: "Every read and every change waits for your Allow.",
-  changes: "It reads on its own. Every change waits for your Allow before it runs.",
-  full: "Runs everything without asking — reads, changes, restarts and deletions — as you, within your role. Every call is audited.",
+  changes:
+    "It reads on its own. Every change waits for your Allow before it runs, and so does a read it would send to another machine.",
+  full: "Runs everything without asking — reads, changes, restarts and deletions — as you, within your role, including what outlasts the chat: a new account, a key, a sudo rule. Every call is audited.",
 }

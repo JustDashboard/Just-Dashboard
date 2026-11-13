@@ -1,9 +1,15 @@
 # The design system
 
-The rules the linter cannot enforce. `eslint-rules/design-system.mjs` catches the two failures that
-are mechanical — typing a value where a token exists, and re-deriving a pattern a primitive owns —
-and `tests/browser/design-system.spec.ts` checks three structural properties in a browser. Everything
+The rules the linter cannot enforce. `eslint-rules/design-system.mjs` catches the three failures that
+are mechanical — typing a value where a token exists, re-deriving a pattern a primitive owns, and
+latency written as a percentile rather than in words — and `tests/browser/design-system.spec.ts`
+checks the structural properties a browser can see. Everything
 below is judgement, and this is where it is written down.
+
+There is one checkbox and one spinner: `Checkbox` (`components/ui/checkbox`) and `Spinner`
+(`components/state.tsx`). The lint rule `design-system/primitives` refuses a native
+`<input type="checkbox">` and a `LoaderCircle` drawn directly anywhere but `components/ui`,
+`state.tsx` and `icons.tsx`, because each came back in a newer file after the 0.6.1 audit removed it.
 
 Since 0.7.5, automatic Attention/Needs attention sections, recommendation comparisons, Advisor and
 navigation attention marks have been removed. Historical layout examples
@@ -19,6 +25,19 @@ to be chosen twice and verified twice, and the second set was seen by almost nob
 is now one bootstrap script: it puts `.dark` on the root element before first paint so the generated
 shadcn primitives' `dark:` variants resolve, sets `color-scheme`, and clears the stored preference
 from anyone upgrading. `hooks/use-theme.tsx` and `/appearance` are gone.
+
+**Text has three inks, and the third has a floor.** `text-foreground`, `text-muted-foreground` for
+secondary text (7.6:1 on the page), and `text-faint` (`--faint`) for what sits behind that: a count, a
+timestamp, a line number, a unit. `--faint` is the dimmest lightness of the muted hue that keeps WCAG
+AA's 4.5:1 on every ground text is set on: 5.3:1 on the page, 5.1 on a card, 4.9 on a popover, 4.8 on
+`--muted`. On `--accent` (a chosen row) it is 4.0:1; set `text-muted-foreground` there. **Do not fade
+text with an opacity.** `text-muted-foreground/60` measured 3.4:1 and `/40` 2.1:1 at 10 to 12 px, on
+about two hundred call sites. Those spellings (`/70` and fainter) now draw the faint ink through one
+rule in `globals.css`, which leaves an `svg` its fade (a glyph needs 3:1 where it carries meaning) and
+stays at one class's weight so a `hover:` colour still wins; new code writes `text-faint`, and the old
+spellings are to be renamed, not copied. A count beside a tab's or a chip's label (`ChipCount`) is the
+label's own ink at 80%, 5.2:1 unselected. `design-system.spec.ts` measures all of these in the browser,
+painted onto a canvas and read back, against each ground.
 
 Colours live on `:root` in `app/globals.css`. That is the only place a colour is named. One page
 holds a copy: `/hub/enter` (`lib/hub-enter.ts`) is a document written by hand that loads no
@@ -155,7 +174,8 @@ taking a frame:
   PM2 applications under their band of what PM2 takes of the machine, the systemd units
   under their band of busy services and recent changes, and the cron jobs, timers and
   system cron files on Scheduled, each a title, a toolbar and a hairline, Scheduled's
-  under its next day drawn as one plain band of lanes (what fires next counting down
+  under its next day drawn as one plain band, an hour chart over the schedules in the order they
+  run (what fires next counting down
   at the end of its identity line), whose Cron log is a plain panel holding the log's
   `Pane` and whose jobs and timers open sheets of their own — with a detail sheet built
   from plain panels that opens on the thing's own mark, the unit's journal, a PM2
@@ -360,6 +380,21 @@ that will change, and *Pinned* is a `Tag` with a pin, because somebody set it an
 because that is what the control does — but anything choosing a *colour* chooses from the shared
 union. A component that declares its own tone names is the drift this file exists to stop.
 
+**How long something took is said in words, never as `p50` / `p95` / `p99`.** The operator found the
+notation unclear ("notation asks the reader to learn it") and Insights' readings became *Half*,
+*19 in 20* and *99 in 100*; in 0.8.6 every other rendered label, legend, column head and sentence
+followed, so one figure has one name on every page. The words live in `lib/latency-words.ts`:
+`LATENCY_SHARE` names a figure, `latencyHead` is a column head, a legend or a tile's label
+("19 in 20 within"), `latencyWords` is the reading inside a sentence ("19 in 20 inside 180ms"), and
+`latencyTerm` is the `title` that keeps the term for a reader who looks for it. A threshold reads the
+other way round, by the share past it ("more than 1 in 20 requests slower than 800ms"), and a factor
+between two readings is a *slowdown*. The lint rule `design-system/latency-words` refuses the
+notation in JSX text, in a string with other words around it and in a `label`, `title`, `name` or
+`hint`; a bare `"p95"` elsewhere is a key of the server's answer and stays. The interface charts on
+`/network/traffic` are outside it: their percentiles are of throughput, not of how long anything
+took. Sentences the server writes (a rollback watch's verdict, a canary's, a replay's, a traffic
+alert's notification) still say p95 and are shown as the server wrote them.
+
 ## 5. No descriptions under titles
 
 **`PageContext`, `Section`, `PanelHeader` and `ChartPanel` have no `description`.** They have no `icon`
@@ -378,8 +413,41 @@ The rule and its three exceptions:
   actions, a `Tag`, or its own row.
 - `Modal` and `SidePanel` keep a `description` prop, rendered `sr-only`. Radix wants an accessible
   description and a screen reader is the one audience that cannot see the rest of the box.
+- `Modal` and `SidePanel` give the keyboard back to what opened them (`hooks/use-focus-return.ts`).
+  Radix returns focus to a `DialogTrigger`, and almost every dialog here is opened by state and has
+  none, so closing a confirmation or an editor left the keyboard on `body` and the next Tab began at the
+  top of the sidebar. The opener is whatever held the keyboard when the dialog opened; for a verb in a
+  row's menu that item is gone by the time the dialog closes, so the menu's own button is remembered
+  beside it (through the menu's `aria-labelledby`) and gets the keyboard instead. A dialog that knows
+  better passes `onCloseAutoFocus` and calls `preventDefault()`. A page that hands the keyboard back
+  itself, for every dialog it opens, calls `claimFocusReturn` as it closes one: the database's data page
+  does (`focusAfterDialog`), because the question it asks before unapplied changes are left is opened by
+  the link that was pressed, and the keyboard belongs back on the rows. Open dialogs through these two
+  components, not through a bare `DialogContent`, or the keyboard is dropped again.
 
 `EmptyState`, `ErrorState` and `Notice` keep their body text: there, the sentence *is* the content.
+
+**A failure is said in sentences, in one place.** The API words its messages to sit inside other text:
+lower case, no full stop ("not found", "too many requests, slow down"). `ErrorState` is where they
+stand alone, so it gives the headline its capital and a reason its full stop (`sentenceCase` and
+`asSentence` in `lib/format.ts`), and `notify.error` does the same for the reason under a toast. A
+message that opens on a program's name, a path or an identifier ("nginx: [emerg] …", "eth0 is down")
+is somebody else's text and is left as written; so is a command that is the sentence's subject ("nginx
+refuses the configuration", "gh did not answer": the `COMMANDS` list beside `sentenceCase`, for names
+that are only ever a command) and a command line ("wget --spider …"). No full stop goes after a path,
+an address or a quoted value. A page does not reword an API message itself.
+
+`ErrorState` draws four kinds (`data-kind`), and only one of them is red:
+
+| Kind | When | Drawn as |
+| --- | --- | --- |
+| `failed` | anything else | the danger wash and rule, the message as the headline |
+| `unavailable` | this host has no Docker, nginx, terminal | neutral: "Not available on this host" |
+| `missing` | 404 | neutral: the message, then "It may have been removed or renamed since this link was made." An old link to something deleted is a normal event |
+| `throttled` | 429 | neutral: the message, "The server asked for a pause", **Try again** whenever `onRetry` is given, and `onRetry` called by itself once the answer's `Retry-After` (ten seconds without one) and a short grace have passed |
+
+Pass `onRetry` wherever the read can be repeated: it is what makes a throttled page come back without
+a press on a read that does not poll.
 
 ## 6. Three states, three mechanisms
 
@@ -395,7 +463,11 @@ A control can be all three at once and stay readable, which is the test.
 The ring is `focus-ring`, or `focus-ring-inset` where there is no room outside the control — one
 appearance, two placements. It is an `outline`, not Tailwind's `ring`: an outline follows
 `border-radius`, cannot be overwritten by a `shadow-*` utility landing on the same element, and works
-on a `<tr>`.
+on a `<tr>`. Being the outline, it is undone by any class in the same list that sets the outline's style
+to none: `outline-hidden` and `outline-none` win over it. The sidebar's five class lists carried
+`outline-hidden` from the component library's own focus styling, so every row of the rail took the
+keyboard's focus and showed nothing. `components/ui/focus-ring.test.js` fails on a class list that has
+both, and `design-system.spec.ts` walks the rail's own rows.
 
 A row's actions appear through `RowActions`, `IconAction reveal`, or `rowReveal()`. Never by hand: the
 four mechanisms that sentence hides — pointer, keyboard, open menu, touch — are how five action
@@ -411,8 +483,11 @@ press from reaching the row around it — discarding a draft used to navigate to
 deleted.
 
 Reveal only where the controls share their space with something else. Where they have a column of
-their own — a container card's actions slot — use `DimActions` instead: always drawn, one step of opacity until
-the pointer is on the row. A reserved column left empty reads as a layout bug, not as an affordance.
+their own — a container card's actions slot — use `DimActions` instead: always drawn, and quiet until
+the pointer is on the row. Quiet is the `row-dim` utility: the glyphs at 55% and the words in the faint
+ink, so a resting verb still reads at 4.5:1 (the whole cluster at 55% put a red "Sign out" at 2.3:1).
+A verb takes its own colour back with the row's hover, focus inside it, or an open menu; a filled
+button in the cluster is not dimmed, and nothing is where there is no hover. A reserved column left empty reads as a layout bug, not as an affordance.
 The Data page's rail is the shared case: a row's menu takes the place of its row count under the
 pointer, in the same grid cell, and the count's slot is at least the menu's width so the menu never
 covers the name. With a column of its own, every count stood a button's width short of the edge the
@@ -430,8 +505,8 @@ rail's headings end on.
 | `StatTile` | One headline figure, in a `StatGrid` | Not free-form — a row of them is read as a table |
 | `ChoiceCard` | One thing you pick out of several, in a `ChoiceGrid` — a source, a template, a database engine | Not a `Panel`: a panel is content that happens to be framed, this is a button that happens to be large |
 | `ChoiceRow` | One instance among many of one kind, in a `ChoiceList` — a repository, an image tag, an unfinished setup | Not a `Row`: a `Row` is read, a `ChoiceRow` is taken |
-| `BarList` | A ranked list with the meter's track behind each name and the figure at the right — the top ten of something, with a signal segment for the share that is wrong | Not a chart, and not a `RowList`: nothing here has a second line worth a row |
-| `RankList` | A ranked list read rather than measured: name, figure and share in columns, with `SplitBar` for one strip of a whole over it. Insights uses it | Not a `BarList`: no bar per row, so nothing grows from row to row |
+| `BarList` | A ranked list with the meter's track behind each name and the figure at the right — the top ten of something, with a signal segment for the share that is wrong | Not a chart, and not a `RowList`: nothing here has a second line worth a row. Not for a ranked list any more: that is a `RankList`. Every page left it in 0.8.6 — the Databases pages first, then a project's failure causes, the proxy's busiest sites, a stream's outcomes and clients, Suricata's signatures, the connection table's breakdowns and the Files inspector's largest entries. A query result's Chart view is the one importer left, because there the bars are the picture the reader asked for, and the lint rule `design-system/primitives` refuses the import anywhere else (the small size bars inside table cells are their own few lines, not a `BarList`) |
+| `RankList` | A ranked list read rather than measured: name, figure and share in columns, with `SplitBar` for one strip of a whole over it, and `RankSkeleton` (rows of its own height) while it loads. Insights, every ranked list on the Databases pages and, since 0.8.6, every other ranked list in the product use it. The share is of a real whole — the schema's bytes, the keys walked, the runtime counted — and a list of the top few of a whole nobody read has no share column rather than a share of the largest | Not a `BarList`: no bar per row, so nothing grows from row to row |
 | `BarReading` | One block of a band: a head, a bar, one line and one strip of marks, the same height in every state (§10) | Not a `BarList`: nothing is listed under the bar, and it is the only thing a band's bar is drawn with |
 
 **Reach for `Panel`/`Pane`/`Page`, and add a variant there rather than a one-off in a feature page.**
@@ -507,7 +582,8 @@ from the history is read back from the server and folded through the same reduce
 exactly as it did and can be carried on. One another tab is answering is followed and says so in a calm bar over the
 box — a breathing dot, *This chat is running in another tab*, and **Take over** — and the tab it was taken from says
 *Continued somewhere else* and stops. Below the chats, what it has changed with a shortcut to each, and what it has
-read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot.
+read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot
+(`phone-panes.tsx`, which Git, Logs and the network tools share: `workspace-interactions.md`).
 
 A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a transition
 on an outline, not a fifth animation. The floating **Back to chat** is the same surface as Remote Desktop's dock, in
@@ -749,7 +825,7 @@ without `onOpenChange` (the build fold computes its initial state from detection
 store the operator's later answer), and React writes the `open` property only when the prop changes,
 so a prop-derived value went on announcing "collapsed" over fields that were plainly on screen. The
 one thing `role="button"` costs is the heading outline: a button's descendants are presentational,
-so a fold cannot also be an `<h3>` the way a `FormSection` is, and the standard
+so a fold cannot also be a heading the way a `FormSection` is (an `<h2>`), and the standard
 `<h3><button aria-expanded>` shape is not available inside `<details>`, whose first child must be
 the `<summary>`. That is the same as it was before the unification — the framed strip was not a
 heading either — and the widget semantics are worth more here than the outline entry. A caller that
@@ -797,7 +873,14 @@ The face is **Source Sans 3**, self-hosted from Adobe's
 italic variable WOFF2 files sit in `src/app/fonts/` with their SIL Open Font License. `next/font/local`
 loads both in `app/layout.tsx` at weights 200–900 and emits `--font-source-sans-3`; `--font-sans` in
 `globals.css` puts it ahead of the system fallback. Nothing at build or run time reaches out to a
-font CDN. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
+font CDN. **Only the upright is preloaded.** The two faces are declared apart (`app/font.ts`,
+`app/font-italic.ts`) because one `localFont` call preloads every file it names, and the italic's
+138 KB then raced the page's JavaScript on each first visit for a face most screens never draw; it is
+fetched when italic text first appears. Both declarations assign to a constant named `sourceSans3`,
+which is what the build names the family after, so they are one family and `font-style: italic` picks
+the italic file with nothing else said; `app-states.spec.ts` checks that, and that the response preloads
+the upright alone. The files are whole, not subset to Latin: the licence reserves the name "Source", so
+a subset is a modified font that could not keep it. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
 
 **Glyphs are laid out at their real widths.** Chromium on Linux hints a web font and rounds every
 glyph's advance to a whole pixel, and against the body's −0.02em tracking that broke the 11–13px
@@ -992,6 +1075,15 @@ rather than assembling its own recharts tree — adding a measurement should mea
   clipped them.
 - A chart's `height` is a **floor**, not a fixed size. Panels in a row stretch to the tallest of
   them, and a fixed plot puts the surplus between the chart and its legend as a band of nothing.
+- **A chart is a frame and a plot, and only the plot is recharts.** The frame (`MetricChart`) is in
+  the page from the first render at the chart's height, with the keyboard, the pinned reading and
+  the crosshair. The plot is drawn when the reader comes within 600px of it (`useNearViewport`),
+  stays drawn once it is, holds the frame it last drew while it is out of reach
+  (`metrics/plot-held.ts`), and is memoised with its legend, so a panel re-rendered for the live
+  figure in its head does not reconcile a tree whose rows are the same array. A page therefore
+  hands a chart **one array per reading, not one per render**: rows built in the render body redraw
+  every chart on every frame of the socket. Opening Metrics drew eleven recharts trees in one
+  blocked stretch and redrew them every two seconds; it now draws the first screen's.
 - **A scale fitted a little above a limit splits into unround steps** (143 / 286 / 429 MB), so
   `yTicks` on `MetricChart` and `ChartPanel` names the ticks. A container's memory chart is scaled to
   its limit and ticks at the limit's quarters, so the top tick names the limit — on Docker's
@@ -1028,8 +1120,8 @@ Processes, Packages, Proxy and Database pages were a bar with a list under it, t
 things as rows and a sentence where there were none yet. Each poll reordered the rows; a block grew
 from a sentence to five lines when its first reading landed, which pushed the table under it down the
 page; and the rows repeated that table's columns. Any new band takes this component, and what it
-would have listed is the table's. Scheduled's lanes and the Overview's Storage are not shares of one
-bar and keep their own shapes.
+would have listed is the table's. Scheduled's hour chart and the Overview's Storage are not shares
+of one bar and keep their own shapes.
 
 - **The line holds one part.** At rest that is the heaviest, or the part the table is narrowed to, or
   the first given on a `ticks` or `fixed` reading, so those lead with the one worth reading: Recent's
@@ -1059,6 +1151,11 @@ bar and keep their own shapes.
   failed read. What needs more goes under the block. **`note`**, at the strip's end, holds what the
   strip leaves out or a control for the whole block. **At most six marks**; a part past them keeps its
   span and is read under the pointer.
+- **A mark is bare**: the part's picture alone, drawn a little larger than the glyph a caller passes
+  (`scale-115`), with no rule under it. Until 0.8.6 each mark sat on a short rule in its part's
+  colour, which made the strip read as a row of tabs; it was removed at the operator's request. The
+  colour is the line's tick and the span's, and a pointed or pressed mark takes the row's hover or
+  accent ground.
 - **A band must not mount, unmount or change columns as data lands, and its page renders it during
   load.** Whether a block is drawn is decided by what the host is, never by what a read has said so
   far, so a page whose readings land does not move.
@@ -1149,7 +1246,14 @@ above:
   being tested, an engine being started from quick setup; and, on `/deploy/new`, a repository or
   an image being inspected. The shimmer lights the stage a release is at and the present
   participles that stand for a wait — *Sending test…*, *Testing…*, *Pausing…*, *Candidate for
-  release #14*, *deploying #14*, *running now*;
+  release #14*, *deploying #14*, *running now*. All three are the browser's own animations, never a
+  script's frame loop, because *live* lasts as long as the page is open: the beam's pulse is a band
+  moved by `transform` behind a mask cut to the line (`jd-beam`), `BorderBeam`'s lap is the frame's
+  edge written as transform keyframes (`lib/beam-lap.ts`) and handed to the Web Animations API
+  once, the shimmer is `jd-shimmer`, the update notice's wire `jd-wire`, and the release path's
+  running `Segment` is `animate-sweep`. Reduced motion stills each of them in CSS. A new *live*
+  mark is written the same way: an endless `motion` animation keeps a page that looks still busy
+  sixty times a second (`design-system.spec.ts` counts the frames a page with wires asks for);
 - *once* — `Confetti` fires only when a release goes live in front of the reader — on the run page,
   on the Overview when a run watched there from start to finish ends in success, and from the
   sidebar's update notice when an update of the dashboard itself finishes while the tab is open —
@@ -1438,6 +1542,17 @@ presses restart twice. The row carries the present participle (`Stopping…`) un
 ## 14. A header is its title
 
 **A surface's header carries its name and its actions. It does not carry a picture of itself.**
+
+**The outline a screen reader walks is part of the header.** Every page has exactly one `h1`: a
+workbench that draws no header (Files, Terminal) says its name in an `sr-only` one. Headings never
+skip a level, so a `FormSection`'s title is an `h2`, the level under the page's title; it was an `h3`
+with nothing between. Nothing is drawn outside a landmark: the sidebar's wordmark, version and search
+are the page's `banner`. A scrolling table with nothing in it to focus is itself a keyboard stop
+(`Table` makes its container a named, focusable region only then, so a table of links keeps the tab
+order it had). A mark that is a link says what it opens in words when its title is drawn rather than
+written (a topology node's `name`), a status dot that carries a label is `role="img"`, and a
+`Sparkline` without a label is hidden rather than an unnamed image. `design-system.spec.ts` holds the
+first three and `network-topology-interfaces.spec.ts` the table and the node's name.
 
 Every `PanelHeader`, `Modal`, `SidePanel` and `Section` used to open with a 28px brand-tinted plot
 and a glyph inside it. On a page of six panels that is six brand marks down the left edge, each one
@@ -1740,7 +1855,13 @@ A watched domain opens a live report and preserves its nonstandard port. Passwor
 lists and watched-domain setup use the deployment settings' sections, each head over its fields; an
 access list is a row you read (its addresses as mono tags, its sites as links, its include line with
 Copy) with Edit inline and Delete in its menu. Certificate renewal lineages and
-DNS providers remain readings with their own actions, laid out to fit the management column; every
+DNS providers remain readings with their own actions, laid out to fit the management column. The
+providers are one list of choices, each a row of one height (mark, name, verbs): a plugin that is not
+installed and credentials nobody saved are the expected answer for a provider nobody chose, so only a
+provider with a token saved, or one a lineage renews through, says where it stands (*credentials
+saved*, *plugin missing*, *no credentials*), and those stand first. The name keeps its width before
+anything beside it; the plugin's id, the propagation wait and why a plugin cannot be installed from
+here are behind the name. Until 0.8.6 all eight carried an amber *plugin missing* line. Every
 run certbot made, the timer's included, follows the two columns as Renewals, a log `Pane` across the
 page's width, which a log needs and the management column does not have. The
 renewal column opens on its recent certbot runs (in the body, where they wrap, not in the narrow
@@ -1773,6 +1894,17 @@ including a stopped, failed, masked and boot-disabled unit, a refused start, res
 the config test panel; `proxy-insights.spec.ts` covers Live traffic, the ingress's routes in it, Recent errors, the nginx counters' switch (pressed on the card as well as the switch) and a phone;
 `proxy-alerts.spec.ts` covers the Alerts page — its picture, what fires, the rule form — and the
 overview bar's firing count.
+
+**A Sites list that could not be read says which read failed, why, and can be asked again.** The list
+is read from nginx, a Caddy on the host and the Caddy container that holds the public ports, and the
+last can fail on a server where the first two are fine (Docker not answering, two public Caddy
+containers and no word on which is the ingress, a Caddy that publishes 80 without 443). The page was
+two words in a red box. `proxy/sites-read-failure.ts` names the block for what was being read
+(*Could not read the sites*), draws the answer's `reason` under its message and its `raw` behind
+*What the server said* where the server sent them, points a bare 500 at the log line with its request
+id where it did not, and always offers **Try again**, since the read changes nothing. The notice over
+rows kept from the last good read carries the same reason and disclosure. `proxy-sites-list.spec.ts`
+holds both at 1280 and 390, with and without a reason.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:
@@ -2233,6 +2365,20 @@ The passes, in order. Each one is a diff you can review on its own.
    which the sampler keeps for every process it measures, so a sheet opened from a table that has
    been open for minutes opens on those minutes.
 
+   The sheet became a page in 0.8.6, at the operator's request: "when I open a process it opens in
+   a side panel … the information just gets cluttered", with everything the kernel keeps about a
+   process — threads, descriptors, limits, environment, the signals it handles — left nowhere to go.
+   A process is a destination now, the way a container is: `/processes/[pid]`, its identity line and
+   its views as the underlined strip (`procs/process-page.tsx`). What the sheet did well, the table
+   beside the thing being read, is the rail from `xl` — the table's filters and ranking folded into a
+   column, the process on screen filled, Alt+↑/↓ to walk it and the view carried along — so checking
+   the next worker is one press rather than a trip back. The Overview keeps the sheet's four readings
+   and replaces its lineage path and child rows with the container page's wiring picture: what
+   supervises it and its parent on the left, the process as its product in the middle, what it started
+   (copies of one program as one node), its sockets and its open files on the right. Control says what
+   each signal will do to *this* process, read from the masks of the signals it handles, so a hang-up
+   that reloads nginx and a hang-up that ends a script stop looking like the same button.
+
    PM2 took the same exit in the same pass, at the operator's request, and for the same reason: four
    grey figures over a table, and nothing that moved. Online and Not running went to state chips in
    the table's head, Errored in its tone and drawn only while there is one; Restarts summed every
@@ -2272,14 +2418,21 @@ The passes, in order. Each one is a diff you can review on its own.
    and its figure-beside-a-bar readings, and its state column says how long a unit has been in its
    state — up for, failed since and why, the restarts it has taken. Only a newly listed unit rises
    (`useArrivals` keyed on its name); starting or stopping an existing unit updates it in place.
-   The unit sheet kept
-   its Journal tab, whose pane needs the height, and its overview became the process sheet's
-   readout: four live tiles (CPU over the unit's recent windows, memory against its limit or over
-   its windows, tasks against theirs, automatic restarts with the policy), or the last run's
-   counters when it is not running; a failure or a restart loop said first as a Notice with the
-   way to its journal; the command coloured as a command rather than systemd's record of it; the
-   processes it holds now, each opening Live's sheet; and how it runs, with its type in words and
-   its overrides.
+   The unit sheet became a page in 0.8.6, as the process sheet did and at the operator's request
+   ("can we do the same for the /services page"): `/processes/services/[unit]`
+   (`procs/service-page.tsx`), the table as a rail beside it from `xl`, failed first, with Alt+↑/↓
+   and the view carried to the next unit. Its Overview keeps the sheet's readout — four live tiles
+   (CPU over the unit's recent windows, memory against its limit or over its windows, tasks against
+   theirs, automatic restarts with the policy), or the last run's counters when it is not running;
+   a failure or a restart loop said first as a Notice with the way to its journal — and draws where
+   the unit sits with the process page's wiring picture (`procs/wiring-picture.tsx`, one component
+   for both): what starts it and what it needs on the left, a down requirement in the danger hue
+   because that is usually why a unit will not start, and its main process, its other processes by
+   program, its sockets and where it writes on the right. What a drawer had no room for became views:
+   its dependencies by the question each answers with every named unit's state, the unit file and
+   its drop-ins coloured as one, its `Environment=`, `systemd-analyze security`'s exposure with each
+   setting most exposed first, and Control, where every verb is a row that says what it does and
+   each signal says what it will do to the main process, read from that process's signal masks.
 
    Docker's Containers took the same exit in 0.7.1, at the operator's request, because it had no
    life: a runtime health bar and a list of findings over a column of grey cards, nothing on it that
@@ -2361,24 +2514,63 @@ The passes, in order. Each one is a diff you can review on its own.
    narrow the log to what they count; timers armed is the timers' head, armed, running now and
    stopped as chips with how many start on boot beside them; the package files' lines are a fact
    and their section's count. What took the tiles' place is the question they answered one figure
-   at a time: `components/procs/schedule-band.tsx`, the next 24 hours of all three on one axis
-   that starts now, a lane per schedule soonest first, each drawn as the program it runs. A lane's
-   next run is a dot in its kind's `--tag-*` hue (blue for the account's crontab, violet for the
-   timers, cyan for the package files — none red or amber, so no lane reads as one that failed),
-   the runs after it ticks, and a schedule that fires more often than the axis can draw a band; the
-   kinds are chips that count and narrow, and what the axis cannot draw — weekly work past it, what
-   runs only at boot, what is switched off — is a line under it. A cron line's runs are its
-   expression's (`lib/schedule.ts`); a timer's is the one systemd reports, since the packages'
-   timers add a random delay to their calendars and every later run drawn from the calendar would
-   be a time they do not fire at. Every countdown ticks, which is the page's motion, and nothing
-   else moves. A lane, a job's command and a timer's name open sheets addressed by `?job=` and
-   `?timer=`: a job's opens on its next run and its runs in the next day and week, the week as seven
-   lines of a day with a tick per run, the command coloured as a command, and the cron log narrowed
-   to that command; a timer's on its next and last run and how long that took, its calendar in
-   words beside the expression with the random delay said, the command its service runs, and the
-   service's Runs view, which used to open inside the timer's table row. The job editor is a sheet
-   as well, its frequency a row of toggles rather than a select, drawing the week the schedule
-   being written makes as the fields change.
+   at a time: `components/procs/schedule-band.tsx`, the next 24 hours of all three, said two
+   ways that agree.
+
+   The first shape of it was a lane per schedule on one axis that started now, the next run a dot,
+   the runs after it ticks, a schedule too frequent to draw a band. In 0.8.6 the operator could not
+   read it — "is it a calendar? a timeline? what does it show" — and they were right on every
+   count: nothing said what a dot, a tick or a band was; most lanes were one dot by the left edge of
+   an empty track, because systemd reports only a timer's next run; the hours were an axis three
+   lanes up; the times were the browser's while the schedules said the server's, so "every day at
+   03:30" forecast 22:30; and `/etc/crontab`'s braced daily line named a lane "}". It is now a
+   chart of the next 24 hours an hour to a column — each schedule that runs in an hour one block in
+   its kind's `--tag-*` hue (blue for the account's crontab, violet for the timers, cyan for the
+   package files, none red or amber so no block reads as a failure), stacked with the hourly ones at
+   the foot so the day's floor is level, the hours named under the columns from *Now* — and one
+   fixed line under it that says the day in a sentence at rest and reads out the hour or the block
+   pointed at (§10's readout, one height in every state). Under the chart, **Up next** lists the
+   schedules in the order they run: each row the clock time, the mark, the name, the schedule in
+   words, the kind and a countdown, one height; pointing at a row lights its blocks across the day
+   and dims the rest, so the list and the picture are read together. The kinds are chips that
+   count and narrow; what the chart cannot draw — work later in the week, what runs only at boot,
+   what is switched off, and the package cron lines left to systemd — is a line under the list.
+   The band renders during load in the same shape, so the tables under it do not move when it
+   lands. Every time on the page is on the server's clock, and the identity line names the zone
+   when it is not the reader's. A cron line's runs are its expression's (`lib/schedule.ts`); a
+   timer's are read off its calendar only where it adds no random delay (`timerRuns`), since a
+   package timer that adds twelve hours fires at none of its calendar's times, and are otherwise
+   the one run systemd reports. A package's cron line guarded on `/run/systemd/system` does nothing
+   on a host running systemd — Debian ships it beside a timer for the same work — so it draws no
+   run, and its row and its sheet say which timer does the work (`deferredToSystemd`).
+
+   The tables under the band took the same pass. A job is named the way the band names it — the
+   note above the line, `run-parts`' Hourly or Daily scripts, or the program — with the command
+   that does the work under the name, the schedule in words over its expression in its own column,
+   and the next run as a countdown over its clock time ("in 2h 23m" over "Tue 00:59") where the
+   column printed the date to the second. A state that is the expected answer is not drawn: the
+   cron jobs lost their *enabled* column, the timers their *Startup* tag, and a timer that will not
+   come back after a reboot says so under its state. The timers say when each fires in words with
+   the delay its package adds — the backend reads every timer's calendar, intervals and delay with
+   one `systemctl show` — and what its unit says it is for. The system cron files are one table
+   grouped under a row per file, where they were a table per file each repeating its header, with
+   `/etc/crontab`'s worked example (a commented `* * * * * user-name command to be executed` under
+   a ruler of pipes, which parsed as a switched-off job) left out.
+
+   Every schedule opens a sheet built from one set of parts (`components/procs/schedule-sheet.tsx`),
+   because the three sheets were tiles, a strip, a command and a log stacked at 20px with nothing
+   louder than another, and the schedule — what a schedule is opened for — was a line of mono under
+   the title. Each opens on the schedule as a sentence over the expression it was written as, then
+   its figures as tiles, then **When it runs**: the next five runs as a list beside the week drawn
+   as seven days of a mark per run and a count per day, a timer's random delay a wash after each
+   mark (why certbot ran at 06:41 when its calendar says midnight is the wash, not a sentence);
+   then Command, Details and Runs, each a title and a hairline on one 24px gutter. A job's figures
+   are its next run and its runs this week, and its Runs the cron log narrowed to its command; a
+   switched-off job, a stopped timer and a line left to systemd say which they are first, the last
+   linking the timer. A timer's figures are its next and last run and how long that took, and its
+   Runs the service's Runs view. The job editor asks what runs, then when — its frequency a grid
+   of toggles — over a preview card of the schedule in words, its week and its next three runs,
+   drawn as the fields change.
 
    The proxy overview took the exit in 0.7.1, at the operator's request, because it had no life:
    four grey tiles (sites, certificates, streams, internet-facing ports) over a column of route cards
@@ -2823,20 +3015,16 @@ The passes, in order. Each one is a diff you can review on its own.
    it, a database never backed up was drawn at a place it did not have, and the track's hairline
    under each row's own rule read as a double line. Each database keeps one hue (`fleetHues`, a
    lane hue without slate dealt in the order the connections were saved, so five databases are
-   five hues and a new one moves nobody's) on its span, its mark's rule in the strip and its table row; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
+   five hues and a new one moves nobody's) on its span and its mark's rule in the strip; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
    the operator's request), and its Stored figure carries a short bar in that hue
-   against the largest database, as the table's Size cell does. The picture of what the databases
-   feed moved above *Found on this server*, so the page's moving thing is not under a list of rows.
-   In 0.7.5, at the operator's request, it and the map are drawn the way Configuration draws the path
-   a request takes (`config/request-path.tsx`): every mark at the wiring vocabulary's full size (the
-   control center's smaller `compact` version went), the two lanes centred on each other with a wide
-   empty lane between them, no lane headings — each node's eyebrow says what it is — and whether a
-   database answers or a reader runs as the dot in its mark's corner, as on Configuration's services.
-   The lanes are ordered for the wires (`wiredOrder`):
-   databases that feed something first, each reader across from the mean of the databases that feed
-   it. The control center's picture is of what is wired, and the databases nothing is seen reading
-   are a line of their engine marks and names under it, each a link to the database, where a
-   sentence listed their names. *Found on this server* lists its servers in the order they can be
+   against the largest database. Until 0.8.6 the cards could be laid across as a table and the page
+   carried a picture of what the databases feed — two lanes of marks drawn the way Configuration
+   draws the path a request takes, with a line of the databases nothing was seen reading under it —
+   and the map was the same picture with a list of readers beside it. In 0.8.6, at the operator's
+   request, the table and the control center's picture went (the cards are the one way the fleet is
+   drawn, and what feeds what is reached from the identity line's "read by" figure), and the map
+   became the server map's canvas with one diagram for each database
+   ([server map](../server-map.md#the-databases-map)). *Found on this server* lists its servers in the order they can be
    connected — one press, a password, a start, nothing this page can do — and a file row's second
    line is the folder it is in, cut from its start, where it repeated the file's whole path.
    In 0.8.2, at the operator's request, it lists only what there is to take: servers, and the files
@@ -3075,8 +3263,8 @@ pages and create command with the list filters; an empty fleet has its create co
 state.
 The Databases section omits the top metric-card sections on every page. The control center starts
 with the server's databases as an identity line — its commands at the line's end beside the verdict —
-then a band of storage, sessions and backups, then the saved databases with search, engine chips and
-layout controls. The attention findings it opened on were removed in 0.7.1; each fix they carried is a
+then a band of storage, sessions and backups, then the saved databases as cards with search, engine
+chips and how they are shelved. The attention findings it opened on were removed in 0.7.1; each fix they carried is a
 verb on the database's card. The former metric-card `?show=` filters no longer narrow the inventory.
 Individual database cards retain the facts needed to compare connections. A database home starts with its
 identity line, then a picture of how it is used, its recorded activity, its server log, its rankings
@@ -3281,8 +3469,10 @@ the end of the field that read as the `/` shortcut and a letter "B". Now:
   is a blue field with amber and red where they happened, not a grey wall. The histogram is taller,
   reads a column out by series under the pointer, and takes a drag as well as a press.
 - **Insights says the window in words first.** A log's opens on its lines, errors, warnings (each
-  narrowing to itself), busiest minute and its measure's p95 or distinct addresses, every figure with
-  its line across the window. A request record's opens on who came: **Visitors** (distinct people —
+  narrowing to itself), busiest minute and its distinct addresses, every figure with its picture on
+  one line across the row. Since 2026-11-09 it is drawn as the request record's is: `RankList` and
+  `SplitBar` rather than a `BarList` per key, group tables of one-line rows, the chart under a block's
+  head, and level chips for the levels present only. A request record's opens on who came: **Visitors** (distinct people —
   an address and a browser that opened a page; never a crawler, a script or a probe), page views, bots
   and scripts, the site that sent them as itself and the devices as one bar in their colours, then
   the people as a list — the browser on its system, the device, the address, their trail of pages —
@@ -3356,7 +3546,17 @@ with the guard's sentence beside it (a device's *Set down* on the uplink, forwar
 needs), because a control that disappears says nothing and one greyed out with no reason says less.
 Each page that reads a tool this host may not have opens on its install where it is missing
 (`network/install.tsx`: the package's name, what it would do here drawn as the product, and the
-Packages page's install job streaming under the button).
+Packages page's install job streaming under the button). The Git page and Tailscale on the VPN page do
+the same, without the after-install phases the server keeps only for the network and security tools
+(`phases={false}`); Tailscale is offered only where the package manager carries it
+(`usePackageKnown`, one `GET /packages/tailscale`), since Debian and Ubuntu do not until its own
+repository is added, and is pointed at otherwise. PM2 is an npm package for a host account, not
+something the package manager installs, so its page names the command and opens the terminal
+(`procs/pm2-missing.tsx`). Docker is never missing on an install that runs in it; what its pages say
+when the daemon cannot be asked is which fault it is (`docker/unreachable.ts`): a socket that refused
+the dashboard, a `docker.service` systemd says is not running (with **Start Docker** for
+`service.control`), a daemon that runs but not at the address asked, or no answer where systemd cannot
+be asked. The client's own sentence is behind *What the server said*.
 
 **Network drift took the exit on 2026-10-10**, at the operator's request, because it was dead:
 four grey figures (known differences, incomplete readings, matching observations, owned repair
@@ -3547,10 +3747,10 @@ the reader through it.
 | Host Overview, metrics, Docker, Security, Network, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
 | Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
-| Databases — the control center, the map, a database's home, Search, Compare, Generate, Performance, Advisor, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
+| Databases — the control center, a database's home, Search, Generate, Performance, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
 | `/databases/[id]/import` — bring a database over from another server | **Flow** | A sequence with an outcome: which server it is on now, how it should come over, and — for a replication — when to cut over, ending in a database here. The spine is taken from the import the server keeps, so a reload, or the next day, finds it where it was. |
 | A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
-| The server map (`/map`) | Reading, as a workbench | The reader arrives to find out what each thing the server runs is made of and wired to. One frame held to the window (`<Page fill>`) around the rail of systems, a canvas and its inspector, the way a database's Diagram is. Each system is its own diagram in a hairlined frame on a ground a step up from the canvas's, and its boxes are the product's own vocabulary — a `ProductLogo` tile, the name, a `Status` dot and word, the eyebrow voice for the kind — given, at the operator's request in 0.8.2, a workflow editor's wiring and an outline per kind: the deployment is the large card, where traffic arrives is rounded on its left like a trigger, a database is a cylinder, a volume a disk, a web container wears a browser's bar, a proxy is cut to a gateway's point, and what hangs under a box (its checkout, its logs, a certificate) is a round sub-node on a dashed line from a labelled port. No shadow, glow or gradient comes with them: the outline is a border and a step of ground, a state is a `rule-*` edge and the dot, and the chosen box's lines are the brand's blue with the §2 pulse travelling them where both ends are up. *Open* in the inspector is the surface's one command face, as is the button a tap floats on a phone, where the canvas is alone and edge to edge, and *Deploy a project* on a server with nothing to draw. No toolbar or minimap: the inspector's toggle and full screen float on the canvas, beside the panel they work. |
+| The server map (`/map`), and the databases map (`/databases/map`) on the same canvas with one diagram for each database | Reading, as a workbench | The reader arrives to find out what each thing the server runs is made of and wired to. One frame held to the window (`<Page fill>`) around the rail of systems, a canvas and its inspector, the way a database's Diagram is. Each system is its own diagram in a hairlined frame on a ground a step up from the canvas's, and its boxes are the product's own vocabulary — a `ProductLogo` tile, the name, a `Status` dot and word, the eyebrow voice for the kind — given, at the operator's request in 0.8.2, a workflow editor's wiring and an outline per kind: the deployment is the large card, where traffic arrives is rounded on its left like a trigger, a database is a cylinder, a volume a disk, a web container wears a browser's bar, a proxy is cut to a gateway's point, and what hangs under a box (its checkout, its logs, a certificate) is a round sub-node on a dashed line from a labelled port. No shadow, glow or gradient comes with them: the outline is a border and a step of ground, a state is a `rule-*` edge and the dot, and the chosen box's lines are the brand's blue with the §2 pulse travelling them where both ends are up. *Open* in the inspector is the surface's one command face, as is the button a tap floats on a phone, where the canvas is alone and edge to edge, and *Deploy a project* on a server with nothing to draw. No toolbar or minimap: the inspector's toggle and full screen float on the canvas, beside the panel they work. |
 | `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's other flow page is Import. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with a picker on it — the generators on a database's Generate page — gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. Each of its four screens is the run page's rail and inspector before the run: the plan read down a rail beside the one focused surface holding the step's fields. |
@@ -3696,6 +3896,18 @@ a new block on this page takes it too:
   its own tint (`WireMark hue`, the `HUE` map's colours), a name, the reading as words ("0.1% of one core"),
   a detail and its last hour at the line's end. Each is one height in every state and opens the page that
   has the rest.
+
+- **A block that shows only in one state takes the shape too.** The release watch and the sleeping
+  block were missed in 0.8.5 because each is drawn only while a release is on watch or the environment
+  is asleep, and stayed two rows of four tiles until 0.8.6. The watch opens on the proxy that wrote the
+  record (Caddy, or nginx where the readings carry no durations) with *Release #12 fails 0.4% of its
+  requests; 19 in 20 finish inside 180ms*, the judgement and the countdown under it, and its picture is
+  the release before and the release now as two strips of one length, what each answered and what it
+  failed, the figures in a column beside them. The sleeping block opens on Docker's mark with *Asleep
+  by design for 42 min*, and its picture is the last seven days as one strip with each stretch asleep on
+  it. Their verbs stay in the head: *Keep release #N* and *Roll back instantly*, *Wake now*. The rows
+  and strips keep one height and one place whether there is a reading or not
+  (`deploy-rollback-watch.spec.ts` and `deploy-sleep.spec.ts` measure both at 1280 and 390).
 
 The Deployments tab's history and every other page keep `StatTile`: this is the Overview's register of
 speech, not a retirement of the figure.

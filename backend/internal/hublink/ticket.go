@@ -216,21 +216,6 @@ func decodeTicketPayload(raw []byte) (TicketPayload, bool) {
 	return p, true
 }
 
-// ticketPeek reads the account a ticket names without checking anything, for
-// display only. /hub/enter does the same in the browser; the server never acts
-// on it.
-func ticketPeek(ticket string) (TicketPayload, bool) {
-	parts := strings.Split(ticket, ".")
-	if len(parts) != 4 {
-		return TicketPayload{}, false
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return TicketPayload{}, false
-	}
-	return decodeTicketPayload(raw)
-}
-
 // pinnedKey is the hub key a ticket's kid names, if it is pinned and not past
 // its end (step 4).
 func pinnedKey(keys []accountlink.SiteKey, kid string, now time.Time) (ed25519.PublicKey, bool) {

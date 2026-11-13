@@ -23,7 +23,31 @@ function webSocketSource(raw: string | undefined): string | undefined {
   }
 }
 
+/**
+ * Where a page address that ends in a slash is sent: the same address without it, or nothing
+ * for an address that needs no change.
+ *
+ * Next did this itself until `skipTrailingSlashRedirect` (see `next.config.ts`), which is set so
+ * that an API call spelled with a trailing slash is not answered with a redirect first. The
+ * matcher below keeps `/api` away from this function, so the rule that is left is the one pages
+ * always had: `/docker/` is `/docker`, and the rail's `pathname === href` goes on matching.
+ */
+export function withoutTrailingSlash(pathname: string): string | undefined {
+  if (pathname.length < 2 || !pathname.endsWith("/")) return undefined
+  // `//host` at the start of a Location is another origin, whatever was meant.
+  return `/${pathname.replace(/^\/+|\/+$/g, "")}`
+}
+
 export function proxy(request: NextRequest) {
+  const trimmed = withoutTrailingSlash(request.nextUrl.pathname)
+  if (trimmed !== undefined) {
+    // A plain URL: `nextUrl` remembers that it arrived with a trailing slash
+    // and writes it back. Next sends a same-host Location as a path, so the
+    // internal address of the standalone server behind Caddy never reaches
+    // the browser.
+    return NextResponse.redirect(new URL(trimmed + request.nextUrl.search, request.url), 308)
+  }
+
   // A new value per document lets Next nonce its runtime and inline data
   // without granting every inline script permission to execute.
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64")
@@ -83,7 +107,12 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     {
-      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+      // Not the files `public/` serves by the dozen either: the Monaco runtime,
+      // the logos and Excalidraw's fonts are not pages, and each one that came
+      // through here was given a fresh nonce and a policy it never reads. A
+      // drawing's own page is `/excalidraw/<id>` and still comes through.
+      source:
+        "/((?!api|_next/static|_next/image|favicon.ico|monaco/|logos/|brand-logo/|excalidraw/[^/]+/fonts/).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

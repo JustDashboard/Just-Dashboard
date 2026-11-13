@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { fetchResponse, get, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { DEFAULT_DOCUMENT, decodeDocument, type MapDocument } from "@/lib/server-map"
+import {
+  DEFAULT_DOCUMENT,
+  boardLayout,
+  composeLayout,
+  decodeDocument,
+  type MapDocument,
+} from "@/lib/server-map"
 import type { MapLayoutResponse } from "@/lib/types"
 
 /**
@@ -19,13 +25,23 @@ import type { MapLayoutResponse } from "@/lib/types"
  * Saving is debounced and speaks only when it fails, with a toast; a change
  * still waiting when the page goes is sent on the way out on a request the
  * browser keeps alive.
+ *
+ * The databases map keeps its own arrangement in the same document, under
+ * `boards.databases` (`composeLayout`): each canvas writes the whole document
+ * with only its own part changed. So a page reads it only after the save the
+ * page before it sent on its way out has landed, or it would put back what
+ * that save had just moved.
  */
 type MemoryStatus = "loading" | "saved" | "saving" | "unsaved" | "failed"
 
 const SAVE_DELAY = 900
 const PATH = "/map/layout"
 
-export function useMapMemory() {
+/** The save on its way, which the next canvas to open reads after. */
+let saving: Promise<unknown> = Promise.resolve()
+
+/** `board` names a canvas other than the server map's: `"databases"`. */
+export function useMapMemory(board?: string) {
   const [state, setState] = useState<{
     document: MapDocument | null
     status: MemoryStatus
@@ -34,13 +50,22 @@ export function useMapMemory() {
   const flying = useRef<MapDocument | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const failed = useRef(false)
+  // The whole document as last read or written, which a save changes only
+  // this board's part of; `undefined` until it has been read.
+  const whole = useRef<unknown>(undefined)
 
   useEffect(() => {
     let cancelled = false
-    get<MapLayoutResponse>(PATH)
+    saving
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .then(() => get<MapLayoutResponse>(PATH))
       .then((res) => {
         if (cancelled) return
-        setState({ document: decodeDocument(res?.layout), status: "saved" })
+        whole.current = res?.layout ?? null
+        setState({ document: decodeDocument(boardLayout(whole.current, board)), status: "saved" })
       })
       .catch(() => {
         // A map that cannot read its arrangement still draws: laid out fresh,
@@ -50,7 +75,7 @@ export function useMapMemory() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [board])
 
   const flush = useCallback(async () => {
     const doc = pending.current
@@ -59,7 +84,16 @@ export function useMapMemory() {
     flying.current = doc
     setState((s) => ({ ...s, status: "saving" }))
     try {
-      await put<MapLayoutResponse>(PATH, { layout: doc })
+      // Never read — the first read failed: read it now, so the other
+      // canvases' arrangements are kept rather than written over.
+      if (whole.current === undefined) {
+        whole.current = (await get<MapLayoutResponse>(PATH))?.layout ?? null
+      }
+      const layout = composeLayout(whole.current, board, doc)
+      const sent = put<MapLayoutResponse>(PATH, { layout })
+      saving = sent
+      await sent
+      whole.current = layout
       flying.current = null
       failed.current = false
       setState((s) => ({ ...s, status: pending.current ? "unsaved" : "saved" }))
@@ -69,7 +103,7 @@ export function useMapMemory() {
       if (!failed.current) notify.error("The map's layout could not be saved", err)
       failed.current = true
     }
-  }, [])
+  }, [board])
 
   const update = useCallback((next: Partial<MapDocument> | ((doc: MapDocument) => MapDocument)) => {
     setState((s) => {
@@ -94,14 +128,15 @@ export function useMapMemory() {
     const leave = () => {
       clearTimeout(timer.current)
       const doc = pending.current ?? flying.current
-      if (!doc) return
+      // Unread, the rest of the document is not known, and this would erase it.
+      if (!doc || whole.current === undefined) return
       pending.current = null
       void fetchResponse(PATH, {
         method: "PUT",
         keepalive: true,
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ layout: doc }),
+        body: JSON.stringify({ layout: composeLayout(whole.current, board, doc) }),
       }).catch(() => undefined)
     }
     window.addEventListener("pagehide", leave)
@@ -110,7 +145,7 @@ export function useMapMemory() {
       clearTimeout(timer.current)
       if (pending.current) void flush()
     }
-  }, [flush])
+  }, [flush, board])
 
   return { document, update }
 }

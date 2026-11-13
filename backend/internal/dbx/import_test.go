@@ -135,17 +135,3 @@ func TestImportNullAs(t *testing.T) {
 		t.Errorf("expected NULL name, got %q", *name)
 	}
 }
-
-func TestImportPreview(t *testing.T) {
-	header, sample, err := ParseImportPreview(
-		strings.NewReader("a,b\n1,2\n3,4\n5,6\n"), true, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(header) != 2 || header[0] != "a" {
-		t.Errorf("header = %v", header)
-	}
-	if len(sample) != 2 {
-		t.Errorf("sample rows = %d, want 2", len(sample))
-	}
-}

@@ -1,6 +1,6 @@
 "use client"
 
-import { SettingsDanger } from "@/components/database/ops"
+import { SettingsDanger } from "@/components/database/ops/settings-danger-page"
 import { SectionPage } from "@/components/database/shell/section-page"
 
 export default function SettingsDangerPage() {

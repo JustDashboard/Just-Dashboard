@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The one configuration in which a browser opening this dashboard sees an
@@ -95,7 +96,7 @@ func (k *CertKeeper) Start(ctx context.Context) {
 		return
 	}
 	ctx, k.stop = context.WithCancel(ctx)
-	go func() {
+	safego.Go(ctx, k.log, "tailscale certificate keeper", func(ctx context.Context) {
 		retry := firstRetry
 		for {
 			wait := checkInterval
@@ -111,7 +112,7 @@ func (k *CertKeeper) Start(ctx context.Context) {
 			case <-time.After(wait):
 			}
 		}
-	}()
+	})
 }
 
 func (k *CertKeeper) Stop() {
@@ -363,20 +364,4 @@ func parseTailscaleStatus(raw []byte) Identity {
 			id.Hostname + " yet. Turn it on at https://login.tailscale.com/admin/dns — it is one switch."
 	}
 	return id
-}
-
-// WithTailnet returns the allowlist with the tailnet range added, if it is not
-// already covered. Adding rather than replacing: the existing entries are the
-// operator's, and a mode switch has no business deciding they were wrong.
-func WithTailnet(list string) string {
-	if nets, err := parseCIDRList(list); err == nil {
-		if containsIP(nets, net.ParseIP("100.64.0.1")) {
-			return list
-		}
-	}
-	list = strings.TrimSpace(list)
-	if list == "" {
-		return TailnetCIDR
-	}
-	return TailnetCIDR + "," + list
 }

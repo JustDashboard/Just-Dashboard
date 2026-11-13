@@ -103,6 +103,36 @@ func TestParseTimerListOrdersBySoonestAndReadsMicroseconds(t *testing.T) {
 	}
 }
 
+func TestParseTimerShowReadsEachTimersTriggers(t *testing.T) {
+	// systemd 255's own output for three Ubuntu timers, Id last in each block.
+	doc := "TimersCalendar={ OnCalendar=*-*-* 06,18:00:00 ; next_elapse=Mon 2026-11-09 06:00:00 CET }\n" +
+		"RandomizedDelayUSec=12h\nId=apt-daily.timer\nDescription=Daily apt download activities\n\n" +
+		"TimersCalendar={ OnCalendar=Mon *-*-* 00:00:00 ; next_elapse=Mon 2026-11-16 00:00:00 CET }\n" +
+		"TimersCalendar={ OnCalendar=*-*-01 03:00:00 ; next_elapse=n/a }\n" +
+		"RandomizedDelayUSec=1h 40min\nId=fstrim.timer\nDescription=Discard unused filesystem blocks once a week\n\n" +
+		"TimersMonotonic={ OnUnitActiveUSec=1d ; next_elapse=2w 3d 16min 41.521525s }\n" +
+		"TimersMonotonic={ OnBootSec=15min ; next_elapse=15min }\n" +
+		"RandomizedDelayUSec=0\nId=systemd-tmpfiles-clean.timer\nDescription=Daily Cleanup of Temporary Directories\n"
+	got := parseTimerShow(doc)
+	apt := got["apt-daily.timer"]
+	if apt.Description != "Daily apt download activities" || apt.RandomDelay != "12h" ||
+		len(apt.Calendar) != 1 || apt.Calendar[0] != "*-*-* 06,18:00:00" || len(apt.Monotonic) != 0 {
+		t.Fatalf("apt-daily = %+v", apt)
+	}
+	fstrim := got["fstrim.timer"]
+	if fstrim.RandomDelay != "1h 40min" || len(fstrim.Calendar) != 2 || fstrim.Calendar[1] != "*-*-01 03:00:00" {
+		t.Fatalf("fstrim = %+v", fstrim)
+	}
+	clean := got["systemd-tmpfiles-clean.timer"]
+	if clean.RandomDelay != "" || len(clean.Monotonic) != 2 ||
+		clean.Monotonic[0] != "OnUnitActiveSec=1d" || clean.Monotonic[1] != "OnBootSec=15min" {
+		t.Fatalf("tmpfiles-clean = %+v", clean)
+	}
+	if len(parseTimerShow("")) != 0 || len(parseTimerShow("garbage\n\nmore")) != 0 {
+		t.Fatal("a listing with no Id read as a timer")
+	}
+}
+
 func TestPM2ControlAllRefusesVerbsThatDoNotTakeAll(t *testing.T) {
 	p := NewPM2()
 	for _, action := range []PM2Action{PM2Delete, PM2Flush, PM2Reset, PM2Action("kill")} {

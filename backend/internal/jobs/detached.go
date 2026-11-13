@@ -186,7 +186,7 @@ func (*systemdUnits) forget(ctx context.Context, unit string) {
 type detachedRecord struct {
 	Job      Job       `json:"job"`
 	Shown    []string  `json:"shown"`
-	Deadline time.Time `json:"deadline"`
+	Deadline time.Time `json:"deadline,omitzero"`
 	// BootID tells a unit that is gone because it finished from one that is
 	// gone because the server restarted under it.
 	BootID string `json:"bootId"`

@@ -418,7 +418,10 @@ function AssistantSettingsView({
           className="flex min-w-0 flex-wrap items-center gap-4 rounded-xl border border-hairline bg-card p-4"
         >
           <AssistantMark product={assistantProduct(view)} size="md" />
-          <div className="min-w-0 flex-1">
+          {/* A measure of its own rather than whatever the command leaves: with
+              none, the button kept its width on a phone and the head wrapped
+              to a word a line beside it. Now the command goes under the text. */}
+          <div className="min-w-0 flex-[1_1_14rem]">
             <p className="text-lg font-semibold tracking-tight">
               {view.configured ? (view.modelLabel ?? view.model) : "The assistant is off"}
             </p>
@@ -436,7 +439,7 @@ function AssistantSettingsView({
             />
           ) : (
             admin && (
-              <Button onClick={() => setEditing({})}>
+              <Button onClick={() => setEditing({})} className="max-sm:w-full">
                 <Sparkles />
                 Set up the assistant
               </Button>

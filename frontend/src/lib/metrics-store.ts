@@ -148,6 +148,30 @@ export function getServerState(): MetricsState {
   return EMPTY
 }
 
+/**
+ * A reader of one value out of the store, for `useSyncExternalStore`.
+ *
+ * The store builds a new state on every frame, so a component that subscribes
+ * to all of it renders every two seconds whatever it draws: the Files page read
+ * the whole state for the free space on one disk and drew a folder's five
+ * hundred rows again on each frame. A reader hands back the value it handed
+ * back last for as long as `same` says the new one is no different, and React
+ * renders a subscriber only when its snapshot is a different value.
+ */
+export function reader<T>(
+  select: (state: MetricsState) => T,
+  same: (a: T, b: T) => boolean = Object.is,
+  from: () => MetricsState = getState,
+): () => T {
+  let last: { value: T } | undefined
+  return () => {
+    const value = select(from())
+    if (last && same(last.value, value)) return last.value
+    last = { value }
+    return value
+  }
+}
+
 export function setHost(host: HostInfo) {
   set({ host })
 }

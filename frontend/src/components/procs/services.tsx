@@ -1,13 +1,12 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Cross, RefreshClockwise, Servers } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
-import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/components/deploy/vocabulary"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
@@ -43,13 +42,22 @@ import { MiniBar } from "@/components/procs/process-table"
 import { ServiceBand } from "@/components/procs/service-band"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
 import { cpuTone } from "@/components/procs/shared"
-import { UnitJournalSheet } from "@/components/procs/unit-journal"
 import {
   useUnitControl,
   useUnitVerbs,
   type ConfirmFn,
   type PendingMap,
 } from "@/components/procs/unit-actions"
+import {
+  BUCKETS,
+  SERVICE_FILTER_KEYS,
+  STARTUP,
+  STARTUPS,
+  filterUnits,
+  serviceHref,
+  startupOf,
+  type StartupFilter,
+} from "@/components/procs/service-facts"
 import {
   ago,
   failureWords,
@@ -69,15 +77,6 @@ const POLL = 5000
 /** The table's rows; a host with more services than this is narrowed by search. */
 const ROWS = 400
 
-type StartupFilter = "" | "enabled" | "disabled" | "static" | "masked"
-
-const STARTUP: { value: Exclude<StartupFilter, "">; label: string; title: string }[] = [
-  { value: "enabled", label: "Enabled", title: "Starts on boot" },
-  { value: "disabled", label: "Disabled", title: "Runs only when started by hand" },
-  { value: "static", label: "Static", title: "Started by another unit, not on its own" },
-  { value: "masked", label: "Masked", title: "Blocked from starting at all" },
-]
-
 /** The state chips, in the order they are asked about; the toned two only while there is one. */
 const STATES: { value: UnitBucket; label: string; tone?: "warning" | "danger" }[] = [
   { value: "active", label: "Active" },
@@ -85,15 +84,6 @@ const STATES: { value: UnitBucket; label: string; tone?: "warning" | "danger" }[
   { value: "changing", label: "Starting", tone: "warning" },
   { value: "inactive", label: "Inactive" },
 ]
-
-const BUCKETS = new Set<string>(STATES.map((s) => s.value))
-const STARTUPS = new Set<string>(STARTUP.map((s) => s.value))
-
-/** An enabled-runtime unit starts on this boot's next start as an enabled one does. */
-function startupOf(unit: SystemdUnit): string {
-  const state = unit.unitFileState || "unknown"
-  return state === "enabled-runtime" ? "enabled" : state
-}
 
 /**
  * Every systemd service on the host, what each is using, and what just
@@ -125,8 +115,9 @@ export function Services() {
   const { confirm, dialog } = useConfirm()
   const params = useSearchParams()
   const { host, snapshot } = useMetrics()
-  const [query, setQuery] = useSessionState("processes.services.query", "")
-  const [rememberedState, rememberState] = useSessionState("processes.services.state", "")
+  const router = useRouter()
+  const [query, setQuery] = useSessionState(SERVICE_FILTER_KEYS.query, "")
+  const [rememberedState, rememberState] = useSessionState(SERVICE_FILTER_KEYS.state, "")
   const [requestedState, setRequestedState] = useState(
     params.get("state") === "failed" ? "failed" : rememberedState,
   )
@@ -136,10 +127,14 @@ export function Services() {
     setRequestedState(next)
     rememberState(next)
   }
-  const [rememberedStartup, setStartup] = useSessionState("processes.services.startup", "")
+  const [rememberedStartup, setStartup] = useSessionState(SERVICE_FILTER_KEYS.startup, "")
   const startup = (STARTUPS.has(rememberedStartup) ? rememberedStartup : "") as StartupFilter
-  const [selected, select] = useQuerySelection("unit")
-  const [focusTab, setFocusTab] = useState<string>()
+  // A unit opened here before 0.8.6 was `?unit=` on this page; each now has
+  // a page of its own, and an old link or bookmark lands on it.
+  const legacy = params.get("unit")
+  useEffect(() => {
+    if (legacy) router.replace(serviceHref(legacy))
+  }, [legacy, router])
   const [reloading, setReloading] = useState(false)
   const list = usePoll((signal) => get<SystemdList>("/systemd/", undefined, signal), POLL)
   const { pending, act } = useUnitControl(list.refresh)
@@ -163,15 +158,10 @@ export function Services() {
   const changingLabel = changing.every((u) => u.activeState === "activating")
     ? "Starting"
     : "Changing"
-  const matching = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    return installed.filter((u) => {
-      if (state && unitBucket(u) !== state) return false
-      if (startup && startupOf(u) !== startup) return false
-      if (!needle) return true
-      return u.name.toLowerCase().includes(needle) || u.description.toLowerCase().includes(needle)
-    })
-  }, [installed, query, state, startup])
+  const matching = useMemo(
+    () => filterUnits(installed, { query, state, startup }),
+    [installed, query, state, startup],
+  )
   const inspection = useInspectionOrder(
     matching,
     (unit) => unit.name,
@@ -181,10 +171,7 @@ export function Services() {
   // A filter change is a new list rather than arrivals into this one.
   const listKey = [query, state, startup].join("\u0000")
 
-  const open = (unit: SystemdUnit, tab?: string) => {
-    setFocusTab(tab)
-    select(unit.name)
-  }
+  const open = (unit: SystemdUnit, tab?: string) => router.push(serviceHref(unit.name, tab))
 
   const daemonReload = async () => {
     setReloading(true)
@@ -482,12 +469,6 @@ export function Services() {
           </PanelFooter>
         </Panel>
 
-        <UnitJournalSheet
-          unit={selected}
-          initialTab={focusTab}
-          onOpenChange={(o) => !o && select(null)}
-          onChanged={list.refresh}
-        />
         {dialog}
       </Page>
     </Workspace>
@@ -628,6 +609,7 @@ function UnitNarrowRow({
   const verbs = useUnitVerbs({ unit, confirm, act, onOpenTab: (tab) => onOpen(unit, tab) })
   const running = unit.cpuReady || (unit.memoryBytes ?? 0) > 0
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- the pointer's larger target: the row's name is the link or button a keyboard opens it by
     <li
       data-workspace-item={unit.name}
       data-workspace-name={unit.name}

@@ -179,7 +179,7 @@ test.describe("the control center", () => {
     expect(where(page)).toBe("/databases")
   })
 
-  test("the shelves and the table are the reader's own arrangement, kept and not in the address", async ({
+  test("the shelves are the reader's own arrangement, kept and not in the address, and the cards are the only way it is drawn", async ({
     page,
   }) => {
     await mockFleet(page, {
@@ -192,63 +192,15 @@ test.describe("the control center", () => {
     await page.getByRole("radio", { name: "Environment" }).click()
     await expect(page.getByRole("list", { name: "production" })).toBeVisible()
     await expect(page.getByRole("list", { name: "No environment" })).toBeVisible()
-
-    await page.getByRole("radio", { name: "Table" }).click()
-    const table = page.getByRole("table")
-    // The figures to compare stay on screen at this width. The engine and the
-    // place are still said — on a second line under the name — and take
-    // columns of their own on a wider one.
-    await expect(table.getByRole("row", { name: /shop/ })).toContainText("PostgreSQL 16.4")
-    await expect(table.getByRole("row", { name: /shop/ })).toContainText("shop-db")
-    await expect(table.getByRole("row", { name: /app/ })).toContainText("db.example.com:27017")
-    expect(
-      await page
-        .locator("[data-slot=table-container]")
-        .evaluate((el) => el.scrollWidth - el.clientWidth),
-    ).toBeLessThanOrEqual(1)
-    await expect(table.getByRole("columnheader")).toHaveText([
-      "Status",
-      "Name",
-      "Size",
-      "Objects",
-      "Sessions",
-      "Feeds",
-      "Last backup",
-      "Reachable from",
-      "Actions",
-    ])
-    await page.setViewportSize({ width: 1720, height: 900 })
-    await expect(table.getByRole("columnheader")).toHaveText([
-      "Status",
-      "Name",
-      "Engine",
-      "Where",
-      "Size",
-      "Objects",
-      "Sessions",
-      "Feeds",
-      "Last backup",
-      "Reachable from",
-      "Actions",
-    ])
-    await expect(table.getByRole("row", { name: /shop/ })).toContainText("shop-db")
-    // The file's size is the one the card gives: what discovery measured.
-    await expect(table.getByRole("row", { name: /notes/ })).toContainText("312.0 KB")
-    await table.getByRole("button", { name: "Size" }).click()
-    await expect(table.getByRole("columnheader", { name: "Size" })).toHaveAttribute(
-      "aria-sort",
-      "descending",
-    )
-    await expect(table.getByRole("row").nth(1)).toContainText("shop")
-    await expect(table.getByRole("link", { name: "Open shop" })).toHaveAttribute(
-      "href",
-      "/databases/1",
-    )
     expect(where(page)).toBe("/databases")
 
+    // The table is gone, and so is the switch that drew it.
+    await expect(page.getByRole("group", { name: "Draw as" })).toHaveCount(0)
+    await expect(page.getByRole("radio", { name: "Table" })).toHaveCount(0)
+    await expect(page.getByRole("table")).toHaveCount(0)
+
     await page.reload()
-    await expect(page.getByRole("table")).toBeVisible()
-    await page.getByRole("radio", { name: "Cards" }).click()
+    await expect(page.getByRole("list", { name: "production" })).toBeVisible()
     await page.getByRole("radio", { name: "Where it runs" }).click()
   })
 
@@ -304,25 +256,28 @@ test.describe("the control center", () => {
     await expect(reading).toContainText("3 today")
     await expect(reading).toContainText("blog")
 
-    // One database, one hue: its mark's key in the band is its card's size bar,
-    // and the card's edge carries none.
+    // One database, one hue: its span in the band is its card's size bar, and
+    // the card's edge carries none. The span holds the colour since the band's
+    // marks were drawn bare, without a rule in their part's colour under each.
     const hue = (el: Element) => getComputedStyle(el).backgroundColor
     const edge = async (name: string) =>
       card(page, name).locator("[data-slot=fleet-size]").evaluate(hue)
+    const fills = band
+      .getByRole("region", { name: "Storage" })
+      .locator("[data-slot=reading-span] > i > i")
     const key = (name: string) =>
       band
-        .getByRole("list", { name: "Largest databases" })
-        .getByRole("link", { name: `Open ${name}` })
-        .locator("i")
+        .getByRole("region", { name: "Storage" })
+        .locator(`[data-slot=reading-span][title^="${name} holds "] > i > i`)
         .evaluate(hue)
     expect(await key("shop")).toBe(await edge("shop"))
     expect(await key("cache")).toBe(await edge("cache"))
     await expect(page.locator("[data-slot=fleet-hue]")).toHaveCount(0)
     // Five databases are five hues.
-    const edges = await band
-      .getByRole("list", { name: "Largest databases" })
-      .locator("i")
-      .evaluateAll((spans) => spans.map((span) => getComputedStyle(span).backgroundColor))
+    const edges = await fills.evaluateAll((spans) =>
+      spans.map((span) => getComputedStyle(span).backgroundColor),
+    )
+    expect(edges).toHaveLength(5)
     expect(new Set(edges).size).toBe(5)
 
     await band.getByRole("list", { name: "Largest databases" }).getByRole("link").first().click()
@@ -442,7 +397,7 @@ test.describe("the control center", () => {
     await expect(page.getByRole("button", { name: /Apply the kernel mitigation/ })).toHaveCount(0)
   })
 
-  test("forty databases fit the page, as cards and as a table", async ({ page }) => {
+  test("forty databases fit the page as cards", async ({ page }) => {
     const server = await mockFleet(page)
     server.answer("GET /databases/fleet", () => ({
       body: {
@@ -466,13 +421,6 @@ test.describe("the control center", () => {
     expect(
       await scroller(page).evaluate((el) => el.scrollWidth - el.clientWidth),
     ).toBeLessThanOrEqual(1)
-    await page.getByRole("radio", { name: "Table" }).click()
-    expect(
-      await page
-        .locator("[data-slot=table-container]")
-        .evaluate((el) => el.scrollWidth - el.clientWidth),
-    ).toBeLessThanOrEqual(1)
-    await page.getByRole("radio", { name: "Cards" }).click()
   })
 
   test("a card says what is wrong in one weight, keeps its labels out of its readings, and cuts nothing it prints", async ({
@@ -728,34 +676,19 @@ test.describe("the control center", () => {
     await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   })
 
-  test("draws what the databases feed at full size, ordered for the wires, and links the ones nothing reads", async ({
+  test("leaves what the databases feed to the map, and reaches it from the readers it counts", async ({
     page,
   }) => {
     await mockFleet(page)
     await page.goto("/databases")
-    const feed = page.locator("section").filter({
-      has: page.getByRole("heading", { name: "What they feed" }),
-    })
-    const picture = feed.locator("[data-slot=wiring]")
-    await expect(
-      picture.getByRole("list", { name: "Databases" }).getByRole("listitem"),
-    ).toHaveCount(4)
-    // Each reader across from the databases that feed it: the worker from
-    // shop and blog, the deployment from shop and cache, then cache's and
-    // app's own readers.
-    const readers = picture.getByRole("list", { name: "What reads them" }).getByRole("listitem")
-    await expect(readers).toHaveCount(4)
-    expect(
-      (await readers.allTextContents()).map((text) =>
-        ["worker", "storefront", "This server", "10.0.0.9"].find((name) => text.includes(name)),
-      ),
-    ).toEqual(["worker", "storefront", "This server", "10.0.0.9"])
-    await expect(readers.first()).toContainText("link broken")
-    // Nothing reads notes: it is a way to the database, not a name in a sentence.
-    await expect(feed.getByRole("link", { name: "notes", exact: true })).toHaveAttribute(
-      "href",
-      "/databases/7",
-    )
+    await expect(card(page, "shop")).toBeVisible()
+    await expect(page.getByRole("heading", { name: "What they feed" })).toHaveCount(0)
+    await expect(page.getByText("Nothing seen reading")).toHaveCount(0)
+    await expect(page.locator("[data-slot=wiring]")).toHaveCount(0)
+    const readers = page.getByRole("link", { name: "read by 4" })
+    await expect(readers).toHaveAttribute("href", "/databases/map")
+    await readers.click()
+    await expect(page.locator(".react-flow__node").first()).toBeVisible()
   })
 
   test("coming back to it draws the last reading at once while it asks again", async ({ page }) => {
@@ -763,7 +696,7 @@ test.describe("the control center", () => {
     await page.goto("/databases")
     await expect(card(page, "shop")).toBeVisible()
     await page.getByRole("link", { name: "Map", exact: true }).click()
-    await expect(page.locator("[data-slot=wiring]")).toBeVisible()
+    await expect(page.locator(".react-flow__node").first()).toBeVisible()
 
     const held = hold()
     server.answer("GET /databases/fleet", async () => {
@@ -1131,96 +1064,197 @@ test.describe("found on this server", () => {
 })
 
 test.describe("the map", () => {
-  test("draws what feeds what without metric cards, and narrows to an engine in the address", async ({
+  const node = (page: Page, id: string) => page.locator(`.react-flow__node[data-id="${id}"]`)
+  const frame = (page: Page, system: string) => node(page, `frame:${system}`)
+  const rail = (page: Page) => page.getByRole("navigation", { name: "Databases" })
+  const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" })
+  const at = async (page: Page, id: string) => {
+    const box = await node(page, id).boundingBox()
+    if (!box) throw new Error(`${id} is not drawn`)
+    return box
+  }
+
+  async function open(page: Page, path = "/databases/map", options = {}) {
+    await page.setViewportSize({ width: 1600, height: 1000 })
+    const server = await mockFleet(page, options)
+    await page.goto(path)
+    await expect(page.locator(".react-flow__node").first()).toBeVisible()
+    return server
+  }
+
+  test("every database is its own diagram on the server map's canvas, listed in the rail by engine", async ({
     page,
   }) => {
-    await mockFleet(page)
-    await page.goto("/databases/map")
+    await open(page)
     await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-
-    const picture = page.locator("[data-slot=wiring]")
-    await expect(
-      picture.getByRole("list", { name: "Databases" }).getByRole("listitem"),
-    ).toHaveCount(5)
-    await expect(picture.getByRole("link", { name: "Open blog" })).toHaveAttribute(
-      "href",
-      "/databases/2",
-    )
+    await expect(page.locator("[data-slot=wiring]")).toHaveCount(0)
     // The engine that answered, not the driver that dials it.
-    await expect(picture.getByRole("list", { name: "Databases" })).toContainText("MariaDB")
-    await expect(page.getByRole("list", { name: "How to read the map" })).toContainText(
-      "link broken",
+    for (const [engine, names] of [
+      ["MariaDB", ["blog"]],
+      ["MongoDB", ["app"]],
+      ["PostgreSQL", ["shop"]],
+      ["Redis", ["cache"]],
+      ["SQLite", ["notes"]],
+    ] as const) {
+      const section = rail(page).locator("section", {
+        has: page.getByRole("heading", { name: engine }),
+      })
+      for (const name of names) await expect(section.getByRole("button", { name })).toBeVisible()
+    }
+    for (const id of [1, 2, 4, 5, 7]) await expect(frame(page, `system:db:${id}`)).toHaveCount(1)
+    await expect(rail(page).getByRole("button", { name: /notes/ })).toContainText(
+      "nothing seen reading it",
     )
-
-    const readers = page.locator("[data-slot=row-list]")
-    await expect(readers.locator("[data-slot=row]")).toHaveCount(4)
-    // The broken link stands first, and says so.
-    await expect(readers.locator("[data-slot=row]").first()).toContainText("worker")
-    await expect(readers.locator("[data-slot=row]").first()).toContainText("link broken")
-    // Each database that reaches a reader has a line of its own, read whole.
-    await expect(readers).toContainText("shop linked by its deployment · 3 open sessions")
-    await expect(readers.locator("[data-slot=row]").first()).toContainText(
-      "blog linked by its deployment",
+    await expect(frame(page, "system:db:1")).toContainText(
+      "feeds 2 things · 3 sessions open · in shop-db",
     )
-    await page.setViewportSize({ width: 1720, height: 1000 })
-    expect(
-      await readers.evaluate(
-        (list) =>
-          [...list.querySelectorAll("*")].filter(
-            (el) =>
-              getComputedStyle(el).textOverflow === "ellipsis" &&
-              el.scrollWidth > el.clientWidth + 1,
-          ).length,
-      ),
-    ).toBe(0)
-    await page.setViewportSize({ width: 1280, height: 720 })
-
-    await page.getByRole("button", { name: /^Redis/ }).click()
-    expect(where(page)).toBe("/databases/map?engine=redis")
-    await expect(
-      picture.getByRole("list", { name: "Databases" }).getByRole("listitem"),
-    ).toHaveCount(1)
-    await expect(readers.locator("[data-slot=row]")).toHaveCount(2)
-    await page.goBack()
-    await expect(readers.locator("[data-slot=row]")).toHaveCount(4)
   })
 
-  test("where no wire is drawn the readers are listed once, not twice", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 })
-    await mockFleet(page)
-    await page.goto("/databases/map")
-    const picture = page.locator("[data-slot=wiring]")
-    await expect(
-      picture.getByRole("list", { name: "Databases" }).getByRole("listitem"),
-    ).toHaveCount(5)
-    await expect(picture.getByRole("list", { name: "What reads them" })).toHaveCount(0)
-    // No wire is drawn, so there is no legend for one.
-    await expect(page.getByRole("list", { name: "How to read the map" })).toBeHidden()
-    await expect(page.locator("[data-slot=row-list] [data-slot=row]")).toHaveCount(4)
-    await expect(page.locator("[data-slot=row]").filter({ hasText: "worker" })).toHaveCount(1)
-    await expect(picture).not.toContainText("worker")
+  test("a database's diagram runs from what reads it, through it, to where it runs, keeps and is copied", async ({
+    page,
+  }) => {
+    await open(page, "/databases/map?database=1")
+    const s = "system:db:1"
+    const reader = await at(page, `${s}/project:7`)
+    const db = await at(page, `${s}/db:1`)
+    const runs = await at(page, `${s}/container:c-shop`)
+    const keeps = await at(page, `${s}/volume:shop-pg-data`)
+    const copied = await at(page, `${s}/backup:2`)
+    expect(reader.x).toBeLessThan(db.x)
+    expect(db.x).toBeLessThan(runs.x)
+    expect(runs.x).toBeLessThan(keeps.x)
+    expect(keeps.x).toBeLessThan(copied.x)
+    await expect(node(page, `${s}/db:1`)).toHaveClass(/react-flow__node-datastore/)
+    await expect(node(page, `${s}/project:7`)).toHaveClass(/react-flow__node-hero/)
+    // The worker shares its stack and network: it could reach it.
+    await expect(node(page, `${s}/container:c-worker`)).toBeVisible()
+    // What two databases are wired to is drawn in each, and says so.
+    await expect(node(page, `${s}/project:7`)).toContainText("also in 1")
+    // This server and another machine, by the sessions they hold.
+    await expect(node(page, "system:db:4/host")).toContainText("Processes here")
+    await expect(node(page, "system:db:5/remote:10.0.0.9")).toContainText("6 sessions open")
   })
 
-  test("says when it could not be read, and when there is nothing to map", async ({ page }) => {
+  test("choosing a box names each of its links in the inspector, a broken one first in its colour", async ({
+    page,
+  }) => {
+    await open(page, "/databases/map?database=2")
+    await node(page, "system:db:2/db:2").click()
+    const wired = inspector(page).locator("section", {
+      has: page.getByRole("heading", { name: "Wired to" }),
+    })
+    await expect(wired.getByRole("button", { name: /worker/ })).toContainText("link broken")
+    await expect(wired.getByRole("button", { name: /blog-db-1/ })).toContainText("serves")
+    // The lit line says so too, in its colour.
+    await expect(page.locator(".react-flow__edgelabel-renderer")).toContainText("link broken")
+    // A row in the rail flies to its diagram.
+    await rail(page).getByRole("button", { name: /shop/ }).click()
+    await node(page, "system:db:1/db:1").click()
+    const storefront = inspector(page).getByRole("button", { name: /storefront/ })
+    await expect(storefront).toContainText("linked database")
+    await expect(storefront).toContainText("3 sessions")
+    await expect(inspector(page).getByRole("link", { name: "Open" })).toHaveAttribute(
+      "href",
+      "/databases/1",
+    )
+  })
+
+  test("a diagram is carried by its head and kept under the databases map's own name", async ({
+    page,
+  }) => {
+    const kept = {
+      version: 2,
+      positions: { "system:project:1/db:1": { x: 10, y: 20 } },
+      frames: {},
+    }
+    const server = await open(page, "/databases/map?database=1", { layout: kept })
+    const s = "system:db:1"
+    const was = await at(page, `frame:${s}`)
+    const grip = (await frame(page, s).locator(".map-frame-grip").boundingBox())!
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(grip.x + grip.width / 2 + 120, grip.y + grip.height / 2 + 80, {
+      steps: 8,
+    })
+    await page.mouse.up()
+    const now = await at(page, `frame:${s}`)
+    expect(now.x - was.x).toBeCloseTo(120, 0)
+
+    await expect
+      .poll(() => (server.layout() as { boards?: { databases?: { frames: object } } })?.boards)
+      .toBeTruthy()
+    const layout = server.layout() as {
+      positions: object
+      boards: { databases: { frames: Record<string, unknown> } }
+    }
+    expect(Object.keys(layout.boards.databases.frames)).toEqual([s])
+    // The server map's own arrangement is where it was.
+    expect(layout.positions).toEqual(kept.positions)
+
+    await page.reload()
+    await expect(frame(page, s)).toBeVisible()
+    await expect(page.getByRole("button", { name: /Tidy up/ })).toBeVisible()
+  })
+
+  test("says what it could not read, and when there is nothing to map", async ({ page }) => {
     const server = await mockFleet(page)
     let failing = true
     server.answer("GET /databases/topology", () => {
       if (failing) return refusal(500, "internal", "the map could not be drawn")
     })
+    server.answer("GET /map/", () => {
+      if (failing) return refusal(500, "internal", "the server map could not be read")
+    })
     await page.goto("/databases/map")
     await expect(
       page.getByRole("alert").filter({ hasText: "the map could not be drawn" }),
     ).toBeVisible()
-    await expect(page.getByText("It is asked again by itself every 30 seconds.")).toBeVisible()
     failing = false
     await page.getByRole("button", { name: "Try again" }).click()
-    await expect(page.locator("[data-slot=wiring]")).toBeVisible()
+    await expect(page.locator(".react-flow__node").first()).toBeVisible()
+
+    // The topology alone failing still draws every database from the server map.
+    server.answer("GET /databases/topology", () =>
+      refusal(500, "internal", "the sessions could not be read"),
+    )
+    await page.reload()
+    await expect(frame(page, "system:db:1")).toBeVisible()
+    await expect(
+      page.getByText(/Sessions and links not read: the sessions could not be read/),
+    ).toBeVisible()
 
     server.answer("GET /databases/topology", () => ({
       body: { nodes: [], edges: [], checkedAt: new Date().toISOString() },
     }))
+    server.answer("GET /map/", () => ({
+      body: { host: {}, kinds: [], links: [], checkedAt: new Date().toISOString() },
+    }))
     await page.reload()
     await expect(page.getByText("Nothing to map yet")).toBeVisible()
+    await expect(
+      page.locator("[data-slot=server-map]").getByRole("link", { name: "Add a database" }),
+    ).toHaveAttribute("href", "/databases/new")
+  })
+
+  test.describe("on a phone", () => {
+    test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
+
+    test("it is the canvas alone, and a tap on a box floats the way to its page", async ({
+      page,
+    }) => {
+      await mockFleet(page)
+      await page.goto("/databases/map?database=1")
+      await expect(page.locator(".react-flow__node").first()).toBeVisible()
+      await expect(rail(page)).toHaveCount(0)
+      await expect(inspector(page)).toHaveCount(0)
+      const canvas = (await page.locator("[data-slot=server-map]").boundingBox())!
+      expect(canvas.width).toBe(390)
+      await node(page, "system:db:1/db:1").tap()
+      await expect(page.getByRole("link", { name: "Open shop" })).toHaveAttribute(
+        "href",
+        "/databases/1",
+      )
+    })
   })
 })
 
@@ -1249,6 +1283,31 @@ test.describe("adding a database", () => {
     await page.goto("/databases/new?mode=found")
     await expect(way("Found on this server")).toHaveAttribute("aria-pressed", "true")
     await expect(page.getByRole("button", { name: "Connect orders-db" })).toBeVisible()
+  })
+
+  // On a phone the three ways in are all in view under their short names: the
+  // strip had scrolled with the third cut at the screen's edge and nothing to
+  // say it went on.
+  test("a phone shows every way in at once", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mockFleet(page)
+    await page.goto("/databases/new")
+    const strip = page.getByRole("group", { name: "Where the database is" })
+    const ways = strip.getByRole("button")
+    // What is drawn, not what the markup holds: each way carries both names
+    // and shows the one for the width.
+    await expect(ways).toHaveText(["Start new", "Connect", "Found here"], { useInnerText: true })
+    expect(await strip.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+    const last = (await ways.last().boundingBox())!
+    expect(last.x + last.width).toBeLessThanOrEqual(390)
+    await ways.last().click()
+    await expect(ways.last()).toHaveAttribute("aria-pressed", "true")
+    // At a laptop's width each keeps its whole name.
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await expect(ways).toHaveText(
+      ["Start a new one here", "Connect to one", "Found on this server"],
+      { useInnerText: true },
+    )
   })
 
   test("a new server answers on this server only unless the reader says otherwise, and lands on its home", async ({
@@ -1607,7 +1666,7 @@ test.describe("adding a database", () => {
 
 /**
  * The design system's structural rules, held on these pages in the states
- * that draw the most: the full control center, its table, its dialogs, the
+ * that draw the most: the full control center, its dialogs, the
  * map, and each way of adding a database with its form open.
  */
 
@@ -1629,12 +1688,18 @@ function unnamedControls(page: Page) {
   })
 }
 
-/** Fully rounded, filled labels. */
+/**
+ * Fully rounded, filled labels. A box on the map's canvas is measured at the
+ * zoom it is drawn at — a card zoomed out to a quarter is a few pixels high
+ * with its corners unchanged — so the canvas's own shapes are not read as
+ * chips; the map's chrome around them still is.
+ */
 function filledPills(page: Page) {
   return page.evaluate(() => {
     const bad: string[] = []
     for (const el of document.querySelectorAll<HTMLElement>("span, div")) {
       if (el.dataset.slot === "user-avatar") continue
+      if (el.closest(".react-flow__viewport")) continue
       const s = getComputedStyle(el)
       const r = parseFloat(s.borderTopLeftRadius)
       const h = el.getBoundingClientRect().height
@@ -1661,6 +1726,9 @@ function offCentreText(page: Page) {
         ? rowStyle.alignItems
         : style.alignSelf
       if (align !== "center" || style.display !== "block" || style.position === "absolute") continue
+      // A glyph that turns has no centre line to be off: its ink is wherever the
+      // turn has it at that instant, and under load this caught a spinner mid-turn.
+      if (style.animationName !== "none" && style.animationIterationCount === "infinite") continue
       const box = item.getBoundingClientRect()
       if (box.height < 2 || box.width < 2) continue
       const blocks = [...item.children].some((child) => {
@@ -1740,17 +1808,11 @@ for (const [label, viewport] of [
     await keepsTheRules(page, "the password form of a found server", "reading")
     await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click()
 
-    if (viewport.width >= 1024) {
-      await page.getByRole("radio", { name: "Table" }).click()
-      await keepsTheRules(page, "/databases as a table", "reading")
-      await page.getByRole("radio", { name: "Cards" }).click()
-    } else {
-      // Eleven columns do not fit a phone: the cards are the rows drawn down.
-      await expect(page.getByRole("radio", { name: "Table" })).toHaveCount(0)
-    }
+    // The cards are the one way the fleet is drawn, at every width.
+    await expect(page.getByRole("radio", { name: "Table" })).toHaveCount(0)
 
     await page.goto("/databases/map")
-    await expect(page.locator("[data-slot=wiring]")).toBeVisible()
+    await expect(page.locator(".react-flow__node").first()).toBeVisible()
     await keepsTheRules(page, "/databases/map", "reading")
 
     await page.goto("/databases/new")

@@ -9,6 +9,7 @@ import {
   type Mutation,
 } from "./security-intrusion-fixture"
 import { loaded } from "./network-fixture"
+import { risen } from "./risen"
 
 const JUMP_KEYS = [
   "allowtcpforwarding",
@@ -474,10 +475,21 @@ test("Suricata reads its mode, its severities, its signatures and its latest ale
   await expect(tiles.filter({ hasText: "Medium · severity 2" })).toContainText("58")
   await expect(tiles.filter({ hasText: "Low · severity 3" })).toContainText("150")
 
-  // Ranked by count, the likeliest noise first.
-  const signatures = section.locator("[data-slot=bar-list] li")
+  // Ranked by count, the likeliest noise first, as figures in columns: no
+  // bar under a name, every row one height, and the counts and their shares
+  // of the alerts scanned ending on one edge down the list.
+  await expect(section.locator("[data-slot=bar-list]")).toHaveCount(0)
+  const signatures = section.locator("[data-slot=rank-row]")
   await expect(signatures).toHaveCount(6)
   await expect(signatures.first()).toContainText("ET SCAN Suspicious inbound to MSSQL port 1433")
+  await risen(page)
+  const rows = await Promise.all((await signatures.all()).map((row) => row.boundingBox()))
+  expect(new Set(rows.map((box) => box!.height))).toEqual(new Set([32]))
+  const shares = await Promise.all(
+    (await section.locator("[data-slot=rank-share]").all()).map((cell) => cell.boundingBox()),
+  )
+  expect(shares).toHaveLength(6)
+  expect(new Set(shares.map((box) => Math.round(box!.x + box!.width))).size).toBe(1)
 
   const alerts = section.getByRole("row")
   await expect(alerts).toHaveCount(1 + 20)

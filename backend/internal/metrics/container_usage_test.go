@@ -140,7 +140,7 @@ func TestContainerUsageDoesNotInventLegacyAvailabilityOrLimits(t *testing.T) {
 	r := testRecorder(t, 5*time.Second, time.Hour)
 	base := time.Unix(1_800_000_000, 0).UTC()
 	for i := range 2 {
-		_, err := r.db.Exec(`INSERT INTO metric_container_samples(ts,name,mem_limit) VALUES(?,?,?)`, base.Unix()+int64(i*5), "old", 8<<30)
+		_, err := r.st.DB.Exec(`INSERT INTO metric_container_samples(ts,name,mem_limit) VALUES(?,?,?)`, base.Unix()+int64(i*5), "old", 8<<30)
 		if err != nil {
 			t.Fatal(err)
 		}

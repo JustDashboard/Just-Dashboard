@@ -1,3 +1,9 @@
+// Package audit keeps the record of who did what: one Entry per audited
+// action, written to the audit_log table and mirrored to the process log
+// (Record), and the filtered read the Audit log page makes (List). It records
+// and never decides: which requests are audited is httpx.AuditMutations'
+// business, and nothing here changes or removes an entry. See "Auth, secrets,
+// state" in docs/internal/architecture/runtime-boundaries.md.
 package audit
 
 import (
@@ -14,7 +20,7 @@ import (
 // Entry is one immutable record of who did what, when, from where.
 type Entry struct {
 	ID       int64     `json:"id"`
-	TS       time.Time `json:"ts"`
+	TS       time.Time `json:"ts,omitzero"`
 	UserID   int64     `json:"userId"`
 	Username string    `json:"username"`
 	Role     string    `json:"role"`
@@ -153,14 +159,17 @@ func (l *Logger) List(ctx context.Context, f Filter) ([]Entry, int, error) {
 	}
 	clause := strings.Join(where, " AND ")
 
+	// Through the read pool: a filter is a LIKE over the whole trail, and the
+	// page that asks must not hold up the next entry being written.
+	read := l.st.Reader()
 	var total int
-	if err := l.st.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE `+clause, args...).Scan(&total); err != nil {
+	if err := read.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE `+clause, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	if f.Limit <= 0 || f.Limit > 500 {
 		f.Limit = 100
 	}
-	rows, err := l.st.DB.QueryContext(ctx,
+	rows, err := read.QueryContext(ctx,
 		`SELECT id, ts, user_id, username, role, ip, actor, action, target, method, path, status, success, detail, key_id, key_name, session_id, hub_user
 		 FROM audit_log WHERE `+clause+` ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`,
 		append(args, f.Limit, f.Offset)...)

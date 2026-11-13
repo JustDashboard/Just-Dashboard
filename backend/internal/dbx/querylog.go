@@ -46,13 +46,31 @@ type QueryEntry struct {
 }
 
 // QueryLogEnable is the setting that keeps the log empty, what it is now, and
-// the statement that changes it. The page offers the statement in the query
-// console rather than running it: turning logging on is the operator's call
-// and the engine's privilege, not a side effect of reading a page.
+// how to change it. Turning logging on is the operator's call and the
+// engine's privilege, never a side effect of reading a page, so the page
+// offers it: a Turn on button for an administrator, and the statement to copy
+// or open in the query console for anyone else.
 type QueryLogEnable struct {
 	Setting string `json:"setting"`
 	Current string `json:"current"`
 	SQL     string `json:"sql"`
+	// Changes are the same change as parameters, in the order Turn on sets
+	// them through the settings route: the Parameters page's own path, which
+	// checks each value, audits it and, on Postgres, reloads the
+	// configuration in the same call. The statement alone left that reload
+	// to a second statement, and a server that had been told to log slow
+	// statements kept logging none.
+	Changes []QueryLogChange `json:"changes,omitempty"`
+	// Blocked says why the account this dashboard connects as cannot make
+	// the change, when the engine says so before it is tried: Turn on is
+	// then not offered, and the statement is for someone who can run it.
+	Blocked string `json:"blocked,omitempty"`
+}
+
+// QueryLogChange is one parameter Turn on sets, and the value it sets.
+type QueryLogChange struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // QueryLog is GET /databases/{id}/querylog.
@@ -112,25 +130,52 @@ const (
 	mysqlEnableTable   = "SET GLOBAL log_output = 'FILE,TABLE';"
 )
 
+// The same changes as parameters, for Turn on. MySQL's sets where the log
+// goes and how slow is slow before it switches the log on, so its first
+// entries are already the ones this page reads.
+var (
+	postgresSlowChanges = []QueryLogChange{{Name: "log_min_duration_statement", Value: "250ms"}}
+	mysqlSlowLogChanges = []QueryLogChange{
+		{Name: "long_query_time", Value: "0.25"},
+		{Name: "log_output", Value: "FILE,TABLE"},
+		{Name: "slow_query_log", Value: "ON"},
+	}
+	mysqlTableChanges = []QueryLogChange{{Name: "log_output", Value: "FILE,TABLE"}}
+)
+
 // PostgresSlowSetting answers what log_min_duration_statement is, and the
 // statement that turns it on when it is off. Postgres writes no statement to
 // its log however long it ran until this says how slow is slow, so an empty
 // Queries view on a default server is this setting, not a quiet database.
 func PostgresSlowSetting(ctx context.Context, db *sql.DB) (current string, enable *QueryLogEnable, err error) {
-	var setting, unit string
-	if err := db.QueryRowContext(ctx,
-		`SELECT setting, COALESCE(unit, '') FROM pg_settings WHERE name = 'log_min_duration_statement'`).
-		Scan(&setting, &unit); err != nil {
+	var (
+		setting, unit, role string
+		super               bool
+	)
+	if err := db.QueryRowContext(ctx, `
+	  SELECT s.setting, COALESCE(s.unit, ''), current_user, COALESCE(r.rolsuper, false)
+	  FROM pg_settings s LEFT JOIN pg_roles r ON r.rolname = current_user
+	  WHERE s.name = 'log_min_duration_statement'`).
+		Scan(&setting, &unit, &role, &super); err != nil {
 		return "", nil, err
 	}
-	if setting == "-1" {
-		return "-1", &QueryLogEnable{
-			Setting: "log_min_duration_statement",
-			Current: "-1",
-			SQL:     postgresEnableSlow,
-		}, nil
+	if setting != "-1" {
+		return setting + unit, nil, nil
 	}
-	return setting + unit, nil, nil
+	enable = &QueryLogEnable{Setting: "log_min_duration_statement", Current: "-1", SQL: postgresEnableSlow}
+	// The settings route changes a Postgres parameter only as a superuser,
+	// as ALTER SYSTEM does: refused there, Turn on would say only that the
+	// parameter cannot be changed from here.
+	if super {
+		enable.Changes = postgresSlowChanges
+	} else {
+		enable.Blocked = postgresNotSuper(role)
+	}
+	return "-1", enable, nil
+}
+
+func postgresNotSuper(role string) string {
+	return "This dashboard connects as " + role + ", which is not a superuser, and only a superuser may change it. Run the statement and SELECT pg_reload_conf(); as one."
 }
 
 // MySQLQueryLog reads MySQL's and MariaDB's slow statements.
@@ -171,12 +216,14 @@ func MySQLQueryLog(ctx context.Context, db *sql.DB, w QueryLogWindow) (*QueryLog
 			Setting: "slow_query_log",
 			Current: "OFF",
 			SQL:     mysqlEnableSlowLog,
+			Changes: mysqlSlowLogChanges,
 		}
 	} else {
 		out.Enable = &QueryLogEnable{
 			Setting: "log_output",
 			Current: output,
 			SQL:     mysqlEnableTable,
+			Changes: mysqlTableChanges,
 		}
 	}
 	if strings.Contains(strings.ToLower(version), "mariadb") {

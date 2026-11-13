@@ -35,7 +35,7 @@ func (s *Service) canProvisionIngress(ctx context.Context) bool {
 			return false
 		}
 	}
-	containers, err := ingressContainers(ctx)
+	containers, err := s.docker.running(ctx)
 	if err != nil {
 		return false
 	}

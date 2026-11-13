@@ -122,8 +122,8 @@ type Passkey struct {
 	ID         int64     `json:"id"`
 	Name       string    `json:"name"`
 	RPID       string    `json:"rpId"`
-	CreatedAt  time.Time `json:"createdAt"`
-	LastUsedAt time.Time `json:"lastUsedAt"`
+	CreatedAt  time.Time `json:"createdAt,omitzero"`
+	LastUsedAt time.Time `json:"lastUsedAt,omitzero"`
 	// Synced says the authenticator backs the credential up (a password
 	// manager or a phone's keychain) rather than keeping it on one device.
 	Synced     bool     `json:"synced"`

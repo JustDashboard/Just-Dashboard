@@ -318,21 +318,6 @@ func TestParseTailscaleStatusWhenLoggedOut(t *testing.T) {
 	}
 }
 
-// Adding rather than replacing: the entries already there are the operator's,
-// and picking a certificate has no business deciding they were wrong.
-func TestWithTailnetAddsTheRangeOnceOnly(t *testing.T) {
-	got := WithTailnet("127.0.0.1/32,::1/128")
-	if got != "100.64.0.0/10,127.0.0.1/32,::1/128" {
-		t.Fatalf("WithTailnet = %q", got)
-	}
-	if again := WithTailnet(got); again != got {
-		t.Fatalf("WithTailnet is not idempotent: %q", again)
-	}
-	if covered := WithTailnet("100.64.0.0/10,127.0.0.1/32"); covered != "100.64.0.0/10,127.0.0.1/32" {
-		t.Fatalf("an allowlist that already covers the tailnet was rewritten: %q", covered)
-	}
-}
-
 // writeSelfSignedCert puts a certificate for name where the proxy looks for
 // one, which is all Certificate and DropStaleCertificate read.
 func writeSelfSignedCert(t *testing.T, dataDir, name string) {

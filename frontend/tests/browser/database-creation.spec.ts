@@ -73,6 +73,27 @@ for (const path of CREATION_PAGES) {
     await expect(current).toContainText("Start the container")
     await expect(progress.getByRole("status")).toContainText("Pulling the image")
     await expect(panel.locator('[style*="--border-beam-width"]')).toHaveCount(1)
+    // The light goes round the frame as one endless animation of transform,
+    // handed to the browser once: nothing of the page's runs per frame.
+    await expect
+      .poll(() =>
+        panel.locator('[style*="--border-beam-width"] > div').evaluate((light) =>
+          light.getAnimations().map((lap) => ({
+            endless: lap.effect?.getComputedTiming().iterations === Infinity,
+            moves: [
+              ...new Set(
+                (lap.effect as KeyframeEffect)
+                  .getKeyframes()
+                  .flatMap((frame) => Object.keys(frame))
+                  .filter(
+                    (key) => !["offset", "computedOffset", "easing", "composite"].includes(key),
+                  ),
+              ),
+            ],
+          })),
+        ),
+      )
+      .toEqual([{ endless: true, moves: ["transform"] }])
     finishProvision()
     await expect(current).toContainText("Wait for the engine")
     finishAdopt()
@@ -168,7 +189,14 @@ for (const path of CREATION_PAGES) {
     await page.getByRole("button", { name: "Create", exact: true }).click()
     const panel = page.locator("[data-slot=flow-panel]")
     await expect(panel.getByRole("status")).toContainText("Pulling the image")
-    await expect(panel.locator('[style*="--border-beam-width"]')).toHaveCount(0)
+    // Reduced motion: the light is not drawn, and no lap is started for it.
+    const beam = panel.locator('[style*="--border-beam-width"]')
+    await expect(beam).toBeHidden()
+    expect(
+      await beam
+        .locator("div")
+        .evaluateAll((all) => all.flatMap((el) => el.getAnimations()).length),
+    ).toBe(0)
     await expect(panel.locator('[aria-current="step"]')).toContainText("Start the container")
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),

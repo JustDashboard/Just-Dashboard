@@ -134,23 +134,6 @@ export function staleOf<T>(poll: PollState<T>): Error | undefined {
   return poll.data !== undefined ? poll.error : undefined
 }
 
-/** A ranked list that has not arrived: names of uneven length over their bars. */
-export function BarsSkeleton({ rows = 5 }: { rows?: number }) {
-  return (
-    <div className="flex flex-col" aria-hidden>
-      {Array.from({ length: rows }).map((_, index) => (
-        <div key={index} className="flex items-center gap-3 px-2 py-1.5">
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <Skeleton className="h-3" style={{ width: `${62 - ((index * 17) % 34)}%` }} />
-            <Skeleton className="h-1 w-full rounded-full" />
-          </div>
-          <Skeleton className="h-3 w-10 shrink-0" />
-        </div>
-      ))}
-    </div>
-  )
-}
-
 /** A list of rows that has not arrived: a mark, two lines, a figure. */
 export function RowsSkeleton({ rows = 3, mark = true }: { rows?: number; mark?: boolean }) {
   return (

@@ -1,6 +1,7 @@
 "use client"
 
 import { plural } from "@/lib/format"
+import { LATENCY_SHARE } from "@/lib/latency-words"
 import type { DeploymentStep, ReplayReport } from "@/lib/types"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Tag } from "@/components/tag"
@@ -45,7 +46,7 @@ export function ReplayView({ step, report }: { step: DeploymentStep; report: Rep
           hint={`${report.driftPercent}% · ${report.maxStatusDrift}% allowed`}
         />
         <StatTile
-          label="Candidate p95"
+          label={`Candidate, ${LATENCY_SHARE.p95} within`}
           value={report.latencyJudged ? replayMs(report.candidateP95) : "Not judged"}
           tone={slow ? "danger" : "default"}
           hint={latencyHint(report)}

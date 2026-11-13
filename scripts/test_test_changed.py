@@ -1,4 +1,5 @@
-"""Which browser specs test-changed.sh picks for a changed fixture or module."""
+"""What test-changed.sh picks for a change: browser specs, script tests and Go packages."""
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -145,6 +146,326 @@ class SectionSelectionTest(unittest.TestCase):
         # A file of the same name in another directory is another module.
         self.assertEqual(self.kept("components/database/kit/values.ts"), [query])
         self.assertEqual(self.kept("components/database/grid/unused.ts"), [])
+
+
+# What the script runs for a part of what an operator runs or the stack is
+# made from: the tests under scripts/ that name it.
+SCRIPT_PROBE = 'eval "$(sed -n "/^script_tests_for() {/,/^}/p" "$1")"\nscript_tests_for "$2"\n'
+
+SCRIPTS = {
+    "scripts/manage.sh": "#!/bin/bash\n",
+    "scripts/test_manage.py": 'TOOLS = ["manage.sh", "install.sh"]\nCOMPOSE = "docker-compose.yml"\n',
+    "scripts/test_pin_images.py": 'FILES = ["backend/Dockerfile", "docker-compose.yml"]\n',
+    "scripts/test_dotenv.py": 'SCRIPT = "dotenv.sh"\nEXAMPLE = ".env.example"\n',
+    "scripts/test_proxy.py": 'ENTRYPOINT = "deploy/proxy-entrypoint.sh"\n',
+}
+
+
+class ScriptTestSelectionTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = pathlib.Path(directory.name)
+        for name, content in SCRIPTS.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+
+    def picked(self, changed):
+        result = subprocess.run(
+            ["bash", "-c", "set -euo pipefail\n" + SCRIPT_PROBE, "probe", str(SCRIPT), changed],
+            cwd=self.root, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return sorted(result.stdout.split())
+
+    def test_a_script_runs_the_tests_that_name_it(self):
+        self.assertEqual(self.picked("scripts/manage.sh"), ["scripts/test_manage.py"])
+        self.assertEqual(self.picked("install.sh"), ["scripts/test_manage.py"])
+
+    def test_what_the_stack_is_made_from_runs_the_tests_that_name_it(self):
+        self.assertEqual(self.picked("docker-compose.yml"), ["scripts/test_manage.py", "scripts/test_pin_images.py"])
+        self.assertEqual(self.picked("backend/Dockerfile"), ["scripts/test_pin_images.py"])
+        self.assertEqual(self.picked(".env.example"), ["scripts/test_dotenv.py"])
+        self.assertEqual(self.picked("deploy/proxy-entrypoint.sh"), ["scripts/test_proxy.py"])
+
+    def test_a_changed_test_runs_as_itself_and_a_deleted_one_does_not(self):
+        self.assertEqual(self.picked("scripts/test_dotenv.py"), ["scripts/test_dotenv.py"])
+        self.assertEqual(self.picked("scripts/test_gone.py"), [])
+
+    def test_a_file_no_test_names_and_a_file_of_the_product_pick_nothing(self):
+        self.assertEqual(self.picked("deploy/Caddyfile"), [])
+        self.assertEqual(self.picked("frontend/src/lib/manage.sh"), [])
+        self.assertEqual(self.picked("README.md"), [])
+
+
+# The packages run whole for a changed file that is not Go, which the script
+# asks of ci-plan.py: here with the real one, over a tree of two packages.
+OTHER_PROBE = (
+    'eval "$(sed -n "/^packages_for_other_files() {/,/^}/p" "$1")"\n'
+    'root=$PWD\nshift\npackages_for_other_files "$@"\n'
+)
+
+BACKEND = {
+    "backend/go.mod": "module example.com/dashboard/backend\n\ngo 1.26\n",
+    "backend/internal/selfupdate/check.go": "package selfupdate\n",
+    "backend/internal/selfupdate/changelog.json": "{}\n",
+    "backend/internal/selfupdate/testdata/old.json": "{}\n",
+    "backend/internal/version/version.go": "package version\n",
+    "backend/internal/version/version_test.go": (
+        'package version\n\nvar files = []string{"../../../frontend/package.json", "../../../docker-compose.yml"}\n'
+    ),
+    "backend/Dockerfile": "FROM scratch\n",
+    "frontend/package.json": "{}\n",
+    "docker-compose.yml": "services: {}\n",
+    "README.md": "\n",
+}
+
+
+class OtherFilePackageSelectionTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = pathlib.Path(directory.name)
+        for name, content in BACKEND.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        (self.root / "scripts").mkdir()
+        (self.root / "scripts/ci-plan.py").write_text(SCRIPT.with_name("ci-plan.py").read_text())
+
+    def packages(self, *changed):
+        result = subprocess.run(
+            ["bash", "-c", "set -euo pipefail\n" + OTHER_PROBE, "probe", str(SCRIPT), *changed],
+            cwd=self.root, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.split()
+
+    def test_a_file_beside_no_go_file_runs_the_nearest_package_above_it(self):
+        self.assertEqual(self.packages("backend/internal/selfupdate/changelog.json"), ["./internal/selfupdate"])
+        self.assertEqual(self.packages("backend/internal/selfupdate/testdata/old.json"), ["./internal/selfupdate"])
+
+    def test_a_file_a_packages_tests_read_from_outside_runs_that_package(self):
+        self.assertEqual(self.packages("frontend/package.json"), ["./internal/version"])
+        self.assertEqual(self.packages("docker-compose.yml", "README.md"), ["./internal/version"])
+
+    def test_a_file_no_package_holds_or_reads_picks_nothing(self):
+        self.assertEqual(self.packages("backend/Dockerfile", "README.md"), [])
+
+
+# The packages a change to go.mod reaches, with a `go` that lists three
+# packages and what each depends on.
+MODULE_PROBE = (
+    'eval "$(sed -n "/^packages_using_changed_modules() {/,/^}/p" "$1")"\n'
+    'fork=$2\npackages_using_changed_modules\n'
+)
+
+GO = """#!/bin/sh
+if [ "$2" = -m ]; then echo example.com/dashboard/backend; exit 0; fi
+cat <<'LIST'
+example.com/dashboard/backend/internal/dbx fmt github.com/clickhouse/client github.com/andybalholm/brotli/matchfinder
+example.com/dashboard/backend/internal/auth fmt golang.org/x/crypto/bcrypt
+example.com/dashboard/backend/internal/files fmt os golang.org/x/cryptography
+LIST
+"""
+
+GO_MOD = """module example.com/dashboard/backend
+
+go 1.26.10
+
+require (
+\tgolang.org/x/crypto v0.58.0
+\tgolang.org/x/unused v0.1.0
+)
+
+require (
+\tgithub.com/andybalholm/brotli v1.2.2 // indirect
+)
+"""
+
+
+class ModuleChangeSelectionTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = pathlib.Path(directory.name) / "repository"
+        (self.root / "backend").mkdir(parents=True)
+        self.bin = pathlib.Path(directory.name) / "bin"
+        self.bin.mkdir()
+        (self.bin / "go").write_text(GO)
+        (self.bin / "go").chmod(0o755)
+        self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}",
+                        GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+        self.git("init", "--quiet")
+        (self.root / "backend/go.mod").write_text(GO_MOD)
+        self.git("add", "-A")
+        self.git("commit", "--quiet", "-m", "before")
+        self.fork = self.git("rev-parse", "HEAD")
+
+    def git(self, *args):
+        return subprocess.run(
+            ["git", "-C", str(self.root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+             "-c", "commit.gpgsign=false", *args],
+            env=self.env, capture_output=True, text=True, check=True).stdout.strip()
+
+    def packages(self, *replacements):
+        text = GO_MOD
+        for old, new in replacements:
+            self.assertIn(old, text)
+            text = text.replace(old, new)
+        (self.root / "backend/go.mod").write_text(text)
+        result = subprocess.run(
+            ["bash", "-c", "set -euo pipefail\n" + MODULE_PROBE, "probe", str(SCRIPT), self.fork],
+            cwd=self.root, env=self.env, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.split()
+
+    def test_a_bumped_module_runs_the_packages_that_import_it(self):
+        self.assertEqual(self.packages(("x/crypto v0.58.0", "x/crypto v0.59.0")), ["./internal/auth"])
+
+    def test_a_bumped_indirect_module_runs_the_packages_that_reach_it(self):
+        self.assertEqual(self.packages(("brotli v1.2.2", "brotli v1.2.8")), ["./internal/dbx"])
+
+    def test_a_module_nothing_imports_runs_nothing(self):
+        self.assertEqual(self.packages(("x/unused v0.1.0", "x/unused v0.2.0")), [])
+
+    def test_a_new_toolchain_runs_every_package(self):
+        self.assertEqual(self.packages(("go 1.26.10", "go 1.26.11"), ("x/crypto v0.58.0", "x/crypto v0.59.0")), ["./..."])
+
+    def test_an_unchanged_file_runs_nothing(self):
+        self.assertEqual(self.packages(), [])
+
+
+# The script from its first line to its plan, over a repository with one
+# commit and a change to each kind of file it used to pick nothing for.
+class PlanTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = pathlib.Path(directory.name)
+        tree = {**BACKEND, **SCRIPTS, "install.sh": "#!/bin/bash\n", "frontend/src/lib/version.ts": "export const v = 1\n",
+                "frontend/tests/browser/design-system.spec.ts": "", "frontend/tests/browser/navigation.spec.ts": "",
+                "frontend/tests/browser/docker-ui.spec.ts": ""}
+        for name, content in tree.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        (self.root / "scripts/ci-plan.py").write_text(SCRIPT.with_name("ci-plan.py").read_text())
+        self.env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, JD_TEST_CHANGED_PLAN="1")
+        self.git("init", "--quiet")
+        self.git("add", "-A")
+        self.git("commit", "--quiet", "-m", "before")
+
+    def git(self, *args):
+        subprocess.run(
+            ["git", "-C", str(self.root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+             "-c", "commit.gpgsign=false", *args],
+            env=self.env, capture_output=True, text=True, check=True)
+
+    def plan(self, *changed):
+        for name in changed:
+            with open(self.root / name, "a") as file:
+                file.write("# changed\n")
+        result = subprocess.run(["bash", str(SCRIPT), "HEAD"], cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return dict(line.split(":", 1) for line in result.stdout.splitlines() if ":" in line)
+
+    def test_the_operators_scripts_and_the_stack_pick_their_tests(self):
+        plan = self.plan("install.sh", "scripts/manage.sh", "docker-compose.yml", ".env.example")
+        self.assertEqual(plan["Shell syntax"].split(), ["install.sh", "scripts/manage.sh"])
+        self.assertEqual(plan["Script tests"].split(),
+                         ["scripts/test_dotenv.py", "scripts/test_manage.py", "scripts/test_pin_images.py"])
+        # And the package whose tests read the compose file.
+        self.assertEqual(plan["Go packages"].split(), ["./internal/version"])
+
+    def test_a_changelog_and_a_dependency_manifest_pick_packages_and_the_shell_specs(self):
+        plan = self.plan("backend/internal/selfupdate/changelog.json", "frontend/package.json")
+        self.assertEqual(plan["Go packages"].split(), ["./internal/selfupdate", "./internal/version"])
+        self.assertEqual(plan["Lint"].strip(), ".")
+        self.assertEqual(plan["Browser specs"].split(),
+                         ["tests/browser/design-system.spec.ts", "tests/browser/navigation.spec.ts"])
+        self.assertEqual(plan["Script tests"].strip(), "")
+
+    def test_a_document_picks_nothing(self):
+        plan = self.plan("README.md")
+        self.assertEqual({key: value.strip() for key, value in plan.items() if not key.startswith("Against")},
+                         {"Shell syntax": "", "Script tests": "", "Lint": "", "Go packages": "", "Browser specs": ""})
+
+
+# The type-check as the script runs it, from frontend/.
+TYPECHECK_PROBE = 'eval "$(sed -n "/^typecheck() {/,/^}/p" "$1")"\ncd frontend\ntypecheck\n'
+
+# Stands in for `bunx tsc --noEmit`: writes down what it was given to start
+# from, leaves its own tsconfig.tsbuildinfo as tsc does whether or not the
+# types hold, and ends as it is told to.
+BUNX = (
+    "#!/usr/bin/env bash\n"
+    "cat tsconfig.tsbuildinfo > started-from 2>/dev/null || : > started-from\n"
+    'printf %s "$TSC_LEAVES" > tsconfig.tsbuildinfo\n'
+    'exit "${TSC_EXIT:-0}"\n'
+)
+
+
+class TypecheckCacheTest(unittest.TestCase):
+    """A worktree's first type-check starts from what another worktree learnt."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        base = pathlib.Path(directory.name)
+        tools = base / "bin"
+        tools.mkdir()
+        (tools / "bunx").write_text(BUNX)
+        (tools / "bunx").chmod(0o755)
+        # Nothing of the machine's own git configuration: the test's clone only.
+        self.env = {
+            "PATH": f"{tools}:/usr/local/bin:/usr/bin:/bin",
+            "HOME": str(base),
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_SYSTEM": "/dev/null",
+        }
+        self.clone = base / "clone"
+        self.other = base / "other"
+        self.git(base, "init", "-q", str(self.clone))
+        self.git(self.clone, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                 "commit", "-q", "--allow-empty", "-m", "start")
+        self.git(self.clone, "worktree", "add", "-q", str(self.other))
+        for tree in (self.clone, self.other):
+            (tree / "frontend").mkdir()
+        self.shared = self.clone / ".git/jd-cache/tsconfig.tsbuildinfo"
+
+    def git(self, cwd, *arguments):
+        subprocess.run(["git", *arguments], cwd=cwd, env=self.env, check=True, capture_output=True)
+
+    def check(self, tree, leaves, exit_code=0):
+        """Runs the type-check in a tree; answers how it ended and what tsc started from."""
+        result = subprocess.run(
+            ["bash", "-c", "set -euo pipefail\n" + TYPECHECK_PROBE, "probe", str(SCRIPT)],
+            cwd=tree, capture_output=True, text=True,
+            env={**self.env, "TSC_LEAVES": leaves, "TSC_EXIT": str(exit_code)},
+        )
+        return result.returncode, (tree / "frontend/started-from").read_text()
+
+    def test_a_new_worktree_starts_from_what_another_one_left(self):
+        self.assertEqual(self.check(self.clone, "first"), (0, ""))
+        self.assertEqual(self.shared.read_text(), "first")
+        self.assertEqual(self.check(self.other, "second"), (0, "first"))
+        self.assertEqual(self.shared.read_text(), "second")
+
+    def test_a_worktree_with_its_own_keeps_it(self):
+        self.check(self.clone, "theirs")
+        (self.other / "frontend/tsconfig.tsbuildinfo").write_text("mine")
+        self.assertEqual(self.check(self.other, "mine again"), (0, "mine"))
+
+    def test_a_check_that_fails_leaves_the_shared_copy_alone(self):
+        self.check(self.clone, "good")
+        code, _ = self.check(self.other, "of a tree that does not type-check", exit_code=2)
+        self.assertEqual(code, 2)
+        self.assertEqual(self.shared.read_text(), "good")
+        # And nothing half written beside it.
+        self.assertEqual([p.name for p in self.shared.parent.iterdir()], ["tsconfig.tsbuildinfo"])
 
 
 if __name__ == "__main__":

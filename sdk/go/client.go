@@ -10,7 +10,7 @@
 // A Client calls one dashboard with a key: a deploy key (what jd and CI use),
 // or an API key, which reaches every route that does not need a session.
 //
-//	c := jd.NewClient("https://dash.example.com", os.Getenv("JD_TOKEN"))
+//	c := jd.NewClient("https://dash.example.com", os.Getenv("JD_KEY"))
 //	run, err := c.DeploymentRunCreate(ctx, deploymentID, environmentID,
 //		jd.DeploymentRunCreateRequest{Operation: jd.DeployOperationDeploy})
 //
@@ -26,7 +26,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // BasePath is where the API is served under the dashboard's address.
@@ -84,10 +86,15 @@ type Error struct {
 	Raw string `json:"raw,omitempty"`
 	// The likely reason it did not work.
 	Reason string `json:"reason,omitempty"`
+	// On a 5xx: the id of the request that failed, also in the X-Request-Id header of every answer.
+	// Quote it to whoever reads the dashboard's log, where the cause is on the line with the same id.
+	RequestID string `json:"requestId,omitempty"`
 	// What the request was acting on, when the handler names it.
 	Resource string `json:"resource,omitempty"`
-	// Whether the same request may succeed if tried again: a timeout or a daemon that was briefly
-	// unreachable.
+	// Whether the same request may succeed if tried again: a timeout, a daemon that was briefly
+	// unreachable, or a rate limit. A 429 rate_limited was refused before anything ran, and its
+	// Retry-After header says the wait in whole seconds; every answer of a rate-limited route carries
+	// RateLimit-Remaining.
 	Retryable bool `json:"retryable,omitempty"`
 	// Body is the answer as it came, for one that was not the envelope.
 	Body []byte `json:"-"`
@@ -153,21 +160,54 @@ func (c *Client) socketURL(path string) string {
 	return u
 }
 
-// send makes one request and returns the answer when it is not a refusal.
+// send makes a request and returns the answer when it is not a refusal.
+//
+// A request refused by a rate limit (429 with Retry-After) was refused before
+// anything ran, so it is sent again when the wait it was told is over: at most
+// rateLimitRetries times, and only for a wait of rateLimitWait or less.
+// Anything longer, and every other refusal, is the caller's to decide.
 func (c *Client) send(ctx context.Context, method, path string, query url.Values, body any, accept string, opts []RequestOption) (*http.Response, error) {
-	var reader io.Reader
+	var raw []byte
 	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
+		var err error
+		if raw, err = json.Marshal(body); err != nil {
 			return nil, fmt.Errorf("encode the request body: %w", err)
 		}
+	}
+	for attempt := 0; ; attempt++ {
+		res, wait, err := c.sendOnce(ctx, method, path, query, raw, body != nil, accept, opts)
+		if wait <= 0 || attempt >= rateLimitRetries {
+			return res, err
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, err
+		case <-timer.C:
+		}
+	}
+}
+
+const (
+	// rateLimitRetries is how many times a rate-limited request is sent again.
+	rateLimitRetries = 2
+	// rateLimitWait is the longest Retry-After worth waiting out here.
+	rateLimitWait = 10 * time.Second
+)
+
+// sendOnce makes one request. wait is how long a rate limit asked for, when
+// that is why err is not nil and the wait is one send would sit through.
+func (c *Client) sendOnce(ctx context.Context, method, path string, query url.Values, raw []byte, hasBody bool, accept string, opts []RequestOption) (res *http.Response, wait time.Duration, err error) {
+	var reader io.Reader
+	if hasBody {
 		reader = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.url(path, query), reader)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if body != nil {
+	if hasBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", accept)
@@ -184,16 +224,22 @@ func (c *Client) send(ctx context.Context, method, path string, query url.Values
 	if client == nil {
 		client = http.DefaultClient
 	}
-	res, err := client.Do(req)
+	res, err = client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if res.StatusCode >= 300 {
 		defer res.Body.Close()
-		raw, _ := io.ReadAll(io.LimitReader(res.Body, errorBodyLimit))
-		return nil, errorFrom(res.StatusCode, raw)
+		refusal, _ := io.ReadAll(io.LimitReader(res.Body, errorBodyLimit))
+		if res.StatusCode == http.StatusTooManyRequests {
+			seconds, convErr := strconv.Atoi(res.Header.Get("Retry-After"))
+			if convErr == nil && seconds > 0 && time.Duration(seconds)*time.Second <= rateLimitWait {
+				wait = time.Duration(seconds) * time.Second
+			}
+		}
+		return nil, wait, errorFrom(res.StatusCode, refusal)
 	}
-	return res, nil
+	return res, 0, nil
 }
 
 // do makes a JSON request and decodes a JSON answer into out, when out is

@@ -1,8 +1,9 @@
 "use client"
 
-import { ArrowLeft, Cross } from "@/components/icons"
+import { Cross } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { PaneHeader } from "@/components/panel"
+import { PaneBack } from "@/components/phone-panes"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -29,15 +30,7 @@ export function PreviewHeader({
     <PaneHeader className={cn("gap-2 px-3", wrap && "items-start")}>
       {/* On a phone the preview is a page of its own, and leaving it is going
           back to the list rather than closing a column. */}
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground lg:hidden"
-        aria-label="Back to the list"
-        onClick={onClose}
-      >
-        <ArrowLeft className="size-4" />
-      </Button>
+      <PaneBack onClick={onClose} />
       {leading}
       <div className="min-w-0 flex-1">
         <p

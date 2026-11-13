@@ -36,7 +36,9 @@ export function useSelfConfig() {
     return next
   }, [])
 
-  const poll = usePoll(fetchReport, live ? LIVE_POLL : IDLE_POLL)
+  // Steady while a restart is in flight: the 502s are the restart, and the
+  // page must see the moment they end.
+  const poll = usePoll(fetchReport, live ? LIVE_POLL : IDLE_POLL, [], { steady: live })
   const { data: report, error, refresh } = poll
 
   const run = report?.run

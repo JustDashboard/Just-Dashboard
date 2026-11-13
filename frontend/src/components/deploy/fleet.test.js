@@ -27,8 +27,6 @@ const project = (overrides) => ({
   ...overrides,
 })
 
-describe("needsAttention", () => {})
-
 describe("fleetCounts", () => {
   test("counts what each chip would leave", () => {
     const counts = fleetCounts(
@@ -104,8 +102,6 @@ describe("fleetHaystack", () => {
     ).toContain("n8n")
   })
 })
-
-describe("fleetAttention", () => {})
 
 describe("failingTone", () => {
   test("one colour for one share, wherever it is drawn", () => {

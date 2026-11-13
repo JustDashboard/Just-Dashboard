@@ -1,6 +1,6 @@
 "use client"
 
-import { Settings } from "@/components/database/ops"
+import { Settings } from "@/components/database/ops/settings"
 import { SectionPage } from "@/components/database/shell/section-page"
 
 export default function SettingsPage() {

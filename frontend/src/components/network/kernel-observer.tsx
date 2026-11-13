@@ -171,7 +171,7 @@ export function KernelObserverPanel({
 }
 
 function ObserverTime({ value }: { value?: string | null }) {
-  return value && !value.startsWith("0001-") ? (
+  return value ? (
     <time dateTime={value}>{value.replace("T", " ").replace("Z", " UTC")}</time>
   ) : (
     <span>Unknown</span>

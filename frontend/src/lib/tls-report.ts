@@ -221,16 +221,19 @@ export function termText(scan: Pick<TLSScan, "lifetimeHours" | "renewalWindowHou
  * Certificates page counts them, and hours for its last two days, which "1d"
  * and "0d" would hide.
  */
-export function certificateLeft(cert: { notAfter: string; daysLeft: number }, now: number): string {
+export function certificateLeft(
+  cert: { notAfter?: string; daysLeft: number },
+  now: number,
+): string {
   if (cert.daysLeft >= 2) return `${cert.daysLeft}d`
-  const hours = Math.floor((Date.parse(cert.notAfter) - now) / 3_600_000)
+  const hours = Math.floor((Date.parse(cert.notAfter ?? "") - now) / 3_600_000)
   return hours >= 1 ? `${hours}h` : "<1h"
 }
 
 /** The share of a certificate's term still to run, 0–100, for the meter under the figure. */
-export function termLeft(cert: { notBefore: string; notAfter: string }, now: number): number {
-  const start = Date.parse(cert.notBefore)
-  const end = Date.parse(cert.notAfter)
+export function termLeft(cert: { notBefore?: string; notAfter?: string }, now: number): number {
+  const start = Date.parse(cert.notBefore ?? "")
+  const end = Date.parse(cert.notAfter ?? "")
   if (!(end > start)) return 0
   return Math.max(0, Math.min(100, ((end - now) / (end - start)) * 100))
 }

@@ -669,15 +669,6 @@ func readCommand(argv []string) command {
 	return command{}
 }
 
-// productFromCommand is the server a command line starts, where it names one.
-func productFromCommand(argv []string) (*product, string) {
-	c := readCommand(argv)
-	if c.product == nil {
-		return nil, ""
-	}
-	return c.product, c.word
-}
-
 // nonServers are programs named after a database that are not one: exporters,
 // poolers, proxies, sentinels and coordinators. They are listed so the rule
 // that leaves them out is written down, and tested, rather than being an

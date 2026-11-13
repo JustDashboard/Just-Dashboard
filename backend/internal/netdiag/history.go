@@ -16,7 +16,7 @@ import (
 type HistoryPoint struct {
 	ID        string               `json:"id"`
 	Name      string               `json:"name"`
-	CreatedAt time.Time            `json:"createdAt"`
+	CreatedAt time.Time            `json:"createdAt,omitzero"`
 	Status    string               `json:"status"`
 	Outcome   string               `json:"outcome,omitempty"`
 	Verdict   string               `json:"verdict,omitempty"`

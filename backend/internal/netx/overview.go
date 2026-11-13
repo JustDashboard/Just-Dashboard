@@ -90,16 +90,6 @@ type Observation struct {
 	Href  string `json:"href"`
 }
 
-// ObservationFailed reports whether the named reading failed.
-func ObservationFailed(observations []Observation, source string) bool {
-	for _, o := range observations {
-		if o.Source == source && o.State == "failed" {
-			return true
-		}
-	}
-	return false
-}
-
 // CurrentConntrack is the connection-tracking table's fullness, for the
 // Overview's attention list and the gateway's reading.
 func CurrentConntrack() Conntrack { return readConntrack() }

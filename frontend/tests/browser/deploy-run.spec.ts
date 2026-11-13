@@ -42,6 +42,8 @@ test("renders the run identity, facts and release path for an active run", async
   await page.goto("/deploy/7/runs/84")
 
   await expect(page.getByRole("heading", { name: "Deployment #1" })).toBeVisible()
+  // The tab says which deployment of which project, not only "Deployments".
+  await expect(page).toHaveTitle("Deployment #1 · api-production · Deployments · Just Dashboard")
   const identity = page.locator('[data-slot="run-identity"]')
   await expect(identity.getByText("Verifying", { exact: true })).toBeVisible()
   // Nothing stands above the identity line: the run's verbs sit on it beside

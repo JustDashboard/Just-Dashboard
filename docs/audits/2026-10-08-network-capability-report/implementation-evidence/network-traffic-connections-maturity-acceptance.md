@@ -306,9 +306,9 @@ a readable Suricata event log, bpftool allowed to list, the WireGuard module pre
 ### Screenshots
 
 From the final gate's production build, at 390 px with the maturity fixture:
-[Traffic live context](network-traffic-connections-maturity/traffic-390.png),
-[upload profile and CAKE delay](network-traffic-connections-maturity/upload-profile-390.png) and
-[a peer's tuples and layers](network-traffic-connections-maturity/peer-sheet-390.png).
+[Traffic live context](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-traffic-connections-maturity/traffic-390.png),
+[upload profile and CAKE delay](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-traffic-connections-maturity/upload-profile-390.png) and
+[a peer's tuples and layers](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-08-network-capability-report/implementation-evidence/network-traffic-connections-maturity/peer-sheet-390.png).
 
 ## Proposed ledger statuses
 

@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react"
 import { Check, ChevronDown, Cross, EyeOff } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { bytes } from "@/lib/format"
+import { latency } from "@/lib/requests"
 import type { LogFacet, LogLine } from "@/lib/types"
 import type { LogFields, LogFilterState } from "@/components/logs/types"
 import {
@@ -14,19 +16,20 @@ import {
   hideField,
   lineValue,
   matchFields,
+  parsePredicate,
   toggleField,
   type LogLevel,
 } from "@/lib/log-filter"
 import { fieldOf, isFilterable } from "@/lib/log-fields"
 import { readingFilter } from "@/lib/log-insights"
 import type { LensView, LogLens } from "@/lib/log-lenses"
-import { FieldValue } from "@/components/logs/field-value"
+import { FieldMark, FieldValue } from "@/components/logs/field-value"
 import {
   readingPressed,
   type LensReadingTile,
   type LensReadingsState,
 } from "@/components/logs/lens-readings"
-import { LevelChips } from "@/components/logs/filter-bar"
+import { LevelChips, presentLevels } from "@/components/logs/filter-bar"
 import { readingFor, readingShown, unaskedReadings } from "@/components/logs/logs-model"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -102,6 +105,24 @@ function countFromFacets(view: LensView, facets: Record<string, LogFacet>): numb
   }
   return undefined
 }
+
+/**
+ * A predicate in the words its chip says it in: a duration or a size as the
+ * figure it is ("≥ 1.84s", which a press on a response time sets) rather than
+ * the milliseconds or bytes the server is asked in.
+ */
+function predicateText(key: string, raw: string) {
+  const p = parsePredicate(raw)
+  const kind = fieldOf(key).kind
+  if (p && (p.op === "gt" || p.op === "ge" || p.op === "lt" || p.op === "le")) {
+    const figure =
+      kind === "duration" ? latency(p.value) : kind === "bytes" ? bytes(p.value) : undefined
+    if (figure) return `${COMPARE[p.op]} ${figure}`
+  }
+  return describePredicate(raw)
+}
+
+const COMPARE = { gt: ">", ge: "≥", lt: "<", le: "≤" } as const
 
 type Tally = { value: string; count: number; errors: number }
 
@@ -233,6 +254,12 @@ export function LensBar({
 
   const setFields = (next: LogFields) => onFilterChange({ ...filter, fields: next })
   const asks = views.length > 0 || unasked.length > 0 || Boolean(lens?.facets.length)
+  // The rule between what narrows and what asks, only once something stands before it.
+  const leads =
+    onDefaults ||
+    predicateKeys.length > 0 ||
+    Boolean(applied) ||
+    presentLevels(filter, levelCounts).length > 0
 
   return (
     <div className="flex shrink-0 items-center gap-1 border-b border-hairline pr-2">
@@ -258,18 +285,29 @@ export function LensBar({
         {predicateKeys.map((key) => {
           const label = fieldOf(key).label
           const values = fields[key]
+          const only = values.length === 1 ? parsePredicate(values[0]) : null
           return (
             <FilterChip
               key={key}
               selected
               aria-label={`Clear the ${label} filter`}
-              title={`${label}: ${values.map(describePredicate).join(" or ")} — press to clear`}
+              title={`${label}: ${values.map((v) => predicateText(key, v)).join(" or ")} — press to clear`}
               onClick={() => setFields(clearField(fields, key))}
             >
               <span className="text-muted-foreground">{label}</span>
-              <span className="max-w-48 truncate font-mono">
-                {values.map(describePredicate).join(", ")}
-              </span>
+              {/* One value is drawn as what it is — an address with its
+                  network, a user in its hue, an event in its tone — as the
+                  request record's chips draw theirs. */}
+              {only?.op === "eq" ? (
+                <span className="flex max-w-48 min-w-0 items-center gap-1 [&_img]:size-3 [&_svg]:size-3">
+                  <FieldMark name={key} value={only.value} />
+                  <FieldValue name={key} value={only.value} compact lens={lensId} />
+                </span>
+              ) : (
+                <span className="max-w-48 truncate font-mono">
+                  {values.map((v) => predicateText(key, v)).join(", ")}
+                </span>
+              )}
               <Cross aria-hidden className="size-3 text-muted-foreground" />
             </FilterChip>
           )
@@ -279,7 +317,7 @@ export function LensBar({
 
         <LevelChips filter={filter} onFilterChange={onFilterChange} counts={levelCounts} />
 
-        {asks && <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />}
+        {asks && leads && <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />}
 
         {lens && lens.facets.length > 0 && (
           <FieldsPopover

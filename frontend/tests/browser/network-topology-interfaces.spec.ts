@@ -208,6 +208,42 @@ test("the throughput tiles and the chart drill into the devices under them", asy
   await expect(page.getByRole("dialog").getByText("ens3").first()).toBeVisible()
 })
 
+// What a keyboard and a screen reader need of the overview. A node's mark is
+// a link, and a device's name is drawn in mono rather than passed as words, so
+// the link around its mark had no name at all. And a table that scrolls with
+// nothing in it to focus is itself a stop, or the rows past its fold could not
+// be reached; one that does not scroll adds no stop.
+test("a node's mark names what it opens, and a scrolling table of plain rows can be reached", async ({
+  page,
+}) => {
+  await mockNetwork(page)
+  await page.goto("/network")
+  await loaded(page)
+  const marks = page.locator("[data-node] a[href^='/network/']")
+  await expect(marks.first()).toBeVisible()
+  const names = await marks.evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute("aria-label") ?? ""),
+  )
+  expect(names.filter((name) => name.trim() === "")).toEqual([])
+  // The private bridge is the one the audit met with no name.
+  expect(names).toContain("jd-lab")
+
+  const table = page.locator("[data-slot=table-container]").filter({ hasText: "Leaves through" })
+  await expect(table).toHaveCount(1)
+  await expect(table).not.toHaveAttribute("tabindex")
+  // The same table in a box shorter than its rows.
+  await table.evaluate((node) => {
+    ;(node as HTMLElement).style.maxHeight = "60px"
+  })
+  await expect(table).toHaveAttribute("tabindex", "0")
+  await expect(table).toHaveAttribute("role", "region")
+  await expect(table).toHaveAttribute("aria-label", /.+/)
+  await table.focus()
+  expect(
+    await table.evaluate((node) => document.activeElement === node && node.scrollHeight > 60),
+  ).toBe(true)
+})
+
 test("a failed native reading remains an error without advisory findings or incidents", async ({
   page,
 }) => {

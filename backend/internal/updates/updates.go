@@ -1,4 +1,7 @@
-// Package updates reports the operating system patches a server is missing.
+// Package updates reports the operating system patches a server is missing,
+// and is the rest of the Packages page as well: what is installed, the
+// catalogue to install from, and the upgrade, install and remove commands for
+// each package manager it knows (managers.go, catalogue*.go).
 //
 // "Is this machine up to date, and does it need a reboot?" is one of the most
 // common reasons to open an SSH session, and it is a question the dashboard
@@ -43,7 +46,7 @@ type Report struct {
 	SecurityFiltering bool      `json:"securityFiltering"`
 	RebootRequired    bool      `json:"rebootRequired"`
 	RebootPackages    []string  `json:"rebootPackages,omitempty"`
-	LastChecked       time.Time `json:"lastChecked"`
+	LastChecked       time.Time `json:"lastChecked,omitzero"`
 	Error             string    `json:"error,omitempty"`
 }
 

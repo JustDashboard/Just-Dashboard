@@ -44,16 +44,27 @@ export function useProcessControl(onChanged?: () => void) {
   const [pending, setPending] = useState<PendingMap>({})
 
   const signal = useCallback(
-    async (process: ProcessRow, sig: string, progressive: string, confirmText?: string) => {
+    async (
+      process: ProcessRow,
+      sig: string,
+      progressive: string,
+      confirmText?: string,
+      tree?: boolean,
+    ) => {
       const key = processKey(process)
       setPending((p) => ({ ...p, [key]: progressive }))
       try {
-        await post(
+        const answer = await post<{ signalled?: number[] } | undefined>(
           `/processes/${process.pid}/signal`,
-          { signal: sig, startedAt: process.createTime },
+          { signal: sig, startedAt: process.createTime, ...(tree ? { tree: true } : {}) },
           { confirm: confirmText },
         )
-        notify.success(`${sig} sent to ${process.name} (${process.pid})`)
+        const reached = answer?.signalled?.length ?? 1
+        notify.success(
+          reached > 1
+            ? `${sig} sent to ${process.name} (${process.pid}) and ${reached - 1} below it`
+            : `${sig} sent to ${process.name} (${process.pid})`,
+        )
         onChanged?.()
       } catch (err) {
         notify.error(`Could not signal ${process.name}`, err)
@@ -80,31 +91,45 @@ export function useProcessControl(onChanged?: () => void) {
  * Nothing here is inline in a table row. A process table is not a list of
  * things one restarts every morning — the daily verb is *reading* it — and a
  * red stop glyph beside every one of four hundred rows is four hundred
- * invitations to end something by mis-click. The sheet draws the first two as
- * named buttons, where the width exists for the word.
+ * invitations to end something by mis-click. The process's page draws the
+ * first two as named buttons, where the width exists for the word.
  */
+export type SignalFn = (
+  process: ProcessRow,
+  sig: string,
+  progressive: string,
+  confirm?: string,
+  tree?: boolean,
+) => Promise<void>
+
 export function useProcessVerbs({
   process,
   confirm,
   signal,
   onInspect,
   onOpen,
+  children = 0,
 }: {
   process: ProcessRow
   confirm: ConfirmFn
-  signal: (process: ProcessRow, sig: string, progressive: string, confirm?: string) => Promise<void>
-  /** Opens the detail sheet; absent inside the sheet itself. */
+  signal: SignalFn
+  /** Opens the process's page; absent on the page itself. */
   onInspect?: () => void
-  /** Opens another process in the sheet — a zombie's parent, which is its remedy. */
+  /** Opens another process's page — a zombie's parent, which is its remedy. */
   onOpen?: (pid: number) => void
+  /**
+   * How many processes it started, where that is known: the page offers to
+   * end them with it, which is how a pool that respawns its workers stops.
+   */
+  children?: number
 }): Verb[] {
   const { can } = useAuth()
   const router = useRouter()
 
   return useMemo(() => {
     const verbs: Verb[] = []
-    // Inline only in the sheet, where the width exists for the word; a row
-    // in the table keeps every verb behind its menu.
+    // Inline only on the process's page, where the width exists for the
+    // word; a row in the table keeps every verb behind its menu.
     const inline = !onInspect
     const stopped = process.state === "stopped"
     const label = `${process.name} (${process.pid})`
@@ -116,7 +141,7 @@ export function useProcessVerbs({
     if (onInspect) {
       verbs.push({
         key: "inspect",
-        label: "Inspect",
+        label: "Open",
         icon: Inspect,
         run: onInspect,
       })
@@ -185,6 +210,49 @@ export function useProcessVerbs({
             action: (phrase) => signal(process, "SIGKILL", "Killing", phrase),
           }),
       })
+      if (children > 0) {
+        const below =
+          children === 1 ? "the process it started" : `the ${children} processes it started`
+        verbs.push({
+          key: "term-tree",
+          group: "With its children",
+          progressive: "Terminating",
+          label: "Terminate with its children",
+          icon: StopCircle,
+          run: () =>
+            confirm({
+              title: "Terminate with its children",
+              confirmLabel: "Terminate all",
+              description: (
+                <p>
+                  <b>{label}</b> and {below}, and everything those started, are each asked to shut
+                  down — the process first, so it does not start new ones in their place.
+                </p>
+              ),
+              action: (phrase) => signal(process, "SIGTERM", "Terminating", phrase, true),
+            }),
+        })
+        verbs.push({
+          key: "kill-tree",
+          group: "With its children",
+          progressive: "Killing",
+          label: "Kill with its children",
+          icon: Stop,
+          danger: true,
+          run: () =>
+            confirm({
+              title: "Kill with its children",
+              confirmLabel: "Kill all",
+              description: (
+                <p>
+                  <b>{label}</b> and {below}, and everything those started, are ended by the kernel
+                  at once. Nothing any of them had not written is kept.
+                </p>
+              ),
+              action: (phrase) => signal(process, "SIGKILL", "Killing", phrase, true),
+            }),
+        })
+      }
       if (stopped) {
         verbs.push({
           key: "cont",
@@ -288,7 +356,7 @@ export function useProcessVerbs({
       })
     }
     return verbs
-  }, [process, can, confirm, signal, onInspect, onOpen, router])
+  }, [process, can, confirm, signal, onInspect, onOpen, router, children])
 }
 
 const EXTRA_SIGNALS = [

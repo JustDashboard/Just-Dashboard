@@ -38,8 +38,8 @@ type ErrorGroup struct {
 	Pattern string    `json:"pattern"`
 	Level   string    `json:"level"`
 	Count   int       `json:"count"`
-	First   time.Time `json:"first"`
-	Last    time.Time `json:"last"`
+	First   time.Time `json:"first,omitzero"`
+	Last    time.Time `json:"last,omitzero"`
 	// Sample is the newest line of the group as nginx wrote it.
 	Sample   string `json:"sample"`
 	Upstream string `json:"upstream,omitempty"`
@@ -60,7 +60,7 @@ type ErrorReport struct {
 	Scope  string    `json:"scope"`
 	Path   string    `json:"path"`
 	Exists bool      `json:"exists"`
-	Since  time.Time `json:"since"`
+	Since  time.Time `json:"since,omitzero"`
 	// Complete is false when the read's byte bound cut into the window, so
 	// every count is a floor.
 	Complete  bool         `json:"complete"`

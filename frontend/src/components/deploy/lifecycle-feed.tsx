@@ -17,7 +17,7 @@ import {
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { clock, plural, relativeTime, timestamp } from "@/lib/format"
+import { clock, dayAt, minuteAt, plural, relativeTime, timestamp } from "@/lib/format"
 import { dedupeEvents, eventKey, lastLinesSearch } from "@/lib/docker-events"
 import { dockerSource } from "@/lib/log-sources"
 import type { DeploymentLifecycle, DockerEvent } from "@/lib/types"
@@ -411,17 +411,10 @@ function byHour(items: FeedItem[]) {
       group.count += size(item)
       continue
     }
-    const time = hour.toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    })
+    const time = minuteAt(hour)
     groups.push({
       key,
-      label:
-        days.size > 1
-          ? `${hour.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${time}`
-          : time,
+      label: days.size > 1 ? `${dayAt(hour)} · ${time}` : time,
       count: size(item),
       items: [item],
     })
@@ -432,9 +425,7 @@ function byHour(items: FeedItem[]) {
 /** The record's start: the clock when it began today, the date when it did not. */
 function recordStart(iso: string) {
   const began = new Date(iso)
-  return began.toDateString() === new Date().toDateString()
-    ? clock(iso)
-    : began.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+  return began.toDateString() === new Date().toDateString() ? clock(iso) : dayAt(began)
 }
 
 /**

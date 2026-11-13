@@ -90,6 +90,7 @@ function InputGroupAddon({
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof addonVariants>) {
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- a press on the addon's padding puts the caret in the field; the field is what a keyboard reaches
     <div
       data-slot="input-group-addon"
       data-align={align}

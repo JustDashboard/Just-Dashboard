@@ -2,7 +2,6 @@ package dockerx
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -25,22 +24,6 @@ func healthFactsOf(insp containerInspect) healthFacts {
 		f.status = insp.State.Health.Status
 	}
 	return f
-}
-
-func parseDockerTime(s string) time.Time {
-	t, err := time.Parse(time.RFC3339Nano, s)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
-}
-
-func truncate(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }
 
 func humanBytes(b int64) string {

@@ -92,12 +92,25 @@ instead, unless they chose full access. What still holds it is below, and
 | Mode | Runs without asking | Waits for the person |
 | --- | --- | --- |
 | Ask every time (`ask`) | Looking up an operation or a route, offering a shortcut | Every read and every change |
-| Ask before changes (`changes`, the default) | Reads, including a SQL statement and a shell command that only read | Every change |
+| Ask before changes (`changes`, the default) | Reads that stay on the server, including a SQL statement and a shell command that only read | Every change, and every read that is sent to another machine |
 | Full access (`full`) | Everything the person's role allows | Anything past `agentSteps` |
 
 The page sends the mode on every press; left out, it is the install's default, which an administrator
 sets on `/assistant` (`PUT /assistant/preferences`). Anyone asking may change it for their conversation.
 It is in the audit entry of every press.
+
+**Full access includes what outlasts the chat.** The routes a hub session is refused because what they make
+outlives whoever made it (`httpx.RefuseHubSession`: an account, a reset password or second factor, an SSH key,
+a sudo rule, a VPN peer, a Git token, the dashboard's own settings) are the assistant's to call where they are
+the person's, except those `agentExclusion` closes. In "ask" and "changes" each of them that makes or changes
+something waits for the person, none being read as a read
+(`TestWhatOutlivesTheChatWaitsForThePersonOutsideFullAccess` walks the hub's table); the few that only show a
+stored secret are reads, whose answer is masked before the provider is sent it. In full access they run
+unasked like the rest. Holding those routes alone there would not keep an instruction the model read from
+leaving access behind: an administrator's shell line or file write can add the same key or sudo rule and runs
+unasked too, and holding those as well is the mode called "Ask before changes". So the mode says what it
+includes where it is chosen (`MODE_DETAIL` in `components/assistant/settings.ts`), and making full access stop
+at lasting access would change what the mode means (security invariant 13), which is the operator's to decide.
 
 A call is one of four kinds: `free` reads nothing of the server; `read`; `change`; and `destructive` for a route
 behind `s.destructive`, a `DELETE`, or one of `mcpDestructiveHints`. `change` and `destructive` differ only in
@@ -106,16 +119,82 @@ what the card says and how Allow is drawn. An `api_request` is read by its metho
 `POST /databases/{id}/query` is a read when its one statement is (`dbx.SingleStatementFor`, risk `read`), so a
 database is asked about without an Allow for each query in "changes".
 
+**A read that is sent to another machine waits, in every mode but full access.** What the model reads is not
+instructions, but it can be told things by it, and a read that sends what it is given to a machine of its
+choosing is the way out for everything else it has read: a row, a file or a host name can be put into a name
+to look up or a path to fetch, and whoever answers for that name is sent it. Masking keeps secrets' values from
+the provider, not ordinary data from a third machine. So:
+
+- A route that reads by reaching a host, a domain or an address its caller names is listed in
+  `agentReachingReads` (`api/handlers_assistant_routes.go`) and its call carries `asks`, which `agentHolds`
+  holds like a change though the card and the answer stay a read's: `GET /certificates/check`, `/scan`,
+  `/scan/deep` and `/dns`, `GET /remote-desktop/probe`, `GET /deploy/hostname` when it is given a `hostname`
+  (a name suggested for a deployment is under the server's own domain), `POST /databases/test` and
+  `POST /databases/{id}/imports/inspect`, which connect to the address they are given,
+  `POST /network/dns/lookup` and `/dnssec-chain`, and `POST /docker/stacks/{name}/validate`, since Compose
+  resolves what a file includes. A scan of one of the server's own sites waits as any other does: the route is
+  listed, not the name. A draft's chat, whose own reads never wait, waits for these too. A read is not
+  listed when it reaches only where the server already points: a saved database connection, a deployment's own
+  domain or repository, GitHub, an image's registry, a configured resolver, the distribution's package index.
+  A new route that takes a host from its caller and reads by reaching it joins the list, which
+  `TestTheCatalogueIsTheRoutesItSaysItIs` holds to the router.
+- A ClickHouse `SELECT` from a table function that reads another machine or runs a program (`url`, `remote`,
+  `s3`, `mysql`, `executable` and kin, `clickHouseReaching`) is not a statement that runs unasked, though the
+  statement's own classifier reads it as a read. The name is looked for anywhere in the statement, quoted or
+  with a comment before its bracket, so a column of that name called like a function costs an Allow.
+- A shell line that reaches another machine is a `change`, as `curl` always was: `ping`, `dig`, `host`,
+  `nslookup` and `traceroute` are not readers, nor are `git ls-remote`, `git remote show`, `openssl s_client`,
+  `npm view` and `npm outdated`; `getent hosts name`, `lsof -i @host`, an `ss` filter that names a host,
+  `openssl x509 -in http://…` and bash's `< /dev/tcp/host/port` ask as well, and so do `lspci -q`, which asks a
+  DNS zone of the line's choosing, and `ip -r`, which looks up the name of the address it was asked the route to.
+
 A `run_command` line is read by `assistant.ClassifyCommand`, conservatively, so that a misreading costs an Allow
-rather than a write nobody saw: it is a `read` only when it is plain — nothing written by a redirection except to
-`/dev/null` or another stream, no `$( )` or backticks, no subshell, group, here-document or background job — and
-every command in it is a program that only reads (`readPrograms`), or one that both reads and writes used with a
-subcommand or flags that only read (`systemctl status`, `docker ps`, `git log`, `nginx -t`, `crontab -l`,
-`iptables -L`), with the flags that make a reader write (`find -exec`/`-delete`, `sort -o`, `date -s`,
-`dmesg -c`, `journalctl --vacuum-*`) read as a change. It is `destructive` when any part removes, stops, kills,
-wipes or reboots (`rm`, `dd`, `mkfs.*`, `kill`, `reboot`, `systemctl stop`, `docker rm`, `apt purge`,
-`git reset`, `iptables -F`, `crontab -r`), and a `change` otherwise — `sed`, `curl`, an interpreter, an unknown
-program, anything not plain.
+rather than a write nobody saw. It keeps that by listing what a read may be made of and asking about everything
+else, never by listing what to refuse. A line is a `read` only when all of this holds:
+
+- **It is plain** (`parseLine`): nothing written by a redirection except to `/dev/null` or to another stream
+  (`2>&1`, `>&2`, `>&-`, each a whole word: `>&file` writes a file in bash and zsh, and `/dev/null.txt` is one),
+  no `$( )`, backticks, `${ }`, `$'…'`, subshell, group, here-document, background job or comment, and no `!`
+  that a terminal window's history would expand. Where bash and zsh, run with `-c` or typed at a prompt, read a
+  line differently, the reading that asks is taken: a control character is a key to a shell that is typed into
+  (one that rubs out what was typed before it, or fetches a line from the history), and a line that ends in a
+  backslash or with a quote open goes on into the next line typed, so neither is plain. The file a `<` reads
+  from is no word of the command: `git < log checkout .` is `git checkout`.
+- **Every command in it is a listed reader** (`readers`, `assistant/command_readers.go`), named bare or under a
+  system directory (`/usr/bin/ls`, never `./ls` or `/srv/app/bin/cat`). A few can only read whatever they are
+  given (`ls`, `cat`, `grep`, `ps`, `jq` and the like) and their arguments are not looked at. Every other is a
+  reader only with the flags listed for it and the subcommands that only read: `find` with its tests and prints
+  but not `-exec`, `-delete` or `-fprint`; `sort` without `-o` or `--compress-program`; `git log`, `status`,
+  `diff`, `show`, `branch` and `tag` listing, without `-c`, `-C`, `--output` or a remote; `docker ps`, `logs`,
+  `inspect` and `compose ps` without `-H`, `--config` or `-f`; `openssl x509` without `-out` or `-engine`;
+  `systemctl status`, `journalctl -u`, `crontab -l`, `iptables -L`, `nft list`, `nginx -t`. **A flag the table has
+  not heard of makes the line a change**, so a new flag, an abbreviated one or a letter in a run of short ones
+  costs an Allow rather than slipping through; a value is taken from the word after its flag only where the
+  program certainly takes it from there, and is read as an operand otherwise. The program may take that word
+  for the value all the same, so nothing that decides what the line does is read past such a flag: the word
+  after it is not the subcommand (`systemctl -p status stop nginx` stops nginx, `npm --depth ls install x`
+  installs, `docker compose --profile ps down` takes the project down), a `--` after it ends nothing
+  (`journalctl -u -- --rotate`, `rg -e -- --pre sh`), and a flag after it is not known to be in force
+  (`git branch --sort -l name` makes a branch). A value written onto its flag (`--property=status`, `-n5`), or
+  after the subcommand where only reading follows (`systemctl status nginx -n 50`), costs nothing.
+- **Its arguments are what was typed**, wherever they decide what the program does: a variable (`$X`, `"$X"`)
+  or a pattern the shell matches file names against can turn out to be a flag or several words, so a reader
+  other than the first kind is not read past one, and neither is a wrapper.
+- **It runs under nothing but** `sudo`, `nice`, `ionice`, `stdbuf`, `timeout`, `time`, `command` or `builtin`
+  with the flags listed for them (`readWrappers`), and a variable set in front of it only when it is one of the
+  locale's, the zone's, the screen's width or a pager set to `cat` (`harmlessVariables`): any other is the
+  program's to obey (`GIT_SSH_COMMAND`, `LD_PRELOAD`, `PATH`), and a line that only sets one sets it for what
+  follows.
+
+It is `destructive` when any part removes, stops, kills, wipes or reboots (`rm`, `dd`, `mkfs.*`, `kill`, `reboot`,
+`systemctl stop`, `docker rm`, `apt purge`, `git reset`, `iptables -F`, `crontab -r`, `loginctl terminate-session`,
+`ss -K`), and a `change` otherwise — `sed`, `curl`, an interpreter, `cd`, an unknown program, anything not plain.
+`TestNothingThatWritesOrRunsIsReadAsARead` holds the lines that were once read as reads; a new reader or flag
+goes into the table with the lines that must still ask.
+
+It reads what a line says, not where it runs or what it opens. In the terminal window a read runs in the
+directory an earlier `cd` left, which the person allowed, and a program that takes configuration from its
+directory (git, npm, Docker Compose) takes it there; and reading a file is a read whatever the file is.
 
 ## The routes
 
@@ -272,8 +351,12 @@ windows are not held, runs on its own as before.
   password turns the terminal's echo off, so it is not in what the window prints either; one that does not would
   print it, and the field says so. `terminal_send` refuses a masked value outright, so the model cannot send a
   `[REDACTED]` back as if it were the secret.
-- **Held like the shell.** A command line is read as `run_command`'s is (`ClassifyCommand`); whatever is typed
-  into a running program is a change, since an answer to a question is a decision; and a read is a read. The
+- **Held like the shell.** A command line is read as `run_command`'s is (`ClassifyCommand`), and as what is
+  typed (`TypedKind`): a tab is a key in a window, where the shell completes the word before it, so a line with
+  one is a change. Whatever is typed into a running program is a change, since an answer to a question is a
+  decision — a `terminal_run` line included when a program holds the window in front of its shell
+  (`terminalBusy`), because that program reads it, not the shell, and a `run_command` line that goes to the
+  window (a `sudo` that may ask) is read the same two ways; and a read is a read. The
   press's audit entry lists each line typed (`terminal: …`) and each answer (`typed: …`, keys by name), masked.
 - **What it changed is said as a change.** A shell line read as a change that succeeded — `run_command` with exit
   0, a terminal call once its window is back at the prompt — carries a `change` like a route's (`commandChange`),
@@ -290,7 +373,7 @@ and its deployments by id, name and last run, and, for a chat opened with **Ask*
 address, with "this" most likely meaning what it shows. `assistant.DatabaseSystemPrompt` is told the connection —
 its name and id, engine and version, host, database, what it serves and the operator's notes — and, for a SQL
 engine that answers within eight seconds, the structure of its schema in focus, never a row
-([a connection's assistant](../backend/databases-proxy-platform.md#a-connections-assistant)). Every prompt (`writeAPI`) tells the model it has the whole
+([a connection's assistant](../backend/databases.md#a-connections-assistant)). Every prompt (`writeAPI`) tells the model it has the whole
 dashboard through `api_request` and `find_routes`, lists the API's areas — each first path segment with its
 count of routes, a sentence (`agentAreaBlurbs`) and a few reads, built from `chi.Walk` when the catalogue is —
 says how to learn a body's shape (GET the resource first, or read the 400 the route answers), how to query a

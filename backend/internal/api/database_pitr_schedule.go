@@ -8,6 +8,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/docker/docker/errdefs"
 	"github.com/robfig/cron/v3"
 )
@@ -27,8 +28,15 @@ func (s *Server) startPITRSchedule(ctx context.Context) {
 	s.pitr.sched.mu.Lock()
 	// The parser the backup jobs use, so a schedule means the same here.
 	s.pitr.sched.cron = cron.New(cron.WithParser(cron.NewParser(
-		cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
-	)))
+		cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Descriptor,
+	)), cron.WithChain(func(job cron.Job) cron.Job {
+		// cron recovers nothing: a panic in one base backup would otherwise
+		// end the dashboard.
+		return cron.FuncJob(func() {
+			defer safego.Recover(s.Log, "scheduled base backup")
+			job.Run()
+		})
+	}))
 	s.pitr.sched.entries = map[int64]cron.EntryID{}
 	s.pitr.sched.cron.Start()
 	s.pitr.sched.mu.Unlock()

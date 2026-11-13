@@ -28,8 +28,8 @@ type SocketUnit struct {
 // socket unit that is loaded but not listening from hiding one that is, and
 // JSON keeps an address with a space in it ("route 1361") in one column.
 func (s *Systemd) Sockets(ctx context.Context) ([]SocketUnit, error) {
-	if !s.Available() {
-		return nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
+	if err := s.unavailable(); err != nil {
+		return nil, err
 	}
 	res, err := run(ctx, 10*time.Second, "systemctl",
 		"list-sockets", "--all", "--no-legend", "--no-pager", "--full", "--show-types", "--output=json")

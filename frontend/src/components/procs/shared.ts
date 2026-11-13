@@ -31,7 +31,7 @@ export function managerHref(process: Pick<ProcessRow, "manager" | "managerName">
   if (!process.managerName) return null
   switch (process.manager) {
     case "systemd":
-      return `/processes/services?unit=${encodeURIComponent(process.managerName)}`
+      return `/processes/services/${encodeURIComponent(process.managerName)}`
     case "pm2":
       return `/processes/pm2?app=${encodeURIComponent(process.managerName)}`
     case "container":

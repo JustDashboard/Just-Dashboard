@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // crowdSecRefreshEvery is how stale the list a route refuses from may be: a
@@ -27,7 +28,7 @@ func (s *Server) startCrowdSecRefresh(ctx context.Context) {
 		return
 	}
 	read := s.modules.netsec.CrowdSecBans
-	go func() {
+	safego.Go(ctx, s.Log, "crowdsec list refresh", func(ctx context.Context) {
 		ticker := time.NewTicker(crowdSecRefreshEvery)
 		defer ticker.Stop()
 		for {
@@ -42,7 +43,7 @@ func (s *Server) startCrowdSecRefresh(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
-	}()
+	})
 }
 
 // crowdSecListWriter is the proxy's half of a refresh.

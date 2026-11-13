@@ -67,18 +67,94 @@ export function relativeTime(iso: string | undefined | null): string {
   return `${duration(Math.abs(delta))} ${suffix}`
 }
 
+/**
+ * A date format that is built once and then only asked.
+ *
+ * `toLocaleString` and its two siblings build a fresh `Intl.DateTimeFormat`
+ * on every call that carries options, and building one costs about thirty
+ * times what asking it does (75 µs against 2 µs). A chart's axis asks for
+ * every tick of every render and a log asks for every row, which made that
+ * construction the largest single cost on the Metrics page while nobody
+ * touched it. So a date is printed through one of these, declared once at
+ * the top of its module, and `eslint.config.mjs` refuses the calls it
+ * replaces.
+ *
+ * The format is built on first use, in the reader's own locale and zone, and
+ * built again if the zone's offset has moved under an open tab, as a laptop's
+ * does when it lands somewhere else: the calls this replaces followed the
+ * zone, and a clock that kept the old one would be wrong without looking it.
+ * A date that is not one reads "Invalid Date", as it did, where
+ * `Intl.DateTimeFormat` alone would throw.
+ *
+ * `toLocaleTimeString` with no time field named fills in hour, minute and
+ * second; `Intl.DateTimeFormat` given the same options fills in a date. So a
+ * clock names its three fields (`CLOCK`), which is what the call resolved to.
+ */
+export function dateFormatter(
+  options: Intl.DateTimeFormatOptions,
+  locale?: string,
+): (date: Date | number) => string {
+  let built: Intl.DateTimeFormat | undefined
+  let offset = Number.NaN
+  return (date) => {
+    const time = typeof date === "number" ? date : date.getTime()
+    // Past the last instant a Date can hold, and NaN, which fails every comparison.
+    if (!(Math.abs(time) <= 8.64e15)) return "Invalid Date"
+    const now = new Date().getTimezoneOffset()
+    if (!built || now !== offset) {
+      built = new Intl.DateTimeFormat(locale, options)
+      offset = now
+    }
+    return built.format(time)
+  }
+}
+
+/** What `toLocaleTimeString(undefined, { hour12: false })` resolves to. */
+export const CLOCK: Intl.DateTimeFormatOptions = {
+  hour: "numeric",
+  minute: "numeric",
+  second: "numeric",
+  hour12: false,
+}
+
+const timestampFormat = dateFormatter({
+  year: "numeric",
+  month: "short",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+})
+const calendarDateFormat = dateFormatter({ year: "numeric", month: "short", day: "numeric" })
+
+/*
+ * The same shapes for a caller that holds a Date or epoch milliseconds: a
+ * chart's tick, an hour a feed groups by. A shape only one module prints is
+ * declared there, with `dateFormatter`.
+ */
+
+/** "11:46:09" */
+export const clockAt = dateFormatter(CLOCK)
+/** "11:46" */
+export const minuteAt = dateFormatter({ hour: "2-digit", minute: "2-digit", hour12: false })
+/** "Oct 31" */
+export const dayAt = dateFormatter({ month: "short", day: "numeric" })
+/** "Wed, Oct 28" */
+export const weekdayAt = dateFormatter({ weekday: "short", month: "short", day: "numeric" })
+/** "Oct 31, 11:46" */
+export const dayMinuteAt = dateFormatter({
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+})
+
 export function timestamp(iso: string | undefined | null): string {
   if (!iso) return "—"
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return "—"
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  })
+  return timestampFormat(d)
 }
 
 /** The day alone — for when something happened, not the second it did. */
@@ -86,7 +162,7 @@ export function calendarDate(iso: string | undefined | null): string {
   if (!iso) return "—"
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return "—"
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+  return calendarDateFormat(d)
 }
 
 /** Zero-padded clock time, for dense log and metric rows. */
@@ -94,7 +170,7 @@ export function clock(iso: string | undefined | null): string {
   if (!iso) return "—"
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return "—"
-  return d.toLocaleTimeString(undefined, { hour12: false })
+  return clockAt(d)
 }
 
 /** Hour and minute: a chart's axis, and a span dragged out of one. */
@@ -102,7 +178,7 @@ export function clockMinute(iso: string | undefined | null): string {
   if (!iso) return "—"
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return "—"
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })
+  return minuteAt(d)
 }
 
 /**
@@ -117,16 +193,7 @@ export function minuteSpan(since: string, until?: string): string {
   const dated =
     to !== undefined &&
     (from.toDateString() !== to.toDateString() || to.getTime() - from.getTime() > 86_400_000)
-  const at = (d: Date) =>
-    dated
-      ? d.toLocaleString(undefined, {
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        })
-      : clockMinute(d.toISOString())
+  const at = dated ? dayMinuteAt : minuteAt
   return `${at(from)}–${to ? at(to) : "now"}`
 }
 
@@ -153,4 +220,93 @@ export function truncateMiddle(value: string, max = 48): string {
  */
 export function plural(n: number, singular: string, many?: string): string {
   return `${n.toLocaleString()} ${n === 1 ? singular : (many ?? singular + "s")}`
+}
+
+/**
+ * A message from the API with the capital a headline starts with.
+ *
+ * The API words its errors to sit inside other text: lower case, no full stop
+ * ("not found", "too many requests, slow down"). Standing alone as the title of
+ * an error box or the reason under a toast they read as something that leaked.
+ * Only a plain word is raised: a message that opens on a program's name, a
+ * path, a unit or an identifier ("nginx: [emerg] …", "pg_dump: …", "eth0 is
+ * down"), or that is a tool's own line with the command before a colon ("nft
+ * list set: permission denied"), is somebody else's text and stays as written.
+ * So does a command that is the subject of the sentence ("nginx refuses the
+ * configuration", "gh did not answer": `COMMANDS`) and a command line ("wget
+ * --spider http://…"): "Gh" and "Nginx" are nobody's spelling.
+ */
+export function sentenceCase(text: string): string {
+  const trimmed = text.trim()
+  const word = /^[a-z]+(?=[\s,]|$)/.exec(trimmed)?.[0]
+  if (!word || COMMANDS.has(word)) return trimmed
+  // Up to three lower-case words and a colon: `tar: …`, `nft list set: …`.
+  const toolLine = /^[a-z0-9_.\-/]+( [a-z0-9_.\-/]+){0,2}: /.test(trimmed)
+  // The word and then an option: a command line, quoted as it was run.
+  const commandLine = /^[a-z]+ --?[a-z]/.test(trimmed)
+  return toolLine || commandLine ? trimmed : trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
+}
+
+/**
+ * Commands the API's messages open on and that are written in lower case
+ * wherever they stand. Only names that are nothing else: a product with a
+ * capital of its own ("Docker", "Git", "Postgres") and a word that is also
+ * English ("ping", "node", "mount") take the capital like any other.
+ */
+const COMMANDS = new Set([
+  "nginx",
+  "systemd",
+  "systemctl",
+  "journalctl",
+  "logrotate",
+  "crontab",
+  "sysctl",
+  "sudo",
+  "ssh",
+  "sshd",
+  "gh",
+  "ufw",
+  "nft",
+  "iptables",
+  "ip",
+  "tc",
+  "wg",
+  "conntrack",
+  "ethtool",
+  "resolvectl",
+  "nmcli",
+  "tracepath",
+  "traceroute",
+  "mtr",
+  "wget",
+  "curl",
+  "rsync",
+  "openssl",
+  "lsblk",
+  "dpkg",
+  "apt",
+  "dnf",
+  "yum",
+  "apk",
+  "pacman",
+  "zypper",
+  "psql",
+  "pgbouncer",
+  "mongod",
+  "mongosh",
+  "mysqld",
+])
+
+/**
+ * `sentenceCase` with the full stop a sentence ends on, for a reason that
+ * stands on its own line. The stop is added only after a word: after a path, a
+ * line number or a quoted value it would read as part of what was quoted, and
+ * tool output that runs over several lines is left alone.
+ */
+export function asSentence(text: string): string {
+  const cased = sentenceCase(text)
+  // The last thing said is a word, not an address or a path that ends on a
+  // letter ("…/healthz", "/etc/hosts").
+  const endsOnWord = /(^|\s)[A-Za-z][A-Za-z'’-]*$/.test(cased)
+  return endsOnWord && !cased.includes("\n") ? `${cased}.` : cased
 }

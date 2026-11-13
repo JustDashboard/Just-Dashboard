@@ -12,6 +12,23 @@ a re-run that keeps `.env`, only `--link` links. The link itself is the last ste
 check, runs with input from `/dev/null`, and never fails the install: a decline, a timeout or an unreachable
 site becomes a warning and a `Not linked. Later: ...` line in the summary.
 
+The first step of stage 1, before a package is installed or a file written, is the preflight in
+`scripts/preflight.sh` (`jd_preflight`, sourced like the other helpers and tested by
+`python3 scripts/test_preflight.py`). It only reads the machine and prints one line per thing it looked
+at, `ok`, `warn` or `stop`, which the installer renders. `stop` ends setup with "Nothing was installed
+or changed": an architecture other than x86_64 or aarch64, which `backend/Dockerfile` cannot build for
+(its rclone stage pins those two), and a host with no `/run/systemd/system`, since the backend manages
+units over the systemd bus and uninstalls itself with `systemd-run`. `warn` lets setup go on: memory
+plus swap under `JD_NEED_MEMORY_MB` (2800, "about 3 GB": the frontend compiler's peak, set a little
+under 3 GB because a server sold as 3 GB reports less) and less than `JD_NEED_DISK_MB` (10000) free
+on the filesystem of Docker's root directory, or of the nearest existing parent of `/var/lib/docker`
+before Docker is installed. A build that then fails ends on the warnings again instead of on
+BuildKit's error alone. Warn rather than stop for those two is decided: the numbers are estimates, a
+re-run with a warm build cache needs less, and an operator may know better. What cannot be measured is
+left out, not guessed. The same numbers are the Requirements in `README.md` and
+`docs/guides/install.md`, and the preflight test fails when those documents stop stating them.
+`JD_PREFLIGHT_MEMINFO` and `JD_PREFLIGHT_SYSTEMD` point the two reads elsewhere for the tests only.
+
 When the checkout has no `.env` and `/var/lib/just-dashboard/install.env` exists — the copy an uninstall
 that kept its data left beside that data — the installer offers to restore it (default yes) and then
 continues as a re-run that keeps its settings, so the reinstall opens the secrets it kept. Declining
@@ -122,10 +139,58 @@ of the built backend image into a temporary file beside the target, makes it 075
 `/usr/local/bin/jd` (`JD_CLI_PATH` chooses another path), so a jd already running keeps its file; an
 image with no jd fails with a message and leaves nothing behind.
 
+## Version, update and rollback
+
+Three commands for the day the dashboard is not there to update itself or to show why an update
+failed. They are the operator-facing half of the rollback that `internal/selfupdate` does on its own,
+and `docs/guides/administration.md` ("If an update fails") is where an operator finds them.
+
+`version` changes nothing. It prints the checkout's version, commit and branch and whether that is the
+release (the rule of `scripts/build-stamp.sh`), what `just-dashboard-backend:latest` and `:previous`
+call themselves (`jd version` run from each image), and the last run in `self-update.json` with the
+path of its transcript and of its database copy.
+
+`update [VERSION]` is the by-hand update with the two things an operator forgets: it tags the running
+images `:previous` first and prints the `rollback` command that undoes it. It asks `origin` which
+tags it has (`ls-remote`), takes the newest `v<version>` tag (or the one named), fetches that tag
+alone (`fetch --tags` brought every branch too, the `pr-assets/*` ones included, and into a clone of
+depth one every older tag with the history below it), and fast-forwards with `merge --ff-only`. In a
+checkout cloned with `--depth`, where git cannot place a tag that is not ahead of `HEAD`, it runs
+`fetch --unshallow` once and then decides; it then builds one service at a time with the build stamp and runs
+`up -d --remove-orphans`. It installs a tag and nothing else, for forks too: a branch head is
+`git pull --ff-only` and `install.sh`. When the checkout's committed `allowed_signers` names a key it
+verifies the tag the way `verifyReleaseTag` does (a tag object, named for the release, signed by a key
+in the file, with every deciding git setting passed on the command line), so turning signed releases
+on does not leave an unverified way in. Decided, and said in its output: it copies no database (the
+store can only copy itself from inside a running backend, and a file copy of a live SQLite database is
+not a backup) and it does not watch health or go back by itself. It does not take the lifecycle lock
+either; it refuses while a `just-dashboard-updater` container is running.
+
+`rollback [COMMIT]` retags each `:previous` image that exists over `:latest`, runs
+`git reset --keep` to the commit, and `up -d --no-build --remove-orphans`: `handCommands` in
+`rollback.go`, in the order that lets git refuse before anything is changed. With no commit it uses the
+one the `:previous` images ran at, from whichever record still describes them, and only when the
+checkout is still where that update left it. `manage-update.last` in the data directory is `update`'s
+own record, written the moment it has kept the images and before the checkout moves: the commit it
+started from, the commit it was going to, and the ids of the images `:previous` then named. It is used
+when the second is HEAD and `:previous` still names those images. Otherwise `fromCommit` of
+`self-update.json` is used when its `toCommit` is HEAD and `manage-update.last` is not the newer file.
+Both conditions are the same question, whether anything has kept the images again since the record was
+written: a later update from the dashboard that failed and went back by itself leaves the checkout
+where `update` put it and `:previous` one version on, and trusting the older record there moved the
+checkout two versions back under images one version back. A checkout somebody has moved since, or
+images kept since, stay where they are and the plan says so. With no `:previous` image it changes
+nothing.
+
+Both ask before changing anything and refuse without a terminal unless `--yes` is appended. git runs
+as the owner of the checkout (`runuser`), so nothing in `.git` ends up owned by root.
+`JD_HOST_DATA_DIR` moves the data directory for the tests only.
+
 ## Verification
 
-Run `scripts/test-changed.sh main`, plus `python3 scripts/test_manage.py` and
-`bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`.
+Run `scripts/test-changed.sh main`. For a change to `install.sh` or anything under `scripts/` it runs
+`bash -n` on the changed scripts and every `scripts/test_*.py` that names one of them, which for
+`manage.sh` and the installer is `python3 scripts/test_manage.py`.
 The Python fixtures check command arguments, stdin preservation, root and input checks, checkout paths
 with spaces, Compose fallback, restoring a kept uninstall's `.env`, refusing a weak first password, removing
 the first password after a healthy fresh install and never from a kept `.env`, asking for the key of a store left

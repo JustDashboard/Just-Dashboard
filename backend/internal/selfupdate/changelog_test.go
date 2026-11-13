@@ -8,9 +8,9 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/version"
 )
 
-// The embedded changelog is parsed by exactly the same function that parses
-// the one fetched over the network, so a file that would break every install's
-// update check breaks the test run first.
+// The embedded changelog is held to the strict parser, which refuses more than
+// the one that reads it off the network does, so a file that an install could
+// not show breaks the test run first.
 func TestLocalManifestIsValid(t *testing.T) {
 	m, err := ParseManifest(changelogJSON)
 	if err != nil {
@@ -151,5 +151,91 @@ func TestHasBreaking(t *testing.T) {
 	if !HasBreaking([]Release{{Version: "1.0"}, {Version: "0.9", Breaking: true}}) {
 		t.Fatal("a breaking release in the middle of the list was missed — an operator " +
 			"upgrading past it would never be told")
+	}
+}
+
+// The published changelog is written by a release that does not exist yet and
+// read by this one. A field, a kind or an entry it does not understand used to
+// fail the whole read, on every install at once, with the release that would
+// have fixed the reader among the ones it could no longer see.
+func TestAPublishedChangelogIsReadPastWhatThisVersionDoesNotUnderstand(t *testing.T) {
+	published := `{"latest":"0.8","schema":2,"releases":[
+		{"version":"0.8","date":"2026-04-01T09:30:00Z","title":"d","audience":"everyone",
+			"changes":[{"kind":"performance","text":"twice as fast","since":"0.7"},{"kind":"fixed","text":"x"},{"kind":"added","text":" "}]},
+		{"version":"0.7","date":"2026-03-01","title":"c","changes":"see the website"},
+		{"version":"0.6","date":"March","title":"b","changes":[{"kind":"added","text":"x"}]},
+		{"version":"0.5","date":"2026-01-01","title":"a","changes":[{"kind":"added","text":"x"}]},
+		{"version":"0.5","date":"2026-01-02","title":"a again","changes":[{"kind":"added","text":"x"}]},
+		{"version":"soon","date":"2026-05-01","title":"e","changes":[{"kind":"added","text":"x"}]}]}`
+	if _, err := ParseManifest([]byte(published)); err == nil {
+		t.Fatal("the strict parser accepted it, so this test is not testing the lenient one")
+	}
+	m, err := ParsePublishedManifest([]byte(published))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Latest != "0.8" || len(m.Releases) != 2 || m.Releases[1].Version != "0.5" {
+		t.Fatalf("read %+v, want 0.8 and 0.5", m.Releases)
+	}
+	head := m.Releases[0]
+	if head.Date != "2026-04-01" {
+		t.Errorf("date %q: a day with a time of day is still that day", head.Date)
+	}
+	if len(head.Changes) != 2 || head.Changes[0].Kind != Changed || head.Changes[0].Text != "twice as fast" || head.Changes[1].Kind != Fixed {
+		t.Errorf("changes %+v: a kind this version has no colour for is shown as changed, and an empty line is dropped", head.Changes)
+	}
+	if m.Releases[1].Title != "a" {
+		t.Errorf("the second entry for 0.5 replaced the first: %q", m.Releases[1].Title)
+	}
+	if got := strings.Join(m.Unread, " "); got != "0.7 0.6" {
+		t.Errorf("unread %q, want the two entries that were named and could not be shown", got)
+	}
+}
+
+func TestAPublishedChangelogWithNothingReadableIsAnError(t *testing.T) {
+	for name, published := range map[string]string{
+		"not json":             `not json`,
+		"no releases":          `{"releases":[]}`,
+		"nothing with a title": `{"releases":[{"version":"1.0","date":"2026-01-01","changes":[{"kind":"added","text":"y"}]}]}`,
+		"nothing versioned":    `{"releases":[{"version":"next","date":"2026-01-01","title":"x","changes":[{"kind":"added","text":"y"}]}]}`,
+	} {
+		if m, err := ParsePublishedManifest([]byte(published)); err == nil {
+			t.Errorf("%s: read %+v out of it", name, m)
+		}
+	}
+}
+
+// A release marked breaking stays marked, whatever happened to its note: the
+// install is being moved past it either way.
+func TestAPublishedBreakingReleaseKeepsItsWarning(t *testing.T) {
+	m, err := ParsePublishedManifest([]byte(`{"releases":[{"version":"1.0","date":"2026-01-01","title":"x",
+		"breaking":true,"breakingSteps":["one","two"],"changes":[{"kind":"added","text":"y"}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !HasBreaking(m.Releases) || strings.TrimSpace(m.Releases[0].BreakingNote) == "" {
+		t.Fatalf("the warning was lost: %+v", m.Releases[0])
+	}
+}
+
+// The file every install fetches is the one at ManifestPath on the tracked
+// branch, and every release up to 0.8.5 stops reading it at FieldManifestCap
+// and then fails to parse what was cut off. Nothing can be sent to those
+// installs to change that, so the file has to stay under it, and this fails
+// while there is still room to do something about it: the file grew about
+// 4 KB a day through the 0.8 releases.
+func TestTheChangelogStaysWhereInstallsInTheFieldCanReadIt(t *testing.T) {
+	const warnAt = 700 << 10
+	if warnAt >= FieldManifestCap {
+		t.Fatal("the warning has to come before the limit")
+	}
+	if len(changelogJSON) > warnAt {
+		t.Fatalf("%s is %d bytes. Installs on 0.8.5 and older read only the first %d and then report that "+
+			"the published changelog could not be read, so they would never be offered another release.\n"+
+			"Before this file reaches that size: keep the recent releases here, move the older ones to a file "+
+			"beside it that only this build embeds (CHANGELOG.md stays complete), and raise this number only "+
+			"once no install older than 0.8.6 is worth reaching. See \"The published changelog\" in "+
+			"docs/internal/backend/platform.md.",
+			ManifestPath, len(changelogJSON), FieldManifestCap)
 	}
 }

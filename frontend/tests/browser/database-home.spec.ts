@@ -540,7 +540,7 @@ const chart = (page: Page, name: string) =>
 
 const names = (scope: ReturnType<typeof block>) =>
   scope
-    .locator("[data-slot=bar-list] button")
+    .locator("[data-slot=rank-list] button")
     .evaluateAll((rows) => rows.map((row) => row.getAttribute("aria-label")))
 const where = (page: Page) => new URL(page.url()).pathname + new URL(page.url()).search
 const menu = (page: Page, name = "shop") =>
@@ -1732,6 +1732,9 @@ function offCentreText(page: Page) {
         ? rowStyle.alignItems
         : style.alignSelf
       if (align !== "center" || style.display !== "block" || style.position === "absolute") continue
+      // A glyph that turns has no centre line to be off: its ink is wherever the
+      // turn has it at that instant, and under load this caught a spinner mid-turn.
+      if (style.animationName !== "none" && style.animationIterationCount === "infinite") continue
       const box = item.getBoundingClientRect()
       if (box.height < 2 || box.width < 2) continue
       const blocks = [...item.children].some((child) => {

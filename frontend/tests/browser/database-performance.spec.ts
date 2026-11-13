@@ -2412,7 +2412,12 @@ async function settled(page: Page) {
   const sheet = dialog(page)
   await expect(sheet).toBeVisible()
   await sheet.evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished),
+    ),
   )
 }
 
@@ -2435,7 +2440,7 @@ test("statement history ranks a window's statements by the column pressed, each 
   await expect(history).toContainText("pg_stat_statements keeps running totals for each statement")
   await expect(history).toContainText("so there are no percentiles")
   // PostgreSQL keeps no run times and counts no rows read: neither column is drawn.
-  await expect(history.getByRole("columnheader", { name: "p95" })).toHaveCount(0)
+  await expect(history.getByRole("columnheader", { name: "19 in 20" })).toHaveCount(0)
   await expect(history.getByRole("columnheader", { name: "Examined" })).toHaveCount(0)
   await expect(history.getByRole("columnheader", { name: "Share" })).toHaveAttribute(
     "aria-sort",
@@ -2558,14 +2563,14 @@ test("an engine that keeps run times gives the history its percentiles and the r
   await visit(page, "/databases/2/performance?view=history")
   const history = historyView(page)
   await expect(history.getByRole("row")).toHaveCount(ANALYTICS_HISTORY.length + 1)
-  await expect(history.getByRole("columnheader", { name: "p95" })).toBeVisible()
+  await expect(history.getByRole("columnheader", { name: "19 in 20" })).toBeVisible()
   await expect(history.getByRole("columnheader", { name: "Examined" })).toBeVisible()
   await expect(history.getByRole("row").nth(1)).toContainText("212 ms")
   await expect(history).toContainText("ClickHouse's query log holds every finished query")
   await history.getByRole("row").nth(1).click()
   await settled(page)
   const panel = dialog(page)
-  await expect(panel.getByText("p99", { exact: true }).first()).toBeVisible()
+  await expect(panel.getByText("99 in 100 within", { exact: true }).first()).toBeVisible()
   await expect(panel).toContainText("487 ms")
   await expect(panel).toContainText("40K for each returned")
 })
@@ -2627,7 +2632,7 @@ test("statement history screenshots @shots", async ({ page }) => {
   await page.keyboard.press("Escape")
 
   await visit(page, "/databases/2/performance?view=history")
-  await expect(historyView(page).getByRole("columnheader", { name: "p95" })).toBeVisible()
+  await expect(historyView(page).getByRole("columnheader", { name: "19 in 20" })).toBeVisible()
   await page.waitForLoadState("networkidle")
   await shot("history-percentiles-1440")
   await historyView(page).getByRole("row").nth(1).click()
@@ -2966,7 +2971,9 @@ test("the queries are named in the engine's words, from the registry and from wh
   await expect(page.getByText("1 statement", { exact: true })).toBeVisible()
   // The engine keeps statement statistics: the third reading is offered.
   await page.getByRole("button", { name: "Top statements" }).click()
-  await expect(region(page, "Top statements").locator("[data-slot=bar-list] button")).toHaveCount(3)
+  await expect(region(page, "Top statements").locator("[data-slot=rank-list] button")).toHaveCount(
+    3,
+  )
 
   // A list read from the server's own query table is a list of queries.
   await mockOps(page, {
@@ -3129,6 +3136,9 @@ function offCentreText(page: Page) {
         ? rowStyle.alignItems
         : style.alignSelf
       if (align !== "center" || style.display !== "block" || style.position === "absolute") continue
+      // A glyph that turns has no centre line to be off: its ink is wherever the
+      // turn has it at that instant, and under load this caught a spinner mid-turn.
+      if (style.animationName !== "none" && style.animationIterationCount === "infinite") continue
       const box = item.getBoundingClientRect()
       if (box.height < 2 || box.width < 2) continue
       const blocks = [...item.children].some((child) => {

@@ -8,14 +8,16 @@ import {
   Database,
   Filter,
   MoreHorizontal,
+  Play,
   Warning,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { get } from "@/lib/api"
+import { errorMessage, get, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { clock, timestamp } from "@/lib/format"
 import { useLogView } from "@/lib/log-view"
 import { latency, latencyTone } from "@/lib/requests"
+import { notify } from "@/lib/toast"
 import { useSessionState } from "@/lib/view-state"
 import type {
   DbConnection,
@@ -40,6 +42,7 @@ import { engineFor, type Engine } from "@/components/database/engine"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { EngineGlyph } from "@/components/database/kit"
 import { StatementsPanel } from "@/components/database/ops/statements-panel"
+import type { DbSettingChange } from "@/components/database/ops/settings-parameters-model"
 import {
   QUERY_RANGES,
   around,
@@ -91,9 +94,12 @@ export function databaseQueriesView(
  * over every run (`/statements`) are the third reading, Top statements.
  *
  * An empty list is never left to read as "nothing was slow": when a setting
- * keeps the log from recording anything, it says which, what it is now, and
- * hands over the statement that changes it, to run in the query console —
- * the advisor's rule, since turning logging on is the operator's call.
+ * keeps the log from recording anything, it says which and what it is now.
+ * An administrator turns it on from the notice, through the settings route
+ * the Parameters page uses, which on Postgres reloads the configuration in
+ * the same call; anyone else is handed the statement to copy or to run in
+ * the query console. It is a button, never a side effect of reading the page:
+ * turning logging on is the operator's call.
  *
  * A SQLite file has no server keeping any of this, so its list is the
  * statements this dashboard ran on it. `ctx` is the logs pane this view sits
@@ -175,8 +181,32 @@ export function DatabaseQueries({
   // one role (ALTER DATABASE … SET), so rows in its log answer the Notice
   // better than the setting does. MySQL's rows beside it are the stand-in the
   // Notice explains, so it stays.
+  // The read Turn on answered: its notice is the one that was just acted on,
+  // and the next read says afresh whether the server is recording.
+  const [answered, setAnswered] = useState<DbQueryLog>()
   const enable =
-    data?.enable && (data.source !== "log" || rows.length === 0) ? data.enable : undefined
+    data?.enable && data !== answered && (data.source !== "log" || rows.length === 0)
+      ? data.enable
+      : undefined
+  // Each parameter through the settings route, in the order the server gave
+  // them. The console took Postgres's ALTER SYSTEM and left the reload to a
+  // second statement, and a server told to log slow statements logged none.
+  const turnOn =
+    enable?.changes?.length && engine.can("sql") && can("system.admin")
+      ? async () => {
+          const read = data
+          let note: string | undefined
+          for (const change of enable.changes ?? []) {
+            const answer = await put<DbSettingChange>(`/databases/${conn.id}/settings`, change)
+            note ??= answer.note
+          }
+          setAnswered(read)
+          notify.success(`${noun.title} are being recorded`, note ? { description: note } : {})
+          // A reload is a signal, and the setting changes a moment after the
+          // call returns: read again once it has.
+          window.setTimeout(log.refresh, 1200)
+        }
+      : undefined
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -242,7 +272,13 @@ export function DatabaseQueries({
         <>
           <div className="min-h-0 flex-1 overflow-auto bg-surface-sunken">
             {enable && (
-              <EnableNotice enable={enable} noun={noun} onQuery={openInQuery} className="m-3" />
+              <EnableNotice
+                enable={enable}
+                noun={noun}
+                onQuery={openInQuery}
+                onTurnOn={turnOn}
+                className="m-3"
+              />
             )}
             {result.error && !result.data ? (
               <div className="p-6">
@@ -257,7 +293,12 @@ export function DatabaseQueries({
               <LoadingRows rows={8} className="p-3" />
             ) : rows.length === 0 ? (
               <div className="flex items-center justify-center p-6">
-                <QueriesEmpty log={sqlite ? undefined : data} noun={noun} range={range} />
+                <QueriesEmpty
+                  log={sqlite ? undefined : data}
+                  off={!!enable}
+                  noun={noun}
+                  range={range}
+                />
               </div>
             ) : (
               <QueryRows
@@ -318,10 +359,13 @@ export function DatabaseQueries({
 /** Why the list is empty, in the words of whatever keeps it so. */
 function QueriesEmpty({
   log,
+  off,
   noun,
   range,
 }: {
   log?: DbQueryLog
+  /** The notice above says what keeps the list empty. */
+  off: boolean
   noun: QueryNoun
   range: QueryRange
 }) {
@@ -343,12 +387,12 @@ function QueriesEmpty({
       />
     )
   }
-  if (log.enable) {
+  if (off && log.enable) {
     return (
       <EmptyState
         icon={Database}
         title={`No ${noun.title.toLowerCase()} recorded`}
-        description={`The server writes none until ${log.enable.setting} is changed — the statement above does that.`}
+        description={`The server writes none until ${log.enable.setting} is changed; the notice above says how.`}
       />
     )
   }
@@ -367,31 +411,65 @@ function QueriesEmpty({
   )
 }
 
-const ENABLE_WORDS: Record<string, (current: string) => string> = {
-  log_min_duration_statement: (current) =>
-    `Postgres writes a statement to its log only when it takes longer than log_min_duration_statement, which is ${current} — off. At 250ms it records every statement slower than a quarter of a second. It takes effect on reload, without a restart: run SELECT pg_reload_conf(); after it.`,
-  slow_query_log: () =>
-    "The slow query log is off. This turns it on for statements slower than 250 ms and keeps a copy in a table this page reads; it holds until the server restarts.",
+/**
+ * How the notice offers the change: Turn on, the statement for a reader who
+ * runs it themselves, or the statement for somebody else to run, the account
+ * this dashboard connects as being refused it.
+ */
+type EnableWay = "turnOn" | "statement" | "blocked"
+
+/** What each setting is doing, and what changing it does. */
+const ENABLE_WORDS: Record<string, (current: string, way: EnableWay) => string> = {
+  log_min_duration_statement: (current, way) =>
+    `Postgres writes a statement to its log only when it takes longer than log_min_duration_statement, which is ${current} — off. At 250ms it records every statement slower than a quarter of a second.` +
+    (way === "turnOn"
+      ? " Turn on sets it and reloads the configuration; nothing restarts."
+      : way === "statement"
+        ? " It takes effect on reload, without a restart: run SELECT pg_reload_conf(); after it."
+        : ""),
+  slow_query_log: (_, way) =>
+    "The slow query log is off. This turns it on for statements slower than 250 ms and keeps a copy in a table this page reads" +
+    (way === "turnOn" ? "." : "; it holds until the server restarts."),
   log_output: (current) =>
     `The slow query log is on, but log_output is ${current}: it goes only to a file inside the server. Adding TABLE keeps a copy this page reads.`,
 }
 
 /**
  * The setting that keeps the list empty, as the advisor draws a fix: what it
- * is, the statement that changes it, and the console to run it in.
+ * is, the statement that changes it, and Turn on for an administrator — or
+ * the console to run the statement in, for a reader who may run one.
  */
 function EnableNotice({
   enable,
   noun,
   onQuery,
+  onTurnOn,
   className,
 }: {
   enable: NonNullable<DbQueryLog["enable"]>
   noun: QueryNoun
   onQuery?: (sql: string) => void
+  /** Makes the change; it throws the server's refusal. */
+  onTurnOn?: () => Promise<void>
   className?: string
 }) {
+  const [busy, setBusy] = useState(false)
+  const [refusal, setRefusal] = useState<string>()
   const words = ENABLE_WORDS[enable.setting]
+  const way: EnableWay = onTurnOn ? "turnOn" : enable.blocked ? "blocked" : "statement"
+  const turnOn = onTurnOn
+    ? async () => {
+        setBusy(true)
+        setRefusal(undefined)
+        try {
+          await onTurnOn()
+        } catch (err) {
+          setRefusal(errorMessage(err))
+        } finally {
+          setBusy(false)
+        }
+      }
+    : undefined
   return (
     <Notice
       tone="warning"
@@ -400,14 +478,31 @@ function EnableNotice({
       title={`${noun.title} are not being recorded`}
     >
       <div className="max-w-3xl space-y-2">
-        <p>{words ? words(enable.current) : `${enable.setting} is ${enable.current}.`}</p>
+        <p>
+          {words ? words(enable.current, way) : `${enable.setting} is ${enable.current}.`}
+          {enable.blocked && ` ${enable.blocked}`}
+        </p>
         <Well className="text-hint whitespace-pre-wrap text-foreground">{enable.sql}</Well>
+        {refusal && (
+          <p role="alert" className="text-destructive">
+            Could not turn it on: {refusal}
+          </p>
+        )}
         <div className="flex flex-wrap gap-1.5">
-          {onQuery && (
-            <Button size="xs" variant="outline" onClick={() => onQuery(enable.sql)}>
-              <CodeBracket className="size-3" />
-              Open in Query
+          {turnOn ? (
+            <Button size="xs" onClick={() => void turnOn()} pending={busy}>
+              <Play className="size-3" />
+              Turn on
             </Button>
+          ) : (
+            // The console runs as the same account, which the server refuses.
+            onQuery &&
+            !enable.blocked && (
+              <Button size="xs" variant="outline" onClick={() => onQuery(enable.sql)}>
+                <CodeBracket className="size-3" />
+                Open in Query
+              </Button>
+            )
           )}
           <Button
             size="xs"

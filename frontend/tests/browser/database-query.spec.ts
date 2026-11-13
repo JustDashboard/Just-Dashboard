@@ -2076,6 +2076,9 @@ function offCentreText(page: Page) {
         ? rowStyle.alignItems
         : style.alignSelf
       if (align !== "center" || style.display !== "block" || style.position === "absolute") continue
+      // A glyph that turns has no centre line to be off: its ink is wherever the
+      // turn has it at that instant, and under load this caught a spinner mid-turn.
+      if (style.animationName !== "none" && style.animationIterationCount === "infinite") continue
       const box = item.getBoundingClientRect()
       if (box.height < 2 || box.width < 2) continue
       const blocks = [...item.children].some((child) => {
@@ -2492,7 +2495,12 @@ async function openPlanTab(page: Page, sql: string) {
 
 async function settled(dialog: ReturnType<Page["getByRole"]>) {
   await dialog.evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished),
+    ),
   )
 }
 
@@ -2665,7 +2673,7 @@ test("a refused question is said in the engine's words, and the dialog stays usa
   await explained(page)
   await results(page).getByRole("button", { name: "What if?" }).click()
   const dialog = whatIfDialog(page)
-  await expect(dialog.getByRole("alert")).toContainText('syntax error at or near "selec"')
+  await expect(dialog.getByRole("alert")).toContainText('Syntax error at or near "selec"')
   await dialog.getByRole("button", { name: "Close" }).first().click()
   await expect(dialog).toHaveCount(0)
   expect(advice.candidates).toHaveLength(1)
@@ -2800,7 +2808,7 @@ test("Missing indexes says when there is none, when the login may not read them,
 
   await mockAdvice(page, { missing: 502 })
   await results(page).getByRole("button", { name: "Missing indexes" }).click()
-  await expect(dialog.getByRole("alert")).toContainText("connection reset by peer")
+  await expect(dialog.getByRole("alert")).toContainText("Connection reset by peer")
   await expect(dialog.getByRole("button", { name: "Try again" })).toBeVisible()
 })
 

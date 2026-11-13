@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
 import { get } from "@/lib/api"
 import type { HostInfo, Snapshot } from "@/lib/types"
 import {
@@ -8,6 +8,7 @@ import {
   getServerState,
   getState,
   pushSnapshot,
+  reader,
   seed,
   setConnection,
   setError,
@@ -20,6 +21,21 @@ import { useSocket, type Envelope } from "@/hooks/use-socket"
 /** Reads the live metrics store. Re-renders only on a new frame. */
 export function useMetrics(): MetricsState {
   return useSyncExternalStore(subscribe, getState, getServerState)
+}
+
+/**
+ * One value out of the live metrics store, for a component that draws one
+ * reading and not the frame: it re-renders when `same` says the value changed,
+ * not every two seconds. `select` and `same` are part of the subscription, so
+ * give it functions that keep their identity (a module's own, or `useCallback`).
+ */
+export function useMetricsValue<T>(
+  select: (state: MetricsState) => T,
+  same?: (a: T, b: T) => boolean,
+): T {
+  const read = useMemo(() => reader(select, same), [select, same])
+  const onServer = useMemo(() => reader(select, same, getServerState), [select, same])
+  return useSyncExternalStore(subscribe, read, onServer)
 }
 
 /**

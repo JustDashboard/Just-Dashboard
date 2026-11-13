@@ -65,15 +65,6 @@ function ownsSlash(id: string) {
   return owner === id
 }
 
-/** The settings behind Options that narrow or widen what is read, as the filter row draws them. */
-export type LogOptions = {
-  context: number
-  archives: boolean
-  boot: boolean
-  /** The lens the reader forced: "" for the detected one, "none" for none. */
-  lens: string
-}
-
 /**
  * One filter for both questions.
  *
@@ -392,6 +383,23 @@ export function FilterBar({
 }
 
 /**
+ * The levels the reading on screen holds, and any the reader chose, as
+ * chips: the request record's class chips (`ClassChips`), which name only
+ * the classes the window has. The six were drawn whatever the log held, so a
+ * log that writes no levels opened on five empty chips and an "other".
+ */
+export function presentLevels(filter: LogFilterState, counts: Record<string, number>) {
+  const present = LOG_LEVELS.filter(
+    (level) => (counts[level] ?? 0) > 0 || filter.levels.includes(level),
+  )
+  // Lines with no level are every line of a log that writes none: a chip
+  // that narrows to all of them narrows nothing.
+  return present.length === 1 && present[0] === "unknown" && filter.levels.length === 0
+    ? []
+    : present
+}
+
+/**
  * Which levels are shown, with how many of each there are.
  *
  * The chips carry the counts, so one group answers both "what am I looking
@@ -400,6 +408,10 @@ export function FilterBar({
  * zero takes that colour too, so "error 238" is red before it is read. They
  * lead the filter row, with the questions the lens asks after them, so every
  * narrowing is in one row rather than split across the chart.
+ *
+ * Only the levels present are drawn (`presentLevels`). The counts are of the
+ * lines the filter lets through, so choosing error leaves error — and the
+ * chosen chip is the one way back, as the record's method chips are.
  */
 export function LevelChips({
   filter,
@@ -417,29 +429,30 @@ export function LevelChips({
         ? filter.levels.filter((l) => l !== level)
         : [...filter.levels, level],
     })
+  const levels = presentLevels(filter, counts)
+  if (levels.length === 0) return null
 
   return (
     <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Levels">
-      {LOG_LEVELS.map((level) => (
-        <Tooltip key={level}>
-          <TooltipTrigger asChild>
-            <FilterChip
-              selected={filter.levels.includes(level)}
-              onClick={() => toggle(level)}
-              className="px-2"
-            >
-              <span aria-hidden className={cn("size-2 rounded-full", LEVEL_DOT[level])} />
-              {LEVEL_LABEL[level]}
-              {counts[level] > 0 && (
-                <ChipCount className={cn(COUNT_TONE[level], COUNT_TONE[level] && "opacity-100")}>
-                  {counts[level].toLocaleString()}
-                </ChipCount>
-              )}
-            </FilterChip>
-          </TooltipTrigger>
-          <TooltipContent>{LEVEL_HINT[level]}</TooltipContent>
-        </Tooltip>
-      ))}
+      {levels.map((level) => {
+        const on = filter.levels.includes(level)
+        return (
+          <Tooltip key={level}>
+            <TooltipTrigger asChild>
+              <FilterChip selected={on} onClick={() => toggle(level)}>
+                <span aria-hidden className={cn("size-1.5 rounded-full", LEVEL_DOT[level])} />
+                {LEVEL_LABEL[level]}
+                {counts[level] > 0 && (
+                  <ChipCount className={cn(COUNT_TONE[level], COUNT_TONE[level] && "opacity-100")}>
+                    {counts[level].toLocaleString()}
+                  </ChipCount>
+                )}
+              </FilterChip>
+            </TooltipTrigger>
+            <TooltipContent>{LEVEL_HINT[level]}</TooltipContent>
+          </Tooltip>
+        )
+      })}
     </div>
   )
 }

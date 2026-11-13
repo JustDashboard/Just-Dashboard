@@ -469,7 +469,7 @@ func WALRetentionKeep(backups []WALBackup, now time.Time, days int) (WALBackup, 
 type RecoveryTarget struct {
 	// Kind is "latest", "time" or "name".
 	Kind string    `json:"kind"`
-	Time time.Time `json:"time,omitempty"`
+	Time time.Time `json:"time"`
 	// Name is a restore point made with pg_create_restore_point.
 	Name string `json:"name,omitempty"`
 }

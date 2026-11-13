@@ -938,15 +938,6 @@ func (s *repoShapeScan) applyDecoys(result *DetectionResult) {
 	}
 }
 
-func hasApplication(candidates []DetectedCandidate) bool {
-	for _, candidate := range candidates {
-		if candidateTier(candidate) == 2 && !documentationCandidate(candidate) {
-			return true
-		}
-	}
-	return false
-}
-
 var documentationFrameworks = map[string]bool{
 	"docusaurus": true, "vitepress": true, "mkdocs": true, "sphinx": true, "vuepress": true, "starlight": true,
 	"nextra": true, "hugo": true, "jekyll": true, "rspress": true, "mdbook": true, "zensical": true,

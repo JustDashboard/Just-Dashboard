@@ -3,15 +3,8 @@
 import { useMemo } from "react"
 import { bytes } from "@/lib/format"
 import type { PollState } from "@/hooks/use-poll"
-import { BarList, type BarListItem } from "@/components/bar-list"
-import {
-  BarsSkeleton,
-  Block,
-  BlockLink,
-  Quiet,
-  Read,
-  staleOf,
-} from "@/components/database/home/blocks"
+import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
+import { Block, BlockLink, Quiet, Read, staleOf } from "@/components/database/home/blocks"
 import { byKeyType, keyType, nameHue } from "@/components/database/home/kinds"
 import { compact, type Part } from "@/components/database/home/readings"
 import type { MongoCollections, RedisTree } from "@/components/database/home/types"
@@ -46,26 +39,25 @@ export function tableKey(entry: Pick<LargestTable, "schema" | "table">): string 
 }
 
 /**
- * The mark before a row that is also a part of the size tile's bar: the
+ * The swatch before a row that is also a part of the size tile's bar: the
  * part's own colour, so the list under the tiles is that bar's legend. A row
- * the bar does not name keeps the slot, empty, and the names stay in line.
+ * the bar does not name keeps the slot in the track's grey, and the names
+ * stay in line.
  */
-function partMark(parts: readonly Part[] | undefined, key: string) {
+function partSwatch(parts: readonly Part[] | undefined, key: string) {
   if (!parts) return undefined
-  const part = parts.find((entry) => entry.key === key)
-  return (
-    <span
-      className="size-1.5 rounded-full"
-      style={{ background: part?.color ?? "var(--meter-track)" }}
-    />
-  )
+  return parts.find((entry) => entry.key === key)?.color ?? "var(--meter-track)"
 }
 
 /**
- * The largest tables, each a way into its rows. The schema is said only
- * where the list holds more than one — on a database with one schema it is
- * the same word on every row — and then in the schema's own hue, so two
- * schemas' tables are told apart down the list without reading the prefix.
+ * The largest tables, each a way into its rows, as figures in a column rather
+ * than bars of different lengths. The schema is said only where the list holds
+ * more than one — on a database with one schema it is the same word on every
+ * row — and then in the schema's own hue, so two schemas' tables are told
+ * apart down the list without reading the prefix.
+ *
+ * No row carries a share: the read is the largest few, not every table, so a
+ * percentage of what was read would not be a percentage of the database.
  */
 export function LargestTablesBlock({
   poll,
@@ -78,19 +70,17 @@ export function LargestTablesBlock({
   const { engine, readOnly, href, goto } = useDatabase()
   const nouns = engine.nouns
   const place = engine.section("data")?.title ?? "Data"
-  const items = useMemo<BarListItem[]>(() => {
+  const items = useMemo<RankItem[]>(() => {
     const data = poll.data
     if (!data) return []
     const list = data.tables.slice(0, TOP)
     const several = new Set(list.map((entry) => entry.schema)).size > 1
-    const weigh = (entry: LargestTable) => (data.sizesKnown ? entry.bytes : Math.max(entry.rows, 0))
-    const longest = Math.max(...list.map(weigh), 0)
     return list.map((entry) => {
       const counted = entry.rows >= 0 ? `${compact(entry.rows)} ${nouns.rows}` : undefined
       const named = several && entry.schema ? tableKey(entry) : entry.table
       return {
         key: tableKey(entry),
-        mark: partMark(parts, tableKey(entry)),
+        swatch: partSwatch(parts, tableKey(entry)),
         label:
           several && entry.schema ? (
             <>
@@ -104,9 +94,6 @@ export function LargestTablesBlock({
         // shows it: two schemas can hold a table of one name.
         title: `Open ${named} in ${place}`,
         value: data.sizesKnown ? bytes(entry.bytes) : entry.rows >= 0 ? compact(entry.rows) : "—",
-        share: longest > 0 ? weigh(entry) / longest : 0,
-        // The bar in its schema's hue, the one the picture above draws it in.
-        color: entry.schema ? nameHue(entry.schema) : undefined,
         hint: data.sizesKnown ? counted : undefined,
         onClick: () => goto("data", { schema: entry.schema, table: entry.table }),
       }
@@ -119,7 +106,7 @@ export function LargestTablesBlock({
       stale={staleOf(poll)}
       actions={<BlockLink href={href("data")}>All {nouns.objects}</BlockLink>}
     >
-      <Read poll={poll} what={`the ${nouns.objects}`} skeleton={<BarsSkeleton rows={6} />}>
+      <Read poll={poll} what={`the ${nouns.objects}`} skeleton={<RankSkeleton rows={6} />}>
         {(data) =>
           items.length === 0 ? (
             <Quiet>
@@ -130,9 +117,9 @@ export function LargestTablesBlock({
             </Quiet>
           ) : (
             <>
-              <BarList items={items} />
+              <RankList items={items} />
               {!data.sizesKnown && (
-                <p className="mt-2 px-2 text-hint text-muted-foreground">
+                <p className="mt-2 text-hint text-muted-foreground">
                   This engine reports no sizes, so they are ranked by {nouns.rows}.
                 </p>
               )}
@@ -155,22 +142,23 @@ export function LargestCollectionsBlock({
   const { engine, readOnly, href, goto } = useDatabase()
   const nouns = engine.nouns
   const place = engine.section("data")?.title ?? "Documents"
-  const items = useMemo<BarListItem[]>(() => {
+  const items = useMemo<RankItem[]>(() => {
     const data = poll.data
     if (!data) return []
-    const list = data.collections
-      .filter((collection) => !collection.system)
-      .sort((a, b) => b.size - a.size || b.count - a.count)
-      .slice(0, TOP)
-    const longest = Math.max(...list.map((collection) => collection.size), 0)
+    const own = data.collections.filter((collection) => !collection.system)
+    // The read lists every collection, so a row's share is of all of them —
+    // unless some went unmeasured, and then there is no whole to be a share of.
+    const whole = data.statsTruncated
+      ? 0
+      : own.reduce((sum, collection) => sum + (collection.statsKnown ? collection.size : 0), 0)
+    const list = own.sort((a, b) => b.size - a.size || b.count - a.count).slice(0, TOP)
     return list.map((collection) => ({
       key: collection.name,
-      mark: partMark(parts, collection.name),
+      swatch: partSwatch(parts, collection.name),
       label: collection.name,
-      color: nameHue(collection.name),
       title: `Open ${collection.name} in ${place}`,
       value: collection.statsKnown ? bytes(collection.size) : "—",
-      share: longest > 0 ? collection.size / longest : 0,
+      share: collection.statsKnown && whole > 0 ? collection.size / whole : undefined,
       hint: collection.statsKnown
         ? `${compact(collection.count)} ${collection.count === 1 ? nouns.row : nouns.rows}`
         : collection.type === "view"
@@ -186,7 +174,7 @@ export function LargestCollectionsBlock({
       stale={staleOf(poll)}
       actions={<BlockLink href={href("data")}>All {nouns.objects}</BlockLink>}
     >
-      <Read poll={poll} what={`the ${nouns.objects}`} skeleton={<BarsSkeleton rows={6} />}>
+      <Read poll={poll} what={`the ${nouns.objects}`} skeleton={<RankSkeleton rows={6} />}>
         {(data) =>
           items.length === 0 ? (
             <Quiet>
@@ -195,7 +183,7 @@ export function LargestCollectionsBlock({
                 : `No ${nouns.objects} in ${data.database} yet. Insert a ${nouns.row} in ${place} and its ${nouns.object} is made with it.`}
             </Quiet>
           ) : (
-            <BarList items={items} />
+            <RankList items={items} />
           )
         }
       </Read>
@@ -215,17 +203,19 @@ export function LargestCollectionsBlock({
  */
 export function LargestNamespacesBlock({ poll }: { poll: PollState<RedisTree> }) {
   const { href, goto } = useDatabase()
-  const items = useMemo<BarListItem[]>(() => {
+  const items = useMemo<RankItem[]>(() => {
     const data = poll.data
     if (!data) return []
     const list = data.folders.slice(0, TOP)
-    const longest = Math.max(...list.map((folder) => folder.count), data.keyCount, 0)
-    const rows: BarListItem[] = list.map((folder) => ({
+    // Every key the walk saw is of one type, so the types add up to the walk.
+    const walked = Object.values(data.types ?? {}).reduce((sum, count) => sum + count, 0)
+    const of = (count: number) => (walked > 0 ? count / walked : undefined)
+    const rows: RankItem[] = list.map((folder) => ({
       key: folder.prefix,
       label: `${folder.prefix}*`,
       title: `Browse the keys under ${folder.prefix}`,
       value: compact(folder.count),
-      share: longest > 0 ? folder.count / longest : 0,
+      share: of(folder.count),
       hint: <TypeWords types={folder.types} />,
       onClick: () => goto("data", { db: String(data.db), pattern: folder.pattern }),
     }))
@@ -235,7 +225,7 @@ export function LargestNamespacesBlock({ poll }: { poll: PollState<RedisTree> })
         label: "no namespace",
         mono: false,
         value: compact(data.keyCount),
-        share: longest > 0 ? data.keyCount / longest : 0,
+        share: of(data.keyCount),
         hint: `keys with no ${data.delimiter} in their name`,
       })
     }
@@ -248,15 +238,15 @@ export function LargestNamespacesBlock({ poll }: { poll: PollState<RedisTree> })
       stale={staleOf(poll)}
       actions={<BlockLink href={href("data")}>All keys</BlockLink>}
     >
-      <Read poll={poll} what="the keyspace" skeleton={<BarsSkeleton rows={6} />}>
+      <Read poll={poll} what="the keyspace" skeleton={<RankSkeleton rows={6} />}>
         {(data) =>
           items.length === 0 ? (
             <Quiet>Database {data.db} holds no keys.</Quiet>
           ) : (
             <div className="space-y-3">
               <TypeBar types={data.types ?? {}} />
-              <BarList items={items} />
-              <p className="px-2 text-hint text-muted-foreground">
+              <RankList items={items} />
+              <p className="text-hint text-muted-foreground">
                 {data.complete
                   ? `Keys in database ${data.db}, by the name before the first “${data.delimiter}”.`
                   : `From the first ${compact(data.scanned)} of ${compact(data.total)} keys in database ${data.db}; the rest are not counted here.`}
@@ -296,7 +286,7 @@ function TypeBar({ types }: { types: Record<string, number> }) {
   const total = held.reduce((sum, entry) => sum + entry.count, 0)
   if (total === 0) return null
   return (
-    <div className="space-y-2 px-2 pt-1" data-slot="key-types">
+    <div className="space-y-2 pt-1" data-slot="key-types">
       <div
         role="img"
         aria-label={`Keys by type: ${held.map((entry) => `${entry.label} ${entry.count.toLocaleString()}`).join(", ")}`}

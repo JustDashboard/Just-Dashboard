@@ -258,13 +258,6 @@ func sinceMs(t time.Time) string {
 	return time.Since(t).Round(time.Millisecond).String()
 }
 
-func nonEmpty(v, missing string) string {
-	if v != "" {
-		return ": " + v
-	}
-	return " " + missing
-}
-
 // parseMaxAge reads max-age out of an HSTS value; -1 means absent or broken.
 func parseMaxAge(hsts string) int {
 	for _, part := range strings.Split(strings.ToLower(hsts), ";") {

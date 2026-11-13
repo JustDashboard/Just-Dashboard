@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -59,21 +60,39 @@ func (s *Server) mountProcessRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleUnitList))
 		r.Method(http.MethodGet, "/timers", s.handle(s.handleTimerList))
 		r.Method(http.MethodGet, "/{name}", s.handle(s.handleUnitShow))
+		r.Method(http.MethodGet, "/{name}/files", s.handle(s.handleUnitFiles))
+		r.Method(http.MethodGet, "/{name}/security", s.handle(s.handleUnitSecurity))
+		r.Method(http.MethodGet, "/{name}/related", s.handle(s.handleUnitRelated))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/{name}/start", s.handle(s.unitAction(procs.UnitStart)))
 			r.Method(http.MethodPost, "/{name}/reload", s.handle(s.unitAction(procs.UnitReload)))
 			r.Method(http.MethodPost, "/{name}/reset-failed", s.handle(s.unitAction(procs.UnitResetFailed)))
+			r.Method(http.MethodPost, "/{name}/thaw", s.handle(s.unitAction(procs.UnitThaw)))
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodPost, "/daemon-reload", s.handle(s.handleDaemonReload))
 			r.Method(http.MethodPost, "/{name}/enable", s.handle(s.unitAction(procs.UnitEnable)))
 			r.Method(http.MethodPost, "/{name}/disable", s.handle(s.unitAction(procs.UnitDisable)))
+			r.Method(http.MethodPost, "/{name}/unmask", s.handle(s.unitAction(procs.UnitUnmask)))
+			// Limits change what the running unit may use, and persistent
+			// ones write a drop-in: host configuration, not service control.
+			r.Method(http.MethodPut, "/{name}/limits", s.handle(s.handleUnitLimits))
+			s.destructive(r, func(r chi.Router) {
+				// Masking changes the unit files, so it is system.admin as
+				// enable is; and nothing starts the unit again until it is
+				// unmasked, so it is destructive as stop is.
+				r.Method(http.MethodPost, "/{name}/mask", s.handle(s.unitAction(procs.UnitMask)))
+			})
 		})
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/{name}/stop", s.handle(s.unitAction(procs.UnitStop)))
 			r.Method(http.MethodPost, "/{name}/restart", s.handle(s.unitAction(procs.UnitRestart)))
+			// A signal can end the unit's processes; a frozen unit serves
+			// nothing until it is thawed.
+			r.Method(http.MethodPost, "/{name}/kill", s.handle(s.handleUnitKill))
+			r.Method(http.MethodPost, "/{name}/freeze", s.handle(s.unitAction(procs.UnitFreeze)))
 		})
 	})
 
@@ -82,9 +101,11 @@ func (s *Server) mountProcessRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/inventory", s.handle(s.handleProcessInventory))
 		r.Method(http.MethodGet, "/{pid}", s.handle(s.handleProcessDetail))
 		r.Method(http.MethodGet, "/{pid}/tree", s.handle(s.handleProcessTree))
+		r.Method(http.MethodGet, "/{pid}/inspect", s.handle(s.handleProcessInspect))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodPut, "/{pid}/priority", s.handle(s.handleProcessPriority))
+			r.Method(http.MethodPut, "/{pid}/oom", s.handle(s.handleProcessOOM))
 		})
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/{pid}/signal", s.handle(s.handleProcessSignal))
@@ -120,11 +141,28 @@ func mapProcsError(err error) error {
 	switch {
 	case errors.Is(err, procs.ErrNotInstalled):
 		return httpx.Err(http.StatusServiceUnavailable, "not_installed", err.Error())
+	case errors.Is(err, procs.ErrNoSystemd):
+		// Not a command that failed: nothing was run. systemctl is here and
+		// has no manager to ask, which is a property of the host.
+		return httpx.Err(http.StatusServiceUnavailable, "systemd_not_running", err.Error()).
+			Because("systemctl is installed, but "+procs.SystemdRunDir+" is not there: the host was not booted with systemd, or the dashboard's container runs without the host's /run/systemd mounted.", "")
 	case errors.Is(err, procs.ErrInvalidName):
 		return httpx.Err(http.StatusBadRequest, "invalid_name", err.Error())
+	case errors.Is(err, procs.ErrInvalidValue):
+		return httpx.Err(http.StatusBadRequest, "invalid_value", err.Error())
+	case systemdNotRunning(err):
+		return httpx.Absent("systemd", "systemd is not running on this server.", err)
 	default:
 		return httpx.Wrap(http.StatusBadGateway, "command_failed", err)
 	}
+}
+
+// systemdNotRunning reads systemctl's own refusal on a machine whose init is
+// something else (a container, WSL 1, a chroot): the program is there and the
+// thing it talks to is not. That is this server lacking systemd, the same
+// answer as systemctl missing, and not a command that failed.
+func systemdNotRunning(err error) bool {
+	return strings.Contains(err.Error(), "System has not been booted with systemd")
 }
 
 func (s *Server) handlePM2List(w http.ResponseWriter, r *http.Request) error {
@@ -278,10 +316,17 @@ func (s *Server) handleDaemonReload(w http.ResponseWriter, r *http.Request) erro
 	return nil
 }
 
+// handleUnitShow is one unit's state and every property systemd reports.
+// The Environment property carries credentials as a container's environment
+// does, so credential-shaped values are masked for anybody without
+// system.admin, by the same rule, in the property's own format.
 func (s *Server) handleUnitShow(w http.ResponseWriter, r *http.Request) error {
 	unit, props, err := s.modules.systemd.Detail(r.Context(), chi.URLParam(r, "name"))
 	if err != nil {
 		return mapProcsError(err)
+	}
+	if env, ok := props["Environment"]; ok && !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+		props["Environment"] = procs.MaskEnvironment(env, dockerx.IsSecretEnvKey, dockerx.RedactedEnvValue)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"unit": unit, "properties": props})
 	return nil
@@ -389,6 +434,72 @@ func (s *Server) handleProcessTree(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
+// handleProcessInspect reads everything else the kernel keeps about one
+// process — identity, scheduling, memory, limits, signals, descriptors,
+// threads and environment — for the process page's slower read. Its
+// environment carries credentials as a container's does, so credential-shaped
+// values are masked for anybody without system.admin, by the same rule.
+func (s *Server) handleProcessInspect(w http.ResponseWriter, r *http.Request) error {
+	pid, err := strconv.ParseInt(chi.URLParam(r, "pid"), 10, 32)
+	if err != nil {
+		return httpx.BadRequest("invalid pid")
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	inspect, err := s.modules.table.Inspect(ctx, int32(pid))
+	if err != nil {
+		return httpx.ErrNotFound
+	}
+	// The dashboard's own environment holds the key that decrypts every
+	// stored secret, and no page needs to show it: it is masked for
+	// administrators too.
+	if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) || inspect.PID == int32(os.Getpid()) {
+		inspect.Environment = dockerx.RedactEnv(inspect.Environment)
+	}
+	httpx.JSON(w, http.StatusOK, inspect)
+	return nil
+}
+
+type oomRequest struct {
+	Adj       *int   `json:"adj"`
+	StartedAt string `json:"startedAt,omitempty"`
+}
+
+// handleProcessOOM sets the bias the out-of-memory killer applies to one
+// process, guarded like a priority change against a PID reused since the
+// page read it.
+func (s *Server) handleProcessOOM(w http.ResponseWriter, r *http.Request) error {
+	pid64, err := strconv.ParseInt(chi.URLParam(r, "pid"), 10, 32)
+	if err != nil {
+		return httpx.BadRequest("invalid pid")
+	}
+	var req oomRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Adj == nil {
+		return httpx.BadRequest("adj is required")
+	}
+	p, err := s.modules.table.Detail(r.Context(), int32(pid64))
+	if err != nil {
+		return httpx.ErrNotFound
+	}
+	if err := requireSameProcess(p, req.StartedAt); err != nil {
+		return err
+	}
+	if err := procs.Controllable(p); err != nil {
+		return refusedControl(p, err)
+	}
+	previous, _ := procs.OOMScoreAdj(int32(pid64))
+	if err := s.modules.table.SetOOMScoreAdj(r.Context(), int32(pid64), *req.Adj); err != nil {
+		return httpx.Refused(err)
+	}
+	httpx.SetAudit(r, "process.oom", p.Name,
+		map[string]any{"pid": pid64, "previous": previous, "adj": *req.Adj})
+	httpx.NoContent(w)
+	return nil
+}
+
 type priorityRequest struct {
 	Nice      *int   `json:"nice"`
 	StartedAt string `json:"startedAt,omitempty"`
@@ -417,7 +528,7 @@ func (s *Server) handleProcessPriority(w http.ResponseWriter, r *http.Request) e
 		return refusedControl(p, procs.ErrZombie)
 	}
 	if err := s.modules.table.SetNice(r.Context(), int32(pid64), *req.Nice); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "process.priority", p.Name,
 		map[string]any{"pid": pid64, "previous": p.Nice, "nice": *req.Nice})
@@ -428,6 +539,9 @@ func (s *Server) handleProcessPriority(w http.ResponseWriter, r *http.Request) e
 type signalRequest struct {
 	Signal    string `json:"signal"`
 	StartedAt string `json:"startedAt,omitempty"`
+	// Tree sends the signal to every process below this one as well, which is
+	// how a worker pool that respawns its workers is ended in one press.
+	Tree bool `json:"tree,omitempty"`
 }
 
 func (s *Server) handleProcessSignal(w http.ResponseWriter, r *http.Request) error {
@@ -456,8 +570,22 @@ func (s *Server) handleProcessSignal(w http.ResponseWriter, r *http.Request) err
 	// No typed phrase: signalling a process is the process table's whole
 	// purpose, and a supervised one comes straight back. The dialog carries the
 	// pid and the command line, which is what identifies the right row.
+	if req.Tree {
+		reached, err := s.modules.table.SignalTree(r.Context(), pid, req.Signal)
+		if errors.Is(err, procs.ErrOwnTree) {
+			return httpx.Err(http.StatusConflict, "own_tree",
+				fmt.Sprintf("The dashboard itself runs under %s (%d), so it cannot end that process with its children. Signal the process on its own, or stop what supervises it.", detail.Name, pid))
+		}
+		if err != nil {
+			return httpx.Refused(err)
+		}
+		httpx.SetAudit(r, "process.signal", detail.Name,
+			map[string]any{"pid": pid, "signal": req.Signal, "cmdline": detail.Cmdline, "tree": true, "pids": reached})
+		httpx.JSON(w, http.StatusOK, map[string]any{"signalled": reached})
+		return nil
+	}
 	if err := s.modules.table.Signal(r.Context(), pid, req.Signal); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "process.signal", detail.Name,
 		map[string]any{"pid": pid, "signal": req.Signal, "cmdline": detail.Cmdline})
@@ -576,7 +704,7 @@ func (s *Server) handleCronUserPut(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	if err := procs.ValidateCrontab(req.Content); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	// No typed phrase: this is the Save button of an editor whose contents are
 	// on screen, and a Save that asks you to type the account name is a Save

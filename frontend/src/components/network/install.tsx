@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useSyncExternalStore } from "react"
-import { get, post } from "@/lib/api"
+import { useEffect, useState, useSyncExternalStore } from "react"
+import { ApiError, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { Job } from "@/lib/types"
 import { phaseReading, type PackageHandoff } from "@/lib/network-traffic"
@@ -69,6 +69,7 @@ export function InstallHandoff({
   title,
   description,
   onInstalled,
+  phases = true,
 }: {
   pkg: string
   /** The tool drawn as itself, where the logo collection has it. */
@@ -78,6 +79,12 @@ export function InstallHandoff({
   title: string
   description: React.ReactNode
   onInstalled: () => void
+  /**
+   * Off for a package the server keeps no after-install reading of (git,
+   * Tailscale): the section's own read, which `onInstalled` asks for again,
+   * is what says it is there.
+   */
+  phases?: boolean
 }) {
   const { can } = useAuth()
   const [installed, setInstalled] = useState(false)
@@ -129,7 +136,7 @@ export function InstallHandoff({
         onDismiss={console_.dismiss}
         onCancel={console_.cancel}
       />
-      {installed && <HandoffPhases pkg={pkg} />}
+      {installed && phases && <HandoffPhases pkg={pkg} />}
     </div>
   )
 }
@@ -188,4 +195,32 @@ export function HandoffPhases({ pkg }: { pkg: string }) {
       {pending && <p className="mt-1">Next: {pending.detail}.</p>}
     </Notice>
   )
+}
+
+/**
+ * Whether this server's package manager has a package by that name. `asking`
+ * until it answers, then `known` or `unknown`; `unread` where it cannot be
+ * asked — no package manager, an account that may not read packages, a read
+ * that failed — which is not the same as "no such package".
+ *
+ * Tailscale is in Arch's, Fedora's and Alpine's repositories, and in Debian's
+ * and Ubuntu's only after its own is added: a button that ends in "Unable to
+ * locate package" is worse than the sentence it replaced.
+ */
+export type PackageKnown = "asking" | "known" | "unknown" | "unread"
+
+export function usePackageKnown(pkg: string): PackageKnown {
+  const [answer, setAnswer] = useState<{ pkg: string; known: PackageKnown } | undefined>(undefined)
+  useEffect(() => {
+    const controller = new AbortController()
+    get(`/packages/${encodeURIComponent(pkg)}`, undefined, controller.signal)
+      .then(() => setAnswer({ pkg, known: "known" }))
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        const missing = err instanceof ApiError && err.status === 404
+        setAnswer({ pkg, known: missing ? "unknown" : "unread" })
+      })
+    return () => controller.abort()
+  }, [pkg])
+  return answer?.pkg === pkg ? answer.known : "asking"
 }

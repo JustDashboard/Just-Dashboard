@@ -10,8 +10,8 @@ import type { GridColumnKind } from "./types"
  * beside an inserted row would be two meanings for one colour.
  *
  * It is the one legend for a value wherever one is drawn — a cell here, a
- * field of a document, a key's value (`ValueText` and `JsonTree` in the kit
- * read it) — so a kind keeps its colour across a database's pages.
+ * field of a document, a key's value (`ValueText` in the kit reads it) — so a
+ * kind keeps its colour across a database's pages.
  */
 export const KIND_HUE: Record<GridColumnKind, string> = {
   number: "numeric",

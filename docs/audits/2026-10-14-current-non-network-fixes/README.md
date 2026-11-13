@@ -81,19 +81,19 @@ original audit baseline; after captures reflect the final repaired tree, includi
 merged account-page design. They establish displayed policy and editor behavior, rather than live
 host enforcement.
 
-- Required-factor Users: [before](account-required-before.png), [after](account-required-after.png).
-- Fail2ban-specific Security reading: [before](security-fail2ban-before.png),
-  [after](security-fail2ban-after.png).
-- Recordings: [drawing navigation](drawing-draft-navigation.webm),
-  [Stickyboard navigation](sticky-draft-navigation.webm),
-  [backup conflict review](backup-conflict-review.webm),
-  [streamed export session recovery](streamed-export-auth-recovery.webm),
-  [proxy history recovery](proxy-draft-history.webm),
-  [proxy conflict review](proxy-conflict-review.webm),
-  [image conflict recovery](image-conflict-recovery.webm),
-  [different-account recovery](different-account-recovery.webm),
-  [same-account recovery](same-account-recovery.webm),
-  [raw editor account cleanup](raw-editor-account-cleanup.webm).
+- Required-factor Users: [before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/account-required-before.png), [after](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/account-required-after.png).
+- Fail2ban-specific Security reading: [before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/security-fail2ban-before.png),
+  [after](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/security-fail2ban-after.png).
+- Recordings: [drawing navigation](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/drawing-draft-navigation.webm),
+  [Stickyboard navigation](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/sticky-draft-navigation.webm),
+  [backup conflict review](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/backup-conflict-review.webm),
+  [streamed export session recovery](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/streamed-export-auth-recovery.webm),
+  [proxy history recovery](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/proxy-draft-history.webm),
+  [proxy conflict review](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/proxy-conflict-review.webm),
+  [image conflict recovery](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/image-conflict-recovery.webm),
+  [different-account recovery](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/different-account-recovery.webm),
+  [same-account recovery](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/same-account-recovery.webm),
+  [raw editor account cleanup](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-14-current-non-network-fixes/raw-editor-account-cleanup.webm).
 
 ## Verification
 

@@ -225,7 +225,14 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			// Gradio's page embeds the whole application config, the
 			// configured value included, and declares a manifest script it
 			// serves only to an installed app; the shell alone is the proof.
-			walkAssets := name != "gradio" && name != "symfony"
+			//
+			// Streamlit's shell names the framework's own bundle, which says
+			// nothing about the application and changes with every release:
+			// a new one named a script the server then answered 404 for, and
+			// this failed on every branch for a reason no change here had
+			// caused. The file the script's own configuration serves is the
+			// proof, below.
+			walkAssets := name != "gradio" && name != "symfony" && name != "streamlit"
 			if name == "symfony" {
 				// AssetMapper names its modules in an import map, beside a shim
 				// served from a CDN.

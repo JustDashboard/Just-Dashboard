@@ -747,10 +747,11 @@ func TestMongoDocumentRoutesTakeADocumentsWorth(t *testing.T) {
 			t.Errorf("replace with body %s: %d %s; want a 400 mentioning %q", body, rec.Code, brief(rec), want)
 		}
 	}
-	// A route that carries no document keeps the ordinary limit.
+	// A route that carries no document keeps the ordinary limit, and says
+	// so the way every route does: 413 body_too_large, naming the limit.
 	rec = mongoDo(limited, http.MethodPatch, "/databases/"+mongoConn+"/mongo/documents",
 		`{"collection":"c","update":"{}","filter":`+large(6<<20)+`}`)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "too large") {
+	if rec.Code != http.StatusRequestEntityTooLarge || mongoErrorCode(rec) != "body_too_large" || !strings.Contains(rec.Body.String(), "4 MB") {
 		t.Errorf("an update with a 6 MiB filter: %d %s", rec.Code, brief(rec))
 	}
 }

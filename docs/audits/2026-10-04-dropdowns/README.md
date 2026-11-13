@@ -45,12 +45,12 @@ Final check results and screenshot links are recorded in the pull request.
 The before image is the operator's supplied screenshot. After captures are rendered from the final
 production build with synthetic project and credential fixtures.
 
-- [Before: ownership menu](screenshots/ownership-before.png)
-- [After: ownership button and menu](screenshots/ownership-detail.png)
-- [Domains at 1280px](screenshots/domains-1280.png), [1720px](screenshots/domains-1720.png)
-  and [390px](screenshots/domains-390.png)
-- [Credential options on desktop](screenshots/credentials-desktop.png) and
-  [phone](screenshots/credentials-mobile.png)
+- [Before: ownership menu](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-dropdowns/screenshots/ownership-before.png)
+- [After: ownership button and menu](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-dropdowns/screenshots/ownership-detail.png)
+- [Domains at 1280px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-dropdowns/screenshots/domains-1280.png), [1720px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-dropdowns/screenshots/domains-1720.png)
+  and [390px](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-dropdowns/screenshots/domains-390.png)
+- [Credential options on desktop](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-dropdowns/screenshots/credentials-desktop.png) and
+  [phone](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-04-dropdowns/screenshots/credentials-mobile.png)
 
 ## Consumer inventory
 

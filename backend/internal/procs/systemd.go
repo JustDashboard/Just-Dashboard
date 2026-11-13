@@ -57,7 +57,23 @@ type Systemd struct {
 
 func NewSystemd() *Systemd { return &Systemd{} }
 
-func (s *Systemd) Available() bool { return binaryExists("systemctl") }
+// Available reports whether this host's units can be read and driven:
+// systemctl is here and systemd is running for it to ask. The second half
+// was missing, so a host with the binary and another init (a container, WSL
+// without systemd) had a Services page that answered 502 with systemctl's
+// own complaint instead of saying there is no systemd.
+func (s *Systemd) Available() bool { return s.unavailable() == nil }
+
+// unavailable is why they cannot be, nil when they can.
+func (s *Systemd) unavailable() error {
+	if !binaryExists("systemctl") {
+		return fmt.Errorf("systemctl %w", ErrNotInstalled)
+	}
+	if !systemdBooted() {
+		return ErrNoSystemd
+	}
+	return nil
+}
 
 // List returns every service unit, loaded or not. `--all` matters: a failed or
 // inactive unit is exactly what an operator opens this page to find, and the
@@ -77,8 +93,8 @@ func (s *Systemd) List(ctx context.Context) ([]Unit, error) {
 // one reading List already makes, because listing the unit files is the slow
 // half of it.
 func (s *Systemd) ListInstalled(ctx context.Context) ([]Unit, map[string]string, error) {
-	if !s.Available() {
-		return nil, nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
+	if err := s.unavailable(); err != nil {
+		return nil, nil, err
 	}
 	res, err := run(ctx, 30*time.Second, "systemctl",
 		"list-units", "--type=service", "--all", "--no-pager", "--no-legend", "--output=json")
@@ -279,6 +295,15 @@ const (
 	// ResetFailed clears a unit's failed state without starting it, so a
 	// service that was fixed by hand stops being counted as broken.
 	UnitResetFailed UnitAction = "reset-failed"
+	// Mask links the unit's file to /dev/null, so nothing starts it — not a
+	// dependency, a timer, a socket or an operator — until unmask removes
+	// the link. It does not stop a unit that is running.
+	UnitMask   UnitAction = "mask"
+	UnitUnmask UnitAction = "unmask"
+	// Freeze stops the unit's processes being scheduled without ending them
+	// (the cgroup freezer); thaw lets them run on from where they were.
+	UnitFreeze UnitAction = "freeze"
+	UnitThaw   UnitAction = "thaw"
 )
 
 func (s *Systemd) Control(ctx context.Context, name string, action UnitAction) (*CommandResult, error) {
@@ -286,11 +311,13 @@ func (s *Systemd) Control(ctx context.Context, name string, action UnitAction) (
 		return nil, err
 	}
 	switch action {
-	case UnitStart, UnitStop, UnitRestart, UnitReload, UnitEnable, UnitDisable, UnitResetFailed:
+	case UnitStart, UnitStop, UnitRestart, UnitReload, UnitEnable, UnitDisable, UnitResetFailed,
+		UnitMask, UnitUnmask, UnitFreeze, UnitThaw:
 	default:
 		return nil, fmt.Errorf("unknown systemd action %q", action)
 	}
-	if action == UnitEnable || action == UnitDisable {
+	switch action {
+	case UnitEnable, UnitDisable, UnitMask, UnitUnmask:
 		defer s.forgetUnitFiles()
 	}
 	return run(ctx, 90*time.Second, "systemctl", string(action), name)
@@ -300,8 +327,8 @@ func (s *Systemd) Control(ctx context.Context, name string, action UnitAction) (
 // editing a unit in the file manager that nobody remembers, and until it runs
 // the unit page keeps describing the old file.
 func (s *Systemd) DaemonReload(ctx context.Context) (*CommandResult, error) {
-	if !s.Available() {
-		return nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
+	if err := s.unavailable(); err != nil {
+		return nil, err
 	}
 	defer s.forgetUnitFiles()
 	return run(ctx, 90*time.Second, "systemctl", "daemon-reload")
@@ -310,7 +337,7 @@ func (s *Systemd) DaemonReload(ctx context.Context) (*CommandResult, error) {
 // JournalEntry is one record from journalctl's JSON output. The interesting
 // fields are normalised out of the __-prefixed noise the journal emits.
 type JournalEntry struct {
-	Timestamp time.Time `json:"timestamp"`
+	Timestamp time.Time `json:"timestamp,omitzero"`
 	Message   string    `json:"message"`
 	Priority  int       `json:"priority"`
 	Unit      string    `json:"unit,omitempty"`

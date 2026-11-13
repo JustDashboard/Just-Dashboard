@@ -168,7 +168,7 @@ func (r *Recorder) MountForecasts(ctx context.Context, now time.Time) ([]MountFo
 	if !r.Enabled() {
 		return out, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT mountpoint, used_bytes, total_bytes, used_percent
 		  FROM metric_mount_samples WHERE ts = (SELECT MAX(ts) FROM metric_mount_samples)
 		 ORDER BY mountpoint`)
@@ -266,7 +266,7 @@ func (r *Recorder) VolumeGrowths(ctx context.Context, names []string, now time.T
 	if err != nil {
 		return nil, err
 	}
-	latest, err := r.db.QueryContext(ctx, `
+	latest, err := r.history().QueryContext(ctx, `
 		SELECT v.name, v.size_bytes FROM metric_volume_samples v
 		  JOIN (SELECT name, MAX(ts) AS ts FROM metric_volume_samples GROUP BY name) n
 		    ON n.name = v.name AND n.ts = v.ts`)
@@ -313,7 +313,7 @@ type hourly struct {
 // start. ?1 is the window's start and ?2 the bucket width in seconds.
 func (r *Recorder) hourlySeries(ctx context.Context, query string, now time.Time) (map[string]hourly, error) {
 	start := now.Add(-r.retention)
-	rows, err := r.db.QueryContext(ctx, query, start.Unix(), int64(forecastBucket/time.Second))
+	rows, err := r.history().QueryContext(ctx, query, start.Unix(), int64(forecastBucket/time.Second))
 	if err != nil {
 		return nil, err
 	}

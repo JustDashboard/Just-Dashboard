@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 const (
@@ -65,8 +67,33 @@ func NewUpgrader(allowedOrigins []string, secure bool) *Upgrader {
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
 		CheckOrigin:     u.checkOrigin,
+		Error:           handshakeRefused,
 	}
 	return u
+}
+
+// handshakeRefused answers a handshake that failed in the API's error
+// envelope, with a code a client can read. The upgrader's own answer is a
+// line of plain text ("Bad Request"), which a client that reads every other
+// refusal as {"error":{"code","message"}} can only report as unknown. The
+// package stays free of the API's types, so the envelope is written here.
+func handshakeRefused(w http.ResponseWriter, _ *http.Request, status int, reason error) {
+	code, message := "websocket_handshake_failed", "the WebSocket handshake failed"
+	switch status {
+	case http.StatusBadRequest, http.StatusUpgradeRequired:
+		// A plain GET, or a handshake missing one of its headers.
+		code, message = "websocket_upgrade_required", "this route is a WebSocket: open it with an Upgrade request"
+	case http.StatusMethodNotAllowed:
+		code, message = "method_not_allowed", "a WebSocket is opened with GET"
+	case http.StatusForbidden:
+		code, message = "origin_not_allowed", "this page's origin may not open a socket here"
+	}
+	if reason != nil && status == http.StatusBadRequest {
+		message += " (" + strings.TrimPrefix(reason.Error(), "websocket: ") + ")"
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": message}})
 }
 
 // checkOrigin refuses browser sockets from other sites. A WebSocket handshake
@@ -234,6 +261,9 @@ func (c *Conn) Close() error {
 // Keepalive pings the peer and closes the socket when the context ends, so a
 // dropped VPN tunnel does not leave a PTY or log tail running forever.
 func (c *Conn) Keepalive(ctx context.Context) {
+	// Every socket handler starts this and DrainControl with a bare `go`,
+	// outside the request's own recovery: a panic here ends one socket.
+	defer safego.Recover(nil, "socket keepalive")
 	t := time.NewTicker(pingPeriod)
 	defer t.Stop()
 	for {
@@ -261,6 +291,7 @@ func (c *Conn) Keepalive(ctx context.Context) {
 // DrainControl reads and discards inbound frames on push-only sockets. Without
 // a reader the pong handler never runs and the connection dies at pongWait.
 func (c *Conn) DrainControl(cancel context.CancelFunc) {
+	defer safego.Recover(nil, "socket control reader")
 	defer cancel()
 	for {
 		if _, _, err := c.ws.ReadMessage(); err != nil {

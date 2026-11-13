@@ -39,8 +39,6 @@ const configuration = {
   domains: [],
 }
 
-test.describe("A stage that fails /preflight", () => {})
-
 test.describe("An ambiguous detection", () => {
   test("picking a candidate re-detects with its id", async ({ page }) => {
     await mockDraftJourney(page)

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  CERT_SORTS,
   afterReload,
   authorityName,
   certbotRunning,
@@ -7,6 +8,7 @@ import {
   hookFailureText,
   lineageActivity,
   parseDomains,
+  renewIfDueLabel,
   renewalMethod,
   renewalReading,
   renewalReload,
@@ -19,7 +21,6 @@ import {
   stillServingTest,
   testCertificateReplaced,
   testRunPassed,
-  unreloadedRenewals,
 } from "./certificates"
 
 const now = Date.parse("2026-09-27T12:00:00Z")
@@ -411,38 +412,33 @@ describe("whether nginx reads a renewed certificate", () => {
     )
     expect(renewalReload({}, { reloadHook: hook("modified") })).toBe("unknown")
   })
+})
 
-  test("the served lineages nothing reloads for, with the sites left on the old certificate", () => {
-    const lineage = (name, overrides = {}) => ({
-      name,
-      domains: [name],
-      expiry: local(12, 1, 0, 0),
-      daysLeft: 60,
-      valid: true,
-      certPath: `/etc/letsencrypt/live/${name}/fullchain.pem`,
-      authenticator: "webroot",
-      ...overrides,
-    })
-    // servedBy is the enabled sites only: a disabled one that names
-    // idle.example.com serves nothing, so it is not here.
-    const state = certbotState({
-      reloadHook: hook("missing"),
-      nginxReloads: true,
-      certs: [
-        lineage("app.example.com", { servedBy: ["app", "www"] }),
-        lineage("idle.example.com"),
-        lineage("nginx.example.com", { installer: "nginx", servedBy: ["n"] }),
-        lineage("post.example.com", { postHook: true, servedBy: ["post"] }),
-      ],
-    })
-    expect(unreloadedRenewals(state)).toEqual({
-      lineages: ["app.example.com"],
-      sites: ["app", "www"],
-    })
-    expect(unreloadedRenewals({ ...state, reloadHook: hook("installed") }).lineages).toEqual([])
-    expect(
-      unreloadedRenewals({ ...state, reloadHook: hook("missing", ["post/reload-nginx"]) }).lineages,
-    ).toEqual([])
-    expect(unreloadedRenewals({ ...state, autoRenew: false }).lineages).toEqual([])
+// The server leaves a time it never set out of its answer (it used to send
+// year one), and a certificate whose file could not be read has neither date.
+describe("a certificate with no dates", () => {
+  const unreadable = { name: "broken", path: "/etc/ssl/broken.pem", daysLeft: 0, error: "no PEM" }
+  const dated = (name, notAfter) => ({
+    name,
+    path: `/etc/ssl/${name}.pem`,
+    daysLeft: 30,
+    notBefore: "2026-08-01T00:00:00Z",
+    notAfter,
+  })
+
+  test("is due for renewal now, and names no day", () => {
+    expect(renewIfDueLabel(unreadable, now)).toBe("Renew, due now")
+    expect(renewIfDueLabel(dated("app", "2026-10-30T00:00:00Z"), now)).toBe(
+      "Renew if due (from Sep 30, 2026)",
+    )
+  })
+
+  test("sorts after every certificate that has an end", () => {
+    const soon = dated("soon", "2026-10-01T00:00:00Z")
+    const later = dated("later", "2026-12-01T00:00:00Z")
+    // Without an error either: the date alone must place it.
+    const undated = { name: "aaa", path: "/etc/ssl/aaa.pem", daysLeft: 0 }
+    const sorted = [undated, later, unreadable, soon].sort(CERT_SORTS.expiry)
+    expect(sorted.map((c) => c.name)).toEqual(["soon", "later", "aaa", "broken"])
   })
 })

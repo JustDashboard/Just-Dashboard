@@ -28,14 +28,14 @@ type networkChangePreview struct {
 	Owner     dockerx.NetworkOwner      `json:"owner"`
 	Conflicts []dockerx.NetworkConflict `json:"conflicts"`
 	Blocked   bool                      `json:"blocked"`
-	CheckedAt time.Time                 `json:"checkedAt"`
+	CheckedAt time.Time                 `json:"checkedAt,omitzero"`
 }
 
 // networkPrunePreview is the reviewed prune: every network the Engine's own
 // prune would take, and which of them this one removes.
 type networkPrunePreview struct {
 	Candidates []dockerx.PruneCandidate `json:"candidates"`
-	CheckedAt  time.Time                `json:"checkedAt"`
+	CheckedAt  time.Time                `json:"checkedAt,omitzero"`
 }
 
 // selfProject is the dashboard's own Compose project among the running

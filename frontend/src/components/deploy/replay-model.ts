@@ -1,5 +1,6 @@
 import type { ReplayDrift, ReplayPlan, ReplayReport } from "@/lib/types"
 import { plural } from "@/lib/format"
+import { latencyWords } from "@/lib/latency-words"
 
 /**
  * The words and figures of the traffic replay (`deploy/replay.go`), kept out
@@ -157,7 +158,7 @@ export function replayRefusal(
   return (
     whole("requests", REPLAY_LIMITS.requests, "The count") ??
     share("maxStatusDrift", 0, REPLAY_LIMITS.maxStatusDrift, "The drift allowed") ??
-    share("latencyFactor", 1, REPLAY_LIMITS.latencyFactor, "The p95 factor") ??
+    share("latencyFactor", 1, REPLAY_LIMITS.latencyFactor, "The slowdown factor") ??
     whole("timeoutSeconds", REPLAY_LIMITS.timeoutSeconds, "The time limit") ??
     (paths ? { field: "paths", message: paths } : undefined)
   )
@@ -169,7 +170,7 @@ export function replayPolicyLine(plan: ReplayPlan | undefined) {
   const terms = replayTerms(plan)
   const scope =
     terms.paths.length > 0 ? ` under ${plural(terms.paths.length, "prefix", "prefixes")}` : ""
-  return `On · the last ${terms.requests} requests${scope}, ${terms.maxStatusDrift}% drift, p95 within ${terms.latencyFactor}×`
+  return `On · the last ${terms.requests} requests${scope}, ${terms.maxStatusDrift}% drift, at most ${terms.latencyFactor}× slower`
 }
 
 /** "< 1 ms", "12 ms", "1.4 s": a replayed request's time. */
@@ -203,11 +204,6 @@ export function driftAnswer(drift: ReplayDrift) {
     : `no answer (${drift.error ?? "none"})`
 }
 
-/** The verdict as a tone: a line crossed is the reason the release stopped. */
-export function replayTone(report: ReplayReport) {
-  return report.verdict.tripped ? "danger" : "success"
-}
-
 /**
  * The step row's line while another step is open: how many were replayed,
  * how many drifted, and the two p95s — what the replay is for.
@@ -219,7 +215,9 @@ export function replaySummary(report: ReplayReport) {
     report.drifted === 0 ? "none drifted" : `${report.drifted} drifted`,
   ]
   if (report.latencyJudged && report.candidateP95 !== undefined) {
-    parts.push(`p95 ${replayMs(report.candidateP95)} (${replayMs(report.recordedP95)} recorded)`)
+    parts.push(
+      `${latencyWords("p95", replayMs(report.candidateP95))} (${replayMs(report.recordedP95)} recorded)`,
+    )
   }
   return parts.join(" · ")
 }

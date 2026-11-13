@@ -319,29 +319,6 @@ export type StreamIncludeResult = {
   warnings: string[]
 }
 
-/** One module this nginx was built with (`GET /proxy/modules`). */
-export type NginxModule = {
-  /** As configure names it: `http_v2_module`, `stream`. */
-  name: string
-  /** `unknown` when the configuration could not be read to tell loaded from not. */
-  state: "static" | "loaded" | "not-loaded" | "not-installed" | "unknown"
-  /** The shared object a dynamic module loads from. */
-  path?: string
-  /** What installs a module that is not installed, named only where the package manager has it. */
-  package?: string
-}
-
-/** What this nginx was built with and what of it the configuration loads. 503 without nginx. */
-export type NginxModules = {
-  /** nginx's own "nginx/1.26.3 (Ubuntu)". */
-  version: string
-  openssl?: string
-  modulesPath: string
-  modules: NginxModule[]
-  /** Why a dynamic module's state could not be read. */
-  detail?: string
-}
-
 /** One `POST /proxy/streams/test`: dialled from the host, inside five seconds. */
 export type StreamTestRequest = {
   target: string

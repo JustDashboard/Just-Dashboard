@@ -438,7 +438,7 @@ func (s *Service) Support(ctx context.Context, id string) ([]byte, error) {
 		Version   int        `json:"version"`
 		ID        string     `json:"id"`
 		Status    string     `json:"status"`
-		CreatedAt time.Time  `json:"createdAt"`
+		CreatedAt time.Time  `json:"createdAt,omitzero"`
 		StartedAt *time.Time `json:"startedAt,omitempty"`
 		EndedAt   *time.Time `json:"endedAt,omitempty"`
 		Packets   int        `json:"packetLimit"`

@@ -166,7 +166,7 @@ func gitErr(err error) error {
 	case errors.Is(err, gitx.ErrProtected):
 		return httpx.Err(http.StatusConflict, "protected", err.Error())
 	case errors.Is(err, gitx.ErrNotARepo), errors.Is(err, gitx.ErrInvalidRef):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	return httpx.Internal(err)
 }
@@ -391,7 +391,11 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	q := r.URL.Query()
-	diff, err := s.modules.git.Diff(r.Context(), path, q.Get("ref"), q.Get("file"), q.Get("staged") == "true")
+	staged, err := httpx.QueryBool(r, "staged")
+	if err != nil {
+		return err
+	}
+	diff, err := s.modules.git.Diff(r.Context(), path, q.Get("ref"), q.Get("file"), staged)
 	if err != nil {
 		return gitErr(err)
 	}
@@ -496,7 +500,10 @@ func (s *Server) handleGitInit(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) handleGitFetch(w http.ResponseWriter, r *http.Request) error {
-	prune := r.URL.Query().Get("prune") == "true"
+	prune, err := httpx.QueryBool(r, "prune")
+	if err != nil {
+		return err
+	}
 	return s.gitAction(w, r, "fetch", func(p string) (*gitx.Result, error) {
 		return s.modules.git.Fetch(r.Context(), p, prune)
 	})

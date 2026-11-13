@@ -306,7 +306,7 @@ type SSHTrust struct {
 	Target  string          `json:"target"`
 	Keys    []SSHTrustedKey `json:"keys"`
 	Source  string          `json:"source"`
-	SavedAt time.Time       `json:"savedAt"`
+	SavedAt time.Time       `json:"savedAt,omitzero"`
 	SavedBy string          `json:"savedBy"`
 }
 

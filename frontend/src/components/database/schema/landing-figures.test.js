@@ -37,7 +37,8 @@ describe("what a schema amounts to", () => {
     expect(figures.reclaimable).toBeNull()
     expect(figures.rankedBy).toBe("size")
     expect(figures.largest.map((entry) => entry.object.name)).toEqual(["orders", "items"])
-    expect(figures.largest[1].share).toBeCloseTo(2 / 3)
+    // Of the schema's bytes, not of the largest table's.
+    expect(figures.largest.map((entry) => entry.share)).toEqual([0.6, 0.4])
   })
 
   test("the engine's statistics win, and split the bytes", () => {
@@ -57,7 +58,8 @@ describe("what a schema amounts to", () => {
     expect(figures.indexBytes).toBe(24576)
     expect(figures.reclaimable).toBe(14771)
     expect(figures.measured).toBe(2)
-    expect(figures.largest[0]).toMatchObject({ bytes: 307200, rows: 2000, share: 1 })
+    expect(figures.largest[0]).toMatchObject({ bytes: 307200, rows: 2000 })
+    expect(figures.largest[0].share).toBeCloseTo(307200 / 311296)
   })
 
   test("reads are added up only over the tables the engine counts them for", () => {

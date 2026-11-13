@@ -26,6 +26,64 @@ only renderer/executor/validation authority for their feature.
   compacted history begins with a `resync` snapshot, and a slow subscriber is disconnected rather than
   allowed to stall execution. Streams replay all retained history in pages of at most 5,000 stored
   events before handing off to live events, including the terminal tail of an already completed run.
+- A step's output is written a batch at a time. `storeStepOutput.Log` collects lines and
+  `OrchestrationStore.AppendLogs` writes them in one transaction — one lease check, one read of the
+  run's sequence, a row a line with consecutive sequences, one update of the step's `last_seq` and one
+  of the legacy tail — when 64 lines or 256 KiB are waiting, or 100 ms after the first of them, so a
+  page following the run still reads as live. A line that follows a quiet moment (the step's first, or
+  one printed more than 100 ms after the last write) does not wait: it is written before `Log` returns,
+  so what a step said before it went silent is in the transcript whatever becomes of the process. That
+  is the line `TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun` reads after it kills a backend
+  inside every step; only the tail of a burst, at most 100 ms of it, can be lost to a kill. A line used
+  to be a transaction of six statements and a
+  commit of its own, about 5 ms each, and a build that printed 5,000 lines spent some 25 s persisting
+  them while every other writer queued behind it. The engine flushes when the step returns, before it
+  records how the step ended, and an event the step records (`Output.Event`) flushes first, so nothing
+  enters the transcript ahead of a line printed before it; an event some other caller appends mid-step
+  can precede lines printed up to 100 ms earlier. A line has no sequence until its batch is written, so
+  what needs one later (the build cause's `lineSeq`) holds the line's mark and asks `SeqOf` for the
+  sequence when the cause is known. A line's text is stored once, in `deploy_log_chunks.text` beside
+  `stream` and `truncated`, with `data_json` `{}`; `EventsAfter` builds the `step.log` event's data
+  from those columns, and a row written before the change (its text repeated in `data_json`) or by the
+  0.6.6 migration still answers with the data it holds. `deploy_runs.log`, the bounded tail the 0.6.6
+  run shape (`lastRun.log`, the legacy run list) still answers with, is rewritten once a batch.
+- What a run printed is the only part of deployment history that is ever removed, and it is removed
+  in two steps (`deploy/run_history.go`). When a run ends, however it ends, the engine keeps its newest
+  10,000 lines (`EngineConfig.HotLogLimit`, `compactFinished`; until 0.8.6 only a run that succeeded was
+  held to it, and a build failing in a loop is the one that prints the most). Later, the history policy
+  (`HistoryPolicy`, `JD_DEPLOY_HISTORY_RUNS`, 200 by default, 0 for no limit) keeps the output of each
+  environment's newest runs whole and cuts an older run to its last 200 lines (`historyTailLines`, as
+  many as a diagnosis sends) and the last 4,000 characters of the tail on its row. A diagnosis picks
+  its lines from a run's last thousand and prefers the failed step's own, so one asked for after the
+  cut is built from the end of the run, which is the failed step's unless later steps printed more
+  than 200 lines after it; a diagnosis made before the cut is stored and unchanged. The engine applies
+  the policy a minute after it starts and
+  every hour, 25 runs a pass, with the next pass a second later and from the run the last one reached
+  while runs are waiting, which is how an install upgraded with years of history catches up and why
+  runs a pass cannot cut never hold one back. Both compactions remove at most 10,000 lines in one
+  transaction (`compactStepLines`, `compactRunLogs`): nothing limits what a run prints while it runs,
+  a failed run was not held to the hot limit before 0.8.6, and removing 300,000 lines at once held the
+  store's write lock for four to ten seconds where every other writer gives up after five. A longer
+  run is cut a step at a time, each step a compaction that ends at a watermark, so a reader between
+  two steps sees a run compacted less far; the steps of one run and the runs of one pass are 150 ms
+  apart (`compactStepPause`), which is longer than a writer on another connection waits before it
+  asks for the lock again. The history pass goes through the store's bulk writer, and
+  `deploy_run_output_pruned` records a run in the transaction of its last step, so a pass never
+  returns to a run it finished and goes on with one it did not. The
+  policy deletes rows of `deploy_log_chunks` whose type is `step.log` and nothing else. A run's row,
+  its steps and their evidence, its diagnosis, its variable and plan snapshots, its state events, its
+  release and the release's artifacts stay for as long as the project does: a rollback, a retry, a
+  promotion and the release comparison read those and none reads output, so no policy value can take
+  something they need. Three kinds of run keep their whole output whatever their age
+  (`historyProtectedQuery`): the one behind the live release, the ones behind pinned releases, and the
+  ones behind the six newest releases that went live, the same six `ArtifactRetentionPlan` keeps images
+  for. A run that has not ended is passed over. A cut run reads as a compacted one always has: the
+  transcript says earlier lines exist and a stream starts with a `resync`. A pass lists its runs from
+  `idx_deploy_runs_environment` and the table of cut runs without reading a run's row
+  (`TestTheHistoryPassFindsItsRunsWithoutReadingRunRows` holds the plan); that is also why the record
+  of a cut is a table and not a column of `deploy_runs`, where it would sit behind the log tail.
+  Webhook deliveries are not pruned: a row is what refuses a replayed delivery
+  (`ErrDeliveryReplayed`), and the provider signs no time a replay could be refused by instead.
 - Reusing a run's `Idempotency-Key` with a different manual `sourceRevision` or `ref` returns
   `409 idempotency_conflict`. The comparison includes the persisted source-request metadata alongside
   the existing digest, so keys created before this check retain their behavior. Retrying the same ref
@@ -1188,7 +1246,7 @@ only renderer/executor/validation authority for their feature.
   not wrap a context error and so is never recorded as a cancellation. The builder redacts the
   transcript of the run's secret build values and of any plain one carrying credential material, never
   of other plain values (`buildLogRedactions`, with the sensitivity `OpenRunScopedVariables` returns).
-  The executor feeds the persisted, already redacted transcript to a bounded collector (`build_output_cause.go`): a ring per open BuildKit
+  The executor feeds the already redacted transcript, as it is logged, to a bounded collector (`build_output_cause.go`): a ring per open BuildKit
   step (400 lines, 64 KiB), one over the stream (64 KiB), BuildKit's replayed and Dockerfile-excerpt
   lines refused. A step that finishes (`DONE` or `CACHED`) is dropped from both: what a passing step
   printed on its way — npm retrying a request that hung up, a config probing for `git` — is never a
@@ -1228,7 +1286,7 @@ only renderer/executor/validation authority for their feature.
   `step_timeout`; only a cancelled context is a cancellation. The signature table and fixes are listed
   in [the recipe contract](recipes.md#failure-diagnosis).
 - A run that failed or rolled back can be asked about, on request only, of the provider an
-  administrator set up for the assistant ([the editor's assistant](../backend/databases-proxy-platform.md#the-editors-assistant)):
+  administrator set up for the assistant ([the assistant's providers](operator.md#providers)):
   `POST /deploy/{id}/runs/{run}/diagnosis` (`service.control`, the assistant's own capability, and the
   install's one budget of model calls and four answers at once; `api/handlers_deploy_diagnosis.go`).
   What is sent is decided in `deploy/run_diagnosis.go` and is what the run's page already shows any
@@ -1266,16 +1324,15 @@ only renderer/executor/validation authority for their feature.
   Nothing the answer says is applied. The live check against a real model is
   `TestLiveFailedBuildIsDiagnosedByARealModel` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
 - A deployment's environment can be asked about as a conversation from the overview's **Diagnose**:
-  `POST /deploy/{id}/assistant` (`service.control` and a session; `api/handlers_deploy_operator.go`,
-  the tools and prompt in `assistant/operator.go`). The same provider and budget answer it; it begins
+  `POST /deploy/{id}/assistant` (`service.control` and a session; `api/handlers_assistant_turn.go`,
+  the deployment's reads in `api/handlers_deploy_operator.go` and `assistant/operator.go`). The same
+  provider and budget answer it; it begins
   knowing what the overview shows and reads more — runs, a run's transcript, the live containers' last
   lines, usage and the sizing verdict, container events, host alerts (`system.admin`), the firewall's
-  rules for the deployment's ports, pending security updates — only through tools whose every call the
-  person allows or declines first, each bounded, read with the person's role and masked by the
-  diagnosis's masker. It proposes a restart, redeploy, rollback, instant rollback, the suggested
-  limits or a maintenance switch through `propose_action`, which runs nothing: the page draws a card,
-  and its press is the request the project's own button makes to that action's route, with its
-  capability, confirmation and audit. See [the deployment operator](operator.md).
+  rules for the deployment's ports, pending security updates, the source — through bounded tools read
+  with the person's role, and acts through the dashboard's own routes as the person, held by the mode
+  they chose; what it reads is masked before the provider sees it. See
+  [the deployment operator](operator.md).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
   rollback clone only available immutable artifacts and traverse the same checks/cutover path (a clone
   carries its target's own source identity and promotion provenance; a rollback moves no data, and the
@@ -1463,6 +1520,13 @@ only renderer/executor/validation authority for their feature.
   instantaneous push-delivery guarantee. Tags, local checkouts, legacy Compose and archived projects
   are excluded. Monitoring status and access failures appear in the project identity line
   and on Settings → General's Automatic deployment section.
+  Each tick asks one statement which environments to watch (`gitWatchTargetsQuery`), with each
+  environment's newest deploy and the revision it built. `deploy_runs` is never pruned, so both of its
+  looks at an environment's runs read `idx_deploy_runs_environment (environment_id, id)` newest first
+  and stop at the first that fits; `TestTheGitWatcherReadsAnEnvironmentsRunsFromAnIndex` holds the
+  plan, so a change to the statement that brings back a table scan or an index built per execution
+  fails there. The other questions about one environment's runs (what is in flight before it sleeps,
+  is promoted or is quarantined) use the same index.
   `deploy_git_watches` persists the last observed revision, policy digest, decision reason and observation generation: restarts,
   failed runs, duplicate provider deliveries and a crash after enqueue cannot cause repeated builds;
   a later branch change (including a force-push back to an older commit) remains eligible. Watching
@@ -1492,8 +1556,7 @@ only renderer/executor/validation authority for their feature.
   that merely moved on still holds it as an ancestor and the release builds it) each carry a fixed
   sentence as `SourceFailure`, which unwraps to `ErrSourceUnavailable`. The API answers them `502` with
   the code; the run's `acquire_source` step and terminal code carry it; the watcher records it as its
-  cursor reason, which the header's auto-deploy reading and the diagnosis (`auto_deploy_stopped`,
-  linking to the source settings or Credentials) name. The resolved revision and, when given, the
+  cursor reason, which the header's auto-deploy reading names. The resolved revision and, when given, the
   requested ref name are recorded as `{"requestedRevision", "requestedRef"}` in the run's metadata so
   the UI can say "Deploy of v1.4.2". This never touches `deploy_git_watches`: that cursor is written
   only by the watcher's own poll/webhook path, so a manual deploy of an older commit cannot make the
@@ -1565,6 +1628,10 @@ only renderer/executor/validation authority for their feature.
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/
   path policy applies to polling and provider/generic hooks; manual and rollback runs are not path-filtered.
+  `POST …/watch-paths/simulate` (`system.admin`, session or deploy key; `{changedPaths, include,
+  exclude}` → `{matched}`, audited `deploy.trigger.test`) answers whether those paths would start a
+  run under those patterns, through the same `deploy.MatchWatchPaths` the watcher and hooks use;
+  Automation's `TryAChange` (`settings/automation/webhooks.tsx`) asks it.
   `GET …/triggers/{trigger}/deliveries` (`system.admin`, session or deploy key) reads the last 50 `deploy_webhook_deliveries`
   rows for a trigger — delivery id, event, ref, decision, reason, run id, received at — or `?limit=` of
   them, 1 to 200 (anything else reads 50), and
@@ -1715,7 +1782,7 @@ only renderer/executor/validation authority for their feature.
   changes under `deploy`, the routes behind `s.destructive` only for an owner who may take
   destructive actions. 100 tools generated, 113 tools in all; previews' approvals, reveals, saved
   credentials and every other session-only route stay out. See
-  [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
+  [the MCP server](../backend/databases.md#the-mcp-server).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
   managed environment labels at the daemon before inspecting matching containers once each — running
   or stopped, since the set is one environment's (`ListContainersWithLastRun`; the plain labelled
@@ -2577,8 +2644,8 @@ project) listing the open requests with the preview built from each — its addr
 reachable, its state in the words `lib/pull-requests.ts` decides, "Out of date" when the head moved — then
 the previews whose request is no longer open, with **Test this pull request** / **Update preview**
 (held while the preview is Ready at this commit, Building, Closing or its cleanup failed, `previewHeld`),
-**Merge** (its detail promises the preview's close only when one is open and a redeploy only when
-auto-deploy is on, `mergeDetail`), **Close preview** and **Retry cleanup** (for a `preview_remove` run
+**Merge** (its toast says the preview is closing only when one was open and that production redeploys
+only when auto-deploy is on), **Close preview** and **Retry cleanup** (for a `preview_remove` run
 that ended short of success, cancelled and superseded included) as the row's verbs
 (`pull-request-verbs.tsx` for the Overview; the Git page's strip and workspace draw the same verbs under
 the same readings from `lib/pull-requests.ts`) and a link to the checkout on the Git page when one is

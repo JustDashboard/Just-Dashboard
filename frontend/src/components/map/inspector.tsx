@@ -9,15 +9,10 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { copyText } from "@/lib/clipboard"
 import { plural } from "@/lib/format"
-import {
-  SYSTEM_LABEL,
-  systemCensus,
-  systemTitle,
-  type System,
-  type SystemNode,
-} from "@/lib/server-systems"
+import { SYSTEM_LABEL, systemTitle, type System, type SystemNode } from "@/lib/server-systems"
 import { cn } from "@/lib/utils"
-import { VIA_LABEL } from "@/components/map/edges"
+import type { MapBoard } from "@/components/map/board"
+import { VIA_LABEL, wireLabel } from "@/components/map/edges"
 import { ItemMark, KIND_GLYPH, TONE_DOT } from "@/components/map/marks"
 import { nodeKindLabel } from "@/components/map/nodes"
 
@@ -32,9 +27,11 @@ type Point = (id: string | null) => void
  * right under the name; then its sections, each a heading over a hairline. A
  * row in any of them is a way somewhere, and pointing at it rings its box on
  * the canvas. With a system and no box chosen it is that system's account —
- * what it holds, box by box — and with neither, the server's list of systems.
+ * what it holds, box by box — and with neither, the board's account of the
+ * whole canvas.
  */
 export function MapInspector({
+  board,
   systems,
   system,
   node,
@@ -43,6 +40,7 @@ export function MapInspector({
   onFocus,
   onFrame,
 }: {
+  board: MapBoard
   systems: System[]
   system: System | undefined
   node: SystemNode | undefined
@@ -63,7 +61,11 @@ export function MapInspector({
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline px-4">
         {HeadGlyph && <HeadGlyph aria-hidden className="size-3.5 text-muted-foreground" />}
         <span className="eyebrow">
-          {node ? nodeKindLabel(node) : system ? SYSTEM_LABEL[system.kind] : "This server"}
+          {node
+            ? nodeKindLabel(node)
+            : system
+              ? SYSTEM_LABEL[system.kind]
+              : board.whole(systems).eyebrow}
         </span>
       </div>
 
@@ -82,9 +84,9 @@ export function MapInspector({
             onFrame={onFrame}
           />
         ) : system ? (
-          <SystemView system={system} onChoose={onChoose} onHover={onHover} />
+          <SystemView board={board} system={system} onChoose={onChoose} onHover={onHover} />
         ) : (
-          <ServerView systems={systems} />
+          <WholeView board={board} systems={systems} />
         )}
       </div>
 
@@ -307,9 +309,23 @@ function NodeView({
                 key={edge.id}
                 mark={<ItemMark item={other.item} kind={other.kind} />}
                 title={other.item.name}
-                line={<Status tone={TONE_DOT[other.item.tone]} label={other.item.state} />}
+                line={
+                  <>
+                    <Status tone={TONE_DOT[other.item.tone]} label={other.item.state} />
+                    {edge.sessions ? (
+                      <span className="numeric shrink-0">· {plural(edge.sessions, "session")}</span>
+                    ) : null}
+                  </>
+                }
                 trailing={
                   <Tag
+                    tone={
+                      edge.tone === "danger"
+                        ? "danger"
+                        : edge.tone === "warning"
+                          ? "warning"
+                          : "default"
+                    }
                     title={
                       edge.also.length
                         ? `Also: ${edge.also.map((v) => VIA_LABEL[v] ?? v).join(", ")}`
@@ -317,7 +333,7 @@ function NodeView({
                     }
                     className="shrink-0"
                   >
-                    {VIA_LABEL[edge.via] ?? edge.via}
+                    {wireLabel(edge.via, edge.tone)}
                   </Tag>
                 }
                 onPress={() => onChoose(other.id)}
@@ -357,6 +373,8 @@ const ORDER = [
   "containers",
   "services",
   "pm2",
+  "host",
+  "remote",
   "databases",
   "volumes",
   "backups",
@@ -366,15 +384,17 @@ const ORDER = [
 ]
 
 function SystemView({
+  board,
   system,
   onChoose,
   onHover,
 }: {
+  board: MapBoard
   system: System
   onChoose: (id: string) => void
   onHover: Point
 }) {
-  const census = systemCensus(system)
+  const holds = board.holds(system)
   const nodes = [...system.nodes].sort(
     (a, b) =>
       ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || a.item.name.localeCompare(b.item.name),
@@ -415,17 +435,11 @@ function SystemView({
           )
         }
       />
-      <Section title="Holds">
-        <Facts
-          facts={[
-            { label: "Containers", value: String(census.containers) },
-            { label: "Databases", value: String(census.databases) },
-            { label: "Domains", value: String(census.domains) },
-            { label: "Volumes", value: String(census.volumes) },
-            { label: "Backups", value: String(census.backups) },
-          ].filter((f) => f.value !== "0")}
-        />
-      </Section>
+      {holds.length > 0 && (
+        <Section title="Holds">
+          <Facts facts={holds} />
+        </Section>
+      )}
       <Section title="On it" count={nodes.length}>
         <ul className="-mx-2 space-y-0.5">
           {nodes.map((n) => (
@@ -451,24 +465,8 @@ function SystemView({
   )
 }
 
-function ServerView({ systems }: { systems: System[] }) {
-  // Each thing once, however many systems draw it.
-  const seen = new Map<string, string>()
-  for (const s of systems) {
-    for (const n of s.nodes) if (n.kind !== "logs") seen.set(n.itemId, n.kind)
-    for (const f of s.frames) seen.set(f.itemId, "stacks")
-  }
-  const count = (...kinds: string[]) => [...seen.values()].filter((k) => kinds.includes(k)).length
-  const totals = [
-    { label: "Deployments", value: count("projects") },
-    { label: "Stacks", value: count("stacks") },
-    { label: "Containers", value: count("containers") },
-    { label: "Databases", value: count("databases") },
-    { label: "Domains", value: count("domains") },
-    { label: "Volumes", value: count("volumes") },
-    { label: "Backups", value: count("backups") },
-    { label: "Apps and services", value: count("pm2", "services") },
-  ].filter((t) => t.value > 0)
+function WholeView({ board, systems }: { board: MapBoard; systems: System[] }) {
+  const whole = board.whole(systems)
   return (
     <>
       <Identity
@@ -477,14 +475,12 @@ function ServerView({ systems }: { systems: System[] }) {
             <Layers className="size-4 text-muted-foreground" />
           </span>
         }
-        title={plural(systems.length, "system")}
-        line={<span>Each one is drawn on its own, with what it is wired to</span>}
+        title={whole.title}
+        line={<span>{whole.line}</span>}
       />
-      {totals.length > 0 && (
-        <Section title="On this server">
-          <Facts
-            facts={totals.map((t) => ({ label: t.label, value: t.value.toLocaleString("en-US") }))}
-          />
+      {whole.facts.length > 0 && (
+        <Section title={whole.heading}>
+          <Facts facts={whole.facts} />
         </Section>
       )}
     </>

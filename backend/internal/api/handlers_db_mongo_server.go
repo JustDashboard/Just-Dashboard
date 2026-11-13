@@ -57,7 +57,11 @@ func (s *Server) handleMongoOps(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 15*time.Second)
 	defer cancel()
 	// ?all=1 adds idle connections and the server's own background work.
-	ops, err := dbx.MongoCurrentOps(ctx, client, r.URL.Query().Get("all") == "1")
+	all, err := httpx.QueryBool(r, "all")
+	if err != nil {
+		return err
+	}
+	ops, err := dbx.MongoCurrentOps(ctx, client, all)
 	if err != nil {
 		return mongoReadFailure(err)
 	}
@@ -368,7 +372,7 @@ func (s *Server) handleMongoCommandClassify(w http.ResponseWriter, r *http.Reque
 	}
 	cmd, verdict, err := dbx.MongoClassifyCommand(req.Command)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	db := mongoConsoleDatabase(req.Database, conn)
 	dbx.MongoGuardCommand(db, cmd, &verdict)
@@ -403,7 +407,7 @@ func (s *Server) handleMongoCommand(w http.ResponseWriter, r *http.Request) erro
 	}
 	cmd, verdict, err := dbx.MongoClassifyCommand(req.Command)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	db := mongoConsoleDatabase(req.Database, conn)
 	dbx.MongoGuardCommand(db, cmd, &verdict)

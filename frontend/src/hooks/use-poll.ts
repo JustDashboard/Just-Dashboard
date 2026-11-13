@@ -1,7 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ApiError } from "@/lib/api"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { pollLoop, type PollHandle } from "@/hooks/poll-loop"
+import { NO_SHARED_ANSWER, sharedPoll, type SharedReader } from "@/hooks/poll-share"
+
+export { pollLoop, type PollFailure, type PollHandle } from "@/hooks/poll-loop"
 
 export type PollState<T> = {
   data: T | undefined
@@ -32,67 +35,39 @@ type PollOptions<T> = {
    * new answer replaces it.
    */
   seed?: T
+  /**
+   * Keep the cadence through a failure that names no wait: for the few reads
+   * that watch the dashboard through its own restart (an update, a settings
+   * restart, an uninstall), where a 502 is the expected answer for a while and
+   * the page must notice the moment it ends. Every other poll backs off
+   * (`pollLoop`). A 429's `Retry-After` is waited out either way.
+   */
+  steady?: boolean
+  /**
+   * The request's name, when other components make the same one: its path,
+   * and its query when it has one (`"/assistant"`, `"/deploy/traffic"`).
+   * Every poll that gives the same key shares one request, one timer at the
+   * fastest cadence any of them asked for, and one last answer, which is also
+   * what a page opened again draws until the new answer lands, with `loading`
+   * true as for `seed` (`hooks/poll-share.ts`). `refresh` asks again for all
+   * of them.
+   *
+   * The key is the resource's whole identity, so `deps` are not read: a
+   * fetcher whose answer depends on anything must have it in the key. Without
+   * a key a poll is its own, as it always was.
+   */
+  key?: string
 }
 
-/** The part of `document` a poll watches, so the schedule can be tested without one. */
-type PollPage = Pick<Document, "visibilityState" | "addEventListener" | "removeEventListener">
-
-/**
- * Fetches now and schedules the next fetch after each one settles, so a slow
- * endpoint cannot stack requests. The interval stops while the tab is hidden —
- * a dashboard left open in a background tab should not keep hammering the
- * server it is monitoring — and coming back fetches at once rather than
- * showing a stale page until a timer is next due. A fetch already in flight is
- * the refresh; its own settling schedules the next.
- *
- * An interval of 0 fetches once: it has no schedule to catch up on.
- * `fetchOnce` must not reject. Returns what stops it.
- */
-export function pollLoop(
-  fetchOnce: () => Promise<void>,
-  intervalMs: number,
-  page: PollPage = document,
-): () => void {
-  let stopped = false
-  let fetching = false
-  let timer: ReturnType<typeof setTimeout> | undefined
-
-  const schedule = () => {
-    if (stopped || intervalMs <= 0) return
-    timer = setTimeout(() => {
-      // Hidden, nothing rearms this: the return to the tab does.
-      if (page.visibilityState === "visible") void run()
-    }, intervalMs)
-  }
-
-  const run = async () => {
-    fetching = true
-    await fetchOnce()
-    fetching = false
-    schedule()
-  }
-
-  const onVisibility = () => {
-    if (page.visibilityState !== "visible" || fetching) return
-    clearTimeout(timer)
-    void run()
-  }
-
-  void run()
-  if (intervalMs > 0) page.addEventListener("visibilitychange", onVisibility)
-  return () => {
-    stopped = true
-    clearTimeout(timer)
-    page.removeEventListener("visibilitychange", onVisibility)
-  }
-}
+const noSubscription = () => () => {}
+const noSharedAnswer = () => NO_SHARED_ANSWER
 
 /** `pollLoop` as a hook: the latest result, and a way to ask again. */
 export function usePoll<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
   intervalMs = 5000,
   deps: unknown[] = [],
-  { enabled = true, seed }: PollOptions<T> = {},
+  { enabled = true, seed, steady = false, key }: PollOptions<T> = {},
 ): PollState<T> {
   // A different resource must never borrow the previous resource's rows or
   // permissions while it loads. Refreshes of the same resource retain data.
@@ -110,40 +85,94 @@ export function usePoll<T>(
   // is synced after render rather than assigned during it — writing a ref
   // mid-render is what makes a component's output depend on when it ran.
   const fetcherRef = useRef(fetcher)
+  const steadyRef = useRef(steady)
+  // So is the cadence: a caller's `busy ? 2_000 : 30_000` flipping is a new
+  // schedule for the same loop, not a reason to abort and fetch again.
+  const intervalRef = useRef(intervalMs)
+  const loop = useRef<PollHandle | undefined>(undefined)
   useEffect(() => {
     fetcherRef.current = fetcher
+    steadyRef.current = steady
+    intervalRef.current = intervalMs
   })
 
-  const refresh = useCallback(() => setTick((t) => t + 1), [])
+  // A keyed poll is a reader of the one shared with every component that
+  // gave the same key; the loop below is then not run at all.
+  const shared = useMemo(() => (key === undefined ? undefined : sharedPoll(key)), [key])
+  const answer = useSyncExternalStore(
+    shared ? shared.subscribe : noSubscription,
+    shared ? shared.read : noSharedAnswer,
+    noSharedAnswer,
+  )
+  const reader = useRef<SharedReader>({
+    interval: () => intervalRef.current,
+    fetch: (signal) => fetcherRef.current(signal),
+    steady: () => steadyRef.current,
+  })
+  useEffect(() => {
+    if (!shared || !enabled) return
+    return shared.join(reader.current)
+  }, [shared, enabled])
+
+  const refresh = useCallback(() => {
+    if (shared) shared.refresh()
+    else setTick((t) => t + 1)
+  }, [shared])
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || shared) return
     let cancelled = false
     const controller = new AbortController()
 
-    const stop = pollLoop(async () => {
-      try {
-        const next = await fetcherRef.current(controller.signal)
-        if (cancelled) return
-        setResult({ resource, data: next, lastSuccess: Date.now() })
-      } catch (err) {
-        if (cancelled || controller.signal.aborted) return
-        if (err instanceof DOMException && err.name === "AbortError") return
-        setResult((previous) => ({
-          resource,
-          data: previous?.resource === resource ? previous.data : undefined,
-          error: err instanceof Error ? err : new Error(String(err)),
-          lastSuccess: previous?.resource === resource ? previous.lastSuccess : undefined,
-        }))
-      }
-    }, intervalMs)
+    const stop = pollLoop(
+      async () => {
+        try {
+          const next = await fetcherRef.current(controller.signal)
+          if (cancelled) return
+          setResult({ resource, data: next, lastSuccess: Date.now() })
+        } catch (err) {
+          if (cancelled || controller.signal.aborted) return
+          if (err instanceof DOMException && err.name === "AbortError") return
+          setResult((previous) => ({
+            resource,
+            data: previous?.resource === resource ? previous.data : undefined,
+            error: err instanceof Error ? err : new Error(String(err)),
+            lastSuccess: previous?.resource === resource ? previous.lastSuccess : undefined,
+          }))
+          return { failed: err }
+        }
+      },
+      () => intervalRef.current,
+      document,
+      { steady: () => steadyRef.current },
+    )
+    loop.current = stop
 
     return () => {
       cancelled = true
       controller.abort()
       stop()
+      loop.current = undefined
     }
-  }, [intervalMs, tick, enabled, resource])
+  }, [tick, enabled, resource, shared])
+
+  useEffect(() => {
+    loop.current?.retime()
+    shared?.retime()
+  }, [intervalMs, shared])
+
+  if (shared) {
+    // The kept answer of a key nobody was reading is drawn like a seed: there
+    // at once, and loading until the read this arrival started has landed.
+    const held = answer.answered || answer.data !== undefined
+    return {
+      data: held ? (answer.data as T | undefined) : seed,
+      error: answer.error,
+      lastSuccess: answer.lastSuccess,
+      loading: enabled && !answer.answered,
+      refresh,
+    }
+  }
 
   // A disabled poll is not loading: nothing is in flight, and reporting
   // otherwise would leave a caller showing a skeleton forever.
@@ -155,8 +184,4 @@ export function usePoll<T>(
     loading: enabled && !current,
     refresh,
   }
-}
-
-export function isAuthError(error: Error | undefined) {
-  return error instanceof ApiError && error.isAuthProblem
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/docker/docker/errdefs"
 )
 
@@ -253,7 +254,7 @@ func (s *Server) ensurePooler(ctx context.Context, r *http.Request, t *poolerTar
 	rec.ServerName, rec.ServerPort = strings.TrimPrefix(t.detail.Name, "/"), t.server.port
 	ini, userlist, sha, err := poolerFiles(rec, dsn)
 	if err != nil {
-		return change, httpx.BadRequest("%v", err)
+		return change, httpx.Refused(err)
 	}
 	if err := s.ensurePoolerNetwork(ctx, rec); err != nil {
 		return change, err
@@ -293,7 +294,7 @@ func (s *Server) ensurePooler(ctx context.Context, r *http.Request, t *poolerTar
 		port := rec.HostPort
 		if port == 0 || portalloc.Available(change.Bind, "tcp", port) != nil {
 			if port, err = freeHostPort(poolerPreferredPort, change.Bind); err != nil {
-				return change, httpx.BadRequest("%v", err)
+				return change, httpx.Refused(err)
 			}
 		}
 		created, err := docker.Create(ctx, poolerSpec(rec, port, change.Bind), nil)
@@ -531,7 +532,7 @@ func (s *Server) setupPoolerAuth(ctx context.Context, conn *dbConnection, dsn, p
 	case err == nil:
 		return nil
 	case errors.Is(err, dbx.ErrPoolerNotSuperuser):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	case errors.Is(err, dbx.ErrPoolerAuthTaken):
 		return httpx.Err(http.StatusConflict, "pooler_auth_taken", err.Error())
 	default:
@@ -645,8 +646,7 @@ func (k *poolerKeeper) Start(ctx context.Context) {
 	}
 	ctx, k.cancel = context.WithCancel(ctx)
 	k.done = make(chan struct{})
-	go func() {
-		defer close(k.done)
+	safego.Go(ctx, nil, "connection pooler keeper", func(ctx context.Context) {
 		ticker := time.NewTicker(poolerKeeperInterval)
 		defer ticker.Stop()
 		for {
@@ -657,7 +657,7 @@ func (k *poolerKeeper) Start(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
-	}()
+	}, safego.Close(k.done))
 }
 
 func (k *poolerKeeper) Stop() {

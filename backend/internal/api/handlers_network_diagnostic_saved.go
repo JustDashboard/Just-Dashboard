@@ -106,7 +106,7 @@ func (s *Server) saveSSHTrust(w http.ResponseWriter, r *http.Request, replace bo
 	}
 	target, keys, err := netsec.ValidateSSHTrust(req.Target, req.Port, req.Keys)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	fingerprints := make([]string, 0, len(keys))
 	for _, k := range keys {

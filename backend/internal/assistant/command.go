@@ -3,9 +3,11 @@ package assistant
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // run_command: a shell on the host, as the terminal's account, for what the
@@ -19,6 +21,16 @@ import (
 // background; a destructive one names a program or flag that removes, stops or
 // replaces something; anything else is a change. A read that is misread is asked
 // about; nothing that writes is read as a read.
+//
+// That is kept by listing what a read may be made of, never what it may not: the
+// programs, the flags each may be given and the subcommands that only read
+// (command_readers.go), the wrappers and the variables it may run under
+// (readUnder), and the few redirections that write no file (redirectionEnd).
+// Whatever is not listed asks — a flag nobody has heard of, a variable or a
+// pattern where an argument decides what the program does, a reader's name under
+// a directory that is not the system's. It reads what a line says, not where it
+// runs: the directory a cd left the terminal window in, and the configuration a
+// program finds there, are the person's to have allowed.
 
 const (
 	ToolRunCommand = "run_command"
@@ -37,6 +49,9 @@ var runCommandTool = Tool{
 		"what is listening or filling the disk — and prefer api_request where a route does the job. It is not interactive: nothing can be typed into it, " +
 		"so give a program the flags it needs to run without asking (apt-get -y, systemctl --no-pager, git --no-pager). " +
 		"Its working directory is the account's home; write cd /path && … for another. It answers with the exit code and the end of its output, secret values masked. " +
+		"A line that only reads need not wait for the person when it is written plainly: reading programs with their usual flags spelled out, " +
+		"no substitution and no output sent to a file, and no variable or wildcard given to a program whose flags could make it write (find, sort, git, docker). " +
+		"What reaches another machine (ping, dig, curl, openssl s_client) waits, as a change does. " +
 		"A line that changes packages or restarts Docker, or runs sudo that may ask for a password, is typed into this chat's terminal window instead, as terminal_run would, " +
 		"where it outlives the dashboard restarting and can be answered; its answer then says so, and terminal_read follows it." +
 		agentRoleLine + agentHoldLine,
@@ -96,66 +111,6 @@ const (
 	CommandDestructive = "destructive"
 )
 
-// readPrograms only read, whatever their arguments, but for what segmentKind
-// checks of them by name.
-var readPrograms = setOf(
-	"ls", "ll", "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "wc", "sort", "uniq", "cut", "tr", "column",
-	"find", "stat", "file", "du", "df", "free", "uptime", "uname", "hostname", "whoami", "id", "groups", "who", "w",
-	"last", "date", "echo", "printf", "pwd", "which", "type", "whereis", "ps", "pgrep", "pstree", "lsof", "ss",
-	"netstat", "ip", "ping", "dig", "nslookup", "host", "getent", "traceroute", "lsblk", "blkid", "findmnt", "lscpu",
-	"lsmem", "lspci", "lsusb", "vmstat", "iostat", "mpstat", "nproc", "dmesg", "journalctl", "systemctl", "loginctl",
-	"tree", "readlink", "realpath", "basename", "dirname", "md5sum", "sha1sum", "sha256sum", "jq", "diff", "cmp",
-	"zcat", "zgrep", "xxd", "od", "strings", "nl", "tac", "rev", "test", "[", "true", "false", "seq", "sleep",
-	"nginx", "apache2ctl", "apachectl", "docker", "git", "apt", "apt-cache", "dpkg", "dpkg-query", "snap", "crontab",
-	"ufw", "iptables", "nft", "fail2ban-client", "openssl", "certbot", "pm2", "npm", "systemd-analyze",
-)
-
-// readSubcommands are what a program that both reads and writes only reads with,
-// as its first word that is not a flag.
-var readSubcommands = map[string][]string{
-	"systemctl":       {"status", "show", "cat", "list-units", "list-unit-files", "list-timers", "list-sockets", "list-dependencies", "is-active", "is-enabled", "is-failed", "is-system-running", "get-default"},
-	"docker":          {"ps", "images", "image", "inspect", "logs", "stats", "top", "port", "version", "info", "history", "diff", "network", "volume", "compose", "container", "system"},
-	"git":             {"status", "log", "diff", "show", "branch", "remote", "rev-parse", "describe", "ls-files", "blame", "tag", "shortlog", "reflog", "ls-remote"},
-	"apt":             {"list", "show", "search", "policy", "depends", "rdepends", "changelog"},
-	"apt-cache":       {"show", "search", "policy", "depends", "rdepends", "showpkg", "madison", "pkgnames"},
-	"snap":            {"list", "info", "find", "version", "services", "changes"},
-	"ufw":             {"status", "show"},
-	"nft":             {"list"},
-	"fail2ban-client": {"status", "get", "ping", "version"},
-	"openssl":         {"x509", "s_client", "version", "verify", "crl", "ciphers"},
-	"certbot":         {"certificates"},
-	"pm2":             {"list", "ls", "status", "show", "describe", "info", "jlist", "prettylist"},
-	"npm":             {"ls", "list", "view", "outdated", "config"},
-	"ip":              {"a", "addr", "address", "r", "route", "l", "link", "n", "neigh", "rule", "maddr"},
-	"systemd-analyze": {"blame", "critical-chain", "time", "verify", "security", "cat-config", "calendar", "timespan"},
-}
-
-// readSecond are what a read subcommand reads with when it takes a word of its
-// own (docker network ls, git remote -v); "" is the subcommand alone.
-var readSecond = map[string][]string{
-	"docker.image":     {"ls", "list", "inspect", "history"},
-	"docker.network":   {"ls", "list", "inspect"},
-	"docker.volume":    {"ls", "list", "inspect"},
-	"docker.compose":   {"ps", "ls", "logs", "config", "top", "images", "version", "port"},
-	"docker.container": {"ls", "list", "inspect", "logs", "top", "port", "stats", "diff"},
-	"docker.system":    {"df", "info"},
-	"git.branch":       {"", "--list", "--show-current"},
-	"git.remote":       {"", "show", "get-url"},
-	"git.tag":          {"", "--list"},
-	"npm.config":       {"get", "list", "ls"},
-	"ip.r":             {"", "show", "list", "get"},
-	"ip.route":         {"", "show", "list", "get"},
-	"ip.a":             {"", "show", "list"},
-	"ip.addr":          {"", "show", "list"},
-	"ip.address":       {"", "show", "list"},
-	"ip.l":             {"", "show", "list"},
-	"ip.link":          {"", "show", "list"},
-	"ip.rule":          {"", "show", "list"},
-	"ip.n":             {"", "show", "list"},
-	"ip.neigh":         {"", "show", "list"},
-	"ip.maddr":         {"", "show"},
-}
-
 // destructivePrograms remove, stop, replace or wipe something.
 var destructivePrograms = setOf(
 	"rm", "rmdir", "shred", "unlink", "dd", "mkfs", "wipefs", "fdisk", "sfdisk", "parted", "sgdisk", "reboot",
@@ -167,6 +122,7 @@ var destructivePrograms = setOf(
 // not a flag, and by the second under a first (docker.compose down).
 var destructiveSubcommands = map[string][]string{
 	"systemctl":        {"stop", "kill", "disable", "mask", "reboot", "poweroff", "halt", "isolate", "rescue", "emergency", "kexec", "soft-reboot"},
+	"loginctl":         {"terminate-session", "terminate-user", "terminate-seat", "kill-session", "kill-user"},
 	"docker":           {"rm", "rmi", "kill", "stop", "prune"},
 	"docker.compose":   {"down", "rm", "kill", "stop"},
 	"docker.container": {"rm", "kill", "stop", "prune"},
@@ -194,13 +150,13 @@ func setOf(names ...string) map[string]bool {
 // ClassifyCommand reads what a command line does: CommandRead, CommandChange or
 // CommandDestructive. The most a part of it does is what the whole does.
 func ClassifyCommand(command string) string {
-	segments, plain := splitCommand(command)
+	commands, plain := parseLine(command)
 	kind := CommandRead
-	if !plain || len(segments) == 0 {
+	if !plain || len(commands) == 0 {
 		kind = CommandChange
 	}
-	for _, words := range segments {
-		switch segmentKind(words) {
+	for _, c := range commands {
+		switch commandKind(c) {
 		case CommandDestructive:
 			return CommandDestructive
 		case CommandChange:
@@ -210,45 +166,140 @@ func ClassifyCommand(command string) string {
 	return kind
 }
 
-// splitCommand cuts a line into its simple commands at ; && || | & and new
-// lines, each as its words, and reports whether the line is plain: nothing
-// written by a redirection but to /dev/null, no substitution, no subshell or
-// group, no here-document and no quote left open. A line that is not plain is
-// never a read.
+// simple is one simple command of a line: its words, and which of them are not
+// what was typed. A word that holds a variable, or a pattern the shell matches
+// file names against, is whatever those turn out to be when it runs — one word
+// or several, a flag as easily as a name — so a command whose arguments decide
+// what it does is not read past one.
+type simple struct {
+	words  []string
+	varies []bool
+}
+
+// splitCommand cuts a line into its simple commands, each as its words, and
+// reports whether the line is plain (parseLine).
 func splitCommand(line string) ([][]string, bool) {
+	commands, plain := parseLine(line)
+	out := make([][]string, len(commands))
+	for i, c := range commands {
+		out[i] = c.words
+	}
+	return out, plain
+}
+
+// parseLine cuts a line into its simple commands at ; && || | & and new lines,
+// and reports whether the line is plain: nothing written by a redirection but
+// to /dev/null or another stream, no substitution, no subshell or group, no
+// here-document, no background job, no comment and no quote left open. A line
+// that is not plain is never a read.
+//
+// It reads the line as bash and zsh both would, run with -c or typed at a
+// prompt, and where those differ it takes the reading that asks: >&word writes a
+// file unless the word is a stream's number, $'…' and ${…} can spell or do
+// anything, a ! is the history's in a terminal window, and a # begins a comment
+// in one and is a word in the other, so what follows it may or may not run. A
+// control character is a key to a shell that is typed into — one that rubs out
+// what was typed before it, or fetches a line from the history — and is in no
+// line somebody writes to read something, so it asks wherever it stands; and a
+// line that ends in a backslash is left open, as one with a quote open is.
+//
+// The file a < reads from is no word of the command: git < log checkout . is
+// git checkout, whatever the file is called.
+func parseLine(line string) ([]simple, bool) {
 	var (
-		segments [][]string
-		words    []string
+		commands []simple
+		current  simple
 		word     strings.Builder
 		inWord   bool
-		quote    rune
-		plain    = true
+		// varies and quoted are of the word in hand: it holds an expansion, and
+		// part of it was quoted or escaped.
+		varies, quoted bool
+		quote          rune
+		plain          = true
 	)
 	endWord := func() {
 		if inWord {
-			words = append(words, word.String())
+			current.words = append(current.words, word.String())
+			// A [ alone is test's other name, not the start of a pattern.
+			current.varies = append(current.varies, varies && word.String() != "[")
 			word.Reset()
-			inWord = false
 		}
+		inWord, varies, quoted = false, false, false
 	}
-	endSegment := func() {
+	endCommand := func() {
 		endWord()
-		if len(words) > 0 {
-			segments = append(segments, words)
+		if len(current.words) > 0 {
+			commands = append(commands, current)
 		}
-		words = nil
+		current = simple{}
 	}
 	runes := []rune(line)
+	at := func(i int) rune {
+		if i < len(runes) {
+			return runes[i]
+		}
+		return 0
+	}
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
-		if quote != 0 {
-			switch {
-			case r == quote:
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			plain = false
+		}
+		if quote == '\'' {
+			if r == '\'' {
 				quote = 0
-			case quote == '"' && (r == '`' || r == '$' && i+1 < len(runes) && runes[i+1] == '('):
-				plain = false
+			} else {
 				word.WriteRune(r)
-			case quote == '"' && r == '\\' && i+1 < len(runes):
+			}
+			continue
+		}
+		// What the shell expands, it expands inside double quotes too.
+		switch r {
+		case '$':
+			next := at(i + 1)
+			switch {
+			case next == '(' || next == '{' || next == '[':
+				// A substitution runs something else; ${…} and $[…] can assign,
+				// evaluate and, in zsh, run.
+				plain = false
+			case quote == 0 && (next == '\'' || next == '"'):
+				// $'\x2d…' spells any character, a flag's dash among them.
+				plain = false
+			case nameRune(next) || strings.ContainsRune("@*#?$!-~=^+", next):
+				// A variable, a special one, or zsh's $~name, $=name, $^name and $+name.
+				varies = true
+				end := i + 1
+				for nameRune(at(end)) {
+					end++
+				}
+				if at(end) == '[' {
+					// zsh reads a subscript, which it evaluates.
+					plain = false
+				}
+			}
+			word.WriteRune(r)
+			inWord = true
+			continue
+		case '`':
+			plain = false
+			word.WriteRune(r)
+			inWord = true
+			continue
+		case '!':
+			// The history's in a terminal window, which is a line nobody wrote
+			// here; alone, or before = or (, it is itself.
+			if next := at(i + 1); next != 0 && !strings.ContainsRune(" \t\n=(", next) {
+				plain = false
+			}
+			word.WriteRune(r)
+			inWord = true
+			continue
+		}
+		if quote == '"' {
+			switch {
+			case r == '"':
+				quote = 0
+			case r == '\\' && i+1 < len(runes):
 				i++
 				word.WriteRune(runes[i])
 			default:
@@ -258,76 +309,72 @@ func splitCommand(line string) ([][]string, bool) {
 		}
 		switch r {
 		case '\'', '"':
-			quote, inWord = r, true
+			quote, inWord, quoted = r, true, true
 		case '\\':
 			if i+1 < len(runes) {
 				i++
 				if runes[i] != '\n' {
 					word.WriteRune(runes[i])
-					inWord = true
+					inWord, quoted = true, true
 				}
+			} else {
+				// Typed, the line goes on into whatever is typed next, whose
+				// first word becomes one of this command's.
+				plain = false
 			}
 		case ' ', '\t':
 			endWord()
 		case '\n', ';':
-			endSegment()
+			endCommand()
 		case '|':
-			endSegment()
-			if i+1 < len(runes) && runes[i+1] == '|' {
+			endCommand()
+			if at(i+1) == '|' {
 				i++
 			}
 		case '&':
-			switch {
-			case i+1 < len(runes) && runes[i+1] == '&':
+			if at(i+1) == '&' {
 				i++
-				endSegment()
-			case i > 0 && runes[i-1] == '>':
-				// The & of 2>&1, which only points one stream at another.
-			default:
+			} else {
 				// A background job outlives what its answer says.
 				plain = false
-				endSegment()
 			}
+			endCommand()
 		case '>':
-			rest := string(runes[i+1:])
-			target := strings.TrimLeft(strings.TrimPrefix(rest, ">"), " \t")
 			// The digit before 2> is the stream, not a word of the command.
-			if inWord && (word.String() == "1" || word.String() == "2") {
+			if inWord && !quoted && !varies && (word.String() == "1" || word.String() == "2") {
 				word.Reset()
 				inWord = false
 			}
 			endWord()
-			switch {
-			case strings.HasPrefix(rest, "&"):
-				// 2>&1: the & is skipped above, the digit after it here.
-				i++
-				for i+1 < len(runes) && runes[i+1] >= '0' && runes[i+1] <= '9' {
+			if end, harmless := redirectionEnd(runes, i+1); harmless {
+				i = end - 1
+			} else {
+				plain = false
+				if at(i+1) == '&' {
+					// >&word writes word; the & is not a background job's.
 					i++
 				}
-			case strings.HasPrefix(target, "/dev/null"):
-				i += len([]rune(rest)) - len([]rune(target)) + len("/dev/null")
-			default:
-				plain = false
 			}
 		case '<':
-			if i+1 < len(runes) && runes[i+1] == '<' {
-				plain = false
-			}
 			endWord()
-		case '`':
-			plain = false
-			word.WriteRune(r)
-			inWord = true
-		case '$':
-			// A variable is read; a substitution runs something else.
-			if i+1 < len(runes) && runes[i+1] == '(' {
+			if end, file := inputFile(runes, i+1); at(i+1) == '<' || !file {
 				plain = false
+			} else {
+				i = end - 1
 			}
-			word.WriteRune(r)
-			inWord = true
 		case '(', ')', '{', '}':
 			plain = false
 			endWord()
+		case '#':
+			if !inWord {
+				plain = false
+			}
+			word.WriteRune(r)
+			inWord = true
+		case '*', '?', '[':
+			varies = true
+			word.WriteRune(r)
+			inWord = true
 		default:
 			word.WriteRune(r)
 			inWord = true
@@ -336,8 +383,65 @@ func splitCommand(line string) ([][]string, bool) {
 	if quote != 0 {
 		plain = false
 	}
-	endSegment()
-	return segments, plain
+	endCommand()
+	return commands, plain
+}
+
+// nameRune is a character of a variable's name, or of a positional's number.
+func nameRune(r rune) bool {
+	return r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+}
+
+// redirectionEnd reads what follows a >, and reports where it ends when it
+// writes no file: &2 and &- point the stream at another or close it, and
+// /dev/null discards it. Each is the whole word — >&2x and >/dev/null.txt are
+// files.
+func redirectionEnd(runes []rune, i int) (int, bool) {
+	ends := func(j int) bool {
+		return j >= len(runes) || strings.ContainsRune(" \t\n;|&<>()", runes[j])
+	}
+	if i < len(runes) && runes[i] == '&' {
+		j := i + 1
+		for j < len(runes) && runes[j] >= '0' && runes[j] <= '9' {
+			j++
+		}
+		if j == i+1 {
+			if j >= len(runes) || runes[j] != '-' {
+				return 0, false
+			}
+			j++
+		}
+		return j, ends(j)
+	}
+	if i < len(runes) && runes[i] == '>' {
+		i++
+	}
+	for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
+		i++
+	}
+	const null = "/dev/null"
+	if !strings.HasPrefix(string(runes[i:]), null) {
+		return 0, false
+	}
+	return i + len(null), ends(i + len(null))
+}
+
+// inputFile reads what follows a <, and reports where it ends and whether it is
+// a file's path written out. bash opens a connection for /dev/tcp/host/port and
+// /dev/udp, and a name that is quoted, or a variable's, could be one.
+func inputFile(runes []rune, i int) (int, bool) {
+	for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
+		i++
+	}
+	start := i
+	for i < len(runes) && (nameRune(runes[i]) || strings.ContainsRune("./~+,:@%=-", runes[i])) {
+		i++
+	}
+	if i < len(runes) && !strings.ContainsRune(" \t\n;|&<>()", runes[i]) {
+		return 0, false
+	}
+	target := string(runes[start:i])
+	return i, !strings.HasPrefix(target, "/dev/tcp") && !strings.HasPrefix(target, "/dev/udp")
 }
 
 // wrappers only change how the command after them runs, by the flags of
@@ -349,7 +453,8 @@ var wrappers = map[string][]string{
 }
 
 // unwrap takes off what only changes how a command runs: variables set for it,
-// sudo, nice, timeout and the like.
+// sudo, nice, timeout and the like. It takes off whatever is there, to find what
+// a line runs under them; whether a read may be run under them is readUnder's.
 func unwrap(words []string) []string {
 	for len(words) > 0 {
 		w := words[0]
@@ -377,6 +482,88 @@ func unwrap(words []string) []string {
 	return words
 }
 
+// readWrappers are the wrappers a read may run under, each with the flags that
+// leave it the command that follows, run once, in the foreground: not sudo -e,
+// -i, -s or -b, not ionice -p, which is another process's, not time -o, which
+// writes a file. nohup writes one too, and exec ends the shell it is typed into.
+var readWrappers = map[string]*flags{
+	"sudo": flagsOf("-n -E -H -S -l -V -u: -g: --non-interactive --set-home --stdin --list --version " +
+		"--preserve-env? --user= --group="),
+	"nice":    flagsOf("-# -n: --adjustment="),
+	"ionice":  flagsOf("-t -c: -n: --ignore --class= --classdata="),
+	"stdbuf":  flagsOf("-i: -o: -e: --input= --output= --error="),
+	"command": flagsOf("-p -v -V"),
+	"builtin": flagsOf(""),
+	"time":    flagsOf("-p"),
+	"timeout": flagsOf("-v -s: -k: --verbose --preserve-status --foreground --signal= --kill-after="),
+}
+
+// A variable set in front of a command is the command's to obey: git runs what
+// GIT_SSH_COMMAND names, the loader what LD_PRELOAD does, any program the PATH
+// it is found on. These few only say how output is written, with values that
+// are a locale's, a zone's or a number; and a pager set to cat is no pager.
+var (
+	harmlessVariables = setOf("LANG", "LANGUAGE", "LC_ALL", "LC_COLLATE", "LC_CTYPE", "LC_MESSAGES", "LC_MONETARY",
+		"LC_NUMERIC", "LC_TIME", "TZ", "COLUMNS", "LINES", "NO_COLOR", "TERM")
+	pagerVariables = setOf("PAGER", "GIT_PAGER", "SYSTEMD_PAGER", "MANPAGER")
+)
+
+func harmlessVariable(word string) bool {
+	name, value, _ := strings.Cut(word, "=")
+	if pagerVariables[name] {
+		return value == "" || value == "cat"
+	}
+	if !harmlessVariables[name] {
+		return false
+	}
+	return !strings.ContainsFunc(value, func(r rune) bool {
+		return !(nameRune(r) || strings.ContainsRune(".@:+-", r) || r == '/' && name == "TZ")
+	})
+}
+
+// readUnder takes off what a read may run under, and reports whether that is
+// all there was in front of the command: false for a variable that is not one of
+// the harmless ones, a wrapper's flag that is not listed, or a word of theirs
+// that is not what was typed, since then what runs is not known here. A line
+// that only sets variables sets them for every line after it.
+func readUnder(c simple) (simple, bool) {
+	for len(c.words) > 0 {
+		w := c.words[0]
+		if c.varies[0] {
+			return c, false
+		}
+		if strings.Contains(w, "=") && !strings.HasPrefix(w, "-") && !strings.HasPrefix(w, "=") {
+			if !harmlessVariable(w) || len(c.words) == 1 {
+				return c, false
+			}
+			c = simple{c.words[1:], c.varies[1:]}
+			continue
+		}
+		form, wraps := readWrappers[w]
+		if !wraps {
+			return c, true
+		}
+		given, took, ok := form.lead(c.words[1:])
+		if w == "timeout" && took < len(c.words)-1 {
+			// Its duration.
+			took++
+		}
+		if !ok || slices.Contains(c.varies[1:1+took], true) {
+			return c, false
+		}
+		if w == "command" && given.any("-v", "-V") {
+			// It says what a name is, and runs nothing.
+			return simple{}, true
+		}
+		c = simple{c.words[1+took:], c.varies[1+took:]}
+	}
+	return c, true
+}
+
+// systemDirectories are where the system keeps its own programs. A reader's
+// name under any other directory is whatever file somebody put there.
+var systemDirectories = setOf("/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/local/bin/", "/usr/local/sbin/", "/snap/bin/")
+
 // nonFlags are a command's words that are not flags, in order.
 func nonFlags(args []string) []string {
 	var out []string
@@ -392,197 +579,56 @@ func anyArg(args []string, match func(string) bool) bool {
 	return slices.ContainsFunc(args, match)
 }
 
-// segmentKind reads one simple command.
-func segmentKind(words []string) string {
-	words = unwrap(words)
-	if len(words) == 0 {
-		return CommandRead
-	}
-	program := filepath.Base(words[0])
-	args := words[1:]
-	plain := nonFlags(args)
-	first, second := "", ""
-	if len(plain) > 0 {
-		first = plain[0]
-	}
-	if len(plain) > 1 {
-		second = plain[1]
-	}
-	switch {
-	case destructivePrograms[program], strings.HasPrefix(program, "mkfs."):
-		return CommandDestructive
-	case slices.Contains(destructiveSubcommands[program], first),
-		slices.Contains(destructiveSubcommands[program+"."+first], second):
-		return CommandDestructive
-	case program == "find" && slices.Contains(args, "-delete"):
-		return CommandDestructive
-	case program == "iptables" && anyArg(args, func(a string) bool {
-		return a == "-D" || a == "-F" || a == "--flush" || a == "-X" || a == "--delete" || a == "-P" || a == "--policy"
-	}):
-		return CommandDestructive
-	case program == "crontab" && slices.Contains(args, "-r"):
-		return CommandDestructive
-	case !readPrograms[program]:
-		return CommandChange
-	}
-	// Programs that only read but for some of their flags or words.
-	switch program {
-	case "find":
-		if anyArg(args, func(a string) bool {
-			return a == "-exec" || a == "-execdir" || a == "-ok" || a == "-okdir" || strings.HasPrefix(a, "-fprint") || a == "-fls"
-		}) {
-			return CommandChange
+// commandKind reads one simple command.
+func commandKind(c simple) string {
+	if words := unwrap(c.words); len(words) > 0 {
+		program := filepath.Base(words[0])
+		args := words[1:]
+		plain := nonFlags(args)
+		first, second := "", ""
+		if len(plain) > 0 {
+			first = plain[0]
 		}
-		return CommandRead
-	case "sort", "tree":
-		if anyArg(args, func(a string) bool { return a == "-o" || strings.HasPrefix(a, "--output") }) {
-			return CommandChange
-		}
-		return CommandRead
-	case "uniq":
-		// uniq in out writes out.
 		if len(plain) > 1 {
-			return CommandChange
+			second = plain[1]
 		}
-		return CommandRead
-	case "date":
-		if anyArg(args, func(a string) bool { return a == "-s" || strings.HasPrefix(a, "--set") }) {
-			return CommandChange
-		}
-		return CommandRead
-	case "hostname":
-		if first != "" || anyArg(args, func(a string) bool { return a == "-F" || a == "-b" || strings.HasPrefix(a, "--file") || a == "--boot" }) {
-			return CommandChange
-		}
-		return CommandRead
-	case "dmesg":
-		if anyArg(args, func(a string) bool {
-			return a == "-c" || a == "-C" || a == "--clear" || a == "--read-clear" || a == "-n" || a == "-E" || a == "-D" || strings.HasPrefix(a, "--console")
-		}) {
-			return CommandChange
-		}
-		return CommandRead
-	case "journalctl":
-		if anyArg(args, func(a string) bool {
-			return strings.HasPrefix(a, "--vacuum") || a == "--rotate" || a == "--flush" || a == "--sync" || a == "--relinquish-var" || a == "--smart-relinquish-var"
-		}) {
-			return CommandChange
-		}
-		return CommandRead
-	case "crontab":
-		// crontab -l, with -u name; anything else installs or edits one.
-		if !slices.Contains(args, "-l") {
-			return CommandChange
-		}
-		for i := 0; i < len(args); i++ {
-			switch {
-			case args[i] == "-l":
-			case args[i] == "-u" && i+1 < len(args):
-				i++
-			default:
-				return CommandChange
-			}
-		}
-		return CommandRead
-	case "nginx", "apache2ctl", "apachectl":
-		reads := []string{"-t", "-T", "-v", "-V", "-q", "-S", "-M", "configtest"}
-		if len(args) == 0 {
-			return CommandChange
-		}
-		for i := 0; i < len(args); i++ {
-			switch {
-			case slices.Contains(reads, args[i]):
-			case (args[i] == "-c" || args[i] == "-p") && i+1 < len(args):
-				i++
-			default:
-				return CommandChange
-			}
-		}
-		return CommandRead
-	case "dpkg", "dpkg-query":
-		actions := []string{"-l", "-L", "-s", "-S", "-p", "-W", "--list", "--listfiles", "--status", "--search", "--print-avail",
-			"--show", "--print-architecture", "--get-selections", "--audit", "-C", "--version"}
-		read := false
-		for _, a := range args {
-			if !strings.HasPrefix(a, "-") {
-				continue
-			}
-			name := strings.SplitN(a, "=", 2)[0]
-			if slices.Contains(actions, name) {
-				read = true
-				continue
-			}
-			if name == "-f" || name == "--showformat" {
-				continue
-			}
-			return CommandChange
-		}
-		if read {
-			return CommandRead
-		}
-		return CommandChange
-	case "iptables":
-		listing := false
-		for i := 0; i < len(args); i++ {
-			a := args[i]
-			switch {
-			case a == "-L" || a == "-S" || a == "--list" || a == "--list-rules" || a == "-nL" || a == "-nvL" || a == "-vnL" || a == "-Ln" || a == "-vL":
-				listing = true
-			case a == "-n" || a == "-v" || a == "-x" || a == "--line-numbers" || a == "-w":
-			case a == "-t" && i+1 < len(args):
-				i++
-			case !strings.HasPrefix(a, "-"):
-				// A chain's name.
-			default:
-				return CommandChange
-			}
-		}
-		if listing {
-			return CommandRead
-		}
-		return CommandChange
-	case "openssl":
-		if anyArg(args, func(a string) bool { return a == "-out" || a == "-keyout" || a == "-signkey" }) {
-			return CommandChange
-		}
-	case "git":
-		if anyArg(args, func(a string) bool { return strings.HasPrefix(a, "--output") || a == "-o" }) {
-			return CommandChange
+		switch {
+		case destructivePrograms[program], strings.HasPrefix(program, "mkfs."):
+			return CommandDestructive
+		case slices.Contains(destructiveSubcommands[program], first),
+			slices.Contains(destructiveSubcommands[program+"."+first], second):
+			return CommandDestructive
+		case program == "find" && slices.Contains(args, "-delete"):
+			return CommandDestructive
+		case program == "iptables" && anyArg(args, func(a string) bool {
+			return a == "-D" || a == "-F" || a == "--flush" || a == "-X" || a == "--delete" || a == "-P" || a == "--policy"
+		}):
+			return CommandDestructive
+		case program == "crontab" && slices.Contains(args, "-r"):
+			return CommandDestructive
+		case program == "ss" && anyArg(args, func(a string) bool { return a == "-K" || a == "--kill" }):
+			return CommandDestructive
 		}
 	}
-	subs, both := readSubcommands[program]
-	if !both {
+	// A read is what is listed as one, under nothing but what is listed too.
+	c, ok := readUnder(c)
+	switch {
+	case !ok:
+		return CommandChange
+	case len(c.words) == 0:
 		return CommandRead
 	}
-	if first == "" {
-		// Bare `systemctl`, `docker`, `git status`-less `git` print and change nothing.
-		switch program {
-		case "systemctl", "ip", "git", "docker", "pm2", "snap", "ufw", "systemd-analyze":
-			return CommandRead
-		}
+	dir, name := path.Split(c.words[0])
+	if dir != "" && !systemDirectories[dir] {
 		return CommandChange
 	}
-	if !slices.Contains(subs, first) {
+	reader, known := readers[name]
+	switch {
+	case !known:
 		return CommandChange
-	}
-	nested, takesSecond := readSecond[program+"."+first]
-	if !takesSecond {
+	case reader.whatever:
 		return CommandRead
-	}
-	if program == "git" {
-		// git branch -d, git tag -a and git remote add change; listing does not.
-		for _, a := range args {
-			if strings.HasPrefix(a, "-") && !slices.Contains(nested, a) &&
-				!(first == "branch" && (a == "-a" || a == "-r" || a == "-v" || a == "-vv" || a == "-l")) &&
-				!(first == "remote" && a == "-v") && !(first == "tag" && a == "-l") {
-				return CommandChange
-			}
-		}
-		if (first == "branch" || first == "tag") && second != "" {
-			return CommandChange
-		}
-	}
-	if !slices.Contains(nested, second) {
+	case slices.Contains(c.varies, true), !reader.reads(c.words[1:]):
 		return CommandChange
 	}
 	return CommandRead

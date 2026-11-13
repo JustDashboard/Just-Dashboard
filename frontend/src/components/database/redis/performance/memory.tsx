@@ -4,7 +4,7 @@ import { useRef, useState } from "react"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { LANES, hueFor } from "@/lib/hue"
 import { useMemoryState } from "@/lib/view-state"
-import { BarList, type BarListItem } from "@/components/bar-list"
+import { RankList, type RankItem } from "@/components/rank-list"
 import { Segments } from "@/components/deploy/settings/segments"
 import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -123,20 +123,18 @@ export function MemoryView({ redis }: { redis: Redis }) {
     noMemory ? group.estimatedKeys.toLocaleString() : bytes(group.estimatedMemory)
   const about = result.complete ? "" : "about "
 
-  const ranked = (groups: RedisAnalysisGroup[]) => Math.max(...groups.map(weight), 1)
-  const namespaces: BarListItem[] = result.namespaces.slice(0, 20).map((group) => {
+  // Every key measured is of one type, so the types add up to the database:
+  // the whole a namespace's, an expiry's or an encoding's share is of.
+  const whole = result.types.reduce((sum, group) => sum + weight(group), 0)
+  const of = (group: RedisAnalysisGroup) => (whole > 0 ? weight(group) / whole : undefined)
+  const namespaces: RankItem[] = result.namespaces.slice(0, 20).map((group) => {
     const name = bytesLabel(group.name)
     return {
       key: bytesId(group.name),
       label: name || "(no namespace)",
-      mark: (
-        <span
-          className="size-1.5 rounded-full"
-          style={{ backgroundColor: hueFor(name.toLowerCase(), LANES) }}
-        />
-      ),
+      swatch: hueFor(name.toLowerCase(), LANES),
       value: figure(group),
-      share: weight(group) / ranked(result.namespaces),
+      share: of(group),
       hint: `${about}${plural(group.estimatedKeys, "key")}`,
       ...(name && typeof group.name === "string"
         ? {
@@ -150,16 +148,16 @@ export function MemoryView({ redis }: { redis: Redis }) {
         : {}),
     }
   })
-  const top: BarListItem[] = result.topKeys.slice(0, 20).map((entry) => {
+  const top: RankItem[] = result.topKeys.slice(0, 20).map((entry) => {
     const name = bytesLabel(entry.key)
     return {
       key: bytesId(entry.key),
       label: name,
       mark: <KindMark type={entry.type} className="size-3" />,
       value: noMemory ? entry.size.toLocaleString() : bytes(entry.memory),
+      // A key's bytes are a share of the database's; its element count is of nothing.
       share:
-        (noMemory ? entry.size : entry.memory) /
-        Math.max(noMemory ? result.topKeys[0].size : result.topKeys[0].memory, 1),
+        !noMemory && result.estimatedMemory > 0 ? entry.memory / result.estimatedMemory : undefined,
       hint: [
         kindLabel(entry.type).toLowerCase(),
         sizeOf(entry.type, entry.size),
@@ -176,25 +174,25 @@ export function MemoryView({ redis }: { redis: Redis }) {
         : {}),
     }
   })
-  const expiry: BarListItem[] = result.expiry.map((group) => {
+  const expiry: RankItem[] = result.expiry.map((group) => {
     const name = bytesLabel(group.name)
     return {
       key: name,
       label: EXPIRY[name] ?? name,
       mono: false,
       value: figure(group),
-      share: weight(group) / ranked(result.expiry),
+      share: of(group),
       hint: `${about}${plural(group.estimatedKeys, "key")}`,
     }
   })
-  const encodings: BarListItem[] = result.encodings.slice(0, 12).map((group) => {
+  const encodings: RankItem[] = result.encodings.slice(0, 12).map((group) => {
     const [type, encoding] = bytesLabel(group.name).split(":")
     return {
       key: bytesLabel(group.name),
       label: encoding ?? type,
       mark: <KindMark type={type} className="size-3" />,
       value: figure(group),
-      share: weight(group) / ranked(result.encodings),
+      share: of(group),
       hint: `${kindLabel(type).toLowerCase()} · ${about}${plural(group.estimatedKeys, "key")}`,
     }
   })
@@ -261,27 +259,27 @@ export function MemoryView({ redis }: { redis: Redis }) {
               ) : undefined
             }
           />
-          <PanelBody className="group-data-[plain]/panel:-ml-2">
-            <BarList items={namespaces} emptyLabel="No key was measured." />
+          <PanelBody>
+            <RankList items={namespaces} emptyLabel="No key was measured." />
           </PanelBody>
         </Panel>
         <Panel plain>
           <PanelHeader title="Largest keys" />
-          <PanelBody className="group-data-[plain]/panel:-ml-2">
-            <BarList items={top} emptyLabel="No key was measured." />
+          <PanelBody>
+            <RankList items={top} emptyLabel="No key was measured." />
           </PanelBody>
         </Panel>
         <Panel plain>
           <PanelHeader title="When it is given back" />
-          <PanelBody className="group-data-[plain]/panel:-ml-2">
-            <BarList items={expiry} />
+          <PanelBody>
+            <RankList items={expiry} />
           </PanelBody>
         </Panel>
         {encodings.length > 0 && (
           <Panel plain>
             <PanelHeader title="How it is stored" />
-            <PanelBody className="group-data-[plain]/panel:-ml-2">
-              <BarList items={encodings} />
+            <PanelBody>
+              <RankList items={encodings} />
             </PanelBody>
           </Panel>
         )}

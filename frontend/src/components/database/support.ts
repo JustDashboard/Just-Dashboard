@@ -1,4 +1,8 @@
+import { dateFormatter } from "@/lib/format"
 import type { DbEndOfLife } from "@/lib/types"
+
+const utcDay = dateFormatter({ year: "numeric", month: "short", day: "numeric", timeZone: "UTC" })
+const utcMonth = dateFormatter({ year: "numeric", month: "short", timeZone: "UTC" })
 
 /**
  * A release's support status, said as a plain fact beside its version
@@ -12,18 +16,7 @@ import type { DbEndOfLife } from "@/lib/types"
  */
 export function supportWords(eol: DbEndOfLife): string {
   const date = new Date(eol.date)
-  return eol.past
-    ? `End of life since ${date.toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC",
-      })}`
-    : `Supported until ${date.toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        timeZone: "UTC",
-      })}`
+  return eol.past ? `End of life since ${utcDay(date)}` : `Supported until ${utcMonth(date)}`
 }
 
 /** The same, as one fact in a line of them: "supported until Nov 2030". */

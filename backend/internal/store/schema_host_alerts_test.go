@@ -23,6 +23,7 @@ func TestHostAlertSchemaOnlyAddsTables(t *testing.T) {
 // The tables arrive on a new install and on one upgraded from 0.6.6, and a
 // rule with its state survives the next boot, since Open runs on every one.
 func TestHostAlertSchemaReachesFreshAndUpgradedInstalls(t *testing.T) {
+	t.Parallel()
 	upgraded := t.TempDir()
 	script, err := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
 	if err != nil {

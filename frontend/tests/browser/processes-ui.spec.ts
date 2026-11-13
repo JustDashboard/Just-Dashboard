@@ -171,6 +171,233 @@ const inventory = {
   ],
 }
 
+/** What the detail route adds to a row, per process: where it runs and what it listens on. */
+const DETAIL: Record<number, Record<string, unknown>> = {
+  4021: {
+    exe: "/usr/bin/node",
+    cwd: "/srv/api",
+    fileDescriptors: 1020,
+    openFilesLimit: 1024,
+    listening: [{ proto: "tcp", address: "0.0.0.0", port: 3000 }],
+    connections: 7,
+    children: 2,
+  },
+  812: {
+    exe: "/usr/sbin/nginx",
+    cwd: "/",
+    fileDescriptors: 38,
+    openFilesLimit: 524288,
+    listening: [
+      { proto: "tcp", address: "0.0.0.0", port: 80 },
+      { proto: "tcp", address: "0.0.0.0", port: 443 },
+      { proto: "tcp6", address: "::", port: 443 },
+    ],
+    connections: 12,
+    children: 4,
+  },
+}
+
+/**
+ * The process page's slower read, built from a row: nginx handles the
+ * signals a daemon does and runs a library an upgrade replaced; node handles
+ * fewer, holds a rotated log open and carries a credential in its
+ * environment.
+ */
+function inspectFor(row: ReturnType<typeof process>) {
+  const nginx = row.name === "nginx"
+  return {
+    pid: row.pid,
+    createTime: row.createTime,
+    argv: String(row.cmdline).split(" ").filter(Boolean),
+    exe: nginx ? "/usr/sbin/nginx" : "/usr/bin/node",
+    exeDeleted: false,
+    root: "/",
+    waitChannel: "do_epoll_wait",
+    identity: {
+      ready: true,
+      user: { id: nginx ? 0 : 1001, name: row.username },
+      effectiveUser: { id: nginx ? 0 : 1001, name: row.username },
+      savedUser: { id: nginx ? 0 : 1001, name: row.username },
+      group: { id: nginx ? 0 : 1001, name: nginx ? "root" : "deploy" },
+      effectiveGroup: { id: nginx ? 0 : 1001, name: nginx ? "root" : "deploy" },
+      groups: nginx
+        ? []
+        : [
+            { id: 1001, name: "deploy" },
+            { id: 27, name: "sudo" },
+          ],
+      session: row.pid,
+      processGroup: row.pid,
+    },
+    scheduling: {
+      ready: true,
+      policy: "normal",
+      nice: row.nice,
+      cpus: "0-1",
+      cpuCount: 2,
+      hostCpus: 2,
+      lastCpu: 1,
+      userSeconds: 5400,
+      systemSeconds: 1200,
+      childrenUserSeconds: 0,
+      childrenSystemSeconds: 0,
+      ioWaitSeconds: 12,
+      voluntarySwitches: 1_204_118,
+      involuntarySwitches: 30_771,
+      minorFaults: 811_004,
+      majorFaults: 212,
+    },
+    memory: {
+      ready: true,
+      resident: row.rss,
+      anonymous: Math.round(Number(row.rss) * 0.7),
+      fileBacked: Math.round(Number(row.rss) * 0.25),
+      sharedMemory: Math.round(Number(row.rss) * 0.05),
+      peak: Number(row.rss) * 2,
+      virtual: row.vms,
+      virtualPeak: Number(row.vms) * 1.1,
+      data: 120_000_000,
+      stack: 135_168,
+      text: 80_000_000,
+      libraries: 9_000_000,
+      locked: 0,
+      pageTables: 1_200_000,
+      swap: Math.round(Number(row.rss) * 0.04),
+      proportional: Math.round(Number(row.rss) * 0.8),
+      unique: Math.round(Number(row.rss) * 0.66),
+      rollupReady: true,
+      oomScore: nginx ? 2 : 671,
+      oomScoreAdj: nginx ? -500 : 0,
+      oomReady: true,
+    },
+    io: {
+      ready: true,
+      charsRead: 9_000_000_000,
+      charsWritten: 3_100_000_000,
+      readCalls: 4_400_000,
+      writeCalls: 2_900_000,
+      readBytes: 220_000_000,
+      writeBytes: 1_800_000_000,
+      cancelledWriteBytes: 0,
+    },
+    security: {
+      ready: true,
+      capabilities: nginx ? ["CAP_NET_BIND_SERVICE", "CAP_SETUID", "CAP_SETGID"] : [],
+      allCapabilities: false,
+      boundingAll: true,
+      noNewPrivs: !nginx,
+      seccomp: nginx ? "off" : "filter",
+      seccompFilters: nginx ? 0 : 1,
+      label: nginx ? "unconfined" : "",
+    },
+    signals: {
+      ready: true,
+      caught: nginx
+        ? ["SIGHUP", "SIGINT", "SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGTERM", "SIGCHLD", "SIGWINCH"]
+        : ["SIGINT", "SIGTERM", "SIGUSR2"],
+      ignored: ["SIGPIPE"],
+      blocked: [],
+      pending: [],
+    },
+    namespaces: [
+      { kind: "pid", own: false },
+      { kind: "net", own: false },
+      { kind: "mnt", own: false },
+    ],
+    cgroup: nginx
+      ? { path: "/system.slice/nginx.service", memoryLimit: 1073741824, memoryCurrent: 46137344 }
+      : { path: "/user.slice/user-1001.slice/user@1001.service/app.slice/pm2-deploy.service" },
+    limits: [
+      { name: "Max cpu time", soft: "unlimited", hard: "unlimited", unit: "seconds" },
+      { name: "Max open files", soft: nginx ? "524288" : "1024", hard: "524288", unit: "files" },
+      { name: "Max processes", soft: "31616", hard: "31616", unit: "processes" },
+      { name: "Max locked memory", soft: "8388608", hard: "8388608", unit: "bytes" },
+    ],
+    files: {
+      ready: true,
+      total: nginx ? 38 : 1020,
+      files: nginx ? 9 : 14,
+      sockets: nginx ? 24 : 990,
+      pipes: 2,
+      devices: 3,
+      other: nginx ? 0 : 11,
+      deleted: nginx ? 0 : 1,
+      entries: [
+        { fd: 0, kind: "device", target: "/dev/null" },
+        { fd: 1, kind: "pipe", target: "pipe:[28812]" },
+        { fd: 2, kind: "pipe", target: "pipe:[28813]" },
+        { fd: 3, kind: "socket", target: "socket:[44120]" },
+        nginx
+          ? { fd: 4, kind: "file", target: "/var/log/nginx/access.log" }
+          : { fd: 4, kind: "file", target: "/srv/api/logs/app.log", deleted: true },
+        {
+          fd: 5,
+          kind: "file",
+          target: nginx ? "/var/log/nginx/error.log" : "/srv/api/logs/app.log.1",
+        },
+        { fd: 6, kind: "other", target: "anon_inode:[eventpoll]" },
+      ],
+    },
+    libraries: nginx
+      ? [
+          { path: "/usr/lib/x86_64-linux-gnu/libssl.so.3", deleted: true },
+          { path: "/usr/lib/x86_64-linux-gnu/libcrypto.so.3", deleted: true },
+          { path: "/usr/lib/x86_64-linux-gnu/libc.so.6" },
+          { path: "/usr/lib/x86_64-linux-gnu/libpcre2-8.so.0" },
+          { path: "/usr/lib/x86_64-linux-gnu/libz.so.1" },
+        ]
+      : [
+          { path: "/usr/lib/x86_64-linux-gnu/libc.so.6" },
+          { path: "/usr/lib/x86_64-linux-gnu/libstdc++.so.6" },
+        ],
+    connections: [
+      { proto: "tcp", local: "10.0.0.5:3000", remote: "10.0.0.9:51234", state: "established" },
+      { proto: "tcp", local: "10.0.0.5:3000", remote: "10.0.0.9:51240", state: "established" },
+      { proto: "tcp", local: "127.0.0.1:48812", remote: "127.0.0.1:5432", state: "established" },
+      { proto: "tcp", local: "10.0.0.5:3000", remote: "203.0.113.7:40112", state: "time_wait" },
+    ],
+    connectionsTotal: 4,
+    environment: [
+      "DATABASE_URL=postgres://api:hunter2@127.0.0.1/api",
+      "HOME=/home/deploy",
+      "NODE_ENV=production",
+      "PATH=/usr/local/bin:/usr/bin:/bin",
+      "PORT=3000",
+    ],
+    environmentReadable: true,
+    threads: [
+      { tid: row.pid, name: row.name, state: "sleeping", cpuSeconds: 4200, lastCpu: 1 },
+      {
+        tid: row.pid + 1,
+        name: nginx ? "nginx" : "V8 Worker",
+        state: "running",
+        cpuSeconds: 1800,
+        lastCpu: 0,
+      },
+      {
+        tid: row.pid + 2,
+        name: nginx ? "nginx" : "libuv-worker",
+        state: "sleeping",
+        cpuSeconds: 600,
+        lastCpu: 1,
+      },
+    ],
+    threadsTotal: 3,
+  }
+}
+
+const systemdLink = {
+  pid: 1,
+  name: "systemd",
+  cmdline: "/sbin/init",
+  username: "root",
+  state: "sleeping",
+  cpuPercent: 0,
+  cpuReady: true,
+  rss: 12582912,
+  createTime: earlier,
+}
+
 /** A process's recent windows, as the sampler keeps them. */
 const history = Array.from({ length: 30 }, (_, i) => ({
   at: new Date(Date.now() - (30 - i) * 4000).toISOString(),
@@ -482,21 +709,58 @@ async function mockHost(page: Page): Promise<LogMocks> {
         children: [],
       })
     }
+    if (path === "/processes/812/tree") {
+      return json(route, {
+        ancestors: [systemdLink],
+        children: [1, 2, 3, 4].map((n) => ({
+          pid: 812 + n,
+          name: "nginx",
+          cmdline: "nginx: worker process",
+          username: "www-data",
+          state: "sleeping",
+          cpuPercent: n === 1 ? 2.4 : 0.2,
+          cpuReady: true,
+          rss: 9437184,
+          createTime: earlier,
+        })),
+      })
+    }
+    if (/^\/processes\/\d+\/tree$/.test(path)) {
+      return json(route, { ancestors: [systemdLink], children: [] })
+    }
+    if (/^\/processes\/\d+\/inspect$/.test(path)) {
+      const pid = Number(path.split("/")[2])
+      const row = processes.find((p) => p.pid === pid)
+      if (!row) return route.fulfill({ status: 404, body: "{}" })
+      const read = inspectFor(row)
+      if (!row.cmdline) {
+        read.files = { ...read.files, ready: false, total: 0, files: 0, deleted: 0, entries: [] }
+        read.environment = []
+        read.waitChannel = row.state === "zombie" ? "" : read.waitChannel
+      }
+      return json(route, read)
+    }
     if (/^\/processes\/\d+$/.test(path)) {
       const pid = Number(path.split("/")[2])
       const row = processes.find((p) => p.pid === pid)
       if (!row) return route.fulfill({ status: 404, body: "{}" })
+      // A kernel thread and a zombie have no executable, directory or
+      // descriptors to read.
+      const empty = !row.cmdline
       return json(route, {
         ...row,
-        exe: "/usr/bin/node",
-        cwd: "/srv/api",
-        fileDescriptors: 1020,
-        fdReady: true,
-        openFilesLimit: 1024,
+        ...(empty
+          ? { fdReady: false }
+          : {
+              exe: "/usr/bin/node",
+              cwd: "/srv/api",
+              fileDescriptors: 1020,
+              fdReady: true,
+              openFilesLimit: 1024,
+            }),
         ioReady: true,
-        children: 2,
-        listening: [{ proto: "tcp", address: "0.0.0.0", port: 3000 }],
-        connections: 7,
+        listening: [],
+        ...DETAIL[pid],
         history,
       })
     }
@@ -602,7 +866,7 @@ test("the live table reads the host and every process verb is a word", async ({ 
   const labels = await menuLabels(page, "4021")
   expect(labels).toEqual(
     expect.arrayContaining([
-      "Inspect",
+      "Open",
       "Terminate",
       "Kill",
       "Pause",
@@ -614,23 +878,32 @@ test("the live table reads the host and every process verb is a word", async ({ 
     ]),
   )
 
-  // The sheet: the readings over their recent shape, the sockets, the parent
-  // chain as a path, and named buttons for the two verbs that matter.
+  // A row opens the process's own page: the readings over their recent
+  // shape, where it sits — its supervisor, its parent, its sockets — and
+  // named buttons for the two verbs that matter.
   await page.getByRole("button", { name: "node", exact: true }).first().click()
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.locator("[data-slot='stat-tile']")).toHaveCount(4)
+  await expect(page).toHaveURL(/\/processes\/4021$/)
+  const readings = page.getByTestId("process-readings")
+  await expect(readings.locator("[data-slot='stat-tile']")).toHaveCount(4)
   await expect(
-    sheet.locator("[data-slot='stat-tile']", { hasText: "CPU" }).locator("svg"),
+    readings.locator("[data-slot='stat-tile']", { hasText: "CPU" }).locator("svg"),
   ).toBeVisible()
-  await expect(sheet.locator("[data-slot='stat-tile']", { hasText: "Open files" })).toContainText(
-    "of 1024",
+  await expect(
+    readings.locator("[data-slot='stat-tile']", { hasText: "Open files" }),
+  ).toContainText("of 1024")
+  const picture = page.getByRole("group", { name: "Where it runs" })
+  await expect(picture.getByText(":3000")).toBeVisible()
+  await expect(picture.getByText("every interface")).toBeVisible()
+  await expect(picture.getByRole("link", { name: "Open api" })).toHaveAttribute(
+    "href",
+    "/processes/pm2?app=api",
   )
-  await expect(sheet.getByText(":3000")).toBeVisible()
-  await expect(sheet.getByText("every interface")).toBeVisible()
-  await expect(sheet.getByRole("button", { name: "Terminate" })).toBeVisible()
-  await expect(sheet.getByRole("button", { name: "Kill" })).toBeVisible()
-  await expect(sheet.getByRole("button", { name: /PM2 v6.0.5: God Daemon/ })).toBeVisible()
-  await expect(page).toHaveURL(/pid=4021/)
+  await expect(
+    picture.getByRole("button", { name: /PM2 v6.0.5: God Daemon \(900\)/ }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Terminate", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeVisible()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
 })
 
 // A kernel thread ignores a signal from user space and a zombie has already
@@ -645,12 +918,141 @@ test("a kernel thread and a zombie are not offered signals they cannot take", as
   expect(zombie).not.toContain("Kill")
   expect(zombie).toContain("Open parent (1)")
 
+  // The old address of a process still opens it, now on its own page.
   await page.goto("/processes?pid=6000")
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByText("Exited, and not yet reaped")).toBeVisible()
-  await expect(sheet.getByRole("button", { name: "Kill" })).toHaveCount(0)
-  await sheet.getByRole("button", { name: "Open parent (1)" }).click()
-  await expect(page).toHaveURL(/pid=1\b/)
+  await expect(page).toHaveURL(/\/processes\/6000$/)
+  await expect(page.getByText("Exited, and not yet reaped")).toBeVisible()
+  await expect(page.getByText("Almost out of file descriptors")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Kill", exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Open parent (1)" }).click()
+  await expect(page).toHaveURL(/\/processes\/1$/)
+})
+
+// A process is a page of its own, and the table it was opened from stands
+// beside it: the next process is one press, Alt+↓ walks the list, and the
+// view on screen goes with the reader.
+test("a process's page keeps the table beside it and carries the view between processes", async ({
+  page,
+}) => {
+  await mockHost(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/processes/4021")
+  const rail = page.getByRole("navigation", { name: "Processes" })
+  await expect(rail).toBeVisible()
+  await expect(rail.getByRole("button", { name: "node, PID 4021" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
+  await page.getByRole("tab", { name: /Files/ }).click()
+  await expect(page).toHaveURL(/\/processes\/4021\?tab=files$/)
+  await rail.getByRole("button", { name: "nginx, PID 812" }).click()
+  await expect(page).toHaveURL(/\/processes\/812\?tab=files$/)
+  await expect(page.getByRole("tab", { name: /Files/ })).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByText("/var/log/nginx/access.log")).toBeVisible()
+  await page.locator("body").click({ position: { x: 900, y: 10 } })
+  await page.keyboard.press("Alt+ArrowDown")
+  await expect(page).toHaveURL(/\/processes\/77\?tab=files$/)
+  await page.getByRole("link", { name: "Processes", exact: true }).click()
+  await expect(page).toHaveURL(/\/processes$/)
+})
+
+// Everything else the kernel keeps about a process has a view: its threads,
+// what it holds open, who it talks to, its environment with credentials
+// hidden, its limits and privileges, and the signals it handles.
+test("every view of a process reads what the kernel keeps about it", async ({ page }) => {
+  await mockHost(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/processes/4021")
+  await expect(page.getByText("Holding a deleted file open")).toBeVisible()
+  await expect(page.getByText("Almost out of file descriptors")).toBeVisible()
+
+  await page.getByRole("tab", { name: /Threads/ }).click()
+  await expect(page.getByRole("cell", { name: "V8 Worker" })).toBeVisible()
+
+  await page.getByRole("tab", { name: /Files/ }).click()
+  await page.getByRole("button", { name: /Deleted/ }).click()
+  await expect(page.getByText("/srv/api/logs/app.log", { exact: true })).toBeVisible()
+  await expect(page.getByText("anon_inode:[eventpoll]")).toHaveCount(0)
+
+  await page.getByRole("tab", { name: /Network/ }).click()
+  await expect(page.getByRole("cell", { name: "127.0.0.1:5432" })).toBeVisible()
+
+  await page.getByRole("tab", { name: /Environment/ }).click()
+  await expect(page.getByRole("cell", { name: "NODE_ENV" })).toBeVisible()
+  await expect(page.getByText("hunter2")).toHaveCount(0)
+  await page.getByRole("button", { name: "Reveal DATABASE_URL" }).click()
+  await expect(page.getByText(/hunter2/)).toBeVisible()
+
+  await page.getByRole("tab", { name: "Limits and privileges" }).click()
+  await expect(page.getByRole("cell", { name: /open files/ })).toContainText("1020 open now")
+  await expect(page.getByText("filtered by 1 filter")).toBeVisible()
+  await expect(page.getByRole("tab", { name: "Logs" })).toBeVisible()
+})
+
+// Control says what each signal will do to this process before it is sent:
+// nginx handles a hang-up and reloads, a node server that does not is ended
+// by one. A signal can take the process's children with it, and the
+// out-of-memory bias and the supervisor's own verbs are on the same view.
+test("control says what a signal will do and sends it with the process's children", async ({
+  page,
+}) => {
+  await mockHost(page)
+  const writes: { path: string; body: unknown }[] = []
+  page.on("request", (request) => {
+    if (request.method() === "GET") return
+    const path = new URL(request.url()).pathname.replace(/^\/api\/v1/, "")
+    writes.push({ path, body: request.postDataJSON() })
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/processes/4021?tab=control")
+  const signals = page.getByRole("list", { name: "Signals" })
+  await expect(signals.getByRole("listitem").filter({ hasText: "SIGHUP" })).toContainText("ends it")
+
+  await page.goto("/processes/812?tab=control")
+  await expect(signals.getByRole("listitem").filter({ hasText: "SIGHUP" })).toContainText("handled")
+  await expect(signals.getByRole("listitem").filter({ hasText: "SIGKILL" })).toContainText(
+    "always ends it",
+  )
+  await expect(page.getByText("What supervises it")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Restart", exact: true })).toBeVisible()
+
+  await page.getByRole("switch", { name: "Include its children" }).click()
+  await page.getByRole("button", { name: "Send SIGTERM to nginx" }).click()
+  const dialog = page.getByRole("alertdialog").or(page.getByRole("dialog"))
+  await expect(dialog).toContainText("4 processes it started")
+  await dialog.getByRole("button", { name: "Send", exact: true }).click()
+  await expect
+    .poll(() => writes.find((w) => w.path === "/processes/812/signal")?.body)
+    .toMatchObject({ signal: "SIGTERM", tree: true, startedAt: earlier })
+
+  await page.getByRole("button", { name: /Never end it/ }).click()
+  await expect
+    .poll(() => writes.find((w) => w.path === "/processes/812/oom")?.body)
+    .toMatchObject({ adj: -1000, startedAt: earlier })
+})
+
+// An upgrade that replaced OpenSSL under a running nginx is a restart the
+// operator does not know they need; the page says so, and draws the workers
+// it started in the picture.
+test("a process running code an upgrade replaced says a restart picks it up", async ({ page }) => {
+  await mockHost(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/processes/812")
+  await expect(page.getByText("Running 2 libraries an upgrade replaced")).toBeVisible()
+  await expect(
+    page.getByText(/Restarting nginx.service loads the new code, which matters/),
+  ).toBeVisible()
+  // Its four workers are one node — nginx × 4 — and the list under the
+  // picture has each of them.
+  const picture = page.getByRole("group", { name: "Where it runs" })
+  await expect(
+    picture.getByRole("button", { name: "Show the 4 nginx processes it started" }),
+  ).toBeVisible()
+  await expect(picture.getByText(":80 :443")).toBeVisible()
+  await expect(picture.getByRole("link", { name: "Open nginx.service" })).toBeVisible()
+  await picture.getByRole("button", { name: "Show the 4 nginx processes it started" }).click()
+  await page.getByRole("button", { name: /nginx 815/ }).click()
+  await expect(page).toHaveURL(/\/processes\/815$/)
 })
 
 // The first read lands after the band is drawn: its blocks keep their height
@@ -700,9 +1102,9 @@ test("a workload narrows the table to its processes", async ({ page }) => {
   await expect(api).toHaveAttribute("aria-pressed", "false")
 })
 
-// A sheet open on a process that exits used to keep its last reading under
-// live verbs, polled into a 404 nobody saw.
-test("a process that exits while its sheet is open says so and stops", async ({ page }) => {
+// A process page open on a process that exits used to keep its last reading
+// under live verbs, polled into a 404 nobody saw.
+test("a process that exits while its page is open says so and stops", async ({ page }) => {
   await mockHost(page)
   let gone = false
   await page.route("**/api/v1/processes/4021", (route) =>
@@ -714,13 +1116,12 @@ test("a process that exits while its sheet is open says so and stops", async ({ 
         })
       : route.fallback(),
   )
-  await page.goto("/processes?pid=4021")
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByRole("button", { name: "Kill" })).toBeVisible()
+  await page.goto("/processes/4021")
+  await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeVisible()
   gone = true
-  await expect(sheet.getByText("This process has exited")).toBeVisible({ timeout: 6000 })
-  await expect(sheet.getByRole("button", { name: "Kill" })).toHaveCount(0)
-  await expect(sheet.locator("[data-slot='stat-tile']", { hasText: "Memory" })).toBeVisible()
+  await expect(page.getByText("This process has exited")).toBeVisible({ timeout: 6000 })
+  await expect(page.getByRole("button", { name: "Kill", exact: true })).toHaveCount(0)
+  await expect(page.locator("[data-slot='stat-tile']", { hasText: "Memory" })).toBeVisible()
 })
 
 /**
@@ -1022,17 +1423,27 @@ test("scheduled says what each schedule means and builds a new one in words", as
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity).toContainText("1 cron job for root, 1 disabled")
   await expect(identity).toContainText("1 of 2 timers armed")
-  await expect(identity).toContainText("1 package cron line")
+  await expect(identity).toContainText("1 system cron line")
   const next = page.locator("[data-slot='next-up']")
   await expect(next).toContainText("Next run")
   await expect(next).toContainText(/\d+[smhd]/)
 
-  // The next day of all three on one axis: a lane per schedule that fires in
-  // it, soonest first, each kind a chip that counts and narrows.
+  // The next day of all three as an hour-by-hour chart, and under it each
+  // schedule in the order it runs, with its clock time and its schedule in
+  // words; each kind a chip that counts and narrows.
+  const chart = page.getByRole("img", { name: /from 3 schedules over the next 24 hours/ })
+  await expect(chart).toBeVisible()
+  await expect(chart.locator("[data-hour]")).toHaveCount(24)
   const band = page.getByRole("list", { name: "Schedules" })
   await expect(band.locator(":scope > li")).toHaveCount(3)
+  // /etc/crontab's run-parts line is the hourly scripts, every hour at :17.
+  const hourly = band.locator(":scope > li").filter({ hasText: "Hourly scripts" })
+  await expect(hourly).toContainText("Every hour at :17")
+  await expect(hourly).toContainText(/:17/)
+  // Pointing at it says it on the chart's line.
+  await hourly.hover()
   await expect(
-    band.getByRole("img", { name: "run-parts: 24 runs in the next 24 hours" }),
+    page.locator("[aria-live=polite]").filter({ hasText: "Hourly scripts" }),
   ).toBeVisible()
   const kinds = page.locator("[aria-label='Kind']")
   await kinds.getByRole("button", { name: /Timers/ }).click()
@@ -1089,6 +1500,112 @@ test("scheduled says what each schedule means and builds a new one in words", as
   await expect(page).not.toHaveURL(/job=/)
 })
 
+test("scheduled says what systemd runs instead and when each timer fires", async ({ page }) => {
+  await mockHost(page)
+  await page.route("**/api/v1/systemd/timers", (route) =>
+    json(route, {
+      ...timers,
+      timers: timers.timers.map((timer) =>
+        timer.unit === "certbot.timer"
+          ? {
+              ...timer,
+              description: "Run certbot twice daily",
+              calendar: ["*-*-* 00,12:00:00"],
+              randomDelay: "12h",
+            }
+          : timer,
+      ),
+    }),
+  )
+  await page.route("**/api/v1/cron/system", (route) =>
+    json(route, [
+      {
+        user: "",
+        source: "/etc/cron.d/certbot",
+        raw: "",
+        env: [],
+        comments: [],
+        timeZone: "UTC",
+        jobs: [
+          {
+            line: 12,
+            schedule: "0 */12 * * *",
+            user: "root",
+            command:
+              "test -x /usr/bin/certbot -a \\! -d /run/systemd/system && perl -e 'sleep int(rand(43200))' && certbot -q renew",
+            comment: "certbot.timer.",
+            raw: "",
+            disabled: false,
+            timeZone: "UTC",
+          },
+        ],
+      },
+      {
+        user: "",
+        source: "/etc/crontab",
+        raw: "",
+        env: [],
+        comments: [],
+        timeZone: "UTC",
+        jobs: [
+          {
+            line: 19,
+            schedule: "* * * * *",
+            user: "user-name",
+            command: "command to be executed",
+            comment: "|  |  |  |  |",
+            raw: "",
+            disabled: true,
+            timeZone: "UTC",
+          },
+          {
+            line: 20,
+            schedule: "25 6 * * *",
+            user: "root",
+            command: "test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.daily; }",
+            raw: "",
+            disabled: false,
+            timeZone: "UTC",
+          },
+        ],
+      },
+    ]),
+  )
+  await page.goto("/processes/scheduled")
+
+  // A timer's schedule is said in words in its row, with the delay its
+  // package adds.
+  const timer = page.locator("[data-process-row='certbot.timer']")
+  await expect(timer).toContainText("Twice a day, at 00:00 and 12:00, up to 12 hours later")
+  await expect(timer).toContainText("Run certbot twice daily")
+
+  // One table of the package files, grouped by file: /etc/crontab's worked
+  // example is no job, the daily line is the daily scripts, and certbot's
+  // line says the timer runs its work.
+  const files = page
+    .locator("[data-slot=panel]")
+    .filter({ has: page.getByRole("heading", { name: /^System cron files/ }) })
+  await expect(files.getByRole("table")).toHaveCount(1)
+  await expect(files).not.toContainText("command to be executed")
+  await expect(files.getByRole("row", { name: /Daily scripts/ })).toContainText(
+    "Every day at 06:25",
+  )
+  const certbot = files.getByRole("row", { name: /certbot:/ })
+  await expect(certbot).toContainText("left to systemd")
+  await expect(certbot).toContainText("certbot.timer")
+  // The band does not count it as a run: it is said under the list.
+  await expect(page.getByText("1 cron line left to systemd")).toBeVisible()
+
+  await certbot.getByRole("button", { name: /certbot:/ }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByText("systemd does this work here")).toBeVisible()
+  await sheet.getByRole("link", { name: "certbot.timer" }).click()
+  await expect(page).toHaveURL(/timer=certbot\.timer/)
+  await expect(page.getByRole("dialog")).toContainText(
+    "Twice a day, at 00:00 and 12:00, up to 12 hours later",
+  )
+})
+
 const RUN_PREDICATES = [
   "starting",
   "started",
@@ -1111,9 +1628,8 @@ test("a unit's journal reads its runs, folds a loop and opens one run's own line
   page,
 }) => {
   const logs = await mockHost(page)
-  await page.goto("/processes/services?unit=postgresql.service")
-  const sheet = page.getByRole("dialog")
-  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  await page.goto("/processes/services/postgresql.service?tab=journal")
+  const sheet = page.getByRole("main")
   // The unit's own journal on the lens socket; the whole journal is the
   // logs page's, so there is no unit to pick here.
   await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("journal:postgresql.service")
@@ -1175,7 +1691,7 @@ test("a unit's journal reads its runs, folds a loop and opens one run's own line
   await expect(sheet.getByRole("button", { name: "Clear the invocation filter" })).toBeVisible()
 })
 
-test("sshd's journal is an administrator's, and the sheet says so rather than asking", async ({
+test("sshd's journal is an administrator's, and the page says so rather than asking", async ({
   page,
 }) => {
   const logs = await mockHost(page)
@@ -1193,9 +1709,8 @@ test("sshd's journal is an administrator's, and the sheet says so rather than as
       unit: { ...unitDetail.unit, name: "ssh.service", description: "OpenBSD Secure Shell server" },
     }),
   )
-  await page.goto("/processes/services?unit=ssh.service")
-  const sheet = page.getByRole("dialog")
-  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  await page.goto("/processes/services/ssh.service?tab=journal")
+  const sheet = page.getByRole("main")
   await expect(sheet.getByText("Login records need an administrator")).toBeVisible()
   // The server refuses the read before the socket upgrades: nothing is asked.
   expect(logs.sockets).toEqual([])
@@ -1218,23 +1733,21 @@ test("a journal the server refuses is said to be refused, in its words, and noth
         body: JSON.stringify({ error: { code: "forbidden", message: refusal } }),
       }),
   )
-  await page.goto("/processes/services?unit=postgresql.service")
-  const sheet = page.getByRole("dialog")
-  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  await page.goto("/processes/services/postgresql.service?tab=journal")
+  const sheet = page.getByRole("main")
   await expect(sheet.getByText(refusal)).toBeVisible()
   // A socket retrying a refusal would say the tunnel dropped.
   expect(logs.sockets).toEqual([])
   expect(logs.searches).toEqual([])
 })
 
-test("on a phone a unit's lines start at the sheet's edge and its controls stay in reach", async ({
+test("on a phone a unit's lines start at the pane's edge and its controls stay in reach", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const logs = await mockHost(page)
-  await page.goto("/processes/services?unit=postgresql.service")
-  const sheet = page.getByRole("dialog")
-  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  await page.goto("/processes/services/postgresql.service?tab=journal")
+  const sheet = page.getByRole("main")
   await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("journal:postgresql.service")
 
   const lines = sheet.getByLabel("Log lines")
@@ -1341,6 +1854,8 @@ test.describe("with no hover available", () => {
     await mockHost(page)
     for (const path of [
       "/processes",
+      "/processes/4021",
+      "/processes/812?tab=control",
       "/processes/pm2",
       "/processes/services",
       "/processes/scheduled",
@@ -1365,11 +1880,37 @@ test.describe("with no hover available", () => {
   })
 })
 
+// On a phone a process's page is the one pane: no rail, the way back and the
+// arrows in reach, the page scrolling as a whole, and the supervisor's verbs
+// under its sentence rather than squeezing it to a word a line.
+test.describe("a process on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 } })
+
+  test("is one pane whose supervisor's verbs stay in reach", async ({ page }) => {
+    await mockHost(page)
+    await page.goto("/processes/812?tab=control")
+    await expect(page.getByRole("navigation", { name: "Processes" })).toBeHidden()
+    await expect(page.getByRole("link", { name: "Processes", exact: true })).toBeInViewport()
+    await expect(page.getByRole("button", { name: "Next process" })).toBeInViewport()
+    const sentence = page.getByText("systemd starts this process again when it exits.")
+    await expect(sentence).toBeVisible()
+    expect((await sentence.boundingBox())!.width).toBeGreaterThan(200)
+    const restart = page.getByRole("button", { name: "Restart", exact: true })
+    await restart.scrollIntoViewIfNeeded()
+    await expect(restart).toBeInViewport()
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    )
+    expect(overflow).toBe(false)
+  })
+})
+
 for (const width of [1280, 1720]) {
   test(`looks right at ${width}`, async ({ page }) => {
     await mockHost(page)
     for (const [name, path] of [
       ["live", "/processes"],
+      ["process", "/processes/812"],
       ["pm2", "/processes/pm2"],
       ["services", "/processes/services"],
       ["scheduled", "/processes/scheduled"],
@@ -1409,9 +1950,11 @@ test("workspace: process focus holds row order and paused searches remain usable
   await expect(page.getByText("Row order held while inspecting")).toBeVisible()
   await page.keyboard.press("ArrowDown")
   await expect(rows.nth(1)).toBeFocused()
+  const second = await rows.nth(1).getAttribute("data-workspace-item")
   await page.keyboard.press("Enter")
-  await expect(page.getByRole("dialog")).toBeVisible()
-  await page.keyboard.press("Escape")
+  await expect(page).toHaveURL(new RegExp(`/processes/${second?.split("-")[0]}$`))
+  await page.goBack()
+  await expect(rows.first()).toBeVisible()
   await page.getByRole("button", { name: "Pause updates", exact: true }).click()
   await expect(page.getByText("Updates paused", { exact: true })).toBeVisible()
   await page.keyboard.press("Control+f")

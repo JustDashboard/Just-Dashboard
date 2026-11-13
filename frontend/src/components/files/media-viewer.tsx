@@ -228,6 +228,7 @@ function Stage({
   switch (kind) {
     case "image":
       return (
+        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- a press switches between fitted and full size, which is the pointer's for now (audit FE-15, left open)
         <div
           className={cn(
             "flex min-h-0 flex-1 overflow-auto checkerboard",

@@ -69,10 +69,10 @@ type Run struct {
 	Status               string              `json:"status"`
 	Outcome              string              `json:"outcome,omitempty"`
 	OutcomeSource        string              `json:"outcomeSource,omitempty"`
-	CreatedAt            time.Time           `json:"createdAt"`
+	CreatedAt            time.Time           `json:"createdAt,omitzero"`
 	StartedAt            *time.Time          `json:"startedAt,omitempty"`
 	EndedAt              *time.Time          `json:"endedAt,omitempty"`
-	UpdatedAt            time.Time           `json:"updatedAt"`
+	UpdatedAt            time.Time           `json:"updatedAt,omitzero"`
 	CreatedBy            string              `json:"createdBy"`
 	RerunOf              string              `json:"rerunOf,omitempty"`
 	JobID                string              `json:"jobId,omitempty"`

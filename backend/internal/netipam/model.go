@@ -32,7 +32,7 @@ type Pool struct {
 	Prefix         string     `json:"prefix"`
 	Family         string     `json:"family"`
 	AllocationBits int        `json:"allocationBits"`
-	CreatedAt      time.Time  `json:"createdAt"`
+	CreatedAt      time.Time  `json:"createdAt,omitzero"`
 	RetiredAt      *time.Time `json:"retiredAt,omitempty"`
 }
 type ReserveRequest struct {
@@ -52,8 +52,8 @@ type Reservation struct {
 	State               string     `json:"state"`
 	UnknownSources      []string   `json:"unknownSources"`
 	AcknowledgedUnknown bool       `json:"acknowledgedUnknown"`
-	CreatedAt           time.Time  `json:"createdAt"`
-	UpdatedAt           time.Time  `json:"updatedAt"`
+	CreatedAt           time.Time  `json:"createdAt,omitzero"`
+	UpdatedAt           time.Time  `json:"updatedAt,omitzero"`
 	ReleasedAt          *time.Time `json:"releasedAt,omitempty"`
 	StartedBy           string     `json:"startedBy"`
 	NativeID            string     `json:"nativeId,omitempty"`
@@ -70,11 +70,11 @@ type Coverage struct {
 	Source    string    `json:"source"`
 	State     string    `json:"state"`
 	Detail    string    `json:"detail"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 }
 type Snapshot struct {
-	CheckedAt    time.Time     `json:"checkedAt"`
-	FinishedAt   time.Time     `json:"finishedAt"`
+	CheckedAt    time.Time     `json:"checkedAt,omitzero"`
+	FinishedAt   time.Time     `json:"finishedAt,omitzero"`
 	Observations []Observation `json:"observations"`
 	Coverage     []Coverage    `json:"coverage"`
 }
@@ -91,7 +91,7 @@ type Preview struct {
 	Status      string     `json:"status"`
 	Conflicts   []Conflict `json:"conflicts"`
 	Coverage    []Coverage `json:"coverage"`
-	CheckedAt   time.Time  `json:"checkedAt"`
+	CheckedAt   time.Time  `json:"checkedAt,omitzero"`
 	Limitations []string   `json:"limitations"`
 }
 type Utilization struct {

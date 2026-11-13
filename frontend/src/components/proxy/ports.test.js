@@ -407,8 +407,6 @@ describe("databases off this machine are counted per port", () => {
   })
 })
 
-describe("a database off this machine", () => {})
-
 // Owners as this host names them: Docker's Caddy ingress publishing 80 in
 // both families through two docker-proxy processes, a deployment's container,
 // socket-activated sshd, nginx under systemd, a PM2 app whose node calls its
@@ -531,9 +529,9 @@ describe("who a socket answers for", () => {
       ["Open container", "/docker/containers/jd-e175-r4"],
       ["Open deployment", "/deploy/12"],
     ])
-    expect(hrefs(sshdActivated)).toEqual([["Open unit", "/processes/services?unit=ssh.service"]])
-    expect(hrefs(sshdIdle)).toEqual([["Open unit", "/processes/services?unit=ssh.service"]])
-    expect(hrefs(nginxUnit)).toEqual([["Open unit", "/processes/services?unit=nginx.service"]])
+    expect(hrefs(sshdActivated)).toEqual([["Open unit", "/processes/services/ssh.service"]])
+    expect(hrefs(sshdIdle)).toEqual([["Open unit", "/processes/services/ssh.service"]])
+    expect(hrefs(nginxUnit)).toEqual([["Open unit", "/processes/services/nginx.service"]])
     expect(hrefs(pm2App)).toEqual([["Open app", "/processes/pm2?app=api"]])
     expect(hrefs(dashboardProxy)).toEqual([
       ["Open container", "/docker/containers/just-dashboard-proxy-1"],

@@ -24,6 +24,7 @@ func TestDeployEventSchemaOnlyAddsTables(t *testing.T) {
 // row keyed the way the recorder writes one — the daemon's nanosecond
 // timestamp, the environment it belongs to, the event whole — reads back.
 func TestDeployEventsReachFreshAndUpgradedInstalls(t *testing.T) {
+	t.Parallel()
 	upgraded := t.TempDir()
 	script, err := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
 	if err != nil {

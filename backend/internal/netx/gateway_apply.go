@@ -1087,22 +1087,6 @@ func parseGatewayCounters(out string) (map[string]RuleCounter, error) {
 	return counters, nil
 }
 
-// gatewayCounters reads the live counters. An absent table — the dashboard
-// has made nothing, or the host was just booted without the unit — is zero
-// counters and loaded false, not an error: the page then says the entries
-// are not in force.
-func gatewayCounters(ctx context.Context) (counters map[string]RuleCounter, loaded bool) {
-	out, err := run(ctx, "nft", "-t", "-j", "list", "table", "inet", gatewayTable)
-	if err != nil {
-		return map[string]RuleCounter{}, false
-	}
-	c, err := parseGatewayCounters(out)
-	if err != nil {
-		return map[string]RuleCounter{}, false
-	}
-	return c, true
-}
-
 // GatewayForwarding is the kernel's forwarding switches.
 type GatewayForwarding struct {
 	IPv4 bool `json:"ipv4"`

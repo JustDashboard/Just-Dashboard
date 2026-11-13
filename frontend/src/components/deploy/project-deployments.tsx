@@ -13,7 +13,7 @@ import {
   ShieldOff,
 } from "@/components/icons"
 import { get, post, put } from "@/lib/api"
-import { relativeTime } from "@/lib/format"
+import { calendarDate, dayAt, relativeTime } from "@/lib/format"
 import { previewURL, promotionOrigin } from "@/lib/pull-requests"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
@@ -120,11 +120,7 @@ function dayLabel(iso: string, now: number) {
   const days = Math.round((start(today) - start(day)) / 86_400_000)
   if (days === 0) return "Today"
   if (days === 1) return "Yesterday"
-  return day.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: day.getFullYear() === today.getFullYear() ? undefined : "numeric",
-  })
+  return day.getFullYear() === today.getFullYear() ? dayAt(day) : calendarDate(day.toISOString())
 }
 
 /**

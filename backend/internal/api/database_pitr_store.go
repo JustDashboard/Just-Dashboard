@@ -34,7 +34,7 @@ type pitrArchive struct {
 	Schedule        string       `json:"schedule"`
 	RetentionDays   int          `json:"retentionDays"`
 	Image           string       `json:"image"`
-	CreatedAt       time.Time    `json:"createdAt"`
+	CreatedAt       time.Time    `json:"createdAt,omitzero"`
 	CreatedBy       string       `json:"createdBy,omitempty"`
 	EndedAt         *time.Time   `json:"endedAt,omitempty"`
 	Reading         *pitrReading `json:"reading,omitempty"`
@@ -55,7 +55,7 @@ type pitrReading struct {
 	// Size is everything the archive keeps in the destination, backups and
 	// log together.
 	Size   int64     `json:"size"`
-	ReadAt time.Time `json:"readAt"`
+	ReadAt time.Time `json:"readAt,omitzero"`
 }
 
 const pitrArchiveCols = `id, container, connection_id, stream, target_kind, target_cfg, secrets_enc, public_key,
@@ -244,7 +244,7 @@ type pitrRestorePoint struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
 	LSN       string    `json:"lsn"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 	CreatedBy string    `json:"createdBy,omitempty"`
 }
 
@@ -295,7 +295,7 @@ type pitrRestore struct {
 	// place.
 	State      string     `json:"state"`
 	Replaced   string     `json:"replaced,omitempty"`
-	CreatedAt  time.Time  `json:"createdAt"`
+	CreatedAt  time.Time  `json:"createdAt,omitzero"`
 	CreatedBy  string     `json:"createdBy,omitempty"`
 	SwitchedAt *time.Time `json:"switchedAt,omitempty"`
 }

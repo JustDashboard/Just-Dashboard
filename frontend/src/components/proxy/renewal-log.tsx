@@ -8,7 +8,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { kindViews } from "@/components/logs/kind-views"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { LoadingRows } from "@/components/state"
+import { Hold, LoadingRows } from "@/components/state"
 
 /** certbot's own log, where every run — the timer's and a click's — writes what it did. */
 export const LETSENCRYPT_LOG = "/var/log/letsencrypt/letsencrypt.log"
@@ -83,6 +83,9 @@ export function RenewalLog({ certbot }: { certbot: CertbotState | undefined }) {
           />
         )}
       </PanelBody>
+      {/* The pane is taller than its skeleton: the page's blocks under this
+          one wait for it. */}
+      <Hold until={settled} />
     </Panel>
   )
 }

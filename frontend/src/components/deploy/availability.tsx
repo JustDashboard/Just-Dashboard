@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { get } from "@/lib/api"
-import { timestamp } from "@/lib/format"
+import { dayAt, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { AvailabilityDay, DeploymentAvailability } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -37,10 +37,7 @@ const FIGURE_TONE = {
 /** "Oct 31", the day a stretch ends on. The last one is the 24-hour window. */
 function dayName(day: AvailabilityDay, last: boolean) {
   if (last) return "Last 24 hours"
-  return new Date(new Date(day.from).getTime() + 86400000).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  })
+  return dayAt(new Date(day.from).getTime() + 86400000)
 }
 
 /**
@@ -129,6 +126,7 @@ export function Availability({
                   className="flex h-6 animate-rise items-stretch gap-0.5"
                 >
                   {days.map((day, index) => (
+                    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- a thumb's way to point at a day, as onPointerEnter is a mouse's; the day's words are its title as well
                     <li
                       key={day.from}
                       title={`${dayName(day, index === days.length - 1)}: ${dayWords(day)}`}

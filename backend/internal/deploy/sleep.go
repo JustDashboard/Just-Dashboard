@@ -16,6 +16,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Scale to zero. An environment whose plan says so (runtime.sleep) has its
@@ -402,7 +403,7 @@ func (s *Sleeper) Start(ctx context.Context) {
 	if s == nil || s.executor == nil || s.executor.store == nil {
 		return
 	}
-	go func() {
+	safego.Go(ctx, nil, "deployment sleep", func(ctx context.Context) {
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 		for {
@@ -417,7 +418,7 @@ func (s *Sleeper) Start(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
-	}()
+	})
 }
 
 func (s *Sleeper) environmentLock(environmentID int64) *sync.Mutex {

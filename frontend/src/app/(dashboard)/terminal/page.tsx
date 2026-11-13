@@ -654,6 +654,7 @@ export default function TerminalPage() {
   if (loading)
     return (
       <Page fill className="px-2 py-2 md:px-3 md:py-3">
+        <h1 className="sr-only">Terminal</h1>
         <LoadingPanel rows={4} />
       </Page>
     )
@@ -663,12 +664,14 @@ export default function TerminalPage() {
   if (error && !data)
     return (
       <Page className="px-2 py-2 md:px-3 md:py-3">
+        <h1 className="sr-only">Terminal</h1>
         <ErrorState error={error} />
       </Page>
     )
   if (!data?.enabled)
     return (
       <Page className="px-2 py-2 md:px-3 md:py-3">
+        <h1 className="sr-only">Terminal</h1>
         <EmptyState
           icon={TerminalWindow}
           title="The web terminal is disabled"
@@ -859,6 +862,8 @@ export default function TerminalPage() {
 
   return (
     <Page fill className="gap-2 px-2 py-2 md:px-3 md:py-3">
+      {/* A workbench draws no page header, so its name is said, not drawn. */}
+      <h1 className="sr-only">Terminal</h1>
       {data.persistenceError && (
         <div role="alert">
           <Notice icon={ShieldOff} tone="danger" title="New terminals are unavailable">

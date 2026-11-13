@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 type EventInput struct {
@@ -100,63 +101,155 @@ func (s *OrchestrationStore) AppendEvent(
 	return event, nil
 }
 
+// LogLine is one line of a step's output on its way into the transcript.
+type LogLine struct {
+	Stream string
+	Text   string
+}
+
+// AppendLog appends one line. A step's output goes through storeStepOutput,
+// which hands over many lines at a time; this is for the single sentences
+// written outside a step.
 func (s *OrchestrationStore) AppendLog(
 	ctx context.Context,
 	runID, stepID int64,
 	claimToken, stream, text string,
 ) (RunEvent, error) {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if stream != "stdout" && stream != "stderr" && stream != "status" {
-		return RunEvent{}, fmt.Errorf("invalid deployment log stream %q", stream)
-	}
-	text, truncated := truncateUTF8(text, maxLogTextBytes)
-	data := logEventData(stream, &text, &truncated)
-	tx, err := s.db.BeginTx(ctx, nil)
+	events, err := s.AppendLogs(ctx, runID, stepID, claimToken, []LogLine{{Stream: stream, Text: text}})
 	if err != nil {
 		return RunEvent{}, err
+	}
+	return events[0], nil
+}
+
+// AppendLogs appends lines to a run's transcript in one transaction, in order
+// and with consecutive sequence numbers: one lease check, one read of the
+// run's sequence, one row per line, one update of the step and one of the
+// legacy tail. A line used to be a transaction of its own, six statements and
+// a commit each, so a chatty build spent longer persisting its output than
+// printing it and every other writer queued behind thousands of tiny write
+// locks.
+func (s *OrchestrationStore) AppendLogs(
+	ctx context.Context,
+	runID, stepID int64,
+	claimToken string,
+	lines []LogLine,
+) ([]RunEvent, error) {
+	if len(lines) == 0 {
+		return nil, nil
+	}
+	type prepared struct {
+		stream, text string
+		truncated    bool
+		data         json.RawMessage
+	}
+	rows := make([]prepared, len(lines))
+	tailBytes := 0
+	for index, line := range lines {
+		if line.Stream != "stdout" && line.Stream != "stderr" && line.Stream != "status" {
+			return nil, fmt.Errorf("invalid deployment log stream %q", line.Stream)
+		}
+		row := prepared{stream: line.Stream}
+		row.text, row.truncated = truncateUTF8(line.Text, maxLogTextBytes)
+		// The event a subscriber receives is bounded as well as the stored
+		// text, and bounding it can shorten the text further.
+		row.data = logEventData(row.stream, &row.text, &row.truncated)
+		rows[index] = row
+		tailBytes += len(row.text)
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	// Through the store's bulk writer, which does not sync the disk on every
+	// commit: a power cut may take the last moment of what a build printed,
+	// and takes the build with it. How a step and its run ended is written
+	// on the durable pool, and that commit makes these lines durable too.
+	tx, err := s.st.Bulk().BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
 	}
 	defer tx.Rollback()
 	now := s.now().UTC()
 	if err := assertLeaseTx(ctx, tx, runID, claimToken, now); err != nil {
-		return RunEvent{}, err
+		return nil, err
 	}
 	if stepID != 0 {
 		var exists int
 		if err := tx.QueryRowContext(ctx,
 			`SELECT 1 FROM deploy_steps WHERE id = ? AND run_id = ?`, stepID, runID).Scan(&exists); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return RunEvent{}, ErrStepNotFound
+				return nil, ErrStepNotFound
 			}
-			return RunEvent{}, err
+			return nil, err
 		}
 	}
-	event, err := appendEventTx(ctx, tx, now, runID, stepID, EventStepLog, stream, text, data)
+	var seq int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(seq), 0) FROM deploy_log_chunks WHERE run_id = ?`, runID).Scan(&seq); err != nil {
+		return nil, err
+	}
+	// A line's text is stored once, in its own column beside its stream and
+	// whether it was cut. data_json used to repeat all three as JSON, which
+	// was most of what a transcript weighed; EventsAfter builds the event's
+	// data from the columns instead.
+	insert, err := tx.PrepareContext(ctx, `
+		INSERT INTO deploy_log_chunks(
+		  run_id, step_id, seq, event_type, stream, ts, text, data_json, truncated)
+		VALUES(?, ?, ?, ?, ?, ?, ?, '{}', ?)`)
 	if err != nil {
-		return RunEvent{}, err
+		return nil, err
+	}
+	defer insert.Close()
+	events := make([]RunEvent, len(rows))
+	tail := make([]byte, 0, tailBytes)
+	for index, row := range rows {
+		seq++
+		if _, err := insert.ExecContext(ctx, runID, stepID, seq, EventStepLog, row.stream, now.Unix(),
+			row.text, boolInt(row.truncated)); err != nil {
+			return nil, err
+		}
+		events[index] = RunEvent{Seq: seq, Type: EventStepLog, RunID: runID, StepID: stepID, TS: now, Data: row.data}
+		tail = append(tail, row.text...)
 	}
 	if stepID != 0 {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE deploy_steps SET last_seq = ? WHERE id = ?`, event.Seq, stepID); err != nil {
-			return RunEvent{}, err
+			`UPDATE deploy_steps SET last_seq = ? WHERE id = ?`, seq, stepID); err != nil {
+			return nil, err
 		}
 	}
-	// The old deployment detail response reads deploy_runs.log. Keep a bounded
-	// tail while 0.6.6 clients coexist; sequenced chunks remain authoritative.
+	// The 0.6.6 run shape still answers with deploy_runs.log (the legacy run
+	// list and a deployment's lastRun, both in the published API), so a
+	// bounded tail is kept beside the chunks, which remain authoritative. It
+	// is rewritten once for the lines of this call rather than once a line.
+	// What the tail cannot hold is not sent: only its end survives anyway.
+	appended := legacyLogTail(string(tail))
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE deploy_runs
 		   SET log = CASE
 		     WHEN length(log) + length(?) <= 64000 THEN log || ?
 		     ELSE '…' || substr(log || ?, -64000)
 		   END
-		 WHERE id = ?`, text, text, text, runID); err != nil {
-		return RunEvent{}, err
+		 WHERE id = ?`, appended, appended, appended, runID); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return RunEvent{}, err
+		return nil, err
 	}
-	s.publish([]RunEvent{event})
-	return event, nil
+	s.publish(events)
+	return events, nil
+}
+
+// legacyLogTail is the end of text that the 64,000-character legacy tail can
+// still show, cut on a character boundary.
+func legacyLogTail(text string) string {
+	const keep = 64000 * utf8.UTFMax
+	if len(text) <= keep {
+		return text
+	}
+	cut := len(text) - keep
+	for cut < len(text) && !utf8.RuneStart(text[cut]) {
+		cut++
+	}
+	return text[cut:]
 }
 
 func logEventData(stream string, text *string, truncated *bool) json.RawMessage {
@@ -219,7 +312,7 @@ func (s *OrchestrationStore) EventsAfter(
 		start = watermark
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT seq, step_id, event_type, ts, data_json
+		SELECT seq, step_id, event_type, ts, data_json, stream, text, truncated
 		  FROM deploy_log_chunks
 		 WHERE run_id = ? AND seq > ? AND compacted = 0
 		 ORDER BY seq
@@ -231,13 +324,20 @@ func (s *OrchestrationStore) EventsAfter(
 	for rows.Next() {
 		var event RunEvent
 		var ts int64
-		var data string
+		var data, stream, text string
+		var truncated bool
 		event.RunID = runID
-		if err := rows.Scan(&event.Seq, &event.StepID, &event.Type, &ts, &data); err != nil {
+		if err := rows.Scan(&event.Seq, &event.StepID, &event.Type, &ts, &data, &stream, &text, &truncated); err != nil {
 			return nil, err
 		}
 		event.TS = unixTime(ts)
 		event.Data = json.RawMessage(data)
+		// A line written since its text stopped being stored twice carries no
+		// data of its own. One written before still does, and so does the
+		// transcript a 0.6.6 run was migrated with, which names its migration.
+		if event.Type == EventStepLog && data == "{}" {
+			event.Data = logEventData(stream, &text, &truncated)
+		}
 		result = append(result, event)
 	}
 	return result, rows.Err()
@@ -248,55 +348,135 @@ func (s *OrchestrationStore) EventsAfter(
 // reconnect request prove that it needs a fresh snapshot even when retained
 // state events have older sequence numbers.
 func (s *OrchestrationStore) CompactRunLogs(ctx context.Context, runID int64, keep int) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	return s.compactRunLogs(ctx, s.db, runID, keep, nil)
+}
+
+// ErrRunStillOpen is what compacting a run's output answers while the run
+// can still print: a reader following it has to find every line.
+var ErrRunStillOpen = errors.New("deployment logs compact only after the run is terminal")
+
+const (
+	// compactStepLines is how many lines one transaction of a compaction
+	// removes. Nothing limits what a run prints while it runs, and a run that
+	// failed was not held to the hot limit until 0.8.6, so a store can hold a
+	// run of any length. Removing three hundred thousand lines in one
+	// transaction held the store's write lock for four seconds on a busy
+	// server and ten on a busier one, and every other writer gives up after
+	// five.
+	compactStepLines = 10_000
+	// compactStepPause is how long a compaction waits between two steps. A
+	// writer on another connection asks for the lock again a tenth of a
+	// second later at most, so this is long enough for it to be given it.
+	compactStepPause = 150 * time.Millisecond
+)
+
+// compactRunLogs is CompactRunLogs on the handle given, compactStepLines at
+// a time, each step a transaction of its own. Between two steps the run reads
+// as one compacted less far: the lines above a watermark, and the watermark.
+// finish, when there is one, runs in the transaction of the last step, so
+// what it writes is there exactly when the compaction is whole.
+func (s *OrchestrationStore) compactRunLogs(ctx context.Context, db *sql.DB, runID int64, keep int, finish func(*sql.Tx) error) error {
 	if keep < 0 {
 		return fmt.Errorf("negative deployment log retention")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	for {
+		done, err := s.compactRunLogsStep(ctx, db, runID, keep, finish)
+		if err != nil || done {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(compactStepPause):
+		}
+	}
+}
+
+func (s *OrchestrationStore) compactRunLogsStep(ctx context.Context, db *sql.DB, runID int64, keep int, finish func(*sql.Tx) error) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback()
+	done, err := compactRunLogsTx(ctx, tx, runID, keep, compactStepLines)
+	if err != nil {
+		return false, err
+	}
+	if done && finish != nil {
+		if err := finish(tx); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return done, nil
+}
+
+// compactRunLogsTx is one step of a compaction inside a transaction of the
+// caller's, which holds the store's write lock. It removes the oldest lines
+// past the newest keep, atMost of them, and reports whether that was all of
+// them.
+func compactRunLogsTx(ctx context.Context, tx *sql.Tx, runID int64, keep, atMost int) (bool, error) {
 	var terminal string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT state FROM deploy_runs WHERE id = ?`, runID).Scan(&terminal); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrRunNotFound
+			return false, ErrRunNotFound
 		}
-		return err
+		return false, err
 	}
 	if !RunState(terminal).Terminal() {
-		return fmt.Errorf("deployment logs compact only after the run is terminal")
+		return false, ErrRunStillOpen
 	}
+	// The newest line that goes: the one after the newest keep. Both this
+	// and the bound below walk the index on (run_id, seq) from one end and
+	// stop, where reading every line of the run to find it was most of what
+	// a compaction cost.
 	var watermark int64
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(MAX(seq), 0) FROM deploy_log_chunks
+	err := tx.QueryRowContext(ctx, `
+		SELECT seq FROM deploy_log_chunks
 		 WHERE run_id = ? AND event_type = ? AND compacted = 0
-		   AND seq NOT IN (
-		     SELECT seq FROM deploy_log_chunks
-		      WHERE run_id = ? AND event_type = ? AND compacted = 0
-		      ORDER BY seq DESC LIMIT ?
-		   )`, runID, EventStepLog, runID, EventStepLog, keep).Scan(&watermark); err != nil {
-		return err
+		 ORDER BY seq DESC LIMIT 1 OFFSET ?`, runID, EventStepLog, keep).Scan(&watermark)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
 	}
-	if watermark == 0 {
-		return tx.Commit()
+	if err != nil {
+		return false, err
 	}
+	done := true
+	// The line atMost lines from the oldest. When it is older than the
+	// watermark, this step stops there and another follows.
+	var bound int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT seq FROM deploy_log_chunks
+		 WHERE run_id = ? AND event_type = ? AND compacted = 0
+		 ORDER BY seq LIMIT 1 OFFSET ?`, runID, EventStepLog, atMost).Scan(&bound)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return false, err
+	case bound < watermark:
+		watermark, done = bound, false
+	}
+	// The mark an earlier, wider compaction or an earlier step left goes
+	// with the lines: only the newest one is read.
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM deploy_log_chunks
-		 WHERE run_id = ? AND event_type = ? AND compacted = 0 AND seq < ?`,
+		 WHERE run_id = ? AND event_type = ? AND seq < ?`,
 		runID, EventStepLog, watermark); err != nil {
-		return err
+		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE deploy_log_chunks
 		   SET compacted = 1, stream = 'status', text = '', data_json = '{}',
 		       redacted = 0, truncated = 0
 		 WHERE run_id = ? AND seq = ?`, runID, watermark); err != nil {
-		return err
+		return false, err
 	}
-	return tx.Commit()
+	return done, nil
 }
 
 func boolInt(value bool) int {

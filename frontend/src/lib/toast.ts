@@ -1,5 +1,6 @@
 import { toast as sonner } from "sonner"
 import { errorMessage } from "@/lib/api"
+import { asSentence } from "@/lib/format"
 
 /**
  * The app's toasts, in one place.
@@ -27,6 +28,11 @@ type Options = {
   action?: { label: string; onClick: () => void }
 }
 
+/** What a failure says under a toast's title: the error's message, as a sentence. */
+export function failureReason(cause: unknown): string {
+  return asSentence(errorMessage(cause))
+}
+
 export const notify = {
   success(title: string, options?: Options) {
     return sonner.success(title, options)
@@ -48,9 +54,14 @@ export const notify = {
    * can be long — a `pg_dump` refusal names two versions and two Debian build
    * strings — so these stay up until dismissed rather than sliding away while
    * somebody is still reading.
+   *
+   * The reason is the API's message, which is worded to sit inside other text:
+   * "not found", "too many requests, slow down". Under a title it stands
+   * alone, so it is given its capital and its full stop here, once, and not by
+   * each caller (`asSentence`, which leaves a tool's own output as it came).
    */
   error(title: string, cause?: unknown, options?: Options) {
-    const description = cause === undefined ? options?.description : errorMessage(cause)
+    const description = cause === undefined ? options?.description : failureReason(cause)
     return sonner.error(title, {
       ...options,
       description,

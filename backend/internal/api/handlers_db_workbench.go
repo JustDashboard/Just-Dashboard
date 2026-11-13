@@ -87,9 +87,8 @@ func (s *Server) handleDBChanges(w http.ResponseWriter, r *http.Request) error {
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"this change set deletes rows and your role does not permit it")
 		}
-		if !s.destrLim.Allow(p.Username() + "|dbchanges") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-				"too many destructive changes, slow down")
+		if err := s.destrLim.Spend(p.Username()+"|dbchanges", "too many destructive changes, slow down"); err != nil {
+			return err
 		}
 	}
 	pool, conn, err := s.dbPool(r.Context(), id)
@@ -159,7 +158,7 @@ func changeError(err error) error {
 			"the database could not apply these changes alongside another transaction; try again").
 			Because("serialization failure", err.Error()).Retry()
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 // keyColumns is which columns a key named, sorted, for the audit log.
@@ -263,7 +262,7 @@ func (s *Server) handleDBScript(w http.ResponseWriter, r *http.Request) error {
 	}
 	statements, err := dbx.ParseScript(conn.Driver, req.Script)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if len(statements) == 0 {
 		return httpx.BadRequest("script is required")
@@ -407,7 +406,7 @@ func (run *dbRun) explain(err error) error {
 	if errors.As(err, &apiErr) {
 		return err
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 type cancelRequest struct {

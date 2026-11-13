@@ -130,7 +130,7 @@ export function PurposePicker({
  * its glyphs, so the switches are laid out where the rows they decide are —
  * a list of sixteen names beside a picture of the rail was the same list
  * twice. Overview, Monitoring and Settings are drawn because every rail has
- * them, and say so instead of carrying a switch; Server configuration is a
+ * them, and say so instead of carrying a switch; Administration is a
  * row that holds three sections, so it is drawn as their heading.
  *
  * Framed in the sidebar's own ground, because it is a picture of the rail.

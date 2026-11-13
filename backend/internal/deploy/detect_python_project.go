@@ -767,29 +767,6 @@ func (p pythonProject) systemPackages(settings string) []DetectedSystemPackage {
 	return result
 }
 
-// pythonNativeBuilds names the locked packages that are compiled for some
-// interpreters and publish nothing a Linux build of this family can install,
-// so pip or uv builds them from source; the system package table already
-// covers the ones it knows.
-func (p pythonProject) nativeBuilds(version, arch string) []string {
-	if p.lock == nil {
-		return nil
-	}
-	main := p.lock.mainPackages()
-	var names []string
-	for _, pkg := range p.lock.packages {
-		if !main[pkg.name] || pythonSystemPackages[pkg.name].packages != nil {
-			continue
-		}
-		support := pythonWheelSupport(pkg.wheels, arch)
-		if support.binary && !support.supports(pythonMinor(version)) {
-			names = append(names, pkg.name+"=="+pkg.version)
-		}
-	}
-	sort.Strings(names)
-	return names
-}
-
 // pythonSourceFiles is a root's Python manifests as the recipe reads them
 // from a build root: the fixed names, every requirement file, and the files
 // they include, each bounded.

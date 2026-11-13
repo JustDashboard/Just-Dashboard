@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/docker/docker/errdefs"
 )
 
@@ -87,8 +88,7 @@ func (o *previewBranchOwner) Start(ctx context.Context) {
 	}
 	ctx, o.cancel = context.WithCancel(ctx)
 	o.done = make(chan struct{})
-	go func() {
-		defer close(o.done)
+	safego.Go(ctx, nil, "preview database branches", func(ctx context.Context) {
 		ticker := time.NewTicker(o.every)
 		defer ticker.Stop()
 		for {
@@ -100,7 +100,7 @@ func (o *previewBranchOwner) Start(ctx context.Context) {
 			case <-o.poke:
 			}
 		}
-	}()
+	}, safego.Close(o.done))
 }
 
 func (o *previewBranchOwner) Stop() {
@@ -167,6 +167,7 @@ func (o *previewBranchOwner) pass(ctx context.Context) {
 			go func(branch deploy.PreviewBranch) {
 				defer o.restores.Done()
 				defer func() { <-o.busy }()
+				defer safego.Recover(nil, "preview branch restore")
 				o.restore(ctx, branch)
 				o.Poke()
 			}(branch)

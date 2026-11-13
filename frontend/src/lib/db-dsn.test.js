@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { buildDsn, maskDsn } from "./db-dsn"
+import { buildDsn } from "./db-dsn"
 
 const fields = {
   host: "127.0.0.1",
@@ -48,14 +48,6 @@ describe("connection strings", () => {
     )
     expect(buildDsn("postgres", { ...fields, host: "fd00::1", port: "5433", password: "" })).toBe(
       "postgres://app@[fd00::1]:5433/shop?sslmode=disable",
-    )
-  })
-  test("mask the password and nothing else", () => {
-    expect(maskDsn("postgres", fields)).toBe(
-      "postgres://app:••••••@127.0.0.1:5432/shop?sslmode=disable",
-    )
-    expect(maskDsn("postgres", { ...fields, password: "" })).toBe(
-      "postgres://app@127.0.0.1:5432/shop?sslmode=disable",
     )
   })
 })

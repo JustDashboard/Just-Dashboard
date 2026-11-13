@@ -45,7 +45,7 @@ import (
 type TLSScan struct {
 	Domain    string    `json:"domain"`
 	Port      int       `json:"port"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 	Reachable bool      `json:"reachable"`
 	Error     string    `json:"error,omitempty"`
 	// Failure is how far a scan that never completed a handshake got, and
@@ -163,8 +163,8 @@ type ProtocolResult struct {
 type ChainLink struct {
 	Subject   string    `json:"subject"`
 	Issuer    string    `json:"issuer"`
-	NotBefore time.Time `json:"notBefore"`
-	NotAfter  time.Time `json:"notAfter"`
+	NotBefore time.Time `json:"notBefore,omitzero"`
+	NotAfter  time.Time `json:"notAfter,omitzero"`
 	Serial    string    `json:"serial"`
 	// Fingerprint is the SHA-256 of the certificate, colon hex.
 	Fingerprint  string   `json:"fingerprint"`
@@ -243,7 +243,7 @@ type HTTPScan struct {
 // RedirectHop is one plain-HTTP request and its answer: a status and where it
 // pointed, or the error when the hop did not answer. Internal is a hop that
 // was not requested at all, because it would have reached this machine or
-// its private network (see followPlainHTTP).
+// its private network (see followPlainHTTPVia).
 type RedirectHop struct {
 	URL      string `json:"url"`
 	Status   int    `json:"status,omitempty"`
@@ -924,7 +924,7 @@ func (c *firstBytes) firstLine() string {
 // scanClient makes one request per call and follows nothing. Redirects are
 // the subject of the test: a client that follows them reports the headers of
 // wherever it ended up, which may be an entirely different host, so
-// followPlainHTTP walks the plain ones by hand.
+// followPlainHTTPVia walks the plain ones by hand.
 func scanClient(transport *http.Transport) *http.Client {
 	return &http.Client{
 		Timeout:       10 * time.Second,
@@ -942,7 +942,7 @@ const maxRedirectHops = 5
 // have reached this machine or its private network.
 var errInternalHop = errors.New("not requested: an address on this machine or its private network")
 
-// followPlainHTTP requests start and follows its redirects by hand until one
+// followPlainHTTPVia requests start and follows its redirects by hand until one
 // points at https://, an answer is not a redirect, a URL comes round again or
 // the hops run out, and says which of those ended it (HTTPScan's
 // RedirectVerdict). The error is the first request's, when nothing answered
@@ -956,13 +956,10 @@ var errInternalHop = errors.New("not requested: an address on this machine or it
 // network behind it, and read their redirects back in the report. The check
 // is on the address actually dialled, after DNS, so a name that resolves
 // inward is caught too. Such a hop is recorded as Internal, unrequested.
-func followPlainHTTP(ctx context.Context, start string) ([]RedirectHop, string, error) {
-	return followPlainHTTPVia(ctx, start, "")
-}
-
-// followPlainHTTPVia is followPlainHTTP with every request to start's own host
-// dialled to connect instead, when it is set. Hops to other hosts go where
-// their records say, and stay under the same guard.
+//
+// When connect is set, every request to start's own host is dialled to it
+// instead. Hops to other hosts go where their records say, and stay under the
+// same guard.
 func followPlainHTTPVia(ctx context.Context, start, connect string) ([]RedirectHop, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

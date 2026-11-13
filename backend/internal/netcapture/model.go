@@ -53,7 +53,7 @@ type Run struct {
 	Name        string     `json:"name"`
 	Request     Request    `json:"request"`
 	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"createdAt"`
+	CreatedAt   time.Time  `json:"createdAt,omitzero"`
 	StartedAt   *time.Time `json:"startedAt,omitempty"`
 	EndedAt     *time.Time `json:"endedAt,omitempty"`
 	CreatedBy   string     `json:"createdBy"`
@@ -64,7 +64,7 @@ type Run struct {
 }
 
 type Result struct {
-	CheckedAt         time.Time            `json:"checkedAt"`
+	CheckedAt         time.Time            `json:"checkedAt,omitzero"`
 	Packets           int                  `json:"packets"`
 	Bytes             int                  `json:"bytes"`
 	LinkType          uint32               `json:"linkType"`

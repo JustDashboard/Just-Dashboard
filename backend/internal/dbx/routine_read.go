@@ -597,8 +597,6 @@ func newHeaderScan(driver Driver, text string) (*headerScan, error) {
 	return &headerScan{driver: driver, text: text, toks: toks}, nil
 }
 
-func (h *headerScan) more() bool { return h.pos < len(h.toks) }
-
 func (h *headerScan) raw(i int) string { return h.text[h.toks[i].start:h.toks[i].end] }
 
 // word is the lower-case word at the current token, or "".

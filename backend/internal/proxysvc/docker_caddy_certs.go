@@ -53,7 +53,7 @@ type CertificateEvidence struct {
 	Name     string    `json:"name"`
 	Path     string    `json:"path"`
 	Domains  []string  `json:"domains"`
-	NotAfter time.Time `json:"notAfter"`
+	NotAfter time.Time `json:"notAfter,omitzero"`
 }
 
 // caddyEvidenceFor is the directory a copy for this hostname is kept in, as

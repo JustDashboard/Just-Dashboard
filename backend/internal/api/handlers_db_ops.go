@@ -130,7 +130,7 @@ func (s *Server) handleDBCancel(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	if err := dbx.CancelQuery(ctx, pool, conn.Driver, req.PID); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "database.session.cancel", conn.Name, map[string]any{"pid": req.PID})
 	httpx.JSON(w, http.StatusOK, map[string]any{"cancelled": req.PID})
@@ -308,9 +308,8 @@ func (s *Server) handleDBMaintenance(w http.ResponseWriter, r *http.Request) err
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				action.ID+" "+why+" and your role does not permit it")
 		}
-		if !s.destrLim.Allow(p.Username() + "|dbmaintenance") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-				"too many blocking maintenance actions, slow down")
+		if err := s.destrLim.Spend(p.Username()+"|dbmaintenance", "too many blocking maintenance actions, slow down"); err != nil {
+			return err
 		}
 	}
 	pool, _, err := s.dbPool(r.Context(), id)
@@ -366,7 +365,7 @@ func (s *Server) handleDBStatementsReset(w http.ResponseWriter, r *http.Request)
 	}
 	if err != nil {
 		httpx.SetAudit(r, "database.statements.reset", conn.Name, map[string]any{"error": err.Error()})
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	s.dbStatements.noteReset(conn.ID)
 	httpx.SetAudit(r, "database.statements.reset", conn.Name, map[string]any{"statement": statement})
@@ -399,7 +398,7 @@ func (s *Server) handleDBStatementsPreload(w http.ResponseWriter, r *http.Reques
 	var refused dbx.ErrSettingRequest
 	if errors.As(err, &refused) {
 		httpx.SetAudit(r, "database.statements.preload", conn.Name, map[string]any{"refused": err.Error()})
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if err != nil {
 		httpx.SetAudit(r, "database.statements.preload", conn.Name, map[string]any{"error": err.Error()})
@@ -494,7 +493,10 @@ func (s *Server) handleDBSettingsList(w http.ResponseWriter, r *http.Request) er
 		// shape; it is the same list under this address.
 		return s.handleDBSettings(w, r)
 	}
-	all := r.URL.Query().Get("all") == "1"
+	all, err := httpx.QueryBool(r, "all")
+	if err != nil {
+		return err
+	}
 	pool, _, err := s.dbPool(r.Context(), id)
 	if err != nil {
 		return err
@@ -580,7 +582,7 @@ func (s *Server) handleDBSettingChange(w http.ResponseWriter, r *http.Request) e
 		}
 		// A refusal of ours and a refusal of the engine's are both about the
 		// value that was sent, and both are printed beside the field.
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	detail["persisted"], detail["restartRequired"] = change.Persisted, change.RestartRequired
 	if !sensitive {
@@ -815,7 +817,12 @@ func (s *Server) changePrivileges(w http.ResponseWriter, r *http.Request, revoke
 	if privilegeElsewhere(conn, change) && !dbNameRe.MatchString(change.Database) {
 		return httpx.BadRequest("a database name is letters, digits and underscores")
 	}
-	preview := r.URL.Query().Get("preview") == "1"
+	// Read strictly: a preview that failed to parse as one must never fall
+	// through to the grant or the revoke.
+	preview, err := httpx.QueryBool(r, "preview")
+	if err != nil {
+		return err
+	}
 	if preview {
 		// Nothing changes, whether it answers or fails.
 		httpx.SkipAudit(r)
@@ -879,7 +886,7 @@ func privilegeError(driver dbx.Driver, err error) error {
 	if errors.Is(err, dbx.ErrUnsupported) {
 		return httpx.BadRequest("%s privileges are not granted object by object from here", driver)
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 // privilegeElsewhere reports whether a change has to run on a connection to
@@ -940,10 +947,14 @@ func (s *Server) handleClickHouseParts(w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 	q := r.URL.Query()
+	inactive, err := httpx.QueryBool(r, "inactive")
+	if err != nil {
+		return err
+	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	parts, err := dbx.ClickHouseTableParts(ctx, pool, strings.TrimSpace(q.Get("database")),
-		strings.TrimSpace(q.Get("table")), q.Get("inactive") == "1")
+		strings.TrimSpace(q.Get("table")), inactive)
 	if err != nil {
 		return queryFailed(err)
 	}

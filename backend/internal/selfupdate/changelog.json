@@ -1,6 +1,145 @@
 {
-  "latest": "0.8.5",
+  "latest": "0.8.6",
   "releases": [
+    {
+      "version": "0.8.6",
+      "date": "2026-11-13",
+      "title": "Updates that wait for a tag, and a page for every process and service",
+      "summary": "An update is now offered only once its release is tagged, the dashboard copies its own database first, and an update cut off halfway is put back. Every process, service and schedule has a page or sheet of its own, the Databases map is drawn on the server map's canvas, and ranked lists read as figures. A full audit of the dashboard fixed 97 findings across the API, the store, the assistant and the pages.",
+      "breaking": true,
+      "breakingNote": "About a minute after this version starts, each deployment environment keeps the whole output of its newest 200 runs and older runs are cut to their last 200 lines. That cannot be undone. To keep everything, set JD_DEPLOY_HISTORY_RUNS=0 in .env before updating. An install that follows another branch of this repository through JD_UPDATE_BRANCH is no longer updated in the app to that branch's head: it is offered tagged releases only.",
+      "changes": [
+        {
+          "kind": "changed",
+          "text": "An update is offered only once its release is tagged",
+          "detail": "An install that follows the project's repository is offered, and installs, a version only when the tag v<version> exists, which is made after every check has passed. A fork named in JD_UPDATE_REPO still follows its branch."
+        },
+        {
+          "kind": "added",
+          "text": "The dashboard copies its own database before an update",
+          "detail": "The copy is kept under pre-update/ in the data directory, the newest two kept. An update that was cut off halfway is put back at the next start, and build cache unused for a week is pruned after an update."
+        },
+        {
+          "kind": "added",
+          "text": "Update, roll back and read the version from a shell",
+          "detail": "scripts/manage.sh gains update, rollback and version, and the administration guide says what an update trusts and how to recover one over SSH."
+        },
+        {
+          "kind": "added",
+          "text": "The installer looks at the server first",
+          "detail": "install.sh stops on a host without systemd or on an architecture other than x86_64 and arm64, and warns with the numbers when memory plus swap or free disk is short."
+        },
+        {
+          "kind": "changed",
+          "text": "Every base image is pinned to the one this release was tested with",
+          "detail": "The images the stack is built from, Caddy included, are named by tag and digest, so an update no longer builds from whatever the registry serves that day."
+        },
+        {
+          "kind": "added",
+          "text": "Every process and every service has a page of its own",
+          "detail": "Opening a process or a systemd service leads to its own page, with the table as a rail beside it, instead of a sheet over the list."
+        },
+        {
+          "kind": "changed",
+          "text": "Scheduled shows the next hours as a chart, with one sheet for every schedule",
+          "detail": "An hour chart stands over Up next, cron jobs and timers open the same sheet, and the tables are plainer."
+        },
+        {
+          "kind": "changed",
+          "text": "The Databases map is drawn on the server map's canvas",
+          "detail": "One diagram per database, left to right: what reads it, a pooler, the database, what it runs in, the volume that keeps its data and the backups that cover it. It pans, zooms and drags like the server map. The overview keeps its cards; the cards and table switch is gone."
+        },
+        {
+          "kind": "changed",
+          "text": "Ranked lists on the Databases and Logs pages read as figures, not bars",
+          "detail": "Largest tables, busiest statements, Redis namespaces and MongoDB collections show each value with its share. The logs page's Insights is drawn the way a project's Logs Insights is."
+        },
+        {
+          "kind": "added",
+          "text": "Turn slow-statement recording on from the Queries view in one press"
+        },
+        {
+          "kind": "changed",
+          "text": "What nothing claims stands in rows on the server map",
+          "detail": "What no system claims used to stand in one long column."
+        },
+        {
+          "kind": "changed",
+          "text": "\"Ask before changes\" asks more often",
+          "detail": "A shell line counts as a read only when everything in it is known to be one, and a read that sends text to another machine (a certificate check, a DNS lookup, a ping, a database connection test) waits for an Allow too."
+        },
+        {
+          "kind": "fixed",
+          "text": "A preview flag spelled the other way no longer runs the real change",
+          "detail": "On two database routes a preview flag spelled a way the route did not expect ran the change. A boolean query flag is now 1, 0, true or false on every route, and anything else is refused."
+        },
+        {
+          "kind": "fixed",
+          "text": "Two reads that could stop every other request",
+          "detail": "Both could hold every connection to the dashboard's own database at once. A test now calls every read of that shape with a single connection."
+        },
+        {
+          "kind": "fixed",
+          "text": "A slow or throttled session check no longer signs you out",
+          "detail": "A throttled or failed check on page load used to send a signed-in person to the sign-in page. Pages also back off when the server asks them to, and a link opened while signed out returns to its page after sign-in."
+        },
+        {
+          "kind": "fixed",
+          "text": "Disks are measured as the host sees them",
+          "detail": "/boot, /boot/efi and second disks appear with their own sizes. A filesystem alert may fire for the first time, and a chart can show a step until older samples age out."
+        },
+        {
+          "kind": "added",
+          "text": "The Overview says when the dashboard itself is in trouble",
+          "detail": "A full disk under the dashboard or a background task that keeps failing is named on the Overview. A reserve keeps sign-in possible on a full disk, and a failing background task is restarted instead of restarting the dashboard."
+        },
+        {
+          "kind": "changed",
+          "text": "API errors say what happened",
+          "detail": "Every answer carries X-Request-Id and a server error names it. A missing nginx, Docker or systemd is 503 not_installed everywhere, a fault on the server's side is no longer reported as the caller's mistake, and a 429 says the real wait, which jd and both SDKs wait out. A browser session and each API key have a rate budget of their own."
+        },
+        {
+          "kind": "fixed",
+          "text": "Files stays quick in a large folder",
+          "detail": "The page no longer redraws every row every two seconds or on every click."
+        },
+        {
+          "kind": "changed",
+          "text": "Pages hold still, name their item and read with a keyboard",
+          "detail": "A browser tab names the item as well as the section, what sits under a loading block no longer jumps when it lands, the sidebar shows keyboard focus, faded text meets WCAG AA, and closing a dialog gives the keyboard back to what opened it. On a phone, Logs and the network tools show one pane at a time."
+        },
+        {
+          "kind": "changed",
+          "text": "Build output is written in batches",
+          "detail": "A build's lines are stored once and in batches, so long builds cost less. After a power cut the last moments of build output or metrics can be missing; accounts, sessions, audit entries and deployment state are still written at once."
+        },
+        {
+          "kind": "security",
+          "text": "The dashboard's database files are private from the first start",
+          "detail": "The store's file, its log and its index are readable by the owner only, and the data directory loses read and write for group and others."
+        },
+        {
+          "kind": "security",
+          "text": "The documents say plainly what each role can reach",
+          "detail": "SECURITY.md and the role picker say that limited and admin are both root on the machine, and what read-only can read. The master key still cannot be rotated, and the documents record why."
+        },
+        {
+          "kind": "security",
+          "text": "Go 1.26.11 and three updated modules",
+          "detail": "Advisories that reach the code go from six to two. The two left are in the Docker client and have no fixed version yet."
+        },
+        {
+          "kind": "changed",
+          "text": "A build that is not a release says so",
+          "detail": "Anything built from a commit other than the tagged one reports its version with the commit, as 0.8.6+98c9349."
+        },
+        {
+          "kind": "fixed",
+          "text": "Backup job cards no longer jump as the Backups page loads",
+          "detail": "A card could be drawn in its narrow shape for one frame and then widen, moving every card under it."
+        }
+      ]
+    },
     {
       "version": "0.8.5",
       "date": "2026-11-06",

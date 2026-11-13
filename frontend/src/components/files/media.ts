@@ -31,7 +31,6 @@ export function mediaKind(name: string): MediaKind | null {
 }
 
 export const isImage = (name: string) => mediaKind(name) === "image"
-export const isVideo = (name: string) => mediaKind(name) === "video"
 
 /** Archives the backend can extract in place. */
 const EXTRACTABLE_RE = /\.(zip|tar|tar\.gz|tgz)$/i
@@ -104,6 +103,24 @@ export const baseOf = (p: string) => cleanPath(p).split("/").pop() || "/"
 export function isWithin(path: string, dir: string): boolean {
   const d = cleanPath(dir)
   return d === "/" || path === d || path.startsWith(d + "/")
+}
+
+/**
+ * The disk a path is on: the mount that holds it and is deepest, as `df` would
+ * answer. Nothing while no frame has carried mounts yet, or for no path.
+ */
+export function mountOf<M extends { mountpoint: string }>(
+  mounts: readonly M[] | null | undefined,
+  path: string | null | undefined,
+): M | undefined {
+  if (!path || !Array.isArray(mounts)) return undefined
+  let best: M | undefined
+  for (const m of mounts) {
+    if (isWithin(path, m.mountpoint) && (!best || m.mountpoint.length > best.mountpoint.length)) {
+      best = m
+    }
+  }
+  return best
 }
 
 /** The MIME type the drag payload of a set of paths travels as. */

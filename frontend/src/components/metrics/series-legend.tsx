@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useSyncExternalStore } from "react"
+import { memo, useMemo, useSyncExternalStore } from "react"
 import { cn } from "@/lib/utils"
 import { getCrosshair, getServerCrosshair, subscribeCrosshair } from "@/lib/metrics-crosshair"
 import { seriesFormat, type ChartRowLike, type Series } from "@/components/metrics/metric-chart"
@@ -18,8 +18,11 @@ import { seriesFormat, type ChartRowLike, type Series } from "@/components/metri
  * the value its series held at that instant. So reading "what was memory doing
  * during that CPU spike" is a matter of hovering the spike and looking down,
  * rather than aligning two graphs by eye.
+ *
+ * Memoised with the plot it sits under (`MetricChart`): a panel re-rendered
+ * for the live figure in its head has no new rows, and no new legend.
  */
-export function SeriesLegend({
+export const SeriesLegend = memo(function SeriesLegend({
   rows,
   series,
   format,
@@ -114,7 +117,7 @@ export function SeriesLegend({
       </table>
     </div>
   )
-}
+})
 
 type Stat = { min: number; mean: number; max: number; last: number | null }
 

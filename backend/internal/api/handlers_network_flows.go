@@ -63,7 +63,7 @@ func (s *Server) handleFlowObserver(w http.ResponseWriter, r *http.Request) erro
 func mapFlowError(err error) error {
 	switch {
 	case errors.Is(err, netflows.ErrInvalid):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	case errors.Is(err, netflows.ErrUnavailable):
 		return httpx.Err(http.StatusServiceUnavailable, "flow_accounting_unavailable", err.Error()).Retry()
 	default:

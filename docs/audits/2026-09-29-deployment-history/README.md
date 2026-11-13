@@ -17,12 +17,12 @@ overflow. The phone uses reduced motion; desktop uses normal motion. Against the
 
 | Capture | Image |
 | --- | --- |
-| Desktop before (1280) | [Before](before-desktop.png) |
-| Phone before (390) | [Before](before-phone.png) |
-| Desktop after (1280) | [After](after-desktop.png) |
-| Wide desktop after (1720) | [After](after-wide.png) |
-| Phone delivery (390) | [After](after-phone.png) |
-| Phone filters (390) | [After](after-phone-filters.png) |
+| Desktop before (1280) | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-09-29-deployment-history/before-desktop.png) |
+| Phone before (390) | [Before](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-09-29-deployment-history/before-phone.png) |
+| Desktop after (1280) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-09-29-deployment-history/after-desktop.png) |
+| Wide desktop after (1720) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-09-29-deployment-history/after-wide.png) |
+| Phone delivery (390) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-09-29-deployment-history/after-phone.png) |
+| Phone filters (390) | [After](https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-09-29-deployment-history/after-phone-filters.png) |
 
 Captures use mocked API responses and a 24-run production history. Local validation passed:
 `cd frontend && bun run build` and

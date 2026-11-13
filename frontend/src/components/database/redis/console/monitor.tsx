@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Play, StopCircle, Warning } from "@/components/icons"
-import { duration, plural } from "@/lib/format"
+import { clockAt, duration, plural } from "@/lib/format"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useMemoryState } from "@/lib/view-state"
-import { BarList } from "@/components/bar-list"
+import { RankList, type RankItem } from "@/components/rank-list"
 import { Segments } from "@/components/deploy/settings/segments"
 import { SearchInput } from "@/components/page"
 import { Notice } from "@/components/state"
@@ -34,7 +34,7 @@ const ENDED: Record<RedisFeedEnd["reason"], string> = {
 /** A moment of the server's clock, to the millisecond. */
 function at(seconds: number): string {
   const date = new Date(seconds * 1000)
-  return `${date.toLocaleTimeString(undefined, { hour12: false })}.${String(date.getMilliseconds()).padStart(3, "0")}`
+  return `${clockAt(date)}.${String(date.getMilliseconds()).padStart(3, "0")}`
 }
 
 /**
@@ -126,16 +126,15 @@ export function MonitorView({ redis }: { redis: Redis }) {
         : events,
     [events, wanted],
   )
-  const top = useMemo(() => {
+  const top = useMemo<RankItem[]>(() => {
     const counts = new Map<string, number>()
     for (const event of events) counts.set(event.command, (counts.get(event.command) ?? 0) + 1)
     const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)
-    const most = ranked[0]?.[1] ?? 1
     return ranked.map(([command, count]) => ({
       key: command,
       label: command,
       value: count.toLocaleString(),
-      share: count / most,
+      share: count / events.length,
       onClick: () => setFilter(command),
       title: `Show only ${command}`,
     }))
@@ -239,7 +238,7 @@ export function MonitorView({ redis }: { redis: Redis }) {
           />
           <div className="shrink-0 overflow-auto border-hairline p-3 max-lg:max-h-48 max-lg:border-t lg:w-64 lg:border-l">
             <p className="eyebrow pb-1">Most run</p>
-            <BarList items={top} emptyLabel="Nothing has run yet." />
+            <RankList items={top} emptyLabel="Nothing has run yet." />
           </div>
         </div>
       )}

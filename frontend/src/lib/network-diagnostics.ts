@@ -336,15 +336,6 @@ export function readDiagnosticHistory(value: unknown): DiagnosticHistory {
   return history
 }
 
-/** One metric across a request's retained runs, oldest first, gaps kept as null. */
-export function historySeries(history: DiagnosticHistory, key: string) {
-  return history.points.map((point) => ({
-    id: point.id,
-    at: point.createdAt,
-    value: point.metrics.find((metric) => metric.key === key)?.value ?? null,
-  }))
-}
-
 /** The metric keys that appear in any retained run, in first-seen order. */
 export function historyKeys(history: DiagnosticHistory) {
   const seen = new Map<string, { key: string; label: string; unit?: string }>()

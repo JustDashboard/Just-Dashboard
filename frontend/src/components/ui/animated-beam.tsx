@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useId, useState, type RefObject } from "react"
-import { motion, useReducedMotion } from "motion/react"
 
 import { cn } from "@/lib/utils"
 
@@ -14,8 +13,16 @@ import { cn } from "@/lib/utils"
  *
  * It measures the two ends against `containerRef` and redraws when the
  * container resizes, so the ends can be laid out by CSS and the line follows.
- * Reduced motion draws the still line: the root `prefers-reduced-motion` rule
- * only reaches CSS animations, and this one is driven from JavaScript.
+ *
+ * The pulse is a band of the two colours, a tenth of the picture wide, that
+ * crosses the picture behind a mask cut to the line, so it is lit only where
+ * the line is. The band moves by `transform` on a CSS animation (`jd-beam` in
+ * `globals.css`), which the browser runs off the main thread. It was a
+ * gradient whose ends a JavaScript frame loop rewrote sixty times a second,
+ * for as long as the page was open: a page that looked still was never idle,
+ * and a dashboard is the page that stays open all day. `duration` is one pass
+ * and its rest together with `repeatDelay`, five sixths of it moving.
+ * Reduced motion draws the still line, in CSS as well.
  *
  * `once` sends a single pulse and then draws the line still — §11's *once*,
  * for the picture of one thing that just happened (a test message leaving for
@@ -79,15 +86,11 @@ export function AnimatedBeam({
   endXOffset?: number
   endYOffset?: number
 }) {
-  const id = useId()
-  const reduced = useReducedMotion()
+  // React's ids carry characters a `url(#…)` reference should not have to quote.
+  const id = useId().replace(/[^a-zA-Z0-9_-]/g, "")
   const [pathD, setPathD] = useState("")
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [spent, setSpent] = useState(false)
-
-  const gradient = reverse
-    ? { x1: ["90%", "-10%"], x2: ["100%", "0%"], y1: ["0%", "0%"], y2: ["0%", "0%"] }
-    : { x1: ["10%", "110%"], x2: ["0%", "100%"], y1: ["0%", "0%"], y2: ["0%", "0%"] }
 
   useEffect(() => {
     const update = () => {
@@ -127,7 +130,7 @@ export function AnimatedBeam({
     endYOffset,
   ])
 
-  const quiet = still || reduced || spent
+  const quiet = still || spent
 
   return (
     <svg
@@ -148,34 +151,53 @@ export function AnimatedBeam({
           tone === "success" && "stroke-success",
           tone === "warning" && "stroke-warning",
           tone === "danger" && "stroke-destructive",
-          tone === "default" && (quiet ? "stroke-border-strong" : "stroke-border"),
+          tone === "default" &&
+            (quiet ? "stroke-border-strong" : "stroke-border motion-reduce:stroke-border-strong"),
         )}
       />
-      {!quiet && (
+      {!quiet && pathD && (
         <>
-          <path d={pathD} strokeWidth={pathWidth} stroke={`url(#${id})`} strokeLinecap="round" />
           <defs>
-            <motion.linearGradient
-              className="transform-gpu"
-              id={id}
-              gradientUnits="userSpaceOnUse"
-              initial={{ x1: "0%", x2: "0%", y1: "0%", y2: "0%" }}
-              animate={gradient}
-              transition={{
-                delay,
-                duration,
-                ease: [0.16, 1, 0.3, 1],
-                repeat: once ? 0 : Infinity,
-                repeatDelay,
-              }}
-              onAnimationComplete={once ? () => setSpent(true) : undefined}
+            {/* The band's own colours, its head at the end it travels toward. */}
+            <linearGradient
+              id={`${id}-pulse`}
+              x1={reverse ? 0 : 1}
+              x2={reverse ? 1 : 0}
+              y1="0"
+              y2="0"
             >
-              <stop style={{ stopColor: "var(--brand)" }} stopOpacity="0" />
               <stop style={{ stopColor: "var(--brand)" }} />
               <stop offset="32.5%" style={{ stopColor: "var(--signal)" }} />
               <stop offset="100%" style={{ stopColor: "var(--signal)" }} stopOpacity="0" />
-            </motion.linearGradient>
+            </linearGradient>
+            {/* In the picture's own units: a level line has no height for a
+                mask sized by what it masks to stand on. */}
+            <mask
+              id={`${id}-line`}
+              maskUnits="userSpaceOnUse"
+              x="0"
+              y="0"
+              width={size.width}
+              height={size.height}
+            >
+              <path d={pathD} strokeWidth={pathWidth} stroke="#fff" strokeLinecap="round" />
+            </mask>
           </defs>
+          <g mask={`url(#${id}-line)`} className="motion-reduce:hidden" data-slot="beam-pulse">
+            {/* It waits and rests off the picture's edge, so a `delay` and the
+                pause between passes show the line alone. */}
+            <rect
+              x={reverse ? "100%" : "-10%"}
+              y="0"
+              width="10%"
+              height="100%"
+              fill={`url(#${id}-pulse)`}
+              style={{
+                animation: `${reverse ? "jd-beam-back" : "jd-beam"} ${duration + repeatDelay}s ${delay}s ${once ? 1 : "infinite"}`,
+              }}
+              onAnimationEnd={once ? () => setSpent(true) : undefined}
+            />
+          </g>
         </>
       )}
     </svg>

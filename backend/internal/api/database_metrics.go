@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 const databaseMetricEvery = 30 * time.Second
@@ -68,8 +69,7 @@ func databaseMetricIdentity(rec *dbConnRecord) string {
 func (s *Server) startDatabaseMetrics(ctx context.Context) {
 	ctx, s.dbMetricsStop = context.WithCancel(ctx)
 	s.dbMetricsDone = make(chan struct{})
-	go func() {
-		defer close(s.dbMetricsDone)
+	safego.Go(ctx, s.Log, "database metrics recorder", func(ctx context.Context) {
 		timer := time.NewTicker(databaseMetricEvery)
 		defer timer.Stop()
 		for {
@@ -80,7 +80,7 @@ func (s *Server) startDatabaseMetrics(ctx context.Context) {
 			case <-timer.C:
 			}
 		}
-	}()
+	}, safego.Close(s.dbMetricsDone))
 	s.startStatementHistory(ctx)
 }
 

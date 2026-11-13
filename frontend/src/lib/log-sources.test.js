@@ -6,7 +6,6 @@ import {
   journalSource,
   kernelSource,
   pm2Source,
-  sourceKindOf,
   stackSource,
 } from "./log-sources"
 
@@ -34,10 +33,4 @@ test("a PM2 source escapes the account and the name, which may hold slashes", ()
     3,
     "api worker/1",
   ])
-})
-
-test("the kind is read back off the prefix", () => {
-  expect(sourceKindOf(stackSource("shop"))).toBe("stack")
-  expect(sourceKindOf(fileSource("/var/log/x:y"))).toBe("file")
-  expect(sourceKindOf("nonsense")).toBe("")
 })

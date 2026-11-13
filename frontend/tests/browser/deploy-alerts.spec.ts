@@ -29,9 +29,13 @@ test.describe("traffic alerts", () => {
     await page.getByLabel("Alert limit").fill("800")
     await page.getByLabel("Alert window in minutes").fill("10")
     // The form speaks the rule back before it is saved.
-    await expect(page.getByText("Slow responses: p95 above 800ms over 10 min.")).toBeVisible()
+    await expect(
+      page.getByText("Slow responses: more than 1 in 20 requests slower than 800ms over 10 min."),
+    ).toBeVisible()
     await page.getByRole("button", { name: "Add alert" }).click()
-    await expect(card.getByText("p95 above 800ms over 10 min")).toBeVisible()
+    await expect(
+      card.getByText("more than 1 in 20 requests slower than 800ms over 10 min"),
+    ).toBeVisible()
   })
 
   // The Logs page is where a reader finds out that nobody would have been told,

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/events"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The Docker event stream, kept rather than merely forwarded.
@@ -31,7 +33,7 @@ import (
 
 // Event is one thing that happened, in a shape the UI can render directly.
 type Event struct {
-	Time time.Time `json:"time"`
+	Time time.Time `json:"time,omitzero"`
 	// Type is Docker's object class: container, image, volume, network,
 	// daemon, plugin.
 	Type   string `json:"type"`
@@ -156,7 +158,7 @@ func (c *Client) NewEventLog(log *slog.Logger) *EventLog {
 // serves the rest of the dashboard, and a recorder that logged a failure every
 // five seconds would be the noisiest thing in the process log.
 func (e *EventLog) Start(ctx context.Context) {
-	go func() {
+	safego.Go(ctx, e.log, "docker event log", func(ctx context.Context) {
 		backoff := time.Second
 		for {
 			if ctx.Err() != nil {
@@ -177,7 +179,7 @@ func (e *EventLog) Start(ctx context.Context) {
 				backoff *= 2
 			}
 		}
-	}()
+	})
 }
 
 func (e *EventLog) follow(ctx context.Context) error {

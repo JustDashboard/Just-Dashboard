@@ -7,6 +7,12 @@ using PID plus creation time as identity. Keyboard inspection and place restorat
 [workspace controller](../frontend/workspace-interactions.md); explicit refresh and changed filters
 still read while paused. Signal and priority route guards remain the contracts below.
 
+A server without systemd answers every systemd route `503 not_installed` (`mapProcsError`): a missing
+`systemctl`, and equally a `systemctl` that is there on a machine whose init is something else (a
+container), which used to be a `502 command_failed` in systemctl's words. A command that ran out of
+its time is `504 timeout` (`procs.run` keeps the deadline in the error's chain); only a command that
+ran and failed is `502 command_failed`.
+
 `internal/procs/table.go` is a live inventory rather than a thin `ps` rendering. The kernel's cgroup
 membership identifies systemd services, containers and login sessions; an empty command line with
 `PF_KTHREAD` among the task flags in `/proc/<pid>/stat` identifies a kernel thread (an empty command line
@@ -56,8 +62,8 @@ socket-activated service's port.
   kernel thread is refused as `409 kernel_thread` and a signal or priority to a zombie as
   `409 process_zombie` naming its parent (`procs.Controllable`): the kernel ignores the first and the
   second has already exited, and both used to answer a Kill with success.
-- The detail sheet exposes identity, cwd/executable links, resource counters and controls without returning
-  environment variables (process environments routinely contain secrets). `Detail` also reads what the
+- The live detail (`GET /processes/{pid}`, polled every two seconds by the process page) carries identity,
+  cwd/executable, resource counters and controls and never the environment. `Detail` also reads what the
   process listens on and how many connections it holds (`sockets` in `detail.go`, from gopsutil's
   per-process connection list) and its soft `NOFILE` limit, so an open-file count is a warning rather
   than a number; a snapshot leaves those empty because reading every process's sockets on each poll
@@ -65,11 +71,39 @@ socket-activated service's port.
   and direct children from one pass over the table, because the remedy for a runaway worker is
   usually its supervisor; each link's CPU is the sampler's last measured window for that process
   (`cpuReady` false where there is none), not gopsutil's average over the process's whole life.
-  Signals are the existing `POST /processes/{pid}/signal`; the page offers SIGTERM, SIGKILL,
-  SIGSTOP/SIGCONT, SIGHUP, SIGINT, SIGUSR1 and SIGUSR2 as words with a sentence each, and none of them
-  to a kernel thread or a zombie, whose menu opens its parent instead. The detail sheet polls every two
-  seconds while open and stops, keeping the last reading, when the PID answers 404 or its creation
-  time changes. PM2 can gracefully reload and
+  Signals are `POST /processes/{pid}/signal`; the route accepts SIGTERM, SIGKILL, SIGSTOP/SIGCONT,
+  SIGHUP, SIGINT, SIGQUIT, SIGUSR1/SIGUSR2, SIGWINCH and SIGTTIN/SIGTTOU (the last four are what Go
+  and Java stack dumps, nginx's graceful worker stop and gunicorn's worker count use), and the page
+  offers them as words with a sentence each and none of them to a kernel thread or a zombie, whose
+  menu opens its parent instead. With `"tree": true` the signal goes to the process and then to every
+  descendant read before the first signal (`SignalTree` in `control.go`): the process first, so a
+  supervisor told to stop does not start new workers in place of the ones being ended; kernel threads,
+  zombies and any child whose start time changed since the tree was read (a reused PID) are passed
+  over; a tree holding the dashboard's own process is refused whole as
+  `409 own_tree`; the answer and the audit record list every PID reached. The process page polls the
+  live detail every two seconds and stops, keeping the last reading, when the PID answers 404 or its
+  creation time changes.
+- `GET /processes/{pid}/inspect` (`inspect.go`) is the process page's slower read, every eight seconds:
+  argv, the executable and whether it was replaced on disk since the process started, its root and wait
+  channel, the PID inside its own namespace; real/effective/saved user and group by name, its groups,
+  terminal, session and process group; the scheduler policy, nice, allowed CPUs, processor time (its
+  own and reaped children's), block-I/O wait, context switches and faults; memory from `status` and
+  `smaps_rollup` (anonymous, file-backed, shared, swap, peak, PSS and USS) with the OOM score and bias;
+  `/proc/<pid>/io`; effective capabilities, the bounding set, no_new_privs, seccomp and the LSM label;
+  the caught, ignored, blocked and pending signal masks by name, which is how the page says whether a
+  hang-up reloads a daemon or ends it; which namespaces differ from PID 1's; the unified cgroup path
+  and its `memory.max`, `cpu.max` and `pids.max` where readable; every rlimit; every descriptor counted
+  by kind with the first 500 listed (deleted files flagged); the shared libraries mapped, replaced ones
+  first; the non-listening sockets (the first 200); its threads by processor time (the first 200); and
+  its environment. **The environment carries credentials, so the route masks credential-shaped values
+  (`dockerx.RedactEnv`, the container rule) for anybody without `system.admin`, and always for the
+  dashboard's own process**, whose environment holds the master key. Every block carries `ready` false
+  where the account cannot read it, and every list is a list. `InspectAt` reads under any root, so
+  `inspect_test.go` runs it over a directory laid out as `/proc`.
+- `PUT /processes/{pid}/oom` sets the out-of-memory killer's bias (−1000…1000) by writing
+  `/proc/<pid>/oom_score_adj`, a path built from the PID alone. It is `system.admin`, guarded by the
+  create timestamp like a priority change, refused for PID 1, the dashboard itself, kernel threads and
+  zombies, and audited as `process.oom` with the previous bias. PM2 can gracefully reload and
   `pm2 save` persists the current list for an existing startup hook; it does not install or rewrite that
   platform-specific hook. The systemd sheet reads effective runtime properties beside the journal and
   links to the unit file; static units do not get an enable/disable control they cannot use. Its
@@ -130,6 +164,10 @@ socket-activated service's port.
   `EXIT_STATUS` and the cursor, and takes the invocation of the unit a manager line names
   (`INVOCATION_ID`, then `USER_INVOCATION_ID`) over the writer's own: a user manager is
   `user@1000.service`, one run, under which every run of every user unit would otherwise fold into one.
+- **No systemd is not a failed command.** `Systemd.Available` needs systemctl and a running manager
+  (`/run/systemd/system`, `procs.SystemdRunDir`). Without one the two lists answer `available: false`
+  and every other route answers 503 `systemd_not_running` with a reason, having run nothing
+  ([runtime boundaries](../architecture/runtime-boundaries.md#server-modules-degradation)).
 - `GET /systemd/` carries each unit's live readings and the manager (`Systemd.Inventory`, additive:
   `units` keeps its shape). One `systemctl show -p … --` over every loaded unit reads its type, main
   PID, cgroup memory (page cache included) and tasks, automatic restarts (`NRestarts`), result and
@@ -150,11 +188,74 @@ socket-activated service's port.
   without figures rather than failing it.
 - systemd grew `reset-failed` (`service.control`) and `POST /systemd/daemon-reload` (`system.admin`),
   and `GET /systemd/timers` joins `list-timers --all` (schedule) with `list-units --type=timer` (state)
-  and `list-unit-files --type=timer` (startup) on the unit name. `next` and `last` are read as
+  and `list-unit-files --type=timer` (startup) on the unit name, and reads every timer's
+  `Description`, `TimersCalendar`, `TimersMonotonic` and `RandomizedDelayUSec` with one
+  `systemctl show` over all of them, so the Scheduled page can say when each fires without a read
+  per timer (`description`, `calendar`, `monotonic` — spelled `OnBootSec=` as the unit file does,
+  where systemd 255 writes `OnBootUSec=` — and `randomDelay`; a `show` that fails leaves them
+  empty). `next` and `last` are read as
   microsecond timestamps; `left` and `passed` are ignored because across systemd versions they have
   been a string, a duration and — on some 257 builds — a copy of `next`. Timer control reuses the
-  unit routes, and "run now" is `start` on the service the timer activates. The unit sheet offers
+  unit routes, and "run now" is `start` on the service the timer activates. The unit's page offers
   reload only when `systemctl show` reports `CanReload=yes`.
+- **A unit's environment is masked below `system.admin`.** `GET /systemd/{name}` rewrites the
+  `Environment` property for anybody without `system.admin`: each entry whose name
+  `dockerx.IsSecretEnvKey` matches has its value replaced with `dockerx.RedactedEnvValue`, the rule
+  a container's and a process's environment use. `procs.SplitEnvironment` reads systemd's format
+  (space-separated, an entry with a space, quote or control character double-quoted with C-style
+  escapes) and `JoinEnvironment` writes it back the same way, so the masked property still parses;
+  a list with nothing to hide is returned byte for byte. Commands (`ExecStart` and the rest) are not
+  masked.
+- The service page (`/processes/services/{unit}`, "Service" in the assistant's change links) reads
+  three more things, all `read`:
+  - `GET /systemd/{name}/files` (`Systemd.Files`) is `{files: [{path, dropIn, content, size,
+    truncated, error?}], needDaemonReload}`: the `FragmentPath` and every `DropInPaths` entry from one
+    `systemctl show`, each read straight from the host through `hostexec.HostPath("/")` with
+    `openat2(RESOLVE_IN_ROOT | RESOLVE_NO_MAGICLINKS)`, so an absolute link (`systemctl link`) is
+    followed in the host's tree, not the container's, and nothing can lead to `/proc/self` (before
+    Linux 5.6, `os.Root`, which refuses any link out of the root). A fragment linked to `/dev/null`
+    answers `error: "masked: linked to /dev/null"`; anything that is not a regular file once opened
+    is refused (a directory, a device, a FIFO — the open is non-blocking, so one cannot hold it);
+    each file is capped at 256 KiB (`truncated`, `size` the real size). A file that cannot be read
+    carries its `error` beside the others. Below `system.admin`, `procs.MaskUnitFileSecrets` masks `Environment=` lines by the same
+    rule (whitespace around `=`, quoting and backslash continuations as systemd reads them; a
+    continued line that had something hidden is written as one line and the lines it continued onto
+    left blank, so line numbers still match the host's) and hides every `SetCredential=` value,
+    which is a credential in plain text whatever its name; `EnvironmentFile=`, `PassEnvironment=`
+    and `LoadCredential=` name files and variables and are left alone. A file with nothing to hide
+    is unchanged.
+  - `GET /systemd/{name}/security` (`Systemd.Security`) is `{available, score?, verdict?, checks:
+    [{name, field, description, set, exposure}], reason?}`: `systemd-analyze security --json=short`
+    for the checks (`set` and `exposure` null where systemd gives null; most exposing first, nulls
+    last) and the text form's `Overall exposure level for …: 9.6 UNSAFE` line for `score` and
+    `verdict`. Both run through `hostexec.CommandOnHost` with `SYSTEMD_IGNORE_CHROOT=1`, 15 s each.
+    A unit systemd will not assess — not a service, not found, no `systemd-analyze`, a systemd
+    older than 250 (no `--json`), a timeout — answers 200 with `available: false` and a sentence in
+    `reason`, never an error; the text form failing only loses the score.
+  - `GET /systemd/{name}/related` (`Systemd.Related`) is `{units: [{name, description, loadState,
+    activeState, subState, unitFileState, relations}]}`: every unit the 23 dependency properties
+    (`Requires` … `JoinsNamespaceOf`, reverse ones included) name, once, without the unit itself and
+    without any name `ValidateName` refuses (escaped device names among them), at most 300, read in
+    one `systemctl show -p Id,Description,LoadState,ActiveState,SubState,UnitFileState -- …`.
+    `relations` is the properties that named it; an alias is answered as the unit it points at.
+- **The service page's controls** reach `systemctl` as argv of validated parts, are audited, and
+  answer the command's result (`{exitCode, stdout, stderr, command}`) as the other unit actions do:
+  - `POST /systemd/{name}/kill` (`{signal, whom}`, destructive) runs `systemctl kill --signal=<SIG>
+    --kill-who=<main|all> -- <name>`; the signal must pass `procs.AllowedSignal`, the process
+    table's list, and `whom` defaults to `all`. `--kill-who=` rather than `--kill-whom=`: 252 added
+    the second spelling and still takes the first, which is all older releases know. Audited
+    `systemd.kill` with the signal, whom and exit code.
+  - `POST /systemd/{name}/mask` (`system.admin` and destructive: nothing starts the unit again until
+    it is unmasked) and `/unmask` (`system.admin`) are `Control` actions and forget the cached
+    unit-file states as enable and disable do. `POST /systemd/{name}/freeze` (destructive: a frozen
+    unit serves nothing) and `/thaw` (`service.control`) use the cgroup freezer. All four are audited
+    `systemd.<action>` by `unitAction`.
+  - `PUT /systemd/{name}/limits` (`{memoryMax?, cpuQuota?, tasksMax?, persistent}`, `system.admin`)
+    runs `systemctl set-property [--runtime] -- <name> MemoryMax=… CPUQuota=… TasksMax=…` with only
+    the fields given; `UnitLimits.Assignments` validates them first (bytes or `infinity`, a
+    percentage or `""` to clear, a count or `infinity`) and at least one is required. Without
+    `persistent` the limits last until the next boot. Audited `systemd.set-property` with the fields
+    given, `persistent` and the exit code.
 - User cron inventory and edits run the host's `crontab` through `hostexec.CommandOnHost`.
   Per-job enable, disable, edit, add and remove are edits to the crontab's text made in the browser
   (`lib/crontab.ts`: only the job's own line and the comment the parser attached to it change) and
@@ -455,6 +556,10 @@ deploy pages use for the repository a project deploys.
   comes from `install.sh` (`jd_install_host_tools`, GitHub's own repository on Debian and Ubuntu), at
   `/usr/bin/gh`, which is on every PATH, interactive or not. An install upgraded without re-running the
   installer and with no gh of its own cannot push over HTTPS from a shell; the Git page is unaffected.
+- **gh without an account is `409 github_login_required`** on the Git page's routes (`ghError`), the
+  code a deployment's pull requests already use, with gh's hint in `error.raw`. It was a
+  `400 bad_request` whose message was "please run: gh auth login". A sign-in that gh turns down stays
+  the request's refusal.
 - **The login is the CLI's own device flow, performed here.** `gh auth login` is a series of prompts and a
   web request has nobody to answer one, so `device.go` runs the OAuth device flow against the GitHub
   CLI's public client id — which is what makes the token indistinguishable from one gh minted, and what

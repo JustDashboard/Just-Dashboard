@@ -45,10 +45,10 @@ export function CertLife({
   >
   className?: string
 }) {
-  const term = Math.max(
-    1,
-    (new Date(cert.notAfter).getTime() - new Date(cert.notBefore).getTime()) / 86_400_000,
-  )
+  // A certificate that could not be read has no dates, so no term to be part
+  // way through.
+  const days = (Date.parse(cert.notAfter ?? "") - Date.parse(cert.notBefore ?? "")) / 86_400_000
+  const term = Number.isFinite(days) ? Math.max(1, days) : 1
   const left = cert.error || cert.expired ? 0 : Math.max(0, Math.min(1, cert.daysLeft / term))
   return (
     <Meter

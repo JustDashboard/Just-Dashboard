@@ -135,6 +135,7 @@ export function TabStrip({
         // The shade at an edge the tabs run under is cast on the strip's own ground.
         className="scroll-affordance flex min-w-0 [scrollbar-width:none] items-stretch overflow-x-auto [--panel-ground:var(--surface-header)] [&::-webkit-scrollbar]:hidden"
       >
+        {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself */}
         <div role="tablist" aria-label="Open statements" className="contents" onKeyDown={onKey}>
           {tabs.map((tab, index) => {
             const selected = tab.id === active

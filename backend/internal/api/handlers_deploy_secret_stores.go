@@ -50,7 +50,7 @@ func mapSecretStoreError(err error) error {
 	case errors.Is(err, secretstore.ErrNameTaken):
 		return httpx.Err(http.StatusConflict, "name_taken", err.Error())
 	case errors.Is(err, secretstore.ErrInvalid):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	case errors.Is(err, deploy.ErrSecretStoreInUse):
 		return httpx.Err(http.StatusConflict, "secret_store_in_use", err.Error())
 	default:

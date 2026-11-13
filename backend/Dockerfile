@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.26.10-bookworm AS build
+# Every image below is held to a digest: the tag says which releases it
+# follows, the digest is what is built on, and scripts/pin-images.py moves it
+# when a release is cut. A tag alone is whatever the registry serves that day,
+# so two installs of one version were not the same bytes.
+FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./
@@ -20,27 +24,37 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+# The commit a build that is not a release was made from, shown as
+# "0.8.5+98c9349" (internal/version). install.sh, an update and a rebuild pass
+# it when the checkout is not on the release's own commit and leave it empty
+# when it is, so a release's compile stays cached from one update to the next.
+# An ordinary build argument, which the classic builder reads as well.
+ARG JD_COMMIT=
 # CGO stays off so the binary runs on a slim base without a libc mismatch;
 # the SQLite driver is pure Go precisely so this works.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/just-dashboard ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X github.com/Wayy01/Just-Dashboard/backend/internal/version.Commit=${JD_COMMIT}" -o /out/just-dashboard ./cmd/server
 # The terminal holder runs on the host, not in this image, for as long as a
 # session lasts — the dashboard copies it out at boot. Static for the same
 # reason as above, and small so each session pins megabytes rather than the
 # whole dashboard. See internal/ptyhold.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/jd-terminal-holder ./cmd/terminal-holder
+# The container's health check. Docker starts it every thirty seconds, so it
+# is a program of its own on the standard library: as a mode of the server it
+# initialised the whole dashboard each time, 150 ms and 57 MB a run.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/jd-healthcheck ./cmd/healthcheck
 # The jd command line, for the server's own shell and for other machines.
 # install.sh and `manage.sh install-cli` copy it to /usr/local/bin/jd, the
 # dashboard keeps that copy current at boot (internal/clihost), and
 # GET /api/v1/cli/jd hands it to anyone signed in. Standard library only, so
 # it adds a few seconds and a few megabytes.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/version/version.go)" -o /out/jd ./cmd/jd
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/version/version.go)${JD_COMMIT:++${JD_COMMIT}}" -o /out/jd ./cmd/jd
 
 # rclone, for backup jobs whose destination is one of the storage services it
 # speaks. Debian packages a release from 2022; this is the project's own
 # build, pinned and checked against the checksums its release publishes (the
 # same on downloads.rclone.org and on GitHub). Fetched in a stage of its own so
 # unzip does not stay in the image.
-FROM debian:bookworm-slim AS rclone
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS rclone
 ARG TARGETARCH
 ARG RCLONE_VERSION=v1.75.2
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip \
@@ -55,7 +69,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && unzip -q /tmp/rclone.zip -d /tmp \
     && install -m 0755 "/tmp/rclone-${RCLONE_VERSION}-linux-${TARGETARCH:-amd64}/rclone" /usr/local/bin/rclone
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
 
 # The dashboard drives the host through these tools; a scratch image would
 # leave most of the product non-functional. They are the same binaries an
@@ -190,16 +204,18 @@ RUN set -eu; \
 
 COPY --from=build /out/just-dashboard /usr/local/bin/just-dashboard
 COPY --from=build /out/jd-terminal-holder /usr/local/bin/jd-terminal-holder
+COPY --from=build /out/jd-healthcheck /usr/local/bin/jd-healthcheck
 COPY --from=build /out/jd /usr/local/bin/jd
 COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 
 # Runs as root deliberately: managing systemd units, the firewall, host
 # accounts and a PTY all require it. The security boundary is the network
-# allowlist plus mandatory 2FA in front of the API, not the process UID.
+# allowlist plus sign-in, with two-factor for every enrolled account, in front
+# of the API, not the process UID.
 WORKDIR /var/lib/just-dashboard
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["/usr/local/bin/just-dashboard", "-healthcheck"]
+  CMD ["/usr/local/bin/jd-healthcheck"]
 
 ENTRYPOINT ["/usr/local/bin/just-dashboard"]

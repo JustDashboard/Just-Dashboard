@@ -153,6 +153,13 @@ func carryOut(ctx context.Context, store *Store, run *Run, out io.Writer, host H
 			fmt.Fprintf(out, "removed image %s\n", image)
 		}
 	}
+	// The images are gone and the layers they were built from are still in
+	// the build cache, which nothing else removes for weeks.
+	selfupdate.PruneBuildCache(out, func(args ...string) ([]byte, error) {
+		ctx, cancel := context.WithTimeout(ctx, selfupdate.PruneTimeout)
+		defer cancel()
+		return host.DockerOutput(ctx, run.Dir, args...)
+	})
 	removeTree(ctx, host, out, warn, "/tmp/just-dashboard")
 
 	if run.Mode == ModeWipe {

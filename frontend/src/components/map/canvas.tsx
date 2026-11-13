@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -28,11 +28,9 @@ import {
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { isArranged, kindOf, type MapDocument, type Point } from "@/lib/server-map"
+import { isArranged, type MapDocument, type Point } from "@/lib/server-map"
 import {
   FRAME,
-  SYSTEM_KINDS,
-  detectSystems,
   layoutAtlas,
   neighbours,
   settle,
@@ -43,8 +41,9 @@ import {
   type SystemNode,
 } from "@/lib/server-systems"
 import { notify } from "@/lib/toast"
-import type { ServerMap } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
+import { SERVER_BOARD, type MapBoard } from "@/components/map/board"
 import { edgeTypes, type WireData } from "@/components/map/edges"
 import { MapInspector } from "@/components/map/inspector"
 import {
@@ -55,27 +54,11 @@ import {
   type Port,
   type StackData,
 } from "@/components/map/nodes"
-import { SystemRail, censusLine } from "@/components/map/rail"
+import { SystemRail } from "@/components/map/rail"
 
 const ZOOM = { min: 0.06, max: 2 }
 /** A system flown to fills the canvas, but a small one is not blown up past its own size. */
 const FLY = { padding: 0.04, maxZoom: 1 }
-
-/**
- * How the canvas is moved, a whiteboard's (Excalidraw's): two fingers on a
- * trackpad slide it, a pinch zooms it about the fingers; a mouse drags it by
- * any open ground, or by its middle button anywhere, and its wheel slides it
- * too — Ctrl or ⌘ with the wheel zooms, Shift with it slides sideways. Space
- * held makes any drag a slide. Nothing on it changes size but by the zoom.
- */
-const MOVE = {
-  panOnScroll: true,
-  panOnScrollSpeed: 1,
-  zoomOnScroll: false,
-  zoomOnPinch: true,
-  zoomOnDoubleClick: false,
-  panOnDrag: [0, 1],
-}
 
 /**
  * Where the map is nothing but the map: below the width the rail and the
@@ -115,11 +98,19 @@ function faceData(node: SystemNode, state: NodeState, ports: Port[], sides: Face
   return data
 }
 
+/** A reading the canvas could not draw from, said over it rather than drawn as empty. */
+export type Unread = { key: string; label: string; reason?: string }
+
 /**
  * The map's canvas: every system's diagram in its own frame, side by side,
  * with the rail of systems down its left and the inspector down its right, and
  * nothing over it but the few controls that float on it. On a phone it is the
  * canvas alone.
+ *
+ * The server map draws every system the server runs on it; the databases map
+ * draws one diagram for each database on the same canvas, so both move,
+ * arrange and are read the same way. What differs is the board (`board.ts`)
+ * and what is kept of the arrangement (`memory.ts`).
  *
  * Choosing a box lights what it is wired to inside its system, draws those
  * lines in the brand's blue with how each is known written on them, and steps
@@ -128,14 +119,23 @@ function faceData(node: SystemNode, state: NodeState, ports: Port[], sides: Face
  * reading that adds a container lays that one out and moves nothing else.
  */
 export function MapCanvas({
-  map,
+  systems,
+  unread,
+  board = SERVER_BOARD,
+  empty = <EmptyMap />,
   doc,
   update,
   full,
   onFullscreen,
   initialSystem,
 }: {
-  map: ServerMap
+  /** Every system, laid out on its own (`detectSystems`, `detectDatabaseSystems`). */
+  systems: System[]
+  /** What could not be read, each said over the canvas. */
+  unread: Unread[]
+  board?: MapBoard
+  /** What the canvas says with no system to draw. */
+  empty?: ReactNode
   doc: MapDocument
   update: (next: Partial<MapDocument> | ((doc: MapDocument) => MapDocument)) => void
   full: boolean
@@ -149,7 +149,6 @@ export function MapCanvas({
   const store = useStoreApi()
   const bare = useMediaQuery(BARE)
 
-  const systems = useMemo(() => detectSystems(map), [map])
   const placed = useMemo(() => layoutAtlas(systems), [systems])
 
   // Where the reader carried whole systems by their heads: the document's,
@@ -268,16 +267,12 @@ export function MapCanvas({
         target?.closest?.("input, textarea, select, [contenteditable], [role=dialog], [role=menu]")
       )
         return
-      const mod = (e.ctrlKey || e.metaKey) && !e.altKey
-      if (mod && (e.key === "=" || e.key === "+")) {
+      const zoom = zoomKey(e)
+      if (zoom) {
         e.preventDefault()
-        void flow.zoomIn({ duration: 150 })
-      } else if (mod && e.key === "-") {
-        e.preventDefault()
-        void flow.zoomOut({ duration: 150 })
-      } else if (mod && e.key === "0") {
-        e.preventDefault()
-        void flow.zoomTo(1, { duration: 150 })
+        if (zoom === "in") void flow.zoomIn({ duration: 150 })
+        else if (zoom === "out") void flow.zoomOut({ duration: 150 })
+        else void flow.zoomTo(1, { duration: 150 })
       } else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit1") {
         e.preventDefault()
         void flow.fitView({ padding: 0.06, duration: 300 })
@@ -292,60 +287,7 @@ export function MapCanvas({
     return () => window.removeEventListener("keydown", onKey)
   }, [flow, flyTo, frameNode])
 
-  // Safari sends a trackpad's pinch as gesture events rather than as the
-  // Ctrl-wheel every other browser sends, and zooms the page with it unless
-  // told not to. Its gestures carry a scale and no point, so the canvas zooms
-  // about where the pointer last was, and any Ctrl-wheel it also sends while
-  // one runs is let go so a pinch zooms once.
-  useEffect(() => {
-    const el = canvasRef.current
-    if (!el) return
-    let base: number | null = null
-    let at = { x: 0, y: 0 }
-    const track = (e: PointerEvent) => {
-      at = { x: e.clientX, y: e.clientY }
-    }
-    const start = (e: Event) => {
-      e.preventDefault()
-      base = store.getState().transform[2]
-    }
-    const change = (e: Event) => {
-      e.preventDefault()
-      if (base === null) return
-      const [x, y, k] = store.getState().transform
-      const next = clampZoom(base * (e as Event & { scale: number }).scale)
-      const rect = el.getBoundingClientRect()
-      const px = at.x - rect.left
-      const py = at.y - rect.top
-      void flow.setViewport({
-        x: px - ((px - x) * next) / k,
-        y: py - ((py - y) * next) / k,
-        zoom: next,
-      })
-    }
-    const end = (e: Event) => {
-      e.preventDefault()
-      base = null
-    }
-    const once = (e: WheelEvent) => {
-      if (base !== null && e.ctrlKey) {
-        e.preventDefault()
-        e.stopPropagation()
-      }
-    }
-    el.addEventListener("pointermove", track)
-    el.addEventListener("gesturestart", start)
-    el.addEventListener("gesturechange", change)
-    el.addEventListener("gestureend", end)
-    el.addEventListener("wheel", once, { capture: true, passive: false })
-    return () => {
-      el.removeEventListener("pointermove", track)
-      el.removeEventListener("gesturestart", start)
-      el.removeEventListener("gesturechange", change)
-      el.removeEventListener("gestureend", end)
-      el.removeEventListener("wheel", once, { capture: true })
-    }
-  }, [flow, store])
+  useCanvasPinch(canvasRef, ZOOM)
 
   // The first view: the system the address or the last visit named, else
   // where the reader left the canvas, else every system at once. A phone opens
@@ -451,7 +393,7 @@ export function MapCanvas({
           title: systemTitle(p.system),
           anchor: p.system.anchor,
           anchorKind: p.system.anchorKind,
-          census: censusLine(p.system),
+          census: board.census(p.system),
           chosen: focus === sid,
           fixed: bare,
         } satisfies FrameData,
@@ -510,7 +452,7 @@ export function MapCanvas({
       }
     }
     return out
-  }, [placed, settled, frameRect, corner, bare, focus, lit, chosenSeat, chosen, hovered])
+  }, [placed, settled, frameRect, corner, board, bare, focus, lit, chosenSeat, chosen, hovered])
 
   const edges = useMemo(() => {
     const out: Edge[] = []
@@ -539,6 +481,9 @@ export function MapCanvas({
             dimmed: inSystem && lit !== null && !on,
             // A stack's frame stands in for its containers; it carries while they run.
             carries: (s?.item.tone ?? "ok") === "ok" && (t?.item.tone ?? "ok") === "ok",
+            live: (e.sessions ?? 0) > 0,
+            maybe: [e.via, ...e.also].every((via) => via === "stack" || via === "network"),
+            tone: e.tone,
           } satisfies WireData,
         })
       }
@@ -612,7 +557,6 @@ export function MapCanvas({
     : tappedSystem && tappedSystem.kind !== "loose"
       ? { name: systemTitle(tappedSystem), href: tappedSystem.anchor.href }
       : null
-  const unread = map.kinds.filter((k) => SYSTEM_KINDS.has(k.key) && k.state === "unread")
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" onKeyDown={onKey}>
@@ -626,7 +570,7 @@ export function MapCanvas({
               : "grid-cols-[15rem_minmax(0,1fr)]",
         )}
       >
-        {!bare && <SystemRail systems={systems} focus={focus} onFocus={focusOn} />}
+        {!bare && <SystemRail board={board} systems={systems} focus={focus} onFocus={focusOn} />}
         <div
           ref={canvasRef}
           data-slot="server-map"
@@ -634,7 +578,7 @@ export function MapCanvas({
           className="group/map relative min-h-0 min-w-0"
         >
           {systems.length === 0 ? (
-            <EmptyMap />
+            empty
           ) : (
             <ReactFlow
               nodes={nodes}
@@ -675,7 +619,7 @@ export function MapCanvas({
               }}
               minZoom={ZOOM.min}
               maxZoom={ZOOM.max}
-              {...MOVE}
+              {...CANVAS_MOVE}
               proOptions={{ hideAttribution: true }}
               nodesConnectable={false}
               nodesDraggable={!bare}
@@ -684,7 +628,7 @@ export function MapCanvas({
               deleteKeyCode={null}
               selectionKeyCode={null}
               multiSelectionKeyCode={null}
-              aria-label="Map of the server's systems"
+              aria-label={board.label}
             />
           )}
           {systems.length > 0 && !bare && (
@@ -735,8 +679,8 @@ export function MapCanvas({
                 >
                   <Warning className="mt-0.5 size-3.5 shrink-0 text-warning" />
                   <span>
-                    <span className="text-foreground">{kindOf(k.key)?.label ?? k.key}s</span> not
-                    read{k.reason ? `: ${k.reason}` : ""}
+                    <span className="text-foreground">{k.label}</span> not read
+                    {k.reason ? `: ${k.reason}` : ""}
                   </span>
                 </p>
               ))}
@@ -746,6 +690,7 @@ export function MapCanvas({
 
         {inspecting && (
           <MapInspector
+            board={board}
             systems={systems}
             system={chosenSeat?.system ?? focusSystem}
             node={chosenNode}

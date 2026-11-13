@@ -29,11 +29,39 @@ function Table({
   // wheel over one that is half below the fold brings the whole of it up first.
   const container = React.useRef<HTMLDivElement>(null)
   useRevealOnWheel(container)
+  // A table that scrolls and has nothing in it to focus could not be reached
+  // by a keyboard at all, so its rows past the fold could not be read. Only
+  // then is the container itself a stop: a table with buttons or links in it
+  // is scrolled by moving through them, and keeps the tab order it had.
+  const [reachable, setReachable] = React.useState(false)
+  React.useEffect(() => {
+    const node = container.current
+    if (!node || typeof ResizeObserver === "undefined") return
+    const measure = () =>
+      setReachable(
+        (node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1) &&
+          !node.querySelector(
+            'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          ),
+      )
+    // The observer reports once as it starts, which is the first reading.
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    if (node.firstElementChild) observer.observe(node.firstElementChild)
+    return () => observer.disconnect()
+  }, [])
   return (
     <div
       ref={container}
       data-slot="table-container"
-      className={cn("scroll-affordance relative w-full overflow-auto", containerClassName)}
+      tabIndex={reachable ? 0 : undefined}
+      role={reachable ? "region" : undefined}
+      aria-label={reachable ? (props["aria-label"] ?? "Table, scrolls") : undefined}
+      className={cn(
+        "scroll-affordance relative w-full overflow-auto",
+        reachable && "focus-ring-inset",
+        containerClassName,
+      )}
     >
       <table
         data-slot="table"

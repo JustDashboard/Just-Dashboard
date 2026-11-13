@@ -27,7 +27,7 @@ export interface SchemaSummary {
   largest: {
     object: DbCatalogObject
     group: DbCatalogGroup
-    /** 0–1 against the largest. */
+    /** 0–1 of the schema's whole: its bytes, or its rows where it is ranked by rows. */
     share: number
   }[]
   /** What `largest` is ranked by: bytes where the engine reports them, else rows. */
@@ -60,14 +60,16 @@ export function schemaSummary(catalog: Pick<DbCatalog, "objects">, most = 8): Sc
     .filter((entry) => known(measure(entry.object)) && (measure(entry.object) ?? 0) > 0)
     .sort((a, b) => (measure(b.object) ?? 0) - (measure(a.object) ?? 0))
     .slice(0, most)
-  const top = ranked.length > 0 ? (measure(ranked[0].object) ?? 0) : 0
+  // The whole is every object the measure is known for, not only the few
+  // listed: "User 48 KB, 40%" is 40% of the schema.
+  const whole = all.reduce((sum, entry) => sum + Math.max(measure(entry.object) ?? 0, 0), 0)
   return {
     counts,
     rows: estimates.length > 0 ? estimates.reduce((sum, n) => sum + n, 0) : null,
     size: sizes.length > 0 ? sizes.reduce((sum, n) => sum + n, 0) : null,
     largest: ranked.map((entry) => ({
       ...entry,
-      share: top > 0 ? (measure(entry.object) ?? 0) / top : 0,
+      share: whole > 0 ? (measure(entry.object) ?? 0) / whole : 0,
     })),
     rankedBy,
   }

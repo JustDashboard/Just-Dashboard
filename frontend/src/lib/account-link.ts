@@ -58,18 +58,6 @@ export function sharedItems(scope: AccountLinkScope): SharedItem[] {
   return (scope === "observe" ? OBSERVED : [...OBSERVED, NAMED]).map(capital)
 }
 
-/** The scope card's sentence for what it shares. */
-export function scopeShares(scope: AccountLinkScope): string {
-  switch (scope) {
-    case "observe":
-      return OBSERVED.map((item) => upper(item.label)).join(" · ")
-    case "operate":
-      return `Everything in Observe, plus ${NAMED.label}.`
-    case "maintain":
-      return `The same as Operate: everything in Observe, plus ${NAMED.label}.`
-  }
-}
-
 /** The scope card's sentence for what the site may do with it. */
 export function scopeAllows(scope: AccountLinkScope): string {
   switch (scope) {

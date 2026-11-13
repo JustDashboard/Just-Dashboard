@@ -310,8 +310,8 @@ func (s *Server) requireDestructive(r *http.Request, bucket, why string) error {
 	if !p.Can(auth.CapDestructive) {
 		return httpx.Err(http.StatusForbidden, "forbidden", why+" needs the destructive capability, which your role does not have")
 	}
-	if !s.destrLim.Allow(p.Username() + "|" + bucket) {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many destructive actions; try again shortly")
+	if err := s.destrLim.Spend(p.Username()+"|"+bucket, "too many destructive actions; try again shortly"); err != nil {
+		return err
 	}
 	return nil
 }

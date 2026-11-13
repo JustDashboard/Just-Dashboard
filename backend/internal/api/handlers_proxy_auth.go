@@ -47,7 +47,7 @@ func (s *Server) handleAuthUserSet(w http.ResponseWriter, r *http.Request) error
 	}
 	file, err := s.modules.proxy.SetAuthUser(req.File, req.User, req.Password)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	// The password is deliberately absent from the audit detail.
 	httpx.SetAudit(r, "proxy.auth.set", req.File, map[string]any{"user": req.User})
@@ -59,7 +59,7 @@ func (s *Server) handleAuthUserRemove(w http.ResponseWriter, r *http.Request) er
 	file, user := chi.URLParam(r, "file"), chi.URLParam(r, "user")
 	updated, err := s.modules.proxy.RemoveAuthUser(file, user)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "proxy.auth.remove", file, map[string]any{"user": user})
 	httpx.JSON(w, http.StatusOK, updated)
@@ -72,7 +72,10 @@ func (s *Server) handleAuthUserRemove(w http.ResponseWriter, r *http.Request) er
 // login.
 func (s *Server) handleAuthFileDelete(w http.ResponseWriter, r *http.Request) error {
 	file := chi.URLParam(r, "file")
-	force := r.URL.Query().Get("force") == "1"
+	force, err := httpx.QueryBool(r, "force")
+	if err != nil {
+		return err
+	}
 	usedBy := s.modules.proxy.AuthFileUsedBy(file)
 	if len(usedBy) > 0 && !force {
 		return httpx.Err(http.StatusConflict, "in_use", fmt.Sprintf(
@@ -81,13 +84,13 @@ func (s *Server) handleAuthFileDelete(w http.ResponseWriter, r *http.Request) er
 	}
 	// An access list naming the file is refused even when forced: the list
 	// would fail its next save, and nginx -t with it.
-	err := s.modules.proxy.DeleteAuthFile(file)
+	err = s.modules.proxy.DeleteAuthFile(file)
 	var listed *proxysvc.AuthFileListedError
 	switch {
 	case errors.As(err, &listed):
 		return httpx.Err(http.StatusConflict, "in_use", err.Error())
 	case err != nil:
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "proxy.auth.delete", file, map[string]any{"usedBy": usedBy, "force": force})
 	httpx.NoContent(w)

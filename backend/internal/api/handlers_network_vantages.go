@@ -75,7 +75,7 @@ func (s *Server) handleNetworkVantageEnrollment(w http.ResponseWriter, r *http.R
 	httpx.SetAudit(r, "network.vantage.enroll", input.Name, map[string]any{"placement": input.Placement, "scopes": len(input.Scopes)})
 	enrollment, e := s.modules.networkVantages.CreateEnrollment(r.Context(), input)
 	if e != nil {
-		return httpx.BadRequest("%s", e)
+		return httpx.Refused(e)
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.JSON(w, 201, enrollment)
@@ -88,7 +88,7 @@ func (s *Server) handleNetworkVantageRevoke(w http.ResponseWriter, r *http.Reque
 	id := chi.URLParam(r, "id")
 	httpx.SetAudit(r, "network.vantage.revoke", id, nil)
 	if e := s.modules.networkVantages.Revoke(r.Context(), id); e != nil {
-		return httpx.BadRequest("%s", e)
+		return httpx.Refused(e)
 	}
 	httpx.JSON(w, 200, map[string]bool{"revoked": true})
 	return nil
@@ -115,7 +115,7 @@ func (s *Server) handleNetworkExternalCheck(w http.ResponseWriter, r *http.Reque
 	httpx.SetAudit(r, "network.external.check", input.VantageID, map[string]any{"scopeId": input.ScopeID, "family": input.Family, "port": input.Port, "tls": input.TLS})
 	check, e := s.modules.networkVantages.CreateCheck(r.Context(), input, httpx.MustPrincipal(r).Username())
 	if e != nil {
-		return httpx.BadRequest("%s", e)
+		return httpx.Refused(e)
 	}
 	httpx.JSON(w, 202, check)
 	return nil
@@ -127,7 +127,7 @@ func (s *Server) handleNetworkExternalCancel(w http.ResponseWriter, r *http.Requ
 	id := chi.URLParam(r, "id")
 	httpx.SetAudit(r, "network.external.cancel", id, nil)
 	if e := s.modules.networkVantages.Cancel(r.Context(), id); e != nil {
-		return httpx.BadRequest("%s", e)
+		return httpx.Refused(e)
 	}
 	httpx.JSON(w, 200, map[string]bool{"cancelled": true, "lateResultsRejected": true})
 	return nil

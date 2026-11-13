@@ -520,8 +520,9 @@ test("unreadable certificates keep their error in the detail surface without ove
         ...certs[0],
         domains: [],
         issuer: "",
-        notBefore: "0001-01-01T00:00:00Z",
-        notAfter: "0001-01-01T00:00:00Z",
+        // A file that could not be read has no dates, and the server leaves them out.
+        notBefore: undefined,
+        notAfter: undefined,
         daysLeft: 0,
         expired: false,
         expiring: false,
