@@ -18,7 +18,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | `JD_BIND` | none | What the proxy listens on, when that is not the same string as `JD_SITE`. Blank uses `JD_SITE`. A Tailscale install answers for a MagicDNS name and binds the tailnet IP behind it, because the proxy container resolves names through Docker's resolver rather than the host's. |
 | `JD_TLS` | `internal` | How the connection is trusted. `tailscale` serves the certificate `tailscale cert` issues for `JD_SITE` — publicly trusted, no browser warning, renewed automatically. `internal` is Caddy's own CA, which is what produces "not secure". `off` is plain HTTP and is refused on anything but loopback; the API also accepts same-origin HTTP WebSockets for live features in this mode. |
 | `JD_ALLOWED_CIDRS` | `127.0.0.1/32,::1/128` | Who may reach the API at all, checked before authentication. Use `100.64.0.0/10,127.0.0.1/32,::1/128` for Tailscale, and keep loopback or you lose the tunnel. |
-| `JD_TRUSTED_PROXIES` | none | Addresses allowed to set `X-Forwarded-For`. Without it a client could spoof its way past the allowlist. One hop is supported: the bundled Caddy replaces the header with the client's real address, so anything placed *in front* of Caddy becomes the client as far as the allowlist is concerned. |
+| `JD_TRUSTED_PROXIES` | `127.0.0.1/32` | Addresses allowed to set `X-Forwarded-For`: the bundled Caddy on loopback, which `docker-compose.yml` and `install.sh` fill in; the binary run by hand trusts none unless it is set. Without it a client could spoof its way past the allowlist. One hop is supported: the bundled Caddy replaces the header with the client's real address, so anything placed *in front* of Caddy becomes the client as far as the allowlist is concerned. |
 | `JD_PORT` | `8443` | The port you connect to — the only one the proxy publishes. |
 | `JD_BACKEND_PORT` | `8080` | The API's loopback port, behind the proxy. `install.sh` picks a random high port on a new install so nothing collides with it. |
 | `JD_FRONTEND_PORT` | `3000` | The UI's loopback port, behind the proxy. Likewise randomised at install time. |
@@ -36,7 +36,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | `JD_REMOTE_DESKTOP_BRIDGE` | none | A Moonlight Web stream bridge on another tailnet machine, as `host:port`, used in place of the container this server would run. Remote Desktop's picture always passes through the bridge; one near you and your computers spares it the trip to this server and back. The bridge must trust the dashboard's account header from this server only. |
 | `JD_SESSION_TTL` | `12h` | Absolute session lifetime. |
 | `JD_SESSION_IDLE_TTL` | `60m` | Idle timeout. |
-| `JD_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker Engine endpoint. The containers that update, restart and uninstall the dashboard are started on it too, and those operations are refused, with nothing changed, while it does not answer. |
+| `JD_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker Engine endpoint. `docker-compose.yml` sets it and does not read it from `.env`; it is an override only when you run the binary yourself. The containers that update, restart and uninstall the dashboard are started on it too, and those operations are refused, with nothing changed, while it does not answer. |
 | `JD_DEPLOY_HEAVY_SLOTS` | `1` | Concurrent deployment build/activation workers. Valid range: 1–8. |
 | `JD_DEPLOY_LIGHT_SLOTS` | `2` | Concurrent validation/metadata deployment workers. Valid range: 1–8. |
 | `JD_DEPLOY_LEASE_TTL` | `30s` | Time before a silent deployment worker claim is reconciled after a crash. Valid range: 5s–5m. |
@@ -53,7 +53,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | `JD_HUB_LINK` | `true` | Whether this server may be [connected to a Just Hub](linking-and-usage.md#connecting-to-just-hub) on its own tailnet. Connecting is always something an administrator does; `false` removes the hub's discovery answer, the Settings page's controls and the terminal command, and silences a connection that already exists, so nothing is ever sent. Independent of `JD_ACCOUNT_LINK`. |
 | `JD_HUB_SIGNIN` | `false` | Whether the Just Hub this server is connected to may [sign people in](linking-and-usage.md#signing-in-from-just-hub): open this server for an account that chose "Let Just Hub sign me in" in **Settings → Hub**, without this server asking for its own code. Anyone who takes over the hub could then sign in as those accounts, with what each may do (the Files page and, for an administrator, the terminal included), so a session opened this way lasts at most two hours, the dashboard's own forms refuse it keys, accounts, passwords, revealed secrets, links and **Settings → Configuration**, and the audit log marks what it does. Counts as off while `JD_HUB_LINK` is `false`; found off at a start, every such choice and session is ended before anything is served. |
 | `JD_USAGE_PING` | `true` | Whether an administrator may be asked to [count this server](linking-and-usage.md#the-usage-count) in the public install numbers. Nothing is sent until one says yes. `false` means nobody is asked and nothing is ever sent; `JD_ACCOUNT_LINK=false` does the same. |
-| `JD_UPDATE_DIR` | discovered | The directory you cloned into. Normally empty: the dashboard asks Docker where its own stack was deployed from. Set it only if the Updates page says that failed. |
+| `JD_UPDATE_DIR` | discovered | The directory you cloned into. Normally empty: the dashboard asks Docker where its own stack was deployed from. Set it only if the Version page says that failed. |
 | `JD_AGENT_MODE` | `false` | Run as an agent managed by a hub: no login, mutual TLS only. Not useful on its own yet. |
 | `JD_DEV` | `false` | Development only. Drops `Secure` from the session cookie, which is then `jd_session` rather than `__Host-jd_session`, so the UI works over plain HTTP. Never set it on a real host. |
 | `JD_LOG_LEVEL` | `info` | `debug` for verbose logs. |
@@ -72,7 +72,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | `JD_INGRESS_CONTAINER` | — | Name of the Caddy container deployment domains are served through, when it is not one publishing 80 and 443 on every address (discovered otherwise). |
 | `JD_BACKUP_DIR` | `/var/backups/just-dashboard` | Local backup destination and staging. |
 | `JD_DB_UPLOAD_MAX_MB` | `2048` | Largest file one database import or uploaded dump may be, in MiB. |
-| `JD_DATA_DIR` | `/var/lib/just-dashboard` | The dashboard's own database. **Back this up.** |
+| `JD_DATA_DIR` | `/var/lib/just-dashboard` | The dashboard's own database. **Back this up.** `docker-compose.yml` sets it and mounts that path, and does not read it from `.env`; it is an override only when you run the binary yourself. |
 
 **First run only**
 
