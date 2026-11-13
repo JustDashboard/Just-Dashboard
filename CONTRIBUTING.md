@@ -58,6 +58,10 @@ as described under [Security issues](#security-issues).
 
 ## Before you open a pull request
 
+New to the tree? [`docs/internal/reference/finding-things.md`](docs/internal/reference/finding-things.md)
+says which route, components, handler files, package, specs and document belong to each page, and
+`backend/`, `frontend/`, `scripts/` and `docs/` each open on a short README.
+
 Keep the PR focused and use the template to explain what changed, why, and how you verified it. Link
 related issues and include before/after screenshots for visual changes or a recording for interaction
 changes. Record validation limits and whether documentation needed updating; submitting the PR agrees

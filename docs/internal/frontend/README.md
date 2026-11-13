@@ -19,5 +19,5 @@ this codebase are off or configured there with the reason beside them. Where a r
 place (a row that is the pointer's larger target for the link inside it), fix the markup if a
 keyboard really is left out, and otherwise say why on the line's own disable comment.
 
-`docs/design-system-audit-report.html` predates the unification pass and describes primitives
+`docs/audits/2026-08-28-design-system-audit/report.html` predates the unification pass and describes primitives
 (`StatusBadge`, `card.tsx`, `ui/badge.tsx`) that no longer exist.

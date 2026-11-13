@@ -14,9 +14,7 @@ repository root; contributors start from [`../AGENTS.md`](../AGENTS.md).
 | [`readme/`](readme/) | The screenshots `README.md` and `FEATURES.md` show | Readers of the repository |
 | [`internal/`](internal/README.md) | The engineering reference: architecture, security invariants, one guide per backend feature, the deployment subsystem, the frontend and its design system | Contributors |
 | [`api/`](api/) | `deploy-openapi.json`, the deployment API's description. Generated from the router and held to it by a test; never edited by hand | Users of the API and the SDKs |
-| [`audits/`](audits/) | Dated records of audits and redesigns. History: a record describes the code as it was on its date | Contributors |
-| [`screenshots/`](screenshots/) | Pictures older pull requests left. New binary evidence goes on a `pr-assets/*` branch instead | Nobody new |
-| `*-report.html` | Three standalone reports of earlier passes, kept as they were written | Contributors |
+| [`audits/`](audits/README.md) | Dated records of audits and redesigns, one folder each. History: a record describes the code as it was on its date. Their pictures and recordings are on a `pr-assets/*` branch, linked by commit | Contributors |
 
 ## Where to start in `internal/`
 

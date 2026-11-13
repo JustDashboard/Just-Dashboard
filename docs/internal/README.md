@@ -11,6 +11,10 @@ strategy, and feature ownership behind those rules.
   and local-development constraints.
 - [`reference/repository-map.md`](reference/repository-map.md) — source-tree map covering every backend
   package and every frontend, deployment, build, test, and operations area.
+- [`reference/finding-things.md`](reference/finding-things.md) — where to look: one feature traced through
+  every layer, the naming rules between layers and where they break, a table from each sidebar page to its
+  route, components, handler files, packages, specs and document, recipes for adding a route, page,
+  setting, store column, module or destructive action, and the file each security boundary is checked in.
 - [`codebase.md`](codebase.md) — compatibility landing page for older links.
 
 ## Architecture and security

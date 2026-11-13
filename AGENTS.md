@@ -3,6 +3,8 @@
 Just Dashboard is a root-equivalent, self-hosted control panel for one Linux server. It is a Go backend
 and Next.js frontend deployed as one Docker Compose stack behind Caddy. Preserve the established
 architecture and security model; detailed guidance is indexed in [`docs/internal/`](docs/internal/README.md).
+To find where a feature's files are, start from
+[`docs/internal/reference/finding-things.md`](docs/internal/reference/finding-things.md).
 
 ## Mandatory workflow
 
