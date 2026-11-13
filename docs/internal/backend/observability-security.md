@@ -286,6 +286,12 @@ most persistent first, with `Capped` reported by the arithmetic `countWithin` us
 ran out inside the window is a floor rather than a total. A console attempt has no address; it is
 counted and not listed.
 
+The logins open now are `GET /ssh-sessions` (`netsec.Sessions`): `who`'s rows, each matched to its
+sshd process by user and terminal so it carries a PID. `POST /ssh-sessions/{pid}/disconnect`
+(`system.admin`, inside `s.destructive`, ordinary confirmation, audited as `ssh.session.disconnect`)
+sends that process `SIGHUP`, and only when the PID is on the list just built: anything else is
+refused, so the route cannot signal an arbitrary process.
+
 `netsec.Exposure` grades who can reach this panel (`tailscale`, `tunnel`, `private`, `public`, `open`)
 from the allowlist and the host's interfaces. The setting lives in an env file nobody re-reads after
 install day, which is exactly why it belongs on screen. The handler adds `Client`, the address the

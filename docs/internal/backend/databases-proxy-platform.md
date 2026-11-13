@@ -6456,6 +6456,9 @@ daemon of the machine running them.
   ticket opened (`RequireSession`, `RefuseHubSession`): the allowlist, the address, `JD_REQUIRE_2FA`, the
   session lifetimes and the terminal outlive whoever changed them (hub-link-protocol.md section 9.9).
   Restarting is left to the role: it comes back on the configuration already on disk.
+  `POST /api/v1/dashboard/config/certificate` (`system.admin`, outside the destructive budget, audited
+  as `dashboard.config.certificate`) runs the keeper's `Ensure` now rather than at its next check, and
+  is refused with a 400 unless `JD_TLS` is `tailscale`.
 
 Database provisioning uses the shared `internal/portalloc` range selection instead of a 64-port window.
 It returns and audits Docker's actual host binding if a competing process claims the initial choice.
