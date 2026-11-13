@@ -2554,6 +2554,13 @@ The passes, in order. Each one is a diff you can review on its own.
    each signal will do to *this* process, read from the masks of the signals it handles, so a hang-up
    that reloads nginx and a hang-up that ends a script stop looking like the same button.
 
+   A network device took the same exit in 0.8.7 (`network/interfaces/device-page.tsx`): its sheet
+   held a chart, eight blocks of facts and five forms. It is `/network/interfaces/[name]` with the
+   Interfaces list as the rail, its relations (what it rides on, its ports, the namespace it leads
+   into, where it answers) drawn as one `WireFlow` picture rather than listed as facts, and its
+   forms as settings sections under one save bar. The namespace cards beside the list gave up the
+   devices listed under each row for a count on the line; the devices are the namespace's sheet's.
+
    PM2 took the same exit in the same pass, at the operator's request, and for the same reason: four
    grey figures over a table, and nothing that moved. Online and Not running went to state chips in
    the table's head, Errored in its tone and drawn only while there is one; Restarts summed every

@@ -409,8 +409,12 @@ review screenshots at those three widths, including scrolled content and rule/ja
 The changed-file gate also runs the design-system checks. `tests/browser/network-ui.spec.ts` (with
 `network-fixture.ts`) checks every Network page's structure — no unnamed control, no pill, no frame
 that is not a table, no sideways scroll on a phone — the redirects, the overview's picture and
-findings, the device sheet's guards, the create forms' bodies, the routing picture and a peer's QR
-code; `JD_NETWORK_SHOTS` writes review screenshots at 390 and 1440.
+findings, a device page's guards, the create forms' bodies, the routing picture and a peer's QR
+code; `JD_NETWORK_SHOTS` writes review screenshots at 390 and 1440. `network-device-page.spec.ts`
+holds the Interfaces list and a device's page to what their overhaul promised, at 1280 and 390: one
+height for every card and row, the opening line in one place loading and loaded, the old `?device=`
+address landing on the page, every verb's request, the rail, and nothing a read-only account cannot
+use.
 
 **Packages.** `install-panel.tsx` updates as you type, which is not decoration: the reason people open a
 terminal instead of a package page is that they do not know the name (`postgresql-client`, not `psql`;
