@@ -1,185 +1,213 @@
 "use client"
 
-import { Slash } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { ProductGlyph } from "@/components/product-logo"
-import { Address, jailProduct } from "@/components/security/marks"
-import { get } from "@/lib/api"
-import { lensFor } from "@/lib/log-lenses"
-import type { BlocksView, Fail2banJail } from "@/lib/types"
+import { useState } from "react"
+import { useSearchParams } from "next/navigation"
+import { Tabs as TabsPrimitive } from "radix-ui"
+import { Play, RefreshClockwise, ShieldOff, Slash } from "@/components/icons"
+import { get, post } from "@/lib/api"
+import { plural } from "@/lib/format"
+import { notify } from "@/lib/toast"
+import type { BlocksView, CrowdSecView, SuricataView } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { PageContext } from "@/components/page"
-import { EmptyState, ErrorState, Hold, LoadingPanel } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Status } from "@/components/status-dot"
-import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
-import { FAIL2BAN_LOG } from "@/components/security/host-logs"
-import {
-  HostLogSection,
-  useAddressLineVerbs,
-  useHostLog,
-  useReadingPress,
-} from "@/components/security/log-section"
+import { BanDialog, banKey, type BanTarget } from "@/components/security/ban-dialog"
 import { BlocksPanel } from "@/components/security/blocks-panel"
 import { CrowdSecPanel } from "@/components/security/crowdsec-panel"
-import { JailsPanel } from "@/components/security/jail-panel"
-import { OffendersPanel } from "@/components/security/offenders-panel"
+import { Fail2banPanel } from "@/components/security/fail2ban-panel"
+import {
+  ENGINE_NAME,
+  posture,
+  shownTab,
+  standings,
+  type Fail2banStatus,
+  type IntrusionTab,
+} from "@/components/security/intrusion-model"
+import { IntrusionPicture } from "@/components/security/intrusion-picture"
+import { Address } from "@/components/security/marks"
 import { useSecurity } from "@/components/security/security-context"
 import { SuricataPanel } from "@/components/security/suricata-panel"
+import { LoadingRows } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { ChipCount, tabClasses } from "@/components/tabs"
+import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { VerbMenu, type Verb } from "@/components/verbs"
 
 /**
- * Intrusion prevention: three tools that read different things, one after the
- * other, each opening on its own identity line.
+ * Intrusion prevention: three tools that read different things, one at a
+ * time under one picture of all three.
  *
  * fail2ban reads this host's logs and bans what it saw misbehave; CrowdSec
- * reads them too and adds what other servers saw, enforced by bouncers; Suricata
- * reads the packets. They are not alternatives — a server can run all three —
- * so a tool that is not installed is a handoff in its own section and never
- * hides the others.
+ * reads them too and adds what other servers saw, enforced by bouncers;
+ * Suricata reads the packets. They are not alternatives (a server can run
+ * all three), so the page opens on what is true of them together: its own
+ * line with the worst thing true of any engine as its state and the one
+ * command that bans by hand, then the picture (`intrusion-picture.tsx`) of
+ * the internet, this server and each engine with what it holds.
+ *
+ * Under the picture one engine is on screen at a time, as a view in the
+ * address (`?tab=`), with the addresses every engine and the firewall refuse
+ * folded into one list as the fourth view. They used to be stacked: a merged
+ * table, then each engine's identity line, tiles, tables and log, nearly six
+ * thousand pixels on a laptop, each section waiting on the one above it. An
+ * address without a view opens on the first engine that is installed, and one
+ * that names an engine that is not shows that engine's way to install it.
+ *
+ * The page reads all three engines itself, because the line and the picture
+ * need every one of them, and hands each view its own read.
  */
 export function IntrusionPanels() {
+  const { can } = useAuth()
+  const admin = can("system.admin")
+  const { exposure } = useSecurity()
+
   // One read of every engine's refused addresses, shared by the merged list
-  // and by both ban forms, which say what already holds an address.
+  // and by the ban form, which says what already holds an address.
   const blocks = usePoll<BlocksView>((signal) => get("/security/blocks", undefined, signal), 30_000)
+  const fail2ban = usePoll<Fail2banStatus>((signal) => get("/fail2ban/", undefined, signal), 20_000)
+  const crowdsec = usePoll<CrowdSecView>(
+    (signal) => get("/security/crowdsec/", undefined, signal),
+    20_000,
+  )
+  const suricata = usePoll<SuricataView>(
+    (signal) => get("/security/suricata/", undefined, signal),
+    20_000,
+    [],
+    { enabled: admin },
+  )
+
+  // An engine whose read failed has answered: the page stops waiting on it,
+  // and its own view says what went wrong.
+  const engines = standings({
+    admin,
+    fail2ban: fail2ban.data,
+    crowdsec: crowdsec.data,
+    suricata: suricata.data,
+    failed: {
+      fail2ban: Boolean(fail2ban.error),
+      crowdsec: Boolean(crowdsec.error),
+      suricata: Boolean(suricata.error),
+    },
+  })
+  const state = posture(engines)
+
+  // The view is in the address, replaced rather than pushed: an engine is not
+  // a place Back should step through. A link that names a view while the page
+  // is open (the picture's own nodes do not navigate) is followed.
+  const requested = useSearchParams().get("tab")
+  const [chosen, setChosen] = useState(requested)
+  const [seen, setSeen] = useState(requested)
+  if (requested !== seen) {
+    setSeen(requested)
+    if (requested) setChosen(requested)
+  }
+  const tab = shownTab(chosen, engines)
+  const setTab = (next: string) => {
+    setChosen(next)
+    const url = new URL(window.location.href)
+    url.searchParams.set("tab", next)
+    window.history.replaceState(null, "", `${url.pathname}${url.search}`)
+  }
+
+  const refreshAll = () => {
+    blocks.refresh()
+    fail2ban.refresh()
+    crowdsec.refresh()
+    if (admin) suricata.refresh()
+  }
+  // What a ban, a release or a start changes: the engine it was made in and
+  // the merged list.
+  const changed = () => {
+    blocks.refresh()
+    fail2ban.refresh()
+    crowdsec.refresh()
+  }
+
+  // Who can take a ban by hand right now: CrowdSec while it runs, and each
+  // jail of a running fail2ban.
+  const targets: BanTarget[] = [
+    ...(crowdsec.data?.installed && crowdsec.data.active ? [{ engine: "crowdsec" as const }] : []),
+    ...(fail2ban.data?.running
+      ? fail2ban.data.jails.map((jail) => ({ engine: "fail2ban" as const, jail: jail.name }))
+      : []),
+  ]
+  const [banning, setBanning] = useState(false)
+  const firstJail = targets.find((target) => target.engine === "fail2ban")
+  const banFrom =
+    tab === "fail2ban" && firstJail ? banKey(firstJail) : banKey({ engine: "crowdsec" })
+
+  const [starting, setStarting] = useState(false)
+  const startFail2ban = async () => {
+    setStarting(true)
+    try {
+      await post("/systemd/fail2ban.service/start")
+      notify.success("fail2ban started")
+      changed()
+    } catch (err) {
+      notify.error("Could not start fail2ban", err)
+    } finally {
+      setStarting(false)
+    }
+  }
+  const verbs: Verb[] = [
+    { key: "refresh", label: "Read again", icon: RefreshClockwise, run: refreshAll },
+    ...(fail2ban.data?.available && !fail2ban.data.running && can("service.control")
+      ? [
+          {
+            key: "start-fail2ban",
+            label: "Start fail2ban",
+            icon: Play,
+            disabled: starting,
+            run: () => void startFail2ban(),
+          },
+        ]
+      : []),
+  ]
+
+  const waiting = state === undefined
+  const failing = fail2ban.data?.running
+    ? fail2ban.data.jails.reduce((n, jail) => n + jail.currentlyFailed, 0)
+    : undefined
+  const views: { key: IntrusionTab; label: string; count?: number }[] = [
+    { key: "fail2ban", label: ENGINE_NAME.fail2ban },
+    { key: "crowdsec", label: ENGINE_NAME.crowdsec },
+    { key: "suricata", label: ENGINE_NAME.suricata },
+    { key: "blocked", label: "Blocked", count: blocks.data?.distinct },
+  ]
+
   return (
     <>
       <PageContext eyebrow="Security" title="Intrusion prevention" />
-      <BlocksPanel
-        data={blocks.data}
-        error={blocks.error}
-        loading={blocks.loading}
-        onRetry={blocks.refresh}
-      />
-      {/* Each tool's section is as tall as what the tool answers, so the page
-          arrives from the top: a section waits for the one over it. */}
-      <Hold until={!blocks.loading} />
-      <Fail2banSection blocks={blocks.data} onBlocked={blocks.refresh} />
-      <ToolSection name="CrowdSec">
-        <CrowdSecPanel blocks={blocks.data} onBlocked={blocks.refresh} />
-      </ToolSection>
-      <ToolSection name="Suricata">
-        <SuricataPanel />
-      </ToolSection>
-    </>
-  )
-}
 
-/**
- * A tool of its own under the one before it. The hairline is what says the
- * page has started on something else: each tool opens on the same identity
- * line, and without it the three read as one long fail2ban page.
- */
-function ToolSection({ name, children }: { name: string; children: React.ReactNode }) {
-  return (
-    <section
-      aria-label={name}
-      className="flex min-w-0 flex-col gap-6 border-t border-hairline pt-8 md:gap-8 md:pt-10"
-    >
-      {children}
-    </section>
-  )
-}
-
-/**
- * fail2ban: the tool itself in one identity line, drawn as its own mark with
- * whether it is running at the right end; the jails, the addresses they are
- * holding, and — under that — what the tool has actually been doing, because
- * a ban expires and the jail is empty again by morning however busy the night
- * was.
- *
- * What it has been doing is its own log, read through the fail2ban lens: every
- * strike a jail counted as well as every ban, so an address three strikes
- * from a ban is on the page before it is banned, and Insights ranks the
- * strikes and bans by jail and the addresses banned more than once. The day's
- * counts are the second row of the readings. It used to be a table of bans
- * and unbans parsed from the file alone, which on a host where fail2ban
- * writes to the journal said there was nothing to read; the journal is read
- * now instead.
- */
-function Fail2banSection({ blocks, onBlocked }: { blocks?: BlocksView; onBlocked: () => void }) {
-  const { can } = useAuth()
-  const { exposure } = useSecurity()
-  const { data, error, loading, refresh } = usePoll(
-    (signal) =>
-      get<{ available: boolean; running: boolean; jails: Fail2banJail[]; error?: string }>(
-        "/fail2ban/",
-        undefined,
-        signal,
-      ),
-    20000,
-  )
-
-  const jails = data?.jails ?? []
-  const bannedNow = jails.reduce((n, j) => n + j.currentlyBanned, 0)
-  const failingNow = jails.reduce((n, j) => n + j.currentlyFailed, 0)
-  const bansTotal = jails.reduce((n, j) => n + j.totalBanned, 0)
-  const watched = new Set(jails.flatMap((j) => j.fileList)).size
-  const activity = useHostLog(FAIL2BAN_LOG, Boolean(data?.available))
-  const readings = useLensReadings(activity.data?.id ?? "", FAIL2BAN_LENS, {
-    forcedLens: "fail2ban",
-    enabled: Boolean(activity.data) && Boolean(data?.running),
-  })
-  const lineVerbs = useAddressLineVerbs({
-    comment: "blocked from fail2ban's log",
-    onBlocked: refresh,
-    blockOn: OFFENCES,
-  })
-  const [ask, press] = useReadingPress()
-  const activitySection = (
-    <HostLogSection
-      title="Activity"
-      log={activity}
-      storageKey="security.intrusion.log"
-      lineVerbs={lineVerbs}
-      ask={ask}
-      readings={readings}
-    />
-  )
-
-  if (loading && !data) return <LoadingPanel hold />
-  if (error && !data) return <ErrorState error={error} />
-  if (!data?.available) {
-    return (
-      <>
-        <EmptyState
-          icon={Slash}
-          title="fail2ban is not installed"
-          description="It turns an endless brute-force against a port that has to stay open into a few attempts and a ban, which is the one thing a firewall cannot do for SSH."
-        />
-      </>
-    )
-  }
-  if (!data.running) {
-    return (
-      <>
-        <EmptyState
-          icon={Slash}
-          title="fail2ban is installed but not responding"
-          description={
-            data.error ?? "Installed and stopped is the state that looks protected and is not."
-          }
-        />
-        {/* Its last lines are usually why. */}
-        {activitySection}
-      </>
-    )
-  }
-
-  return (
-    <>
       <HostIdentity
-        mark="fail2ban"
-        title="fail2ban"
+        label="About intrusion prevention"
+        slot="intrusion-identity"
+        fallback={ShieldOff}
+        title="Intrusion prevention"
+        state={
+          state ? (
+            <Status tone={state.tone} label={state.label} />
+          ) : (
+            <Status tone="unknown" label="reading" />
+          )
+        }
         facts={
           <>
             <span className="numeric">
-              {jails.length === 1 ? "1 jail" : `${jails.length} jails`}
+              {blocks.data
+                ? `${plural(blocks.data.distinct, "address", "addresses")} refused`
+                : blocks.error
+                  ? "refused addresses not read"
+                  : "reading the engines"}
             </span>
-            <FactDot />
-            <span className="numeric">
-              {watched === 1 ? "1 log watched" : `${watched} logs watched`}
-            </span>
+            {blocks.data && blocks.data.duplicated > 0 && (
+              <>
+                <FactDot />
+                <span className="numeric">{blocks.data.duplicated} held more than once</span>
+              </>
+            )}
             {exposure?.client && (
               <>
                 <FactDot />
@@ -191,72 +219,82 @@ function Fail2banSection({ blocks, onBlocked }: { blocks?: BlocksView; onBlocked
             )}
           </>
         }
-        aside={<Status tone="running" label="running" className="text-body" />}
+        command={
+          admin && targets.length > 0 ? (
+            <Button size="sm" onClick={() => setBanning(true)}>
+              <Slash aria-hidden />
+              <span className="max-sm:sr-only">Ban an address</span>
+            </Button>
+          ) : undefined
+        }
+        menu={<VerbMenu verbs={verbs} label="Intrusion actions" />}
       />
 
-      {/* The four numbers the rest of the page is an explanation of. They were
-          a "·"-joined sentence in each jail's header, which meant comparing two
-          jails was reading two sentences. Under them, from the log, the last
-          day's bans, strikes, unbans and errors — the jails' counters start
-          again with every restart, the log does not. Two-up on a phone: eight
-          short figures one-up are a screen and a half before the jails. */}
-      <StatGrid columns={4} dense>
-        <StatTile label="Jails" value={jails.length} hint="configured and running" />
-        <StatTile
-          label="Banned now"
-          value={bannedNow}
-          tone={bannedNow > 0 ? "warning" : "default"}
-          hint="held this instant — bans expire"
-        />
-        <StatTile
-          label="Failing now"
-          value={failingNow}
-          hint="attempts inside the current window"
-        />
-        <StatTile label="Bans in total" value={bansTotal} hint="since fail2ban last started" />
-        {readings.tiles.map((tile) => (
-          <ReadingTile
-            key={tile.reading.id}
-            tile={tile}
-            window={readings.window}
-            onPick={() => press(tile.reading)}
-          />
-        ))}
-      </StatGrid>
-
-      <JailsPanel
-        jails={jails}
-        canManage={can("system.admin")}
-        clientIp={exposure?.client}
-        blocks={blocks}
-        onChanged={() => {
-          refresh()
-          onBlocked()
-        }}
+      <IntrusionPicture
+        engines={engines}
+        blocks={blocks.data}
+        failing={failing}
+        loading={waiting}
+        onOpen={setTab}
       />
 
-      <OffendersPanel onBlocked={refresh} journal={activity.data?.kind === "journal"} />
-      {activitySection}
+      <Tabs value={tab ?? ""} onValueChange={setTab} className="min-w-0 gap-0">
+        <TabsPrimitive.List
+          aria-label="Engines"
+          className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
+        >
+          {views.map((view) => (
+            <TabsPrimitive.Trigger
+              key={view.key}
+              value={view.key}
+              className={tabClasses(tab === view.key, "h-10")}
+            >
+              {view.label}
+              {view.count !== undefined && view.count > 0 && <ChipCount>{view.count}</ChipCount>}
+            </TabsPrimitive.Trigger>
+          ))}
+        </TabsPrimitive.List>
+
+        {/* Before the engines have answered there is no view to pick, unless
+            the address names one: grey rows hold the place of whichever it
+            turns out to be. */}
+        {tab === undefined && (
+          <div className="pt-6">
+            <LoadingRows rows={6} hold />
+          </div>
+        )}
+        <TabsContent value="fail2ban" className={VIEW}>
+          {tab === "fail2ban" && <Fail2banPanel view={fail2ban} onChanged={changed} />}
+        </TabsContent>
+        <TabsContent value="crowdsec" className={VIEW}>
+          {tab === "crowdsec" && <CrowdSecPanel view={crowdsec} onChanged={changed} />}
+        </TabsContent>
+        <TabsContent value="suricata" className={VIEW}>
+          {tab === "suricata" && <SuricataPanel view={suricata} />}
+        </TabsContent>
+        <TabsContent value="blocked" className={VIEW}>
+          {tab === "blocked" && (
+            <BlocksPanel
+              data={blocks.data}
+              error={blocks.error}
+              loading={blocks.loading}
+              onRetry={blocks.refresh}
+            />
+          )}
+        </TabsContent>
+      </Tabs>
+
+      <BanDialog
+        open={banning}
+        onOpenChange={setBanning}
+        targets={targets}
+        initial={banFrom}
+        blocks={blocks.data}
+        onBanned={changed}
+      />
     </>
   )
 }
 
-const FAIL2BAN_LENS = lensFor("fail2ban")
-
-/**
- * The lines whose address a deny answers: every strike and ban, and the ones
- * fail2ban let go. An address it was told to ignore is one the operator
- * trusts, and is never offered.
- */
-const OFFENCES = ["found", "ban", "increase", "restore_ban", "already_banned", "unban"]
-
-/** A jail's name with the mark of the service it watches, where that is one. */
-export function JailName({ name }: { name: string }) {
-  const product = jailProduct(name)
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      {product && <ProductGlyph id={product} />}
-      <span>{name}</span>
-    </span>
-  )
-}
+/** A view's own sections, spaced as the page spaces its blocks. */
+const VIEW = "min-w-0 flex-col gap-6 pt-6 data-[state=active]:flex md:gap-8"
