@@ -1877,13 +1877,6 @@ export type LogRotateRule = {
   options: string[]
 }
 
-export type LogRotateStatus = {
-  available: boolean
-  rules: LogRotateRule[]
-  stateFile?: string
-  lastRun?: string
-}
-
 /** The verdict for one file: is anything actually trimming this. */
 export type LogRetention = {
   managed: boolean
@@ -2352,25 +2345,6 @@ export type DbConnection = {
   capabilities?: DbCapabilities
 }
 
-/** One table, view or Mongo collection, as the schema browser lists it. */
-export type DbTable = {
-  schema: string
-  name: string
-  type: string
-  estimatedRows: number
-  size?: number
-  comment?: string
-}
-
-export type DbColumn = {
-  name: string
-  type: string
-  nullable: boolean
-  default?: string
-  key?: string
-  position: number
-}
-
 export type QueryResult = {
   columns: string[]
   types: string[]
@@ -2382,50 +2356,6 @@ export type QueryResult = {
   statement: string
 }
 
-export type QueryRisk = {
-  destructive: boolean
-  level: "read" | "medium" | "high" | "critical"
-  reasons: string[]
-}
-
-/** One index on a table, with the columns it covers in order. */
-export type DbIndex = {
-  name: string
-  columns: string[]
-  unique: boolean
-  primary: boolean
-}
-
-/** One outgoing foreign key. Composite keys keep columns paired in order. */
-export type DbForeignKey = {
-  name: string
-  columns: string[]
-  refSchema?: string
-  refTable: string
-  refColumns: string[]
-  onUpdate?: string
-  onDelete?: string
-}
-
-/** Everything the Structure tab shows and everything row editing needs. */
-export type DbTableDetail = {
-  schema: string
-  name: string
-  columns: DbColumn[]
-  primaryKey: string[]
-  indexes: DbIndex[]
-  foreignKeys: DbForeignKey[]
-  createSql?: string
-}
-
-/** A named SQL snippet kept against a connection. */
-export type DbSavedQuery = {
-  id: number
-  name: string
-  sql: string
-  createdAt: string
-}
-
 /** One entry in a connection's recent-statement history. */
 export type DbHistoryEntry = {
   id: number
@@ -2435,54 +2365,6 @@ export type DbHistoryEntry = {
   durationMs: number
   rowCount: number
   ranAt: string
-}
-
-export type OrmTarget = "prisma" | "drizzle" | "typescript" | "zod"
-
-/** A generator the server offers, with the filename its download will use. */
-export type OrmTargetInfo = {
-  id: OrmTarget
-  label: string
-  filename: string
-  description: string
-}
-
-/** One session the database server is currently running. */
-export type DbActivity = {
-  pid: string
-  user?: string
-  database?: string
-  state?: string
-  seconds: number
-  query?: string
-  client?: string
-  wait?: string
-  blockedBy?: string
-  /** True for the connection that answered this request — never offer to kill it. */
-  self?: boolean
-}
-
-export type DbActivityResponse = {
-  sessions: DbActivity[]
-  /** False on an engine with no server-side session list, e.g. SQLite. */
-  supported: boolean
-  reason?: string
-}
-
-/** One row found by the schema-wide value search. */
-export type DbSearchMatch = {
-  schema: string
-  table: string
-  column: string
-  value: string
-  row: Record<string, unknown>
-}
-
-export type DbSearchResult = {
-  matches: DbSearchMatch[]
-  tablesScanned: number
-  tablesSkipped?: string[]
-  truncated: boolean
 }
 
 /** What one table costs on disk. Row counts are the engine's estimate. */
@@ -2515,77 +2397,6 @@ export type DbOverview = {
   /** False where the engine cannot report bytes — show rows and say so. */
   sizesKnown: boolean
   pool: DbPoolStats
-}
-
-/** One condition in the data grid's filter row. */
-export type DbFilter = {
-  column: string
-  op: string
-  value: string
-}
-
-/** A column being created or added, as the DDL form describes it. */
-export type DbNewColumn = {
-  name: string
-  type: string
-  notNull?: boolean
-  primaryKey?: boolean
-  default?: string
-}
-
-export type DbImportResult = {
-  inserted: number
-  failed: number
-  errors: string[]
-  errorsTruncated: boolean
-  statement: string
-}
-
-/** Table name to column names, for editor completion. */
-export type DbOutline = {
-  schema: string
-  tables: Record<string, string[]>
-}
-
-/** table -> its outgoing foreign keys, for the entity diagram. */
-export type DbRelations = Record<string, DbForeignKey[]>
-
-// --- Redis ---------------------------------------------------------------
-
-export type RedisKeyInfo = {
-  key: string
-  type: string
-  /** Seconds; -1 means no expiry, -2 means the key is gone. */
-  ttl: number
-  size: number
-}
-
-export type RedisPage = {
-  keys: RedisKeyInfo[]
-  cursor: string
-  done: boolean
-}
-
-export type RedisZMember = { member: string; score: number }
-
-export type RedisValue = {
-  key: string
-  type: string
-  ttl: number
-  string?: string
-  list?: string[]
-  set?: string[]
-  hash?: Record<string, string>
-  zset?: RedisZMember[]
-  stream?: { id: string; values: Record<string, unknown> }[]
-  truncated: boolean
-}
-
-// --- MongoDB -------------------------------------------------------------
-
-export type MongoCollectionInfo = {
-  indexes: DbIndex[]
-  stats?: Record<string, unknown>
 }
 
 export type PasswordState = "set" | "locked" | "none" | "empty" | "unknown"
@@ -3706,17 +3517,6 @@ export type DeploymentRuntimeServices = {
   services: DeploymentRuntimeService[]
 }
 
-export type DockerTemplate = {
-  id: string
-  name: string
-  blurb: string
-  category: "http" | "database" | "tool" | "automation" | "game"
-  requires?: string
-  docsUrl: string
-  license: string
-  spec: ContainerSpec
-}
-
 /**
  * How the first person to open a deployed template gets in. The catalogue
  * declares it; the picker promises it before the deploy and the project's
@@ -4037,44 +3837,6 @@ export type GameProperties = {
   values?: Record<string, string>
   known: BlueprintProperty[]
   restartRequired?: boolean
-}
-
-export type BlueprintRenderedPlan = {
-  detection: { source: { kind: string; repository?: string; ref?: string; digest?: string } }
-  configuration: DeploymentConfiguration
-  rendered: {
-    blueprintId: string
-    blueprintVersion: string
-    profile: string
-    image: string
-    memoryMb: number
-    digest: string
-    variables: {
-      name: string
-      value?: string
-      sensitivity: string
-      generated?: boolean
-      length?: number
-      label?: string
-    }[]
-    ports: {
-      name: string
-      internal: number
-      protocol: string
-      exposure: string
-      purpose: string
-      primary?: boolean
-    }[]
-    volumes: { name: string; target: string; purpose: string; data: boolean; backup: boolean }[]
-    checks: { name: string; kind: string; phase: string; required: boolean }[]
-    domains?: string[]
-    acceptances?: { input: string; label: string; url: string }[]
-    stopCommands?: string[]
-  }
-  summary: BlueprintSummary
-  inputs: BlueprintInput[]
-  automation: BlueprintAutomation[]
-  files: BlueprintConfigFile[]
 }
 
 export type DeploymentDomainRoute = {
@@ -6871,12 +6633,6 @@ export type DeploymentRemovalPlan = {
   generatedAt: string
 }
 
-export type DeploymentRemovalExecution = {
-  deploymentId: number
-  removed: DeploymentRemovalTarget[]
-  remaining: DeploymentRemovalTarget[]
-}
-
 export type DeploymentBackupGateEvidence = {
   jobId: number
   runId?: number
@@ -7043,13 +6799,6 @@ export type SourceIdentity = {
   dirty?: boolean
   composeFiles?: string[]
   services?: string[]
-}
-
-export type EnvVar = {
-  key: string
-  value?: string
-  updatedAt: string
-  masked: string
 }
 
 export type AuditEntry = {
@@ -7911,29 +7660,6 @@ export type TerminalWindow = TerminalWindowSummary & {
 // --- detected and provisioned database servers ----------------------------
 
 /**
- * A database server found running on this host. It deliberately carries no
- * password: what reaches the browser is the description of a connection that
- * could be made, not the means to make it.
- */
-export type DbDetectedServer = {
-  driver: DbConnection["driver"]
-  container: string
-  image: string
-  host: string
-  port: number
-  user?: string
-  database?: string
-  /** Why this one cannot be connected to, when it cannot. */
-  reason?: string
-  /** The name of the connection already pointing at it, if there is one. */
-  adopted?: string
-  health?: string
-  status?: string
-}
-
-export type DbDetected = { servers: DbDetectedServer[] }
-
-/**
  * Where a connection's server can be reached from, as GET /databases/{id}/access
  * reads it off the container's port binding and the host's firewall.
  *
@@ -8247,14 +7973,6 @@ export type DbUnreachableServer = {
   reason: string
 }
 
-export type DbSyncResult = {
-  added: string[]
-  already: string[]
-  unreachable?: DbUnreachableServer[]
-  /** Servers running on the host itself, which nothing here can sign in to. */
-  needsCredentials?: DbCredentialServer[]
-}
-
 /**
  * A database installed on the machine rather than in a container.
  *
@@ -8284,50 +8002,6 @@ export type DbProvisionOption = {
 }
 
 // --- schema graph (the diagram) -------------------------------------------
-
-export type DbGraphColumn = {
-  name: string
-  type: string
-  nullable: boolean
-  primaryKey: boolean
-  foreignKey?: string
-  unique?: boolean
-}
-
-export type DbGraphTable = {
-  schema: string
-  name: string
-  type: string
-  rows: number
-  columns: DbGraphColumn[]
-}
-
-export type DbGraphEdge = {
-  name: string
-  fromTable: string
-  fromColumn: string
-  toTable: string
-  toColumn: string
-  onDelete?: string
-  cardinality: "one-to-one" | "many-to-one"
-}
-
-export type DbSchemaGraph = {
-  schema: string
-  tables: DbGraphTable[]
-  edges: DbGraphEdge[]
-  truncated: boolean
-}
-
-/**
- * How the operator arranged one schema's diagram, as the server hands it back.
- * The document itself is decoded by `components/database/diagram/memory.ts`;
- * the server stores it whole and says only when it was last saved.
- */
-export type DbDiagramLayoutResponse = {
-  layout: Record<string, unknown> | null
-  updatedAt?: string
-}
 
 // --- the fleet, the server behind a connection, and the map ----------------
 
@@ -8415,72 +8089,6 @@ export type DbFleet = {
   checkedAt: string
 }
 
-/** One account on the server, in the terms every engine shares. */
-export type DbRole = {
-  name: string
-  host?: string
-  login: boolean
-  superuser: boolean
-  createDb: boolean
-  createRole: boolean
-  connectionLimit: number
-  validUntil?: string
-  memberOf?: string[]
-  connections: number
-  locked?: boolean
-  system?: boolean
-}
-
-export type DbRoles = { roles: DbRole[]; supported: boolean; reason?: string }
-
-export type DbGrantLevel = "read" | "write" | "all"
-
-export type DbExtension = {
-  name: string
-  version?: string
-  availableVersion?: string
-  installed: boolean
-  schema?: string
-  comment?: string
-}
-
-export type DbExtensions = {
-  extensions: DbExtension[]
-  supported: boolean
-  editable?: boolean
-  reason?: string
-}
-
-export type DbSetting = {
-  name: string
-  value: string
-  unit?: string
-  category?: string
-  description?: string
-  source?: string
-  restartRequired?: boolean
-}
-
-export type DbSettings = { settings: DbSetting[]; supported: boolean }
-
-export type DbStatement = {
-  id: string
-  query: string
-  calls: number
-  totalMs: number
-  meanMs: number
-  maxMs?: number
-  rows: number
-  hitRatio: number
-}
-
-export type DbStatements = {
-  statements: DbStatement[]
-  supported: boolean
-  reason?: string
-  totalMs: number
-}
-
 /**
  * The logs a database's server writes, as GET /databases/{id}/logs/sources
  * follows the connection to them: its container, or the file its process
@@ -8538,15 +8146,6 @@ export type DbQueryLog = {
   entries: DbQueryEntry[]
   truncated: boolean
 }
-
-export type DbBackupFile = {
-  file: string
-  size: number
-  takenAt: string
-  format: string
-}
-
-export type DbBackups = { dir: string; files: DbBackupFile[] }
 
 /** A node on the map of what talks to what. */
 export type DbTopoNode = {
@@ -9107,15 +8706,6 @@ export type UninstallPlan = {
   durableLog: string
 }
 
-/** A layer of the host's exposure the posture did not see: neither a finding nor a pass. */
-export type PostureUnknown = {
-  id: string
-  layer: "provider" | "nftables"
-  title: string
-  detail: string
-  subjects?: string[]
-}
-
 export type SSHSetting = {
   key: string
   label: string
@@ -9155,20 +8745,6 @@ export type SSHDConfig = {
   error?: string
 }
 
-export type SSHApplyResult = {
-  written: boolean
-  file: string
-  valid: boolean
-  output?: string
-  reloaded: boolean
-  reloadError?: string
-  applied: string[]
-  /** Whether the socket unit was moved onto the new port as well. */
-  socketMoved?: boolean
-  socketUnit?: string
-  socketError?: string
-}
-
 export type Peer = {
   address: string
   count: number
@@ -9203,23 +8779,6 @@ export type NetInterface = {
   bytesSent: number
   bytesRecv: number
   public: boolean
-}
-
-export type Route = {
-  destination: string
-  gateway?: string
-  interface?: string
-  source?: string
-  metric?: string
-  family: "ipv4" | "ipv6"
-  raw: string
-}
-
-export type NetworkInfo = {
-  interfaces: NetInterface[]
-  routes: Route[]
-  resolvers: string[]
-  search: string[]
 }
 
 export type ProbeResult = {
@@ -9457,28 +9016,6 @@ export type DeploymentRequests = {
   slowest?: RequestEntry[]
   summary: RequestSummary
   coverage: RequestCoverage
-}
-
-/** One window's worth of traffic, small enough to sit beside a release or on a card. */
-export type TrafficReading = {
-  requests: number
-  pages: number
-  perMinute: number
-  errorRate: number
-  p95?: number
-  from: string
-  until: string
-}
-
-/** What a release did to the traffic: the same reading either side of its activation. */
-export type RunTraffic = {
-  status: "available" | "unavailable"
-  reason?: string
-  activationCompletedAt?: string
-  windowMinutes: number
-  before?: TrafficReading
-  after?: TrafficReading
-  latency: boolean
 }
 
 /** A project's last hour on a card: alive, failing, and a line to draw. */
@@ -10000,9 +9537,6 @@ export type NetworkTopologyFlows = {
   accounting: boolean
   edges: NetworkFlowEdge[]
 }
-
-/** What a change to a device the dashboard did not make says about the next boot. */
-export type NetworkLinkChange = { persisted: boolean; note?: string }
 
 export type NetworkNamespace = {
   name: string

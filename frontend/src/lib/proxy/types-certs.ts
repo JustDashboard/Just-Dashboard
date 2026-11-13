@@ -505,31 +505,6 @@ export type IssuePreflight = {
   checkedAt: string
 }
 
-export type CertificateFindingKind =
-  "key-readable" | "key-mismatch" | "key-reused" | "weak" | "uncovered" | "stale"
-
-export type CertificateHygieneFinding = {
-  id: string
-  kind: CertificateFindingKind
-  level: "critical" | "warning" | "notice"
-  title: string
-  detail: string
-  advice: string
-  /** A listed file the finding is about, which opens its sheet. */
-  certificate?: string
-  /** A certbot lineage the finding suggests deleting. */
-  lineage?: string
-  /** Server names the block's certificate does not cover. */
-  names?: string[]
-}
-
-export type CertificateHygiene = {
-  findings: CertificateHygieneFinding[]
-  /** "nginx -T", or "site files" when nginx could not print its configuration. */
-  config: string
-  configNote?: string
-}
-
 export type CoveredName = {
   name: string
   site: string
