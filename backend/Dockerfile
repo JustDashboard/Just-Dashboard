@@ -210,7 +210,8 @@ COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 
 # Runs as root deliberately: managing systemd units, the firewall, host
 # accounts and a PTY all require it. The security boundary is the network
-# allowlist plus mandatory 2FA in front of the API, not the process UID.
+# allowlist plus sign-in, with two-factor for every enrolled account, in front
+# of the API, not the process UID.
 WORKDIR /var/lib/just-dashboard
 EXPOSE 8080
 
