@@ -109,9 +109,9 @@ describe("the absence behind a failed read", () => {
 })
 
 describe("one line for several reads that failed for one reason", () => {
-  test("lists the kinds once, in the order the map draws them", () => {
+  test("lists the kinds once, in the order they were given", () => {
     expect(
-      unreadLine("Docker is not answering", ["Volumes", "Containers", "Stacks", "Containers"]),
+      unreadLine("Docker is not answering", ["Containers", "Stacks", "Containers", "Volumes"]),
     ).toBe("Docker is not answering: containers, stacks and volumes not drawn")
     expect(unreadLine("Docker is not answering", ["Containers"])).toBe(
       "Docker is not answering: containers not drawn",

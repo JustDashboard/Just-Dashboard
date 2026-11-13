@@ -49,6 +49,9 @@ async function at(page: Page, id: string) {
 
 test("every system is its own diagram, listed in the rail by what anchors it", async ({ page }) => {
   await open(page)
+  // Seventeen systems at once are a scatter of boxes: the page opens on one.
+  await page.getByRole("button", { name: "All", exact: true }).click()
+  await still(page)
   for (const [group, names] of [
     ["This dashboard", ["Just Dashboard"]],
     ["Deployments", ["billing", "blog", "api", "n8n", "shop", "docs"]],
@@ -226,7 +229,9 @@ test("an arrangement the mind map saved is read as a fresh one", async ({ page }
     layout: { version: 1, positions: { "container:c-api": { x: 4000, y: 4000 } }, minimap: false },
   })
   await expect(page.locator(".react-flow__minimap")).toHaveCount(0)
-  await expect(frame(page, "system:project:1")).toBeVisible()
+  // Fresh, so it opens where a crowded server does: on the dashboard's own system.
+  await expect(frame(page, "system:dashboard:self")).toBeVisible()
+  await expect(node(page, "system:project:1/container:c-api")).toHaveCount(0)
 })
 
 test("the desk has the canvas and its panels, with no bar over them and no minimap", async ({
@@ -553,5 +558,131 @@ test("a server with nothing on it offers the first deployment, and says what it 
     "href",
     "/deploy/new",
   )
-  await expect(page.getByText(/Certificates not read: Still being read/)).toBeVisible()
+  // Said in the inspector, as on its way rather than as a failure.
+  await expect(inspector(page).getByRole("list", { name: "Not read" })).toHaveText(
+    "Still reading certificates",
+  )
+  await expect(page.locator("[data-slot=server-map]").getByText(/Still reading/)).toHaveCount(0)
+})
+
+const daemon =
+  "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"
+/** The busy server with a Docker that does not answer: what it would have listed is unread. */
+const withoutDocker = {
+  ...busyMap,
+  kinds: busyMap.kinds.map((k) =>
+    ["containers", "stacks", "volumes"].includes(k.key)
+      ? { ...k, state: "unread", reason: daemon }
+      : k,
+  ),
+} as typeof busyMap
+
+test("with no place left behind, a crowded server opens on the dashboard's own system, readable", async ({
+  page,
+}) => {
+  const mock = await open(page)
+  await still(page)
+  await expect(railRow(page, "system:dashboard:self")).toHaveAttribute("aria-current", "true")
+  await expect(inspector(page).getByRole("heading", { name: "Just Dashboard" })).toBeVisible()
+  expect((await view(page)).zoom).toBeGreaterThanOrEqual(0.5)
+  // Its head is on the canvas, at the start of the diagram.
+  const canvas = (await page.locator("[data-slot=server-map]").boundingBox())!
+  const first = await at(page, "frame:system:dashboard:self")
+  expect(first.x).toBeGreaterThanOrEqual(canvas.x)
+  expect(first.y).toBeGreaterThanOrEqual(canvas.y)
+  expect(first.y).toBeLessThan(canvas.y + canvas.height / 2)
+  // Looked at, not chosen: nothing was written down as the reader's.
+  expect(mock.saved.puts).toBe(0)
+
+  // All is still everything, however small, and Fit the whole of a system.
+  await page.getByRole("button", { name: "All", exact: true }).click()
+  await expect.poll(async () => (await view(page)).zoom).toBeLessThan(0.3)
+  await expect(inspector(page).getByRole("heading", { name: "17 systems" })).toBeVisible()
+})
+
+test("a server whose systems can all be read at once still opens on all of them", async ({
+  page,
+}) => {
+  const few = {
+    ...busyMap,
+    kinds: busyMap.kinds.map((k) => (k.key === "dashboard" ? k : { ...k, items: [], total: 0 })),
+    links: [],
+  } as typeof busyMap
+  await open(page, "/map", { map: few })
+  await still(page)
+  await expect(rail(page).locator("[aria-current=true]")).toHaveCount(0)
+  await expect(inspector(page).getByRole("heading", { name: /^1 system$/ })).toBeVisible()
+})
+
+test("the place the reader left is kept over the page's own choice", async ({ page }) => {
+  await open(page, "/map", {
+    layout: { version: 2, positions: {}, frames: {}, focus: "system:project:1" },
+  })
+  await still(page)
+  await expect(railRow(page, "system:project:1")).toHaveAttribute("aria-current", "true")
+  await expect(railRow(page, "system:dashboard:self")).not.toHaveAttribute("aria-current", "true")
+})
+
+test("what Docker did not answer for is one line in the inspector, not four over the canvas", async ({
+  page,
+}) => {
+  await open(page, "/map", { map: withoutDocker })
+  const notes = inspector(page).getByRole("list", { name: "Not read" })
+  await expect(notes.getByRole("listitem")).toHaveCount(1)
+  await expect(notes).toContainText(
+    "Docker is not answering: containers, stacks and volumes not drawn",
+  )
+  await expect(notes.getByRole("link", { name: "Open Docker" })).toHaveAttribute("href", "/docker")
+  // The client's question is one press away, never the line.
+  await expect(notes.getByText(daemon)).toBeHidden()
+  await notes.getByText("What the server said").click()
+  await expect(notes.getByText(daemon)).toBeVisible()
+  // Nothing is said over the canvas while the inspector says it.
+  const canvas = page.locator("[data-slot=server-map]")
+  await expect(canvas.getByText(/Docker is not answering/)).toHaveCount(0)
+  await expect(canvas.getByText(/not read/)).toHaveCount(0)
+  // It stays through every view of the inspector.
+  await railRow(page, "system:project:1").click()
+  await expect(notes).toContainText("Docker is not answering")
+
+  // With the inspector put away the same line floats on the canvas, once.
+  await canvas.getByRole("button", { name: /Hide the inspector/ }).click()
+  const floating = canvas.getByRole("list", { name: "Not read" })
+  await expect(floating.getByRole("listitem")).toHaveCount(1)
+  await expect(floating.getByRole("link", { name: "Open Docker" })).toBeVisible()
+  await expect(floating.getByText("What the server said")).toHaveCount(0)
+})
+
+test("on this server is a row for each kind, and a row lights that kind's boxes on the canvas", async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole("button", { name: "All", exact: true }).click()
+  await still(page)
+  const rows = inspector(page).locator("button[data-kind]")
+  await expect(rows.first()).toBeVisible()
+  await expect(inspector(page).locator("dl")).toHaveCount(0)
+  const databases = inspector(page).locator('button[data-kind="databases"]')
+  await expect(databases).toHaveAttribute("aria-pressed", "false")
+  await expect(databases.locator("svg")).toHaveCount(1)
+  // One height, with the figure at the end of each.
+  const heights = await rows.evaluateAll((all) =>
+    all.map((row) => Math.round(row.getBoundingClientRect().height)),
+  )
+  expect(new Set(heights).size).toBe(1)
+
+  await databases.click()
+  await expect(databases).toHaveAttribute("aria-pressed", "true")
+  await still(page)
+  // Every database drawn is lit and what is not one steps back.
+  const lit = page.locator('.react-flow__node[data-id$="/db:1"]').first()
+  await expect(lit).toBeVisible()
+  await expect(lit.locator(".opacity-35")).toHaveCount(0)
+  await expect.poll(() => page.locator(".react-flow__node .opacity-35").count()).toBeGreaterThan(0)
+  // The whole view stays, so another kind is one press away, and the same
+  // row or Escape lets them go.
+  await expect(inspector(page).getByRole("heading", { name: "17 systems" })).toBeVisible()
+  await databases.click()
+  await expect(databases).toHaveAttribute("aria-pressed", "false")
+  await expect(page.locator(".react-flow__node .opacity-35")).toHaveCount(0)
 })

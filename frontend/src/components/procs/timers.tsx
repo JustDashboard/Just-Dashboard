@@ -132,7 +132,11 @@ export function TimersPanel({
       <PanelBody flush>
         {timers.loading && !timers.data && <LoadingRows rows={3} className="pt-3" />}
         {timers.error && !timers.data && <ErrorState error={timers.error} className="mt-3" />}
-        {timers.data && !timers.data.available && <NoSystemd reader="timers" size="block" />}
+        {timers.data && !timers.data.available && (
+          // The panel's body is flush for its table; the block takes the
+          // gutter the header has.
+          <NoSystemd reader="timers" size="block" className="px-5" />
+        )}
         {timers.data?.available && list.length === 0 && <EmptyNote>No timers.</EmptyNote>}
         {list.length > 0 && shown.length === 0 && <EmptyNote>No timer is {state}.</EmptyNote>}
         {shown.length > 0 && (

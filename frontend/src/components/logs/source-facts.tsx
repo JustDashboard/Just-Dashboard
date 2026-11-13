@@ -5,6 +5,7 @@ import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { ProductLogos, imageProducts } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
+import { Skeleton } from "@/components/ui/skeleton"
 import { KIND_TAG, kindIcon } from "@/components/logs/source-rail"
 import type { ServiceLogSource } from "@/components/logs/service-logs"
 
@@ -106,6 +107,8 @@ export type JournalFacts = {
   size?: number
   /** When its first record was written. */
   oldest?: string
+  /** The journal is being asked: the two facts it answers keep their room. */
+  loading?: boolean
 }
 
 /**
@@ -121,15 +124,23 @@ function journalFacts(journal: JournalFacts) {
         {plural(journal.units, "unit")}
       </span>
     ),
-    journal.size ? (
+    journal.loading ? (
+      // The room the two facts take, so a phone's line does not wrap a
+      // second time when they land.
+      <Skeleton key="size" className="h-3 w-22" />
+    ) : journal.size ? (
       <span key="size" className="numeric whitespace-nowrap">
         {bytes(journal.size)} on disk
       </span>
     ) : null,
-    journal.oldest && (
-      <span key="oldest" className="numeric min-w-0 truncate" title={timestamp(journal.oldest)}>
-        oldest line {relativeTime(journal.oldest)}
-      </span>
+    journal.loading ? (
+      <Skeleton key="oldest" className="h-3 w-28" />
+    ) : (
+      journal.oldest && (
+        <span key="oldest" className="numeric min-w-0 truncate" title={timestamp(journal.oldest)}>
+          oldest line {relativeTime(journal.oldest)}
+        </span>
+      )
     ),
   ].filter(Boolean)
 }

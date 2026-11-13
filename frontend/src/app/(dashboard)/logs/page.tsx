@@ -461,7 +461,12 @@ function LogsScreen() {
           source={viewSource}
           journal={
             wholeJournal
-              ? { units: units?.length, size: journal.data?.size, oldest: journal.data?.oldest }
+              ? {
+                  units: units?.length,
+                  size: journal.data?.size,
+                  oldest: journal.data?.oldest,
+                  loading: journal.loading && !journal.data,
+                }
               : undefined
           }
           aside={

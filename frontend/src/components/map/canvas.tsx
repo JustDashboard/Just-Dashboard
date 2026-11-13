@@ -63,6 +63,8 @@ const ZOOM = { min: 0.06, max: 2 }
  * drawn smaller, a board with a home opens on that system instead.
  */
 const READABLE = 0.4
+/** The least the system the canvas opens on by itself is drawn at. */
+const ARRIVE = 0.5
 /** The room `fitView` leaves round what it fits, as a share of the canvas. */
 const FIT_PADDING = 0.06
 /** A system flown to fills the canvas, but a small one is not blown up past its own size. */
@@ -349,9 +351,26 @@ export function MapCanvas({
           width && height && all.width > 0 && all.height > 0
             ? Math.min((width * room) / all.width, (height * room) / all.height)
             : 1
-        if (home && bySystem.has(home) && zoom < READABLE) {
+        const rect = home && zoom < READABLE ? frameRect(home) : null
+        if (home && rect && width && height) {
+          // Read first: a wide system is not shrunk to fit the canvas past
+          // where its names are read. It starts at its head and its first
+          // column, and Fit (F) shows the whole of it.
+          const fit = Math.min(1, (width * room) / rect.width, (height * room) / rect.height)
+          const at = clampZoom(Math.max(fit, ARRIVE))
+          const margin = 16
           setFocus(home)
-          flyTo(home, 0)
+          void flow.setViewport({
+            x:
+              rect.width * at <= width - margin * 2
+                ? (width - rect.width * at) / 2 - rect.x * at
+                : margin - rect.x * at,
+            y:
+              rect.height * at <= height - margin * 2
+                ? (height - rect.height * at) / 2 - rect.y * at
+                : margin - rect.y * at,
+            zoom: at,
+          })
         } else void flow.fitView({ padding: FIT_PADDING })
       }
     }, 0)

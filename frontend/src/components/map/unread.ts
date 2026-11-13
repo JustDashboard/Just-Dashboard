@@ -45,7 +45,8 @@ export function unreadNotices(unread: UnreadKind[]): UnreadNotice[] {
       thing: "docker",
       sentence: unreadLine(
         "Docker is not answering",
-        docker.map((kind) => kind.label),
+        // "Compose stacks" beside Docker's name is "stacks".
+        docker.map((kind) => kind.label.replace(/^compose /i, "")),
       ),
       href: "/docker",
       label: "Open Docker",

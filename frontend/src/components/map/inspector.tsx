@@ -1,7 +1,15 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowUpRight, ChevronRight, Copy, Crosshair, Layers, Logs } from "@/components/icons"
+import {
+  ArrowUpRight,
+  ChevronRight,
+  Copy,
+  Crosshair,
+  Layers,
+  Logs,
+  Warning,
+} from "@/components/icons"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { KEYCAP } from "@/components/command-search/keycaps"
 import { Status } from "@/components/status-dot"
@@ -16,6 +24,7 @@ import { VIA_LABEL, wireLabel } from "@/components/map/edges"
 import { ItemMark, KIND_GLYPH, TONE_DOT } from "@/components/map/marks"
 import type { UnreadNotice } from "@/components/map/unread"
 import { MissingLine } from "@/components/missing-thing"
+import { Spinner } from "@/components/state"
 import { nodeKindLabel } from "@/components/map/nodes"
 
 type Point = (id: string | null) => void
@@ -498,8 +507,16 @@ export function UnreadNotices({
     >
       {notices.map((notice) => (
         <li key={notice.key} className="min-w-0 space-y-1">
-          <MissingLine thing={notice.thing} href={notice.href} label={notice.label}>
-            <span className="text-foreground">{notice.sentence}</span>
+          <MissingLine
+            thing={notice.thing}
+            // A kind still being read for the first time is on its way, not missing.
+            icon={notice.key === "filling" ? Spinner : Warning}
+            href={notice.href}
+            label={notice.label}
+          >
+            <span className={cn(notice.key !== "filling" && "text-foreground")}>
+              {notice.sentence}
+            </span>
           </MissingLine>
           {notice.raw && (
             <details className="min-w-0 text-hint">

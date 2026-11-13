@@ -311,12 +311,15 @@ export function MissingOrError({
  */
 export function MissingLine({
   thing,
+  icon: Icon = Slash,
   children,
   href,
   label,
   className,
 }: {
   thing?: string
+  /** The glyph where the thing is no product. */
+  icon?: Glyph
   children: React.ReactNode
   href?: string
   /** The link's words: "Open Docker". */
@@ -328,25 +331,31 @@ export function MissingLine({
       data-slot="missing-line"
       data-thing={thing}
       className={cn(
-        "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-hint leading-snug text-muted-foreground",
+        "flex min-w-0 items-start gap-2 text-hint leading-snug text-muted-foreground",
         className,
       )}
     >
-      {hasProductLogo(thing) ? (
-        <ProductGlyph id={thing} />
-      ) : (
-        <Slash aria-hidden className="size-3.5 shrink-0" />
-      )}
-      <span className="min-w-0 flex-1 basis-40 text-pretty">{children}</span>
-      {href && label && (
-        <Link
-          href={href}
-          className="inline-flex shrink-0 items-center gap-1 rounded-sm font-medium text-foreground focus-ring hover:underline"
-        >
-          {label}
-          <ArrowRight className="size-3" />
-        </Link>
-      )}
+      {/* The mark keeps the first line's height, so it sits beside the
+          sentence's first line when the link wraps under it. */}
+      <span aria-hidden className="flex h-[1.375em] shrink-0 items-center">
+        {hasProductLogo(thing) ? (
+          <ProductGlyph id={thing} />
+        ) : (
+          <Icon className="size-3.5 shrink-0" />
+        )}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+        <span className="min-w-0 text-pretty">{children}</span>
+        {href && label && (
+          <Link
+            href={href}
+            className="inline-flex shrink-0 items-center gap-1 rounded-sm font-medium text-foreground focus-ring hover:underline"
+          >
+            {label}
+            <ArrowRight className="size-3" />
+          </Link>
+        )}
+      </span>
     </p>
   )
 }

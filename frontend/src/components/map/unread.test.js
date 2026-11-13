@@ -8,7 +8,7 @@ describe("what the map could not read", () => {
   test("every kind Docker would have answered for is one line with one way on", () => {
     const notices = unreadNotices([
       { key: "containers", label: "Containers", reason: daemon },
-      { key: "stacks", label: "Stacks", reason: daemon },
+      { key: "stacks", label: "Compose stacks", reason: daemon },
       { key: "volumes", label: "Volumes", reason: `Last read 2m ago: ${daemon}` },
     ])
     expect(notices).toHaveLength(1)

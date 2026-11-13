@@ -146,20 +146,14 @@ export function missingFromError(
   }
 }
 
-/** The Docker kinds a reading draws, in the order a sentence lists them. */
-const DOCKER_KINDS = ["deployments", "containers", "stacks", "volumes", "images", "networks"]
-
 /**
  * One line for several reads that failed for one reason: "Docker is not
  * answering: containers, stacks and volumes not drawn". `kinds` are the
- * plural names of what went unread, `verb` what the page would have done
- * with them.
+ * plural names of what went unread, in the order to say them, and `verb`
+ * what the page would have done with them.
  */
 export function unreadLine(subject: string, kinds: string[], verb = "drawn"): string {
-  const unique = [...new Set(kinds.map((kind) => kind.toLowerCase()))].sort((a, b) => {
-    const [x, y] = [DOCKER_KINDS.indexOf(a), DOCKER_KINDS.indexOf(b)]
-    return (x < 0 ? DOCKER_KINDS.length : x) - (y < 0 ? DOCKER_KINDS.length : y)
-  })
+  const unique = [...new Set(kinds.map((kind) => kind.toLowerCase()))]
   if (unique.length === 0) return subject
   const list =
     unique.length === 1
