@@ -84,7 +84,7 @@ export function TrafficBudgets({ links }: { links: NetworkLink[] | undefined }) 
         title="Transfer budgets"
         actions={
           <>
-            {list && (
+            {list && list.length > 0 && (
               <span className="numeric pr-1.5 text-hint text-muted-foreground">
                 {plural(list.length, "budget")} · alerts, never limits
               </span>

@@ -253,7 +253,7 @@ function QueueCard({
           <VerbMenu verbs={verbs} label={`Queue on ${d.name}`} />
         ) : (
           // The menu's place is kept, so every card's columns start on one edge.
-          <span aria-hidden className="size-7" />
+          <span aria-hidden className="size-8" />
         )
       }
     >

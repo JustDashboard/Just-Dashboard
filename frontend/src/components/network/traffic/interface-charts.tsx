@@ -27,6 +27,7 @@ import { LinkGlyph, ROLE_LABEL } from "@/components/network/marks"
 import { RX, TX } from "@/components/network/rate-pair"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useViewState } from "@/lib/view-state"
+import { cn } from "@/lib/utils"
 import {
   WINDOWS,
   isRange,
@@ -273,7 +274,7 @@ export function InterfaceCharts({
     return (
       <ChartGrid>
         {Array.from({ length: Math.max(1, remembered) }, (_, i) => (
-          <ChartGhost key={i} height={i === 0 ? LEAD_HEIGHT : CHART_HEIGHT} />
+          <ChartGhost key={i} lead={i === 0} recorded={recorded} />
         ))}
       </ChartGrid>
     )
@@ -344,7 +345,7 @@ export function InterfaceCharts({
             rows={rowsFor(link.name)}
             span={span}
             reading={reading}
-            height={i === 0 ? LEAD_HEIGHT : CHART_HEIGHT}
+            lead={i === 0}
             livePoints={live[link.name]}
             percentiles={history.data?.percentiles?.[link.name]}
             events={events}
@@ -358,12 +359,26 @@ export function InterfaceCharts({
 
 const LEAD_HEIGHT = 220
 const CHART_HEIGHT = 160
+
 /**
- * What a drawn chart stands on besides its plot: the title line, the legend's
- * three lines and the footer's one. A block is held to the plot plus this in
- * every state, so a first reading fills the block instead of stretching it.
+ * What a block stands on besides its plot (`--plot`), and so how tall it is
+ * held in every state: the title line, the legend's three lines and the line
+ * under it, which is one line on the live window and the window's spread on
+ * a recorded one. The spread wraps between its four parts and never inside
+ * one: a phone's column takes one part to a line, half the page two, the
+ * whole page all four, and each is given that room before it has anything to
+ * say, so a first reading fills its block instead of stretching it.
  */
-const CHART_CHROME = 157
+function blockHeight(lead: boolean, recorded: boolean) {
+  if (!recorded) return "min-h-[calc(var(--plot)+157px)]"
+  return lead
+    ? "min-h-[calc(var(--plot)+207px)] sm:min-h-[calc(var(--plot)+174px)] xl:min-h-[calc(var(--plot)+157px)]"
+    : "min-h-[calc(var(--plot)+207px)] xl:min-h-[calc(var(--plot)+174px)]"
+}
+const spreadHeight = (lead: boolean) =>
+  lead ? "min-h-[4lh] sm:min-h-[2lh] xl:min-h-[1lh]" : "min-h-[4lh] xl:min-h-[2lh]"
+const plot = (lead: boolean) =>
+  ({ "--plot": `${lead ? LEAD_HEIGHT : CHART_HEIGHT}px` }) as React.CSSProperties
 
 /** The uplink across the page, then two to a row. */
 function ChartGrid({ children }: { children: React.ReactNode }) {
@@ -375,13 +390,13 @@ function ChartGrid({ children }: { children: React.ReactNode }) {
 }
 
 /** A device's block before the devices are known. */
-function ChartGhost({ height }: { height: number }) {
+function ChartGhost({ lead, recorded }: { lead: boolean; recorded: boolean }) {
   return (
     <div
       data-slot="device-chart"
       aria-hidden
-      className="flex min-w-0 flex-col"
-      style={{ minHeight: height + CHART_CHROME }}
+      className={cn("flex min-w-0 flex-col", blockHeight(lead, recorded))}
+      style={plot(lead)}
     >
       <div className="flex items-center justify-between border-b border-hairline pb-3">
         <Skeleton className="h-4 w-28" />
@@ -407,7 +422,7 @@ function DeviceChart({
   rows,
   span,
   reading,
-  height,
+  lead,
   livePoints,
   percentiles,
   events,
@@ -418,7 +433,8 @@ function DeviceChart({
   span: TrafficSpan
   /** The recorded window has not answered yet. */
   reading: boolean
-  height: number
+  /** The first device, drawn across the page and taller. */
+  lead: boolean
   livePoints?: NetworkLivePoint[]
   percentiles?: Percentiles
   events?: TrafficAnnotation[]
@@ -430,8 +446,8 @@ function DeviceChart({
     () =>
       !live && percentiles && percentiles.samples > 1
         ? [
-            { value: percentiles.rxP95, label: thresholdWords("in", percentiles.rxP95) },
-            { value: percentiles.txP95, label: thresholdWords("out", percentiles.txP95) },
+            { value: percentiles.rxP95, label: thresholdWords("In", percentiles.rxP95) },
+            { value: percentiles.txP95, label: thresholdWords("Out", percentiles.txP95) },
           ]
         : undefined,
     [live, percentiles],
@@ -450,8 +466,8 @@ function DeviceChart({
   return (
     <div
       data-slot="device-chart"
-      className="flex min-w-0 flex-col"
-      style={{ minHeight: height + CHART_CHROME }}
+      className={cn("flex min-w-0 flex-col", blockHeight(lead, !live))}
+      style={plot(lead)}
     >
       <ChartPanel
         plain
@@ -462,7 +478,7 @@ function DeviceChart({
         format={formatRate}
         axisFormat={axisRate}
         showPeaks={!live}
-        height={height}
+        height={lead ? LEAD_HEIGHT : CHART_HEIGHT}
         thresholds={thresholds}
         events={live ? undefined : events}
         onZoom={onZoom}
@@ -477,7 +493,7 @@ function DeviceChart({
           live ? (
             last?.rxp !== undefined ? (
               <span
-                className="numeric truncate text-hint text-muted-foreground"
+                className="numeric text-hint text-muted-foreground"
                 aria-label={`${link.name} packets`}
               >
                 {packetRate(last.rxp)} packets in · {packetRate(last.txp)} out
@@ -488,11 +504,17 @@ function DeviceChart({
             ) : undefined
           ) : percentiles && percentiles.samples > 0 ? (
             <span
-              className="numeric truncate text-hint text-muted-foreground"
+              className={cn(
+                "numeric flex flex-wrap content-start gap-x-4 text-hint text-muted-foreground",
+                spreadHeight(lead),
+              )}
               aria-label={`${link.name} throughput spread`}
-              title={throughputWords(percentiles)}
             >
-              {throughputWords(percentiles)}
+              {throughputWords(percentiles).map((part) => (
+                <span key={part} className="whitespace-nowrap">
+                  {part}
+                </span>
+              ))}
             </span>
           ) : undefined
         }

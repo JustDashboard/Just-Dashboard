@@ -96,19 +96,19 @@ export function tcpWords({
  * learning of the reader either way: the shares are said as the latency
  * figures say theirs.
  */
-export function throughputWords(p: Percentiles): string {
+export function throughputWords(p: Percentiles): string[] {
   const pair = (rx: number, tx: number) => `↓ ${rate(rx)} ↑ ${rate(tx)}`
   return [
     `${LATENCY_SHARE.p50} of the time under ${pair(p.rxP50, p.txP50)}`,
     `${LATENCY_SHARE.p95.toLowerCase()} under ${pair(p.rxP95, p.txP95)}`,
     `${LATENCY_SHARE.p99.toLowerCase()} under ${pair(p.rxP99, p.txP99)}`,
     `over ${p.samples} ${p.basisSeconds}s intervals`,
-  ].join(" · ")
+  ]
 }
 
 /** The line a chart draws at the rate a direction stayed under 19 times in 20. */
-export function thresholdWords(direction: "in" | "out", value: number): string {
-  return `${direction} ${LATENCY_SHARE.p95.toLowerCase()} under ${rate(value)}`
+export function thresholdWords(direction: "In" | "Out", value: number): string {
+  return `${direction}: ${LATENCY_SHARE.p95.toLowerCase()} under ${rate(value)}`
 }
 
 const DIRECTION_WORD: Record<InterfaceQuota["direction"], string> = {

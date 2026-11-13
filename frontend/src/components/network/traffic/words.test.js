@@ -74,11 +74,14 @@ test("a window's throughput spread is said in shares, not percentiles", () => {
     txP95: 1_048_576,
     txP99: 1_572_864,
   })
-  expect(words).toBe(
-    "Half of the time under ↓ 1.0 MB/s ↑ 512.0 KB/s · 19 in 20 under ↓ 2.0 MB/s ↑ 1.0 MB/s · 99 in 100 under ↓ 2.5 MB/s ↑ 1.5 MB/s · over 240 15s intervals",
-  )
-  expect(words).not.toMatch(/p50|p95|p99/)
-  expect(thresholdWords("in", 2_097_152)).toBe("in 19 in 20 under 2.0 MB/s")
+  expect(words).toEqual([
+    "Half of the time under ↓ 1.0 MB/s ↑ 512.0 KB/s",
+    "19 in 20 under ↓ 2.0 MB/s ↑ 1.0 MB/s",
+    "99 in 100 under ↓ 2.5 MB/s ↑ 1.5 MB/s",
+    "over 240 15s intervals",
+  ])
+  expect(words.join(" ")).not.toMatch(/p50|p95|p99/)
+  expect(thresholdWords("In", 2_097_152)).toBe("In: 19 in 20 under 2.0 MB/s")
 })
 
 test("a budget says what it measured, and one that is not measured says why", () => {
