@@ -184,7 +184,7 @@ export function JailsPanel({
  */
 function JailFigure({ value, label }: { value: number; label: string }) {
   return (
-    <span className="flex w-24 shrink-0 flex-col items-end max-md:hidden">
+    <span className="flex w-24 shrink-0 flex-col items-end pr-3 max-md:hidden">
       <span
         className={cn(
           "numeric text-body leading-5 font-medium",
