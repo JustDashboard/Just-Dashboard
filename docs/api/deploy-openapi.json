@@ -16803,7 +16803,7 @@
     },
     "summary": "The deployment routes of a Just Dashboard, as its router mounts them.",
     "title": "Just Dashboard deployment API",
-    "version": "0.8.5"
+    "version": "0.8.6"
   },
   "openapi": "3.1.0",
   "paths": {
