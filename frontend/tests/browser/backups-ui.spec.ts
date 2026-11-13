@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { risen } from "./risen"
 import { jobs, mockWorkbench, run } from "./workbench-fixture"
 
 /**
@@ -25,9 +26,89 @@ test("the page opens on where the data goes, not on four figures", async ({ page
   await expect(jobCards(page).first()).toContainText("failed")
   await expect(page.getByRole("region", { name: "Attention", exact: true })).toHaveCount(0)
   await expect(page.getByText(/things on this server have no backup/)).toHaveCount(0)
-  // The totals the Stored tile carried are the jobs' header now, and the picture's middle.
-  await expect(page.getByText("3 jobs · 3.7 GB in 29 archives")).toBeVisible()
-  await expect(page.getByText("3 jobs · 3.7 GB", { exact: true })).toBeVisible()
+  // The totals the Stored tile carried are the identity line's now, and are
+  // said there once: the picture's middle no longer repeats them under it.
+  const identity = page.getByRole("region", { name: "About backups" })
+  await expect(identity).toContainText("3 jobs")
+  await expect(identity).toContainText("3.7 GB in 29 archives")
+  await expect(identity).toContainText(/next backup \d+h/)
+  await expect(page.getByText("3 jobs", { exact: false })).toHaveCount(1)
+  await expect(page.getByText(/next backup/)).toHaveCount(1)
+})
+
+test("the identity line says how the jobs stand and carries the page's commands", async ({
+  page,
+}) => {
+  await page.goto("/backups")
+  const identity = page.getByRole("region", { name: "About backups" })
+  await expect(identity).toHaveAttribute("data-layout", "project")
+  // One job's last run failed and one is paused: the worst is said first.
+  await expect(identity).toContainText("1 job failed")
+  await expect(identity).toContainText("1 paused")
+  // New backup is the one command; the Jobs title line keeps its count.
+  await expect(identity.getByRole("button", { name: "New backup", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "New backup", exact: true })).toHaveCount(1)
+  await expect(page.getByRole("button", { name: /^Import/ })).toHaveCount(0)
+  await identity.getByRole("button", { name: "New backup", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "New backup" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  // Import is the menu's.
+  await identity.getByRole("button", { name: "Backup actions" }).click()
+  await page.getByRole("menuitem", { name: "Import from a destination…" }).click()
+  await expect(page.getByRole("dialog", { name: "Import from a destination" })).toBeVisible()
+})
+
+test("the identity line stands where it will while the jobs are read", async ({ page }) => {
+  let gate: Promise<void> = Promise.resolve()
+  await page.route("**/api/v1/backups/", async (route) => {
+    await gate
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(jobs) })
+  })
+  for (const width of [1280, 390]) {
+    let release!: () => void
+    gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/backups")
+    const identity = page.getByRole("region", { name: "About backups" })
+    await expect(identity).toBeVisible()
+    await expect(identity).not.toContainText("3 jobs")
+    await risen(page)
+    const before = await identity.boundingBox()
+    release()
+    await expect(identity).toContainText("3 jobs")
+    await expect(jobCards(page).first()).toBeVisible()
+    await risen(page)
+    expect(await identity.boundingBox(), `the line at ${width}`).toEqual(before)
+  }
+})
+
+test("a read-only account is offered neither New backup nor Import", async ({ page }) => {
+  await page.route("**/api/v1/auth/session", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        authenticated: true,
+        needsTotp: false,
+        needsEnrollment: false,
+        require2fa: false,
+        capabilities: ["read"],
+        user: { id: 2, username: "viewer", role: "viewer", totpEnabled: true },
+      }),
+    }),
+  )
+  await page.goto("/backups")
+  const identity = page.getByRole("region", { name: "About backups" })
+  await expect(identity).toContainText("3 jobs")
+  await expect(page.getByRole("button", { name: "New backup", exact: true })).toHaveCount(0)
+  await identity.getByRole("button", { name: "Backup actions" }).click()
+  await expect(page.getByRole("menuitem", { name: "Refresh" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: /Import/ })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  // A job's own verbs are the same question: nothing a reader cannot use.
+  await expect(jobCards(page).first().getByRole("button", { name: "Run now" })).toHaveCount(0)
+  await expect(jobCards(page).first().getByRole("button", { name: "Edit" })).toHaveCount(0)
 })
 
 test("the picture draws each kind by its products and each destination as its service", async ({
@@ -100,6 +181,7 @@ test("a job taking a backup is lit on its card and named in the picture", async 
   await page.setViewportSize({ width: 1440, height: 1100 })
   await page.goto("/backups")
   await expect(page.getByText("Backing up Nginx configuration")).toBeVisible()
+  await expect(page.getByRole("region", { name: "About backups" })).toContainText("Backing up now")
   await expect(picture(page, "What this server has")).toContainText("backing up now")
   const nginx = jobCards(page).filter({ hasText: "Nginx configuration" })
   await expect(nginx).toContainText("running now")

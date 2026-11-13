@@ -88,24 +88,15 @@ export function ProtectionMap({
   const groups = kindGroups(resources, containers, running)
   const places = destinations(jobs)
   const busy = jobs.filter((job) => running.has(job.id))
-  const next = jobs
-    .filter((job) => job.enabled && job.nextRun)
-    .map((job) => job.nextRun!)
-    .sort()[0]
-  const stored = jobs.reduce((sum, job) => sum + job.stored.bytes, 0)
 
-  const hint =
+  // The middle says what is moving through it, and nothing while nothing is:
+  // how many jobs there are, what they hold and when the next one runs stood
+  // here until the page's identity line took them, a line above.
+  const title =
     busy.length > 0 ? (
       <TextShimmer>{`Backing up ${busy.map((job) => job.name).join(", ")}`}</TextShimmer>
-    ) : next ? (
-      `next backup ${relativeTime(next)}`
-    ) : jobs.length > 0 ? (
-      "nothing scheduled"
-    ) : (
-      "nothing leaves this server yet"
-    )
-  const title =
-    jobs.length > 0 ? `${plural(jobs.length, "job")} · ${bytes(stored)}` : "No backup jobs"
+    ) : undefined
+  const hint = jobs.length === 0 ? "nothing leaves this server yet" : undefined
 
   const kinds = groups.map((group) => (
     <KindNode
@@ -176,8 +167,9 @@ function Picture({
   wide: boolean
   containerRef: RefObject<HTMLDivElement | null>
   hubRef: RefObject<HTMLDivElement | null>
-  title: React.ReactNode
-  hint: React.ReactNode
+  /** What this server is doing or is set to do; nothing while there is nothing to say. */
+  title?: React.ReactNode
+  hint?: React.ReactNode
   from: React.ReactNode
   fromLabel: string
   to: React.ReactNode
@@ -212,8 +204,8 @@ function Picture({
       ) : (
         <div className="flex flex-col items-center text-center">
           <p className="eyebrow">This server</p>
-          <p className="text-body leading-snug font-medium">{title}</p>
-          <p className="text-hint leading-snug text-muted-foreground">{hint}</p>
+          {title && <p className="text-body leading-snug font-medium">{title}</p>}
+          {hint && <p className="text-hint leading-snug text-muted-foreground">{hint}</p>}
           <div
             role="group"
             aria-label={fromLabel}
