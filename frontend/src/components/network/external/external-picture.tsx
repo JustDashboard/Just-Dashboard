@@ -122,7 +122,13 @@ export function ExternalPicture({
   return (
     <WireFlow
       loading={loading}
-      start={{ title: "Sources", nodes: sources, max: DRAWN, count: live.length, loadingRows: 2 }}
+      start={{
+        title: "Measured from",
+        nodes: sources,
+        max: DRAWN,
+        count: live.length,
+        loadingRows: 2,
+      }}
       end={{ title: "Approved services", nodes: services, max: DRAWN, loadingRows: 1 }}
       hub={{
         mark: (

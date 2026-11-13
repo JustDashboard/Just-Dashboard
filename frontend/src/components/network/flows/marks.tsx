@@ -16,6 +16,11 @@ const DAY = new Intl.DateTimeFormat("en-GB", {
   hour: "2-digit",
   minute: "2-digit",
 })
+const HOUR = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  hour: "2-digit",
+  minute: "2-digit",
+})
 const CLOCK = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC",
   hour: "2-digit",
@@ -26,8 +31,8 @@ const CLOCK = new Intl.DateTimeFormat("en-GB", {
 /**
  * A moment of the record, always in UTC and always saying so: the recorder
  * keeps UTC hours, and a local time beside them would name a different hour.
- * `short` drops the year and seconds, `clock` the date; the whole moment is
- * the element's title either way. A moment that was never recorded reads
+ * `short` drops the year and seconds, `clock` the date and `hour` the seconds
+ * too; the whole moment is the element's title either way. A moment that was never recorded reads
  * "Unknown".
  */
 export function UTCTime({
@@ -35,14 +40,20 @@ export function UTCTime({
   form = "full",
 }: {
   value?: string | null
-  form?: "full" | "short" | "clock"
+  form?: "full" | "short" | "clock" | "hour"
 }) {
   const at = value ? new Date(value) : undefined
   if (!value || !at || Number.isNaN(at.getTime())) return <span>Unknown</span>
   const whole = `${FULL.format(at)} UTC`
   return (
     <time dateTime={value} title={whole}>
-      {form === "full" ? whole : form === "short" ? `${DAY.format(at)} UTC` : CLOCK.format(at)}
+      {form === "full"
+        ? whole
+        : form === "short"
+          ? `${DAY.format(at)} UTC`
+          : form === "hour"
+            ? HOUR.format(at)
+            : CLOCK.format(at)}
     </time>
   )
 }

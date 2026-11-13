@@ -1,5 +1,7 @@
-import { expect, test, type Page } from "@playwright/test"
-import { admin, json, mockNetwork } from "./network-fixture"
+import { expect, test, type Locator, type Page } from "@playwright/test"
+import { admin, json, loaded, mockNetwork, type Mutation } from "./network-fixture"
+import { ipamEmpty, ipamView } from "./network-evidence-fixture"
+import { risen } from "./risen"
 import type { IPAMView } from "../../src/lib/network-ipam"
 const now = new Date().toISOString()
 const poolId = "a".repeat(32)
@@ -58,26 +60,58 @@ const fixture: IPAMView = {
   ],
   limitations: ["Reservations are planning evidence; native ownership remains unchanged."],
 }
-async function setup(page: Page, readonly = false) {
+const readonlySession = {
+  ...admin,
+  capabilities: ["read"],
+  user: { ...admin.user, role: "readonly" },
+}
+async function setup(page: Page, readonly = false, mutations: Mutation[] = []) {
   await mockNetwork(
     page,
-    [],
+    mutations,
     readonly
-      ? { session: { ...admin, capabilities: ["read"], user: { ...admin.user, role: "readonly" } } }
+      ? { session: readonlySession }
       : { overrides: { "/docker/ping": { available: true } } },
   )
   await page.route("**/api/v1/network/ipam/", (route) => json(route, fixture))
 }
-test("shows exact IPv6 counts and retains unresolved owner allocation", async ({ page }) => {
+const top = async (page: Page, locator: Locator) => {
+  await risen(page)
+  return (await locator.boundingBox())!
+}
+
+test("is named as the rail names it and keeps exact IPv6 counts on the pool's band", async ({
+  page,
+}) => {
   await setup(page)
   await page.goto("/network/ipam")
-  await expect(page.getByRole("heading", { name: "Shared address pools" })).toBeVisible()
-  await expect(page.getByText("65536", { exact: true })).toBeVisible()
-  await expect(page.getByText("Docker network · Review required · allocation held")).toBeVisible()
-  await expect(page.getByRole("link", { name: /Open (Docker|WireGuard) creation/ })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Address planning", level: 1 })).toBeVisible()
   await expect(page.locator('[data-slot="page"]')).toHaveAttribute("data-register", "reading")
-  await expect(page.locator('[data-slot="panel"]:not([data-plain])')).toHaveCount(0)
+  await expect(page.locator('[data-slot="stat-grid"], [data-slot="stat-tile"]')).toHaveCount(0)
+  const identity = page.getByRole("region", { name: "About address planning" })
+  await expect(identity).toContainText("1 coverage gap")
+  await expect(identity).toContainText("1 pool")
+  await expect(identity).toContainText("1 reservation held")
+  const band = page.getByRole("region", { name: "Shared IPv6, fd48:abcd::/48" })
+  await expect(band).toContainText("fd48:abcd::/48 → /64")
+  await expect(band).toContainText("65,535 of 65,536 free")
+  await expect(band).toContainText("Planned")
+  await expect(band).toContainText("1 block")
+  await expect(band).toContainText("1 unavailable")
+  // The pool's owner is drawn as the product that holds the block.
+  await expect(band.getByRole("img", { name: "Held by Docker" })).toBeVisible()
+  const plan = page.getByRole("list", { name: "Planning reservations" }).getByRole("listitem")
+  await expect(plan).toContainText("fd48:abcd::/64")
+  await expect(plan).toContainText("app-private · Docker network")
+  await expect(plan).toContainText("Review required · allocation held")
+  // Held for review: there is no owner form to open with it.
+  await expect(plan.getByRole("link")).toHaveCount(0)
+  await plan.getByRole("button", { name: "About the plan for app-private" }).hover()
+  await expect(
+    page.getByRole("tooltip").filter({ hasText: "Native response unavailable" }),
+  ).toBeVisible()
 })
+
 test("preview retains private owner and unknown provider evidence", async ({ page }) => {
   await setup(page)
   await page.route("**/api/v1/network/ipam/preview", (route) =>
@@ -99,14 +133,22 @@ test("preview retains private owner and unknown provider evidence", async ({ pag
   )
   await page.goto("/network/ipam")
   await page.getByLabel("Prefix to preview").fill("10.244.0.0/24")
-  await page.getByRole("button", { name: "Preview known overlap" }).click()
+  await page.getByRole("button", { name: "Preview overlap" }).click()
   await expect(page.getByTestId("ipam-preview")).toContainText("Known overlap")
   await expect(page.getByTestId("ipam-preview")).toContainText("wireguard · wg0")
-  await page.getByRole("button", { name: /Coverage and ownership limits/ }).click()
+  const coverage = page.getByRole("region", { name: "Coverage" })
+  await expect(coverage).toContainText("1 gap")
+  await expect(coverage.getByRole("row").filter({ hasText: "provider" })).toContainText("unknown")
   await expect(
-    page.getByText("Provider allocations are not authoritative from this host"),
+    coverage.getByText("Provider allocations are not authoritative from this host"),
   ).toBeVisible()
+  await expect(
+    page.getByText("Reservations are planning evidence; native ownership remains unchanged."),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Dismiss preview" }).click()
+  await expect(page.getByTestId("ipam-preview")).toHaveCount(0)
 })
+
 test("read account does not request private inventory or enable planner mutation", async ({
   page,
 }) => {
@@ -120,9 +162,16 @@ test("read account does not request private inventory or enable planner mutation
   await expect(
     page.getByText(/Shared pools and private native-owner inventories require/),
   ).toBeVisible()
-  await expect(page.getByRole("button", { name: "Preview known overlap" })).toBeDisabled()
+  // No control it cannot use; the one way on is the calculator a read account has.
+  await expect(page.locator('[data-slot="page"]').getByRole("button")).toHaveCount(0)
+  await expect(page.getByLabel("Prefix to preview")).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Open the subnet calculator" })).toHaveAttribute(
+    "href",
+    "/network/tools?tool=subnet",
+  )
   expect(calls).toBe(0)
 })
+
 test("failed preview preserves the prefix", async ({ page }) => {
   await setup(page)
   await page.route("**/api/v1/network/ipam/preview", (route) =>
@@ -130,12 +179,202 @@ test("failed preview preserves the prefix", async ({ page }) => {
   )
   await page.goto("/network/ipam")
   await page.getByLabel("Prefix to preview").fill("fd48:abcd:1::/64")
-  await page.getByRole("button", { name: "Preview known overlap" }).click()
+  await page.getByRole("button", { name: "Preview overlap" }).click()
   await expect(
     page.getByRole("alert").filter({ hasText: "Native source unreadable" }),
   ).toBeVisible()
   await expect(page.getByLabel("Prefix to preview")).toHaveValue("fd48:abcd:1::/64")
 })
+
+test("a pool and a reservation are made from their sheets", async ({ page }) => {
+  await setup(page)
+  const sent: { path: string; body: unknown }[] = []
+  await page.route("**/api/v1/network/ipam/pools", (route) => {
+    sent.push({ path: "pools", body: route.request().postDataJSON() })
+    return json(route, { ...fixture.pools[0], id: poolId }, 201)
+  })
+  let refuse = true
+  await page.route("**/api/v1/network/ipam/reservations", (route) => {
+    sent.push({ path: "reservations", body: route.request().postDataJSON() })
+    if (refuse)
+      return json(
+        route,
+        { error: { code: "ipam_reservation_refused", message: "No free block" } },
+        409,
+      )
+    return json(route, fixture.reservations[0], 201)
+  })
+  await page.goto("/network/ipam")
+  await page.getByRole("button", { name: "New pool" }).click()
+  const pool = page.getByRole("dialog", { name: "New pool" })
+  await expect(pool.getByRole("button", { name: "Create pool" })).toBeDisabled()
+  await pool.getByLabel("Pool name").fill("Lab")
+  await pool.getByLabel("Pool network").fill("10.99.0.0/16")
+  await pool.getByRole("button", { name: "Create pool" }).click()
+  await expect(pool).toBeHidden()
+  expect(sent[0]).toEqual({
+    path: "pools",
+    body: { name: "Lab", prefix: "10.99.0.0/16", allocationBits: 24 },
+  })
+
+  await page.getByRole("button", { name: "Reserve", exact: true }).click()
+  const reserve = page.getByRole("dialog", { name: "Reserve a block" })
+  await expect(reserve.getByLabel("Shared pool")).toContainText("Shared IPv6 · fd48:abcd::/48")
+  await reserve.getByRole("button", { name: "WireGuard server" }).click()
+  await reserve.getByLabel("Exact native resource name").fill("wg-lab")
+  await expect(reserve.getByText("Leave empty for the first free /64.")).toBeVisible()
+  // The provider's ranges could not be read: reserving has to say it was seen.
+  await expect(reserve.getByRole("button", { name: "Reserve", exact: true })).toBeDisabled()
+  await reserve.getByRole("switch", { name: "I have reviewed the incomplete coverage" }).click()
+  await reserve.getByRole("button", { name: "Reserve", exact: true }).click()
+  await expect(reserve.getByRole("alert").filter({ hasText: "No free block" })).toBeVisible()
+  await expect(reserve.getByLabel("Exact native resource name")).toHaveValue("wg-lab")
+  refuse = false
+  await reserve.getByRole("button", { name: "Reserve", exact: true }).click()
+  await expect(reserve).toBeHidden()
+  expect(sent.at(-1)).toEqual({
+    path: "reservations",
+    body: { poolId, owner: "wireguard_server", resource: "wg-lab", acknowledgeUnknown: true },
+  })
+})
+
+test("a reserved plan opens its owner's creation form and is released only on review", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockNetwork(page, mutations, { overrides: { "/network/ipam/": ipamView } })
+  await page.goto("/network/ipam")
+  const plans = page.getByRole("list", { name: "Planning reservations" })
+  const reserved = plans.getByRole("listitem").filter({ hasText: "wg-office" })
+  await expect(
+    reserved.getByRole("link", { name: "Open WireGuard creation for wg-office" }),
+  ).toHaveAttribute("href", `/network/vpn?ipamReservation=${ipamView.reservations[1].id}`)
+  // A plan an owner already answered for has no form to open.
+  await expect(
+    plans.getByRole("listitem").filter({ hasText: "shop-backend" }).getByRole("link"),
+  ).toHaveCount(0)
+  await page.getByRole("button", { name: "Actions for wg-office" }).click()
+  await expect(page.getByRole("menuitem", { name: "Open WireGuard creation" })).toBeVisible()
+  await page.getByRole("menuitem", { name: "Release plan" }).click()
+  await expect(page.getByRole("dialog")).toContainText(
+    "does not remove or reconfigure its native resource",
+  )
+  expect(mutations).toEqual([])
+  await page.getByRole("button", { name: "Release plan", exact: true }).click()
+  await expect.poll(() => mutations.length).toBe(1)
+  expect(mutations[0]).toMatchObject({
+    method: "DELETE",
+    path: `/network/ipam/reservations/${ipamView.reservations[1].id}`,
+  })
+  await page
+    .getByRole("button", { name: "Actions for Container networks" })
+    .click({ timeout: 10_000 })
+  await page.getByRole("menuitem", { name: "Retire" }).click()
+  await expect(page.getByRole("dialog")).toContainText("Stop new planning allocations from")
+  await page.getByRole("button", { name: "Retire pool", exact: true }).click()
+  await expect.poll(() => mutations.length).toBe(2)
+  expect(mutations[1]).toMatchObject({
+    method: "DELETE",
+    path: `/network/ipam/pools/${ipamView.pools[1].id}`,
+  })
+})
+
+test("an administrator who may not destroy sees no Retire or Release", async ({ page }) => {
+  await mockNetwork(page, [], {
+    session: { ...admin, capabilities: ["read", "system.admin"] },
+    overrides: { "/network/ipam/": ipamView },
+  })
+  await page.goto("/network/ipam")
+  await loaded(page)
+  await expect(page.getByRole("button", { name: "Reserve", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Actions for (Shared|Container)/ })).toHaveCount(0)
+  await page.getByRole("button", { name: "Actions for wg-office" }).click()
+  await expect(page.getByRole("menuitem", { name: "Open WireGuard creation" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Release plan" })).toHaveCount(0)
+})
+
+test("no pools is a designed state with the next step as its button", async ({ page }) => {
+  await mockNetwork(page, [], { overrides: { "/network/ipam/": ipamEmpty } })
+  await page.goto("/network/ipam")
+  await loaded(page)
+  await expect(page.getByText("No pools yet", { exact: true })).toBeVisible()
+  await expect(page.getByText("No planning reservations.", { exact: true })).toBeVisible()
+  // Nothing to reserve from yet, so the page's command is the pool.
+  await expect(page.getByRole("button", { name: "Reserve", exact: true })).toHaveCount(0)
+  await page
+    .getByRole("region", { name: "About address planning" })
+    .getByRole("button", {
+      name: "New pool",
+    })
+    .click()
+  await expect(page.getByRole("dialog", { name: "New pool" })).toBeVisible()
+})
+
+for (const width of [1280, 390]) {
+  test(`pools and plans keep one height in every state at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockNetwork(page, [], { overrides: { "/network/ipam/": ipamView } })
+    await page.goto("/network/ipam")
+    await loaded(page)
+    await risen(page)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    // A pool one block deep, one with observed owners, and a retired one with no counts.
+    const pools = page.getByRole("list", { name: "Address pools" }).locator("> li")
+    await expect(pools).toHaveCount(ipamView.pools.length)
+    const heights = await pools.evaluateAll((items) =>
+      items.map((item) => item.getBoundingClientRect().height),
+    )
+    expect(new Set(heights).size).toBe(1)
+    await expect(pools.nth(2)).toContainText("Blocks unknown")
+    // A plan under review, one that links to its owner's form, one with an owner ID.
+    const plans = page
+      .getByRole("list", { name: "Planning reservations" })
+      .locator('[data-slot="choice-row"]')
+    await expect(plans).toHaveCount(ipamView.reservations.length)
+    const boxes = await plans.evaluateAll((items) =>
+      items.map((item) => item.getBoundingClientRect()).map((b) => ({ y: b.y, height: b.height })),
+    )
+    for (const [i, box] of boxes.entries()) {
+      expect(box.height).toBe(boxes[0].height)
+      if (i > 0) expect(box.y - (boxes[i - 1].y + boxes[i - 1].height)).toBeCloseTo(8, 0)
+    }
+  })
+
+  test(`the opening holds its place while the plan loads at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockNetwork(page)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route("**/api/v1/network/ipam/", async (route) => {
+      await held
+      return json(route, { ...ipamView, pools: ipamView.pools.slice(0, 2) })
+    })
+    await page.goto("/network/ipam")
+    const identity = page.getByRole("region", { name: "About address planning" })
+    const pools = page.getByRole("region", { name: "Pools", exact: true })
+    const plans = page.getByRole("region", { name: "Reservations" })
+    await expect(pools.locator('[data-slot="skeleton"]').first()).toBeVisible()
+    const before = {
+      identity: await top(page, identity),
+      pools: await top(page, pools),
+      plans: await top(page, plans),
+    }
+    release()
+    await expect(page.getByRole("list", { name: "Address pools" })).toBeVisible()
+    const after = {
+      identity: await top(page, identity),
+      pools: await top(page, pools),
+      plans: await top(page, plans),
+    }
+    expect(after.identity).toEqual(before.identity)
+    expect(after.pools).toEqual(before.pools)
+    expect(after.plans.y).toBe(before.plans.y)
+  })
+}
 
 test("Docker deep link sends the exact IPv6 reservation through its owner form", async ({
   page,

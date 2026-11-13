@@ -138,14 +138,14 @@ export function FlowsTable({
             title="Day (UTC)"
             value={draft.day}
             onChange={(event) => onDraft({ ...draft, day: event.target.value })}
-            className="w-40 font-mono"
+            className="w-40 font-mono max-sm:w-full"
           />
           <Input
             aria-label="Observed peer IP"
             placeholder="Any peer, or a literal IP"
             value={draft.address}
             onChange={(event) => onDraft({ ...draft, address: event.target.value })}
-            className="min-w-40 flex-1 font-mono sm:max-w-60"
+            className="min-w-40 flex-1 font-mono max-sm:basis-full sm:max-w-60"
             spellCheck={false}
           />
           <Input
@@ -153,7 +153,7 @@ export function FlowsTable({
             placeholder="Any owner, or a full Docker ID"
             value={draft.containerId}
             onChange={(event) => onDraft({ ...draft, containerId: event.target.value })}
-            className="min-w-40 flex-1 font-mono sm:max-w-72"
+            className="min-w-40 flex-1 font-mono max-sm:basis-full sm:max-w-72"
             spellCheck={false}
           />
           <Button type="submit" size="sm" variant="outline" disabled={!flowDateRange(draft.day)}>
@@ -181,13 +181,13 @@ export function FlowsTable({
           <Table className="table-fixed" containerClassName="max-h-[25rem] max-lg:hidden">
             <TableHeader className={stickyTableHeader}>
               <TableRow>
-                <TableHead className="w-[19%]">Owner</TableHead>
+                <TableHead className="w-[18%]">Owner</TableHead>
                 <TableHead className="w-24">Socket</TableHead>
                 <TableHead>Local → observed peer</TableHead>
                 <TableHead className="w-28">Measured by</TableHead>
                 <TableHead className="w-32">Sent</TableHead>
                 <TableHead className="w-32">Received</TableHead>
-                <TableHead className="w-36">Seen (UTC)</TableHead>
+                <TableHead className="w-16">Hour</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -236,9 +236,8 @@ export function FlowsTable({
                     <TableCell className="numeric truncate text-hint">
                       <Bytes value={bytesOf(row, "rx")} />
                     </TableCell>
-                    <TableCell className="truncate font-mono text-hint text-muted-foreground">
-                      <UTCTime value={row.firstSeen} form="clock" /> –{" "}
-                      <UTCTime value={row.lastSeen} form="clock" />
+                    <TableCell className="font-mono text-hint text-muted-foreground">
+                      <UTCTime value={row.hour} form="hour" />
                     </TableCell>
                   </TableRow>
                 )

@@ -319,8 +319,6 @@ export function SocketHistoryPage() {
             >
               <p className="text-body text-muted-foreground">
                 Recording has not been enabled, so no contact or bandwidth conclusion can be drawn.
-                Once on, each sample notes every open socket, who owns it and the bytes TCP counted
-                for it.
               </p>
               {recordingVerb}
             </div>

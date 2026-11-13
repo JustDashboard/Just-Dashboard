@@ -115,14 +115,14 @@ export function ExternalChecks({
           <Table className="table-fixed" containerClassName="max-h-[21.5rem] max-md:hidden">
             <TableHeader className={stickyTableHeader}>
               <TableRow>
-                <TableHead className="w-[21%]">Source</TableHead>
+                <TableHead className="w-[19%]">Source</TableHead>
                 <TableHead>Service</TableHead>
-                <TableHead className="w-28">State</TableHead>
-                <TableHead className="w-24">DNS</TableHead>
-                <TableHead className="w-24">TCP</TableHead>
-                <TableHead className="w-24">TLS</TableHead>
+                <TableHead className="w-32">State</TableHead>
+                <TableHead className="w-[5.25rem]">DNS</TableHead>
+                <TableHead className="w-[5.25rem]">TCP</TableHead>
+                <TableHead className="w-[5.25rem]">TLS</TableHead>
                 <TableHead className="w-24">When</TableHead>
-                <TableHead className="w-20">
+                <TableHead className="w-14">
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
@@ -235,25 +235,42 @@ export function ExternalChecks({
   )
 }
 
+/**
+ * How a check stands, in one word: what it measured where it measured
+ * anything, and where it is in its queue where it did not.
+ */
 function CheckState({ check, className }: { check: ExternalCheck; className?: string }) {
   const outcome = checkOutcome(check)
+  const measured = outcome.kind !== "none" && outcome.kind !== "pending"
+  const word = measured ? outcome.word : STATUS_WORD[check.status]
   return (
-    <span title={check.result ? "Agent reported" : "No accepted measurement"} className={className}>
-      <Status tone={outcome.tone} label={STATUS_WORD[check.status]} />
+    <span
+      title={
+        check.result ? `${STATUS_WORD[check.status]} · Agent reported` : "No accepted measurement"
+      }
+      className={className}
+    >
+      <Status tone={outcome.tone} label={word[0].toUpperCase() + word.slice(1)} />
     </span>
   )
 }
 
+/** A stage's word, green or red only where the agent measured it. */
 function StageWord({ check, stage }: { check: ExternalCheck; stage: (typeof STAGES)[number] }) {
   const reading = stageReading(check, stage)
   return (
-    <span
-      title={reading.detail}
-      className={cn("text-hint", reading.good ? "text-success" : "text-muted-foreground")}
-    >
+    <span title={reading.detail} className={cn("text-hint", stageTone(check, stage))}>
       {reading.label}
     </span>
   )
+}
+
+function stageTone(check: ExternalCheck, name: (typeof STAGES)[number]) {
+  const stage = check.result?.stages.find((item) => item.name === name)
+  if (stageReading(check, name).good) return "text-success"
+  if (stage?.basis === "measured" && ["failed", "refused", "unavailable"].includes(stage.state))
+    return "text-destructive"
+  return "text-muted-foreground"
 }
 
 function CheckVerbs({
@@ -333,6 +350,9 @@ export function CheckReading({
             {familyWord(check.request.family)} · TCP {check.request.port}
             {check.request.tls ? " · TLS verified" : ""}
           </span>
+          <span>
+            {STATUS_WORD[check.status]} · {result ? "agent reported" : "no accepted measurement"}
+          </span>
           <span>Requested by {check.startedBy}</span>
           <span>Deadline {calendarTime(check.expiresAt)}</span>
           <span>Received {calendarTime(check.completedAt)}</span>
@@ -354,7 +374,7 @@ export function CheckReading({
                     <dt className="font-mono text-hint text-muted-foreground">
                       {stage.name.toUpperCase()}
                     </dt>
-                    <dd className={cn("truncate", reading.good && "text-success")}>
+                    <dd className={cn("truncate", stageTone(check, stage.name), "text-body")}>
                       {reading.label}
                     </dd>
                     <dd className="text-hint text-muted-foreground max-sm:hidden">

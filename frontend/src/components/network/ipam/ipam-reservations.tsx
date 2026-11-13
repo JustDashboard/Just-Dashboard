@@ -157,6 +157,9 @@ export function IPAMReservations({
                           </span>
                         )}
                       </InfoTip>
+                      {/* Where a row with somewhere to go draws its arrow, so
+                          every row's state ends on one edge. */}
+                      {!link && <span aria-hidden className="size-3.5 shrink-0" />}
                     </span>
                   }
                   actions={

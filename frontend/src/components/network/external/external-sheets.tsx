@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import { SidePanel } from "@/components/side-panel"
 import { Field, FieldRow, FormNote, FormSection, OptionRow } from "@/components/form"
 import { Segments } from "@/components/deploy/settings/segments"

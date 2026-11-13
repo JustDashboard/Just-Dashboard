@@ -26,7 +26,7 @@ export const vantage: ExternalVantage = {
   ],
   createdAt: "2026-10-08T10:00:00Z",
   enrolledAt: "2026-10-08T10:01:00Z",
-  lastSeen: "2026-10-08T10:02:00Z",
+  lastSeen: minutesAgo(3),
 }
 
 export const vantages: ExternalVantage[] = [
@@ -64,13 +64,14 @@ export const queued = (
   id: string,
   family: "inet" | "inet6" = "inet",
   source = vantage.id,
+  ago = 13,
 ): ExternalCheck => ({
   id,
   vantageId: source,
   request: { vantageId: source, scopeId: "service", family, port: 443, tls: true },
   status: "queued",
-  createdAt: "2026-10-08T10:03:00Z",
-  expiresAt: "2026-10-08T10:05:00Z",
+  createdAt: minutesAgo(ago + 1),
+  expiresAt: minutesAgo(ago - 1),
   startedBy: "operator",
 })
 
@@ -79,14 +80,15 @@ export function measured(
   family: "inet" | "inet6",
   source = vantage.id,
   tcp: "connected" | "refused" = "connected",
+  ago = 13,
 ): ExternalCheck {
-  const row = queued(id, family, source)
+  const row = queued(id, family, source, ago)
   const address = family === "inet" ? "192.0.2.8" : "2001:db8::8"
   const states = ["resolved", tcp, tcp === "connected" ? "verified" : "skipped"]
   return {
     ...row,
     status: "completed",
-    completedAt: "2026-10-08T10:04:00Z",
+    completedAt: minutesAgo(ago),
     result: {
       checkId: id,
       vantageId: source,
@@ -95,8 +97,8 @@ export function measured(
       addresses: [address],
       address,
       sourceAddress: family === "inet" ? "192.0.2.3" : "2001:db8::3",
-      startedAt: "2026-10-08T10:03:01Z",
-      endedAt: "2026-10-08T10:03:02Z",
+      startedAt: minutesAgo(ago + 1),
+      endedAt: minutesAgo(ago),
       stages: ["dns", "tcp", "tls"].map((name, i) => ({
         name: name as "dns" | "tcp" | "tls",
         basis: i === 2 && tcp === "refused" ? "unknown" : "measured",
@@ -114,14 +116,10 @@ export function measured(
 }
 
 export const checks: ExternalCheck[] = [
-  measured("v4", "inet"),
-  measured("v6", "inet6"),
-  { ...measured("b4", "inet", vantages[1].id, "refused"), createdAt: "2026-10-08T10:02:00Z" },
-  {
-    ...queued("old", "inet", vantages[1].id),
-    status: "expired",
-    createdAt: "2026-10-08T09:00:00Z",
-  },
+  measured("v4", "inet", vantage.id, "connected", 4),
+  measured("v6", "inet6", vantage.id, "connected", 9),
+  measured("b4", "inet", vantages[1].id, "refused", 21),
+  { ...queued("old", "inet", vantages[1].id, 95), status: "expired" },
 ]
 
 const now = new Date().toISOString()
@@ -250,10 +248,10 @@ export const ipamView: IPAMView = {
       poolId: "d".repeat(32),
       totalAddresses: "65536",
       totalBlocks: "256",
-      reservedBlocks: "2",
-      observedBlocks: "3",
-      unavailableBlocks: "4",
-      candidateBlocks: "252",
+      reservedBlocks: "38",
+      observedBlocks: "61",
+      unavailableBlocks: "92",
+      candidateBlocks: "164",
       coverage: "observed",
     },
   ],
@@ -268,14 +266,17 @@ export const ipamEmpty: IPAMView = {
   inventory: { checkedAt: now, finishedAt: now, observations: [], coverage: [] },
 }
 
-const stamp = "2026-10-08T12:00:00Z"
+/** The day the page opens on (yesterday, UTC) and a reading taken the day after. */
+export const day = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+export const stamp = `${new Date().toISOString().slice(0, 10)}T00:20:00Z`
+const at = (clock: string) => `${day}T${clock}Z`
 export const containerId = "a".repeat(64)
 
 export const flowRow: FlowRow = {
   id: "native-cookie-owner",
-  hour: "2026-10-07T12:00:00Z",
-  firstSeen: "2026-10-07T12:00:00Z",
-  lastSeen: "2026-10-07T12:00:30Z",
+  hour: at("12:00:00"),
+  firstSeen: at("12:00:00"),
+  lastSeen: at("12:00:30"),
   sourceId: containerId,
   sourceName: "fixture",
   namespace: "4:123",
@@ -295,7 +296,7 @@ export const flowRow: FlowRow = {
       status: "verified_container",
       containerId,
       containerName: "worker",
-      containerStartedAt: "2026-10-07T01:00:00Z",
+      containerStartedAt: at("01:00:00"),
     },
   },
   samples: 2,
@@ -331,8 +332,8 @@ export const udpRow: FlowRow = {
 
 export const flowReport: FlowReport = {
   checkedAt: stamp,
-  from: "2026-10-07T00:00:00Z",
-  to: "2026-10-08T00:00:00Z",
+  from: at("00:00:00"),
+  to: `${stamp.slice(0, 10)}T00:00:00Z`,
   status: "off",
   settings: { enabled: false, intervalSeconds: 30, retentionDays: 7 },
   recordingSince: null,
@@ -354,8 +355,8 @@ export const flowReport: FlowReport = {
 }
 
 const cycle = {
-  at: "2026-10-07T12:00:00Z",
-  finishedAt: "2026-10-07T12:00:01Z",
+  at: at("12:00:00"),
+  finishedAt: at("12:00:01"),
   bootId: "fixture-boot",
   kernelRelease: "6.8.0-fixture",
   tool: "ss",
@@ -377,7 +378,7 @@ const cycle = {
       malformed: 0,
       identityUnavailable: 0,
       unconnectedUdp: 2,
-      observedAt: "2026-10-07T12:00:00Z",
+      observedAt: at("12:00:00"),
     },
   ],
   dockerStatus: "observed",
@@ -388,7 +389,7 @@ const cycle = {
 }
 
 const hours = [0, 1, 2, 3, 9, 10, 11, 12].map((h) => {
-  const hour = `2026-10-07T${String(h).padStart(2, "0")}:00:00Z`
+  const hour = at(`${String(h).padStart(2, "0")}:00:00`)
   return {
     hour,
     firstSampleAt: hour,
@@ -408,13 +409,13 @@ export const recordingReport: FlowReport = {
   ...flowReport,
   status: "recording",
   settings: { enabled: true, kernelObserverEnabled: false, intervalSeconds: 30, retentionDays: 7 },
-  recordingSince: "2026-10-06T08:00:00Z",
+  recordingSince: `${new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10)}T08:00:00Z`,
   lastCycle: cycle,
   rows: [flowRow, udpRow],
   coverageHours: hours,
   retainedRows: 2,
   retainedBytes: 2048,
-  retainedFrom: "2026-10-06T08:00:00Z",
+  retainedFrom: `${new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10)}T08:00:00Z`,
   kernelObserver: {
     status: "off",
     reason: "Exact helper support is checked only on explicit attachment.",

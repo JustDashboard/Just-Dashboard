@@ -128,9 +128,9 @@ export function ExternalChecksPage() {
     }
   }
   const checkFrom = (vantage?: ExternalVantage) => {
-    // A draft already on this source keeps what was chosen; another starts on its first scope.
-    if (!vantage || draft.vantageId !== vantage.id)
-      setDraft(draftFrom(vantage ?? enrolled[0], draft.tls))
+    // The command opens on what was last chosen; a source opens on itself.
+    const source = vantage ?? enrolled.find((v) => v.id === draft.vantageId) ?? enrolled[0]
+    if (source?.id !== draft.vantageId) setDraft(draftFrom(source, draft.tls))
     open("check")
   }
   const queue = () => {
