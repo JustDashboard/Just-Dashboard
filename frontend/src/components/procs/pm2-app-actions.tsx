@@ -93,12 +93,15 @@ export function usePM2AppVerbs({
   app,
   confirm,
   act,
+  busy,
   onScale,
   onDeleted,
 }: {
   app: PM2App
   confirm: ConfirmFn
   act: PM2AppAct
+  /** A verb is in flight: a second one would cross it on the same workers. */
+  busy?: boolean
   onScale: () => void
   /** The application is gone from PM2: its page has nothing left to show. */
   onDeleted: () => void
@@ -128,6 +131,7 @@ export function usePM2AppVerbs({
       if (app.online < count) {
         verbs.push({
           key: "start",
+          disabled: busy,
           progressive: "Starting",
           label: "Start",
           icon: Play,
@@ -138,6 +142,7 @@ export function usePM2AppVerbs({
       if (anyOnline) {
         verbs.push({
           key: "reload",
+          disabled: busy,
           progressive: "Reloading",
           label: "Reload",
           icon: RotateClockwise,
@@ -150,6 +155,7 @@ export function usePM2AppVerbs({
     if (can("destructive")) {
       verbs.push({
         key: "restart",
+        disabled: busy,
         progressive: "Restarting",
         label: "Restart",
         icon: RefreshClockwise,
@@ -170,6 +176,7 @@ export function usePM2AppVerbs({
       if (anyOnline) {
         verbs.push({
           key: "stop",
+          disabled: busy,
           progressive: "Stopping",
           label: "Stop",
           icon: StopCircle,
@@ -196,6 +203,7 @@ export function usePM2AppVerbs({
     if (can("service.control") && restarts > 0) {
       verbs.push({
         key: "reset",
+        disabled: busy,
         label: "Reset restart counter",
         icon: Backspace,
         run: () => void act(app, "reset").catch(() => undefined),
@@ -205,6 +213,7 @@ export function usePM2AppVerbs({
     if (can("destructive") && lead.logsAvailable !== false) {
       verbs.push({
         key: "flush",
+        disabled: busy,
         label: "Flush logs",
         icon: Trash,
         run: () =>
@@ -242,6 +251,7 @@ export function usePM2AppVerbs({
     if (can("destructive")) {
       verbs.push({
         key: "delete",
+        disabled: busy,
         label: "Delete from PM2",
         icon: Trash,
         danger: true,
@@ -266,5 +276,5 @@ export function usePM2AppVerbs({
     }
 
     return verbs
-  }, [app, can, confirm, act, onScale, onDeleted, router])
+  }, [app, can, confirm, act, busy, onScale, onDeleted, router])
 }

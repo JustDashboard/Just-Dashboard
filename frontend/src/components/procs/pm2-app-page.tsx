@@ -478,6 +478,7 @@ function AppMain({
     app,
     confirm,
     act: control.act,
+    busy: Boolean(control.pending),
     onScale: openScale,
     onDeleted: deleted,
   })
@@ -535,7 +536,7 @@ function AppMain({
           busy={control.pending}
           command={
             command && (
-              <Button size="sm" disabled={Boolean(control.pending)} onClick={command.run}>
+              <Button size="sm" disabled={command.disabled} onClick={command.run}>
                 <command.icon className="size-3.5" />
                 {command.label}
               </Button>
