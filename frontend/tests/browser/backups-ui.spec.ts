@@ -536,10 +536,31 @@ test("a job's page opens on its identity, its picture and the run it last took",
   await expect(takes.locator('img[src="/logos/postgresql.svg"]')).toHaveCount(2)
   await expect(picture(page, "Where its archives go")).toContainText("wayy-backups")
 
-  await expect(page.locator("[data-slot=stat-tile]").filter({ hasText: "Holding" })).toContainText(
-    "1.7 GB",
-  )
+  // What it holds is one sentence with its trend, not four tiles. How the
+  // last run went is the identity line's end, and when it runs next is the
+  // picture's middle: each is said once.
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  const holding = page.locator("[data-slot=reading-line]")
+  await expect(holding).toHaveCount(1)
+  await expect(holding).toContainText("Holding")
+  await expect(holding).toContainText("1.7 GB in 12 archives")
+  await expect(holding).toContainText("Keeps last 14 archives and 30 days · last archive")
+  await expect(
+    holding.getByRole("img", { name: "Archive size, oldest run to newest" }),
+  ).toBeVisible()
+  await expect(page.getByText(/^next \d+h/)).toHaveCount(1)
   await expect(page.getByText("14 runs · 2 failed")).toBeVisible()
+
+  // A run is one line of the rail, its archive's size a figure and no bar.
+  const rail = page.getByRole("list", { name: "Runs" })
+  await expect(rail.locator("[data-slot=run-size]")).toHaveCount(14)
+  await expect(rail.locator("[data-slot=run-size]").nth(1)).toHaveText(/^\d+(\.\d)? (B|KB|MB|GB)$/)
+  await expect(rail.locator("[role=presentation], [class*=bg-meter-track]")).toHaveCount(0)
+  const heights = await rail
+    .getByRole("button")
+    .evaluateAll((runs) => runs.map((run) => Math.round(run.getBoundingClientRect().height)))
+  expect(new Set(heights).size, `rail rows ${heights}`).toBe(1)
 
   // With none picked the newest run is shown, its failing line washed.
   const inspector = page.getByRole("region", { name: "Run 100" })
@@ -552,6 +573,79 @@ test("a job's page opens on its identity, its picture and the run it last took",
     "true",
   )
 })
+
+test("a job that pauses containers names them on its line and still says when it runs next", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/backups/1", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ...jobs[0], pauseContainers: ["web", "worker"] }),
+    }),
+  )
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  await page.goto("/backups/1")
+  const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity).toContainText("pauses web, worker while it archives")
+  await expect(identity).not.toContainText("pauses 2 containers")
+  // The picture's middle is the schedule over the next run, whatever the job pauses.
+  await expect(page.getByText(/^next \d+h/)).toBeVisible()
+  await expect(page.getByText("Every day at 03:00")).toBeVisible()
+})
+
+test("a read-only account reads a job and is offered none of its verbs", async ({ page }) => {
+  await page.route("**/api/v1/auth/session", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        authenticated: true,
+        needsTotp: false,
+        needsEnrollment: false,
+        require2fa: false,
+        capabilities: ["read"],
+        user: { id: 2, username: "viewer", role: "viewer", totpEnabled: true },
+      }),
+    }),
+  )
+  await page.goto("/backups/1")
+  await expect(page.locator("[data-slot=reading-line]")).toContainText("50.3 KB in 7 archives")
+  await expect(page.getByRole("button", { name: /^Run 100,/ })).toBeVisible()
+  for (const name of ["Run now", "Edit", "More actions for Nginx configuration"]) {
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0)
+  }
+  // The run it shows can be read and browsed, not restored or downloaded.
+  await expect(page.getByRole("button", { name: "Browse files" })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Run 100" }).getByRole("button")).toHaveCount(1)
+})
+
+for (const width of [1280, 390]) {
+  test(`a job's opening stands where it will while its runs are read, at ${width}`, async ({
+    page,
+  }) => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route("**/api/v1/backups/1/runs", async (route) => {
+      await gate
+      return route.fallback()
+    })
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/backups/1")
+    const holding = page.locator("[data-slot=reading-line]")
+    await expect(holding).toContainText("50.3 KB in 7 archives")
+    await risen(page)
+    const before = await holding.boundingBox()
+    const runs = await page.getByRole("heading", { name: "Runs" }).boundingBox()
+    release()
+    await expect(page.getByRole("button", { name: /^Run 100,/ })).toBeVisible()
+    // The last archive's size and the trend land in the line, which keeps its height.
+    await expect(holding).toContainText("last archive")
+    await risen(page)
+    expect(await holding.boundingBox()).toEqual(before)
+    expect(await page.getByRole("heading", { name: "Runs" }).boundingBox()).toEqual(runs)
+  })
+}
 
 for (const width of [1280, 1720]) {
   test(`looks right at ${width}`, async ({ page }) => {

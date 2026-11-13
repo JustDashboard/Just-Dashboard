@@ -512,6 +512,8 @@ type Source = {
  * SQLite — wired into this server, and this server wired out to where the job
  * writes. The page's own picture, narrowed to one job.
  *
+ * The middle is when it runs: its schedule over its next run.
+ *
  * The wire to the destination is the last run's: green when it landed, red
  * when it did not, still and grey while the job is paused. The wires in are
  * grey, because a failed run says the archive did not arrive and not which of
@@ -535,7 +537,6 @@ export function JobMap({
   const rest = sources.length - shown.length
   const running = job.lastRun?.status === "running"
   const place = destinations([job])[0]
-  const paused = job.pauseContainers ?? []
 
   const title = running ? (
     <TextShimmer>Backing up now</TextShimmer>
@@ -544,15 +545,17 @@ export function JobMap({
   ) : (
     scheduleLabel(job.schedule)
   )
+  // When it runs next, always: the containers it pauses stood here in place
+  // of that, which left a job that pauses any with nowhere on its page saying
+  // when it runs again once the Next run tile went. They are the identity
+  // line's now, beside what the job takes.
   const hint = job.imported
-    ? `from ${job.origin?.host || "another server"}; it never runs here`
-    : paused.length > 0
-      ? `pauses ${paused.join(", ")} while it archives`
-      : !job.schedule
-        ? "runs by hand"
-        : job.enabled && job.nextRun
-          ? `next ${relativeTime(job.nextRun)}`
-          : "schedule paused"
+    ? `from ${job.origin?.host || "another server"}; it never runs or prunes here`
+    : !job.schedule
+      ? "runs by hand"
+      : job.enabled && job.nextRun
+        ? `next ${relativeTime(job.nextRun)}`
+        : "schedule paused"
 
   const from = (
     <>
