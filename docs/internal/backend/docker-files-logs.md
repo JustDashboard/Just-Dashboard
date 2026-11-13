@@ -416,7 +416,8 @@ and cleanup of staging in the original moved directory.
 exact binary revisions, changes during staging, concurrent text/image writers and the HTTP contract;
 `files-ui.spec.ts` checks conflict retention, Save as, confirmed reload and full-editor handoff.
 
-Editor reads (`GET /files/read`) return a SHA-256 `revision` of the bytes they read. The Files
+Editor reads (`GET /files/read`) return a SHA-256 `revision` of the bytes they read
+(`internal/contentguard`, which Compose and crontab edits share). The Files
 and Git editors send it as `expectedRevision` to `PUT /files/write`, whose successful response
 returns the saved revision. `WriteChecked` serializes the content comparison and atomic publish
 with Compose saves to the same resolved path, checks the bytes before staging and immediately

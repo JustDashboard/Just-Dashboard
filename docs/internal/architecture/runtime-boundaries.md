@@ -55,7 +55,13 @@ purpose is to have been running while nobody was looking), the database activity
 of connections sealed under another master key (`database_stranded.go`), the Docker event log, the host alerts' pass once a minute (`hostAlerts.Start`, after both of those it reads), the network module's interface sampler and its daily blocklist refresh, the self-update
 check, the backup scheduler, `selfupdate.Installer.Reconcile`,
 `selfcfg.Applier.Reconcile`, Remote Desktop's `Reconcile` (closing the history of sessions a restart cut
-off) and the Tailscale certificate keeper. `Shutdown` releases what outlives a request:
+off) and the Tailscale certificate keeper. It also starts the route history, database TLS renewal,
+the proxies' CrowdSec list, the settling of an interrupted uninstall, the point-in-time recovery
+schedule, the Docker Caddy ingress upkeep, the proxy pages' own work (`startProxyExtras`), the
+deployment side (preview quarantine, schedules, traffic alerts, log drains, the engine, the rollback
+watcher, the Cloudflare tunnel, sleep, data copies, preview branches, image scans, Git monitoring,
+the preview reconciler, managed database networks and poolers), and last the account link, the hub
+link and the usage count. `Shutdown` releases what outlives a request:
 samplers, scheduler, live PTYs, database pools, Docker clients (Remote Desktop's engine and stream bridge clients among them;
 both containers keep running). A held terminal session is let go rather
 than ended — its holder is a systemd unit of its own on the host — and module setup takes every
