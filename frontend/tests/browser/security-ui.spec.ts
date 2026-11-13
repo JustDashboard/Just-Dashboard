@@ -785,14 +785,21 @@ test("the logins page folds the failed record into attackers", async ({ page }) 
   await page.goto("/security/logins")
   await loaded(page)
 
-  await expect(page.locator("[data-slot=stat-grid]")).toContainText("2312")
-  const row = page.getByRole("row").filter({ hasText: "203.0.113.9" })
-  await expect(row).toContainText("2200")
-  await expect(row).toContainText("root")
-  await row.getByRole("button", { name: "Block at the firewall" }).click()
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "Logins on this server" })).toContainText(
+    "2,312 failed attempts in 7 days",
+  )
+  const rows = page.locator("#attackers [data-slot=rank-row]")
+  const first = rows.filter({ hasText: "203.0.113.9" })
+  await expect(first).toContainText("2,200")
+  await expect(first).toContainText("root")
+  // The firewall already turns this one away, so it is not offered a second rule.
+  await expect(first).toContainText("blocked")
+  await page.getByRole("button", { name: "Actions for 198.51.100.4", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Block at the firewall", exact: true }).click()
   await expect
     .poll(() => mutations.find((m) => m.path === "/firewall/rules")?.body)
-    .toEqual({ action: "deny", direction: "in", from: "203.0.113.9", comment: "failed logins" })
+    .toEqual({ action: "deny", direction: "in", from: "198.51.100.4", comment: "failed logins" })
 })
 
 /** A figure in the page's one grid, by its name. */
