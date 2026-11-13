@@ -287,7 +287,7 @@ export function SocketHistoryPage() {
           description="Peer and descriptor-owner history can expose private workload connections."
         />
       ) : !data && read.error ? (
-        <ErrorState error={read.error} onRetry={read.refresh} />
+        <ErrorState error={read.error} onRetry={read.refresh} retryable />
       ) : (
         <>
           <NetworkReadWarning

@@ -299,14 +299,11 @@ test("no pools is a designed state with the next step as its button", async ({ p
   await loaded(page)
   await expect(page.getByText("No pools yet", { exact: true })).toBeVisible()
   await expect(page.getByText("No planning reservations.", { exact: true })).toBeVisible()
-  // Nothing to reserve from yet, so the page's command is the pool.
+  // Nothing to reserve from yet: the one command on the page is the pool.
   await expect(page.getByRole("button", { name: "Reserve", exact: true })).toHaveCount(0)
-  await page
-    .getByRole("region", { name: "About address planning" })
-    .getByRole("button", {
-      name: "New pool",
-    })
-    .click()
+  await expect(page.getByText("No sources reported", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "New pool" })).toHaveCount(1)
+  await page.getByRole("button", { name: "New pool" }).click()
   await expect(page.getByRole("dialog", { name: "New pool" })).toBeVisible()
 })
 

@@ -18,6 +18,8 @@ import {
 } from "@/components/network/external/reading"
 
 const DRAWN = 5
+/** Room under the hub for its caption, which hangs below a column one node tall. */
+const HUB_ROOM = "lg:py-14"
 
 /**
  * The enrolled sources on the left, the internet they measure across, and
@@ -131,6 +133,7 @@ export function ExternalPicture({
       end={{ title: "Approved services", nodes: services, max: DRAWN }}
       hub={{
         mark: <InternetMark />,
+        className: HUB_ROOM,
         eyebrow: "Across",
         title: "The internet",
         hint: kept
@@ -191,6 +194,7 @@ function Waiting() {
       }}
       hub={{
         mark: <InternetMark />,
+        className: HUB_ROOM,
         eyebrow: "Across",
         title: "The internet",
         hint: <LinePlaceholder className="h-2.5 w-28" />,

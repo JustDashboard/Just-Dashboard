@@ -85,12 +85,12 @@ export function FlowsHours({
         )}
         <div
           data-slot="flow-hour-reading"
-          className="flex h-8 min-w-0 items-center gap-x-4 text-hint text-muted-foreground"
+          className="flex h-[4.75rem] min-w-0 flex-wrap content-start items-center gap-x-4 text-hint text-muted-foreground sm:h-8 sm:flex-nowrap"
         >
           {loading ? (
             <Skeleton className="h-3 w-72" />
           ) : hours.length === 0 ? (
-            <span className="truncate">
+            <span className="sm:truncate">
               No retained samples for this period. Recorder downtime and missing hours remain
               unknown.
             </span>
@@ -101,7 +101,7 @@ export function FlowsHours({
               </span>
               {reading ? (
                 <>
-                  <span className="numeric min-w-0 truncate">
+                  <span className="numeric min-w-0 max-sm:order-last max-sm:basis-full sm:truncate">
                     {reading.samples} samples · {reading.failedSources} failed source reads ·{" "}
                     {reading.truncatedSources} capped · {reading.omittedSources} omitted sources ·{" "}
                     {reading.discardedIntervals} skipped intervals
@@ -118,7 +118,9 @@ export function FlowsHours({
                   </Popover>
                 </>
               ) : (
-                <span className="truncate">not recorded; what happened in it remains unknown</span>
+                <span className="max-sm:basis-full sm:truncate">
+                  not recorded; what happened in it remains unknown
+                </span>
               )}
             </>
           )}

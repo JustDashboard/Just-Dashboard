@@ -94,17 +94,7 @@ export function ExternalChecks({
           )
         }
       />
-      {loading ? (
-        <div aria-hidden className="divide-y divide-hairline">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="flex h-12 items-center gap-6 px-4">
-              <Skeleton className="h-3.5 w-36" />
-              <Skeleton className="h-3.5 w-28" />
-              <Skeleton className="ml-auto h-3.5 w-20" />
-            </div>
-          ))}
-        </div>
-      ) : checks.length === 0 ? (
+      {!loading && checks.length === 0 ? (
         <EmptyNote className="px-5 py-6">
           No checks kept. Each check is kept for seven days.
         </EmptyNote>
@@ -128,6 +118,7 @@ export function ExternalChecks({
               </TableRow>
             </TableHeader>
             <TableBody>
+              {loading && <LoadingRows columns={8} />}
               {checks.map((check) => {
                 const source = sourceOf(check)
                 const name = source?.name ?? check.vantageId
@@ -185,6 +176,12 @@ export function ExternalChecks({
           {/* A phone keeps every check as two lines of one height: who and how
               it stands, then what each stage measured. */}
           <ul aria-label="Checks" className="divide-y divide-hairline md:hidden">
+            {loading &&
+              [0, 1, 2].map((i) => (
+                <li key={i} aria-hidden className="flex h-16 items-center px-4">
+                  <Skeleton className="h-3.5 w-2/3" />
+                </li>
+              ))}
             {checks.map((check) => {
               const name = sourceOf(check)?.name ?? check.vantageId
               return (
@@ -205,26 +202,38 @@ export function ExternalChecks({
                       </button>
                       <CheckState check={check} className="ml-auto shrink-0" />
                     </div>
-                    <p className="flex min-w-0 gap-3 truncate text-hint">
-                      <span className="text-muted-foreground">
+                    <p className="flex min-w-0 items-center gap-2 text-hint">
+                      <span className="min-w-0 truncate font-mono text-muted-foreground">
+                        {checkTarget(check, vantages) ?? "Unknown target"} ·{" "}
                         {familyWord(check.request.family)} · {check.request.port}
                       </span>
-                      {STAGES.map((stage) => (
-                        <span key={stage} className="shrink-0">
-                          <span className="text-muted-foreground">{stage.toUpperCase()} </span>
-                          <StageWord check={check} stage={stage} />
-                        </span>
-                      ))}
+                      {/* The three stages by name, in the colour of what each
+                          measured; the words are the reading under the list. */}
+                      <span className="ml-auto flex shrink-0 gap-2 font-mono">
+                        {STAGES.map((stage) => (
+                          <span
+                            key={stage}
+                            className={stageTone(check, stage)}
+                            aria-label={`${stage.toUpperCase()} ${stageReading(check, stage).label}`}
+                          >
+                            {stage.toUpperCase()}
+                          </span>
+                        ))}
+                      </span>
                     </p>
                   </div>
-                  <CheckVerbs
-                    check={check}
-                    name={name}
-                    canAct={canAct}
-                    busy={busy}
-                    onCancel={onCancel}
-                    onCompareFrom={onCompareFrom}
-                  />
+                  {/* A slot of one width whether the row has verbs or not, so
+                      every state word ends on the same edge. */}
+                  <span className="flex w-8 shrink-0 justify-end">
+                    <CheckVerbs
+                      check={check}
+                      name={name}
+                      canAct={canAct}
+                      busy={busy}
+                      onCancel={onCancel}
+                      onCompareFrom={onCompareFrom}
+                    />
+                  </span>
                 </li>
               )
             })}
@@ -233,6 +242,17 @@ export function ExternalChecks({
       )}
     </Panel>
   )
+}
+
+/** The rows a table holds while its first read is out, at its rows' own height. */
+function LoadingRows({ columns }: { columns: number }) {
+  return [0, 1, 2].map((i) => (
+    <TableRow key={i} aria-hidden className="h-12 hover:bg-transparent">
+      <TableCell colSpan={columns}>
+        <Skeleton className="h-3.5 w-2/3" />
+      </TableCell>
+    </TableRow>
+  ))
 }
 
 /**
@@ -369,7 +389,7 @@ export function CheckReading({
                 return (
                   <div
                     key={stage.name}
-                    className="grid min-w-0 grid-cols-[3rem_minmax(0,8rem)_minmax(0,1fr)] items-center gap-3 py-2 text-body sm:grid-cols-[3rem_9rem_7rem_minmax(0,1fr)]"
+                    className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 py-2 text-body sm:grid-cols-[3rem_9rem_7rem_minmax(0,1fr)]"
                   >
                     <dt className="font-mono text-hint text-muted-foreground">
                       {stage.name.toUpperCase()}
@@ -377,10 +397,13 @@ export function CheckReading({
                     <dd className={cn("truncate", stageTone(check, stage.name), "text-body")}>
                       {reading.label}
                     </dd>
-                    <dd className="text-hint text-muted-foreground max-sm:hidden">
+                    <dd className="text-hint text-muted-foreground">
                       {stage.basis} · {stage.durationMs} ms
                     </dd>
-                    <dd className="truncate text-hint text-muted-foreground" title={stage.detail}>
+                    <dd
+                      className="text-hint text-muted-foreground max-sm:col-span-3 sm:truncate"
+                      title={stage.detail}
+                    >
                       {stage.detail}
                     </dd>
                   </div>

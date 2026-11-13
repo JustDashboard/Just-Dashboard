@@ -136,6 +136,9 @@ export function AddressPlanningPage() {
             <Status tone="warning" label="Last known plan" />
           ) : gaps > 0 ? (
             <Status tone="warning" label={`${gaps} coverage ${gaps === 1 ? "gap" : "gaps"}`} />
+          ) : data.inventory.coverage.length === 0 ? (
+            // Nothing reported is not the same as everything read.
+            <Status tone="unknown" label="No sources reported" />
           ) : (
             <Status tone="running" label="Every source read" />
           )
@@ -165,17 +168,13 @@ export function AddressPlanningPage() {
           </IdentityFacts>
         }
         command={
-          !admin || !data ? undefined : pools.length > 0 ? (
+          // With no pool to reserve from, the pools' own empty state holds the next step.
+          admin && data && pools.length > 0 ? (
             <Button size="sm" disabled={Boolean(view.error)} onClick={() => open("reserve")}>
               <Plus className="size-3.5" />
               Reserve
             </Button>
-          ) : (
-            <Button size="sm" onClick={() => open("pool")}>
-              <Plus className="size-3.5" />
-              New pool
-            </Button>
-          )
+          ) : undefined
         }
         menu={admin && data ? <VerbMenu verbs={menu} label="More planning actions" /> : undefined}
       />
@@ -191,7 +190,7 @@ export function AddressPlanningPage() {
           }
         />
       ) : !data && view.error ? (
-        <ErrorState error={view.error} onRetry={view.refresh} />
+        <ErrorState error={view.error} onRetry={view.refresh} retryable />
       ) : (
         <>
           <NetworkReadWarning

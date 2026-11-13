@@ -53,7 +53,38 @@ export function FlowsSample({ cycle }: { cycle: FlowCycle | null }) {
             </p>
             {cycle.dockerError && <p className="text-body">{cycle.dockerError}</p>}
             {cycle.toolVersionError && <p className="text-body">{cycle.toolVersionError}</p>}
-            <div className="overflow-hidden rounded-xl border">
+            {/* Below `md` a source is two lines, its counts in words; the
+                table's nine columns would have to scroll sideways there. */}
+            <ul
+              aria-label="Sampled sources"
+              className="divide-y divide-hairline rounded-xl border md:hidden"
+            >
+              {cycle.sources.map((source) => (
+                <li key={source.id} className="space-y-1 px-4 py-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 truncate text-body font-medium">{source.name}</span>
+                    <span className="truncate font-mono text-hint text-muted-foreground">
+                      {source.namespace ?? "namespace unknown"}
+                    </span>
+                    <Status
+                      tone={source.status === "observed" ? "running" : "unknown"}
+                      label={
+                        source.status.replaceAll("_", " ") +
+                        (source.truncated ? " · cap reached" : "")
+                      }
+                      className="ml-auto shrink-0"
+                    />
+                  </div>
+                  <p className="numeric text-hint text-muted-foreground">
+                    {source.tcp} TCP · {source.udp} UDP · sent counters {source.tcpTxCounters} ·
+                    received counters {source.tcpRxCounters} · unknown owners{" "}
+                    {source.unverifiedOwners} · missing identities {source.identityUnavailable} ·
+                    observed <UTCTime value={source.observedAt} form="clock" />
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <div className="overflow-hidden rounded-xl border max-md:hidden">
               <Table className="min-w-[44rem]">
                 <TableHeader>
                   <TableRow>

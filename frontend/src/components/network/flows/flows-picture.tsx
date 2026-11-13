@@ -208,6 +208,8 @@ export function FlowsPicture({
             <ClockRewind aria-hidden />
           </WireMark>
         ),
+        // Room for the caption's four lines under the mark.
+        className: "lg:py-[4.5rem]",
         eyebrow: "Recorder",
         title: settings ? (
           `every ${settings.intervalSeconds}s`

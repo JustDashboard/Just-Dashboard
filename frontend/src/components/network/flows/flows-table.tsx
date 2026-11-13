@@ -161,17 +161,7 @@ export function FlowsTable({
           </Button>
         </form>
       </PanelToolbar>
-      {loading ? (
-        <div aria-hidden className="divide-y divide-hairline">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="flex h-11 items-center gap-6 px-4">
-              <Skeleton className="h-3.5 w-32" />
-              <Skeleton className="h-3.5 w-48" />
-              <Skeleton className="ml-auto h-3.5 w-24" />
-            </div>
-          ))}
-        </div>
-      ) : rows.length === 0 ? (
+      {!loading && rows.length === 0 ? (
         <EmptyNote className="px-5 py-6">
           No retained socket rows match this period and filter. No contact or bandwidth conclusion
           can be drawn.
@@ -191,6 +181,14 @@ export function FlowsTable({
               </TableRow>
             </TableHeader>
             <TableBody>
+              {loading &&
+                [0, 1, 2].map((i) => (
+                  <TableRow key={i} aria-hidden className="h-11 hover:bg-transparent">
+                    <TableCell colSpan={7}>
+                      <Skeleton className="h-3.5 w-2/3" />
+                    </TableCell>
+                  </TableRow>
+                ))}
               {rows.map((row) => {
                 const key = rowKey(row)
                 const chosen = selected !== undefined && rowKey(selected) === key
@@ -247,6 +245,12 @@ export function FlowsTable({
           {/* Below `lg` a row is two lines of one height: who and what was
               measured, then the tuple. */}
           <ul aria-label="Socket hours" className="divide-y divide-hairline lg:hidden">
+            {loading &&
+              [0, 1, 2].map((i) => (
+                <li key={i} aria-hidden className="flex h-16 items-center px-4">
+                  <Skeleton className="h-3.5 w-2/3" />
+                </li>
+              ))}
             {rows.map((row) => {
               const key = rowKey(row)
               const chosen = selected !== undefined && rowKey(selected) === key

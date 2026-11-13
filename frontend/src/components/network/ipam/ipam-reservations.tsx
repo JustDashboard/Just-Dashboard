@@ -19,6 +19,7 @@ import {
   stickyTableHeader,
 } from "@/components/ui/table"
 import { VerbActions, type Verb } from "@/components/verbs"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { copyText } from "@/lib/clipboard"
 import {
   ownerLabel,
@@ -69,6 +70,9 @@ export function IPAMReservations({
   onRelease: (row: IPAMReservation) => void
 }) {
   const router = useRouter()
+  // From `sm` a card is one line; narrower, how the hand-off stands takes a
+  // second line under the block on every card alike.
+  const wide = useMediaQuery("(min-width: 640px)")
   const held = reservations.filter((row) => row.state !== "released").length
   return (
     <Panel plain aria-label="Reservations">
@@ -138,16 +142,13 @@ export function IPAMReservations({
                   description={
                     <>
                       <span className="font-mono">{row.resource}</span> · {ownerLabel[row.owner]}
-                      <span className="sm:hidden"> · {reservationState[row.state]}</span>
                     </>
                   }
                   trailing={
                     <span className="flex items-center gap-2">
-                      <Status
-                        tone={STATE_TONE[row.state]}
-                        label={reservationState[row.state]}
-                        className="max-sm:hidden"
-                      />
+                      {wide && (
+                        <Status tone={STATE_TONE[row.state]} label={reservationState[row.state]} />
+                      )}
                       <InfoTip label={`About the plan for ${row.resource}`}>
                         {row.detail ||
                           "No native configuration has been applied by this reservation."}
@@ -167,7 +168,15 @@ export function IPAMReservations({
                       <VerbActions dim verbs={verbs} menuLabel={`Actions for ${row.resource}`} />
                     )
                   }
-                />
+                >
+                  {!wide && (
+                    <Status
+                      tone={STATE_TONE[row.state]}
+                      label={reservationState[row.state]}
+                      className="min-w-0"
+                    />
+                  )}
+                </ChoiceRow>
               )
             })}
           </ChoiceList>
@@ -242,7 +251,10 @@ export function IPAMCoverageTable({
                   <TableCell>
                     <Status tone={COVERAGE_TONE[row.state]} label={row.state} />
                   </TableCell>
-                  <TableCell className="truncate text-muted-foreground" title={row.detail}>
+                  <TableCell
+                    className="text-muted-foreground max-sm:whitespace-normal sm:truncate"
+                    title={row.detail}
+                  >
                     {row.detail}
                   </TableCell>
                 </TableRow>

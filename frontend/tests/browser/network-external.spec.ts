@@ -213,6 +213,21 @@ test("readonly accounts cannot queue checks or create machine credentials", asyn
   expect(requests).toEqual([])
 })
 
+test("no sources is a designed state with the next step as its command", async ({ page }) => {
+  await setup(page, [], { sources: [] })
+  await page.goto("/network/external")
+  await loaded(page)
+  const identity = page.getByRole("region", { name: "About external checks" })
+  await expect(identity.getByText("No sources enrolled", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Run a check" })).toHaveCount(0)
+  // The picture says what goes where, and its ring opens the same sheet.
+  const picture = page.locator('[data-slot="wire-flow"]')
+  await expect(picture).toContainText("a machine you control elsewhere")
+  await expect(picture.getByRole("button", { name: "Enroll a source" })).toBeVisible()
+  await identity.getByRole("button", { name: "Enroll a source" }).click()
+  await expect(page.getByRole("dialog", { name: "Enroll a source" })).toBeVisible()
+})
+
 test("revoking is offered only to an account the server lets revoke", async ({ page }) => {
   const mutations: Mutation[] = []
   await setup(page, [], {

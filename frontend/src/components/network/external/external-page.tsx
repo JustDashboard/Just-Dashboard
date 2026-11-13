@@ -228,16 +228,18 @@ export function ExternalChecksPage() {
           </IdentityFacts>
         }
         command={
-          admin ? (
-            <Button
-              size="sm"
-              disabled={loading || enrolled.length === 0}
-              onClick={() => checkFrom()}
-            >
+          !admin ? undefined : !loading && enrolled.length === 0 ? (
+            // Nothing to ask yet: the page's command is the step that makes a source.
+            <Button size="sm" onClick={() => open("enroll")}>
+              <Plus className="size-3.5" />
+              Enroll a source
+            </Button>
+          ) : (
+            <Button size="sm" disabled={loading} onClick={() => checkFrom()}>
               <Play className="size-3.5" />
               Run a check
             </Button>
-          ) : undefined
+          )
         }
         menu={admin ? <VerbMenu verbs={menu} label="More external check actions" /> : undefined}
       />
@@ -248,7 +250,7 @@ export function ExternalChecksPage() {
           description="External measurements and agent management require system administrator access."
         />
       ) : readError && !vantages.data && !checks.data ? (
-        <ErrorState error={readError} onRetry={refresh} />
+        <ErrorState error={readError} onRetry={refresh} retryable />
       ) : (
         <>
           <NetworkReadWarning
@@ -283,7 +285,7 @@ export function ExternalChecksPage() {
             canAct={admin}
             busy={busy}
             onCancel={cancel}
-            onCompare={() => open("compare")}
+            onCompare={retained.length > 1 ? () => open("compare") : undefined}
             onCompareFrom={(check) => {
               setBefore(check.id)
               setAfter("")

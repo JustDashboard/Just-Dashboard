@@ -78,7 +78,7 @@ export function IPAMPools({
                 {pools.length > active && ` · ${pools.length - active} retired`}
               </span>
             )}
-            {canCreate && (
+            {canCreate && (loading || pools.length > 0) && (
               <Button size="sm" variant="outline" onClick={onCreate}>
                 <Plus className="size-3.5" />
                 New pool
@@ -99,7 +99,7 @@ export function IPAMPools({
           <EmptyState
             mark={<ProductLogos ids={["docker", "wireguard", "tailscale"]} />}
             title="No pools yet"
-            description="A pool is a network set aside for planning. Blocks are reserved from it for Docker networks, WireGuard tunnels and the rest."
+            description="A pool is a network set aside for planning, with blocks reserved from it for Docker networks, WireGuard tunnels and the rest."
             action={
               canCreate && (
                 <Button size="sm" onClick={onCreate}>

@@ -9,6 +9,7 @@ import { EmptyNote } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { VerbActions, type Verb } from "@/components/verbs"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { relativeTime } from "@/lib/format"
 import type { ExternalVantage } from "@/lib/network-external"
 import { sourceState } from "@/components/network/external/reading"
@@ -43,6 +44,9 @@ export function ExternalSources({
   onCredential: () => void
   onRevoke: (vantage: ExternalVantage) => void
 }) {
+  // From `sm` a card is one line; narrower, its placement and last poll take
+  // a second line under its name on every card alike.
+  const wide = useMediaQuery("(min-width: 640px)")
   return (
     <Panel plain aria-label="Sources">
       <PanelHeader
@@ -52,7 +56,7 @@ export function ExternalSources({
             {vantages.length > 0 && (
               <span className="numeric text-hint text-muted-foreground">{vantages.length}</span>
             )}
-            {canAdmin && (
+            {canAdmin && (loading || vantages.length > 0) && (
               <Button size="sm" variant="outline" onClick={onEnroll}>
                 <Plus className="size-3.5" />
                 Enroll a source
@@ -100,6 +104,17 @@ export function ExternalSources({
                   disabled: busy,
                   run: () => onRevoke(v),
                 })
+              const placement =
+                v.placement === "controlled_fixture"
+                  ? "Controlled fixture"
+                  : "External host (operator declared)"
+              const polled = (
+                <span
+                  title={`Poll source IP: ${v.lastIp || "Not recorded"}. This is not a probe source or geographic attestation.`}
+                >
+                  {v.lastSeen ? `polled ${relativeTime(v.lastSeen)}` : "never polled"}
+                </span>
+              )
               const press =
                 canAdmin && enrolled ? () => onCheck(v) : holdsCredential ? onCredential : undefined
               return (
@@ -113,22 +128,20 @@ export function ExternalSources({
                   onSelect={press}
                   disabled={!press}
                   description={
-                    <>
-                      {v.location || "Location undeclared"} ·{" "}
-                      {v.placement === "controlled_fixture"
-                        ? "Controlled fixture"
-                        : "External host (operator declared)"}
-                    </>
+                    wide ? (
+                      <>
+                        {v.location || "Location undeclared"} · {placement}
+                      </>
+                    ) : (
+                      v.location || "Location undeclared"
+                    )
                   }
                   trailing={
                     <span className="flex items-center gap-4 text-hint text-muted-foreground">
-                      <span
-                        className="max-sm:hidden"
-                        title={`Poll source IP: ${v.lastIp || "Not recorded"}. This is not a probe source or geographic attestation.`}
-                      >
-                        {v.lastSeen ? `polled ${relativeTime(v.lastSeen)}` : "never polled"}
-                      </span>
+                      {wide && polled}
                       <Status tone={state.tone} label={state.word} />
+                      {/* Where a card with somewhere to go draws its arrow. */}
+                      {!press && <span aria-hidden className="-ml-2 size-3.5 shrink-0" />}
                     </span>
                   }
                   actions={
@@ -136,7 +149,13 @@ export function ExternalSources({
                       <VerbActions dim verbs={verbs} menuLabel={`Actions for ${v.name}`} />
                     )
                   }
-                />
+                >
+                  {!wide && (
+                    <p className="truncate text-hint text-muted-foreground">
+                      {placement} · {polled}
+                    </p>
+                  )}
+                </ChoiceRow>
               )
             })}
           </ChoiceList>
