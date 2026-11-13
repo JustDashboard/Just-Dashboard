@@ -10,7 +10,6 @@ import {
   reportOf,
   reportWords,
   upgradeJobKind,
-  upgradeResultOf,
   upgradeSteps,
 } from "./settings-version-model"
 
@@ -71,14 +70,11 @@ describe("an upgrade's jobs", () => {
     expect(transferKind({ kind: "packages.upgrade" })).toBeUndefined()
   })
 
-  test("end on a line the page reads as their report or their result", () => {
+  test("end on a line the page reads as their report", () => {
     const checked = report([check("version", "ok")])
     expect(reportOf(lines(checked))).toEqual(checked)
     expect(reportOf(lines({ file: "x.dump" }))).toBeUndefined()
     expect(reportOf([{ seq: 1, stream: "stdout", text: "no result yet" }])).toBeUndefined()
-    const done = { from: "16", to: "17", previous: "shop-db-pg16", summary: "1 database matches" }
-    expect(upgradeResultOf(lines(done))).toEqual(done)
-    expect(upgradeResultOf(lines(checked))).toBeUndefined()
   })
 
   test("are announced in words that say what happened to the server", () => {

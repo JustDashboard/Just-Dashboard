@@ -1,4 +1,4 @@
-import { clock, clockMinute } from "@/lib/format"
+import { clock } from "@/lib/format"
 import type { ProxyMetrics, ProxyMetricsSample } from "@/lib/proxy/types-metrics"
 
 /**
@@ -31,35 +31,9 @@ export function mergeSeries(held: MetricsSeries | undefined, report: ProxyMetric
   return { epoch: report.epoch, samples: samples.filter((sample) => Date.parse(sample.at) >= cut) }
 }
 
-/**
- * The request rate's shape. A reading with no rate is left out rather than
- * drawn at zero: after a restart nginx served something, just not a number
- * that can be told.
- */
-export function requestTrend(samples: ProxyMetricsSample[]): number[] {
-  return samples.flatMap((sample) => (sample.requests === null ? [] : [sample.requests]))
-}
-
-export function connectionTrend(samples: ProxyMetricsSample[]): number[] {
-  return samples.map((sample) => sample.active)
-}
-
 /** A rate as a figure: tenths below ten a second, whole numbers above. */
 export function perSecond(rate: number): string {
   return rate.toLocaleString(undefined, { maximumFractionDigits: rate < 10 ? 1 : 0 })
-}
-
-/**
- * How long the held readings reach back, for the hour's total: "in the last
- * hour" once they span it, and from when they start until then — right after
- * switching on, an hour's total would claim an hour nobody measured.
- */
-export function windowLabel(samples: ProxyMetricsSample[]): string {
-  const oldest = samples[0]
-  const newest = samples.at(-1)
-  if (!oldest || !newest) return ""
-  if (Date.parse(newest.at) - Date.parse(oldest.at) >= HOUR_MS - 60_000) return "in the last hour"
-  return `since ${clockMinute(oldest.at)}`
 }
 
 /** The connections' three states, in nginx's words for the first two. */

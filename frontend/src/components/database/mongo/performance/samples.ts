@@ -243,11 +243,6 @@ type Numeric = {
   [K in keyof StatRow]: StatRow[K] extends number | null ? K : never
 }[keyof StatRow]
 
-/** One series of the rows, without the moments it has no reading for. */
-export function seriesOf(rows: readonly StatRow[], key: Exclude<Numeric, "ts">): number[] {
-  return rows.map((row) => row[key]).filter((value): value is number => value !== null)
-}
-
 /** The newest reading of a series that has one. */
 export function latest(rows: readonly StatRow[], key: Exclude<Numeric, "ts">): number | null {
   for (let index = rows.length - 1; index >= 0; index--) {
@@ -275,18 +270,6 @@ export function reportsNothing(server: MongoServer): boolean {
     server.network.numRequests === 0 &&
     server.cache === null
   )
-}
-
-export function lifetimeTargeting(server: MongoServer): number | null {
-  return server.documents.returned > 0 ? server.scanned.documents / server.documents.returned : null
-}
-
-/** "1.3", "12", "140": a ratio in the fewest digits that say it. */
-export function ratio(value: number): string {
-  if (value === 0) return "0"
-  if (value >= 100) return Math.round(value).toLocaleString("en-US")
-  if (value >= 10) return value.toFixed(0)
-  return value.toFixed(1)
 }
 
 /** How long a server has been up, for a member's row: "3d 4h", "12m". */

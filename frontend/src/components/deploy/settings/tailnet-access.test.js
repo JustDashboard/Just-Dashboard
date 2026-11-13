@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test"
 import {
   TAILNET_MAX_ALLOW,
-  isTailnetTag,
   readTailnetEntry,
   tailnetAccessState,
   tailnetBlockers,
@@ -33,8 +32,6 @@ test("the same login twice, in any case, and a list past the limit are refused",
   expect(readTailnetEntry("tag:CI", ["tag:ci"])).toEqual({ entry: "tag:CI", tag: true })
   const full = Array.from({ length: TAILNET_MAX_ALLOW }, (_, i) => `user${i}@example.com`)
   expect(readTailnetEntry("one@example.com", full).error).toBe("At most 64 logins and tags")
-  expect(isTailnetTag("tag:ci")).toBe(true)
-  expect(isTailnetTag("alice@example.com")).toBe(false)
 })
 
 test("the state says who opens the environment", () => {

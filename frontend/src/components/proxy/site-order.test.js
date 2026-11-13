@@ -1,13 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  byUrgency,
-  isBroken,
-  isDisabled,
-  isParked,
-  isPlain,
-  sharedNames,
-  waiting,
-} from "./site-order"
+import { byUrgency, isBroken, isDisabled, isParked, isPlain, sharedNames } from "./site-order"
 
 const vhost = (overrides) => ({
   name: "app.example.com",
@@ -50,13 +42,6 @@ describe("site order", () => {
     expect(disabled).toEqual(["plainOff", "off"])
   })
 
-  test("waiting is either", () => {
-    const needs = Object.entries(sites)
-      .filter(([, v]) => waiting(v))
-      .map(([k]) => k)
-    expect(needs).toEqual(["plain", "plainOff", "off", "caddyPlain"])
-  })
-
   test("worst first, then by name", () => {
     const ordered = Object.values(sites)
       .sort(byUrgency)
@@ -78,11 +63,10 @@ describe("broken links", () => {
   const dangling = vhost({ name: "ghost", enabled: false, broken: "dangling" })
   const stale = vhost({ name: "stale", enabled: false, broken: "stale" })
 
-  test("a broken link is broken and waiting, and not merely disabled", () => {
+  test("a broken link is broken, and not merely disabled", () => {
     for (const v of [dangling, stale]) {
       expect(isBroken(v)).toBe(true)
       expect(isDisabled(v)).toBe(false)
-      expect(waiting(v)).toBe(true)
     }
     expect(isBroken(sites.off)).toBe(false)
   })
@@ -115,10 +99,9 @@ describe("the stock default site", () => {
     package: "nginx-common",
   })
 
-  test("is disabled but not waiting on anybody", () => {
+  test("is disabled but not parked", () => {
     expect(isDisabled(stock)).toBe(true)
     expect(isParked(stock)).toBe(false)
-    expect(waiting(stock)).toBe(false)
   })
 
   test("sorts with the settled sites, not ahead of them", () => {

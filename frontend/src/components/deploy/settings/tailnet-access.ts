@@ -42,11 +42,6 @@ export function readTailnetEntry(raw: string, existing: readonly string[] = []):
   return { entry, tag }
 }
 
-/** Whether an entry of the list is a tag rather than a login. */
-export function isTailnetTag(entry: string) {
-  return entry.startsWith("tag:")
-}
-
 /** Who opens the environment, as the Tailnet section's state. */
 export function tailnetAccessState(tailnet: DeploymentRouteTailnet | undefined): string {
   if (!tailnet) return "Off · answers on its public domains"

@@ -2,12 +2,10 @@ import { describe, expect, test } from "bun:test"
 import {
   addSample,
   countScale,
-  lifetimeHitRate,
   micros,
   perSecond,
   rateBetween,
   recordedSamples,
-  seriesOf,
   statRows,
 } from "./samples"
 import { scheduleWords } from "./schedule"
@@ -121,21 +119,9 @@ describe("samples as chart rows", () => {
   test("a counter the server answers -1 for is absent, not minus one", () => {
     expect(rows[2].keys).toBeNull()
   })
-
-  test("a series is its readings, without the moments it has none for", () => {
-    expect(seriesOf(rows, "ops")).toEqual([20, 0])
-    expect(seriesOf(rows, "hitRate")).toEqual([75])
-    expect(seriesOf(rows, "keys")).toEqual([5, 5])
-  })
 })
 
 describe("readings in words", () => {
-  test("hits as a share of every lookup since the server started", () => {
-    expect(lifetimeHitRate({ keyspace_hits: 90, keyspace_misses: 10 })).toBe(90)
-    expect(lifetimeHitRate({ keyspace_hits: 0, keyspace_misses: 0 })).toBeNull()
-    expect(lifetimeHitRate({})).toBeNull()
-  })
-
   test("a count a second, in the fewest digits that say it", () => {
     expect(perSecond(2146.4)).toBe("2,146")
     expect(perSecond(12.44)).toBe("12.4")

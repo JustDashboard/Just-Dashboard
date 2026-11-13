@@ -507,36 +507,6 @@ function closing(text: string, from: number, open: string): number {
   return -1
 }
 
-/** The words of a Markdown body with the syntax taken out, for a one-line excerpt. */
-export function markdownText(source: string): string {
-  const words: string[] = []
-  const walkInline = (runs: Inline[]) => {
-    for (const run of runs) {
-      if (run.t === "text" || run.t === "code") words.push(run.v)
-      else if (run.t === "ref") words.push(`#${run.n}`)
-      else if (run.t === "mention") words.push(`@${run.v}`)
-      else if (run.t === "image") words.push(run.alt)
-      else if (run.t === "br") words.push(" ")
-      else if ("c" in run) walkInline(run.c)
-    }
-  }
-  const walk = (blocks: Block[]) => {
-    for (const block of blocks) {
-      if (block.t === "heading" || block.t === "paragraph") walkInline(block.c)
-      else if (block.t === "quote") walk(block.c)
-      else if (block.t === "list") block.items.forEach((item) => walk(item.c))
-      else if (block.t === "details") {
-        walkInline(block.summary)
-        words.push(" ")
-        walk(block.c)
-      }
-      words.push(" ")
-    }
-  }
-  walk(parseMarkdown(source))
-  return words.join("").replace(/\s+/g, " ").trim()
-}
-
 /** Every picture and video in a body, in reading order: what a lightbox steps through. */
 export function markdownMedia(blocks: Block[]): { src: string; alt: string }[] {
   const out: { src: string; alt: string }[] = []

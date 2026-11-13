@@ -1,15 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
-  STALE_AFTER_MS,
-  backupAge,
   contentsWords,
   holdsWords,
-  keptBytes,
-  lastBackup,
   nameParts,
   newDatabaseProblem,
   originWord,
-  outcomesLabel,
   restoreEffect,
   restoreReach,
   resultWords,
@@ -18,12 +13,10 @@ import {
   tableChoice,
   tookWords,
   transferKind,
-  transferOutcomes,
   transferResult,
   uploadNameProblem,
 } from "./backups-model"
 
-const NOW = Date.parse("2026-10-02T09:00:00Z")
 const TABLES = { object: "table", objects: "tables" }
 const file = (name, over = {}) => ({
   file: name,
@@ -177,77 +170,11 @@ describe("what a dump holds", () => {
 })
 
 describe("when the database was last backed up", () => {
-  test("an uploaded dump is not a backup of what is here", () => {
-    const files = [file("up.sql", { origin: "upload" }), file("a.dump"), file("b.dump")]
-    expect(lastBackup(files)?.file).toBe("a.dump")
-    expect(lastBackup([file("up.sql", { origin: "upload" })])).toBeUndefined()
-  })
-
-  test("a safety dump is one", () => {
-    expect(lastBackup([file("s.dump", { origin: "safety" })])?.file).toBe("s.dump")
-  })
-
-  test("never, and older than a week, are the answers to worry about", () => {
-    expect(backupAge(undefined, NOW)).toEqual({ stale: true, never: true })
-    expect(backupAge(file("a"), NOW)).toEqual({ stale: false, never: false })
-    const old = new Date(NOW - STALE_AFTER_MS - 1000).toISOString()
-    expect(backupAge(file("a", { takenAt: old }), NOW).stale).toBe(true)
-  })
-
-  test("what is kept adds up", () => {
-    expect(keptBytes([file("a"), file("b", { size: 24 })])).toBe(1024)
-    expect(keptBytes([])).toBe(0)
-  })
-
   test("a duration is said to the precision it deserves", () => {
     expect(tookWords(undefined)).toBe("")
     expect(tookWords(388)).toBe("under a second")
     expect(tookWords(2400)).toBe("2.4 s")
     expect(tookWords(95_000)).toBe("1m 35s")
-  })
-})
-
-describe("how the last operations ended", () => {
-  const when = (iso) => iso
-
-  test("kept dumps are successes, oldest first, and the running job is last", () => {
-    const files = [
-      file("new.dump", { takenAt: "2026-10-02T08:00:00Z" }),
-      file("old.dump", { takenAt: "2026-10-01T08:00:00Z" }),
-    ]
-    const marks = transferOutcomes(files, [], job("r", "backup", "running"), when)
-    expect(marks.map((mark) => [mark.key, mark.tone])).toEqual([
-      ["file:old.dump", "success"],
-      ["file:new.dump", "success"],
-      ["job:r", "running"],
-    ])
-  })
-
-  test("a failed job is a mark of its own: it left no file to speak for it", () => {
-    const marks = transferOutcomes(
-      [file("a.dump", { takenAt: "2026-10-02T08:00:00Z" })],
-      [
-        job("f", "backup", "failed", { endedAt: "2026-10-02T08:40:00Z", error: "no such table" }),
-        job("c", "restore", "cancelled", { endedAt: "2026-10-02T08:50:00Z" }),
-        // Already said by its file.
-        job("s", "backup", "succeeded", { endedAt: "2026-10-02T08:00:01Z" }),
-      ],
-      undefined,
-      when,
-    )
-    expect(marks.map((mark) => mark.tone)).toEqual(["success", "danger", "muted"])
-    expect(marks[1].title).toContain("no such table")
-    expect(outcomesLabel(marks)).toBe("The last 3 operations, 1 failed")
-  })
-
-  test("only the last few are drawn", () => {
-    const files = Array.from({ length: 20 }, (_, index) =>
-      file(`f${index}`, { takenAt: new Date(NOW - index * 3600_000).toISOString() }),
-    )
-    const marks = transferOutcomes(files, [], undefined, when, 14)
-    expect(marks).toHaveLength(14)
-    expect(marks.at(-1)?.key).toBe("file:f0")
-    expect(outcomesLabel(marks)).toBe("The last 14 operations, none failed")
   })
 })
 

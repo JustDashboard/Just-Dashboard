@@ -20,20 +20,6 @@ import type {
  * "Out of date" on the project's Overview.
  */
 
-/** The dot for a pull request's folded check state: gh's success/failure/pending. */
-export function pullChecksTone(pull: Pick<GitPullRequest, "checks">): DotTone {
-  switch (pull.checks) {
-    case "success":
-      return "running"
-    case "failure":
-      return "danger"
-    case "pending":
-      return "warning"
-    default:
-      return "unknown"
-  }
-}
-
 // The engine's run states that have not ended yet. Listed here rather than
 // imported from the deploy vocabulary because this file is plain data the unit
 // tests load without a component tree behind it.

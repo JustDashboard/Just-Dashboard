@@ -21,7 +21,6 @@ export { VALUE_KIND_CLASS, ValueText } from "@/components/database/kit/value-tex
 export {
   binarySize,
   jsonPath,
-  sizeWord,
   valueKind,
   valuePreview,
   type ValueKind,

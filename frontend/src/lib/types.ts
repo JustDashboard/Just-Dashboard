@@ -2345,17 +2345,6 @@ export type DbConnection = {
   capabilities?: DbCapabilities
 }
 
-export type QueryResult = {
-  columns: string[]
-  types: string[]
-  rows: unknown[][]
-  rowCount: number
-  rowsAffected: number
-  duration: string
-  truncated: boolean
-  statement: string
-}
-
 /** One entry in a connection's recent-statement history. */
 export type DbHistoryEntry = {
   id: number

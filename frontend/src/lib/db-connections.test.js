@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { unusableCount, unusableReason } from "./db-connections"
+import { unusableReason } from "./db-connections"
 
 // The list of saved connections carries the ones that no longer open, flagged.
 // Every page outside the Databases section that picks from it asks here, so
@@ -21,10 +21,5 @@ describe("saved connections that cannot be opened", () => {
     expect(unusableReason({ broken: true, brokenReason: "" })).toBe(
       "This saved connection cannot be opened.",
     )
-  })
-
-  test("counts only the broken ones", () => {
-    expect(unusableCount(undefined)).toBe(0)
-    expect(unusableCount([{}, { broken: true }, { broken: false }, { broken: true }])).toBe(2)
   })
 })

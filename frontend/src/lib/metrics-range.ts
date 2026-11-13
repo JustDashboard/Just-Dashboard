@@ -117,12 +117,6 @@ export function windowQuery(win: MetricsWindow, points: number): Record<string, 
   return { range: rangeSpec(win.key).query ?? "1h", points }
 }
 
-/** How wide the window is, in seconds — for the retention note. */
-export function windowSeconds(win: MetricsWindow): number {
-  if (win.from !== undefined && win.to !== undefined) return (win.to - win.from) / 1000
-  return rangeSpec(win.key).seconds
-}
-
 /**
  * How often to re-read a window.
  *
@@ -446,43 +440,6 @@ function gapRow(ts: number): ChartRow {
 
 function shortDateTime(ts: number): string {
   return dayMinuteAt(ts)
-}
-
-/**
- * The frame shared by every recorded series — the host's and a container's
- * alike. Both endpoints return the same envelope, so the notes below read it
- * structurally rather than caring which series they were handed.
- */
-export type HistoryWindow = {
-  from: string
-  earliest: string | null
-  stepSeconds: number
-  retentionSeconds: number
-}
-
-/**
- * How much of the requested window the record actually covers.
- *
- * A dashboard installed this morning cannot answer a question about last
- * Tuesday, and the honest response is to say so — an empty left-hand half of a
- * 7d chart otherwise reads as a week of zero load.
- */
-export function coverageNote(history: HistoryWindow | undefined): string | null {
-  if (!history || !history.earliest) return null
-  const earliest = new Date(history.earliest).getTime()
-  if (Number.isNaN(earliest)) return null
-  const from = new Date(history.from).getTime()
-  // A minute of slack: the first sample is always a little after the window
-  // opens, and reporting that as incomplete coverage would be pedantic.
-  if (earliest <= from + 60_000) return null
-  return `recorded from ${timestamp(history.earliest)}`
-}
-
-/** The retention ceiling, phrased for the range that ran into it. */
-export function retentionNote(history: HistoryWindow | undefined, spec: RangeSpec): string | null {
-  if (!history) return null
-  if (history.retentionSeconds >= spec.seconds) return null
-  return `history is kept for ${Math.round(history.retentionSeconds / 3600)}h`
 }
 
 /** One row of a container's chart data, with the same gap semantics as the host rows. */

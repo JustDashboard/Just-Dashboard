@@ -23,16 +23,6 @@ export function requestKey(request: DdlRequest | null): string {
   return request ? `${request.method} ${request.path} ${JSON.stringify(request.body)}` : ""
 }
 
-/**
- * Whether asking for the statement costs something. The routes of the
- * destructive group spend the role's destructive budget even for a preview,
- * so they are previewed once, when their confirmation opens, and never while
- * somebody types.
- */
-export function spendsBudget(request: DdlRequest): boolean {
-  return request.method === "DELETE" || request.path === "/ddl/truncate"
-}
-
 /** `schema.name`, or the name alone where the engine has no schema to say. */
 export function qualified(schema: string, name: string): string {
   return schema ? `${schema}.${name}` : name

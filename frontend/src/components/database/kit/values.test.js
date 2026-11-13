@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { binarySize, jsonPath, sizeWord, valueKind, valuePreview } from "./values"
+import { binarySize, jsonPath, valueKind, valuePreview } from "./values"
 
 describe("what kind of thing a value is", () => {
   test("NULL is not the empty string", () => {
@@ -109,11 +109,5 @@ describe("naming a place in a document", () => {
     expect(jsonPath(["user", "addresses", 0, "city"])).toBe("$.user.addresses[0].city")
     expect(jsonPath(["postal code"])).toBe('$["postal code"]')
     expect(jsonPath(["a.b", 2, "$oid"])).toBe('$["a.b"][2].$oid')
-  })
-
-  test("a container says how much it holds", () => {
-    expect(sizeWord({ a: 1, b: 2, c: 3 })).toBe("3 keys")
-    expect(sizeWord([1])).toBe("1 item")
-    expect(sizeWord([])).toBe("0 items")
   })
 })

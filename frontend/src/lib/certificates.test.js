@@ -21,7 +21,6 @@ import {
   stillServingTest,
   testCertificateReplaced,
   testRunPassed,
-  unreloadedRenewals,
 } from "./certificates"
 
 const now = Date.parse("2026-09-27T12:00:00Z")
@@ -412,40 +411,6 @@ describe("whether nginx reads a renewed certificate", () => {
       "unknown",
     )
     expect(renewalReload({}, { reloadHook: hook("modified") })).toBe("unknown")
-  })
-
-  test("the served lineages nothing reloads for, with the sites left on the old certificate", () => {
-    const lineage = (name, overrides = {}) => ({
-      name,
-      domains: [name],
-      expiry: local(12, 1, 0, 0),
-      daysLeft: 60,
-      valid: true,
-      certPath: `/etc/letsencrypt/live/${name}/fullchain.pem`,
-      authenticator: "webroot",
-      ...overrides,
-    })
-    // servedBy is the enabled sites only: a disabled one that names
-    // idle.example.com serves nothing, so it is not here.
-    const state = certbotState({
-      reloadHook: hook("missing"),
-      nginxReloads: true,
-      certs: [
-        lineage("app.example.com", { servedBy: ["app", "www"] }),
-        lineage("idle.example.com"),
-        lineage("nginx.example.com", { installer: "nginx", servedBy: ["n"] }),
-        lineage("post.example.com", { postHook: true, servedBy: ["post"] }),
-      ],
-    })
-    expect(unreloadedRenewals(state)).toEqual({
-      lineages: ["app.example.com"],
-      sites: ["app", "www"],
-    })
-    expect(unreloadedRenewals({ ...state, reloadHook: hook("installed") }).lineages).toEqual([])
-    expect(
-      unreloadedRenewals({ ...state, reloadHook: hook("missing", ["post/reload-nginx"]) }).lineages,
-    ).toEqual([])
-    expect(unreloadedRenewals({ ...state, autoRenew: false }).lineages).toEqual([])
   })
 })
 

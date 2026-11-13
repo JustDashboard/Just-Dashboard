@@ -19,7 +19,6 @@ import {
   triggerRequest,
   triggerTables,
 } from "./programs"
-import { spendsBudget } from "./changes"
 
 const operationsOf = (driver, flavor) => {
   const entry = catalogue.find((item) => item.id === driver)
@@ -124,7 +123,6 @@ describe("a routine form", () => {
         language: "plpgsql",
       },
     })
-    expect(spendsBudget(routineRequest(draft, abilities))).toBe(false)
   })
 
   test("OUT parameters stand in for a Postgres return type", () => {
@@ -214,7 +212,6 @@ describe("a routine form", () => {
       body: { kind: "function", schema: "public", name: "armor", signature: "bytea, text[]" },
     })
     expect(dropRoutineRequest("procedure", "shop", "bump", "").body).not.toHaveProperty("signature")
-    expect(spendsBudget(dropRoutineRequest("function", "", "f", ""))).toBe(true)
   })
 })
 

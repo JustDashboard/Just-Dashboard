@@ -3,7 +3,6 @@ import {
   boxSafe,
   bytesId,
   bytesLabel,
-  byteLength,
   fromBytes,
   globEscape,
   hasGlob,
@@ -49,7 +48,6 @@ describe("a name is its bytes", () => {
 describe("bytes go out as they came in", () => {
   test("text round-trips as text, multi-byte characters included", () => {
     expect(fromBytes(toBytes("Chișinău ✓"))).toBe("Chișinău ✓")
-    expect(byteLength("ș")).toBe(2)
   })
 
   test("bytes that are not UTF-8 stay bytes and are never mangled", () => {

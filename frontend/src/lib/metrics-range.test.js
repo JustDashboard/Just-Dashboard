@@ -4,18 +4,15 @@ import {
   HISTORY_RANGES,
   RANGES,
   containerRows,
-  coverageNote,
   historyRows,
   liveRows,
   liveStorageRows,
   memoryLimit,
   rangeSpec,
-  retentionNote,
   storageRows,
   windowLabel,
   windowQuery,
   windowRefreshMs,
-  windowSeconds,
 } from "./metrics-range"
 
 const T0 = Date.parse("2026-11-10T12:00:00Z")
@@ -59,9 +56,7 @@ test("a named window is asked for by its name, a dragged one by its two ends in 
   expect(windowQuery({ key: "24h", from: T0 }, 288)).toEqual({ range: "24h", points: 288 })
 })
 
-test("a dragged span is as wide as it was dragged, and is read once", () => {
-  expect(windowSeconds({ key: "7d" })).toBe(604_800)
-  expect(windowSeconds({ key: "7d", from: T0, to: T0 + 90_000 })).toBe(90)
+test("a dragged span is read once", () => {
   expect(windowRefreshMs({ key: "1h" })).toBe(15_000)
   expect(windowRefreshMs({ key: "live" })).toBe(0)
   // A fixed span in the past does not change, whatever range it was dragged on.
@@ -328,34 +323,4 @@ test("the live feed has one storage line: the mount where there is one, the full
   const several = liveStorageRows(buffer, [{ mountpoint: "/" }, { mountpoint: "/data" }])
   expect(several.series.map((s) => s.mountpoint)).toEqual(["fullest"])
   expect(liveStorageRows(buffer, []).series.map((s) => s.mountpoint)).toEqual(["fullest"])
-})
-
-// ------------------------------------------------------------------ notes
-
-test("a record younger than its window says when it starts, with a minute's grace", () => {
-  const window = (earliest) => ({
-    from: at(0),
-    earliest,
-    stepSeconds: 15,
-    retentionSeconds: 604_800,
-  })
-  expect(coverageNote(undefined)).toBeNull()
-  expect(coverageNote(window(null))).toBeNull()
-  expect(coverageNote(window("not a time"))).toBeNull()
-  expect(coverageNote(window(at(-3600)))).toBeNull()
-  expect(coverageNote(window(at(60)))).toBeNull()
-  expect(coverageNote(window(at(61)))).toStartWith("recorded from ")
-})
-
-test("a range wider than what is kept says how long history is kept", () => {
-  const kept = (retentionSeconds) => ({
-    from: at(0),
-    earliest: null,
-    stepSeconds: 15,
-    retentionSeconds,
-  })
-  expect(retentionNote(undefined, rangeSpec("7d"))).toBeNull()
-  expect(retentionNote(kept(604_800), rangeSpec("7d"))).toBeNull()
-  expect(retentionNote(kept(86_400), rangeSpec("24h"))).toBeNull()
-  expect(retentionNote(kept(86_400), rangeSpec("7d"))).toBe("history is kept for 24h")
 })

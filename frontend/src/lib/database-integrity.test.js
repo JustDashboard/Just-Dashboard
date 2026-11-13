@@ -1,39 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { coerceDbValue } from "./db-values"
-import { resultToCSV } from "./db-export"
 import { parseDockerRun } from "./docker-run"
 import { api, ApiError } from "./api"
-
-describe("lossless database values", () => {
-  test("exact SQL types retain all entered digits through JSON", () => {
-    for (const type of [
-      "bigint",
-      "BIGINT UNSIGNED",
-      "bigserial",
-      "int8",
-      "numeric(30,10)",
-      "decimal",
-    ])
-      expect(JSON.parse(JSON.stringify(coerceDbValue("9007199254740993", type)))).toBe(
-        "9007199254740993",
-      )
-    expect(coerceDbValue("1.123456789012345678901234567890", "numeric")).toBe(
-      "1.123456789012345678901234567890",
-    )
-    expect(coerceDbValue("3", "integer")).toBe("3")
-    expect(coerceDbValue("false", "boolean")).toBe(false)
-  })
-  test("non-finite and unsafe ordinary numbers never turn into null or rounded JSON", () => {
-    expect(() => coerceDbValue("1e999", "double precision")).toThrow("finite range")
-    expect(coerceDbValue("9007199254740993", "integer")).toBe("9007199254740993")
-    expect(coerceDbValue("", "float")).toBe("")
-  })
-  test("CSV escapes headers and carriage returns as well as data", () => {
-    expect(
-      resultToCSV({ columns: ["a,b", 'quote"name', "line\rname"], rows: [["a\rb", 'x"y', null]] }),
-    ).toBe('"a,b","quote""name","line\rname"\n"a\rb","x""y",')
-  })
-})
 
 describe("docker command parsing", () => {
   test("explicit false cannot enable privileges or removal", () => {

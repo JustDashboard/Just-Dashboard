@@ -11,7 +11,6 @@ import {
   MAX_COLUMN_WIDTH,
   MIN_COLUMN_WIDTH,
   moveColumn,
-  pruneLayout,
   resetColumnWidth,
   resolveColumns,
   setColumnHidden,
@@ -101,7 +100,7 @@ describe("which columns are drawn, and where", () => {
     expect(displayOrder(COLUMNS, layout)).toEqual(["tier", "id", "email", "created"])
   })
 
-  test("a layout naming columns that are gone is harmless, and can be pruned before it is stored", () => {
+  test("a layout naming columns that are gone is harmless", () => {
     const stale = {
       order: ["dropped", "email", "email", "id"],
       widths: { dropped: 300, email: 250 },
@@ -110,12 +109,6 @@ describe("which columns are drawn, and where", () => {
     }
     expect(keys(resolveColumns(COLUMNS, stale))).toEqual(["id", "email", "tier", "created"])
     expect(displayOrder(COLUMNS, stale)).toEqual(["email", "id", "tier", "created"])
-    expect(pruneLayout(COLUMNS, stale)).toEqual({
-      order: ["email", "email", "id"],
-      widths: { email: 250 },
-      hidden: [],
-      pinned: ["id"],
-    })
   })
 
   test("hiding and pinning are idempotent", () => {

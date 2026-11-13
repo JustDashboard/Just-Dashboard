@@ -46,9 +46,3 @@ export function stackSource(project: string) {
 export function pm2Source(daemon: string, id: number, name: string) {
   return `pm2:${encodeURIComponent(daemon)}/${id}/${encodeURIComponent(name)}`
 }
-
-/** The kind an id names, from its prefix: `docker:abc` is a container. */
-export function sourceKindOf(id: string): string {
-  const at = id.indexOf(":")
-  return at < 0 ? "" : id.slice(0, at)
-}

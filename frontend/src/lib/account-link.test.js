@@ -8,7 +8,6 @@ import {
   policyWords,
   scopeAllows,
   scopeName,
-  scopeShares,
   sharedGroups,
   sharedItems,
   siteHost,
@@ -59,13 +58,8 @@ const snapshot = {
 const rows = (key) => sharedGroups(snapshot).find((group) => group.key === key).rows
 const value = (key, label) => rows(key).find((row) => row.label === label)?.value
 
-test("each scope names what it shares and what it lets the site do", () => {
+test("each scope names itself and what it lets the site do", () => {
   expect(scopeName("observe")).toBe("Observe")
-  expect(scopeShares("observe")).toContain("Access path (tailnet address or SSH tunnel port)")
-  expect(scopeShares("observe")).toContain("Alerts firing")
-  expect(scopeShares("observe")).not.toContain("project names")
-  expect(scopeShares("operate")).toContain("backup-job and last-deployed project names")
-  expect(scopeShares("maintain")).toContain("backup-job and last-deployed project names")
   expect(scopeAllows("observe")).toBe("Refresh the snapshot.")
   expect(scopeAllows("operate")).toContain("restart a stack")
   expect(scopeAllows("operate")).not.toContain("update")

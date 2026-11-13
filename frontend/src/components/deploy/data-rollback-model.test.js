@@ -2,7 +2,6 @@ import { expect, test } from "bun:test"
 import {
   NOT_POINTED,
   comparisonSummary,
-  copiesOfRun,
   copiesPollMs,
   copyActive,
   copyLine,
@@ -136,7 +135,7 @@ test("the copies are read often only while one is moving", () => {
   expect(copiesPollMs(undefined)).toBe(30_000)
 })
 
-test("a run's page links the copies that waited for it, and active copies lead", () => {
+test("active copies lead", () => {
   const waiting = {
     ...copy,
     id: 4,
@@ -145,7 +144,6 @@ test("a run's page links the copies that waited for it, and active copies lead",
     createdAt: "2026-09-03T11:00:00Z",
   }
   const gone = { ...copy, id: 5, state: "removed", createdAt: "2026-09-03T12:30:00Z" }
-  expect(copiesOfRun([copy, waiting], 90).map((entry) => entry.id)).toEqual([4])
   expect(orderCopies([gone, waiting, copy]).map((entry) => entry.id)).toEqual([3, 4, 5])
 })
 

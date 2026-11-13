@@ -32,19 +32,6 @@ export type ConsoleChoice = { shell: ConsoleShell; runAs: ConsoleRunAs }
 
 export const DEFAULT_CHOICE: ConsoleChoice = { shell: "auto", runAs: "default" }
 
-/** A remembered value from an older build, or a hand-edited one, is the default. */
-export function readShell(value: unknown): ConsoleShell {
-  return SHELLS.find((shell) => shell.id === value)?.id ?? "auto"
-}
-
-export function readRunAs(value: unknown): ConsoleRunAs {
-  return RUN_AS.find((one) => one.id === value)?.id ?? "default"
-}
-
-export function readChoice(value: Partial<ConsoleChoice> | undefined): ConsoleChoice {
-  return { shell: readShell(value?.shell), runAs: readRunAs(value?.runAs) }
-}
-
 /**
  * The socket's query. `cmd` and `user` appear only once chosen, so the default
  * session is the same request the console has always made.

@@ -1,7 +1,6 @@
 import type {
   Container,
   Job,
-  PortOwner,
   StreamAccess,
   StreamAppendReason,
   StreamEntry,
@@ -414,16 +413,6 @@ export function byUrgency(a: StreamEntry, b: StreamEntry): number {
   return rank(a) - rank(b) || a.listen - b.listen || a.name.localeCompare(b.name)
 }
 
-/** The states the page filters by, in the order its chips run. */
-export const STREAM_STATES: StreamState[] = [
-  "live",
-  "not-listening",
-  "shadowed",
-  "not-read",
-  "unknown",
-  "paused",
-]
-
 /** A state in the words its chip and its card use. */
 export function stateLabel(state: StreamState): string {
   switch (state) {
@@ -439,12 +428,6 @@ export function stateLabel(state: StreamState): string {
       return "paused"
   }
   return "unknown"
-}
-
-/** A state as a chip names it. */
-export function stateTitle(state: StreamState): string {
-  const label = stateLabel(state)
-  return label[0].toUpperCase() + label.slice(1)
 }
 
 /** A stream's state as its card's Status reads it: a verdict, or a plain dot for one never checked. */
@@ -481,18 +464,6 @@ export function stateCounts(streams: StreamEntry[]): Record<StreamState | "all",
   }
   for (const stream of streams) counts[stream.state]++
   return counts
-}
-
-/** What holds a port, named the way a sentence names it. */
-export function portOwnerName(owner: PortOwner): string {
-  switch (owner.kind) {
-    case "stream":
-      return owner.name ? `the stream ${owner.name}` : `a stream server in ${owner.file}`
-    case "site":
-      return owner.name ? `the site ${owner.name}` : `an http server in ${owner.file}`
-  }
-  if (!owner.name) return "another program"
-  return owner.pid ? `${owner.name} (pid ${owner.pid})` : owner.name
 }
 
 /** The toast a save ends with: how far it got, in the words that are true of it. */

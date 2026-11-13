@@ -3,13 +3,10 @@ import {
   SAMPLE_CAP,
   addSample,
   latest,
-  lifetimeTargeting,
   rate,
-  ratio,
   recordedServers,
   reportsNothing,
   runningWords,
-  seriesOf,
   statRows,
   uptimeWords,
 } from "./samples"
@@ -114,7 +111,6 @@ describe("a rate is the difference of two samples", () => {
     ])
     expect(rows[1].targeting).toBe(100)
     expect(rows[2].targeting).toBeNull()
-    expect(seriesOf(rows, "targeting")).toEqual([100])
     expect(latest(rows, "targeting")).toBe(100)
     expect(latest(rows, "readLatency")).toBeNull()
   })
@@ -143,26 +139,6 @@ describe("a rate is the difference of two samples", () => {
 })
 
 describe("words", () => {
-  test("query targeting since the server started", () => {
-    expect(lifetimeTargeting(sample(0))).toBeNull()
-    expect(
-      lifetimeTargeting(
-        sample(0, {
-          documents: { inserted: 0, returned: 50, updated: 0, deleted: 0 },
-          scanned: { keys: 0, documents: 150 },
-        }),
-      ),
-    ).toBe(3)
-  })
-
-  test("a ratio in the fewest digits that say it", () => {
-    expect(ratio(0)).toBe("0")
-    expect(ratio(1)).toBe("1.0")
-    expect(ratio(3.55)).toBe("3.5")
-    expect(ratio(12.4)).toBe("12")
-    expect(ratio(1500)).toBe("1,500")
-  })
-
   test("how long something has run", () => {
     expect(runningWords(0.004)).toBe("4 ms")
     expect(runningWords(2.34)).toBe("2.3 s")

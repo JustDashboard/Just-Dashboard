@@ -73,12 +73,3 @@ export function buildDsn(driver: DbDriver, fields: DsnFields): string {
       return `redis://${credentials(fields.user, fields.password)}${at}/${db.replace(/^db/, "") || "0"}`
   }
 }
-
-/** The same string with the password hidden, for showing what will be saved. */
-export function maskDsn(driver: DbDriver, fields: DsnFields): string {
-  if (!fields.password) return buildDsn(driver, fields)
-  return buildDsn(driver, { ...fields, password: "••••••" }).replace(
-    encodeURIComponent("••••••"),
-    "••••••",
-  )
-}

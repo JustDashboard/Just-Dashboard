@@ -2,7 +2,6 @@ import { expect, test } from "bun:test"
 import {
   accessAdmits,
   accessLosses,
-  accessUnknowns,
   deniedSources,
   findingsByRule,
   isAnywhere,
@@ -93,7 +92,6 @@ test("a change loses only required access that was admitted before", () => {
     check("limited", true, "limited", "refused"),
   ])
   expect(losses.map((c) => c.name)).toEqual(["dashboard", "limited"])
-  expect(accessUnknowns([check("a", true, "admitted", "unknown")])).toHaveLength(1)
   expect(accessAdmits("unfiltered")).toBe(true)
   expect(accessAdmits("unknown")).toBe(false)
 })

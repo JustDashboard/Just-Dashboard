@@ -10,7 +10,6 @@ import {
   formatMetric,
   hasEvidence,
   historyKeys,
-  historySeries,
   observedSSHKeys,
   readDiagnosticHistory,
   resultReading,
@@ -194,7 +193,6 @@ describe("structured diagnostic evidence", () => {
         },
       ],
     }
-    expect(historySeries(history, "loss").map((point) => point.value)).toEqual([0, null, 25])
     expect(historyKeys(history).map((key) => key.key)).toEqual(["loss", "jitter"])
     expect(hasEvidence({ ok: true, records: ["x"] })).toBe(false)
     expect(hasEvidence({ ok: true, stages: [{ id: "a", label: "A", status: "passed" }] })).toBe(

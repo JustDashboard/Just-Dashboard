@@ -357,25 +357,6 @@ export function renewalReload(
 }
 
 /**
- * The lineages an enabled site serves whose renewal nothing reloads nginx
- * for, and those sites: each renewal leaves them on the old certificate until
- * it expires. A disabled site serves nothing.
- */
-export function unreloadedRenewals(state: CertbotState): { lineages: string[]; sites: string[] } {
-  const lineages: string[] = []
-  const sites = new Set<string>()
-  if (!state.autoRenew) return { lineages, sites: [] }
-  for (const lineage of state.certs) {
-    if (lineage.error || renewalReload(lineage, state) !== "none") continue
-    const served = lineage.servedBy ?? []
-    if (served.length === 0) continue
-    lineages.push(lineage.name)
-    for (const site of served) sites.add(site)
-  }
-  return { lineages, sites: [...sites] }
-}
-
-/**
  * A hook that failed, in a line: certbot's name for it and the file it ran,
  * what it exited with, and what it said.
  */
