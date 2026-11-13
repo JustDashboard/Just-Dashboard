@@ -3725,6 +3725,17 @@ strip's figures went, and what took their place (`docker/stack-detail.tsx`):
     into it over it, the way that page's rail lists its sources: lines and errors in the last hour,
     their shape in the service's lane, a press narrowing the log to one.
 
+**Packet captures and Saved runs took the exit on 2026-11-13.** Both opened on four grey tiles over a
+list beside a key-and-value inspector. The tiles went where each figure is said better: on the
+identity line (what is capturing or running as its state; how many are kept, the packet data in
+bytes, the retention as its facts) and on the list's filter chips, which count the run states the
+tiles counted. The inspector became a page for one item on the process page's shape
+(`components/network/capture-page.tsx`, `run-page.tsx`, the rail in `item-rail.tsx`): a capture is
+drawn as the interface it listens on, with its interface, filter and file as a `WireFlow` picture
+and its seventeen facts on a second view; a run's result is drawn by the tool's own renderer, with
+Compare, History and Details as views. A row's verbs are words behind its menu, its state stands in
+one column wide and leads its second line on a phone, and every row is one height.
+
 ## 16. Two registers
 
 Everything above §15 describes a page that **reports**. The Overview, the metrics page, the Docker

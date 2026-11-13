@@ -514,7 +514,10 @@ for (const width of [375, 1280, 1720]) {
     await fixture(page)
     for (const path of ["/network/runs", "/network/runs?run=baseline"]) {
       await page.goto(path)
-      await expect(page.getByText("IPv6 DNS baseline").first()).toBeVisible()
+      // Narrow, the rail's rows are in the page and not drawn: only what is drawn counts.
+      await expect(
+        page.getByText("IPv6 DNS baseline").locator("visible=true").first(),
+      ).toBeVisible()
       await expect(page.locator('[data-slot="page"]')).toHaveAttribute("data-register", "reading")
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
         width,
