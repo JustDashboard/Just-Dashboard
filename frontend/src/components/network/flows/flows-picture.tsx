@@ -6,9 +6,10 @@ import { ProductGlyph } from "@/components/product-logo"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
 import { plural } from "@/lib/format"
 import { flowBytes, observerReading, type FlowReport } from "@/lib/network-flows"
+import { LinePlaceholder } from "@/components/network/identity-facts"
 import { UTCTime, dayWords } from "@/components/network/flows/marks"
 
-const SOURCES_DRAWN = 4
+const SOURCES_DRAWN = 2
 
 /**
  * What the recorder samples, the recorder, and what it keeps.
@@ -18,12 +19,19 @@ const SOURCES_DRAWN = 4
  * and the kernel observer, and the lines carry a pulse while samples are
  * landing. With recording off and nothing kept, the same picture says what
  * would be sampled and kept, every line dashed and still.
+ *
+ * Every node is a name and one line whatever it holds, and what has not been
+ * read yet is a grey bar on that line, so the picture is one height loading,
+ * off and recording and the table under it does not move. On a phone it is
+ * rows of marks around the recorder (the sections under it name each again),
+ * except in the off state, where the words are the page.
  */
 export function FlowsPicture({
   data,
   day,
   loading,
   stale,
+  words,
 }: {
   data?: FlowReport
   /** The UTC day the page is reading, `2026-10-07`. */
@@ -31,6 +39,8 @@ export function FlowsPicture({
   loading?: boolean
   /** The reading on screen is the last known one: nothing is drawn as moving. */
   stale?: boolean
+  /** Keep every node's words on a phone: the off state, where they are the page. */
+  words?: boolean
 }) {
   const settings = data?.settings
   const recording =
@@ -51,12 +61,11 @@ export function FlowsPicture({
               {container ? <ProductGlyph id="docker" /> : <Servers aria-hidden />}
             </WireMark>
           ),
-          eyebrow: source.status.replaceAll("_", " "),
           title: source.name,
           name: source.name,
           hint: (
             <span className="numeric">
-              {source.tcp} TCP · {source.udp} UDP
+              {source.status.replaceAll("_", " ")} · {source.tcp} TCP · {source.udp} UDP
             </span>
           ),
           line: source.error
@@ -106,24 +115,24 @@ export function FlowsPicture({
       ),
       title: "Socket hours",
       name: "Socket hours",
-      hint:
-        rows > 0 && data ? (
-          <>
-            <span className="numeric block">
-              {plural(rows, "row")} · {flowBytes(BigInt(data.retainedBytes))}
-              {data.prunedRows > 0 && ` · ${data.prunedRows} pruned`}
-            </span>
-            {data.retainedFrom && (
-              <span className="block">
-                from <UTCTime value={data.retainedFrom} form="short" />
-              </span>
-            )}
-          </>
-        ) : settings?.enabled ? (
-          "nothing kept yet"
-        ) : (
-          "a row for each socket and hour"
-        ),
+      hint: loading ? (
+        <LinePlaceholder className="h-2.5 w-28" />
+      ) : rows > 0 && data ? (
+        <span className="numeric">
+          {plural(rows, "row")} · {flowBytes(BigInt(data.retainedBytes))}
+          {data.prunedRows > 0 && ` · ${data.prunedRows} pruned`}
+          {data.retainedFrom && (
+            <>
+              {" "}
+              · from <UTCTime value={data.retainedFrom} form="date" />
+            </>
+          )}
+        </span>
+      ) : settings?.enabled ? (
+        "nothing kept yet"
+      ) : (
+        "a row for each socket and hour"
+      ),
       line: flowing(rows > 0),
       onPress: rows > 0 ? jump("flow-rows") : undefined,
       label: "Go to the socket hours",
@@ -137,16 +146,17 @@ export function FlowsPicture({
       ),
       title: "Recorded hours",
       name: "Recorded hours",
-      hint:
-        hours > 0 ? (
-          <span className="numeric">
-            {hours} of 24 on {dayWords(day)}
-          </span>
-        ) : settings?.enabled ? (
-          `none on ${dayWords(day)}`
-        ) : (
-          "which hours were sampled"
-        ),
+      hint: loading ? (
+        <LinePlaceholder className="h-2.5 w-32" />
+      ) : hours > 0 ? (
+        <span className="numeric">
+          {hours} of 24 on {dayWords(day)}
+        </span>
+      ) : settings?.enabled ? (
+        `none on ${dayWords(day)}`
+      ) : (
+        "which hours were sampled"
+      ),
       line: flowing(hours > 0),
       onPress: hours > 0 ? jump("flow-hours") : undefined,
       label: "Go to the recorded hours",
@@ -164,7 +174,13 @@ export function FlowsPicture({
       eyebrow: "Opt-in",
       title: "Kernel observer",
       name: "Kernel observer",
-      hint: observer ? observer.label.toLowerCase() : "payload bytes, when switched on",
+      hint: loading ? (
+        <LinePlaceholder className="h-2.5 w-24" />
+      ) : observer ? (
+        observer.label.toLowerCase()
+      ) : (
+        "payload bytes, when switched on"
+      ),
       line:
         data?.kernelObserver.status === "recording"
           ? { state: "up", moving: recording }
@@ -178,15 +194,14 @@ export function FlowsPicture({
 
   return (
     <WireFlow
-      loading={loading}
+      phone={words ? "stack" : "marks"}
       start={{
         title: "Sampled",
         nodes: sampled,
         max: SOURCES_DRAWN,
-        loadingRows: 2,
         more: { words: (hidden) => `${hidden} more sources` },
       }}
-      end={{ title: "Kept", nodes: kept, loadingRows: 3 }}
+      end={{ title: "Kept", nodes: kept }}
       hub={{
         mark: (
           <WireMark tone={recording ? "brand" : "neutral"} size="lg">
@@ -194,12 +209,28 @@ export function FlowsPicture({
           </WireMark>
         ),
         eyebrow: "Recorder",
-        title: settings ? `every ${settings.intervalSeconds}s` : undefined,
-        hint: settings && data && (
+        title: settings ? (
+          `every ${settings.intervalSeconds}s`
+        ) : (
+          <LinePlaceholder className="h-3 w-16" />
+        ),
+        hint: (
           <>
-            <span className="block">keeps {plural(settings.retentionDays, "day")}</span>
+            <span className="block">
+              {settings ? (
+                `keeps ${plural(settings.retentionDays, "day")}`
+              ) : (
+                <LinePlaceholder className="h-2.5 w-20" />
+              )}
+            </span>
             <span className="block" title="Every restart begins a fresh byte baseline">
-              collector started <UTCTime value={data.collectorStartedAt} form="short" />
+              {data ? (
+                <>
+                  collector started <UTCTime value={data.collectorStartedAt} form="short" />
+                </>
+              ) : (
+                <LinePlaceholder className="h-2.5 w-36" />
+              )}
             </span>
           </>
         ),

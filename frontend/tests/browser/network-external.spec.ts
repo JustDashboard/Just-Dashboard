@@ -336,15 +336,14 @@ for (const width of [1280, 390]) {
     const identity = page.getByRole("region", { name: "About external checks" })
     const picture = page.locator('[data-slot="wire-flow"]')
     const table = page.getByRole("region", { name: "Checks", exact: true })
-    await expect(picture).toHaveAttribute("data-loading", "true")
+    await expect(picture.locator('[data-slot="skeleton"]').first()).toBeVisible()
     const before = {
       identity: await top(page, identity),
       picture: await top(page, picture),
       table: await top(page, table),
     }
     release()
-    await expect(picture).not.toHaveAttribute("data-loading", "true")
-    await expect(picture.getByText("reached").first()).toBeVisible()
+    await loaded(page)
     const after = {
       identity: await top(page, identity),
       picture: await top(page, picture),

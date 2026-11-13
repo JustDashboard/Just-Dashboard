@@ -17,7 +17,7 @@ export function IdentityFacts({
 }) {
   return (
     <span className="flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-9">
-      {loading ? <Placeholder className="w-64" /> : children}
+      {loading ? <LinePlaceholder className="h-3 w-64" /> : children}
     </span>
   )
 }
@@ -26,20 +26,21 @@ export function IdentityFacts({
 export function IdentityStateLoading() {
   return (
     <span className="inline-flex items-center text-xs font-medium">
-      <Placeholder className="w-32" />
+      <LinePlaceholder className="h-3 w-32" />
     </span>
   )
 }
 
 /**
  * A grey bar on a line of text's own height: the space before it is a real
- * character, so the line box is the one the words will have.
+ * character, so the line box is the one the words will have. A picture's node
+ * draws its unread words with it, so the node is as tall loading as loaded.
  */
-function Placeholder({ className }: { className: string }) {
+export function LinePlaceholder({ className = "h-3 w-24" }: { className?: string }) {
   return (
     <span aria-hidden className="inline-flex max-w-full items-center">
-      {" "}
-      <Skeleton className={`h-3 max-w-full ${className}`} />
+      {"\u00a0"}
+      <Skeleton className={`max-w-full ${className}`} />
     </span>
   )
 }

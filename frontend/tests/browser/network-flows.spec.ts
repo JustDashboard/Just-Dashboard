@@ -247,7 +247,9 @@ test("the day's recorded hours are a strip that reads one hour at a time", async
   await expect(line).toContainText("2 skipped intervals")
   await line.getByRole("button", { name: "Retained observer gaps" }).click()
   await expect(
-    page.getByText("Observer quality was not retained for this reading.", { exact: true }),
+    page
+      .getByRole("dialog")
+      .getByText("Observer quality was not retained for this reading.", { exact: true }),
   ).toBeVisible()
 })
 
@@ -585,14 +587,13 @@ for (const width of [1280, 390]) {
     const identity = page.getByRole("region", { name: "About socket history" })
     const picture = page.locator('[data-slot="wire-flow"]')
     const table = page.getByRole("region", { name: "Socket hours" })
-    await expect(picture).toHaveAttribute("data-loading", "true")
+    await expect(picture.locator('[data-slot="skeleton"]').first()).toBeVisible()
     const before = {
       identity: await top(page, identity),
       picture: await top(page, picture),
       table: await top(page, table),
     }
     release()
-    await expect(picture).not.toHaveAttribute("data-loading", "true")
     await loaded(page)
     const after = {
       identity: await top(page, identity),

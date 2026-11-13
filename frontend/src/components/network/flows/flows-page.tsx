@@ -311,6 +311,7 @@ export function SocketHistoryPage() {
             day={filters.day}
             loading={loading}
             stale={Boolean(read.error)}
+            words={untouched}
           />
           {untouched ? (
             <div
