@@ -1829,7 +1829,23 @@ block of two numbered steps above its list — the stream module, then connectin
 with its `Status`, a line of meaning and the button that does it where the page can; the step that
 needs doing carries the page's one brand command, so "Prepare a stream" stays outline, and the
 connect opens a sheet showing the file before anything is written. The install step keeps the recent
-installs beside its button, the list its job console says a run is reopened from. A stream card's Status is nginx's own state for it — live, not listening, shadowed, not read — and a card that is not live says why in a hint line under its route, nginx's logged error in mono beneath; the first tile counts the live streams and chips filter by state.
+installs beside its button, the list its job console says a run is reopened from. A stream's Status is nginx's own state for it — live, not listening, shadowed, not read — on its row and its page, and its page says why one is not live (below).
+
+**Streams took the deploy pages' shape in 0.8.7**, and the grid of cards and the stream half of the
+route bands above went with it. The page opens on an identity line (the forwards as the products
+their ports are, the module's state, the counts and the hour's sessions as facts, the verdict that
+the Live tile was at its end and New stream beside it), then a wiring picture — the host's ports on
+the left drawn as their products, nginx in the middle, the addresses they are handed to on the
+right, a forward open to anyone in the warning colour and a database port open to anyone in the
+danger one, a line moving only while nginx holds the port and bytes crossed it in the hour — and
+then the forwards as one-line `ChoiceRow`s, one height in every state: the name over where it
+listens and where that goes, the protocol, who may connect and the hour's sessions in aligned
+columns, its state, and a menu. A test's outcome takes the hour's place on the row until the next
+test. Why a stream is not live, nginx's bind error and the way to what holds the port are a
+`Notice` on its page, which is a destination like a site's: the identity line, the views as tabs
+in the address, the list as a rail from `xl`. Its traffic is `ReadingLine`s with each window's
+shape at their end, the session lengths in words ("half inside 2.4 s"), the outcomes and the
+clients `RankList`s; its form is a settings column with the one floating save bar.
 Every site card, the overview's route rows and a certificate's links to the sites using it open the
 site's own page (`/proxy/sites/<name>`): the same marks as an identity line, the way a request
 reaches it on the page's ground, and its requests and errors read there in one log `Pane`, so a
