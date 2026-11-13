@@ -26,7 +26,7 @@ package version
 //
 // It is a marketing version, not a semver contract: 0.5 is the dashboard as a
 // complete single-server panel, 1.0 is when the API stops moving under people.
-const Version = "0.8.5"
+const Version = "0.8.6"
 
 // Commit is the short commit this binary was built from, when that is not the
 // release's own commit. Empty in a build of a release.
