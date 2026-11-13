@@ -143,6 +143,35 @@ test("what needs a look is a mark on the peer it is about, and a sentence in its
   )
 })
 
+test("a long column draws six peers and sends the rest to the tunnel's page, which draws them all", async ({
+  page,
+}) => {
+  const base = vpn.wireguard.interfaces[0]
+  const phones = Array.from({ length: 9 }, (_, i) => ({
+    ...base.peers[0],
+    id: 20 + i,
+    name: `Phone ${i + 1}`,
+    publicKey: `PhoneKey${i}AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`,
+    address: `10.8.0.${50 + i}/32`,
+  }))
+  const crowded = { ...base, peers: [...phones, ...base.peers.filter((p) => p.kind === "site")] }
+  await mockNetwork(page, [], {
+    overrides: {
+      "/network/vpn": { ...vpn, wireguard: { ...vpn.wireguard, interfaces: [crowded] } },
+    },
+  })
+  await page.goto("/network/vpn")
+  const devices = page.getByRole("region", { name: "Devices" })
+  await expect(devices.getByRole("button", { name: /^Open Phone/ })).toHaveCount(6)
+  await expect(devices).toContainText("3 more")
+  await devices.getByRole("link", { name: "3 more" }).click()
+  await expect(page).toHaveURL(/\/network\/vpn\/wg0$/)
+  await expect(
+    page.getByRole("region", { name: "Devices" }).getByRole("button", { name: /^Open Phone/ }),
+  ).toHaveCount(9)
+  await expect(page.getByRole("button", { name: "Add a device" })).toHaveCount(2)
+})
+
 test("a tunnel's menu takes it down, brings it up and removes it, each after its confirmation", async ({
   page,
 }) => {

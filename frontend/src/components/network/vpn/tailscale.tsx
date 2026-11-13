@@ -112,7 +112,7 @@ export function TailscaleBlock({
     : []
 
   return (
-    <section aria-label="Tailscale" className="flex min-w-0 flex-col gap-6">
+    <section aria-label="Tailscale" className="flex min-w-0 flex-col gap-8">
       <HostIdentity
         label="About this server on the tailnet"
         slot="tailnet-identity"
