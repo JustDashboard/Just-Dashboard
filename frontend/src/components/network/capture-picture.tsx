@@ -47,10 +47,14 @@ export function CapturePicture({
       ? { state: doubtful ? "warning" : "up" }
       : { state: "down" }
   const drops = result?.kernelDropped
+  const narrowed = Boolean(request.source || request.destination)
+  // Wide, the filter's words hang under its mark, outside the picture's own
+  // box: the room they take is kept under it, more where an address is long
+  // enough to take two lines, so the block below never moves under them.
+  const long = [request.source, request.destination].some((address) => (address ?? "").length > 20)
   return (
     <WireFlow
-      className={cn("animate-rise", className)}
-      hubShare={1.4}
+      className={cn("animate-rise", long ? "lg:pb-32" : "lg:pb-24", className)}
       start={{
         title: "Interface",
         nodes: [
@@ -66,19 +70,18 @@ export function CapturePicture({
                 )}
               </WireMark>
             ),
-            eyebrow: "Interface",
+            // Where the columns stack, the column's own heading says it.
+            eyebrow: <span className="max-lg:hidden">Interface</span>,
             title: <span className="font-mono">{request.interface}</span>,
             hint: (
-              <span className="block truncate">
-                {familyWord(request.family)}
-                {result
-                  ? !finished
-                    ? " · readback pending"
-                    : result.identityVerified
-                      ? " · readback matched"
-                      : " · readback changed"
-                  : ""}
-              </span>
+              <>
+                <span className="block">{familyWord(request.family)}</span>
+                {/* Said only when it is news: the device was replaced or
+                    changed while the capture ran. */}
+                {finished && result && !result.identityVerified && (
+                  <span className="block text-warning">changed while capturing</span>
+                )}
+              </>
             ),
             line: into,
           },
@@ -90,21 +93,15 @@ export function CapturePicture({
             <Filter aria-hidden />
           </WireMark>
         ),
-        // Three lines of words under the mark: room for them, so they never
-        // run into the block under the picture.
-        className: "py-12",
         eyebrow: "Filter",
         title: filter.title,
-        hint: (
+        hint: narrowed ? (
           <>
-            <span className="block max-w-64 truncate font-mono" title={filter.from}>
-              from {filter.from}
-            </span>
-            <span className="block max-w-64 truncate font-mono" title={filter.to}>
-              to {filter.to}
-            </span>
-            <span className="block">first {request.snapshotLength} bytes of each packet</span>
+            <span className="block font-mono break-all">from {filter.from}</span>
+            <span className="block font-mono break-all">to {filter.to}</span>
           </>
+        ) : (
+          "any address"
         ),
       }}
       end={{
@@ -123,19 +120,24 @@ export function CapturePicture({
               <span className="numeric">
                 {result
                   ? `${plural(result.packets, "packet")} · ${bytes(result.bytes)}`
-                  : "Nothing yet"}
+                  : finished
+                    ? "Nothing kept"
+                    : "Nothing yet"}
               </span>
             ),
-            hint: (
-              <span className="block">
-                <span className="numeric">of {bytes(request.maxBytes)}</span>
-                {" · "}
-                <span
-                  className={cn("numeric", (drops === undefined || drops > 0) && "text-warning")}
-                >
-                  {drops === undefined ? "kernel drops unknown" : plural(drops, "kernel drop")}
-                </span>
+            // The drops are a reading of what was captured; with nothing
+            // captured the line says the limit it was held to.
+            hint: result ? (
+              <span
+                className={cn(
+                  "numeric block",
+                  (drops === undefined || drops > 0) && "text-warning",
+                )}
+              >
+                {drops === undefined ? "kernel drops unknown" : plural(drops, "kernel drop")}
               </span>
+            ) : (
+              <span className="numeric block">up to {bytes(request.maxBytes)}</span>
             ),
             line: out,
           },

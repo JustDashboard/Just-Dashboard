@@ -172,13 +172,7 @@ export function SavedRuns({ watched }: { watched: React.ReactNode }) {
               {policy.data && (
                 <>
                   <FactDot />
-                  <button
-                    type="button"
-                    onClick={() => setRetention(true)}
-                    className="rounded-sm focus-ring hover:text-foreground hover:underline"
-                  >
-                    {retentionWords(policy.data)}
-                  </button>
+                  <span>{retentionWords(policy.data)}</span>
                 </>
               )}
               {list.counts.failed > 0 && (
