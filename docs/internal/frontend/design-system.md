@@ -1748,6 +1748,15 @@ one. A game server's three pages add one line under that header (`GameIdentity`)
 the game can say — the address a player types, the edition, how full it is — and draw neither the
 game nor its name again.
 
+**Any page can open as a project does.** The project's header was markup in `ProjectShell` and the
+other pages' line was `HostIdentity`; since 0.8.7 the header is `HostIdentity` too. Given a `state`, a
+`command` or a `menu` it takes the project's layout: a 40px tile beside two rows, the title with its
+state after it, the facts under them, the command and its `⋯` at the far end across both, 16px above the
+hairline; on a phone the tile, the title and the command keep the first row, the state takes the next
+and the facts run the full width. `label` makes the line a landmark ("About api"). Without those props
+the line is drawn as it always was — a 48px tile, the facts under the title, the `aside` at the far
+end — so a page opts in by passing them.
+
 **The Security section draws what it watches.** All eight pages use the reading register, and
 since 0.7.1 the overview, Firewall and SSH each draw a wiring picture on the page's own ground,
 in the `WireNode`/`AnimatedBeam` vocabulary the deployment and Configuration pictures
