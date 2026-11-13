@@ -1355,6 +1355,35 @@ so a reload arms the guard again; `tests/browser/network-confirmation.spec.ts`).
 are checked by `network-native-profile.spec.ts`; the native manager's separate evidence and limits are
 documented in [the backend contract](../backend/network-native-managers.md).
 
+The Routing page (`app/(dashboard)/network/routing/page.tsx`, `components/network/routing/`) opens on
+its identity line (`identity.tsx`): the default way out, the counts of tables, routes and rules,
+whether the server forwards as its state, *Add route* as the command and *Add rule* and *Refresh*
+behind the `⋯`. Under it are four views named in the address (`?tab=history`, `bgp`, `forwarding`;
+the first has no parameter). Overview is the decision picture (`decision-map.tsx`, hand-laid: two
+columns wired to each other) with its question in its head: the family chips and one target field
+(`route-lookup.tsx`). An address or network typed there narrows the routes to those covering it
+and the history to the changes touching it; one literal address is also put to the kernel
+(`GET /network/routing/lookup`, when the typing pauses and every fifteen seconds after), with the
+packet's source and mark behind the field's sliders, and the table the kernel names is lit in the
+picture, with the rule where one rule alone leads to that table. The line under the head is the
+answer; with nothing asked it is this browser's reply path and how far the kernel vouches for the
+highlight, the long form behind an `ⓘ`. Every route is then one line of one framed table
+(`route-tables.tsx`), the routing table a column and a chip, the device and its source on one mono
+line, Edit and Remove on the dashboard's own rows and why a guarded row stays behind an `ⓘ` a
+keyboard reaches; the policy rules are a second framed table with *Add rule* on its title line.
+Below 1100px a route is two lines of one height, and a rule below 768px. History
+(`route-history.tsx`) is a line a change with the observer's limits behind an `ⓘ`; BGP (`bgp.tsx`)
+is FRR's neighbours, OSPF adjacencies and the route browser as framed tables, or a designed empty
+state that links to Packages. Forwarding (`forwarding.tsx`) is a setting: a `WireFlow` of each
+family, this server and what needs it, then a switch row a family, changed as a draft and written
+by the page's save bar (`SaveBarProvider`), which asks before it stops a family; the view stays
+mounted so a draft stays on the bar while another view is read. An account that cannot change
+anything is shown no command, no row verb and no switch. The page is drawn before its first read
+at the size it had last time (`useViewState("network.routing.shape")`). Checked by
+`tests/browser/network-routing.spec.ts`, with what the forms send in
+`network-routing-firewall.spec.ts` and `network-audit.spec.ts`; the pure readings are
+`route-reading.test.js`.
+
 ## A deployment's project pages in more detail
 
 The project identity line and Settings → General show read-only production Git monitoring status,
