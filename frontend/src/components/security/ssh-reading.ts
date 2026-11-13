@@ -2,11 +2,12 @@ import type { SSHDConfig } from "@/lib/types"
 import type { Tone } from "@/components/tone"
 
 /**
- * The SSH server in one line, for the Security overview's tile: the riskiest
- * fact about how a login reaches a shell, and where sshd listens.
+ * The SSH server in one line, for sshd's node in the Security overview's
+ * picture: the riskiest fact about how a login reaches a shell, and where sshd
+ * listens.
  *
- * The tile said "Configuration", a label where every tile beside it is a
- * reading, on the door that matters most. The SSH page already reads the two
+ * The overview said "Configuration" there, a label where everything beside it
+ * is a reading, on the door that matters most. The SSH page already reads the two
  * directives that answer "is this server safe": whether a password alone gets
  * in, and whether root's does. Root signing in with a password is the red one;
  * passwords at all are amber; keys only is the expected answer and is plain.

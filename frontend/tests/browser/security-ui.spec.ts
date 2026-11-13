@@ -1443,32 +1443,39 @@ test("the overview reads the access boundary and names the part that broke", asy
   await expect(boundary).toContainText("21001 is funnelled")
 })
 
-// The SSH tile is a reading like the tiles beside it: the riskiest fact about
-// how a login gets in, in its tone, with where sshd listens. It said
-// "Configuration". The row keeps one height whichever reading each tile holds.
-test("the overview's SSH tile says how a login gets in, and the firewall's has no bare dash", async ({
+/** A node of the overview's picture, by the page its mark goes to. */
+function way(page: Page, name: "connections" | "firewall" | "intrusion" | "ssh" | "logins") {
+  return page
+    .getByRole("list", { name: "The ways onto this machine" })
+    .locator(`[data-node=${name}]`)
+}
+
+// sshd's node is a reading like the nodes beside it: the riskiest fact about
+// how a login gets in, in its tone, with where sshd listens. The readings were
+// a row of tiles over the picture; the picture keeps one height whichever
+// reading each node holds.
+test("the overview's sshd node says how a login gets in, and the firewall's has no bare dash", async ({
   page,
 }) => {
-  const tile = (name: string) =>
-    page.getByRole("main").getByRole("link", { name, exact: true }).locator("[data-slot=stat-tile]")
-  const heights = async () => {
+  const height = async () => {
     await risen(page)
-    const boxes = await Promise.all(
-      (
-        await page.getByRole("main").locator("[data-slot=stat-grid]").first().locator("a").all()
-      ).map((link) => link.boundingBox()),
-    )
-    return boxes.map((box) => Math.round(box!.height))
+    const box = await page.getByRole("list", { name: "The ways onto this machine" }).boundingBox()
+    return Math.round(box!.height)
   }
 
   await mockSecurity(page)
   await page.goto("/security")
-  await expect(tile("SSH")).toContainText("Passwords allowed")
-  await expect(tile("SSH")).toContainText("port 22")
-  await expect(tile("SSH")).not.toContainText("Configuration")
-  await expect(tile("SSH").locator("span.text-warning")).toContainText("Passwords allowed")
-  const passwords = await heights()
-  expect(new Set(passwords).size).toBe(1)
+  await expect(page.getByRole("main").locator("[data-slot=stat-grid]")).toHaveCount(0)
+  await expect(way(page, "ssh")).toContainText("Passwords allowed")
+  await expect(way(page, "ssh")).toContainText("port 22")
+  await expect(way(page, "ssh").getByRole("link", { name: "SSH", exact: true })).toHaveAttribute(
+    "href",
+    "/security/ssh",
+  )
+  await expect(way(page, "ssh").getByText("Passwords allowed", { exact: true })).toHaveClass(
+    /text-warning/,
+  )
+  const passwords = await height()
 
   // Keys only is the expected answer and is plain; an unknown inbound policy
   // is said in words rather than as a dash.
@@ -1486,12 +1493,12 @@ test("the overview's SSH tile says how a login gets in, and the firewall's has n
     },
   })
   await page.goto("/security")
-  await expect(tile("SSH")).toContainText("Keys only")
-  await expect(tile("SSH")).toContainText("ports 22, 2222")
-  await expect(tile("SSH").locator("span.text-warning, span.text-destructive")).toHaveCount(0)
-  await expect(tile("Firewall")).toContainText("inbound policy unknown")
-  await expect(tile("Firewall")).not.toContainText("—")
-  expect(await heights()).toEqual(passwords)
+  await expect(way(page, "ssh")).toContainText("Keys only")
+  await expect(way(page, "ssh")).toContainText("ports 22, 2222")
+  await expect(way(page, "ssh").locator("span.text-warning, span.text-destructive")).toHaveCount(0)
+  await expect(way(page, "firewall")).toContainText("inbound policy unknown")
+  await expect(way(page, "firewall")).not.toContainText("—")
+  expect(await height()).toEqual(passwords)
 
   // Root by password is the red one.
   await mockSecurity(page, [], {
@@ -1505,20 +1512,21 @@ test("the overview's SSH tile says how a login gets in, and the firewall's has n
     },
   })
   await page.goto("/security")
-  await expect(tile("SSH")).toContainText("Root can sign in")
-  await expect(tile("SSH").locator("span.text-destructive")).toContainText("Root can sign in")
-  expect(await heights()).toEqual(passwords)
+  await expect(way(page, "ssh")).toContainText("Root can sign in")
+  await expect(way(page, "ssh").getByText("Root can sign in", { exact: true })).toHaveClass(
+    /text-destructive/,
+  )
+  expect(await height()).toEqual(passwords)
 })
 
-test("a reader who may not open sshd's settings is told so on the SSH tile", async ({ page }) => {
+test("a reader who may not open sshd's settings is told so on sshd's node", async ({ page }) => {
   let asked = false
   await mockSecurity(page, [], { session: readonly })
   page.on("request", (request) => {
     if (request.url().endsWith("/api/v1/ssh/config")) asked = true
   })
   await page.goto("/security")
-  const tile = page.getByRole("main").getByRole("link", { name: "SSH", exact: true })
-  await expect(tile).toContainText("Administrators only")
+  await expect(way(page, "ssh")).toContainText("Administrators only")
   expect(asked).toBe(false)
 })
 
@@ -1530,10 +1538,9 @@ for (const available of [false, true]) {
       overrides: { "/fail2ban/": { available, running: false, jails: [] } },
     })
     await page.goto("/security")
-    const reading = page.getByRole("main").getByRole("link", { name: "Intrusion", exact: true })
-    await expect(reading).toContainText(
-      available ? "fail2ban is not running" : "fail2ban is not installed",
-    )
+    const reading = way(page, "intrusion")
+    await expect(reading).toContainText("fail2ban")
+    await expect(reading).toContainText(available ? "not running" : "not installed")
     await expect(reading).not.toContainText("nothing is blocking")
   })
 }
@@ -1548,11 +1555,11 @@ test("an unreadable fail2ban status is unknown rather than absent protection", a
     }),
   )
   await page.goto("/security")
-  const reading = page.getByRole("main").getByRole("link", { name: "Intrusion", exact: true })
-  await expect(reading).toContainText("Unreadable")
-  await expect(reading).toContainText("fail2ban status could not be read")
+  const reading = way(page, "intrusion")
+  await expect(reading).toContainText("unreadable")
+  await expect(reading).toContainText("its status could not be read")
   await expect(reading).not.toContainText("nothing is blocking")
-  await expect(reading).not.toContainText("No fail2ban")
+  await expect(reading).not.toContainText("not installed")
 })
 
 test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {

@@ -435,3 +435,128 @@ test.describe("logins", () => {
     await expect(page.locator("[data-slot=logins-picture]")).toContainText("1 session open")
   })
 })
+
+test.describe("security overview", () => {
+  const node = (page: Page, name: string) =>
+    page.getByRole("list", { name: "The ways onto this machine" }).locator(`[data-node=${name}]`)
+
+  test("opens on how it is reached and the ways in, whose marks are the ways to its pages", async ({
+    page,
+  }) => {
+    await mockLogins(page)
+    await page.goto("/security")
+    await loaded(page)
+
+    await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+    // The picture is the block directly under the identity line.
+    const order = await page.evaluate(() =>
+      Array.from(document.querySelector("[data-slot=page]")!.children)
+        // Past the page's name, which is there for a screen reader alone.
+        .filter((el) => el.getBoundingClientRect().height > 1)
+        .map((el) =>
+          el.matches("[data-slot=host-identity]")
+            ? "identity"
+            : el.querySelector("ol[aria-label='The ways onto this machine']")
+              ? "picture"
+              : el.matches("[data-slot=panel]")
+                ? "panel"
+                : "other",
+        ),
+    )
+    expect(order.slice(0, 2)).toEqual(["identity", "picture"])
+
+    for (const [name, label, href] of [
+      ["connections", "Connections", "/network/connections"],
+      ["firewall", "Firewall", "/network/firewall"],
+      ["intrusion", "Intrusion", "/security/intrusion"],
+      ["ssh", "SSH", "/security/ssh"],
+      ["logins", "Logins", "/security/logins"],
+    ] as const) {
+      await expect(
+        node(page, name).getByRole("link", { name: label, exact: true }),
+      ).toHaveAttribute("href", href)
+    }
+
+    // Each reading a tile carried is on its node.
+    await expect(node(page, "connections")).toContainText("1 connected now")
+    await expect(node(page, "connections")).toContainText("2 addresses · 14 sockets")
+    await expect(node(page, "connections").locator('img[src="/logos/caddy.svg"]')).toHaveCount(1)
+    await expect(node(page, "firewall")).toContainText("ufw")
+    await expect(node(page, "firewall")).toContainText("deny inbound · 3 rules")
+    await expect(node(page, "firewall")).toContainText(":22")
+    await expect(node(page, "intrusion")).toContainText("2 jails watching")
+    await expect(node(page, "intrusion")).toContainText("2 banned now")
+    await expect(node(page, "ssh")).toContainText("Passwords allowed")
+    await expect(node(page, "ssh")).toContainText("port 22")
+    await expect(node(page, "ssh").getByText("Passwords allowed", { exact: true })).toHaveClass(
+      /text-warning/,
+    )
+    await expect(node(page, "logins")).toContainText("ubuntu")
+    await expect(node(page, "logins")).toContainText("1 session · 1 over ssh")
+    await expect(node(page, "logins").locator('img[src="/logos/tailscale.svg"]')).toHaveCount(1)
+
+    await node(page, "logins").getByRole("link", { name: "Logins", exact: true }).click()
+    await expect(page).toHaveURL(/\/security\/logins$/)
+  })
+
+  test("a read that failed is unreadable on its node, not a missing layer", async ({ page }) => {
+    await mockLogins(page, [], {
+      overrides: {
+        "/fail2ban/": unreadable,
+        "/connections": unreadable,
+        "/ssh-sessions": unreadable,
+        "/ssh/config": unreadable,
+      },
+    })
+    await page.goto("/security")
+    await loaded(page)
+    await expect(node(page, "intrusion")).toContainText("unreadable")
+    await expect(node(page, "intrusion")).not.toContainText("not installed")
+    await expect(node(page, "connections")).toContainText("unreadable")
+    await expect(node(page, "ssh")).toContainText("Unreadable")
+    await expect(node(page, "logins")).toContainText("Unreadable")
+    await expect(node(page, "logins")).not.toContainText("Nobody")
+  })
+
+  test("an unread firewall is not drawn as no firewall, and the picture keeps its place", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    const picture = "ol[aria-label='The ways onto this machine']"
+    await mockLogins(page, [], {
+      overrides: {
+        "/firewall/": PENDING,
+        "/fail2ban/": PENDING,
+        "/connections": PENDING,
+        "/ssh-sessions": PENDING,
+        "/ssh/config": PENDING,
+      },
+    })
+    await page.goto("/security")
+    await page.waitForSelector(picture)
+    await expect(node(page, "firewall")).toContainText("not read yet")
+    await expect(node(page, "firewall")).not.toContainText("nothing filters")
+    await expect(node(page, "firewall")).not.toContainText("None")
+    await expect(node(page, "intrusion")).toContainText("not read yet")
+    const waiting = await places(page, [picture])
+
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockLogins(page)
+    await page.goto("/security")
+    await loaded(page)
+    await expect(node(page, "firewall")).toContainText("deny inbound")
+    expect(await places(page, [picture])).toEqual(waiting)
+  })
+
+  test("reads on a phone without scrolling sideways, every word kept", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mockLogins(page)
+    await page.goto("/security")
+    await loaded(page)
+    await expect(node(page, "firewall")).toContainText("deny inbound · 3 rules")
+    await expect(node(page, "ssh")).toContainText("Passwords allowed")
+    await expect(node(page, "logins")).toContainText("1 session · 1 over ssh")
+    expect(await overflow(page)).toBeLessThanOrEqual(0)
+  })
+})
