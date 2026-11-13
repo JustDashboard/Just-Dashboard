@@ -611,7 +611,9 @@ test("every state the pages can be in is one they were drawn for", async ({ page
     await route.fulfill({
       status: 502,
       contentType: "application/json",
-      body: JSON.stringify({ code: "command_failed", message: "pm2 jlist: exit status 1" }),
+      body: JSON.stringify({
+        error: { code: "command_failed", message: "pm2 jlist: exit status 1" },
+      }),
     })
   })
   for (const path of ["/processes/pm2", "/processes/pm2/api"]) {

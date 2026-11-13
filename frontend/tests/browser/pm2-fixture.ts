@@ -283,7 +283,7 @@ export async function mockPM2(
       if (options.fail) {
         return json(
           route,
-          { code: "command_failed", message: "pm2 jlist: exit status 1" },
+          { error: { code: "command_failed", message: "pm2 jlist: exit status 1" } },
           options.fail,
         )
       }

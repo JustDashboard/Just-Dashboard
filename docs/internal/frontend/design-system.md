@@ -178,8 +178,8 @@ taking a frame:
   run (what fires next counting down
   at the end of its identity line), whose Cron log is a plain panel holding the log's
   `Pane` and whose jobs and timers open sheets of their own — with a detail sheet built
-  from plain panels that opens on the thing's own mark, the unit's journal, a PM2
-  application's logs, a timer's runs and a job's cron lines a `Pane` in their sheets — and the
+  from plain panels that opens on the thing's own mark, the unit's journal, a timer's runs and a
+  job's cron lines a `Pane` in their sheets, a PM2 application's logs a `Pane` on its page — and the
   two System pages follow the same shape: on System users the identity line and what to change over
   the accounts as a table of readings whose row opens the account, each account's page plain lists
   of rows and plain forms, and on the audit
@@ -1724,7 +1724,8 @@ the machine is running. The Services page draws each busy service and each recen
 product beside its name, which is where its Active and Failed tiles carried their marks.
 The Live page opens on the machine's identity line — the same one, with the table's cadence and cap
 at its right end where Metrics keeps its range — and PM2 on PM2's own: its mark, the account, the
-Node it runs, the boot hook and the last save as facts, and whether it resurrects as the verdict.
+Node it runs, the boot hook and the last save as facts, and whether it resurrects as the verdict
+beside its name, with Start application as the line's one command and the daemon's verbs in its menu.
 
 And the dashboard's own two pages draw what it is made of and reached through: the stack's three
 services as Caddy, Next.js and Go, its checkout as Compose, the certificate modes as Tailscale and
@@ -2463,6 +2464,16 @@ The passes, in order. Each one is a diff you can review on its own.
    its drop-ins coloured as one, its `Environment=`, `systemd-analyze security`'s exposure with each
    setting most exposed first, and Control, where every verb is a row that says what it does and
    each signal says what it will do to the main process, read from that process's signal masks.
+   The PM2 sheet became a page in 0.8.7 on the same shape: `/processes/pm2/[app]`
+   (`procs/pm2-app-page.tsx`), the list as a rail beside it from `xl`, crashing first. It is the
+   application's page rather than one worker's, which the sheet was: a cluster is one page whose
+   readings are its workers summed and whose verbs reach every worker in turn, with each worker a
+   one-line card under Instances that opens its process's page and keeps its own verbs. Its
+   identity line is laid out as a project's header (`HostIdentity` with a state and a command) —
+   one command, Start or Reload, and the rest in the menu — and its four readings are
+   `ReadingLine`s where the sheet opened on a dense `StatGrid`; its picture is the same
+   `wiring-picture.tsx`, the account's daemon and its boot hook on the left and the workers, the
+   port, the log and the working directory on the right.
 
    Docker's Containers took the same exit in 0.7.1, at the operator's request, because it had no
    life: a runtime health bar and a list of findings over a column of grey cards, nothing on it that
@@ -3582,7 +3593,10 @@ the same, without the after-install phases the server keeps only for the network
 (`usePackageKnown`, one `GET /packages/tailscale`), since Debian and Ubuntu do not until its own
 repository is added, and is pointed at otherwise. PM2 is an npm package for a host account, not
 something the package manager installs, so its page names the command and opens the terminal
-(`procs/pm2-missing.tsx`). Docker is never missing on an install that runs in it; what its pages say
+(`procs/pm2-missing.tsx`). The same file draws PM2's two other absences under its mark: installed
+with no account's daemon running (it starts with the first application, so the block names
+`pm2 start`), and not answering (what the page asked for, PM2's own words under that sentence
+rather than as the headline, and Try again). Docker is never missing on an install that runs in it; what its pages say
 when the daemon cannot be asked is which fault it is (`docker/unreachable.ts`): a socket that refused
 the dashboard, a `docker.service` systemd says is not running (with **Start Docker** for
 `service.control`), a daemon that runs but not at the address asked, or no answer where systemd cannot

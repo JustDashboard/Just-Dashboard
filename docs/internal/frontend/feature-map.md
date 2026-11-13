@@ -941,8 +941,10 @@ supervisor's processes, or the copies of one program started by hand, summed ove
 with shared pages counted once — as spans of one bar the size of the machine that ease to each poll,
 one of them on the line beneath it (a bar reading, design system §10) and a press narrowing the
 table to its workload), over the inventory table whose head counts running, sleeping, blocked and
-zombie as state chips beside the user facet and an automatic focus that says why, with owner chips
-(PM2 and Docker drawn with their marks) and the chosen workload as a chip under it; fixed columns,
+zombie as state chips beside the ranking as five chips (Automatic, which says why it chose, CPU,
+Memory, Disk I/O, Uptime), with owner chips (PM2 and Docker drawn with their marks), the accounts as
+chips beside them (the three with the most processes, the rest behind one more chip, the one in
+force always drawn) and the chosen workload as a chip under it; fixed columns,
 so a long command line never pushes the readings or the row menu past the panel's edge, CPU and
 memory as a figure beside a short bar, a container owner by its name, a kernel thread, a zombie and
 an unreadable command line each saying which it is, and a process that started since the last poll
@@ -971,10 +973,12 @@ the container's — every signal with what it will do to *this* process from its
 switch to send it to its children too, the priority stepper and the out-of-memory bias as five
 presets) and **Logs** (its supervisor's log through the service logs) — and it stops reading and
 says so when the process exits or its PID is reused; below `xl` the page is the one pane and scrolls
-as a whole. PM2: PM2's own identity line (the account, the Node every application runs, the boot
-hook, the last save and the application count as facts; whether it resurrects on boot as the
-verdict, read against the saved list's own names so an application started since the save turns it
-amber and offers **Save list** beside it; several accounts as rows under it), a band of what PM2
+as a whole. PM2: PM2's own identity line laid out as a project's header (whether it resurrects on
+boot as the verdict beside its name, read against the saved list's own names so an application
+started since the save turns it amber and offers **Save list**; the account, the Node every
+application runs, the boot hook, the last save and the application count as facts; **Start
+application** as the line's one command and the daemon-wide save/reload/restart/stop in its menu;
+several accounts as rows under it), a band of what PM2
 takes of the machine (`pm2-band.tsx`, bar readings: the five heaviest applications by processor and
 by memory, a cluster summed into one, as spans of one bar the size of the host beside everything
 else in use, easing to each poll, a press narrowing the table to the application with a chip to let
@@ -983,20 +987,38 @@ table of every instance — crashing applications first, each drawn as its inter
 ticking, CPU and memory as a figure beside a short bar (memory against the limit PM2 restarts it at,
 where it has one), its restart count rising when it moves with the unstable ones in red, *not saved*
 where the saved list lacks it, fixed columns from `xl` with the mode folded into the name line below
-`2xl` — with start/reload/restart/stop inline and logs, scale, reset counters, flush, delete behind
-the menu; a detail sheet addressed by `?app=` (an exact `account:id`, or a bare name from the live
-table's owner link, which opens a cluster's first running instance) whose overview is one scroll —
-four live readings from the process table's read of its PID every two seconds (CPU, memory against
-its restart limit, disk I/O, restarts) over the sampler's recent windows, a cluster's other
-instances as rows that open in the same sheet with Scale beside them, what it listens on and who can
-reach each address, the command coloured as a command, how PM2 runs it and its log files — and whose
-Logs tab is the service logs on the process's `pm2:` source (the sheet's layout) under the record's
-own facts — restarts, unstable restarts, uptime — with an Around the last start window only where
-PM2 stamps its lines, and the server's reason instead of a socket where the logs are outside the log
-roots; a scale dialog that is a stepper over the workers, those to start outlined and those to stop
-struck, with one per core a press away; a start-application dialog whose interpreter and mode are
-cards with their marks and which shows the `pm2 start` command it will run, coloured; and
-daemon-wide save/reload/restart/stop. Services: the machine's identity line (systemd's version, the
+`2xl`, every row one height — with start/reload/restart/stop inline and logs, scale, reset counters,
+flush, delete behind the menu; a row opens the application's own page. The line and the band are
+drawn while the list is read; a server without PM2, one where PM2 is installed and no daemon runs,
+and a PM2 that does not answer each say so under PM2's mark with the next step
+(`pm2-missing.tsx`). **An application's page** (`/processes/pm2/[app]`, `pm2-app-page.tsx`; the
+name is the address, `?account=` only where two accounts run the same name, and the old `?app=`
+address — an exact `account:id` or a bare name — redirects there): from `xl` the list folded into
+a rail beside it (`pm2-app-rail.tsx`: the list's own search, state chip and order, a cluster one
+row, held while the pointer is in it), Alt+↑/↓ and two arrows to walk it with the view carried
+along; the identity line (the application as its interpreter, its name and state, its script, fork
+or cluster of n, restarts and unstable restarts, uptime ticking) with one command — Start where a
+worker is down, otherwise Reload — and the rest in a menu; then the views as the underlined strip,
+`?tab=` in the address — **Overview** (`pm2-app-overview.tsx`: notices where PM2 gave up, where
+some workers are down and where a reboot would not bring it back; *Where it runs*, the process
+page's wired picture with the account's daemon and its boot hook on the left and each worker as a
+process, the port they answer on, the log and the working directory on the right; *What it
+takes*, four reading lines — CPU and memory summed over its workers from the process table's read of
+each PID, memory against the limit PM2 restarts a worker at, disk rates and restarts — that hold
+their place while it is not running; the command; how PM2 runs it; and whether it comes back
+after a reboot), **Instances** (a cluster only: each worker a one-line card that opens its
+process's page, with its own verbs in its menu and Scale on the title line), **Logs** (the service
+logs on each worker's `pm2:` source under the record's own facts — restarts, unstable restarts,
+uptime — with an Around the last start window only where PM2 stamps its lines, and the server's
+reason instead of a socket where the logs are outside the log roots), **Environment** (read from
+the running process, credentials masked as on a process's page) and **Control** (every verb as a
+row that says what it does, and the startup list). A verb pressed on the page reaches every worker
+in turn through the per-process routes (`pm2-app-actions.tsx`); a worker's own verbs reach it
+alone. Below `xl` the page is the one pane and scrolls as a whole. Dialogs: a scale dialog
+(`pm2-scale-dialog.tsx`) that is a stepper over the workers, those to start outlined and those to
+stop struck, with one per core a press away, opened from a row, the Instances view or the menu; and
+a start-application dialog whose interpreter and mode are
+cards with their marks and which shows the `pm2 start` command it will run, coloured. Services: the machine's identity line (systemd's version, the
 active and boot-enabled counts and when it booted as facts, the failed count as the verdict that
 narrows the table to them, Reload unit files and the shortcuts at its right end), then
 `procs/service-band.tsx`, bar readings — the five services using the most processor and memory as
@@ -1086,10 +1108,13 @@ a grid of toggles — over a preview of the schedule in words, its week and its 
 `process-rail.tsx`, `process-overview.tsx`, `process-views.tsx`, `process-detail.tsx`,
 `process-facts.ts`, `wiring-picture.tsx`, `services.tsx`, `service-page.tsx`, `service-rail.tsx`,
 `service-overview.tsx`, `service-views.tsx`, `service-facts.ts`, `service-band.tsx`, `pm2-band.tsx`,
-`pm2-shared.ts`, `unit-runs.tsx`, `units.ts`, `schedule-band.tsx`, `cron-job-sheet.tsx`,
+`pm2-shared.ts`, `pm2-facts.ts`, `pm2-app-page.tsx`, `pm2-app-rail.tsx`, `pm2-app-overview.tsx`,
+`pm2-app-views.tsx`, `pm2-app-actions.tsx`, `pm2-scale-dialog.tsx`, `pm2-start-dialog.tsx`,
+`pm2-missing.tsx`, `unit-runs.tsx`, `units.ts`, `schedule-band.tsx`, `cron-job-sheet.tsx`,
 `timer-sheet.tsx`), `components/verbs.tsx`, `lib/cron.ts`, `lib/crontab.ts`, `lib/schedule.ts`,
-`lib/unit-runs.ts` (`units.ts`, `pm2-shared.ts`, `process-facts.ts`, `service-facts.ts` and these
-unit-tested); checked by `tests/browser/processes-ui.spec.ts` and
+`lib/unit-runs.ts` (`units.ts`, `pm2-shared.ts`, `pm2-facts.ts`, `process-facts.ts`,
+`service-facts.ts` and these unit-tested); checked by `tests/browser/processes-ui.spec.ts`,
+`tests/browser/pm2-application.spec.ts` and
 `tests/browser/services-ui.spec.ts`
 
 ### `/proxy/*`
