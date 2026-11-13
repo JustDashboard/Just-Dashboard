@@ -1,12 +1,15 @@
 "use client"
 
-import { File, Filter, NetworkDevice } from "@/components/icons"
+import { File, Filter } from "@/components/icons"
+import { ProductGlyph } from "@/components/product-logo"
 import { WireMark } from "@/components/deploy/wire"
 import { WireFlow, type WireLine } from "@/components/wire-flow"
 import { bytes, plural } from "@/lib/format"
 import { captureFinished, type CaptureRun } from "@/lib/network-captures"
 import { captureFilter, familyWord } from "@/lib/network-runs-view"
+import type { NetworkLink } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { interfaceMark } from "./diagnostic-marks"
 
 /**
  * A capture as the thing it is: one interface, the filter its packets pass,
@@ -14,7 +17,18 @@ import { cn } from "@/lib/utils"
  * has ended with a file, and are dashed where nothing was kept; amber where
  * the record says the evidence is incomplete.
  */
-export function CapturePicture({ run, className }: { run: CaptureRun; className?: string }) {
+export function CapturePicture({
+  run,
+  links,
+  className,
+}: {
+  run: CaptureRun
+  /** The server's devices, for the interface's own mark. */
+  links?: NetworkLink[]
+  className?: string
+}) {
+  const device = interfaceMark(run.request.interface, links)
+  const DeviceGlyph = device.glyph
   const { request, result } = run
   const filter = captureFilter(request)
   const running = run.status === "running"
@@ -45,7 +59,11 @@ export function CapturePicture({ run, className }: { run: CaptureRun; className?
             name: request.interface,
             mark: (
               <WireMark tone="logo" size="md">
-                <NetworkDevice aria-hidden />
+                {device.product ? (
+                  <ProductGlyph id={device.product} />
+                ) : (
+                  <DeviceGlyph aria-hidden />
+                )}
               </WireMark>
             ),
             eyebrow: "Interface",

@@ -35,7 +35,7 @@ import {
   type RunScope,
 } from "@/lib/network-runs-view"
 import { useSessionState } from "@/lib/view-state"
-import { StateTile, toolGlyph } from "./diagnostic-marks"
+import { PhoneState, StateTile, toolGlyph } from "./diagnostic-marks"
 import { NetworkReadWarning } from "./read-warning"
 import { useRunActions } from "./run-actions"
 import { RetentionDialog, retentionWords } from "./run-retention"
@@ -159,6 +159,8 @@ export function SavedRuns({ watched }: { watched: React.ReactNode }) {
             ) : (
               <Status tone="stopped" label="Nothing running" />
             )
+          ) : poll.error ? (
+            <Status tone="unknown" label="Not read" />
           ) : (
             <TextShimmer className="text-xs">Reading…</TextShimmer>
           )
@@ -222,7 +224,7 @@ export function SavedRuns({ watched }: { watched: React.ReactNode }) {
         />
       )}
       {!poll.data && poll.error ? (
-        <ErrorState error={poll.error} onRetry={poll.refresh} />
+        <ErrorState error={poll.error} onRetry={poll.refresh} retryable />
       ) : poll.data && runs.length === 0 ? (
         <EmptyState
           icon={Notes}
@@ -315,6 +317,7 @@ function RunRow({ run, onChanged }: { run: DiagnosticRun; onChanged: () => void 
       busy={!diagnosticFinished(run)}
       description={
         <>
+          <PhoneState tone={reading.tone}>{reading.label}</PhoneState>
           {`${runTool(run)} · `}
           <span className="font-mono">{runRequestLine(run)}</span>
         </>

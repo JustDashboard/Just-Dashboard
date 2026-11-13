@@ -3,6 +3,7 @@ import {
   captureFilter,
   captureLine,
   captureMatches,
+  captureStateWord,
   captureTotals,
   neighbours,
   runChips,
@@ -116,6 +117,11 @@ describe("a capture in words", () => {
       narrowed: false,
     })
     expect(captureLine({ request })).toBe("ens3 · IPv6 · UDP 8443")
+  })
+  test("says a row's state without repeating what the list is of", () => {
+    expect(captureStateWord("Capture completed")).toBe("Completed")
+    expect(captureStateWord("Capturing")).toBe("Capturing")
+    expect(captureStateWord("Interrupted")).toBe("Interrupted")
   })
   test("adds the list up in bytes, not rounded to nothing", () => {
     expect(

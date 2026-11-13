@@ -27,7 +27,7 @@ import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { ApiError, get } from "@/lib/api"
-import { bytes, plural, timestamp } from "@/lib/format"
+import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import {
   captureFinished,
   captureReading,
@@ -43,9 +43,16 @@ import {
   startedApart,
 } from "@/lib/network-runs-view"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import { CAPTURE_QUERY_KEY, CaptureMenu, captureHref, useCaptureActions } from "./captures"
+import type { NetworkLink } from "@/lib/types"
+import {
+  CAPTURE_QUERY_KEY,
+  CaptureMenu,
+  captureHref,
+  useCaptureActions,
+  useCaptureLinks,
+} from "./captures"
 import { CapturePicture } from "./capture-picture"
-import { StateTile, toolGlyph } from "./diagnostic-marks"
+import { StateTile, interfaceMark, toolGlyph } from "./diagnostic-marks"
 import { ItemRail } from "./item-rail"
 import { NetworkReadWarning } from "./read-warning"
 import { runHref } from "./saved-runs"
@@ -100,6 +107,7 @@ export function CapturePage() {
     [admin],
     { enabled: admin },
   )
+  const links = useCaptureLinks(admin)
   const rows = (list.data?.runs ?? []).filter((run) => captureMatches(run, query))
   const walk = neighbours(rows, id)
   const open = (next?: CaptureRun) => next && router.push(captureHref(next.id, tab))
@@ -155,7 +163,13 @@ export function CapturePage() {
               id: run.id,
               href: captureHref(run.id, tab),
               label: run.name,
-              mark: <StateTile glyph={Crosshair} tone={captureReading(run).tone} size="sm" />,
+              mark: (
+                <StateTile
+                  {...interfaceMark(run.request.interface, links)}
+                  tone={captureReading(run).tone}
+                  size="sm"
+                />
+              ),
               title: run.name,
               line: captureLine(run),
             }))}
@@ -163,6 +177,7 @@ export function CapturePage() {
           <CaptureMain
             key={id}
             id={id}
+            links={links}
             tab={tab}
             setTab={setTab}
             onListChanged={list.refresh}
@@ -179,6 +194,7 @@ type Step = { disabled: boolean; run: () => void }
 
 function CaptureMain({
   id,
+  links,
   tab,
   setTab,
   onListChanged,
@@ -186,6 +202,7 @@ function CaptureMain({
   next,
 }: {
   id: string
+  links?: NetworkLink[]
   tab: Tab
   setTab: (tab: string) => void
   onListChanged: () => void
@@ -242,7 +259,7 @@ function CaptureMain({
             }
           />
         ) : poll.error ? (
-          <ErrorState error={poll.error} onRetry={poll.refresh} />
+          <ErrorState error={poll.error} onRetry={poll.refresh} retryable />
         ) : (
           <>
             <HostIdentity
@@ -263,6 +280,7 @@ function CaptureMain({
         {header}
         <CaptureIdentity
           run={run}
+          links={links}
           onChanged={() => {
             poll.refresh()
             onListChanged()
@@ -298,7 +316,7 @@ function CaptureMain({
           ))}
         </TabsPrimitive.List>
         <TabsContent value="overview" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
-          {tab === "overview" && <CaptureOverview run={run} />}
+          {tab === "overview" && <CaptureOverview run={run} links={links} />}
         </TabsContent>
         <TabsContent value="facts" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
           {tab === "facts" && <CaptureFacts run={run} />}
@@ -315,10 +333,12 @@ function CaptureMain({
  */
 function CaptureIdentity({
   run,
+  links,
   onChanged,
   onDeleted,
 }: {
   run: CaptureRun
+  links?: NetworkLink[]
   onChanged: () => void
   onDeleted: () => void
 }) {
@@ -329,7 +349,13 @@ function CaptureIdentity({
     <>
       <HostIdentity
         label={`About ${run.name}`}
-        logo={<StateTile glyph={Crosshair} tone={reading.tone} size="lg" />}
+        logo={
+          <StateTile
+            {...interfaceMark(run.request.interface, links)}
+            tone={reading.tone}
+            size="lg"
+          />
+        }
         title={<span className="truncate">{run.name}</span>}
         state={<Status {...reading} className="text-body" />}
         facts={
@@ -346,9 +372,9 @@ function CaptureIdentity({
               </>
             )}
             <FactDot />
-            <span className="numeric">
-              <time dateTime={run.createdAt}>{timestamp(run.createdAt)}</time>
-            </span>
+            <time dateTime={run.createdAt} title={timestamp(run.createdAt)} className="numeric">
+              {relativeTime(run.createdAt)}
+            </time>
           </>
         }
         command={
@@ -387,7 +413,7 @@ function CaptureIdentity({
   )
 }
 
-function CaptureOverview({ run }: { run: CaptureRun }) {
+function CaptureOverview({ run, links }: { run: CaptureRun; links?: NetworkLink[] }) {
   return (
     <div className="min-w-0 space-y-8">
       {run.error && (
@@ -406,7 +432,7 @@ function CaptureOverview({ run }: { run: CaptureRun }) {
           The record becomes cancelled after its runner returns from process-group cleanup.
         </Notice>
       )}
-      <CapturePicture run={run} />
+      <CapturePicture run={run} links={links} />
       {run.request.incidentRunId && <RelatedRun id={run.request.incidentRunId} capture={run} />}
     </div>
   )

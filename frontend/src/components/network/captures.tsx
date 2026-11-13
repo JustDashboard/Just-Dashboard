@@ -10,6 +10,7 @@ import {
   Download,
   FileText,
   MoreHorizontal,
+  NetworkDevice,
   Plus,
   RefreshClockwise,
   StopCircle,
@@ -42,10 +43,16 @@ import {
   type CaptureList,
   type CaptureRun,
 } from "@/lib/network-captures"
-import { captureLine, captureMatches, captureTotals } from "@/lib/network-runs-view"
+import {
+  captureLine,
+  captureMatches,
+  captureStateWord,
+  captureTotals,
+} from "@/lib/network-runs-view"
+import type { NetworkLink } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { CaptureCreate } from "./capture-create"
-import { StateTile } from "./diagnostic-marks"
+import { PhoneState, StateTile, interfaceMark } from "./diagnostic-marks"
 import { NetworkReadWarning } from "./read-warning"
 
 /** The list's search, shared with the rail on a capture's page. */
@@ -53,6 +60,19 @@ export const CAPTURE_QUERY_KEY = "network.captures.query"
 
 export const captureHref = (id: string, tab?: string) =>
   `/network/captures/${encodeURIComponent(id)}${tab && tab !== "overview" ? `?tab=${tab}` : ""}`
+
+/**
+ * The server's devices, read for their marks: a capture is drawn as the
+ * interface it listens on. Slow, because a device's kind does not change.
+ */
+export function useCaptureLinks(enabled: boolean) {
+  return usePoll<NetworkLink[]>(
+    (signal) => get("/network/links", undefined, signal),
+    60_000,
+    [enabled],
+    { enabled },
+  ).data
+}
 
 /**
  * Reading register: the captures this server keeps, and the one way to start
@@ -74,6 +94,7 @@ export function Captures() {
   // is captured until the operator starts it.
   const [open, setOpen] = useState(() => Boolean(seed))
   const [query, setQuery] = useSessionState(CAPTURE_QUERY_KEY, "")
+  const links = useCaptureLinks(admin)
   // The address that selected a capture beside the list opens its page.
   const legacy = params.get("capture")
   useEffect(() => {
@@ -101,11 +122,13 @@ export function Captures() {
   const list = poll.data
   const runs = list?.runs ?? []
   const shown = runs.filter((run) => captureMatches(run, query))
+  const failed = !list && Boolean(poll.error)
   return (
     <>
       <PageContext title="Packet captures" />
       <CapturesIdentity
         list={list}
+        failed={failed}
         onNew={() => setOpen(true)}
         onRefresh={poll.refresh}
         onSummary={() => router.push("/network/tools?tool=capture")}
@@ -119,7 +142,7 @@ export function Captures() {
         />
       )}
       {!list && poll.error ? (
-        <ErrorState error={poll.error} onRetry={poll.refresh} />
+        <ErrorState error={poll.error} onRetry={poll.refresh} retryable />
       ) : list && runs.length === 0 ? (
         <EmptyState
           icon={Crosshair}
@@ -172,7 +195,7 @@ export function Captures() {
             ) : (
               <ChoiceList aria-label="Packet captures">
                 {shown.map((run) => (
-                  <CaptureRow key={run.id} run={run} onChanged={poll.refresh} />
+                  <CaptureRow key={run.id} run={run} links={links} onChanged={poll.refresh} />
                 ))}
               </ChoiceList>
             )}
@@ -195,11 +218,13 @@ export function Captures() {
  */
 function CapturesIdentity({
   list,
+  failed,
   onNew,
   onRefresh,
   onSummary,
 }: {
   list?: CaptureList
+  failed: boolean
   onNew: () => void
   onRefresh: () => void
   onSummary: () => void
@@ -217,6 +242,8 @@ function CapturesIdentity({
           ) : (
             <Status tone="stopped" label="Nothing capturing" />
           )
+        ) : failed ? (
+          <Status tone="unknown" label="Not read" />
         ) : (
           <TextShimmer className="text-xs">Reading…</TextShimmer>
         )
@@ -267,18 +294,32 @@ function CapturesIdentity({
   )
 }
 
-function CaptureRow({ run, onChanged }: { run: CaptureRun; onChanged: () => void }) {
+function CaptureRow({
+  run,
+  links,
+  onChanged,
+}: {
+  run: CaptureRun
+  links?: NetworkLink[]
+  onChanged: () => void
+}) {
   const reading = captureReading(run)
+  const word = captureStateWord(reading.label)
   const actions = useCaptureActions(run, { onChanged, onDeleted: onChanged })
   return (
     <ChoiceRow
       workspaceItem={{ id: run.id, name: run.name }}
-      leading={<StateTile glyph={Crosshair} tone={reading.tone} />}
+      leading={<StateTile {...interfaceMark(run.request.interface, links)} tone={reading.tone} />}
       title={run.name}
       verb={`Open ${run.name}`}
       href={captureHref(run.id)}
       busy={!captureFinished(run)}
-      description={<span className="font-mono">{captureLine(run)}</span>}
+      description={
+        <span className="font-mono">
+          <PhoneState tone={reading.tone}>{word}</PhoneState>
+          {captureLine(run)}
+        </span>
+      }
       trailing={
         <span className="flex items-center gap-4">
           <span className="numeric w-32 truncate text-right text-hint text-muted-foreground max-md:hidden">
@@ -292,8 +333,8 @@ function CaptureRow({ run, onChanged }: { run: CaptureRun; onChanged: () => void
           >
             {timestamp(run.createdAt)}
           </time>
-          <span className="flex w-36 justify-end max-sm:hidden">
-            <Status {...reading} />
+          <span className="flex w-28 justify-end max-sm:hidden">
+            <Status tone={reading.tone} label={word} />
           </span>
         </span>
       }
@@ -354,7 +395,7 @@ export function useCaptureActions(
             confirm({
               title: "Delete packet capture",
               subject: {
-                mark: <StateTile glyph={Crosshair} tone={captureReading(run).tone} size="sm" />,
+                mark: <StateTile glyph={NetworkDevice} tone={captureReading(run).tone} size="sm" />,
                 name: run.name,
                 facts: <span className="font-mono">{captureLine(run)}</span>,
               },

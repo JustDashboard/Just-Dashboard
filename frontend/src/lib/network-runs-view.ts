@@ -155,6 +155,15 @@ export function captureFilter(request: CaptureRun["request"]) {
   }
 }
 
+/**
+ * A capture's state as its row says it. In a list of captures "Capture
+ * completed" says "capture" once per row; the row says "Completed".
+ */
+export function captureStateWord(label: string) {
+  const word = label.replace(/^Capture /, "")
+  return word.charAt(0).toUpperCase() + word.slice(1)
+}
+
 /** The capture in one mono line, as its row says it. */
 export function captureLine(run: Pick<CaptureRun, "request">) {
   const { request } = run

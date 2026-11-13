@@ -107,8 +107,10 @@ const STAGE_TONES: Record<string, DotTone> = {
 }
 
 /**
- * The run's lifecycle as a strip: validated, probed, recorded — each step a
- * dot and its word, joined by a line that is solid once the step is done.
+ * The run's lifecycle as a strip: validated, probed, recorded. A step that
+ * is done is its green dot and its name; only a step that is not says its
+ * state in a word, so three finished steps do not say "completed" three
+ * times. The line into a step is dashed until the step has begun.
  */
 export function RunStages({ run }: { run: DiagnosticRun }) {
   return (
@@ -119,24 +121,25 @@ export function RunStages({ run }: { run: DiagnosticRun }) {
       {run.stages.map((stage, index) => {
         const tone = STAGE_TONES[stage.status] ?? "unknown"
         const when = stage.endedAt ?? stage.startedAt
+        const done = stage.status === "completed"
         return (
           <li key={stage.id} className="flex min-w-0 items-center gap-2">
             {index > 0 && (
               <span
                 aria-hidden
                 className={cn(
-                  "h-px w-6 shrink-0",
-                  stage.status === "queued" ? "border-t border-dashed" : "bg-border",
+                  "w-5 shrink-0 border-t",
+                  stage.status === "queued" && "border-dashed",
                 )}
               />
             )}
             <span
               className="inline-flex items-center gap-1.5"
-              title={when ? timestamp(when) : undefined}
+              title={when ? `${stage.status} · ${timestamp(when)}` : stage.status}
             >
               <StatusDot tone={tone} />
               <span className="font-medium capitalize">{stage.id}</span>
-              <span className="text-muted-foreground">{stage.status}</span>
+              <span className={done ? "sr-only" : "text-muted-foreground"}>{stage.status}</span>
             </span>
           </li>
         )

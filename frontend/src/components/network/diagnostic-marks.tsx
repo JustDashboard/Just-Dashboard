@@ -19,8 +19,10 @@ import {
   Wrench,
   type Icon,
 } from "@/components/icons"
+import { linkGlyph, linkProduct } from "@/components/network/marks"
 import { ProductLogo } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
+import type { NetworkLink } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /**
@@ -65,9 +67,24 @@ export function toolGlyph(run: { kind?: string; request: { tool: string } }): Ic
 const SIZES = {
   // The identity line's tile, the row's and the rail's, with the state dot
   // scaled to each.
-  lg: { tile: "size-12 rounded-xl [&_svg]:size-6", ring: "size-4", dot: undefined },
-  md: { tile: "size-9 rounded-lg [&_svg]:size-4", ring: "size-3", dot: "size-2" },
-  sm: { tile: "size-7 rounded-md [&_svg]:size-3.5", ring: "size-2.5", dot: "size-1.5" },
+  lg: {
+    tile: "size-12 rounded-xl [&_svg]:size-6",
+    logo: "[&_img]:size-7",
+    ring: "size-4",
+    dot: undefined,
+  },
+  md: {
+    tile: "size-9 rounded-lg [&_svg]:size-4",
+    logo: "[&_img]:size-5",
+    ring: "size-3",
+    dot: "size-2",
+  },
+  sm: {
+    tile: "size-7 rounded-md [&_svg]:size-3.5",
+    logo: "[&_img]:size-4",
+    ring: "size-2.5",
+    dot: "size-1.5",
+  },
 } as const
 
 /**
@@ -76,11 +93,14 @@ const SIZES = {
  */
 export function StateTile({
   glyph,
+  product,
   tone,
   size = "md",
   className,
 }: {
   glyph: Icon
+  /** The product the thing is, where one made it: its logo stands in the glyph's place. */
+  product?: string
   tone: DotTone
   size?: keyof typeof SIZES
   className?: string
@@ -88,7 +108,7 @@ export function StateTile({
   const s = SIZES[size]
   return (
     <span className={cn("relative flex shrink-0", className)}>
-      <ProductLogo fallback={glyph} className={s.tile} />
+      <ProductLogo id={product} fallback={glyph} className={cn(s.tile, s.logo)} />
       <span
         aria-hidden
         className={cn(
@@ -98,6 +118,43 @@ export function StateTile({
       >
         <StatusDot tone={tone} className={s.dot} />
       </span>
+    </span>
+  )
+}
+
+/**
+ * What a capture is drawn as: the interface it listens on, as the Network
+ * pages draw a device (`network/marks.tsx`) — Docker's bridge, a WireGuard or
+ * Tailscale tunnel as the product that made it, anything else as its kind. A
+ * device that has gone since, or one not read yet, keeps the plain glyph.
+ */
+export function interfaceMark(name: string, links: NetworkLink[] | undefined) {
+  const link = links?.find((row) => row.name === name)
+  return {
+    product: link ? linkProduct(link) : undefined,
+    glyph: link ? linkGlyph(link.kind) : NetworkDevice,
+  }
+}
+
+const WORD_TONE: Record<DotTone, string> = {
+  running: "text-foreground",
+  stopped: "text-muted-foreground",
+  warning: "text-warning",
+  danger: "text-destructive",
+  notice: "text-muted-foreground",
+  unknown: "text-muted-foreground",
+}
+
+/**
+ * A row's state as a word at the head of its second line, for a phone: the
+ * row's end has no room for it there, and the state is what the list is read
+ * for. From `sm` the word stands in its own column and this is not drawn.
+ */
+export function PhoneState({ tone, children }: { tone: DotTone; children: React.ReactNode }) {
+  return (
+    <span className={cn("font-sans sm:hidden", WORD_TONE[tone])}>
+      {children}
+      <span className="text-muted-foreground"> · </span>
     </span>
   )
 }

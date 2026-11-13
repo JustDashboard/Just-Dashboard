@@ -19,7 +19,7 @@ import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { ApiError, get } from "@/lib/api"
-import { plural, timestamp } from "@/lib/format"
+import { plural, relativeTime, timestamp } from "@/lib/format"
 import {
   diagnosticCompatible,
   diagnosticDuration,
@@ -234,7 +234,7 @@ function RunMain({
             }
           />
         ) : poll.error ? (
-          <ErrorState error={poll.error} onRetry={poll.refresh} />
+          <ErrorState error={poll.error} onRetry={poll.refresh} retryable />
         ) : (
           <>
             <HostIdentity
@@ -326,14 +326,14 @@ function RunView({
               <span className="text-foreground">{runTool(run)}</span>
               <FactDot />
               <span className="min-w-0 truncate font-mono">{runRequestLine(run)}</span>
-              <FactDot />
-              <span>
-                {run.scope.vantage === "dashboard_host"
-                  ? "from this server"
-                  : run.scope.source
-                    ? `from ${run.scope.source}`
-                    : run.scope.vantage.replaceAll("_", " ")}
-              </span>
+              {run.scope.vantage !== "dashboard_host" && (
+                <>
+                  <FactDot />
+                  <span className="min-w-0 truncate">
+                    from {run.scope.source || run.scope.vantage.replaceAll("_", " ")}
+                  </span>
+                </>
+              )}
               {finished && diagnosticDuration(run) !== "Not recorded" && (
                 <>
                   <FactDot />
@@ -341,9 +341,9 @@ function RunView({
                 </>
               )}
               <FactDot />
-              <span className="numeric">
-                <time dateTime={run.createdAt}>{timestamp(run.createdAt)}</time> by {run.createdBy}
-              </span>
+              <time dateTime={run.createdAt} title={timestamp(run.createdAt)} className="numeric">
+                {relativeTime(run.createdAt)}
+              </time>
             </>
           }
           command={
