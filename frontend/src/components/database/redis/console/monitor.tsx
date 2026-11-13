@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Play, StopCircle, Warning } from "@/components/icons"
-import { duration, plural } from "@/lib/format"
+import { clockAt, duration, plural } from "@/lib/format"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useMemoryState } from "@/lib/view-state"
 import { RankList, type RankItem } from "@/components/rank-list"
@@ -34,7 +34,7 @@ const ENDED: Record<RedisFeedEnd["reason"], string> = {
 /** A moment of the server's clock, to the millisecond. */
 function at(seconds: number): string {
   const date = new Date(seconds * 1000)
-  return `${date.toLocaleTimeString(undefined, { hour12: false })}.${String(date.getMilliseconds()).padStart(3, "0")}`
+  return `${clockAt(date)}.${String(date.getMilliseconds()).padStart(3, "0")}`
 }
 
 /**

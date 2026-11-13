@@ -93,7 +93,7 @@ type Coverage struct {
 	// Cursor is the newest request's sequence, for a live tail to continue
 	// from exactly.
 	Cursor      uint64    `json:"cursor"`
-	RefreshedAt time.Time `json:"refreshedAt"`
+	RefreshedAt time.Time `json:"refreshedAt,omitzero"`
 	// Stale reports that this answer is from the last successful read because
 	// the current one failed — served rather than refused, since the figures
 	// are still true of the moment they describe.

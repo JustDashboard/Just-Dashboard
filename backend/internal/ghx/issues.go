@@ -15,8 +15,8 @@ type Issue struct {
 	URL       string    `json:"url"`
 	State     string    `json:"state"`
 	Author    string    `json:"author,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 	Comments  int       `json:"comments"`
 	Labels    []string  `json:"labels,omitempty"`
 	Assignees []string  `json:"assignees,omitempty"`
@@ -52,8 +52,8 @@ func (s *Service) ListIssues(ctx context.Context, dir, nameWithOwner, state stri
 		Author struct {
 			Login string `json:"login"`
 		} `json:"author"`
-		CreatedAt time.Time  `json:"createdAt"`
-		UpdatedAt time.Time  `json:"updatedAt"`
+		CreatedAt time.Time  `json:"createdAt,omitzero"`
+		UpdatedAt time.Time  `json:"updatedAt,omitzero"`
 		Comments  []struct{} `json:"comments"`
 		Labels    []struct {
 			Name string `json:"name"`

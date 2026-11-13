@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { get, post } from "@/lib/api"
 import { percent, relativeTime } from "@/lib/format"
+import { latencyHead, latencyTerm } from "@/lib/latency-words"
 import { latency } from "@/lib/requests"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
@@ -160,7 +161,9 @@ function CanaryPanel({
               <th className="px-5 py-2 font-normal">Release</th>
               <th className="px-3 py-2 text-right font-normal">Requests</th>
               <th className="px-3 py-2 text-right font-normal">5xx</th>
-              <th className="px-5 py-2 text-right font-normal">p95</th>
+              <th className="px-5 py-2 text-right font-normal" title={latencyTerm("p95")}>
+                {latencyHead("p95")}
+              </th>
             </tr>
           </thead>
           <tbody>

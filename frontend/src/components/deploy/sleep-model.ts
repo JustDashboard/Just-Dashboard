@@ -167,6 +167,49 @@ export function lastWakeLine(status: SleepStatus) {
   return `Last woken by ${wakeCause(woken)}${took}`
 }
 
+/**
+ * The sleeping block's sentence and its detail, as the Overview's blocks open
+ * (§16): that it is asleep on purpose and for how long, then why, what the
+ * next visitor meets and what woke it last. The wake limit is the plan's own
+ * and is said only in Runtime settings: here it would be a default repeated.
+ */
+export function sleepLead(status: SleepStatus, waking: boolean, now = Date.now()) {
+  const since = status.since ? Date.parse(status.since) : NaN
+  const title = waking
+    ? "Waking up: its container is starting"
+    : Number.isNaN(since)
+      ? "Asleep by design"
+      : `Asleep by design for ${spanLength((now - since) / 1000)}`
+  const last = lastWakeLine(status)
+  const hint = [
+    status.reason,
+    `The next request to its domain starts it and is answered by it, held for up to ${status.holdSeconds} s.`,
+    last && `${last}.`,
+  ]
+    .filter(Boolean)
+    .join(" ")
+  return { title, hint }
+}
+
+const WEEK_MS = 7 * 24 * 3600 * 1000
+
+/**
+ * The last seven days as one strip: where each stretch asleep begins and how
+ * wide it is, 0–1 of the week, oldest first. A stretch still open runs to now,
+ * and one that began before the week is cut at its edge.
+ */
+export function sleepWeek(status: SleepStatus, now = Date.now()) {
+  const from = now - WEEK_MS
+  return status.recent
+    .map((span) => {
+      const slept = Math.max(from, Date.parse(span.sleptAt))
+      const woke = Math.min(now, span.wokeAt ? Date.parse(span.wokeAt) : now)
+      return { key: span.id, left: (slept - from) / WEEK_MS, width: (woke - slept) / WEEK_MS }
+    })
+    .filter((stretch) => Number.isFinite(stretch.left) && stretch.width > 0)
+    .sort((a, b) => a.left - b.left)
+}
+
 /** Whether the overview draws the sleeping panel: asleep, or waking up. */
 export function sleepShown(status: SleepStatus | undefined) {
   return status?.state === "asleep" || status?.state === "waking"

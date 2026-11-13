@@ -23,6 +23,7 @@ func TestDeployTemplateSchemaOnlyAddsTables(t *testing.T) {
 // The table arrives on a new install and on one upgraded from 0.6.6, and a
 // template's id is one per dashboard.
 func TestDeployTemplateSchemaReachesFreshAndUpgradedInstalls(t *testing.T) {
+	t.Parallel()
 	upgraded := t.TempDir()
 	script, err := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
 	if err != nil {

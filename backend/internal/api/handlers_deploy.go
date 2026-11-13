@@ -394,7 +394,7 @@ func mapDeployError(err error) error {
 	case errors.Is(err, deploy.ErrPullRequestUnreadable):
 		return httpx.Err(http.StatusBadGateway, "pull_request_unreadable", err.Error())
 	default:
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 }
 
@@ -701,7 +701,7 @@ func (s *Server) handleDeployRollback(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	if err := deploy.ValidateSHA(req.Commit); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	project, err := s.modules.deployStore.Get(r.Context(), id)
 	if err != nil {
@@ -900,8 +900,8 @@ func (s *Server) handleDeploymentRunCreate(w http.ResponseWriter, r *http.Reques
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"your role does not permit this action ("+string(auth.CapDestructive)+")")
 		}
-		if !s.destrLim.Allow(p.Username()) {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many destructive actions; try again shortly")
+		if err := s.destrLim.Spend(p.Username(), "too many destructive actions; try again shortly"); err != nil {
+			return err
 		}
 	}
 	if req.SourceRevision != "" && req.Ref != "" {
@@ -1474,7 +1474,7 @@ func (s *Server) handleDeployCommits(w http.ResponseWriter, r *http.Request) err
 	commits, err := s.modules.deployer.History(r.Context(), project,
 		atoiDefault(r.URL.Query().Get("limit"), 30))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, commits)
 	return nil

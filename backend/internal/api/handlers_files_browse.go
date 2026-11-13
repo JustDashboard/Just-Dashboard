@@ -260,6 +260,10 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) error {
 	if q.Get("q") == "" {
 		return httpx.BadRequest("q query parameter is required")
 	}
+	hidden, err := httpx.QueryBool(r, "hidden")
+	if err != nil {
+		return err
+	}
 	// The handler's own ceiling sits above the walk's budget on purpose: the
 	// walk stops itself and reports a partial answer, and this is only the
 	// backstop for a filesystem that blocks on a read.
@@ -269,7 +273,7 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) error {
 		Root:     q.Get("path"),
 		Query:    q.Get("q"),
 		Limit:    atoiDefault(q.Get("limit"), 0),
-		Hidden:   q.Get("hidden") == "true",
+		Hidden:   hidden,
 		MaxDepth: atoiDefault(q.Get("depth"), 0),
 		Budget:   time.Duration(atoiDefault(q.Get("budgetMs"), 0)) * time.Millisecond,
 	})
@@ -339,7 +343,11 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) error {
 		return httpx.Err(http.StatusUnsupportedMediaType, "not_inline",
 			"this file is not one of the media types served inline; download it instead")
 	}
-	if r.URL.Query().Get("revision") == "true" {
+	revision, err := httpx.QueryBool(r, "revision")
+	if err != nil {
+		return err
+	}
+	if revision {
 		if !strings.HasPrefix(mediaType, "image/") {
 			return httpx.BadRequest("content revisions are available for image editing only")
 		}

@@ -65,11 +65,14 @@ export const ROW_REVEAL = rowReveal()
  * buttons, which reads as a layout bug rather than as an affordance.
  *
  * So the controls are always drawn and merely quiet, brightening when the
- * pointer is on the row. Same four mechanisms as `rowReveal`, one step of
- * opacity instead of all of it.
+ * pointer is on the row. Same four mechanisms as `rowReveal` (the row's
+ * hover, focus inside it, an open menu, no hover at all).
+ *
+ * Quiet is not the whole cluster at 55%. That dimmed the words with the
+ * glyphs, and a resting "Sign out" measured 2.3:1. `row-dim` (globals.css)
+ * fades the glyphs and sets the words in the faint ink, which keeps 4.5:1.
  */
-export const ROW_DIM =
-  "opacity-55 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 has-[[data-state=open]]:opacity-100 [@media(hover:none)]:opacity-100"
+export const ROW_DIM = "row-dim"
 
 export function DimActions({ className, ...props }: React.ComponentProps<"div">) {
   return <div className={cn("flex shrink-0 items-center gap-0.5", ROW_DIM, className)} {...props} />

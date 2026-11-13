@@ -30,7 +30,7 @@ type dbConnection struct {
 	Port      string     `json:"port"`
 	User      string     `json:"user"`
 	Database  string     `json:"database"`
-	CreatedAt time.Time  `json:"createdAt"`
+	CreatedAt time.Time  `json:"createdAt,omitzero"`
 	// What the operator says about the connection rather than what its DSN
 	// does: the environment it serves, whether the dashboard may change what
 	// is in it, and anything worth remembering.
@@ -50,6 +50,9 @@ type dbConnection struct {
 
 func (s *Server) mountDatabaseRoutes(r chi.Router) {
 	r.Route("/databases", func(r chi.Router) {
+		// Before anything reads ?preview=: a flag no handler can read is a
+		// 400 here, never a change that was meant to be shown.
+		r.Use(requirePreviewFlag)
 		r.Use(s.protectReadOnlyConnections)
 		r.Method(http.MethodGet, "/", s.handle(s.handleDBConnList))
 		r.Method(http.MethodGet, "/drivers", s.handle(s.handleDBDrivers))
@@ -804,14 +807,14 @@ func (s *Server) handleDBBrowse(w http.ResponseWriter, r *http.Request) error {
 		defer client.Disconnect(context.Background())
 		res, err := dbx.MongoFind(r.Context(), client, q.Get("schema"), q.Get("table"), q.Get("filter"), limit, offset)
 		if err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		httpx.JSON(w, http.StatusOK, res)
 		return nil
 	}
 	opts, err := browseOptions(q)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	pool, conn, err := s.dbPool(r.Context(), id)
 	if err != nil {
@@ -852,7 +855,7 @@ func tableReadError(err error) error {
 	if dbx.Unreachable(err) {
 		return queryFailed(err)
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 const (
@@ -1045,9 +1048,8 @@ func (s *Server) authoriseSQL(r *http.Request, risk dbx.Risk) error {
 		return httpx.Err(http.StatusForbidden, "forbidden",
 			"this statement is destructive and your role does not permit it")
 	}
-	if !s.destrLim.Allow(p.Username() + "|dbquery") {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-			"too many destructive statements, slow down")
+	if err := s.destrLim.Spend(p.Username()+"|dbquery", "too many destructive statements, slow down"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1085,7 +1087,7 @@ func (s *Server) handleDBQuery(w http.ResponseWriter, r *http.Request) error {
 	}
 	statement, err := dbx.SingleStatementFor(conn.Driver, req.Query)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	risk := statement.Risk
 	if err := s.authoriseSQL(r, risk); err != nil {
@@ -1498,10 +1500,10 @@ type savedQuery struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
 	SQL       string    `json:"sql"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 	// UpdatedAt is when the query was last renamed or edited; the creation
 	// time until then.
-	UpdatedAt time.Time `json:"updatedAt"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 }
 
 func (s *Server) handleDBSavedList(w http.ResponseWriter, r *http.Request) error {
@@ -1615,7 +1617,7 @@ type historyEntry struct {
 	RowCount     int       `json:"rowCount"`
 	RowsAffected int64     `json:"rowsAffected"`
 	Error        string    `json:"error,omitempty"`
-	RanAt        time.Time `json:"ranAt"`
+	RanAt        time.Time `json:"ranAt,omitzero"`
 }
 
 func (s *Server) handleDBHistory(w http.ResponseWriter, r *http.Request) error {
@@ -1796,7 +1798,7 @@ func (s *Server) handleDBCount(w http.ResponseWriter, r *http.Request) error {
 	}
 	opts, err := browseOptions(r.URL.Query())
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	ctx, cancel := timeoutCtx(r, 120*time.Second)
 	defer cancel()
@@ -1895,7 +1897,7 @@ func (s *Server) handleDBExplain(w http.ResponseWriter, r *http.Request) error {
 	}
 	statement, err := dbx.ExplainTarget(conn.Driver, req.Query)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if req.Analyze {
 		if !httpx.MustPrincipal(r).Can(auth.CapServiceControl) {
@@ -1924,7 +1926,7 @@ func (s *Server) handleDBExplain(w http.ResponseWriter, r *http.Request) error {
 		if errors.Is(err, dbx.ErrExplainUnsupported) {
 			return httpx.Err(http.StatusBadRequest, "unsupported", err.Error())
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "database.explain", conn.Name, map[string]any{
 		"statement": statement.SQL, "analyze": req.Analyze, "format": plan.Format,
@@ -2015,7 +2017,7 @@ func (s *Server) handleDBKill(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	if err := dbx.KillQuery(ctx, pool, conn.Driver, req.PID); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "database.session.kill", conn.Name, map[string]any{"pid": req.PID})
 	httpx.JSON(w, http.StatusOK, map[string]any{"killed": req.PID})
@@ -2131,7 +2133,7 @@ func (s *Server) handleDBRowSQL(w http.ResponseWriter, r *http.Request) error {
 	}
 	out, err := dbx.TableRowsInsertSQL(ctx, pool, conn.Driver, req.Schema, req.Table, req.Rows)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"sql": out})
 	return nil

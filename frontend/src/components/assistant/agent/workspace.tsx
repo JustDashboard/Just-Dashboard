@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react"
 import { AnimatePresence, MotionConfig, motion } from "motion/react"
-import { ChatBubble, Logs, Sparkles, type Icon } from "@/components/icons"
+import { ChatBubble, Logs, Sparkles } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useArrivals } from "@/hooks/use-arrivals"
+import { PaneBar } from "@/components/phone-panes"
 import { ProductGlyph } from "@/components/product-logo"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { AssistantMark } from "@/components/assistant/mark"
@@ -27,7 +28,7 @@ export type AgentPane = "chat" | "chats" | "activity"
  * and what this one has done, with a shortcut to each change. Nothing is boxed: the
  * conversation is the page's own ground down to the window's foot, and the rail is a
  * column after a hairline. On a phone they are one full-height pane at a time with a
- * bar to switch (the Git workspace's pattern), never stacked.
+ * bar to switch (`phone-panes.tsx`, the Git workspace's pattern), never stacked.
  */
 export function AgentWorkspace({
   session,
@@ -76,7 +77,22 @@ export function AgentWorkspace({
             className={cn("flex-1", pane === "chats" && "max-lg:hidden")}
           />
         </aside>
-        <PaneBar pane={pane} onPane={setPane} changes={changes} />
+        <PaneBar
+          label="Assistant panes"
+          active={pane}
+          onPick={setPane}
+          stops={[
+            { key: "chat", label: "Chat", icon: <Sparkles /> },
+            { key: "chats", label: "Chats", icon: <ChatBubble /> },
+            {
+              key: "activity",
+              label: "What it did",
+              icon: <Logs />,
+              count: changes,
+              countClassName: "bg-success",
+            },
+          ]}
+        />
       </div>
     </MotionConfig>
   )
@@ -190,55 +206,5 @@ function Activity({ session, className }: { session: AgentSession; className?: s
         </p>
       )}
     </div>
-  )
-}
-
-/** The phone's way between the panes: a bar at the foot, one pane at a time. */
-function PaneBar({
-  pane,
-  onPane,
-  changes,
-}: {
-  pane: AgentPane
-  onPane: (pane: AgentPane) => void
-  changes: number
-}) {
-  const stop = (key: AgentPane, label: string, icon: Icon, count = 0) => {
-    const Mark = icon
-    const active = pane === key
-    return (
-      <button
-        type="button"
-        onClick={() => onPane(key)}
-        aria-current={active ? "page" : undefined}
-        className={cn(
-          "flex h-14 min-w-0 flex-1 flex-col items-center justify-center gap-1 focus-ring-inset transition-colors",
-          active ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        <span aria-hidden className={cn("relative flex [&_svg]:size-5", active && "text-brand")}>
-          <Mark />
-          {count > 0 && (
-            <span className="numeric absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-sm bg-success px-1 text-micro font-semibold text-background">
-              {count > 99 ? "99+" : count}
-            </span>
-          )}
-        </span>
-        <span className="text-micro font-medium">
-          {label}
-          {count > 0 && <span className="sr-only"> ({count})</span>}
-        </span>
-      </button>
-    )
-  }
-  return (
-    <nav
-      aria-label="Assistant panes"
-      className="flex shrink-0 border-t border-hairline bg-surface-header pb-[env(safe-area-inset-bottom)] lg:hidden"
-    >
-      {stop("chat", "Chat", Sparkles)}
-      {stop("chats", "Chats", ChatBubble)}
-      {stop("activity", "What it did", Logs, changes)}
-    </nav>
   )
 }

@@ -76,6 +76,7 @@ export function TrafficReadings({ projectId }: { projectId: number }) {
     (signal) => get<Record<string, TrafficPulse>>("/deploy/traffic", undefined, signal),
     30000,
     [],
+    { key: "/deploy/traffic" },
   )
   const mine = pulse.data?.[String(projectId)]
   const ready = mine?.status === "available" ? mine : undefined

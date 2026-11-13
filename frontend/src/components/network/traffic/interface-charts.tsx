@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { get } from "@/lib/api"
-import { bytes, rate } from "@/lib/format"
+import { bytes, dateFormatter, rate } from "@/lib/format"
 import type { NetworkHistory, NetworkLink, NetworkLivePoint } from "@/lib/types"
 import {
   localInput,
@@ -60,8 +60,8 @@ export function coveringWindow(span: TrafficSpan, now: number): Exclude<TrafficW
   return (["1h", "6h", "24h", "7d"] as const).find((w) => WINDOW_SECONDS[w] >= back) ?? "7d"
 }
 
-const rangeLabel = (r: TrafficRange) =>
-  `${new Date(r.from * 1000).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })} – ${new Date(r.to * 1000).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}`
+const rangeEnd = dateFormatter({ dateStyle: "short", timeStyle: "short" })
+const rangeLabel = (r: TrafficRange) => `${rangeEnd(r.from * 1000)} – ${rangeEnd(r.to * 1000)}`
 
 const LIVE_SERIES = [
   { key: "rx", label: "In", color: RX, kind: "area" as const },
@@ -72,6 +72,9 @@ const RECORDED_SERIES = [
   { key: "tx", label: "Out", color: TX, kind: "area" as const, peakKey: "txPeak" },
 ]
 const formatRate = (value: number) => rate(value)
+
+type DeviceRow = { ts: number; rx: number; tx: number; rxPeak?: number; txPeak?: number }
+const NO_ROWS: DeviceRow[] = []
 const axisRate = (value: number) => `${bytes(value, 0)}/s`
 
 /**
@@ -244,20 +247,39 @@ export function InterfaceCharts({
     { enabled: admin },
   )
 
-  const rowsFor = useMemo(() => {
-    return (name: string) => {
-      if (span === "live") {
-        return (live[name] ?? []).map((p) => ({ ts: p.t * 1000, rx: p.rx, tx: p.tx }))
-      }
-      return (history.data?.interfaces[name] ?? []).map((p) => ({
-        ts: p.t * 1000,
-        rx: p.rx,
-        tx: p.tx,
-        rxPeak: p.rxPeak,
-        txPeak: p.txPeak,
-      }))
+  // One array per device per reading, not per render: a chart is redrawn when
+  // its rows are another array (`ChartPanel` is memoised), and this page
+  // renders on every frame of the live ring whichever window is on screen. On
+  // a recorded window the rows change once a minute, with the record.
+  const liveRows = useMemo(() => {
+    const out = new Map<string, DeviceRow[]>()
+    if (recorded) return out
+    for (const [name, points] of Object.entries(live)) {
+      out.set(
+        name,
+        points.map((p) => ({ ts: p.t * 1000, rx: p.rx, tx: p.tx })),
+      )
     }
-  }, [span, live, history.data])
+    return out
+  }, [recorded, live])
+  const recordedRows = useMemo(() => {
+    const out = new Map<string, DeviceRow[]>()
+    if (!recorded) return out
+    for (const [name, points] of Object.entries(history.data?.interfaces ?? {})) {
+      out.set(
+        name,
+        points.map((p) => ({
+          ts: p.t * 1000,
+          rx: p.rx,
+          tx: p.tx,
+          rxPeak: p.rxPeak,
+          txPeak: p.txPeak,
+        })),
+      )
+    }
+    return out
+  }, [recorded, history.data])
+  const rowsFor = (name: string) => (recorded ? recordedRows : liveRows).get(name) ?? NO_ROWS
 
   if (recorded && !history.data) {
     return history.error ? (

@@ -13,7 +13,7 @@ type ReflogEntry struct {
 	Selector string    `json:"selector"`
 	Message  string    `json:"message"`
 	Author   string    `json:"author"`
-	At       time.Time `json:"at"`
+	At       time.Time `json:"at,omitzero"`
 }
 
 // Reflog only reads HEAD's journal. Recovery creates a new branch through the
@@ -47,7 +47,7 @@ type BlameLine struct {
 	Line         int       `json:"line"`
 	OriginalLine int       `json:"originalLine"`
 	Author       string    `json:"author"`
-	At           time.Time `json:"at"`
+	At           time.Time `json:"at,omitzero"`
 	Subject      string    `json:"subject"`
 	Content      string    `json:"content"`
 }

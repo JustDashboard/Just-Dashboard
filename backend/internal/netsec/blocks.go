@@ -36,7 +36,7 @@ type Block struct {
 	Comment       string     `json:"comment"`
 	IncidentRunID string     `json:"incidentRunId,omitempty"`
 	CreatedBy     string     `json:"createdBy,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
+	CreatedAt     time.Time  `json:"createdAt,omitzero"`
 	ExpiresAt     *time.Time `json:"expiresAt,omitempty"`
 	// State is active, expired (lifted by its end), or lifted (by hand).
 	State   string     `json:"state"`

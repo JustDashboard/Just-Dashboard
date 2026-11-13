@@ -134,7 +134,14 @@ const keyPanel = (page: Page) => page.getByRole("region", { name: "Backup key" }
 const card = (page: Page, name: string) =>
   page.locator("[data-slot=choice-row]").filter({ hasText: name })
 const settled = (locator: Locator) =>
-  locator.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)))
+  locator.evaluate((el) =>
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
+  )
 const noSidewaysScroll = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
 

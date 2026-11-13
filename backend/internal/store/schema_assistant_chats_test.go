@@ -24,6 +24,7 @@ func TestAssistantChatSchemaOnlyAddsTables(t *testing.T) {
 // goes with its owner, with the deployment it is about, and its lines and
 // images with it.
 func TestAssistantChatsReachFreshAndUpgradedInstalls(t *testing.T) {
+	t.Parallel()
 	upgraded := t.TempDir()
 	script, err := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
 	if err != nil {

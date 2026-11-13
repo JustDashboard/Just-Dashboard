@@ -5,7 +5,8 @@ import Link from "next/link"
 import { ArrowCircleUp, ArrowRight, Cross, CrossCircle, Sparkles } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { phaseLabel, useSelfUpdate } from "@/hooks/use-self-update"
+import { phaseLabel, updateHasNews, useSelfUpdate } from "@/hooks/use-self-update"
+import { useUpdateHistory } from "@/hooks/use-update-history"
 import { LogoGlyph } from "@/components/logo"
 import { Segment } from "@/components/deploy/run-pipeline"
 import { KindBand, UpdateWire } from "@/components/update/update-art"
@@ -54,10 +55,12 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   const { report, restarting, dismiss, outcome } = useSelfUpdate()
   const { openUpdate, dialog } = useUpdateDialog()
   const confetti = useRef<ConfettiRef>(null)
+  // Only an outcome is headed by a release that may no longer be in the report: the notes of
+  // the version just installed are in the new build's own history.
+  const history = useUpdateHistory(report?.version, Boolean(outcome))
 
   const run = report?.run
   const running = run?.status === "running" || run?.status === "pending"
-  const available = Boolean(report?.available)
 
   // An update that finishes while somebody is watching it is §11's *once*.
   // Arriving at a page after it already succeeded is not the moment.
@@ -69,7 +72,7 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   }, [running, status])
 
   // Nothing to say: no update, nothing running, and no outcome left unread.
-  if (!report || (!available && !running && !outcome)) return null
+  if (!updateHasNews(report, outcome)) return null
 
   const mode = running
     ? "running"
@@ -133,7 +136,7 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
 
   const headline =
     mode === "success" || mode === "failed"
-      ? [...report.releases, ...report.history].find((r) => r.version === outcome!.toVersion)
+      ? [...report.releases, ...(history ?? [])].find((r) => r.version === outcome!.toVersion)
       : report.releases[0]
   const delivered = mode === "available" ? report.releases : headline ? [headline] : []
 

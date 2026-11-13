@@ -87,7 +87,9 @@ export default function NetworkDNSPage() {
     return (
       <Page className="animate-rise">
         <PageContext eyebrow="Network" title="DNS" />
-        {dns.error ? <ErrorState error={dns.error} onRetry={dns.refresh} /> : <LoadingPanel />}
+        {/* The engines stay mounted across the first read and are not drawn
+            until it lands: the whole page arrives between the title and them. */}
+        {dns.error ? <ErrorState error={dns.error} onRetry={dns.refresh} /> : <LoadingPanel hold />}
         <DNSServiceManager key="native-dns-services" request={serviceRequest} />
       </Page>
     )
@@ -182,7 +184,7 @@ export default function NetworkDNSPage() {
           {hosts.error ? (
             <ErrorState error={hosts.error} onRetry={hosts.refresh} />
           ) : (
-            <LoadingPanel />
+            <LoadingPanel hold />
           )}
         </Section>
       )}

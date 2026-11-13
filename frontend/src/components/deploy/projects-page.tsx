@@ -152,6 +152,8 @@ function Fleet() {
   const pulse = usePoll(
     (signal) => get<Record<string, TrafficPulse>>("/deploy/traffic", undefined, signal),
     30000,
+    [],
+    { key: "/deploy/traffic" },
   )
   // Read once for the count beside Archived, and again when a card archives
   // its project: the archive does not otherwise change under the reader, and

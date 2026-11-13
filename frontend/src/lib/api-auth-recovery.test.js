@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test"
 import {
   HUB_SESSION_REFUSED,
+  UNREADABLE_ANSWER,
   errorFromResponse,
   fetchResponse,
   get,
@@ -187,4 +188,89 @@ test("a session opened through Just Hub is told to sign in on the server itself"
   expect(err).toMatchObject({ status: 403, code: "hub_session_not_allowed" })
   expect(err.message).toBe(HUB_SESSION_REFUSED)
   expect(err.message.startsWith("Sign in on this server itself to do this")).toBe(true)
+})
+
+test("an internal error says which request failed, and other refusals keep their words", () => {
+  // A 500 hides its cause on purpose; the id is what the server's log line is filed under.
+  const hidden = errorFromResponse(
+    500,
+    JSON.stringify({
+      error: { code: "internal", message: "internal error", requestId: "7f3a9c1e2b4d5a60" },
+    }),
+    "/proxy/vhosts",
+  )
+  expect(hidden.message).toBe("internal error (request 7f3a9c1e2b4d5a60)")
+  expect(hidden.requestId).toBe("7f3a9c1e2b4d5a60")
+
+  // A 502 already says what the subsystem said: the id is carried, not appended.
+  const said = errorFromResponse(
+    502,
+    JSON.stringify({
+      error: {
+        code: "query_failed",
+        message: "relation does not exist",
+        requestId: "0123456789abcdef",
+      },
+    }),
+    "/databases/1/query",
+  )
+  expect(said.message).toBe("relation does not exist")
+  expect(said.requestId).toBe("0123456789abcdef")
+
+  const plain = errorFromResponse(
+    500,
+    JSON.stringify({ error: { code: "internal", message: "internal error" } }),
+    "/proxy/vhosts",
+  )
+  expect(plain.message).toBe("internal error")
+  expect(plain.requestId).toBeUndefined()
+})
+
+test("a refusal carries the wait its Retry-After asked for", async () => {
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({ error: { code: "rate_limited", message: "too many requests, slow down" } }),
+      { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "30" } },
+    )
+  await expect(get("/jobs")).rejects.toMatchObject({
+    status: 429,
+    code: "rate_limited",
+    retryAfterMs: 30_000,
+  })
+  globalThis.fetch = async () => new Response("Bad Gateway", { status: 502 })
+  const down = await get("/jobs").catch((err) => err)
+  expect(down.status).toBe(502)
+  expect(down.retryAfterMs).toBeUndefined()
+})
+
+test("an answer that is there but does not parse is a failure, not a read of nothing", async () => {
+  const answer = (body, status = 200) => {
+    globalThis.fetch = async () =>
+      new Response(body, { status, headers: { "Content-Type": "application/json" } })
+  }
+  // Cut off by a proxy timeout, or by a backend that died while writing it.
+  answer('{"containers":[{"id":"a1"},{"id":')
+  for (const request of [
+    () => get("/docker/containers"),
+    () => post("/docker/containers/a1/start"),
+    () => postForm("/files/upload", new FormData()),
+  ]) {
+    const err = await request().catch((caught) => caught)
+    expect(err).toMatchObject({ status: 200, code: "bad_response", retryable: true })
+    expect(err.message).toBe(UNREADABLE_ANSWER)
+    expect(err.isAuthProblem).toBe(false)
+  }
+  // The proxy's own page in place of the API's answer is the same failure.
+  answer("<!doctype html><title>Just Dashboard</title>")
+  await expect(get("/docker/containers")).rejects.toMatchObject({ code: "bad_response" })
+
+  // "Done, nothing to add" is still nothing, and a whole answer is still itself.
+  answer("")
+  expect(await post("/docker/containers/a1/start")).toBeUndefined()
+  answer(null, 204)
+  expect(await post("/docker/containers/a1/start")).toBeUndefined()
+  answer("[]")
+  expect(await get("/docker/containers")).toEqual([])
+  answer("null")
+  expect(await get("/docker/containers")).toBeNull()
 })

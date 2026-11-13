@@ -59,7 +59,7 @@ type IssuePreflight struct {
 	Limits   RateLimits       `json:"limits"`
 	// Blocking is a critical check: the real run is expected to fail.
 	Blocking  bool      `json:"blocking"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 }
 
 // ValidCertDomain is a name certbot's -d takes: a host name or a wildcard.

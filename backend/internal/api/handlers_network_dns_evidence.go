@@ -30,7 +30,7 @@ func (s *Server) handleDNSEvidenceCreate(w http.ResponseWriter, r *http.Request)
 	}
 	clean, err := netx.ValidateDNSInvestigation(req)
 	if err != nil {
-		return httpx.BadRequest("%s", err.Error())
+		return httpx.Refused(err)
 	}
 	ctx, cancel := timeoutCtx(r, 25*time.Second)
 	defer cancel()

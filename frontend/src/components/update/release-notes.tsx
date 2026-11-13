@@ -1,5 +1,6 @@
 "use client"
 
+import { dateFormatter } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { ChangeKind } from "@/lib/types"
 
@@ -42,14 +43,11 @@ export function ChangeLabel({ kind }: { kind: ChangeKind }) {
   )
 }
 
+const utcDay = dateFormatter({ day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })
+
 /** A calendar day as a person writes one. The value is YYYY-MM-DD, not a time. */
 export function releaseDay(date: string): string {
   const parsed = new Date(`${date}T00:00:00Z`)
   if (Number.isNaN(parsed.getTime())) return date
-  return parsed.toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  })
+  return utcDay(parsed)
 }

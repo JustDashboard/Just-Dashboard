@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useQuestionHistory, useHistoryVisit } from "@/components/workspace/history"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Logs, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
+import { ListUnordered, Logs, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { get } from "@/lib/api"
 import type { DbFleetEntry, LogSource, LogSourceIndex } from "@/lib/types"
@@ -25,6 +25,7 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { usePanelSize } from "@/lib/panel-size"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { Page, PageContext } from "@/components/page"
+import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { EmptyState } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { ResizeHandle } from "@/components/resize-handle"
@@ -64,8 +65,19 @@ const RAIL = { min: 208, max: 420, base: 272 }
 /** The readings every source offers; a page view's id — events, runs, queries — joins them where the source has it. */
 const MODES = ["live", "search", "insights"]
 
-/** The lines' column where it stacks under the rail: a window's height, not what is left of one. */
-const COLUMN = "max-lg:h-[max(32rem,calc(100dvh-5rem))] max-lg:flex-none"
+/**
+ * The lines' column where it stacks under the rail, from `md` up to `lg`: a
+ * window's height, not what is left of one. Below `md` nothing stacks and it
+ * is the pane's whole height.
+ */
+const COLUMN = "md:max-lg:h-[max(32rem,calc(100dvh-5rem))] md:max-lg:flex-none"
+
+/** A phone's two panes: the log that is open, and the sources to open another. */
+type PhonePane = "log" | "sources"
+const PHONE_STOPS: PaneStop<PhonePane>[] = [
+  { key: "log", label: "Log", icon: <Logs /> },
+  { key: "sources", label: "Sources", icon: <ListUnordered /> },
+]
 
 /** A page view's id as a link may name it, before the views it could name are known. */
 const VIEW_ID = /^[a-z][a-z-]{0,31}$/
@@ -219,6 +231,10 @@ function LogsScreen() {
   const [archives, setArchives] = useSessionState("logs.archives", false)
   const [boot, setBoot] = useSessionState("logs.boot", false)
   const [showRail, setShowRail] = useViewState("logs.rail", true)
+  // On a phone the sources are a pane of their own, picked on the bar at the
+  // foot, and the page opens on the log: the reason it was opened.
+  const [phonePane, setPhonePane] = useState<PhonePane>("log")
+  const column = cn(COLUMN, paneShown(phonePane === "log", "md"))
   const [railWidth, setRailWidth, resetRailWidth] = usePanelSize("logs.rail", RAIL.base)
   const railPx = Math.max(RAIL.min, Math.min(RAIL.max, railWidth))
   // A jump to a moment — a view's "open the log around this" — is a History
@@ -455,7 +471,8 @@ function LogsScreen() {
     <IconAction
       label={showRail ? "Hide the sources" : "Show the sources"}
       aria-pressed={showRail}
-      className="size-7 shrink-0"
+      // A phone has the bar at the foot for this.
+      className="size-7 shrink-0 max-md:hidden"
       onClick={() => setShowRail((value) => !value)}
     >
       {showRail ? <SidebarLeftClose /> : <SidebarLeftOpen />}
@@ -470,6 +487,12 @@ function LogsScreen() {
     // window: a request record's chart and filters left its rows no height
     // at all. There the page scrolls, and the column under the rail keeps a
     // window's height of its own.
+    //
+    // That is a tablet's layout. Below `md` nothing stacks: a phone gave the
+    // sources a 173px box and started the console four fifths of the way
+    // down the screen. There the frame is held to the window again, runs to
+    // its edges, and shows one pane — the log, or the sources — with a bar at
+    // the foot to switch (`phone-panes.tsx`).
     <Workspace
       name="Logs"
       rows={false}
@@ -480,7 +503,7 @@ function LogsScreen() {
         setJump((value) => value + 1)
       }}
     >
-      <Page fill className="gap-4 max-lg:h-auto max-lg:overflow-visible md:gap-5">
+      <Page fill className="gap-4 md:gap-5 md:max-lg:h-auto md:max-lg:overflow-visible">
         <PageContext
           eyebrow="Server"
           title="Logs"
@@ -494,10 +517,18 @@ function LogsScreen() {
           the page, and the screen is one working surface. */}
         <div
           style={{ "--jd-rail": `${railPx}px` } as React.CSSProperties}
-          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card max-lg:flex-none lg:flex-row"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card max-md:-mx-5 max-md:-mb-6 max-md:rounded-none max-md:border-x-0 max-md:border-b-0 md:max-lg:flex-none lg:flex-row"
         >
-          {showRail && (
-            <div className="relative flex max-h-64 shrink-0 border-b border-hairline lg:max-h-none lg:w-(--jd-rail) lg:border-r lg:border-b-0">
+          {/* "Hide the sources" is a wider screen's choice: a phone reaches
+              them from the bar whether or not they were hidden at a desk. */}
+          {(showRail || phonePane === "sources") && (
+            <div
+              className={cn(
+                "relative flex shrink-0 border-hairline max-md:min-h-0 max-md:flex-1 md:max-h-64 md:border-b lg:max-h-none lg:w-(--jd-rail) lg:border-r lg:border-b-0",
+                !showRail && "md:hidden",
+                paneShown(phonePane === "sources", "md"),
+              )}
+            >
               <SourceRail
                 index={sources.data}
                 sources={listed}
@@ -505,6 +536,8 @@ function LogsScreen() {
                 error={sources.error}
                 selectedId={record ? null : (selected?.id ?? null)}
                 onSelect={(source) => {
+                  // Picking a source on a phone is asking to read it.
+                  setPhonePane("log")
                   if (record || source.id !== selected?.id) commitQuestion()
                   setRecord("")
                   switchSource(source, source.kind === "journal" ? unit : "")
@@ -514,6 +547,7 @@ function LogsScreen() {
                 records={requests.records}
                 selectedRecord={record || null}
                 onSelectRecord={(next) => {
+                  setPhonePane("log")
                   if (next.id !== record) commitQuestion()
                   setRecord(next.id)
                 }}
@@ -534,7 +568,7 @@ function LogsScreen() {
           )}
 
           {windowError ? (
-            <Blank leading={railToggle}>
+            <Blank leading={railToggle} className={column}>
               <EmptyState
                 icon={Logs}
                 title="Invalid log window"
@@ -557,7 +591,7 @@ function LogsScreen() {
           ) : record ? (
             found ? (
               <RecordColumn
-                className={COLUMN}
+                className={column}
                 key={record}
                 record={found}
                 leading={railToggle}
@@ -568,7 +602,7 @@ function LogsScreen() {
                 openLog={openLog}
               />
             ) : (
-              <Blank leading={railToggle}>
+              <Blank leading={railToggle} className={column}>
                 <EmptyState
                   icon={Logs}
                   title={
@@ -586,7 +620,7 @@ function LogsScreen() {
             <LogWorkspace
               key={sourceId}
               refreshToken={jump}
-              className={COLUMN}
+              className={column}
               flush
               leading={railToggle}
               // The identity line over the frame names it — a unit's journal
@@ -636,7 +670,7 @@ function LogsScreen() {
               onBootChange={setBoot}
             />
           ) : (
-            <Blank leading={railToggle}>
+            <Blank leading={railToggle} className={column}>
               <EmptyState
                 icon={Logs}
                 title={
@@ -656,6 +690,13 @@ function LogsScreen() {
               />
             </Blank>
           )}
+          <PaneBar
+            label="Logs"
+            until="md"
+            stops={PHONE_STOPS}
+            active={phonePane}
+            onPick={setPhonePane}
+          />
         </div>
       </Page>
     </Workspace>
@@ -663,10 +704,20 @@ function LogsScreen() {
 }
 
 /** The lines column with nothing to show: the rail toggle stays reachable. */
-function Blank({ leading, children }: { leading: React.ReactNode; children: React.ReactNode }) {
+function Blank({
+  leading,
+  className,
+  children,
+}: {
+  leading: React.ReactNode
+  className?: string
+  children: React.ReactNode
+}) {
   return (
-    <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", COLUMN)}>
-      <div className="flex min-h-10 shrink-0 items-center border-b border-hairline px-2">
+    <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
+      {/* The strip holds the rail's toggle and nothing else, and a phone has
+          no toggle to hold. */}
+      <div className="flex min-h-10 shrink-0 items-center border-b border-hairline px-2 max-md:hidden">
         {leading}
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">

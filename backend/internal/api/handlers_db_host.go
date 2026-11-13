@@ -85,7 +85,7 @@ func (s *Server) handleDBHostGrant(w http.ResponseWriter, r *http.Request) error
 		account = dashboardDBAccount
 	}
 	if err := validateRoleName(account); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if err := validConnectionNames("", req.Database); err != nil {
 		return err

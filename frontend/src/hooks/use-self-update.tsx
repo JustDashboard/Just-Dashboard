@@ -102,14 +102,22 @@ export function SelfUpdateProvider({ children }: { children: React.ReactNode }) 
     // "check for updates when the page loads". It costs the server one
     // conditional background fetch, floored at a few minutes, so a tab that is
     // reloaded twenty times asks the repository once.
-    const query = reads === 1 ? { nudge: true } : undefined
+    //
+    // `history: false` on every read: the release notes are read once, apart
+    // (useUpdateHistory). The server still sends them to a request that does
+    // not say so, for the pages that were loaded before it learnt this.
+    const query = reads === 1 ? { nudge: true, history: false } : { history: false }
     const next = await get<SelfUpdateReport>("/dashboard/update", query, signal)
     setLive(next.run?.status === "running" || next.run?.status === "pending")
     if (reads >= 2) setSettling(false)
     return next
   }, [])
 
-  const poll = usePoll(fetchReport, live ? LIVE_POLL : settling ? SETTLE_POLL : IDLE_POLL)
+  // The poll is told the same thing (`steady`): while a run is live it keeps
+  // its two seconds against a 502 instead of backing off as other reads do.
+  const poll = usePoll(fetchReport, live ? LIVE_POLL : settling ? SETTLE_POLL : IDLE_POLL, [], {
+    steady: live,
+  })
   const { data: report, error, refresh } = poll
 
   const run = report?.run
@@ -118,7 +126,7 @@ export function SelfUpdateProvider({ children }: { children: React.ReactNode }) 
   const check = useCallback(async () => {
     setChecking(true)
     try {
-      await get<SelfUpdateReport>("/dashboard/update", { refresh: true })
+      await get<SelfUpdateReport>("/dashboard/update", { refresh: true, history: false })
       refresh()
     } finally {
       setChecking(false)
@@ -184,6 +192,21 @@ export function useSelfUpdate() {
   const ctx = useContext(SelfUpdateContext)
   if (!ctx) throw new Error("useSelfUpdate must be used inside SelfUpdateProvider")
   return ctx
+}
+
+/**
+ * Whether the sidebar's notice has anything to say: an update to install, a
+ * run in flight, or a finished run nobody here has read. The notice draws
+ * nothing otherwise, and the shell does not even fetch its code
+ * (`components/update/update-notice-slot.tsx`), so the two must agree on this.
+ */
+export function updateHasNews(
+  report: SelfUpdateReport | undefined,
+  outcome: UpdateRun | undefined,
+): report is SelfUpdateReport {
+  if (!report) return false
+  const running = report.run?.status === "running" || report.run?.status === "pending"
+  return Boolean(report.available) || running || Boolean(outcome)
 }
 
 /** What the phase of a running upgrade is called on screen. */

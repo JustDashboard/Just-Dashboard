@@ -290,23 +290,22 @@ func (s *Server) handleDeploymentDotenvImport(w http.ResponseWriter, r *http.Req
 	}
 	// A preview that failed to parse as one must never fall through to the
 	// import, so anything but a boolean is refused rather than read as false.
-	if raw := r.URL.Query().Get("dryRun"); raw != "" {
-		dryRun, err := strconv.ParseBool(raw)
+	// httpx.QueryBool is that rule for every flag: 1, 0, true or false.
+	dryRun, err := httpx.QueryBool(r, "dryRun")
+	if err != nil {
+		return err
+	}
+	if dryRun {
+		preview, err := s.modules.deployPlanning.PreviewDotenvImport(r.Context(), projectID, environmentID, request)
 		if err != nil {
-			return httpx.BadRequest("dryRun must be 1 or 0")
+			return mapDeploymentPlanningError(err)
 		}
-		if dryRun {
-			preview, err := s.modules.deployPlanning.PreviewDotenvImport(r.Context(), projectID, environmentID, request)
-			if err != nil {
-				return mapDeploymentPlanningError(err)
-			}
-			httpx.SetAudit(r, "deploy.variable.import_preview", strconv.Itoa(len(preview.Variables)), map[string]any{
-				"deploymentId": projectID, "environmentId": environmentID,
-				"sensitivity": request.Sensitivity, "scopes": request.Scopes,
-			})
-			httpx.JSON(w, http.StatusOK, preview)
-			return nil
-		}
+		httpx.SetAudit(r, "deploy.variable.import_preview", strconv.Itoa(len(preview.Variables)), map[string]any{
+			"deploymentId": projectID, "environmentId": environmentID,
+			"sensitivity": request.Sensitivity, "scopes": request.Scopes,
+		})
+		httpx.JSON(w, http.StatusOK, preview)
+		return nil
 	}
 	principal := httpx.MustPrincipal(r)
 	result, err := s.modules.deployPlanning.ImportDotenv(

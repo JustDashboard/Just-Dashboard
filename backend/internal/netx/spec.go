@@ -340,7 +340,7 @@ type BlocklistSpec struct {
 	Entries []string `json:"entries,omitempty"`
 	Enabled bool     `json:"enabled"`
 	// Refreshed, Count and Error describe the last fetch.
-	Refreshed time.Time `json:"refreshed,omitempty"`
+	Refreshed time.Time `json:"refreshed"`
 	Count     int       `json:"count"`
 	Error     string    `json:"error,omitempty"`
 	// Refresh is how often a fetched list is fetched again: one of

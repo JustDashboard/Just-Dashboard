@@ -234,7 +234,7 @@ type ControlCheck struct {
 type ControlsVerification struct {
 	Site      string         `json:"site"`
 	URL       string         `json:"url"`
-	CheckedAt time.Time      `json:"checkedAt"`
+	CheckedAt time.Time      `json:"checkedAt,omitzero"`
 	Requests  int            `json:"requests"`
 	Policy    *ServicePolicy `json:"policy"`
 	Checks    []ControlCheck `json:"checks"`

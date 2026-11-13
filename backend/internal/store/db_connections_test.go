@@ -12,6 +12,7 @@ import (
 // applyAddedColumns, and a missing default would be a boot failure on exactly
 // the installs that already have databases connected.
 func TestOpenAddsConnectionLabelsToExistingConnections(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	old, err := sql.Open("sqlite", filepath.Join(dir, DatabaseFile))
 	if err != nil {

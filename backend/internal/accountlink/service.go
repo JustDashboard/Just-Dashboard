@@ -16,6 +16,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
 
@@ -273,10 +274,7 @@ func (s *Service) Start(ctx context.Context) {
 	// clears s.done before the goroutine may have read it.
 	done := make(chan struct{})
 	s.done = done
-	go func() {
-		defer close(done)
-		s.run(ctx)
-	}()
+	safego.Go(ctx, s.log, s.p.Name+" connector", s.run, safego.Close(done))
 }
 
 // Stop ends the connector and waits for it.
@@ -414,8 +412,10 @@ func (s *Service) runLinked(ctx context.Context, st State) {
 		go func() {
 			defer wg.Done()
 			// A loop that returns on its own means the link is over or has
-			// changed; the others have no reason to go on.
+			// changed; the others have no reason to go on. One that panics
+			// ends the same way, and the connector links again.
 			defer cancel()
+			defer safego.Recover(s.log, s.p.Name+" loop")
 			loop(ctx, st)
 		}()
 	}

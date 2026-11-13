@@ -620,7 +620,7 @@ function ComposeProjects({ stacks, canDeploy }: { stacks: ComposeStack[]; canDep
             </Link>
             {canDeploy && (
               <Button size="sm" asChild>
-                <Link href="/deploy">Open Deploy</Link>
+                <Link href="/deploy">Open Deployments</Link>
               </Button>
             )}
           </span>
@@ -731,7 +731,7 @@ function FirstRun({ canDeploy }: { canDeploy: boolean }) {
         actions={
           canDeploy && (
             <Button size="sm" asChild>
-              <Link href="/deploy">Open Deploy</Link>
+              <Link href="/deploy">Open Deployments</Link>
             </Button>
           )
         }

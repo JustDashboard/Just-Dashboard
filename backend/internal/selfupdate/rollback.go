@@ -35,10 +35,17 @@ type updateSteps struct {
 	start   func() error
 	health  func(url string, window time.Duration) error
 	restore func(from string) error
+	// tidy runs once the new version is up, and never after a failure: a
+	// rollback's images are in the cache it would be pruning around.
+	tidy func()
 }
 
-// savedImage is an image this update can put back.
-type savedImage struct{ current, previous string }
+// SavedImage is an image this update can put back: the tag it is run under,
+// and the tag its last version was kept under before the build replaced it.
+type SavedImage struct {
+	Current  string `json:"current"`
+	Previous string `json:"previous"`
+}
 
 // PreviousImage is the tag an update keeps an image's last version under, or ""
 // for a reference that cannot be given another tag.
@@ -99,7 +106,7 @@ func composeImages(ctx context.Context, dir, compose string) []string {
 // stop the update, which would otherwise be lost to a renamed image on a machine
 // where it would have worked. It only means there is nothing to go back to, and
 // complete says so.
-func savePreviousImages(images []string, docker func(args ...string) error, out io.Writer) (saved []savedImage, complete bool) {
+func savePreviousImages(images []string, docker func(args ...string) error, out io.Writer) (saved []SavedImage, complete bool) {
 	complete = len(images) > 0
 	for _, image := range images {
 		previous := PreviousImage(image)
@@ -113,7 +120,7 @@ func savePreviousImages(images []string, docker func(args ...string) error, out 
 			fmt.Fprintf(out, "! %s could not be kept for a rollback: %v\n", image, err)
 			continue
 		}
-		saved = append(saved, savedImage{image, previous})
+		saved = append(saved, SavedImage{image, previous})
 	}
 	if !complete {
 		fmt.Fprintf(out, "! this update cannot restart the previous version if it fails\n")
@@ -125,7 +132,10 @@ func savePreviousImages(images []string, docker func(args ...string) error, out 
 func replaceStack(store *Store, run *Run, compose string, steps updateSteps, out io.Writer) error {
 	saved, complete := savePreviousImages(steps.images(), steps.docker, out)
 
-	_ = store.Update(func(r *Run) { r.Phase = PhaseBuilding })
+	// Recorded before the build, which is the first thing that can replace
+	// one: if this process is killed from here on, the record is all that
+	// says which tags to move back.
+	_ = store.Update(func(r *Run) { r.Phase, r.SavedImages = PhaseBuilding, saved })
 	if err := steps.build(); err != nil {
 		return rollBack(store, run, compose, steps, saved, complete, false, err, out)
 	}
@@ -134,14 +144,16 @@ func replaceStack(store *Store, run *Run, compose string, steps updateSteps, out
 	}
 
 	_ = store.Update(func(r *Run) { r.Phase = PhaseRestarting })
-	if run.Health == "" {
-		return nil
+	if run.Health != "" {
+		fmt.Fprintf(out, "\nwaiting for the dashboard to answer at %s\n", run.Health)
+		if err := steps.health(run.Health, probeWindow); err != nil {
+			return rollBack(store, run, compose, steps, saved, complete, true, err, out)
+		}
+		fmt.Fprintf(out, "the dashboard is answering again\n")
 	}
-	fmt.Fprintf(out, "\nwaiting for the dashboard to answer at %s\n", run.Health)
-	if err := steps.health(run.Health, probeWindow); err != nil {
-		return rollBack(store, run, compose, steps, saved, complete, true, err, out)
+	if steps.tidy != nil {
+		steps.tidy()
 	}
-	fmt.Fprintf(out, "the dashboard is answering again\n")
 	return nil
 }
 
@@ -157,7 +169,7 @@ func replaceStack(store *Store, run *Run, compose string, steps updateSteps, out
 //
 // Each `up` passes --no-build: a missing image is a thing to report, and
 // compiling for fifteen minutes first would be its own outage.
-func rollBack(store *Store, run *Run, compose string, steps updateSteps, saved []savedImage, complete, touched bool, cause error, out io.Writer) error {
+func rollBack(store *Store, run *Run, compose string, steps updateSteps, saved []SavedImage, complete, touched bool, cause error, out io.Writer) error {
 	fmt.Fprintf(out, "\nThe update failed: %v\n\nGoing back to %s.\n", cause, run.FromVersion)
 	_ = store.Update(func(r *Run) { r.Phase = PhaseRestarting })
 
@@ -169,8 +181,8 @@ func rollBack(store *Store, run *Run, compose string, steps updateSteps, saved [
 	}
 	restartable := complete
 	for _, image := range saved {
-		if err := steps.docker("image", "tag", image.previous, image.current); err != nil {
-			report("could not move %s back to %s: %v", image.current, image.previous, err)
+		if err := steps.docker("image", "tag", image.Previous, image.Current); err != nil {
+			report("could not move %s back to %s: %v", image.Current, image.Previous, err)
 			restartable = false
 		}
 	}
@@ -206,21 +218,26 @@ func rollBack(store *Store, run *Run, compose string, steps updateSteps, saved [
 	return rollbackResult(run, compose, saved, cause, problems)
 }
 
-func rollbackResult(run *Run, compose string, saved []savedImage, cause error, problems []string) error {
+func rollbackResult(run *Run, compose string, saved []SavedImage, cause error, problems []string) error {
 	if len(problems) == 0 {
-		return fmt.Errorf("%w\n\nThe update was rolled back: %s is running and the checkout at %s is back on %s",
-			cause, run.FromVersion, run.Dir, run.FromCommit)
+		return fmt.Errorf("%w\n\nThe update was rolled back: %s is running and the checkout at %s is back on %s%s",
+			cause, run.FromVersion, run.Dir, run.FromCommit, copyNote(run))
 	}
+	commands := handCommands(run, compose, saved)
+	return fmt.Errorf("%w\n\nThe rollback did not finish:\n- %s\n\nTo finish it by hand, run these in %s:\n  %s%s",
+		cause, strings.Join(problems, "\n- "), run.Dir, strings.Join(commands, "\n  "), copyNote(run))
+}
+
+// handCommands are what puts an update back by hand, in the order to run them.
+func handCommands(run *Run, compose string, saved []SavedImage) []string {
 	var commands []string
 	for _, image := range saved {
-		commands = append(commands, "docker image tag "+image.previous+" "+image.current)
+		commands = append(commands, "docker image tag "+image.Previous+" "+image.Current)
 	}
 	if run.FromCommit != "" {
 		commands = append(commands, "git reset --keep "+run.FromCommit)
 	}
-	commands = append(commands, "docker compose -f "+compose+" up -d")
-	return fmt.Errorf("%w\n\nThe rollback did not finish:\n- %s\n\nTo finish it by hand, run these in %s:\n  %s",
-		cause, strings.Join(problems, "\n- "), run.Dir, strings.Join(commands, "\n  "))
+	return append(commands, "docker compose -f "+compose+" up -d")
 }
 
 // restoreCheckout takes the checkout back to the commit the update started from.

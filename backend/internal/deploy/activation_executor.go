@@ -166,7 +166,7 @@ type BackupGateEvidence struct {
 	JobID         int64      `json:"jobId"`
 	RunID         int64      `json:"runId,omitempty"`
 	Status        string     `json:"status"`
-	StartedAt     time.Time  `json:"startedAt,omitempty"`
+	StartedAt     time.Time  `json:"startedAt"`
 	EndedAt       *time.Time `json:"endedAt,omitempty"`
 	Fresh         bool       `json:"fresh"`
 	RestoreTested bool       `json:"restoreTested"`

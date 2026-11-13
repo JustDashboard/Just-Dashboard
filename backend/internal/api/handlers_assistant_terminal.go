@@ -264,6 +264,41 @@ func (s *Server) chatTerminal(ctx context.Context, p *httpx.Principal, chat, tit
 	return t, nil
 }
 
+// terminalBusy reports whether a program holds the chat's window in front of its
+// shell. A line typed then is read by that program, not by the shell — a w is
+// fdisk's write, and less takes an s for save — so it is an answer, as what
+// terminal_send types is, whatever the line would do at a prompt.
+func (pr *agentPress) terminalBusy() bool {
+	m := pr.s.modules.term
+	if m == nil || pr.c == nil {
+		return false
+	}
+	terminals := pr.s.assistant.terminals
+	terminals.mu.Lock()
+	t := terminals.byChat[pr.c.ID]
+	terminals.mu.Unlock()
+	var session *term.Session
+	if t != nil {
+		if _, _, ended := t.watch(); !ended {
+			session = t.session
+		}
+	}
+	if session == nil {
+		// A window the dashboard forgot when it restarted, as chatTerminal finds it.
+		name := agentTerminalWindow(pr.c.ID)
+		for _, sess := range m.List() {
+			if pr.p != nil && sess.Owner == pr.p.Username() && sess.WindowName == name {
+				session = sess
+			}
+		}
+	}
+	if session == nil {
+		return false
+	}
+	busy, _ := session.Foreground()
+	return busy
+}
+
 // agentTerminalView is what the page is told of the window under a call.
 type agentTerminalView struct {
 	// Session is the window's workspace, which /terminal?session= opens.

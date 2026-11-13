@@ -153,6 +153,7 @@ export function FleetCard({
               <BorderBeam size={80} duration={4} />
             </span>
           )}
+          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the card's name is the link or button a keyboard opens it by */}
           <div
             onClick={(event) => {
               // React carries a press inside the open menu up through its

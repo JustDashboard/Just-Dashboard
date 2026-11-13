@@ -9,6 +9,7 @@ import { HistoryPaging } from "@/components/git/inspect-panels"
 import { Field } from "@/components/form"
 import { ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { FilterChip } from "@/components/tabs"
@@ -388,7 +389,7 @@ function ForgeCreate({
           />
         </Field>
         <label className="flex items-center gap-2 text-xs">
-          <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
+          <Checkbox checked={draft} onCheckedChange={(checked) => setDraft(checked === true)} />
           Draft
         </label>
         {error && <ErrorState error={error} />}

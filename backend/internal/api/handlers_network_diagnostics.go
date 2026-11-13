@@ -54,7 +54,7 @@ func mapDiagnosticError(err error) error {
 	case errors.Is(err, netdiag.ErrTrustExists):
 		return httpx.Err(http.StatusConflict, "ssh_trust_exists", err.Error())
 	case errors.Is(err, netdiag.ErrInvalid):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	case errors.Is(err, netdiag.ErrUnavailable):
 		return httpx.Err(http.StatusServiceUnavailable, "diagnostics_unavailable", err.Error()).Retry()
 	case errors.Is(err, netdiag.ErrBusy), errors.Is(err, netdiag.ErrNotRunning), errors.Is(err, netdiag.ErrRunning), errors.Is(err, netdiag.ErrIncompatible), errors.Is(err, netdiag.ErrTooMany):

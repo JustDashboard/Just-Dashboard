@@ -23,7 +23,10 @@ func (s *Server) mountServedCertificateRoutes(r chi.Router) {
 // that may reload nginx can ask for it: the one moment it matters is right
 // after a reload.
 func (s *Server) handleServedCertificates(w http.ResponseWriter, r *http.Request) error {
-	refresh := r.URL.Query().Get("refresh") == "1"
+	refresh, err := httpx.QueryBool(r, "refresh")
+	if err != nil {
+		return err
+	}
 	if refresh && !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
 		return httpx.Err(http.StatusForbidden, "forbidden",
 			"your role does not permit this action ("+string(auth.CapSystemAdmin)+")")

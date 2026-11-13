@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // RollbackEnqueuer asks for the instant rollback a reading decided on. It is
@@ -51,7 +52,7 @@ func (w *RollbackWatcher) Start(ctx context.Context) {
 	if w == nil || w.executor == nil || w.executor.store == nil {
 		return
 	}
-	go func() {
+	safego.Go(ctx, nil, "rollback watch", func(ctx context.Context) {
 		ticker := time.NewTicker(w.interval)
 		defer ticker.Stop()
 		for {
@@ -64,7 +65,7 @@ func (w *RollbackWatcher) Start(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
-	}()
+	})
 }
 
 // Tick is one pass over every open window.

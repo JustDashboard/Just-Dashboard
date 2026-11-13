@@ -68,14 +68,14 @@ type DatabaseState struct {
 	Installed bool `json:"installed"`
 	// UpdatedAt is when the database was built — what its age is counted
 	// from — and NextUpdate when its publisher says the next one is due.
-	UpdatedAt    time.Time `json:"updatedAt,omitempty"`
-	NextUpdate   time.Time `json:"nextUpdate,omitempty"`
-	DownloadedAt time.Time `json:"downloadedAt,omitempty"`
+	UpdatedAt    time.Time `json:"updatedAt,omitzero"`
+	NextUpdate   time.Time `json:"nextUpdate,omitzero"`
+	DownloadedAt time.Time `json:"downloadedAt,omitzero"`
 	Digest       string    `json:"digest,omitempty"`
 	Source       string    `json:"source,omitempty"`
 	// LastAttemptAt and LastError are the most recent download's, whatever
 	// came of it.
-	LastAttemptAt time.Time `json:"lastAttemptAt,omitempty"`
+	LastAttemptAt time.Time `json:"lastAttemptAt,omitzero"`
 	LastError     string    `json:"lastError,omitempty"`
 }
 
@@ -105,8 +105,8 @@ func (d DatabaseState) due(now time.Time) bool {
 
 type databaseMetadata struct {
 	Version    int       `json:"Version"`
-	NextUpdate time.Time `json:"NextUpdate"`
-	UpdatedAt  time.Time `json:"UpdatedAt"`
+	NextUpdate time.Time `json:"NextUpdate,omitzero"`
+	UpdatedAt  time.Time `json:"UpdatedAt,omitzero"`
 }
 
 type ociManifest struct {

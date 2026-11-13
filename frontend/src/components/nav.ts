@@ -5,8 +5,10 @@ import {
   Box,
   ChartActivity,
   Clock,
+  ClockRewind,
   CloudUpload,
   Cpu,
+  Crosshair,
   Database,
   DesktopDevice,
   FileText,
@@ -16,6 +18,7 @@ import {
   Globe,
   GridMasonry,
   GridSquare,
+  Hash,
   Home,
   Inspect,
   Key,
@@ -26,6 +29,7 @@ import {
   LineChart,
   Linked,
   ListOrdered,
+  Location,
   LockClosed,
   Logs,
   Monitoring,
@@ -85,6 +89,28 @@ export type NavChild = {
    * opens it directly.
    */
   hubLink?: boolean
+  /**
+   * The heading this page sits under in its section's panel, for a section
+   * with more pages than a reader scans as one list. Pages that share one
+   * stand together; a page with none opens the panel above every heading.
+   */
+  group?: string
+}
+
+/**
+ * A section's pages as the rail draws them: the ungrouped ones first under no
+ * heading, then each heading's in the order the section lists them.
+ */
+export function groupedChildren<T extends { group?: string }>(
+  children: T[],
+): { label?: string; items: T[] }[] {
+  const groups: { label?: string; items: T[] }[] = []
+  for (const child of children) {
+    const last = groups.at(-1)
+    if (last && last.label === child.group) last.items.push(child)
+    else groups.push({ label: child.group, items: [child] })
+  }
+  return groups
 }
 
 export type NavItem = {
@@ -133,7 +159,9 @@ export type NavEntry = NavItem | NavGroup
  * The top-level list is twelve rows, not seventeen. Metrics, Processes and Logs
  * are one question — how is the machine doing — and sit behind Monitoring; the
  * packages, system accounts and audit trail are the pages you open to change
- * the server rather than to use it, and sit behind Server configuration. The
+ * the server rather than to use it, and sit behind Administration (it was
+ * "Server configuration", a synonym of Settings → Configuration two rows down
+ * for a group that holds the audit log, which configures nothing). The
  * network — its devices, routes, gateway, tunnels and resolver, and the proxy
  * in front of the sites — is a group of its own before Protection.
  */
@@ -267,61 +295,77 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         title: "Network",
         href: "/network",
         icon: Topology,
+        // Nineteen pages in one flat list was past what a reader scans, and
+        // four glyphs each stood for two of them. They fall into what the
+        // machine is set up as, what is happening on it and the tools that
+        // look into it, under headings as a project's rail has; within a
+        // heading the order is the one a packet meets them in.
         children: [
           { title: "Overview", href: "/network", icon: GridSquare },
-          { title: "Drift", href: "/network/drift", icon: Monitoring },
+          { title: "Interfaces", href: "/network/interfaces", icon: NetworkDevice, group: "Setup" },
+          { title: "Routing", href: "/network/routing", icon: Route, group: "Setup" },
+          { title: "Egress groups", href: "/network/egress", icon: Lifebuoy, group: "Setup" },
+          { title: "Firewall", href: "/network/firewall", icon: FirewallCheck, group: "Setup" },
+          { title: "Gateway", href: "/network/gateway", icon: ArrowLeftRight, group: "Setup" },
+          { title: "Protection", href: "/network/protection", icon: ShieldCheck, group: "Setup" },
+          { title: "VPN", href: "/network/vpn", icon: LockClosed, group: "Setup" },
+          { title: "DNS", href: "/network/dns", icon: Globe, group: "Setup" },
           {
             title: "Address planning",
             href: "/network/ipam",
-            icon: NetworkDevice,
+            icon: Hash,
             capability: "system.admin",
+            group: "Setup",
           },
-          {
-            title: "External checks",
-            href: "/network/external",
-            icon: Globe,
-            capability: "system.admin",
-          },
-          { title: "Interfaces", href: "/network/interfaces", icon: NetworkDevice },
-          { title: "Routing", href: "/network/routing", icon: Route },
-          { title: "Egress groups", href: "/network/egress", icon: Lifebuoy },
-          { title: "Firewall", href: "/network/firewall", icon: FirewallCheck },
-          { title: "Gateway", href: "/network/gateway", icon: ArrowLeftRight },
-          { title: "Protection", href: "/network/protection", icon: ShieldCheck },
-          { title: "VPN", href: "/network/vpn", icon: LockClosed },
-          { title: "DNS", href: "/network/dns", icon: Globe },
-          { title: "Traffic", href: "/network/traffic", icon: ChartActivity },
+          { title: "Traffic", href: "/network/traffic", icon: ChartActivity, group: "Activity" },
           {
             title: "Socket history",
             href: "/network/flows",
-            icon: ChartActivity,
+            icon: ClockRewind,
             capability: "system.admin",
+            group: "Activity",
           },
-          { title: "Connections", href: "/network/connections", icon: Connection },
+          {
+            title: "Connections",
+            href: "/network/connections",
+            icon: Connection,
+            group: "Activity",
+          },
+          { title: "Drift", href: "/network/drift", icon: Monitoring, group: "Activity" },
+          { title: "Tools", href: "/network/tools", icon: Wrench, group: "Diagnostics" },
           {
             title: "Connection path",
             href: "/network/investigate",
             icon: Inspect,
             capability: "system.admin",
+            group: "Diagnostics",
           },
-          { title: "Tools", href: "/network/tools", icon: Wrench },
           {
             title: "Packet captures",
             href: "/network/captures",
-            icon: Inspect,
+            icon: Crosshair,
             capability: "system.admin",
+            group: "Diagnostics",
+          },
+          {
+            title: "External checks",
+            href: "/network/external",
+            icon: Location,
+            capability: "system.admin",
+            group: "Diagnostics",
           },
           {
             title: "Saved runs",
             href: "/network/runs",
             icon: Notes,
             capability: "system.admin",
+            group: "Diagnostics",
           },
         ],
       },
       // The reverse proxy, its certificates, the TCP/UDP streams and the load
       // balancing in a site's upstreams are the gateway's other half, so the
-      // section sits beside Network rather than under Server configuration.
+      // section sits beside Network rather than under Administration.
       {
         title: "Proxy & TLS",
         href: "/proxy",
@@ -362,7 +406,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
     label: "Advanced",
     items: [
       {
-        title: "Server configuration",
+        title: "Administration",
         icon: SettingsSliders,
         children: [
           { title: "Packages", href: "/packages", icon: Puzzle },
@@ -648,10 +692,86 @@ export function navLocation(
 
 export const APP_NAME = "Just Dashboard"
 
+/** What the page on screen says its tab is about (`components/tab-title.tsx`). */
+export type TabName = {
+  /** Most specific first: the item, then what it belongs to. */
+  parts: readonly string[]
+  /** Said on purpose with `useTabTitle`, not read off the page's heading. */
+  explicit: boolean
+}
+
+/** How many rail rows carry each title: "Alerts" is Metrics' and the proxy's. */
+const TITLE_COUNT = (() => {
+  const count = new Map<string, number>()
+  const walk = (entries: readonly (NavEntry | NavChild)[]) => {
+    for (const entry of entries) {
+      // A section's landing row shares its address and is the section.
+      count.set(entry.title, (count.get(entry.title) ?? 0) + 1)
+      if ("children" in entry && entry.children)
+        walk(entry.children.filter((child) => child.href !== entry.href))
+    }
+  }
+  walk(NAV.flatMap((group) => group.items))
+  walk(PERSONAL_NAV.filter((row) => row.href !== ACCOUNT_SECTION.href))
+  return count
+})()
+
+/** One project's page from its address: `/deploy/12/logs` is "Logs". */
+function projectPage(pathname: string): string | undefined {
+  const rest = /^\/deploy\/\d+(\/.*)?$/.exec(pathname)?.[1]
+  if (!rest) return undefined
+  return [...PROJECT_SETTINGS_NAV, ...PROJECT_NAV].find(
+    (entry) => entry.path && (rest === entry.path || rest.startsWith(`${entry.path}/`)),
+  )?.title
+}
+
+/**
+ * Where the nav puts an address, innermost first, and whether the address is a
+ * rail row's own. A row inside a section is named alone unless another row has
+ * the same name, and then with its section: "Alerts · Proxy & TLS". An address
+ * under a row (a container under Containers) is named for that row, since the
+ * item's own name comes from the page.
+ */
+function tabPlace(pathname: string): { names: string[]; own: boolean } {
+  const section = sectionsFor(pathname).at(-1)
+  if (!section?.children) {
+    const row = NAV.flatMap((group) => group.items).find(
+      (entry) => entry.href !== undefined && navMatches(entry.href, pathname),
+    )
+    return { names: row ? [row.title] : [], own: row?.href === pathname }
+  }
+  if (section.href === pathname) {
+    // The section's landing page: "Profile" for the account, else the section.
+    return { names: [navLocation(pathname)?.title ?? section.title], own: true }
+  }
+  let row: NavEntry | NavChild | undefined
+  for (const child of section.children) {
+    if (child.href === undefined || child.href === section.href) continue
+    if (!navMatches(child.href, pathname)) continue
+    if (!row || child.href.length > (row.href?.length ?? 0)) row = child
+  }
+  if (!row) {
+    const page = projectPage(pathname)
+    return { names: page ? [page, section.title] : [section.title], own: false }
+  }
+  const shared = (TITLE_COUNT.get(row.title) ?? 0) > 1
+  return { names: shared ? [row.title, section.title] : [row.title], own: row.href === pathname }
+}
+
 /**
  * What the browser's tab says on a page: "Files · Just Dashboard". An address
- * the nav has no row for takes the section it sits in, and one under no
- * section takes the product's name alone.
+ * the nav has no row for takes the row or the section it sits under, and one
+ * under no section takes the product's name alone.
+ *
+ * The item comes first. Every page of every database read "Databases" and
+ * every page of every project "Deployments", so four tabs and the Back menu's
+ * entries could not be told apart. `name` is what the page on screen says it
+ * is about (`components/tab-title.tsx`): "orders · Query · Databases", "shop ·
+ * Logs · Deployments", "nginx · Containers", "Page not found". A page's
+ * heading names it only where the nav has no row for the address, so a list
+ * page keeps its rail entry's word; what a page says with `useTabTitle` is
+ * always used. Two rows that share a word ("Alerts", "Traffic", "Security",
+ * "Map", "Configuration") carry their section. A word said twice is said once.
  *
  * A server linked to a Just Hub is one of several, and five tabs that all say
  * "Docker · Just Dashboard" cannot be told apart — so `host`, this server's
@@ -661,7 +781,17 @@ export const APP_NAME = "Just Dashboard"
  * rather than before, so the page still leads and a narrow tab cuts the
  * product's name first. Unlinked, the title is exactly what it was.
  */
-export function tabTitle(pathname: string, host?: string): string {
-  const page = navLocation(pathname)?.title ?? sectionsFor(pathname)[0]?.title
-  return [page, host?.trim() || undefined, APP_NAME].filter(Boolean).join(" · ")
+export function tabTitle(pathname: string, host?: string, name?: TabName): string {
+  const { names, own } = tabPlace(pathname)
+  const said = name && (name.explicit || !own) ? name.parts : []
+  const seen = new Set<string>()
+  const page = [...said, ...names]
+    .map((part) => part.trim())
+    .filter((part) => {
+      const key = part.toLowerCase()
+      if (!part || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  return [...page, host?.trim() || undefined, APP_NAME].filter(Boolean).join(" · ")
 }

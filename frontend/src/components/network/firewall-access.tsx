@@ -11,7 +11,7 @@ import type {
   FirewallStatus,
 } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Notice, Spinner } from "@/components/state"
+import { Hold, Notice, Spinner } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Warning } from "@/components/icons"
@@ -51,14 +51,20 @@ export function FirewallAccessPanel() {
     30_000,
   )
   const checks = access.data?.checks ?? []
-  if (checks.length === 0) return null
+  // Whether there is a way in to list decides whether this is on the page at
+  // all: the rules under it wait to find out rather than be pushed down.
+  const hold = <Hold until={!access.loading} />
+  if (checks.length === 0) return hold
   return (
-    <Panel>
-      <PanelHeader title="Preserved access" />
-      <PanelBody flush>
-        <AccessTable checks={checks} />
-      </PanelBody>
-    </Panel>
+    <>
+      <Panel>
+        <PanelHeader title="Preserved access" />
+        <PanelBody flush>
+          <AccessTable checks={checks} />
+        </PanelBody>
+      </Panel>
+      {hold}
+    </>
   )
 }
 

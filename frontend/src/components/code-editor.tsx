@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 import dynamic from "next/dynamic"
 import { cn } from "@/lib/utils"
+import { MONACO_VS } from "@/lib/vendored"
 import { Spinner } from "@/components/state"
 
 // Monaco pulls in a large worker bundle and touches `window`, so it is loaded
@@ -25,7 +26,7 @@ const MonacoEditor = dynamic(
   () =>
     import("@monaco-editor/react").then(async (mod) => {
       const { loader } = await import("@monaco-editor/react")
-      loader.config({ paths: { vs: `${window.location.origin}/monaco/vs` } })
+      loader.config({ paths: { vs: `${window.location.origin}${MONACO_VS}` } })
       return mod
     }),
   {

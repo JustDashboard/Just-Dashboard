@@ -120,7 +120,7 @@ type workspace struct {
 	Live      bool      `json:"live"`
 	CWD       string    `json:"cwd,omitempty"`
 	Windows   int       `json:"windows"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 	Attached  int       `json:"attached"`
 	User      string    `json:"user,omitempty"`
 	Shell     string    `json:"shell,omitempty"`
@@ -710,7 +710,7 @@ func (s *Server) handleTerminalWindowKill(w http.ResponseWriter, r *http.Request
 		if errors.Is(err, term.ErrNotFound) {
 			return httpx.ErrNotFound
 		}
-		return httpx.BadRequest("%s", err.Error())
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "terminal.window.kill", id, map[string]any{"window": windowID})
 	httpx.NoContent(w)

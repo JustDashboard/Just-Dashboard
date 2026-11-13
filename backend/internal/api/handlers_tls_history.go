@@ -75,7 +75,7 @@ type scanSummary struct {
 	DaysLeft    *int64    `json:"daysLeft,omitempty"`
 	Fingerprint string    `json:"fingerprint,omitempty"`
 	Reachable   bool      `json:"reachable"`
-	CheckedAt   time.Time `json:"checkedAt"`
+	CheckedAt   time.Time `json:"checkedAt,omitzero"`
 }
 
 // handleTLSScans lists a target's stored reports, newest first.
@@ -213,7 +213,7 @@ func (s *Server) handleCheckWatchedNow(w http.ResponseWriter, r *http.Request) e
 }
 
 type watchedCheck struct {
-	CheckedAt   time.Time `json:"checkedAt"`
+	CheckedAt   time.Time `json:"checkedAt,omitzero"`
 	DaysLeft    *int64    `json:"daysLeft,omitempty"`
 	Fingerprint string    `json:"fingerprint,omitempty"`
 	Error       string    `json:"error,omitempty"`

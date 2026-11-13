@@ -198,8 +198,10 @@ reading it answers says awake; `409 not_asleep` when there is nothing asleep.
 
 - The deployment summary carries `asleepSince` while a stretch is open, and the project reads **Asleep**
   rather than Stopped: the fleet, the header, the overview. Its primary verb is Wake now rather than Start.
-- The overview draws the sleeping panel (`sleep-panel.tsx`): since when and why, the last request, how
-  long a visitor waits, the share of the week asleep, the last wake, and Wake now. Its site preview is not
+- The overview draws the sleeping block (`sleep-panel.tsx`) in the shape its other blocks take: Docker's
+  mark with *Asleep by design for …* as the sentence, then why, what the next visitor meets and the last
+  wake under it, and one picture, the last seven days as a strip with each stretch asleep on it, over
+  the share of the week asleep. Its verb is Wake now. It carries no metric cards. Its site preview is not
   loaded while asleep (`SitePreview asleep`): loading it would be a request through the route, and wake it
   for nobody.
 - The host's `container_down` alert reads a stopped container with an open stretch as fine: "It is asleep

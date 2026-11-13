@@ -339,7 +339,7 @@ type SiteBackup struct {
 	Layout   string    `json:"layout"`
 	Path     string    `json:"path"`
 	Size     int64     `json:"size"`
-	Modified time.Time `json:"modified"`
+	Modified time.Time `json:"modified,omitzero"`
 	// Site is the name a restore gives it back, and SiteExists whether a
 	// site of that name is there now — a restore then needs another name.
 	Site       string `json:"site,omitempty"`

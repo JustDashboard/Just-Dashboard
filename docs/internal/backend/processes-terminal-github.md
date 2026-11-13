@@ -7,6 +7,12 @@ using PID plus creation time as identity. Keyboard inspection and place restorat
 [workspace controller](../frontend/workspace-interactions.md); explicit refresh and changed filters
 still read while paused. Signal and priority route guards remain the contracts below.
 
+A server without systemd answers every systemd route `503 not_installed` (`mapProcsError`): a missing
+`systemctl`, and equally a `systemctl` that is there on a machine whose init is something else (a
+container), which used to be a `502 command_failed` in systemctl's words. A command that ran out of
+its time is `504 timeout` (`procs.run` keeps the deadline in the error's chain); only a command that
+ran and failed is `502 command_failed`.
+
 `internal/procs/table.go` is a live inventory rather than a thin `ps` rendering. The kernel's cgroup
 membership identifies systemd services, containers and login sessions; an empty command line with
 `PF_KTHREAD` among the task flags in `/proc/<pid>/stat` identifies a kernel thread (an empty command line
@@ -158,6 +164,10 @@ socket-activated service's port.
   `EXIT_STATUS` and the cursor, and takes the invocation of the unit a manager line names
   (`INVOCATION_ID`, then `USER_INVOCATION_ID`) over the writer's own: a user manager is
   `user@1000.service`, one run, under which every run of every user unit would otherwise fold into one.
+- **No systemd is not a failed command.** `Systemd.Available` needs systemctl and a running manager
+  (`/run/systemd/system`, `procs.SystemdRunDir`). Without one the two lists answer `available: false`
+  and every other route answers 503 `systemd_not_running` with a reason, having run nothing
+  ([runtime boundaries](../architecture/runtime-boundaries.md#server-modules-degradation)).
 - `GET /systemd/` carries each unit's live readings and the manager (`Systemd.Inventory`, additive:
   `units` keeps its shape). One `systemctl show -p … --` over every loaded unit reads its type, main
   PID, cgroup memory (page cache included) and tasks, automatic restarts (`NRestarts`), result and
@@ -546,6 +556,10 @@ deploy pages use for the repository a project deploys.
   comes from `install.sh` (`jd_install_host_tools`, GitHub's own repository on Debian and Ubuntu), at
   `/usr/bin/gh`, which is on every PATH, interactive or not. An install upgraded without re-running the
   installer and with no gh of its own cannot push over HTTPS from a shell; the Git page is unaffected.
+- **gh without an account is `409 github_login_required`** on the Git page's routes (`ghError`), the
+  code a deployment's pull requests already use, with gh's hint in `error.raw`. It was a
+  `400 bad_request` whose message was "please run: gh auth login". A sign-in that gh turns down stays
+  the request's refusal.
 - **The login is the CLI's own device flow, performed here.** `gh auth login` is a series of prompts and a
   web request has nobody to answer one, so `device.go` runs the OAuth device flow against the GitHub
   CLI's public client id — which is what makes the token indistinguishable from one gh minted, and what

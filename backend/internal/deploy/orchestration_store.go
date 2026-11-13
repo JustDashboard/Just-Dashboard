@@ -40,6 +40,7 @@ const (
 // same stable deploy_projects and deploy_runs identities.
 type OrchestrationStore struct {
 	db     *sql.DB
+	st     *basestore.Store
 	now    func() time.Time
 	broker *eventBroker
 	// SQLite permits concurrent readers but one writer. Serializing this
@@ -52,8 +53,16 @@ type OrchestrationStore struct {
 }
 
 func NewOrchestrationStore(st *basestore.Store) *OrchestrationStore {
-	return &OrchestrationStore{db: st.DB, now: time.Now, broker: newEventBroker()}
+	return &OrchestrationStore{db: st.DB, st: st, now: time.Now, broker: newEventBroker()}
 }
+
+// reader is the store's read pool, for the reads a page polls or pages
+// through: the fleet and its summaries, run lists, transcripts. They are the
+// long and the frequent ones, and on a pool of their own they cannot stand
+// between the engine, or a request's session check, and the database. They
+// see every commit made before they began. Nothing that is part of a write
+// reads through it.
+func (s *OrchestrationStore) reader() *sql.DB { return s.st.Reader() }
 
 const engineRunColumns = `
 id, run_number, source_revision, project_id, environment_id, state, operation, trigger, actor,
@@ -64,6 +73,18 @@ terminal_code, terminal_reason, lease_until, priority, slot_class,
 metadata_json`
 
 type scanner interface{ Scan(...any) error }
+
+// withColumns scans a row that carries more columns after the ones a scan
+// function reads, so a list can select what it would otherwise look up row by
+// row while its cursor is open.
+type withColumns struct {
+	row   scanner
+	extra []any
+}
+
+func (w withColumns) Scan(dest ...any) error {
+	return w.row.Scan(append(dest[:len(dest):len(dest)], w.extra...)...)
+}
 
 func scanEngineRun(row scanner) (*EngineRun, error) {
 	var (

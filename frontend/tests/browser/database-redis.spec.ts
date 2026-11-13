@@ -1221,7 +1221,7 @@ test.describe("keys", () => {
   }) => {
     const redis = await mockRedis(page, { failing: /^\/keys\/tree$/ })
     await page.goto(KEYS)
-    await expect(rail(page).getByRole("alert")).toContainText("the server did not answer")
+    await expect(rail(page).getByRole("alert")).toContainText("The server did not answer")
     redis.heal()
     await rail(page).getByRole("button", { name: "Try again" }).click()
     await expect(rail(page).getByRole("button", { name: "Open leaderboard" })).toBeVisible()

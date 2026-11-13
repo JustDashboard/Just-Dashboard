@@ -50,7 +50,7 @@ type ConsoleResult struct {
 	Command    string    `json:"command"`
 	Output     string    `json:"output"`
 	ExitCode   int       `json:"exitCode"`
-	ExecutedAt time.Time `json:"executedAt"`
+	ExecutedAt time.Time `json:"executedAt,omitzero"`
 }
 
 // ValidateCommand is exported so preflight, schedules and the route all refuse
@@ -139,7 +139,7 @@ type Players struct {
 	Online     int       `json:"online"`
 	Maximum    int       `json:"maximum"`
 	Names      []string  `json:"names"`
-	ObservedAt time.Time `json:"observedAt"`
+	ObservedAt time.Time `json:"observedAt,omitzero"`
 }
 
 // listRE matches the vanilla `list` reply, which Paper, Purpur, Fabric, Forge

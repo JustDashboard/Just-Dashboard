@@ -98,7 +98,7 @@ function QuestionImages({ images }: { images: AgentImage[] }) {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={image.thumb}
-                alt={`Image ${at + 1} of the question`}
+                alt=""
                 className="block max-h-40 max-w-56 object-contain transition-[filter] duration-150 hover:brightness-90"
               />
             </button>

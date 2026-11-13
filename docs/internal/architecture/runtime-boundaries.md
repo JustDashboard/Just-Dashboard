@@ -17,6 +17,35 @@ Databases and disposable application checks to a Docker adapter; Backups owns th
 else; affected routes return a precise "unavailable on this host" code the frontend renders as
 information (`ErrorState` in `components/state.tsx`), not an error.
 
+"There" means usable, not installed: the image ships the docker CLI and systemctl whatever the host
+runs, so a program on `PATH` says nothing about the daemon or the manager behind it.
+
+- **Docker and the proxy.** The lookup of the Caddy ingress that deployments share answers one of
+  three things: an ingress, none, or a `*proxysvc.IngressProblem` (`ingress_problem.go`) that carries a
+  code, the sentence, what to do about it and what Docker said. `GET /proxy/vhosts` reads nginx's
+  sites and the host Caddyfile's from files, so a lookup that fails takes none of them away
+  (`Service.ReadVHosts`): the list answers 200 with them, and `GET /proxy/status` carries the problem
+  as `ingressProblem: {code, message, reason, raw, retryable}`, the names an API error uses. The TLS
+  fleet (`GET /certificates/scans/latest` and the scan `POST /certificates/scan-all` starts) and the
+  ports page read the sites the same way, so they keep nginx's sites too.
+  `Service.ListVHosts` stays whole-or-error for callers that decide from the list (deploy preflight,
+  the request tester, the site-controls check, the Certificate Transparency monitor, which does not
+  report on the names it could read as if they were all). Where an ingress problem does fail a
+  request, `mapProxyError` and `proxyReadError`
+  (`handlers_proxy.go`) answer it under its own code with `reason` and `raw`: 503 and retryable for
+  `ingress_unreachable` (Docker did not answer), `ingress_not_running` (the container
+  `JD_INGRESS_CONTAINER` names) and `ingress_unreadable` (found, but its routes could not be read,
+  which fails the list rather than showing an ingress with no routes); 409 for `ingress_ambiguous`
+  (more than one public Caddy) and `ingress_unusable` (no port 443, nothing persisted, not serving
+  `/etc/caddy/Caddyfile`). None of them is a 500.
+- **systemd.** `Systemd.Available` is systemctl on `PATH` and `/run/systemd/system` on the side
+  systemctl runs (`procs.SystemdRunDir`, what `sd_booted(3)` checks; in the container it is the
+  host's, mounted with `/run/systemd`). Without it `GET /systemd/` and `/systemd/timers` answer
+  `available: false` as they do without the program, and every other systemctl call is refused
+  before it starts (`procs.run`) with `ErrNoSystemd`: 503 `systemd_not_running` with the reason,
+  where it used to run and come back as 502 `command_failed` with "System has not been booted with
+  systemd".
+
 `Server.Start(ctx)` is separate from `New` so failing to schedule background work is reported by `main`
 rather than swallowed in construction. It starts the metrics recorder (here, not lazily — its whole
 purpose is to have been running while nobody was looking), the database activity recorder, the repair
@@ -72,6 +101,23 @@ fences their old work. Its controller stops owned containers, disables restart, 
 and retries incomplete isolation every 30 seconds without preventing access to the dashboard. It stops
 before the deployment engine on shutdown; retained legacy data is never deleted by quarantine.
 
+**A stop has a budget, and the container is given longer than it.** `docker-compose.yml` sets the
+backend's `stop_grace_period` to 60 seconds, and `cmd/server/lifecycle.go` spends at most 50 of them
+(`shutdownBudget`; a test holds the two apart). On SIGTERM `drainHTTP` stops accepting requests and
+gives those under way three seconds to finish as they would have; then it cancels the base context every
+request's context descends from (`http.Server.BaseContext`), which is the only thing that ends a
+response held open on purpose (an assistant's answer, an export) or a hijacked socket, neither of which
+`http.Server.Shutdown` cancels by itself. Handlers have eight seconds in all to return. Then
+`api.Server.ShutdownContext(budget)` runs the module shutdown above with what is left: the deployment
+engine's 30-second grace and the three 10-second waits (socket history, captures, diagnostics) keep their
+own limits and are cut short by the budget. It ends by waiting for the goroutines `Start` launched itself
+(`Server.background`: the store's health, block expiry, the Remote Desktop and database upgrade
+recoveries), and `main` waits for the session janitor, so nothing is still writing when the store closes.
+`Shutdown` runs once; the deferred call after a signal's is a no-op. Before this the HTTP drain alone
+could take 15 seconds against Docker's default of 10, so a stop with a stream open was a kill and the
+engine's grace was never available. Compose reads the grace period on `stop` and on every recreate, an
+update's and a settings restart's included; the uninstaller's `down --timeout 30` is its own choice.
+
 `helpers.detachedContext` is the deliberate opposite: work that must outlive its request (a backup
 transfer, a `compose up --build`) descends from `context.Background()` and is not cancelled by shutdown
 — a deploy killed halfway is worse than one finishing into a dashboard that is gone. Its timeout is the
@@ -82,6 +128,130 @@ backend container's cgroup and is killed when the container stops. Package comma
 themselves (docker-ce's maintainer script restarts Docker), so they run as transient units of the host's
 systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
 [streaming and jobs](../backend/databases-proxy-platform.md#streaming-jobs-secrets-agent-mode).
+
+## Background work survives its own panics
+
+A panic on a goroutine nothing recovers ends the process, and `httpx.Recoverer` covers request
+goroutines only. Most background loops parse what the host prints (nginx, `ss`, systemd, Docker's
+JSON), so one unusual line used to take the dashboard down for everybody, and since the line was still
+there after Compose restarted the container, it went down again.
+
+`internal/safego` is how background work is started instead:
+
+- `safego.Go(ctx, log, name, fn, after...)` runs a loop as a named task. A panic is logged once with
+  its stack under the task's name, and `fn` is called again after a pause that starts at one second and
+  doubles to a minute (starting over after a run of five minutes). `ctx` is what stops a task: one whose
+  owner cancelled it is not started again, and the pause ends with it, so a `Stop` never waits one out.
+  Because `fn` runs more than once it must not do on its way out what can only be done once; the channel
+  a `Stop` waits on is closed in `after`, which runs when the task has returned for good.
+- `safego.Once` is the same for work that is finished when it returns (a reconcile at boot, the
+  Remote Desktop and database upgrade recoveries), without the restart.
+- `defer safego.Recover(log, name)` is for a goroutine that must not be started twice or is one of
+  many: a deployment worker (its lease lapses and the schedule's sweep reclaims the run, as for any
+  worker that died), the kernel socket observer, the fan-out inside a loop's pass (one repository's
+  check, one egress round, one container's log reader), a link's inner loops, the container feed the
+  first subscribing page starts, and the keepalive and control reader every WebSocket handler starts.
+  The two cron schedulers (backups, base backups) wrap each job the same way, since `robfig/cron`
+  recovers nothing.
+- `safego.Try(log, name, fn)` is for work that has somebody to tell: the panic comes back as `fn`'s
+  error. `jobs.Manager.run` calls every job's runner through it, so a job that panics is a failed job
+  with the reason on it, not the end of the dashboard and of every other job.
+
+Every task is remembered by name (`safego.Tasks`); a name is a fixed phrase, never built from an id.
+`GET /dashboard/health` lists the ones that panicked in the last half hour as `tasks` and the Overview
+says so as a warning, because a task that is restarted after every panic otherwise fails without a
+sound. Everything `Server.Start` and the modules' `Start` functions launch goes through `safego`, and
+`TestStartFunctionsStartSupervisedGoroutines` (`internal/safego/boot_test.go`) fails on a function
+named `Start…` that starts a goroutine with a bare `go`, except the per-request ones it lists with
+their reasons. Other goroutines a request handler starts for itself (a log follower, a probe's
+fan-out, a terminal's reader) are not covered by that rule: a panic in one still ends the process.
+
+A loop's pass that returns an error is reported, never assigned to blank. `safego.Passes` (one per
+loop, made where the loop begins) logs by change of state, so a loop that runs every five seconds can
+report every pass: the first failure as `background task failed`, a failure whose text has changed at
+most once a minute and a reminder each hour as `background task is still failing`, and the recovery as
+`background task recovered` with how long it lasted and how many passes failed. A pass cut short by the
+loop's own context is neither. The Git branch watch (whose `poll` now returns each failed check with
+its project and environment), the preview reconciler, the database network reconciler, the deployment
+schedule (a due schedule that could not be run is also logged by name), the nginx status sampler,
+the certificate watch and the deployment ingress upkeep (which warned every thirty seconds for as long
+as Docker did not answer) report this way. `TestSupervisedLoopsDoNotDiscardWhatAPassReturned`
+(`internal/safego/discard_test.go`) fails on a task function that assigns a call made with its context
+to blank. This is the log only: the deployment page still shows such a watch as `stale`, and a store
+that refuses writes is said on the Overview by [the dashboard's own health](#the-dashboards-own-health).
+
+## The dashboard's own health
+
+`/healthz` is liveness and nothing else: a fixed `{"status":"ok"}` for as long as the process serves.
+It is what the image's `HEALTHCHECK` asks, and through the container's
+health so do `docker compose up --wait` in the installer and the updater, and the updater's rollback. It
+must therefore not depend on the store: a liveness that turned red when SQLite cannot be written would
+restart-loop the stack on a full disk and roll an update back for a reason the previous version shares,
+at the moment the dashboard is the tool for finding what filled the disk.
+
+The check itself is `jd-healthcheck` (`cmd/healthcheck`, `internal/healthprobe`): one GET of `/healthz`
+on `JD_ADDR`, over TLS without verification in agent mode. It is a program of its own on the standard
+library, which a test holds it to, because Docker starts it every thirty seconds: as a mode of the server
+binary each run initialised all 340 packages the server links, about 150 ms and 57 MB, against 1 ms and
+8 MB now. The server's `-healthcheck` flag runs the same probe and stays for a container still described
+by an older image.
+
+What liveness leaves out is `internal/storehealth`, started first in `Server.Start`. Every fifteen
+seconds it rewrites one `settings` row (`store_health_probe`), reads back if that fails, and measures
+the filesystem under `JD_DATA_DIR`. `GET /api/v1/dashboard/health` (every role, `handlers_self.go`)
+answers `{ok, store, tasks}` with the store's `code`: `disk_full` (SQLite or the kernel refused space, under
+4 MiB is free, or the reserve is spent), `store_unreadable` (not even `SELECT 1` answers), or
+`store_unwritable` (writes have failed for another reason for a full minute, so one busy answer during
+a migration is not a problem). The Overview draws a danger `Notice` from it
+(`components/overview/health-notice.tsx`, worded in `lib/dashboard-health.ts`), and the log says each
+change of state once.
+
+The monitor also keeps a **space reserve**: 32 MiB of random bytes at
+`JD_DATA_DIR/staging/disk-reserve`, written only while that leaves eight times its size free, and not at
+all under `JD_DEV`. When a write is refused for space, or free space falls under 4 MiB, the file is
+deleted, which hands SQLite room for the sign-in, the audit lines and the settings an operator needs
+while cleaning up; the status stays `disk_full` until there is room to write the reserve again. It is
+random rather than preallocated because a compressing filesystem would keep zeros in a few blocks, and
+it lives in `staging` because every backup of the data directory already excludes that folder. A
+reserve that cannot be written (a quota, a filesystem that reports room it cannot hand out) is said in
+the log once and tried again every ten minutes, not on every pass: each attempt writes all 32 MiB. It is a
+margin, not a guarantee: whatever filled the disk can fill 32 MiB more. A request whose store write is
+still refused answers `507 disk_full` with a sentence saying so (`httpx.DiskFull`, applied in
+`WriteError` to any error that would otherwise be an unexplained `500 internal`), which is what the
+sign-in page shows.
+
+### What the process uses, and profiles of it
+
+The dashboard measured the host, its containers and its databases and had nothing to say about
+itself; why the backend sat at 130 MB or took 3% of a core with nobody signed in was a guess from
+`docker stats`. Two things answer it, both `system.admin` (`handlers_self_stat.go`), behind the
+allowlist and authentication like the rest of `/api/v1`, and neither on `/healthz`:
+
+- `GET /api/v1/dashboard/self` is one reading: `process` (`internal/selfstat`: pid, start and uptime,
+  Go version, `GOMAXPROCS`, goroutines, threads, open files, cumulative user and system CPU seconds,
+  `rssBytes` as the kernel charges it, and `memory`, the runtime's own account: heap in use, idle and
+  released, stacks, total obtained from the system, the next collection's target, collections and
+  their pause time); `store` (the database file with its `-wal` and `-shm` sizes: a write-ahead log
+  that stays large is a reader holding a checkpoint back); and `tasks`, every `safego` task with its
+  panics and, where its loop reports through `safego.Passes`, `passes: {passes, lastPassAt,
+  failingSince, failedPasses, lastError, lastErrorAt}` (`safego.PassStates`). `lastError` outlives the
+  recovery, so a loop that fails now and then is not only ever seen working. There is no duration of
+  a pass: `Report` is handed what a pass returned and does not know when it began. Tasks that share
+  a name share a row, and a loop that does not report through `Passes` has none.
+- `GET /api/v1/dashboard/debug/pprof/` lists the profiles and `…/pprof/{name}` writes one in the
+  format `go tool pprof` reads, as a file: `profile` (CPU, sampled for `?seconds=`, 1 to 60, 10 unless
+  said; a second one while it runs is 409 `profile_running`, because the runtime takes one at a
+  time), `heap`, `allocs`, `goroutine` and `threadcreate`; `?debug=1` or `2` answers text.
+  `net/http/pprof` is not imported, on purpose: its `init` registers the profiles on
+  `http.DefaultServeMux`, where any listener that ever served the default mux would hand them out
+  unauthenticated, and a test holds the default mux to having none. Block and mutex profiles are not
+  offered: they are empty unless sampling is turned on for the whole process. The routes take the
+  destructive routes' rate budget (`destrLim`) without their mark, each profile is on the audit trail
+  as `dashboard.profile` although it is a read (`httpx.AuditRead`), and the assistant does not call
+  them (`agentExcludedAreas`): the answer is a binary file for a person's tools.
+
+A request that ends in a 5xx is logged at error level with its request id, which is also in the
+answer (`httpx.WriteError`); requests that succeed are logged at debug.
 
 ## Reaching the host, and containing paths
 
@@ -150,7 +320,10 @@ prefix test, with the same hole. File-manager extraction additionally stops afte
 8 GiB of bytes actually written, reserves at least 1 GiB of free space, serialises extraction requests,
 removes the current partial file on failure, and obeys a ten-minute request deadline — compressed
 metadata is never trusted as the quota. `internal/sysinfo` reads the host through gopsutil rather than parsing
-`/proc`, so the same path works across kernels and inside a container with `/proc` bind-mounted.
+`/proc`, so the same path works across kernels and inside a container with `/proc` bind-mounted. The one
+reading `/proc` cannot give, each filesystem's size, is a `statfs` of the mount point, which `sysinfo`
+makes through `InHostMounts` with a two-second wait per pass
+([per-filesystem capacity](../backend/observability-security.md#metrics-and-saturation)).
 
 ## Auth, secrets, state
 
@@ -290,6 +463,16 @@ close of the file anywhere in it — a scan reading its header, a download, an a
 and another SQLite closing its connection afterwards would believe it was the last one and delete the
 `-wal` and `-shm` the store is still writing through, corrupting the database. Inspect a live store
 read-only: `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`.
+The store, its `-wal` and its `-shm` are `0600` from the moment each exists (`store/file_modes.go`): the
+log holds the pages written last, so it is as private as the file. SQLite gives the two sidecars the mode
+of the database, whatever the umask, so `Open` creates `vpsd.db` `0600`, or makes an existing one and
+its sidecars `0600`, before the first connection; a chmod after the schema used to leave both `0644`
+from a first start until the next restart. `Open` also takes listing and writing in `JD_DATA_DIR` away
+from other accounts (`0755`, as Docker makes a bind mount's source, becomes `0711`). The directory
+stays searchable because the host's nginx reaches `nginx-cache` under it as its own account, and bits
+are only removed, so a directory closed further stays closed. The process umask is not changed: the
+server starts package installs, builds and the terminal, and a umask of 077 handed down to them would
+make what they install unreadable to the accounts meant to read it.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
 `api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `api_token_deployments` — the deployments a deploy key, or an MCP key's deployment grant, was narrowed to —, `audit_log`, whose `key_id` and `key_name` name the API key behind a request, and whose `session_id` and `hub_user` name the session a Just Hub sign-in ticket opened and its hub user); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, the images placed on them in `board_files`, the install's shape library in `board_library`, and `sticky_boards`, which nothing reads since Stickyboard was removed in 0.8 but which stays so the boards made with it in 0.7.2–0.7.5 survive an update); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
 `remote_desktop_sessions`); backups
@@ -317,7 +500,91 @@ with seven days of per-minute protection samples (`network_gateway_counters`,
 `/etc/just-dashboard/network/spec.json` instead, because it describes the host and has to outlive the
 dashboard ([network module](../backend/network.md#three-rules)). The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old
-columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
+columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract. A test that takes
+that fixture through `Open` calls `t.Parallel()` first, and `parallel_test.go` fails one that does
+not: each migrates twice, under the race detector one `Open` is about six seconds, and twenty of them
+in a row put the package at `go test`'s ten minutes, which is what failed the race gate three times
+in November 2026 with no race reported. They own the directories they open and the package keeps no
+state between stores, so nothing is shared.
+
+### The store's connections
+
+`store.Open` opens the one database file through three handles. The two that write differ in what a
+power cut may take; the third cannot write at all:
+
+| Handle | Connections | Opened with | Carries |
+| --- | --- | --- | --- |
+| `Store.DB` | 4 | `synchronous=FULL`, `_txlock=immediate` | everything, unless it is named in the next rows |
+| `Store.Bulk()` | 1 | `synchronous=NORMAL`, `_txlock=immediate` | metric samples and their pruning (`metrics.Recorder`), the lines a deployment step prints (`OrchestrationStore.AppendLogs`) |
+| `Store.Reader()` | 4 | `query_only`, no `_txlock` | the reads that take long or that a page polls: metric history and its events, forecasts and sizing (`metrics.Recorder`), the deployments read model, run lists, insights and transcripts (`OrchestrationStore.reader()`), a page of the audit trail (`audit.Logger.List`) |
+
+All three wait five seconds on a busy database. `DB` is kept at four connections so SQLite's one
+writer does not queue behind itself; that number was chosen for the writer, and it used to be all the
+readers had too.
+
+**Long reads have a pool of their own.** A week of host history takes about half a second to fold, a
+Metrics page asks for several such reads at once, and Deployments polls its fleet. On `DB` two such
+tabs held all four connections, and a session check, an audit row or the next metric sample waited in
+`database/sql`'s queue, not in SQLite: a 2 ms request took a third of a second. In WAL mode a reader
+never waits for the writer nor the writer for a reader, so those reads now run on `Reader()`, whose
+connections are not `DB`'s. A read there sees every commit made before it began, on whichever handle.
+Its connections are `query_only`, so a write sent to it fails instead of being lost, and it is opened
+without `_txlock=immediate`, because a transaction on a connection that cannot write must not begin by
+asking for the write lock. Two rules follow. A read goes to `Reader()` when it is long (history over a
+range, a filtered scan) or frequent (a poll), and is not part of a write: a function that reads and
+then writes inside one transaction keeps to that transaction on `DB`. And the rule below holds on this
+pool as on any other: a cursor open on `Reader()` is closed before the next query on `Reader()`.
+`Store.Reader()` on a store that `Open` did not make answers with `DB`.
+
+**Which writes survive a power cut is a decision, and this is it.** The database is in WAL mode. With
+`synchronous=FULL` a commit returns once the write-ahead log is on disk; with `NORMAL` it returns once
+the operating system has it, and the log is synced at the next checkpoint or the next `FULL` commit,
+whichever comes first. Neither can corrupt the database, and neither loses anything when the process
+is killed or crashes. The difference shows only after a power cut or a kernel crash: commits made
+under `NORMAL` since the log was last synced can be missing. That is the last seconds of them: any
+`FULL` commit syncs the log, and with none the kernel writes it out by itself within about thirty
+seconds.
+
+- **Kept durable (`DB`, the default):** every write the dashboard has acknowledged and somebody would
+  act on — audit entries, accounts, passwords, second factors, sessions and their revocation, API keys,
+  hub grants, settings, sealed secrets, a deployment's runs, steps, releases and leases, backups,
+  schedules, proxy and network records. A revoked key that works again after the power returns, or an
+  audit trail missing the last thing that was done to the host, is not a trade for speed. Anything
+  nobody has classified is here.
+- **Relaxed (`Bulk()`):** rows whose last seconds nobody would miss. A metric sample lost to a power
+  cut leaves a gap no wider than the outage draws anyway; the last lines of a build log are lost
+  together with the build that was printing them, and how each step and the run ended is written on
+  `DB`, whose commit makes every line before it durable. In return the recorder no longer costs the
+  disk three or four syncs every sampling interval, and a build's log does not wait on the disk for
+  every batch.
+
+A writer moves to `Bulk()` only when the answer to "if the server lost power the moment after this
+write, would anybody act differently for not having the row?" is no. It has one connection, because a
+second would only wait for the first inside SQLite; so a transaction on it never asks the store for
+anything else while it is open (the rule below, at its strictest). `Store.Bulk()` on a store that
+`Open` did not make (a test's own database) answers with `DB`.
+
+**Nothing queries the pool while it holds one of its connections.** An open `*sql.Rows` holds a
+connection until it is closed or read to its end, and a `*sql.Tx` until it commits or rolls back. A
+query made in between — directly, or through a method that looks harmless — takes a second connection.
+That works until as many such calls run at once as the pool has connections: each then holds one and
+waits for another, and every other database call in the process (session checks, audit rows, the
+metrics recorder, the deployment engine) waits behind them until the stuck requests' clients go away.
+The fleet read and the schedule list both did this, and four browser tabs on Deployments during a busy
+deploy were enough. So a list reads its cursor to the end and closes it before it looks anything up
+(better: selects it in the same statement, or reads it for all rows in one `IN` query), and a function
+that is handed a transaction runs every statement on that transaction, never on the pool beside it.
+
+Two things keep it that way. `storetest.OneConnection(st)` leaves a test's store one connection for
+everything (`Store.SingleConnection`: every handle answers with `DB`, and `DB` keeps one), on which
+such a call can never finish; `deploy/one_connection_test.go` calls every list read of the
+deployment stores that way, with rows present and a deadline, and a new list read belongs in its table.
+And `JD_STORE_ONE_CONNECTION=1` does the same to every store `storetest.Open` opens, which turns a
+package's whole suite into the hunt: `JD_STORE_ONE_CONNECTION=1 go test -timeout 5m ./internal/deploy`
+hangs in the test that makes the mistake and the timeout's stack names the line. A test about the
+handles themselves (samples, a log batch or a read still getting through while `DB` is exhausted) has
+nothing to show on such a store and calls `storetest.OwnHandles`, which skips it there; so a hunt that
+fails names that mistake and nothing else.
 
 `internal/audit` writes `audit_log` **and** mirrors every entry to the process log, so a trail survives
 the database being tampered with. The row is written with the request's values but not its

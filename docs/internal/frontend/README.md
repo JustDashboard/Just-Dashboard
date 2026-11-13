@@ -11,5 +11,11 @@ Read [`design-system.md`](design-system.md) before adding a component that any o
 want. `eslint-rules/design-system.mjs` and `tests/browser/design-system.spec.ts` enforce the parts of
 it that a machine can check; the rest is judgement and lives in that document.
 
+`eslint.config.mjs` also holds every `src/**/*.tsx` to `jsx-a11y`'s recommended rules, as errors: a
+field has a label, and what a pointer can press a keyboard can reach. The rules that are wrong for
+this codebase are off or configured there with the reason beside them. Where a rule misreads one
+place (a row that is the pointer's larger target for the link inside it), fix the markup if a
+keyboard really is left out, and otherwise say why on the line's own disable comment.
+
 `docs/design-system-audit-report.html` predates the unification pass and describes primitives
 (`StatusBadge`, `card.tsx`, `ui/badge.tsx`) that no longer exist.

@@ -33,6 +33,7 @@ import type {
 } from "@/lib/types"
 import type { ProjectDetail } from "@/components/deploy/project-context"
 import { Page, PageContext, Section } from "@/components/page"
+import { useTabTitle } from "@/components/tab-title"
 import { ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
 import { VerbMenu, type Verb } from "@/components/verbs"
@@ -255,6 +256,11 @@ export function RunPage() {
       name: project.data.project.name,
       archived: Boolean(project.data.project.archivedAt),
     },
+  )
+  // Which deployment of which project, in the tab: "Deployment #42 · shop".
+  useTabTitle(
+    snapshot && `Deployment #${snapshot.run.runNumber}`,
+    snapshot && project.data?.project.name,
   )
 
   const attempts = useMemo(() => latestAttempts(snapshot?.steps ?? []), [snapshot?.steps])

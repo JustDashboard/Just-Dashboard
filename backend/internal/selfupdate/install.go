@@ -67,6 +67,8 @@ type Installer struct {
 	socket     string
 	dockerHost string
 	log        *slog.Logger
+	// database is copied before an update starts; nil where there is none.
+	database *Database
 }
 
 func NewInstaller(store *Store, dataDir, dockerHost string, log *slog.Logger) *Installer {
@@ -74,6 +76,12 @@ func NewInstaller(store *Store, dataDir, dockerHost string, log *slog.Logger) *I
 	if path, ok := strings.CutPrefix(dockerHost, "unix://"); ok {
 		i.socket = path
 	}
+	return i
+}
+
+// WithDatabase names the store an update copies before it starts.
+func (i *Installer) WithDatabase(db *Database) *Installer {
+	i.database = db
 	return i
 }
 
@@ -87,6 +95,8 @@ type StartRequest struct {
 	From string
 	To   string
 	Ref  string
+	// RequireTag refuses to install To from anything but origin's tag v<To>.
+	RequireTag bool
 	// Health is the URL the updater probes once the stack is back up. It
 	// belongs in the request rather than being written to the record after the
 	// container has been created: the updater may read that record within
@@ -138,6 +148,7 @@ func (i *Installer) Start(ctx context.Context, loc *Location, req StartRequest) 
 		FromVersion: Normalise(req.From),
 		ToVersion:   Normalise(req.To),
 		Ref:         req.Ref,
+		RequireTag:  req.RequireTag,
 		Dir:         loc.Dir,
 		Compose:     loc.Compose,
 		Image:       loc.Image,
@@ -148,11 +159,32 @@ func (i *Installer) Start(ctx context.Context, loc *Location, req StartRequest) 
 		StartedAt:   time.Now().UTC(),
 	}
 
+	// Before the record replaces the last run's, so a copy that takes a
+	// minute is a minute in which the page still shows what it showed. From
+	// here on the store is only read by the version that wrote it until the
+	// new backend opens it, so this is the last moment the copy is sure to be
+	// of the database the running version made.
+	copied, copyErr := copyDatabase(ctx, i.dataDir, i.database, run)
+	run.DatabaseCopy = copied
+
 	// The transcript is opened first and truncated, so the log an operator
 	// reads is always this run's and never the tail of the last one.
 	if f, err := i.store.OpenLog(); err == nil {
 		fmt.Fprintf(f, "Updating Just Dashboard %s → %s\n", run.FromVersion, run.ToVersion)
-		fmt.Fprintf(f, "checkout: %s (%s)\n\n", run.Dir, run.Ref)
+		fmt.Fprintf(f, "checkout: %s (%s)\n", run.Dir, run.Ref)
+		if copyErr != nil {
+			fmt.Fprintf(f, "! the database was not copied before the update: %v\n", copyErr)
+			fmt.Fprintf(f, "! if this update fails, the rollback restores the code and the images and not the data\n")
+		} else {
+			fmt.Fprintf(f, "database copy: %s\n", copied)
+		}
+		switch {
+		case run.RequireTag && SignaturesRequired():
+			fmt.Fprintf(f, "release: origin's tag v%s, signed with a release key, or nothing\n", run.ToVersion)
+		case run.RequireTag:
+			fmt.Fprintf(f, "release: origin's tag v%s, or nothing\n", run.ToVersion)
+		}
+		fmt.Fprintln(f)
 		f.Close()
 	}
 	if err := i.store.Save(run); err != nil {
@@ -239,13 +271,15 @@ func (i *Installer) updaterArgs(run *Run, loc *Location) []string {
 // leave it alone. If it is gone and this process is the version the run was
 // aiming at, the upgrade worked — the only way this code is running at all is
 // that the build succeeded and compose got as far as recreating the backend.
-// If it is gone and the version did not move, something stopped it.
+// If it is gone and the version did not move, something stopped it, and what
+// it had already changed is put back (putback.go).
 func (i *Installer) Reconcile(ctx context.Context, current string, list Lister) {
 	run, err := i.store.Load()
 	if err != nil || run == nil || !run.Status.Live() {
 		return
 	}
 	alive, err := i.updaterAlive(ctx, list)
+	asked := err == nil
 	switch {
 	case err == nil && alive:
 		// Still working. The phase is nudged so the UI stops saying
@@ -275,9 +309,18 @@ func (i *Installer) Reconcile(ctx context.Context, current string, list Lister) 
 		_ = DockerCommand(ctx, i.dockerHost, "rm", "-f", UpdaterContainer).Run()
 		return
 	}
-	_ = i.store.Finish(fmt.Errorf(
+	// Read again: an updater that failed and rolled back by itself may have
+	// closed the run between the first read and the listing, and its account
+	// of why is the one to keep.
+	latest, err := i.store.Load()
+	if err != nil || latest == nil || !latest.Status.Live() {
+		return
+	}
+	run = latest
+	cause := fmt.Errorf(
 		"the updater stopped before %s was running — this install is still on %s; the transcript below is what it managed",
-		run.ToVersion, current))
+		run.ToVersion, current)
+	_ = i.store.Finish(i.putBack(ctx, run, cause, asked))
 	i.log.Warn("self-update did not complete", "expected", run.ToVersion, "running", current)
 }
 

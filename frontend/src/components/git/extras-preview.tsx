@@ -10,6 +10,7 @@ import { PreviewHeader } from "@/components/git/preview-header"
 import { Field } from "@/components/form"
 import { ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { FilterChip } from "@/components/tabs"
@@ -453,11 +454,10 @@ export function PatchPreview({ ctx, onClose }: { ctx: PreviewContext; onClose: (
               />
             </Field>
             <label className="flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={staged}
-                onChange={(e) => {
-                  setStaged(e.target.checked)
+                onCheckedChange={(checked) => {
+                  setStaged(checked === true)
                   setCheck(undefined)
                 }}
               />

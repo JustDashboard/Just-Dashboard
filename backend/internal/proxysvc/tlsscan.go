@@ -45,7 +45,7 @@ import (
 type TLSScan struct {
 	Domain    string    `json:"domain"`
 	Port      int       `json:"port"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 	Reachable bool      `json:"reachable"`
 	Error     string    `json:"error,omitempty"`
 	// Failure is how far a scan that never completed a handshake got, and
@@ -163,8 +163,8 @@ type ProtocolResult struct {
 type ChainLink struct {
 	Subject   string    `json:"subject"`
 	Issuer    string    `json:"issuer"`
-	NotBefore time.Time `json:"notBefore"`
-	NotAfter  time.Time `json:"notAfter"`
+	NotBefore time.Time `json:"notBefore,omitzero"`
+	NotAfter  time.Time `json:"notAfter,omitzero"`
 	Serial    string    `json:"serial"`
 	// Fingerprint is the SHA-256 of the certificate, colon hex.
 	Fingerprint  string   `json:"fingerprint"`

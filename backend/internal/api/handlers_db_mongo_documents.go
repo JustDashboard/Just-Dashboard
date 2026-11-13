@@ -268,7 +268,7 @@ func (s *Server) handleMongoUpdateDocuments(w http.ResponseWriter, r *http.Reque
 	}
 	empty, err := dbx.MongoFilterIsEmpty(req.Filter)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	whole := empty && req.Many
 	if whole && !req.DryRun {
@@ -322,7 +322,7 @@ func (s *Server) handleMongoDeleteDocuments(w http.ResponseWriter, r *http.Reque
 	}
 	empty, err := dbx.MongoFilterIsEmpty(req.Filter)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	whole := empty && req.Many && strings.TrimSpace(req.ID) == ""
 	if whole && !req.DryRun && !req.All {
@@ -411,13 +411,17 @@ func (s *Server) handleMongoExport(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	q := r.URL.Query()
+	relaxed, err := httpx.QueryBool(r, "relaxed")
+	if err != nil {
+		return err
+	}
 	spec := dbx.MongoExportSpec{
 		MongoFindSpec: dbx.MongoFindSpec{
 			Filter: q.Get("filter"), Projection: q.Get("projection"), Sort: q.Get("sort"),
 			Collation: q.Get("collation"), Hint: q.Get("hint"),
 			Skip: int64(atoiDefault(q.Get("skip"), 0)), Limit: int64(atoiDefault(q.Get("limit"), 0)),
 		},
-		Format: q.Get("format"), Relaxed: q.Get("relaxed") == "1",
+		Format: q.Get("format"), Relaxed: relaxed,
 	}
 	ctx, cancel := timeoutCtx(r, 10*time.Minute)
 	defer cancel()

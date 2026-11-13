@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node scripts/sync-monaco.mjs && node scripts/sync-excalidraw.mjs && next dev",
     "build": "node scripts/sync-monaco.mjs && node scripts/sync-excalidraw.mjs && next build",
-    "start": "next start",
+    "start": "node scripts/serve-standalone.mjs",
     "lint": "eslint",
     "test": "bun test src",
     "test:browser": "playwright test",
@@ -52,6 +52,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
     "prettier": "^3.9.6",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "tailwindcss": "^4",

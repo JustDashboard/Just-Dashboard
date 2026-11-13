@@ -45,7 +45,9 @@ export function VariableMark({
  */
 export function RevealedValue({ name, value }: { name: string; value: string }) {
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- a value to read and select: it scrolls sideways under the keyboard, and its onClick only keeps the press from the row around it
     <span
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a value to read and select: it scrolls sideways under the keyboard, and its onClick only keeps the press from the row around it
       tabIndex={0}
       aria-label={`Value of ${name}`}
       onClick={(event) => event.stopPropagation()}

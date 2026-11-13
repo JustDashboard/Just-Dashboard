@@ -20,7 +20,11 @@ import (
 // connection. On a kernel MongoDB 8 refuses (a runner on Linux 7.0) it
 // restarts for ever, as it would on an operator's server. On any other, the
 // subtest writes MongoDB's refusal into the server's log, kills it, and has
-// the dashboard read its kernel as 7.0.0, so the same path runs. Found on this
+// the dashboard read its kernel as 7.0.0, so the same path runs. It does the
+// same when the kernel's release reads as one MongoDB refuses and this
+// MongoDB runs on it all the same: the image's tag moves with MongoDB's
+// releases, and a distribution's kernel can carry the fix under a release
+// that still reads 7.0.0, and neither is this dashboard's to decide. Found on this
 // server and then the Databases page must offer the mitigation, applying it
 // must bring the server up on the same volume, and the offer must then be
 // gone. It runs from TestLiveDeploymentDatabaseConnection, which the live job
@@ -71,17 +75,24 @@ func liveMongoKernelMitigation(t *testing.T) {
 	}
 	if refuses {
 		// It refuses at once; wait for Docker to have seen it exit.
-		for deadline := time.Now().Add(time.Minute); ; time.Sleep(time.Second) {
+		for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(time.Second) {
 			observed, err := docker.Inspect(ctx, name)
 			if err == nil && (observed.State != "running" || observed.RestartNum > 0) {
 				t.Logf("Linux %s: MongoDB 8 without the mitigation is %s after %d restarts", kernel, observed.State, observed.RestartNum)
 				break
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("MongoDB 8 kept running without the mitigation on Linux %s, which it refuses: %s", kernel, describeFixtureContainer(docker, name))
+				// The release reads as one MongoDB 8 refuses, and this one runs.
+				// What is under test is what the dashboard does with a refusal,
+				// so the refusal is written for it, as on any other kernel.
+				t.Logf("Linux %s reads as a kernel MongoDB 8 refuses, and this MongoDB keeps running on it; the server is made to say it refused: %s",
+					kernel, describeFixtureContainer(docker, name))
+				refuses = false
+				break
 			}
 		}
-	} else {
+	}
+	if !refuses {
 		// The image's entrypoint runs a server to initialise the data and then
 		// the real one; written before the second has finished starting, the
 		// line would be pushed out of the tail the dashboard reads.

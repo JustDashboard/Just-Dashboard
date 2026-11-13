@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"path"
 	"sort"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	basestore "github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
 
@@ -812,14 +814,29 @@ func (s *AutomationStore) ListSchedules(ctx context.Context, projectID, environm
 				v.NextRuns = append([]time.Time{x}, rest...)
 			}
 		}
-		steps, err := s.scheduleSteps(ctx, v.ID)
-		if err != nil {
-			return nil, err
-		}
-		v.Steps = steps
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	// Read once the cursor has let go of its connection: a query made inside
+	// the loop above holds one connection and waits for a second, and four
+	// such reads at once stop every database call in the process.
+	ids := make([]int64, 0, len(out))
+	for _, v := range out {
+		ids = append(ids, v.ID)
+	}
+	steps, err := s.scheduleSteps(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Steps = steps[out[i].ID]
+	}
+	return out, nil
 }
 
 type ScheduleDispatch struct {
@@ -853,14 +870,25 @@ func (s *AutomationStore) ClaimDueSchedules(ctx context.Context, limit int) ([]S
 		v.UpdatedAt = time.Unix(updated, 0).UTC()
 		due := time.Unix(next, 0).UTC()
 		v.NextRunAt = &due
-		v.Steps, err = s.scheduleSteps(ctx, v.ID)
-		if err != nil {
-			return nil, err
-		}
 		out = append(out, ScheduleDispatch{Schedule: v, DueAt: due})
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
+	}
+	if err = rows.Close(); err != nil {
+		return nil, err
+	}
+	// As in ListSchedules: nothing queries while the cursor is open.
+	ids := make([]int64, 0, len(out))
+	for _, item := range out {
+		ids = append(ids, item.Schedule.ID)
+	}
+	steps, err := s.scheduleSteps(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Schedule.Steps = steps[out[i].Schedule.ID]
 	}
 	claimed := out[:0]
 	for _, item := range out {
@@ -888,6 +916,8 @@ type AutomationScheduler struct {
 	sweeps   []func(context.Context)
 	cancel   context.CancelFunc
 	done     chan struct{}
+	// log is where a pass that failed is said; nil is the process's default.
+	log *slog.Logger
 }
 
 func NewAutomationScheduler(store *AutomationStore, dispatch func(context.Context, ScheduleDispatch) error) *AutomationScheduler {
@@ -909,35 +939,49 @@ func (s *AutomationScheduler) Start(ctx context.Context) {
 	runCtx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 	s.done = make(chan struct{})
-	go func() {
-		defer close(s.done)
+	safego.Go(runCtx, s.log, "deployment schedule", func(runCtx context.Context) {
+		passes := safego.NewPasses(s.log, "deployment schedule")
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		s.run(runCtx)
+		passes.Report(runCtx, s.run(runCtx))
 		for {
 			select {
 			case <-runCtx.Done():
 				return
 			case <-ticker.C:
-				s.run(runCtx)
+				passes.Report(runCtx, s.run(runCtx))
 			}
 		}
-	}()
+	}, safego.Close(s.done))
 }
-func (s *AutomationScheduler) run(ctx context.Context) {
+
+// run is one pass. Its error is the pass as a whole failing: the due
+// schedules could not be claimed, so nothing scheduled runs. Both that and a
+// schedule that could not be run used to be dropped without a word.
+func (s *AutomationScheduler) run(ctx context.Context) error {
 	due, err := s.store.ClaimDueSchedules(ctx, 20)
 	if err != nil {
-		return
+		return fmt.Errorf("the due schedules could not be claimed: %w", err)
 	}
 	for _, item := range due {
-		_ = s.dispatch(ctx, item)
+		// What a schedule's steps did, failures included, is on the run it
+		// leaves behind. An error here is a schedule that left none.
+		if err := s.dispatch(ctx, item); err != nil && ctx.Err() == nil {
+			log := s.log
+			if log == nil {
+				log = slog.Default()
+			}
+			log.Warn("a deployment schedule came due and could not be run",
+				"schedule", item.Schedule.ID, "name", item.Schedule.Name, "due", item.DueAt.UTC().Format(time.RFC3339), "error", err)
+		}
 	}
 	for _, sweep := range s.sweeps {
 		if ctx.Err() != nil {
-			return
+			return nil
 		}
 		sweep(ctx)
 	}
+	return nil
 }
 func (s *AutomationScheduler) Stop() {
 	if s == nil || s.cancel == nil {
@@ -947,23 +991,35 @@ func (s *AutomationScheduler) Stop() {
 	<-s.done
 	s.cancel = nil
 }
-func (s *AutomationStore) scheduleSteps(ctx context.Context, id int64) ([]ScheduleStep, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT action,config_json,required FROM deploy_schedule_steps WHERE schedule_id=? ORDER BY ordinal`, id)
+
+// scheduleSteps reads the steps of every listed schedule in one statement,
+// each schedule's in order. A schedule with none still has an entry, so its
+// steps encode as an empty list.
+func (s *AutomationStore) scheduleSteps(ctx context.Context, ids []int64) (map[int64][]ScheduleStep, error) {
+	out := make(map[int64][]ScheduleStep, len(ids))
+	for _, id := range ids {
+		out[id] = []ScheduleStep{}
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	placeholders, args := inPlaceholders(ids)
+	rows, err := s.db.QueryContext(ctx, `SELECT schedule_id,action,config_json,required FROM deploy_schedule_steps WHERE schedule_id IN `+placeholders+` ORDER BY schedule_id,ordinal`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []ScheduleStep{}
 	for rows.Next() {
+		var id int64
 		var v ScheduleStep
 		var cfg string
 		var required int
-		if err := rows.Scan(&v.Action, &cfg, &required); err != nil {
+		if err := rows.Scan(&id, &v.Action, &cfg, &required); err != nil {
 			return nil, err
 		}
 		v.Config = json.RawMessage(cfg)
 		v.Required = required != 0
-		out = append(out, v)
+		out[id] = append(out[id], v)
 	}
 	return out, rows.Err()
 }

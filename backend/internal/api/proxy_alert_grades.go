@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // A grade needs a full scan, which is heavier than the certificate handshake
@@ -84,6 +85,7 @@ func (s *Server) checkWatchedGrades(ctx context.Context, scan watchGradeScanner)
 		go func(c *watchGrade) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer safego.Recover(nil, "certificate grade check")
 			protocol, err := proxysvc.ParseStartTLS("", c.Port)
 			if err != nil {
 				return

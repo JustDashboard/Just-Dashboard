@@ -200,7 +200,8 @@ var openapiErrorFields = map[string]string{
 	"operation": "What the request was trying to do, when the handler names it.",
 	"reason":    "The likely reason it did not work.",
 	"raw":       "What the subsystem underneath reported, kept for the details rather than the headline.",
-	"retryable": "Whether the same request may succeed if tried again: a timeout or a daemon that was briefly unreachable.",
+	"retryable": "Whether the same request may succeed if tried again: a timeout, a daemon that was briefly unreachable, or a rate limit. A 429 rate_limited was refused before anything ran, and its Retry-After header says the wait in whole seconds; every answer of a rate-limited route carries RateLimit-Remaining.",
+	"requestId": "On a 5xx: the id of the request that failed, also in the X-Request-Id header of every answer. Quote it to whoever reads the dashboard's log, where the cause is on the line with the same id.",
 }
 
 // openapiErrorProperties is the error envelope's properties, read off
@@ -729,7 +730,7 @@ func buildDeployOpenAPI(root chi.Routes) *openapiDocument {
 			"description": "Generated from the dashboard's own router and the Go types its handlers decode and encode, and checked against both by its tests, so it describes exactly what this build serves. " +
 				"Every route is under /api/v1/deploy and takes one of three credentials: the browser session (the " + httpx.SessionCookie + " cookie, " + sessioncookie.PlainName + " on a dashboard served over plain HTTP on loopback, with the X-JD-CSRF: 1 header on every request that is not a GET), " +
 				"an API key as a bearer token, or a deploy key as a bearer token, which reaches only the routes marked deployKey; x-deploy-key on each operation says what a deploy key gets there and why. " +
-				"A property is present in an answer whenever its Go field has no omitempty, and may be left out of a request, where it is its zero value; a property that is a pointer, list or map in Go may be null. " +
+				"A property is present in an answer whenever its Go field has no omitempty or omitzero (a time that was never set is left out, never sent as year one), and may be left out of a request, where it is its zero value; a property that is a pointer, list or map in Go may be null. " +
 				"Secrets are marked writeOnly: they are accepted by a write and read back by no route. Every refusal is the Error envelope under default.",
 			"license": map[string]any{"name": "AGPL-3.0-only", "identifier": "AGPL-3.0-only"},
 		},

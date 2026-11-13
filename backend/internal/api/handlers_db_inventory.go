@@ -106,7 +106,7 @@ type inventoryResponse struct {
 	// Detail is "full" or "reduced": whether container environment was read
 	// to produce the list.
 	Detail    string    `json:"detail"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 	// KernelProblems is, by instance key, a MongoDB 8 container found here
 	// that cannot start on this kernel as it is (inventoryKernelProblems);
 	// read for an administrator only, as the environment it is read from is.
@@ -640,7 +640,7 @@ func (s *Server) resolveFileInstance(ctx context.Context, path string) (*dbx.Ins
 		return nil, nil, httpx.Err(http.StatusForbidden, "outside_root", err.Error())
 	}
 	if err != nil {
-		return nil, nil, httpx.BadRequest("%v", err)
+		return nil, nil, httpx.Refused(err)
 	}
 	info, err := os.Stat(resolved)
 	if err != nil || !info.Mode().IsRegular() {

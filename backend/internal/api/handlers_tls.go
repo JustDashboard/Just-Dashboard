@@ -88,7 +88,7 @@ func (s *Server) handleRequestTest(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	vhosts, err := s.modules.proxy.ListVHosts(ctx)
 	if err != nil {
-		return httpx.Internal(err)
+		return proxyReadError(err)
 	}
 	certs, err := s.modules.proxy.ListCertificates(ctx)
 	if err != nil {
@@ -97,7 +97,7 @@ func (s *Server) handleRequestTest(w http.ResponseWriter, r *http.Request) error
 	httpx.SetAudit(r, "proxy.tools.request", strings.ToUpper(req.Method)+" "+req.URL, nil)
 	result, err := proxysvc.TestRequest(ctx, req, vhosts, certs)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, result)
 	return nil
@@ -109,7 +109,7 @@ func (s *Server) handleRequestTest(w http.ResponseWriter, r *http.Request) error
 func scanTarget(r *http.Request) (proxysvc.ScanTarget, error) {
 	target, err := proxysvc.ParseScanQuery(r.URL.Query().Get("domain"), r.URL.Query().Get("port"))
 	if err != nil {
-		return proxysvc.ScanTarget{}, httpx.BadRequest("%v", err)
+		return proxysvc.ScanTarget{}, httpx.Refused(err)
 	}
 	return target, nil
 }
@@ -123,7 +123,7 @@ func (s *Server) handleCertCheck(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	cert, err := proxysvc.CheckDomain(ctx, target.Host, target.Port)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, cert)
 	return nil
@@ -137,14 +137,18 @@ func (s *Server) handleTLSScan(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	opts := proxysvc.ScanOptions{AllAddresses: r.URL.Query().Get("all") == "1"}
+	all, err := httpx.QueryBool(r, "all")
+	if err != nil {
+		return err
+	}
+	opts := proxysvc.ScanOptions{AllAddresses: all}
 	if raw := r.URL.Query().Get("connect"); raw != "" {
 		if opts.AllAddresses {
 			return httpx.BadRequest("connect to dials one address; scanning every address asks the name's own")
 		}
 		connect, err := proxysvc.ParseConnectTo(raw, target)
 		if err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		opts.ConnectTo = connect
 		// A scan is a read and the audit middleware skips reads, but this one
@@ -158,11 +162,11 @@ func (s *Server) handleTLSScan(w http.ResponseWriter, r *http.Request) error {
 	// dialogue; Auto (no ?proto=) picks it by port.
 	opts.StartTLS, err = proxysvc.ParseStartTLS(q.Get("proto"), target.Port)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	opts.Request, err = proxysvc.ParseRequestShape(q.Get("method"), q.Get("path"), q.Get("host"))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if opts.Request.Host != "" {
 		// Another Host sent to the name's server reaches whichever of its
@@ -203,7 +207,11 @@ func (s *Server) handleDomainDNS(w http.ResponseWriter, r *http.Request) error {
 	if domain == "" {
 		return httpx.BadRequest("domain query parameter is required")
 	}
-	if r.URL.Query().Get("deep") == "1" {
+	deep, err := httpx.QueryBool(r, "deep")
+	if err != nil {
+		return err
+	}
+	if deep {
 		return s.handleDeepDNS(w, r, domain)
 	}
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
@@ -234,7 +242,7 @@ func (s *Server) dnsResolvers(r *http.Request) ([]string, error) {
 func (s *Server) handleDeepDNS(w http.ResponseWriter, r *http.Request, domain string) error {
 	name, err := proxysvc.NormalizeDNSName(domain)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	resolvers, err := s.dnsResolvers(r)
 	if err != nil {
@@ -260,7 +268,7 @@ func (s *Server) handleSetDNSResolvers(w http.ResponseWriter, r *http.Request) e
 	}
 	list, err := proxysvc.ParseDNSResolvers(req.Resolvers)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if len(list) == 0 {
 		list = proxysvc.DefaultDNSResolvers

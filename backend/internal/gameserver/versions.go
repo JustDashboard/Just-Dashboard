@@ -24,7 +24,7 @@ import (
 type Version struct {
 	ID          string    `json:"id"`
 	Kind        string    `json:"kind"`
-	ReleasedAt  time.Time `json:"releasedAt,omitempty"`
+	ReleasedAt  time.Time `json:"releasedAt,omitzero"`
 	Recommended bool      `json:"recommended,omitempty"`
 	Latest      bool      `json:"latest,omitempty"`
 }
@@ -35,7 +35,7 @@ type VersionList struct {
 	Status      string    `json:"status"`
 	Reason      string    `json:"reason,omitempty"`
 	Source      string    `json:"source"`
-	CheckedAt   time.Time `json:"checkedAt"`
+	CheckedAt   time.Time `json:"checkedAt,omitzero"`
 	Versions    []Version `json:"versions"`
 	Recommended string    `json:"recommended,omitempty"`
 }
@@ -138,7 +138,7 @@ func (a *Adapter) javaVersions(ctx context.Context, source string) (VersionList,
 		Versions []struct {
 			ID          string    `json:"id"`
 			Type        string    `json:"type"`
-			ReleaseTime time.Time `json:"releaseTime"`
+			ReleaseTime time.Time `json:"releaseTime,omitzero"`
 		} `json:"versions"`
 	}
 	if err := json.Unmarshal(body, &manifest); err != nil {

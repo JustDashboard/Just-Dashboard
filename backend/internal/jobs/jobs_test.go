@@ -92,6 +92,34 @@ func TestFailureIsRecordedWithItsReason(t *testing.T) {
 	}
 }
 
+// A job runs on a goroutine of its own, which no request's recovery covers:
+// a runner that panicked used to end the process, and every other job in it.
+func TestAJobThatPanicsFailsAndTheOthersCarryOn(t *testing.T) {
+	m := testManager(t)
+	release := make(chan struct{})
+	other := m.Start(Spec{Kind: "other"}, func(ctx context.Context, out Emitter) error {
+		<-release
+		return nil
+	})
+	job := m.Start(Spec{Kind: "test"}, func(ctx context.Context, out Emitter) error {
+		var parsed []string
+		out.Line("stdout", parsed[2]) // the fault: an unusual line
+		return nil
+	})
+	waitFor(t, "the panicking job to fail", func() bool {
+		j, _, _ := m.Get(job.ID)
+		return j.Status == StatusFailed
+	})
+	if j, _, _ := m.Get(job.ID); !strings.Contains(j.Error, "index out of range") {
+		t.Fatalf("error = %q, want the fault said on the job", j.Error)
+	}
+	close(release)
+	waitFor(t, "the other job to finish", func() bool {
+		j, _, _ := m.Get(other.ID)
+		return j.Status == StatusSucceeded
+	})
+}
+
 // The whole point of the package: a job is not owned by the socket watching
 // it, so nothing about attaching or detaching changes whether it runs.
 func TestAJobOutlivesItsSubscribers(t *testing.T) {

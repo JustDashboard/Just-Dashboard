@@ -1,0 +1,13 @@
+24 31 0:22 / /sys rw,nosuid,nodev,noexec,relatime shared:7 - sysfs sysfs rw
+25 31 0:23 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw
+26 31 0:5 / /dev rw,nosuid,relatime shared:2 - devtmpfs udev rw,size=8126284k,nr_inodes=2031571,mode=755,inode64
+28 31 0:25 / /run rw,nosuid,nodev,noexec,relatime shared:5 - tmpfs tmpfs rw,size=1629908k,mode=755,inode64
+31 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw,discard,errors=remount-ro
+92 31 259:0 / /boot rw,relatime shared:43 - ext4 /dev/sda16 rw
+95 92 8:15 / /boot/efi rw,relatime shared:45 - vfat /dev/sda15 rw,fmask=0077,dmask=0077,codepage=437,iocharset=iso8859-1,shortname=mixed,errors=remount-ro
+97 31 7:0 / /snap/core22/2045 ro,nodev,relatime shared:47 - squashfs /dev/loop0 ro,errors=continue
+110 31 8:33 / /mnt/data rw,relatime shared:60 - ext4 /dev/sdc1 rw
+111 31 8:1 /usr/share/hunspell /var/snap/firefox/common/host-hunspell ro,noexec,noatime shared:1 - ext4 /dev/sda1 rw,discard,errors=remount-ro
+120 31 11:0 / /mnt/config ro,relatime shared:70 - iso9660 /dev/sr0 ro
+130 31 0:52 / /var/lib/docker/overlay2/3f1c/merged rw,relatime shared:80 - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/l/A,upperdir=/var/lib/docker/overlay2/3f1c/diff,workdir=/var/lib/docker/overlay2/3f1c/work
+131 28 0:4 net:[4026532561] /run/docker/netns/5a0c rw shared:81 - nsfs nsfs rw

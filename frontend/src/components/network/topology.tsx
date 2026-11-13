@@ -21,6 +21,8 @@ type Node = {
   mark: React.ReactNode
   eyebrow: React.ReactNode
   title: React.ReactNode
+  /** The node's name in words, where `title` is drawn rather than written. */
+  name?: string
   hint?: React.ReactNode
   /** The device whose counters the wire carries; undefined draws a still wire. */
   devices: NetworkLink[]
@@ -225,7 +227,7 @@ function NodeItem({
   const mark = node.href ? (
     <Link
       href={node.href}
-      aria-label={typeof node.title === "string" ? node.title : undefined}
+      aria-label={node.name ?? (typeof node.title === "string" ? node.title : undefined)}
       className="rounded-xl focus-ring"
     >
       {node.mark}
@@ -368,6 +370,7 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
       mark: <WirePlaceholder size="md" product="wireguard" />,
       eyebrow: "VPN",
       title: <span className="text-muted-foreground">Add WireGuard</span>,
+      name: "Add WireGuard",
       hint: "devices and other sites, with a QR code each",
       devices: [],
       dashed: true,
@@ -429,6 +432,7 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
             ? `VLAN${l.vlanId ? ` ${l.vlanId}` : ""}`
             : "Network card",
       title: <span className="font-mono">{l.name}</span>,
+      name: l.name,
       hint: (
         <>
           <span className="block truncate font-mono">
@@ -450,6 +454,7 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
       mark: <WirePlaceholder size="md" fallback={Bridge} />,
       eyebrow: "Private network",
       title: <span className="text-muted-foreground">Make a bridge</span>,
+      name: "Make a bridge",
       hint: "a network of its own for VMs, namespaces or a VLAN",
       devices: [],
       dashed: true,

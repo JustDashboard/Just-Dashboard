@@ -1,5 +1,5 @@
 import type { PortEvent, SeenListener } from "@/lib/types"
-import { clockMinute, duration } from "@/lib/format"
+import { clockMinute, dayMinuteAt, duration, minuteAt, weekdayAt } from "@/lib/format"
 import { foldDualStack, reachGroup, type ReachGroup } from "@/components/proxy/ports"
 
 /** How long a socket reads as new once the history first saw it listening. */
@@ -148,16 +148,7 @@ export function changeWhen(
   const from = new Date(change.after)
   const to = new Date(change.at)
   const dated = from.toDateString() !== to.toDateString()
-  const at = (d: Date) =>
-    dated
-      ? d.toLocaleString(undefined, {
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        })
-      : clockMinute(d.toISOString())
+  const at = dated ? dayMinuteAt : minuteAt
   return { time, span: `Sometime between ${at(from)} and ${at(to)}, when nothing was sampled` }
 }
 
@@ -204,5 +195,5 @@ export function dayLabel(iso: string, now: number): string {
   yesterday.setDate(today.getDate() - 1)
   if (date.toDateString() === today.toDateString()) return "Today"
   if (date.toDateString() === yesterday.toDateString()) return "Yesterday"
-  return date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
+  return weekdayAt(date)
 }

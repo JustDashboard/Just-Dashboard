@@ -5,6 +5,11 @@ are mechanical — typing a value where a token exists, and re-deriving a patter
 and `tests/browser/design-system.spec.ts` checks three structural properties in a browser. Everything
 below is judgement, and this is where it is written down.
 
+There is one checkbox and one spinner: `Checkbox` (`components/ui/checkbox`) and `Spinner`
+(`components/state.tsx`). The lint rule `design-system/primitives` refuses a native
+`<input type="checkbox">` and a `LoaderCircle` drawn directly anywhere but `components/ui`,
+`state.tsx` and `icons.tsx`, because each came back in a newer file after the 0.6.1 audit removed it.
+
 Since 0.7.5, automatic Attention/Needs attention sections, recommendation comparisons, Advisor and
 navigation attention marks have been removed. Historical layout examples
 below describe the earlier pages; their attention blocks are no longer part of those page passes.
@@ -19,6 +24,19 @@ to be chosen twice and verified twice, and the second set was seen by almost nob
 is now one bootstrap script: it puts `.dark` on the root element before first paint so the generated
 shadcn primitives' `dark:` variants resolve, sets `color-scheme`, and clears the stored preference
 from anyone upgrading. `hooks/use-theme.tsx` and `/appearance` are gone.
+
+**Text has three inks, and the third has a floor.** `text-foreground`, `text-muted-foreground` for
+secondary text (7.6:1 on the page), and `text-faint` (`--faint`) for what sits behind that: a count, a
+timestamp, a line number, a unit. `--faint` is the dimmest lightness of the muted hue that keeps WCAG
+AA's 4.5:1 on every ground text is set on: 5.3:1 on the page, 5.1 on a card, 4.9 on a popover, 4.8 on
+`--muted`. On `--accent` (a chosen row) it is 4.0:1; set `text-muted-foreground` there. **Do not fade
+text with an opacity.** `text-muted-foreground/60` measured 3.4:1 and `/40` 2.1:1 at 10 to 12 px, on
+about two hundred call sites. Those spellings (`/70` and fainter) now draw the faint ink through one
+rule in `globals.css`, which leaves an `svg` its fade (a glyph needs 3:1 where it carries meaning) and
+stays at one class's weight so a `hover:` colour still wins; new code writes `text-faint`, and the old
+spellings are to be renamed, not copied. A count beside a tab's or a chip's label (`ChipCount`) is the
+label's own ink at 80%, 5.2:1 unselected. `design-system.spec.ts` measures all of these in the browser,
+painted onto a canvas and read back, against each ground.
 
 Colours live on `:root` in `app/globals.css`. That is the only place a colour is named. One page
 holds a copy: `/hub/enter` (`lib/hub-enter.ts`) is a document written by hand that loads no
@@ -361,6 +379,21 @@ that will change, and *Pinned* is a `Tag` with a pin, because somebody set it an
 because that is what the control does — but anything choosing a *colour* chooses from the shared
 union. A component that declares its own tone names is the drift this file exists to stop.
 
+**How long something took is said in words, never as `p50` / `p95` / `p99`.** The operator found the
+notation unclear ("notation asks the reader to learn it") and Insights' readings became *Half*,
+*19 in 20* and *99 in 100*; in 0.8.6 every other rendered label, legend, column head and sentence
+followed, so one figure has one name on every page. The words live in `lib/latency-words.ts`:
+`LATENCY_SHARE` names a figure, `latencyHead` is a column head, a legend or a tile's label
+("19 in 20 within"), `latencyWords` is the reading inside a sentence ("19 in 20 inside 180ms"), and
+`latencyTerm` is the `title` that keeps the term for a reader who looks for it. A threshold reads the
+other way round, by the share past it ("more than 1 in 20 requests slower than 800ms"), and a factor
+between two readings is a *slowdown*. The lint rule `design-system/latency-words` refuses the
+notation in JSX text, in a string with other words around it and in a `label`, `title`, `name` or
+`hint`; a bare `"p95"` elsewhere is a key of the server's answer and stays. The interface charts on
+`/network/traffic` are outside it: their percentiles are of throughput, not of how long anything
+took. Sentences the server writes (a rollback watch's verdict, a canary's, a replay's, a traffic
+alert's notification) still say p95 and are shown as the server wrote them.
+
 ## 5. No descriptions under titles
 
 **`PageContext`, `Section`, `PanelHeader` and `ChartPanel` have no `description`.** They have no `icon`
@@ -379,8 +412,41 @@ The rule and its three exceptions:
   actions, a `Tag`, or its own row.
 - `Modal` and `SidePanel` keep a `description` prop, rendered `sr-only`. Radix wants an accessible
   description and a screen reader is the one audience that cannot see the rest of the box.
+- `Modal` and `SidePanel` give the keyboard back to what opened them (`hooks/use-focus-return.ts`).
+  Radix returns focus to a `DialogTrigger`, and almost every dialog here is opened by state and has
+  none, so closing a confirmation or an editor left the keyboard on `body` and the next Tab began at the
+  top of the sidebar. The opener is whatever held the keyboard when the dialog opened; for a verb in a
+  row's menu that item is gone by the time the dialog closes, so the menu's own button is remembered
+  beside it (through the menu's `aria-labelledby`) and gets the keyboard instead. A dialog that knows
+  better passes `onCloseAutoFocus` and calls `preventDefault()`. A page that hands the keyboard back
+  itself, for every dialog it opens, calls `claimFocusReturn` as it closes one: the database's data page
+  does (`focusAfterDialog`), because the question it asks before unapplied changes are left is opened by
+  the link that was pressed, and the keyboard belongs back on the rows. Open dialogs through these two
+  components, not through a bare `DialogContent`, or the keyboard is dropped again.
 
 `EmptyState`, `ErrorState` and `Notice` keep their body text: there, the sentence *is* the content.
+
+**A failure is said in sentences, in one place.** The API words its messages to sit inside other text:
+lower case, no full stop ("not found", "too many requests, slow down"). `ErrorState` is where they
+stand alone, so it gives the headline its capital and a reason its full stop (`sentenceCase` and
+`asSentence` in `lib/format.ts`), and `notify.error` does the same for the reason under a toast. A
+message that opens on a program's name, a path or an identifier ("nginx: [emerg] …", "eth0 is down")
+is somebody else's text and is left as written; so is a command that is the sentence's subject ("nginx
+refuses the configuration", "gh did not answer": the `COMMANDS` list beside `sentenceCase`, for names
+that are only ever a command) and a command line ("wget --spider …"). No full stop goes after a path,
+an address or a quoted value. A page does not reword an API message itself.
+
+`ErrorState` draws four kinds (`data-kind`), and only one of them is red:
+
+| Kind | When | Drawn as |
+| --- | --- | --- |
+| `failed` | anything else | the danger wash and rule, the message as the headline |
+| `unavailable` | this host has no Docker, nginx, terminal | neutral: "Not available on this host" |
+| `missing` | 404 | neutral: the message, then "It may have been removed or renamed since this link was made." An old link to something deleted is a normal event |
+| `throttled` | 429 | neutral: the message, "The server asked for a pause", **Try again** whenever `onRetry` is given, and `onRetry` called by itself once the answer's `Retry-After` (ten seconds without one) and a short grace have passed |
+
+Pass `onRetry` wherever the read can be repeated: it is what makes a throttled page come back without
+a press on a read that does not poll.
 
 ## 6. Three states, three mechanisms
 
@@ -396,7 +462,11 @@ A control can be all three at once and stay readable, which is the test.
 The ring is `focus-ring`, or `focus-ring-inset` where there is no room outside the control — one
 appearance, two placements. It is an `outline`, not Tailwind's `ring`: an outline follows
 `border-radius`, cannot be overwritten by a `shadow-*` utility landing on the same element, and works
-on a `<tr>`.
+on a `<tr>`. Being the outline, it is undone by any class in the same list that sets the outline's style
+to none: `outline-hidden` and `outline-none` win over it. The sidebar's five class lists carried
+`outline-hidden` from the component library's own focus styling, so every row of the rail took the
+keyboard's focus and showed nothing. `components/ui/focus-ring.test.js` fails on a class list that has
+both, and `design-system.spec.ts` walks the rail's own rows.
 
 A row's actions appear through `RowActions`, `IconAction reveal`, or `rowReveal()`. Never by hand: the
 four mechanisms that sentence hides — pointer, keyboard, open menu, touch — are how five action
@@ -412,8 +482,11 @@ press from reaching the row around it — discarding a draft used to navigate to
 deleted.
 
 Reveal only where the controls share their space with something else. Where they have a column of
-their own — a container card's actions slot — use `DimActions` instead: always drawn, one step of opacity until
-the pointer is on the row. A reserved column left empty reads as a layout bug, not as an affordance.
+their own — a container card's actions slot — use `DimActions` instead: always drawn, and quiet until
+the pointer is on the row. Quiet is the `row-dim` utility: the glyphs at 55% and the words in the faint
+ink, so a resting verb still reads at 4.5:1 (the whole cluster at 55% put a red "Sign out" at 2.3:1).
+A verb takes its own colour back with the row's hover, focus inside it, or an open menu; a filled
+button in the cluster is not dimmed, and nothing is where there is no hover. A reserved column left empty reads as a layout bug, not as an affordance.
 The Data page's rail is the shared case: a row's menu takes the place of its row count under the
 pointer, in the same grid cell, and the count's slot is at least the menu's width so the menu never
 covers the name. With a column of its own, every count stood a button's width short of the edge the
@@ -431,8 +504,8 @@ rail's headings end on.
 | `StatTile` | One headline figure, in a `StatGrid` | Not free-form — a row of them is read as a table |
 | `ChoiceCard` | One thing you pick out of several, in a `ChoiceGrid` — a source, a template, a database engine | Not a `Panel`: a panel is content that happens to be framed, this is a button that happens to be large |
 | `ChoiceRow` | One instance among many of one kind, in a `ChoiceList` — a repository, an image tag, an unfinished setup | Not a `Row`: a `Row` is read, a `ChoiceRow` is taken |
-| `BarList` | A ranked list with the meter's track behind each name and the figure at the right — the top ten of something, with a signal segment for the share that is wrong | Not a chart, and not a `RowList`: nothing here has a second line worth a row. Not for a new ranked list either: that is a `RankList`. The Databases pages left it in 0.8.6; a query result's Chart view keeps it, because there the bars are the picture the reader asked for |
-| `RankList` | A ranked list read rather than measured: name, figure and share in columns, with `SplitBar` for one strip of a whole over it, and `RankSkeleton` (rows of its own height) while it loads. Insights and every ranked list on the Databases pages use it. The share is of a real whole — the schema's bytes, the keys walked, the runtime counted — and a list of the top few of a whole nobody read has no share column rather than a share of the largest | Not a `BarList`: no bar per row, so nothing grows from row to row |
+| `BarList` | A ranked list with the meter's track behind each name and the figure at the right — the top ten of something, with a signal segment for the share that is wrong | Not a chart, and not a `RowList`: nothing here has a second line worth a row. Not for a ranked list any more: that is a `RankList`. Every page left it in 0.8.6 — the Databases pages first, then a project's failure causes, the proxy's busiest sites, a stream's outcomes and clients, Suricata's signatures, the connection table's breakdowns and the Files inspector's largest entries. A query result's Chart view is the one importer left, because there the bars are the picture the reader asked for, and the lint rule `design-system/primitives` refuses the import anywhere else (the small size bars inside table cells are their own few lines, not a `BarList`) |
+| `RankList` | A ranked list read rather than measured: name, figure and share in columns, with `SplitBar` for one strip of a whole over it, and `RankSkeleton` (rows of its own height) while it loads. Insights, every ranked list on the Databases pages and, since 0.8.6, every other ranked list in the product use it. The share is of a real whole — the schema's bytes, the keys walked, the runtime counted — and a list of the top few of a whole nobody read has no share column rather than a share of the largest | Not a `BarList`: no bar per row, so nothing grows from row to row |
 | `BarReading` | One block of a band: a head, a bar, one line and one strip of marks, the same height in every state (§10) | Not a `BarList`: nothing is listed under the bar, and it is the only thing a band's bar is drawn with |
 
 **Reach for `Panel`/`Pane`/`Page`, and add a variant there rather than a one-off in a feature page.**
@@ -508,7 +581,8 @@ from the history is read back from the server and folded through the same reduce
 exactly as it did and can be carried on. One another tab is answering is followed and says so in a calm bar over the
 box — a breathing dot, *This chat is running in another tab*, and **Take over** — and the tab it was taken from says
 *Continued somewhere else* and stops. Below the chats, what it has changed with a shortcut to each, and what it has
-read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot.
+read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot
+(`phone-panes.tsx`, which Git, Logs and the network tools share: `workspace-interactions.md`).
 
 A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a transition
 on an outline, not a fifth animation. The floating **Back to chat** is the same surface as Remote Desktop's dock, in
@@ -750,7 +824,7 @@ without `onOpenChange` (the build fold computes its initial state from detection
 store the operator's later answer), and React writes the `open` property only when the prop changes,
 so a prop-derived value went on announcing "collapsed" over fields that were plainly on screen. The
 one thing `role="button"` costs is the heading outline: a button's descendants are presentational,
-so a fold cannot also be an `<h3>` the way a `FormSection` is, and the standard
+so a fold cannot also be a heading the way a `FormSection` is (an `<h2>`), and the standard
 `<h3><button aria-expanded>` shape is not available inside `<details>`, whose first child must be
 the `<summary>`. That is the same as it was before the unification — the framed strip was not a
 heading either — and the widget semantics are worth more here than the outline entry. A caller that
@@ -798,7 +872,14 @@ The face is **Source Sans 3**, self-hosted from Adobe's
 italic variable WOFF2 files sit in `src/app/fonts/` with their SIL Open Font License. `next/font/local`
 loads both in `app/layout.tsx` at weights 200–900 and emits `--font-source-sans-3`; `--font-sans` in
 `globals.css` puts it ahead of the system fallback. Nothing at build or run time reaches out to a
-font CDN. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
+font CDN. **Only the upright is preloaded.** The two faces are declared apart (`app/font.ts`,
+`app/font-italic.ts`) because one `localFont` call preloads every file it names, and the italic's
+138 KB then raced the page's JavaScript on each first visit for a face most screens never draw; it is
+fetched when italic text first appears. Both declarations assign to a constant named `sourceSans3`,
+which is what the build names the family after, so they are one family and `font-style: italic` picks
+the italic file with nothing else said; `app-states.spec.ts` checks that, and that the response preloads
+the upright alone. The files are whole, not subset to Latin: the licence reserves the name "Source", so
+a subset is a modified font that could not keep it. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
 
 **Glyphs are laid out at their real widths.** Chromium on Linux hints a web font and rounds every
 glyph's advance to a whole pixel, and against the body's −0.02em tracking that broke the 11–13px
@@ -993,6 +1074,15 @@ rather than assembling its own recharts tree — adding a measurement should mea
   clipped them.
 - A chart's `height` is a **floor**, not a fixed size. Panels in a row stretch to the tallest of
   them, and a fixed plot puts the surplus between the chart and its legend as a band of nothing.
+- **A chart is a frame and a plot, and only the plot is recharts.** The frame (`MetricChart`) is in
+  the page from the first render at the chart's height, with the keyboard, the pinned reading and
+  the crosshair. The plot is drawn when the reader comes within 600px of it (`useNearViewport`),
+  stays drawn once it is, holds the frame it last drew while it is out of reach
+  (`metrics/plot-held.ts`), and is memoised with its legend, so a panel re-rendered for the live
+  figure in its head does not reconcile a tree whose rows are the same array. A page therefore
+  hands a chart **one array per reading, not one per render**: rows built in the render body redraw
+  every chart on every frame of the socket. Opening Metrics drew eleven recharts trees in one
+  blocked stretch and redrew them every two seconds; it now draws the first screen's.
 - **A scale fitted a little above a limit splits into unround steps** (143 / 286 / 429 MB), so
   `yTicks` on `MetricChart` and `ChartPanel` names the ticks. A container's memory chart is scaled to
   its limit and ticks at the limit's quarters, so the top tick names the limit — on Docker's
@@ -1155,7 +1245,14 @@ above:
   being tested, an engine being started from quick setup; and, on `/deploy/new`, a repository or
   an image being inspected. The shimmer lights the stage a release is at and the present
   participles that stand for a wait — *Sending test…*, *Testing…*, *Pausing…*, *Candidate for
-  release #14*, *deploying #14*, *running now*;
+  release #14*, *deploying #14*, *running now*. All three are the browser's own animations, never a
+  script's frame loop, because *live* lasts as long as the page is open: the beam's pulse is a band
+  moved by `transform` behind a mask cut to the line (`jd-beam`), `BorderBeam`'s lap is the frame's
+  edge written as transform keyframes (`lib/beam-lap.ts`) and handed to the Web Animations API
+  once, the shimmer is `jd-shimmer`, the update notice's wire `jd-wire`, and the release path's
+  running `Segment` is `animate-sweep`. Reduced motion stills each of them in CSS. A new *live*
+  mark is written the same way: an endless `motion` animation keeps a page that looks still busy
+  sixty times a second (`design-system.spec.ts` counts the frames a page with wires asks for);
 - *once* — `Confetti` fires only when a release goes live in front of the reader — on the run page,
   on the Overview when a run watched there from start to finish ends in success, and from the
   sidebar's update notice when an update of the dashboard itself finishes while the tab is open —
@@ -1444,6 +1541,17 @@ presses restart twice. The row carries the present participle (`Stopping…`) un
 ## 14. A header is its title
 
 **A surface's header carries its name and its actions. It does not carry a picture of itself.**
+
+**The outline a screen reader walks is part of the header.** Every page has exactly one `h1`: a
+workbench that draws no header (Files, Terminal) says its name in an `sr-only` one. Headings never
+skip a level, so a `FormSection`'s title is an `h2`, the level under the page's title; it was an `h3`
+with nothing between. Nothing is drawn outside a landmark: the sidebar's wordmark, version and search
+are the page's `banner`. A scrolling table with nothing in it to focus is itself a keyboard stop
+(`Table` makes its container a named, focusable region only then, so a table of links keeps the tab
+order it had). A mark that is a link says what it opens in words when its title is drawn rather than
+written (a topology node's `name`), a status dot that carries a label is `role="img"`, and a
+`Sparkline` without a label is hidden rather than an unnamed image. `design-system.spec.ts` holds the
+first three and `network-topology-interfaces.spec.ts` the table and the node's name.
 
 Every `PanelHeader`, `Modal`, `SidePanel` and `Section` used to open with a 28px brand-tinted plot
 and a glyph inside it. On a page of six panels that is six brand marks down the left edge, each one
@@ -1746,7 +1854,13 @@ A watched domain opens a live report and preserves its nonstandard port. Passwor
 lists and watched-domain setup use the deployment settings' sections, each head over its fields; an
 access list is a row you read (its addresses as mono tags, its sites as links, its include line with
 Copy) with Edit inline and Delete in its menu. Certificate renewal lineages and
-DNS providers remain readings with their own actions, laid out to fit the management column; every
+DNS providers remain readings with their own actions, laid out to fit the management column. The
+providers are one list of choices, each a row of one height (mark, name, verbs): a plugin that is not
+installed and credentials nobody saved are the expected answer for a provider nobody chose, so only a
+provider with a token saved, or one a lineage renews through, says where it stands (*credentials
+saved*, *plugin missing*, *no credentials*), and those stand first. The name keeps its width before
+anything beside it; the plugin's id, the propagation wait and why a plugin cannot be installed from
+here are behind the name. Until 0.8.6 all eight carried an amber *plugin missing* line. Every
 run certbot made, the timer's included, follows the two columns as Renewals, a log `Pane` across the
 page's width, which a log needs and the management column does not have. The
 renewal column opens on its recent certbot runs (in the body, where they wrap, not in the narrow
@@ -1779,6 +1893,17 @@ including a stopped, failed, masked and boot-disabled unit, a refused start, res
 the config test panel; `proxy-insights.spec.ts` covers Live traffic, the ingress's routes in it, Recent errors, the nginx counters' switch (pressed on the card as well as the switch) and a phone;
 `proxy-alerts.spec.ts` covers the Alerts page — its picture, what fires, the rule form — and the
 overview bar's firing count.
+
+**A Sites list that could not be read says which read failed, why, and can be asked again.** The list
+is read from nginx, a Caddy on the host and the Caddy container that holds the public ports, and the
+last can fail on a server where the first two are fine (Docker not answering, two public Caddy
+containers and no word on which is the ingress, a Caddy that publishes 80 without 443). The page was
+two words in a red box. `proxy/sites-read-failure.ts` names the block for what was being read
+(*Could not read the sites*), draws the answer's `reason` under its message and its `raw` behind
+*What the server said* where the server sent them, points a bare 500 at the log line with its request
+id where it did not, and always offers **Try again**, since the read changes nothing. The notice over
+rows kept from the last good read carries the same reason and disclosure. `proxy-sites-list.spec.ts`
+holds both at 1280 and 390, with and without a reason.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:
@@ -3420,7 +3545,17 @@ with the guard's sentence beside it (a device's *Set down* on the uplink, forwar
 needs), because a control that disappears says nothing and one greyed out with no reason says less.
 Each page that reads a tool this host may not have opens on its install where it is missing
 (`network/install.tsx`: the package's name, what it would do here drawn as the product, and the
-Packages page's install job streaming under the button).
+Packages page's install job streaming under the button). The Git page and Tailscale on the VPN page do
+the same, without the after-install phases the server keeps only for the network and security tools
+(`phases={false}`); Tailscale is offered only where the package manager carries it
+(`usePackageKnown`, one `GET /packages/tailscale`), since Debian and Ubuntu do not until its own
+repository is added, and is pointed at otherwise. PM2 is an npm package for a host account, not
+something the package manager installs, so its page names the command and opens the terminal
+(`procs/pm2-missing.tsx`). Docker is never missing on an install that runs in it; what its pages say
+when the daemon cannot be asked is which fault it is (`docker/unreachable.ts`): a socket that refused
+the dashboard, a `docker.service` systemd says is not running (with **Start Docker** for
+`service.control`), a daemon that runs but not at the address asked, or no answer where systemd cannot
+be asked. The client's own sentence is behind *What the server said*.
 
 **Network drift took the exit on 2026-10-10**, at the operator's request, because it was dead:
 four grey figures (known differences, incomplete readings, matching observations, owned repair
@@ -3760,6 +3895,18 @@ a new block on this page takes it too:
   its own tint (`WireMark hue`, the `HUE` map's colours), a name, the reading as words ("0.1% of one core"),
   a detail and its last hour at the line's end. Each is one height in every state and opens the page that
   has the rest.
+
+- **A block that shows only in one state takes the shape too.** The release watch and the sleeping
+  block were missed in 0.8.5 because each is drawn only while a release is on watch or the environment
+  is asleep, and stayed two rows of four tiles until 0.8.6. The watch opens on the proxy that wrote the
+  record (Caddy, or nginx where the readings carry no durations) with *Release #12 fails 0.4% of its
+  requests; 19 in 20 finish inside 180ms*, the judgement and the countdown under it, and its picture is
+  the release before and the release now as two strips of one length, what each answered and what it
+  failed, the figures in a column beside them. The sleeping block opens on Docker's mark with *Asleep
+  by design for 42 min*, and its picture is the last seven days as one strip with each stretch asleep on
+  it. Their verbs stay in the head: *Keep release #N* and *Roll back instantly*, *Wake now*. The rows
+  and strips keep one height and one place whether there is a reading or not
+  (`deploy-rollback-watch.spec.ts` and `deploy-sleep.spec.ts` measure both at 1280 and 390).
 
 The Deployments tab's history and every other page keep `StatTile`: this is the Overview's register of
 speech, not a retirement of the figure.

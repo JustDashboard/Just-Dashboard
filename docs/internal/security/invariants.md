@@ -362,8 +362,15 @@ A change that weakens any of these has to say so explicitly.
     the operator protected is out of every chat's reach as well (`agentProtected`): its own chat is refused by the
     guard, and a call into its routes is answered with why, so nothing in it is sent to a model. What used to be
     refused is asked instead: how much runs without asking is the mode, which the server holds on every press —
-    "ask" holds every read and change, "changes" (the default) holds every change, and **full access runs
-    everything the person's role allows, unseen**; a draft's own saves never wait, but committing it, discarding
+    "ask" holds every read and change, "changes" (the default) holds every change and every read that is sent to
+    a machine the call names (a lookup, a scan, a probe: `agentReachingReads`, and the shell's `ping`, `dig` and
+    kin), since that is how what it has read would leave the server, and **full access runs
+    everything the person's role allows, unseen**, which for an administrator includes what a hub session is
+    refused because it outlives whoever made it (an account, a key, a sudo rule, a VPN peer, the dashboard's
+    settings): holding those routes alone would not keep one from being made, since the shell and file writes
+    run unseen there too, so the mode says so where it is chosen (`MODE_DETAIL`) and
+    `TestWhatOutlivesTheChatWaitsForThePersonOutsideFullAccess` holds that in the other two modes each of them
+    that makes or changes something waits; a draft's own saves never wait, but committing it, discarding
     it, or a save that changes its source, points a variable at a saved secret or reaches the host waits unless
     the mode is full. Text the model reads can try to talk it into a change, which is why "changes" stays the
     default and who answers takes a session. **What is kept from the provider is every secret's value**: every
@@ -702,3 +709,61 @@ it once, requires valid UTF-8, and compares the exact phrase. Legacy unencoded h
 supported. Only the Compose WebSocket action accepts a phrase in a query parameter because browsers
 cannot set custom WebSocket headers; `wsx` still checks the origin. An ordinary handler must use the
 header guard instead.
+
+## What a role is, and what it is not
+
+The three roles (`auth.rolePermissions`) decide which routes an account reaches. They are not a line
+between people trusted with the server and people who are not, and no document or screen may present
+them as one:
+
+- `admin` holds `terminal`: a root shell.
+- `limited` holds `file.write`. The Files routes behind it (write, upload, mkdir, touch, move, copy,
+  symlink, extract) resolve a path against `JD_FILE_ROOTS` (`/` by default) and act as root in the
+  host's mount namespace; `files.WriteChecked` has no deny-list. A `limited` account can write
+  `/root/.ssh/authorized_keys`, `/etc/sudoers.d/*`, `/etc/cron.d/*`, a systemd unit or the dashboard's
+  own `.env`. It is root-equivalent.
+- `readonly` holds `read`, and the Files routes that read (list, read, download, raw, preview, archive,
+  search, find, checksum) resolve the same way. It reads `/etc/shadow`, SSH private keys, every
+  project's `.env`, the dashboard's own `.env` with `JD_MASTER_KEY`, and the store in `JD_DATA_DIR`.
+  With the last two it opens every value `auth.Sealer` sealed (connection DSNs, provider and Git
+  credentials, deployment secrets, every account's TOTP seed) and holds every account's Argon2id hash.
+
+The redactions below `system.admin` (a container's environment in `handleContainerInspect`, the
+dashboard's own environment on the process page) raise the cost of reading a secret off a page. They do
+not keep it from a role, and must not be described as if they did.
+
+**Where the operator is told.** The Roles section of `SECURITY.md`, and the sentences shown wherever a
+role is handed out or read: the new-user and new-key forms, the picker on each account's card and the
+role ladder on the profile (`frontend/src/components/account/capabilities.ts`: `ROLE_SUMMARY` and the
+`read` and `file.write` descriptions, held by `capabilities.test.js`). A change to what a role reaches
+changes both in the same commit.
+
+**The decision.** Every role sees everything on the server by design: the dashboard is one panel for the
+people who run one server. The owner has decided not to narrow that (audit of 10 November 2026,
+findings SEC-01 and SEC-11), so no deny-list is built. It is not to be added one route at a time
+either: a route that refuses a path the others still serve is a line in name only, and reads as a
+promise.
+
+**What narrowing it would take**, if the owner decides to:
+
+1. *One owner.* The refusal lives in `files.Resolve`, which every client-supplied path already goes
+   through (invariant 6), on the path after links are resolved, and takes the principal: today it
+   knows the roots and not who asks.
+2. *The dashboard's own state, for every role below `system.admin`:* `JD_DATA_DIR`, `JD_BACKUP_DIR`,
+   the install directory's `.env` and every copy of it (`.env.backup.*`, `.env.jd-port-previous-*`,
+   the `install.env` an uninstall keeps), and `/proc/<pid>/environ` of the dashboard's processes.
+3. *For `file.write`, an allow-list, not a deny-list.* The paths that grant root are not a list anyone
+   can finish: sudoers, cron, systemd units, PAM, `ld.so.preload`, shell profiles, `authorized_keys`
+   in every home, and every program or library root runs. A `limited` that is less than root writes
+   only inside roots the operator names for it, which means file roots per role instead of one
+   `JD_FILE_ROOTS`.
+4. *The other ways to the same values.* The Compose file at `/docker/stacks/{name}/config`, a
+   deployment run's log, the Git and Logs pages within their own roots, and a backup download each
+   return what a file holds without going through the Files routes. Each needs the same answer, or
+   the refusal in 1 is decoration.
+5. *What a role can make the server run.* `service.control` starts deployments and restarts services,
+   and a `limited` account may change what a deployment is built from. A role that is not root cannot
+   decide what root runs.
+6. *Proof.* A test per role that asks every route in 1 and 4 for every path in 2 and 3, directly,
+   through a link, through `..` and inside an archive, and is refused; and the wording above changed
+   in the same commit, because it would then be wrong in the other direction.

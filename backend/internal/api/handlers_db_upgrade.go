@@ -94,7 +94,7 @@ type dbUpgradeRecord struct {
 	SafetyDump     string     `json:"safetyDump,omitempty"`
 	Error          string     `json:"error,omitempty"`
 	StartedBy      string     `json:"startedBy,omitempty"`
-	StartedAt      time.Time  `json:"startedAt"`
+	StartedAt      time.Time  `json:"startedAt,omitzero"`
 	UpgradedAt     *time.Time `json:"upgradedAt,omitempty"`
 	EndedAt        *time.Time `json:"endedAt,omitempty"`
 

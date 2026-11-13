@@ -28,7 +28,7 @@ type APIToken struct {
 	// Scope narrows the key to one capability. Empty is an ordinary key, bound
 	// only by its role; a scoped key reaches nothing but the routes that name it.
 	Scope      string     `json:"scope"`
-	CreatedAt  time.Time  `json:"createdAt"`
+	CreatedAt  time.Time  `json:"createdAt,omitzero"`
 	ExpiresAt  *time.Time `json:"expiresAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt"`
 	Revoked    bool       `json:"revoked"`

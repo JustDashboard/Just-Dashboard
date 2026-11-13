@@ -3,7 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
-	"strings"
+	"fmt"
 	"time"
 )
 
@@ -12,7 +12,7 @@ var ErrContainerIdentityWindow = errors.New("container identity history requires
 // Identity history is deliberately separate from name-continuous Docker charts.
 // A replacement or a renamed container must not acquire another release's data.
 type ContainerIdentityPoint struct {
-	TS           time.Time `json:"ts"`
+	TS           time.Time `json:"ts,omitzero"`
 	Samples      int       `json:"samples"`
 	CPU          float64   `json:"cpu"`
 	CPUPeak      float64   `json:"cpuPeak"`
@@ -47,7 +47,9 @@ func (r *Recorder) ContainerIdentityRange(ctx context.Context, ids []string, fro
 		if _, exists := indexes[id]; exists || id == "" || len(id) > 128 {
 			return nil, ErrContainerIdentityWindow
 		}
-		indexes[id], marks[i] = i, "?"
+		// Numbered, so the condition can name each id for both of the ways
+		// a sample spells one.
+		indexes[id], marks[i] = i, fmt.Sprintf("?%d", i+1)
 		args = append(args, id)
 	}
 	if maxPoints < 1 {
@@ -56,9 +58,9 @@ func (r *Recorder) ContainerIdentityRange(ctx context.Context, ids []string, fro
 	if maxPoints > 600 {
 		maxPoints = 600
 	}
-	where := "container_id IN (" + strings.Join(marks, ",") + ")"
+	where := containerIdentityIn(marks)
 	window, err := r.window(ctx, from, to, maxPoints,
-		"SELECT MIN(ts) FROM metric_container_samples WHERE "+where, args...)
+		"SELECT MIN(s.ts) FROM metric_container_samples s WHERE "+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +71,6 @@ func (r *Recorder) ContainerIdentityRange(ctx context.Context, ids []string, fro
 	if !r.Enabled() {
 		return result, nil
 	}
-	queryArgs := []any{window.StepSeconds, window.StepSeconds}
-	queryArgs = append(queryArgs, args...)
 	// Samples are whole-second instants. Rounding either boundary down would
 	// misclassify a sample when activation evidence contains fractional seconds.
 	fromSecond, toSecond := from.Unix(), to.Unix()
@@ -80,12 +80,16 @@ func (r *Recorder) ContainerIdentityRange(ctx context.Context, ids []string, fro
 	if to.Nanosecond() != 0 {
 		toSecond++
 	}
-	queryArgs = append(queryArgs, fromSecond, toSecond)
-	rows, err := r.db.QueryContext(ctx, `SELECT container_id, (ts / ?) * ? AS bucket,
-		COUNT(*), AVG(cpu_percent), MAX(cpu_percent), AVG(mem_percent), MAX(mem_percent),
-		AVG(mem_bytes), MAX(mem_bytes), MAX(mem_limit)
-		FROM metric_container_samples WHERE `+where+` AND ts >= ? AND ts < ?
-		GROUP BY container_id, bucket ORDER BY container_id, bucket`, queryArgs...)
+	// The ids keep the numbers the condition gave them; the step and the
+	// window's bounds follow.
+	step, lower, upper := fmt.Sprintf("?%d", len(args)+1), fmt.Sprintf("?%d", len(args)+2), fmt.Sprintf("?%d", len(args)+3)
+	queryArgs := append(append([]any{}, args...), window.StepSeconds, fromSecond, toSecond)
+	rows, err := r.history().QueryContext(ctx, `SELECT `+containerIdentity+` AS identity, (s.ts / `+step+`) * `+step+` AS bucket,
+		COUNT(*), AVG(s.cpu_percent), MAX(s.cpu_percent), AVG(s.mem_percent), MAX(s.mem_percent),
+		AVG(s.mem_bytes), MAX(s.mem_bytes), MAX(s.mem_limit)
+		FROM metric_container_samples s`+containerIdentityJoin+`
+		WHERE `+where+` AND s.ts >= `+lower+` AND s.ts < `+upper+`
+		GROUP BY identity, bucket ORDER BY identity, bucket`, queryArgs...)
 	if err != nil {
 		return nil, err
 	}

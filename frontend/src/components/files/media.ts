@@ -106,6 +106,24 @@ export function isWithin(path: string, dir: string): boolean {
   return d === "/" || path === d || path.startsWith(d + "/")
 }
 
+/**
+ * The disk a path is on: the mount that holds it and is deepest, as `df` would
+ * answer. Nothing while no frame has carried mounts yet, or for no path.
+ */
+export function mountOf<M extends { mountpoint: string }>(
+  mounts: readonly M[] | null | undefined,
+  path: string | null | undefined,
+): M | undefined {
+  if (!path || !Array.isArray(mounts)) return undefined
+  let best: M | undefined
+  for (const m of mounts) {
+    if (isWithin(path, m.mountpoint) && (!best || m.mountpoint.length > best.mountpoint.length)) {
+      best = m
+    }
+  }
+  return best
+}
+
 /** The MIME type the drag payload of a set of paths travels as. */
 export const DRAG_PATHS = "application/x-jd-paths"
 

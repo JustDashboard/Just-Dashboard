@@ -17,7 +17,7 @@ const iso = (ms: number) => new Date(ms).toISOString()
 const me = {
   id: 1,
   username: "ion",
-  displayName: "Ion Moisei",
+  displayName: "Ion Popescu",
   avatarVersion: 0,
   role: "admin",
   totpEnabled: true,
@@ -58,7 +58,8 @@ const phone = {
   id: 5,
   name: "iPhone",
   rpId: "dash.example.com",
-  lastUsedAt: "0001-01-01T00:00:00Z",
+  // Never used: the server leaves the time out.
+  lastUsedAt: undefined,
   synced: true,
 }
 
@@ -143,7 +144,7 @@ test("adding a passkey asks for the password and the code, then the browser make
         publicKey: {
           challenge: b64(randomBytes(32)),
           rp: { name: "Just Dashboard", id: "localhost" },
-          user: { id: b64(Buffer.from("account-handle")), name: "ion", displayName: "Ion Moisei" },
+          user: { id: b64(Buffer.from("account-handle")), name: "ion", displayName: "Ion Popescu" },
           pubKeyCredParams: [{ type: "public-key", alg: -7 }],
           timeout: 60000,
           excludeCredentials: [],
@@ -154,7 +155,7 @@ test("adding a passkey asks for the password and the code, then the browser make
     }
     if (path === "/account/passkeys/register/finish") {
       finishes.push(request.postDataJSON())
-      const created = { ...laptop, id: 9, name: "Work laptop", lastUsedAt: "0001-01-01T00:00:00Z" }
+      const created = { ...laptop, id: 9, name: "Work laptop", lastUsedAt: undefined }
       keys = [created, laptop]
       return json(route, created, 201)
     }

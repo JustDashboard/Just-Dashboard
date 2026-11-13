@@ -158,7 +158,14 @@ export function JobCard({
             {last}
             {note}
           </div>
-          {strip}
+          {/* The strip's place, at the width of its fourteen squares, from the
+              first paint of a job that has run: the runs are a read of the
+              card's own, and a strip that took its place when they landed
+              pushed the schedule onto a line of its own and every card under
+              this one down. */}
+          {job.lastRun || runs.data?.runs.length ? (
+            <span className="flex w-27.5">{strip}</span>
+          ) : null}
           <span className="whitespace-nowrap">{next}</span>
           <span className="whitespace-nowrap">{stored}</span>
         </div>

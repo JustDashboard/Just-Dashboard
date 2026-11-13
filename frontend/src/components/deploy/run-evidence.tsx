@@ -83,7 +83,11 @@ function text(value: unknown) {
   return typeof value === "string" && value !== "" ? value : undefined
 }
 
-/** Go's zero `time.Time`, which an `omitempty` on a struct field still emits. */
+/**
+ * Go's zero `time.Time`. The server leaves an unset time out of what it
+ * answers now, but a run's evidence is read as it was stored, and what was
+ * stored before that still spells "never" as year one.
+ */
 const ZERO_TIME = /^0001-01-01T/
 
 /** A value worth a row: not empty, not Go's zero time, not an empty list or record. */

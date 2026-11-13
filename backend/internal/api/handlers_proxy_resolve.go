@@ -26,7 +26,7 @@ func (s *Server) handleRouteResolve(w http.ResponseWriter, r *http.Request) erro
 	}
 	out, err := proxysvc.ResolveRoute(tree, r.URL.Query().Get("url"))
 	if errors.Is(err, proxysvc.ErrRouteURL) {
-		return httpx.BadRequest("%s", err.Error())
+		return httpx.Refused(err)
 	}
 	if err != nil {
 		return httpx.Internal(err)
@@ -51,7 +51,7 @@ func (s *Server) handleRouteAccess(w http.ResponseWriter, r *http.Request) error
 	q := r.URL.Query()
 	out, err := proxysvc.ExplainAccess(tree, q.Get("url"), q.Get("source"))
 	if errors.Is(err, proxysvc.ErrRouteURL) || errors.Is(err, proxysvc.ErrAccessSource) {
-		return httpx.BadRequest("%s", err.Error())
+		return httpx.Refused(err)
 	}
 	if err != nil {
 		return httpx.Internal(err)

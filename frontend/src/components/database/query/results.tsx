@@ -362,6 +362,7 @@ export function Results({
   return (
     <div data-slot="query-results" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex h-9 shrink-0 items-stretch border-b border-hairline bg-surface-header pr-1.5">
+        {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself */}
         <div
           ref={tabs}
           role="tablist"

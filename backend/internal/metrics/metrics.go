@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
 )
@@ -56,7 +57,7 @@ const pruneEvery = time.Hour
 // Sample is one recorded moment. Rates are per second, averaged over the
 // interval since the previous sample, exactly as the live socket reports them.
 type Sample struct {
-	TS          time.Time `json:"ts"`
+	TS          time.Time `json:"ts,omitzero"`
 	CPUPercent  float64   `json:"cpuPercent"`
 	Load1       float64   `json:"load1"`
 	MemPercent  float64   `json:"memPercent"`
@@ -110,7 +111,7 @@ type Sample struct {
 // means reports a quiet night. The peaks are what make a downsampled week
 // still worth reading.
 type Point struct {
-	TS      time.Time `json:"ts"`
+	TS      time.Time `json:"ts,omitzero"`
 	Samples int       `json:"samples"`
 
 	CPU     float64 `json:"cpu"`
@@ -200,8 +201,8 @@ type Point struct {
 // before here" can be labelled as such rather than looking like an idle
 // server.
 type Window struct {
-	From             time.Time  `json:"from"`
-	To               time.Time  `json:"to"`
+	From             time.Time  `json:"from,omitzero"`
+	To               time.Time  `json:"to,omitzero"`
 	StepSeconds      int        `json:"stepSeconds"`
 	IntervalSeconds  int        `json:"sampleIntervalSeconds"`
 	RetentionSeconds int        `json:"retentionSeconds"`
@@ -219,7 +220,7 @@ type Series struct {
 // pinned a core, or climbed to its memory limit and was killed, leaves nothing
 // behind in a mean.
 type ContainerPoint struct {
-	TS      time.Time `json:"ts"`
+	TS      time.Time `json:"ts,omitzero"`
 	Samples int       `json:"samples"`
 
 	// Null means no sample in the bucket measured an interval, as for the
@@ -263,7 +264,7 @@ type ContainerSeries struct {
 
 // MountPoint is one bucket of one filesystem's capacity.
 type MountPoint struct {
-	TS      time.Time `json:"ts"`
+	TS      time.Time `json:"ts,omitzero"`
 	Samples int       `json:"samples"`
 
 	UsedPercent     float64 `json:"usedPercent"`
@@ -329,7 +330,7 @@ const VolumeInterval = 15 * time.Minute
 
 // Recorder samples the host and answers questions about the past.
 type Recorder struct {
-	db        *sql.DB
+	st        *store.Store
 	log       *slog.Logger
 	interval  time.Duration
 	retention time.Duration
@@ -363,6 +364,18 @@ type Recorder struct {
 	// saved a moment ago is judged at once.
 	sizingMu    sync.Mutex
 	sizingCache map[string]sizingCached
+
+	// ids are the numbers container ids are written down under
+	// (container_ids.go), remembered so a sample does not ask the store for
+	// one every interval. idsMu is held for a whole write of samples and for
+	// the pruning of ids, so the two never interleave.
+	idsMu sync.Mutex
+	ids   map[string]int64
+	// numberIDs is whether a sample is written with its container's id as a
+	// number, or spelled out as every release so far has written it. It is
+	// off and only a test turns it on: see container_ids.go for what has to
+	// be true of the binary a rollback returns to before the server may.
+	numberIDs bool
 }
 
 // New builds a recorder. An interval or retention outside the supported band
@@ -378,13 +391,26 @@ func New(st *store.Store, log *slog.Logger, interval, retention time.Duration) *
 		retention = MinRetention
 	}
 	return &Recorder{
-		db:        st.DB,
+		st:        st,
 		log:       log,
 		interval:  interval,
 		retention: retention,
 		col:       sysinfo.NewCollector(),
 	}
 }
+
+// samples is where samples are written and pruned: the store's bulk writer,
+// which does not sync the disk on every commit. A power cut can take the last
+// few seconds of samples, which leaves a gap no wider than the one the outage
+// itself draws, and the recorder stops costing the disk a sync for every
+// table it writes every interval.
+func (r *Recorder) samples() *sql.DB { return r.st.Bulk() }
+
+// history is where the past is read from: the store's read pool. A week of
+// samples takes half a second to fold and a Metrics page asks for several at
+// once; on the pool every request shares, two such pages left no connection
+// for a session check or for the next sample.
+func (r *Recorder) history() *sql.DB { return r.st.Reader() }
 
 // WithContainers attaches per-container recording. Called after New because
 // the Docker client is built alongside the recorder rather than before it.
@@ -442,7 +468,17 @@ func (r *Recorder) Start(parent context.Context) error {
 		r.log.Warn("metrics prune failed", "error", err)
 	}
 
-	go r.loop(ctx, done)
+	// Volumes on a loop of their own: the disk walk behind a volume's size can
+	// take minutes on a cold cache, and the host's fifteen-second record must
+	// not wait on it. Each is a task of its own (internal/safego), so a panic
+	// in one is logged and that one started again; done closes when both have
+	// left, which is what Stop waits for.
+	var volumes sync.WaitGroup
+	if r.volumes != nil {
+		volumes.Add(1)
+		safego.Go(ctx, r.log, "volume size recorder", r.volumeLoop, volumes.Done)
+	}
+	safego.Go(ctx, r.log, "metrics recorder", r.loop, volumes.Wait, safego.Close(done))
 	r.log.Info("recording metrics history",
 		"interval", r.interval.String(), "retention", r.retention.String())
 	return nil
@@ -462,20 +498,7 @@ func (r *Recorder) Stop() {
 	<-done
 }
 
-func (r *Recorder) loop(ctx context.Context, done chan struct{}) {
-	defer close(done)
-	// Volumes on a loop of their own: the disk walk behind a volume's size can
-	// take minutes on a cold cache, and the host's fifteen-second record must
-	// not wait on it. Deferred after close(done), so it is waited for first.
-	var volumes sync.WaitGroup
-	defer volumes.Wait()
-	if r.volumes != nil {
-		volumes.Add(1)
-		go func() {
-			defer volumes.Done()
-			r.volumeLoop(ctx)
-		}()
-	}
+func (r *Recorder) loop(ctx context.Context) {
 	t := time.NewTicker(r.interval)
 	defer t.Stop()
 	lastPrune := time.Now()
@@ -556,7 +579,7 @@ func (r *Recorder) writeVolumes(ctx context.Context, at time.Time, sizes []Volum
 	if len(sizes) == 0 {
 		return nil
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.samples().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -588,7 +611,7 @@ func (r *Recorder) recordMounts(ctx context.Context, at time.Time, mounts []sysi
 	if len(mounts) == 0 {
 		return nil
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.samples().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -648,7 +671,7 @@ func (r *Recorder) StorageRange(ctx context.Context, from, to time.Time, maxPoin
 	series := &StorageSeries{Window: window, Mounts: []MountSeries{}}
 
 	secs := int64(window.StepSeconds)
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT mountpoint,
 		       (ts / ?) * ? AS bucket,
 		       COUNT(*),
@@ -724,18 +747,23 @@ func (r *Recorder) recordContainersAt(ctx context.Context, at time.Time, stats [
 }
 
 func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []dockerx.ContainerStats) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	r.idsMu.Lock()
+	defer r.idsMu.Unlock()
+	tx, err := r.samples().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	// A row spells its container's id out in container_id and holds no
+	// number, or, with numberIDs, holds the number of the id's row in
+	// metric_container_ids and leaves container_id empty (container_ids.go).
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO metric_container_samples
 		  (ts, name, cpu_percent, mem_bytes, mem_limit, mem_percent, net_rx, net_tx, pids,
-		   block_read, block_write, container_id, size_rw, network_available, block_available,
+		   block_read, block_write, container_id, container_ref, size_rw, network_available, block_available,
 		   mem_limited, cpu_total, sample_time, cpu_periods, cpu_throttled)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(name, ts) DO UPDATE SET
 		  cpu_percent = excluded.cpu_percent,
 		  mem_bytes   = excluded.mem_bytes,
@@ -747,6 +775,7 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		  block_read  = excluded.block_read,
 		  block_write = excluded.block_write,
 		  container_id = excluded.container_id,
+		  container_ref = excluded.container_ref,
 		  size_rw     = excluded.size_rw,
 		  network_available = excluded.network_available,
 		  block_available = excluded.block_available,
@@ -760,9 +789,17 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 	}
 	defer stmt.Close()
 
+	resolved := map[string]int64{}
 	for _, st := range stats {
 		if st.Name == "" {
 			continue // nothing to key the series on, and nothing to look it up by
+		}
+		spelled, ref := st.ID, any(nil)
+		if r.numberIDs {
+			if ref, err = r.containerRef(ctx, tx, st.ID, resolved); err != nil {
+				return err
+			}
+			spelled = ""
 		}
 		observed := at
 		if !st.TS.IsZero() {
@@ -778,13 +815,17 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		if _, err := stmt.ExecContext(ctx, observed.Unix(), st.Name, st.CPUPercent,
 			int64(st.MemUsage), int64(st.MemLimit), st.MemPercent,
 			int64(st.NetRx), int64(st.NetTx), int64(st.PIDs),
-			int64(st.BlockRead), int64(st.BlockWrite), st.ID, st.SizeRw,
+			int64(st.BlockRead), int64(st.BlockWrite), spelled, ref, st.SizeRw,
 			st.NetworkAvailable, st.BlockAvailable, st.MemLimited, int64(st.CPUTotal),
 			float64(observed.UnixNano())/1e9, periods, throttled); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.rememberContainerRefs(resolved)
+	return nil
 }
 
 // Reduce flattens a full snapshot into the handful of series worth keeping for
@@ -860,7 +901,7 @@ func (r *Recorder) record(ctx context.Context, s Sample) error {
 	if ts.IsZero() {
 		ts = time.Now()
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.samples().ExecContext(ctx, `
 		INSERT INTO metric_samples
 		  (ts, cpu_percent, load1, mem_percent, mem_used, mem_total, swap_percent,
 		   net_rx, net_tx, disk_read, disk_write, disk_percent, uptime_seconds,
@@ -926,16 +967,19 @@ func (r *Recorder) prune(ctx context.Context) error {
 		return nil
 	}
 	cutoff := time.Now().Add(-r.retention).Unix()
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM metric_samples WHERE ts < ?`, cutoff); err != nil {
+	if _, err := r.samples().ExecContext(ctx, `DELETE FROM metric_samples WHERE ts < ?`, cutoff); err != nil {
 		return err
 	}
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM metric_container_samples WHERE ts < ?`, cutoff); err != nil {
+	if _, err := r.samples().ExecContext(ctx, `DELETE FROM metric_container_samples WHERE ts < ?`, cutoff); err != nil {
 		return err
 	}
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM metric_volume_samples WHERE ts < ?`, cutoff); err != nil {
+	if err := r.pruneContainerIDs(ctx); err != nil {
 		return err
 	}
-	_, err := r.db.ExecContext(ctx, `DELETE FROM metric_mount_samples WHERE ts < ?`, cutoff)
+	if _, err := r.samples().ExecContext(ctx, `DELETE FROM metric_volume_samples WHERE ts < ?`, cutoff); err != nil {
+		return err
+	}
+	_, err := r.samples().ExecContext(ctx, `DELETE FROM metric_mount_samples WHERE ts < ?`, cutoff)
 	return err
 }
 
@@ -960,7 +1004,7 @@ func (r *Recorder) Range(ctx context.Context, from, to time.Time, maxPoints int)
 	series := &Series{Window: window, Points: []Point{}}
 
 	secs := int64(window.StepSeconds)
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT (ts / ?) * ?                          AS bucket,
 		       COUNT(*),
 		       AVG(cpu_percent),  MAX(cpu_percent),
@@ -1056,7 +1100,7 @@ func (r *Recorder) window(ctx context.Context, from, to time.Time, maxPoints int
 		RetentionSeconds: int(r.retention / time.Second),
 	}
 	var ts sql.NullInt64
-	if err := r.db.QueryRowContext(ctx, earliestQuery, args...).Scan(&ts); err != nil {
+	if err := r.history().QueryRowContext(ctx, earliestQuery, args...).Scan(&ts); err != nil {
 		return Window{}, err
 	}
 	if ts.Valid {
@@ -1098,7 +1142,7 @@ func (r *Recorder) Sparklines(ctx context.Context, from, to time.Time, maxPoints
 	step := bucketFor(to.Sub(from), maxPoints, r.interval)
 	secs := int64(step / time.Second)
 
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT name,
 		       (ts / ?) * ? AS bucket,
 		       MAX(cpu_percent), MAX(mem_bytes)
@@ -1143,7 +1187,7 @@ func (r *Recorder) Sparklines(ctx context.Context, from, to time.Time, maxPoints
 // UI can offer a series for one that is no longer running — which is exactly
 // the container an operator is usually looking for.
 func (r *Recorder) RecordedContainers(ctx context.Context, from, to time.Time) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.history().QueryContext(ctx, `
 		SELECT name FROM metric_container_samples
 		 WHERE ts >= ? AND ts <= ?
 		 GROUP BY name ORDER BY name`, from.Unix(), to.Unix())

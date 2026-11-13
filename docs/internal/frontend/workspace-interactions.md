@@ -82,6 +82,29 @@ and the bar hidden and a back arrow in `PreviewHeader`. `pick` closes an open pr
 that asks for a list shows it. The branch graph has no tab strip to live in on a phone and is also in the
 More menu. The hardware back button still leaves the page rather than closing a preview.
 
+That layout is `components/phone-panes.tsx`, and a page with several panels uses its parts rather than
+stacking them: `paneShown(shown, until)` on each pane (hidden below the break while it is not the one
+picked, untouched from the break up), `PaneBar` at the foot of the frame (one 56px stop for each pane, a
+count on a glyph's shoulder, clear of the home indicator, not drawn from the break up) and `PaneBack` in the
+head of a page a row opened. The page keeps its own state for which pane is shown, and the frame is held
+to the window below the break so the pane has a height to be the whole of. Four pages are on it:
+
+| Page | Break | Stops | Opens on |
+| --- | --- | --- | --- |
+| Git workspace | `lg` | Changes, History, Branches, GitHub, Files | Changes |
+| Assistant chat | `lg` | Chat, Chats, What it did | Chat |
+| `/logs` | `md` | Log, Sources | the log |
+| `/network/tools` | `md` | Tool, Every tool | the tool, the one a link asked for |
+
+Logs and the tools run to the screen's edges below `md` and open on the thing the page is for; picking a
+source or a tool returns to it. Logs keeps its tablet layout from `md` to `lg` (the rail stacked over the
+lines, the page scrolling), which was a choice made for a request record's chart. *Hide the sources* is a
+wider screen's toggle and is not drawn on a phone, where the bar reaches the sources whether or not they
+were hidden at a desk. `tests/browser/phone-panes.spec.ts` holds both at 390×844 (the working control in
+view without scrolling, the bar at the foot, every row reachable), a tablet's stack and a desk's columns;
+`git-panel.spec.ts` and `database-assistant.spec.ts` hold the two that came first. The database
+workbenches, a deployment's Logs page and the container, process and stack detail pages are not on it yet.
+
 Git file drafts stay in memory per checkout/path across SPA previews, with an unload guard across
 repositories; cron builder drafts keep their captured crontab revision in memory per account. Their
 explicit Close/discard and sign-out paths clear the retained content. File Cut clipboard entries are

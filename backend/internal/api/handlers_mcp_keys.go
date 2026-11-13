@@ -95,7 +95,7 @@ func (s *Server) handleCreateMCPToken(w http.ResponseWriter, r *http.Request) er
 	}
 	tok, secret, err := s.Auth.CreateMCPToken(r.Context(), httpx.MustPrincipal(r).User, req.Name, req.Role, ttl, req.Connections, req.Deployments, req.DeploymentIDs, req.Operations)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	detail := map[string]any{
 		"role": tok.Role, "ttlDays": req.TTLDays, "scope": tok.Scope,
@@ -139,7 +139,7 @@ func (s *Server) handleSetMCPTokenConnections(w http.ResponseWriter, r *http.Req
 	case errors.Is(err, auth.ErrTokenInactive):
 		return httpx.Err(http.StatusConflict, "token_inactive", "this key was revoked or has expired; make a new one")
 	case err != nil:
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	detail := map[string]any{
 		"connections": mcpGrantedNames(conns, tok.Connections), "deployments": tok.Deployments,

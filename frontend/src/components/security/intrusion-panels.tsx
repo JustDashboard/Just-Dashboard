@@ -10,7 +10,7 @@ import type { BlocksView, Fail2banJail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { PageContext } from "@/components/page"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState, Hold, LoadingPanel } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
 import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
@@ -51,6 +51,9 @@ export function IntrusionPanels() {
         loading={blocks.loading}
         onRetry={blocks.refresh}
       />
+      {/* Each tool's section is as tall as what the tool answers, so the page
+          arrives from the top: a section waits for the one over it. */}
+      <Hold until={!blocks.loading} />
       <Fail2banSection blocks={blocks.data} onBlocked={blocks.refresh} />
       <ToolSection name="CrowdSec">
         <CrowdSecPanel blocks={blocks.data} onBlocked={blocks.refresh} />
@@ -134,7 +137,7 @@ function Fail2banSection({ blocks, onBlocked }: { blocks?: BlocksView; onBlocked
     />
   )
 
-  if (loading && !data) return <LoadingPanel />
+  if (loading && !data) return <LoadingPanel hold />
   if (error && !data) return <ErrorState error={error} />
   if (!data?.available) {
     return (

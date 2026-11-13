@@ -655,7 +655,7 @@ type dbPower struct {
 type dbPowerChange struct {
 	// Action is start, stop or restart, and Since when it was asked for.
 	Action string    `json:"action"`
-	Since  time.Time `json:"since"`
+	Since  time.Time `json:"since,omitzero"`
 	// done is when the route finished acting; zero while it still is.
 	done time.Time
 }
@@ -1289,7 +1289,7 @@ type dbConnSummary struct {
 	// Capabilities is the feature reading for this driver and flavour, the
 	// same object the driver catalogue serves.
 	Capabilities map[string]any `json:"capabilities"`
-	CheckedAt    time.Time      `json:"checkedAt"`
+	CheckedAt    time.Time      `json:"checkedAt,omitzero"`
 }
 
 // handleDBConnSummary is one connection's reading.
@@ -1448,8 +1448,8 @@ func (s *Server) handleDBPower(w http.ResponseWriter, r *http.Request) error {
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"stopping or restarting a database interrupts whatever is using it, and your role does not permit it")
 		}
-		if !s.destrLim.Allow(p.Username() + "|dbpower") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many stops and restarts, slow down")
+		if err := s.destrLim.Spend(p.Username()+"|dbpower", "too many stops and restarts, slow down"); err != nil {
+			return err
 		}
 	}
 	conn, dsn, err := s.dbConnRow(r.Context(), id)

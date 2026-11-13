@@ -147,6 +147,7 @@ function ContainerNarrowRow({
 }: RowsProps & { container: Container; arrived: boolean }) {
   const placed = placements.get(container.id) ?? []
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- the pointer's larger target: the row's name is the link or button a keyboard opens it by
     <li
       data-workspace-item={container.id}
       data-workspace-name={container.name}

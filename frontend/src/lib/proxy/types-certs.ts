@@ -3,8 +3,9 @@ export type Certificate = {
   path: string
   domains: string[]
   issuer: string
-  notBefore: string
-  notAfter: string
+  /** Absent, like notAfter, for a certificate whose file could not be read. */
+  notBefore?: string
+  notAfter?: string
   daysLeft: number
   expired: boolean
   expiring: boolean

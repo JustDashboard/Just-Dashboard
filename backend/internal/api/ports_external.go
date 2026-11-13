@@ -37,7 +37,7 @@ type portExternalEvidence struct {
 	State  string    `json:"state"`
 	Basis  string    `json:"basis"`
 	Detail string    `json:"detail,omitempty"`
-	At     time.Time `json:"at"`
+	At     time.Time `json:"at,omitzero"`
 }
 
 // portExternalScope is an enrolled source's scope as the ports page needs
@@ -60,7 +60,7 @@ type portExternalScope struct {
 type portsExternal struct {
 	Evidence  []portExternalEvidence `json:"evidence"`
 	Scopes    []portExternalScope    `json:"scopes"`
-	CheckedAt time.Time              `json:"checkedAt"`
+	CheckedAt time.Time              `json:"checkedAt,omitzero"`
 	// Error is the external-check owner being unavailable, which is a
 	// different answer from no source being enrolled.
 	Error string `json:"error,omitempty"`

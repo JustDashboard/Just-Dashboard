@@ -720,8 +720,8 @@ out.
 | `sentAt` | int | observe | Unix seconds when the body was built |
 | `server.name` | string | observe | The host name |
 | `server.version` | string | observe | The installed dashboard version |
-| `server.latest` | string, optional | observe | The newest published version, when known |
-| `server.updateAvailable` | bool | observe | A newer version exists |
+| `server.latest` | string, optional | observe | The newest version this server is offered, when known: from the project's own repository the newest with a release tag, so a version that is merged and not yet tagged is not it |
+| `server.updateAvailable` | bool | observe | A newer version is on offer |
 | `server.updateBreaking` | bool | observe | The newer version's notes mark it breaking |
 | `server.updateRun` | object, optional | observe | An update under way, or one that ended in the last 10 minutes |
 | `server.updateRun.status` | string | observe | `pending`, `running`, `success` or `failed` |

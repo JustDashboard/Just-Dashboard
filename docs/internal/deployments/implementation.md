@@ -26,6 +26,64 @@ only renderer/executor/validation authority for their feature.
   compacted history begins with a `resync` snapshot, and a slow subscriber is disconnected rather than
   allowed to stall execution. Streams replay all retained history in pages of at most 5,000 stored
   events before handing off to live events, including the terminal tail of an already completed run.
+- A step's output is written a batch at a time. `storeStepOutput.Log` collects lines and
+  `OrchestrationStore.AppendLogs` writes them in one transaction — one lease check, one read of the
+  run's sequence, a row a line with consecutive sequences, one update of the step's `last_seq` and one
+  of the legacy tail — when 64 lines or 256 KiB are waiting, or 100 ms after the first of them, so a
+  page following the run still reads as live. A line that follows a quiet moment (the step's first, or
+  one printed more than 100 ms after the last write) does not wait: it is written before `Log` returns,
+  so what a step said before it went silent is in the transcript whatever becomes of the process. That
+  is the line `TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun` reads after it kills a backend
+  inside every step; only the tail of a burst, at most 100 ms of it, can be lost to a kill. A line used
+  to be a transaction of six statements and a
+  commit of its own, about 5 ms each, and a build that printed 5,000 lines spent some 25 s persisting
+  them while every other writer queued behind it. The engine flushes when the step returns, before it
+  records how the step ended, and an event the step records (`Output.Event`) flushes first, so nothing
+  enters the transcript ahead of a line printed before it; an event some other caller appends mid-step
+  can precede lines printed up to 100 ms earlier. A line has no sequence until its batch is written, so
+  what needs one later (the build cause's `lineSeq`) holds the line's mark and asks `SeqOf` for the
+  sequence when the cause is known. A line's text is stored once, in `deploy_log_chunks.text` beside
+  `stream` and `truncated`, with `data_json` `{}`; `EventsAfter` builds the `step.log` event's data
+  from those columns, and a row written before the change (its text repeated in `data_json`) or by the
+  0.6.6 migration still answers with the data it holds. `deploy_runs.log`, the bounded tail the 0.6.6
+  run shape (`lastRun.log`, the legacy run list) still answers with, is rewritten once a batch.
+- What a run printed is the only part of deployment history that is ever removed, and it is removed
+  in two steps (`deploy/run_history.go`). When a run ends, however it ends, the engine keeps its newest
+  10,000 lines (`EngineConfig.HotLogLimit`, `compactFinished`; until 0.8.6 only a run that succeeded was
+  held to it, and a build failing in a loop is the one that prints the most). Later, the history policy
+  (`HistoryPolicy`, `JD_DEPLOY_HISTORY_RUNS`, 200 by default, 0 for no limit) keeps the output of each
+  environment's newest runs whole and cuts an older run to its last 200 lines (`historyTailLines`, as
+  many as a diagnosis sends) and the last 4,000 characters of the tail on its row. A diagnosis picks
+  its lines from a run's last thousand and prefers the failed step's own, so one asked for after the
+  cut is built from the end of the run, which is the failed step's unless later steps printed more
+  than 200 lines after it; a diagnosis made before the cut is stored and unchanged. The engine applies
+  the policy a minute after it starts and
+  every hour, 25 runs a pass, with the next pass a second later and from the run the last one reached
+  while runs are waiting, which is how an install upgraded with years of history catches up and why
+  runs a pass cannot cut never hold one back. Both compactions remove at most 10,000 lines in one
+  transaction (`compactStepLines`, `compactRunLogs`): nothing limits what a run prints while it runs,
+  a failed run was not held to the hot limit before 0.8.6, and removing 300,000 lines at once held the
+  store's write lock for four to ten seconds where every other writer gives up after five. A longer
+  run is cut a step at a time, each step a compaction that ends at a watermark, so a reader between
+  two steps sees a run compacted less far; the steps of one run and the runs of one pass are 150 ms
+  apart (`compactStepPause`), which is longer than a writer on another connection waits before it
+  asks for the lock again. The history pass goes through the store's bulk writer, and
+  `deploy_run_output_pruned` records a run in the transaction of its last step, so a pass never
+  returns to a run it finished and goes on with one it did not. The
+  policy deletes rows of `deploy_log_chunks` whose type is `step.log` and nothing else. A run's row,
+  its steps and their evidence, its diagnosis, its variable and plan snapshots, its state events, its
+  release and the release's artifacts stay for as long as the project does: a rollback, a retry, a
+  promotion and the release comparison read those and none reads output, so no policy value can take
+  something they need. Three kinds of run keep their whole output whatever their age
+  (`historyProtectedQuery`): the one behind the live release, the ones behind pinned releases, and the
+  ones behind the six newest releases that went live, the same six `ArtifactRetentionPlan` keeps images
+  for. A run that has not ended is passed over. A cut run reads as a compacted one always has: the
+  transcript says earlier lines exist and a stream starts with a `resync`. A pass lists its runs from
+  `idx_deploy_runs_environment` and the table of cut runs without reading a run's row
+  (`TestTheHistoryPassFindsItsRunsWithoutReadingRunRows` holds the plan); that is also why the record
+  of a cut is a table and not a column of `deploy_runs`, where it would sit behind the log tail.
+  Webhook deliveries are not pruned: a row is what refuses a replayed delivery
+  (`ErrDeliveryReplayed`), and the provider signs no time a replay could be refused by instead.
 - Reusing a run's `Idempotency-Key` with a different manual `sourceRevision` or `ref` returns
   `409 idempotency_conflict`. The comparison includes the persisted source-request metadata alongside
   the existing digest, so keys created before this check retain their behavior. Retrying the same ref
@@ -1188,7 +1246,7 @@ only renderer/executor/validation authority for their feature.
   not wrap a context error and so is never recorded as a cancellation. The builder redacts the
   transcript of the run's secret build values and of any plain one carrying credential material, never
   of other plain values (`buildLogRedactions`, with the sensitivity `OpenRunScopedVariables` returns).
-  The executor feeds the persisted, already redacted transcript to a bounded collector (`build_output_cause.go`): a ring per open BuildKit
+  The executor feeds the already redacted transcript, as it is logged, to a bounded collector (`build_output_cause.go`): a ring per open BuildKit
   step (400 lines, 64 KiB), one over the stream (64 KiB), BuildKit's replayed and Dockerfile-excerpt
   lines refused. A step that finishes (`DONE` or `CACHED`) is dropped from both: what a passing step
   printed on its way — npm retrying a request that hung up, a config probing for `git` — is never a
@@ -1463,6 +1521,13 @@ only renderer/executor/validation authority for their feature.
   instantaneous push-delivery guarantee. Tags, local checkouts, legacy Compose and archived projects
   are excluded. Monitoring status and access failures appear in the project identity line
   and on Settings → General's Automatic deployment section.
+  Each tick asks one statement which environments to watch (`gitWatchTargetsQuery`), with each
+  environment's newest deploy and the revision it built. `deploy_runs` is never pruned, so both of its
+  looks at an environment's runs read `idx_deploy_runs_environment (environment_id, id)` newest first
+  and stop at the first that fits; `TestTheGitWatcherReadsAnEnvironmentsRunsFromAnIndex` holds the
+  plan, so a change to the statement that brings back a table scan or an index built per execution
+  fails there. The other questions about one environment's runs (what is in flight before it sleeps,
+  is promoted or is quarantined) use the same index.
   `deploy_git_watches` persists the last observed revision, policy digest, decision reason and observation generation: restarts,
   failed runs, duplicate provider deliveries and a crash after enqueue cannot cause repeated builds;
   a later branch change (including a force-push back to an older commit) remains eligible. Watching

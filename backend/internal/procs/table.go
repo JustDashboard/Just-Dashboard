@@ -39,7 +39,7 @@ type Process struct {
 	Shared      uint64    `json:"shared,omitempty"`
 	Threads     int32     `json:"threads"`
 	Nice        int32     `json:"nice"`
-	CreateTime  time.Time `json:"createTime"`
+	CreateTime  time.Time `json:"createTime,omitzero"`
 	CWD         string    `json:"cwd,omitempty"`
 	Exe         string    `json:"exe,omitempty"`
 	IORead      uint64    `json:"ioReadBytes,omitempty"`
@@ -75,7 +75,7 @@ type Process struct {
 // ProcessSample is one measured interval of a process: its CPU over the
 // interval, its resident memory at the end of it, and its disk rates.
 type ProcessSample struct {
-	At    time.Time `json:"at"`
+	At    time.Time `json:"at,omitzero"`
 	CPU   float64   `json:"cpu"`
 	RSS   uint64    `json:"rss"`
 	Read  uint64    `json:"read"`

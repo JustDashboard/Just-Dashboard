@@ -11,6 +11,7 @@
  *    phrase on the server and return the expected phrase in the error body.
  */
 
+import { retryAfterMs } from "@/lib/backoff"
 import { networkPendingHeaders } from "@/lib/network-pending"
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api/v1"
@@ -42,6 +43,11 @@ export type ApiErrorBody = {
      * form can attach the message to the control that caused it.
      */
     field?: string
+    /**
+     * On a 5xx: the id of the request that failed, which is also the
+     * `X-Request-Id` header and on the server's log line that has the cause.
+     */
+    requestId?: string
   }
 }
 
@@ -84,11 +90,19 @@ export class ApiError extends Error {
   raw?: string
   retryable?: boolean
   field?: string
+  /** The failed request's id on a 5xx, to quote to whoever reads the server's log. */
+  requestId?: string
   /**
    * The whole parsed body, for a route that answers a refusal with more than
    * the error: a start the config test turned down carries the test beside it.
    */
   body?: unknown
+  /**
+   * How long the answer's `Retry-After` asked the caller to wait, in
+   * milliseconds: the limiter's 429 says thirty seconds. A poll and the
+   * session probe wait that long rather than ask again at their own pace.
+   */
+  retryAfterMs?: number
 
   constructor(
     status: number,
@@ -96,7 +110,18 @@ export class ApiError extends Error {
     message: string,
     phrase?: string,
     detail?: Partial<
-      Pick<ApiError, "resource" | "operation" | "reason" | "raw" | "retryable" | "field" | "body">
+      Pick<
+        ApiError,
+        | "resource"
+        | "operation"
+        | "reason"
+        | "raw"
+        | "retryable"
+        | "field"
+        | "requestId"
+        | "body"
+        | "retryAfterMs"
+      >
     >,
   ) {
     super(message)
@@ -209,7 +234,13 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
  * Successful binary and streaming responses never pass through this reader.
  */
 export async function responseError(res: Response, path: string): Promise<ApiError> {
-  return errorFromResponse(res.status, await res.text(), path, res.statusText)
+  return errorFromResponse(
+    res.status,
+    await res.text(),
+    path,
+    res.statusText,
+    res.headers.get("Retry-After"),
+  )
 }
 
 /**
@@ -226,6 +257,7 @@ export function errorFromResponse(
   text: string,
   path: string,
   statusText = "",
+  retryAfter?: string | null,
 ): ApiError {
   let parsed: ApiErrorBody | undefined
   try {
@@ -234,6 +266,13 @@ export function errorFromResponse(
     // A proxy failure can be plain text; only recognized API codes trigger recovery.
   }
   const body = parsed?.error
+  // A 500 hides its cause on purpose ("internal error"), which leaves the
+  // reader nothing to report. The id is what the log line with the cause is
+  // filed under, so it is said wherever the message is.
+  const message =
+    body?.code === "internal" && body.requestId
+      ? `${body.message} (request ${body.requestId})`
+      : body?.message
   if (typeof window !== "undefined") {
     if (body?.code === "password_change_required") {
       window.dispatchEvent(new Event("jd:password-change-required"))
@@ -252,7 +291,7 @@ export function errorFromResponse(
     body?.code ?? "unknown",
     body?.code === "hub_session_not_allowed"
       ? HUB_SESSION_REFUSED
-      : (body?.message ?? (text.slice(0, 300) || statusText || `HTTP ${status}`)),
+      : (message ?? (text.slice(0, 300) || statusText || `HTTP ${status}`)),
     body?.phrase,
     {
       resource: body?.resource,
@@ -261,9 +300,37 @@ export function errorFromResponse(
       raw: body?.raw,
       retryable: body?.retryable,
       field: body?.field,
+      requestId: body?.requestId,
       body: parsed,
+      retryAfterMs: retryAfterMs(retryAfter),
     },
   )
+}
+
+/** The longest Retry-After a read waits out by itself, in seconds. */
+const RATE_LIMIT_WAIT_MAX = 5
+
+/** The milliseconds a rate limit asked for: a 429 whose Retry-After is short enough to wait out. */
+function rateLimitWait(res: Response): number | undefined {
+  if (res.status !== 429) return undefined
+  const seconds = Number(res.headers.get("Retry-After") ?? "")
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > RATE_LIMIT_WAIT_MAX) return undefined
+  return seconds * 1000
+}
+
+/** Waits, or stops waiting when the request is aborted (the fetch that follows then rejects). */
+function pause(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true },
+    )
+  })
 }
 
 /**
@@ -277,14 +344,25 @@ export async function fetchResponse(
 ): Promise<Response> {
   const headers = new Headers(options.headers)
   const method = options.method ?? "GET"
-  if (!["GET", "HEAD", "OPTIONS", "TRACE"].includes(method.toUpperCase())) {
+  const read = ["GET", "HEAD", "OPTIONS", "TRACE"].includes(method.toUpperCase())
+  if (!read) {
     for (const [key, value] of Object.entries({
       ...mutationHeaders(),
       ...networkPendingHeaders(path, method),
     }))
       headers.set(key, value)
   }
-  const res = await fetch(buildUrl(path, query), { ...options, headers, credentials: "include" })
+  const send = () => fetch(buildUrl(path, query), { ...options, headers, credentials: "include" })
+  let res = await send()
+  // A read the rate limit refused is asked again once, after the wait the server named
+  // (about a second): a panel that is not polled would otherwise show "too many requests"
+  // until the page is reloaded. A write is not sent again behind the person's back.
+  const wait = read ? rateLimitWait(res) : undefined
+  if (wait !== undefined) {
+    await res.text().catch(() => undefined)
+    await pause(wait, options.signal)
+    res = await send()
+  }
   const networkChange = res.headers.get("X-JD-Network-Change")
   if (networkChange && typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("jd:network-change", { detail: networkChange }))
@@ -293,15 +371,34 @@ export async function fetchResponse(
   return res
 }
 
-async function readResponse<T>(res: Response, path: string): Promise<T> {
+/** What a page says when an answer arrived but could not be read. */
+export const UNREADABLE_ANSWER =
+  "The server's answer could not be read: it was cut off on the way, or is not what this page expects."
+
+/**
+ * The body of a JSON answer. Nothing for a 204 and for an empty body, which is
+ * how a route says "done" with nothing to add.
+ *
+ * A body that is there and does not parse is a failure, `bad_response`. It
+ * used to come back as `undefined` too, so an answer cut off by a proxy
+ * timeout, or by a backend that died while writing it, was a successful read
+ * of nothing and the page drew its empty state: "no containers" where the
+ * truth was "could not read the containers".
+ */
+export async function readResponse<T>(res: Response, path: string): Promise<T> {
   if (!res.ok) throw await responseError(res, path)
   if (res.status === 204) return undefined as T
   const text = await res.text()
   if (!text) return undefined as T
   try {
     return JSON.parse(text) as T
-  } catch {
-    return undefined as T
+  } catch (err) {
+    // For the disclosure: what kind of thing arrived, never the thing itself.
+    const kind = res.headers.get("Content-Type") ?? "no content type"
+    throw new ApiError(res.status, "bad_response", UNREADABLE_ANSWER, undefined, {
+      raw: `${kind}, ${text.length} characters: ${errorMessage(err)}`,
+      retryable: true,
+    })
   }
 }
 

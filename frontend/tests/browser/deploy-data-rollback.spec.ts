@@ -496,7 +496,12 @@ test("every surface of data-aware rollback @shots", async ({ page }) => {
   // A dialog or a sheet is captured once it has finished arriving.
   const settled = () =>
     page.evaluate(() =>
-      Promise.all(document.getAnimations().map((animation) => animation.finished)),
+      Promise.all(
+        document
+          .getAnimations()
+          .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+          .map((animation) => animation.finished),
+      ),
     )
   await page.setViewportSize({ width: 1280, height: 900 })
   await mockProject(page, {

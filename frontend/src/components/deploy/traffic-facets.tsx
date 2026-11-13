@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { bytes, clock, plural } from "@/lib/format"
 import type { RequestEntry, RequestFacet, RequestSummary } from "@/lib/types"
 import { agentProduct, networkOf, refererProduct } from "@/lib/clients"
+import { latencyWords } from "@/lib/latency-words"
 import { latency, latencyTone, statusClass, type StatusClass } from "@/lib/requests"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { DimActions } from "@/components/icon-action"
@@ -481,7 +482,7 @@ function pageHint(p: RequestFacet, latencyKnown: boolean) {
       {p.errors > 0 && timed && " · "}
       {timed && (
         <span className={cn(latencyTone(p.p95) === "warning" && "text-warning")}>
-          p95 {latency(p.p95)}
+          {latencyWords("p95", latency(p.p95))}
         </span>
       )}
     </>

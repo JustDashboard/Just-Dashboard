@@ -47,7 +47,6 @@ import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePanelSize } from "@/lib/panel-size"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMetrics } from "@/hooks/use-metrics"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page } from "@/components/page"
 import { PaneFooter, PaneHeader } from "@/components/panel"
@@ -64,6 +63,8 @@ import {
 } from "@/components/files/file-icon"
 import { FolderColourMenu } from "@/components/files/folder-colour"
 import { COLUMN, FileRow } from "@/components/files/file-row"
+import { DiskRoom } from "@/components/files/disk-room"
+import { useEntryHandlers } from "@/components/files/entry-handlers"
 import { FilesSidebar } from "@/components/files/files-sidebar"
 import { GridView, type TileSize } from "@/components/files/grid-view"
 import { ImageEditorSheet } from "@/components/files/image-editor"
@@ -115,7 +116,6 @@ import {
 } from "@/components/files/media"
 import { startPathDrag, useDropTarget, type DropMode } from "@/components/files/dnd"
 import { ResizeHandle } from "@/components/resize-handle"
-import { Meter, utilisationTone } from "@/components/meter"
 import { IconAction } from "@/components/icon-action"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -471,22 +471,6 @@ export default function FilesPage() {
   const parentReachable =
     parent !== null &&
     (listing.data?.roots ?? places.data?.roots ?? []).some((root) => isWithin(parent, root))
-
-  // The disk this folder is on, from the metrics stream the shell already
-  // keeps open: a cloud says how much room is left, and so does this.
-  const { snapshot } = useMetrics()
-  const mount = useMemo(() => {
-    // A frame that has not carried mounts yet — the first one after the
-    // socket opens, or a seeded server snapshot — is simply no reading.
-    if (!path || !Array.isArray(snapshot?.mounts)) return undefined
-    let best: (typeof snapshot.mounts)[number] | undefined
-    for (const m of snapshot.mounts) {
-      if (isWithin(path, m.mountpoint) && (!best || m.mountpoint.length > best.mountpoint.length)) {
-        best = m
-      }
-    }
-    return best
-  }, [path, snapshot])
 
   // An upload into the browsed folder is a change to the listing; one into
   // another folder shows up when that folder is opened.
@@ -1340,9 +1324,23 @@ export default function FilesPage() {
   const dropFilesInto = canWrite
     ? (transfer: DataTransfer, dir: string) => void dropFiles(transfer, dir)
     : undefined
+  // What every row and tile is handed: one object for the page's life, so a
+  // render of the page is not a render of the folder (entry-handlers.ts).
+  const entryHandlers = useEntryHandlers({
+    onToggle: toggleSelected,
+    onSelect: selectRow,
+    onFocusEntry: activateEntry,
+    onOpen: openEntry,
+    onDragStart: dragStart,
+    onDropPaths: (paths, dir, mode) => void movePaths(paths, dir, mode),
+    onDropFiles: (transfer, dir) => void dropFiles(transfer, dir),
+    actionsFor,
+  })
 
   return (
     <Page fill data-files-workspace className="gap-2 px-2 py-2 md:px-3 md:py-3">
+      {/* A workbench draws no page header, so its name is said, not drawn. */}
+      <h1 className="sr-only">Files</h1>
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
         {/* One frame around the whole workbench: a strip across the top, then
             the sidebar, the listing and the inspector separated by a hairline
@@ -1724,13 +1722,7 @@ export default function FilesPage() {
                           dragging={dragging}
                           caps={caps}
                           size={tile}
-                          onToggle={toggleSelected}
-                          onSelect={selectRow}
-                          onFocusEntry={activateEntry}
-                          onOpen={openEntry}
-                          onDragStart={canWrite ? dragStart : undefined}
-                          onDropPaths={dropInto}
-                          onDropFiles={dropFilesInto}
+                          handlers={entryHandlers}
                         />
                       )}
                     </div>
@@ -1820,16 +1812,7 @@ export default function FilesPage() {
                               dimmed={dimmed.has(entry.path)}
                               dragging={dragging.has(entry.path)}
                               caps={caps}
-                              onToggle={(checked) => toggleSelected(entry, checked)}
-                              onSelect={(event) => selectRow(entry, event)}
-                              onFocusEntry={() => activateEntry(entry)}
-                              onOpen={() => openEntry(entry)}
-                              onDragStart={
-                                canWrite ? (event) => dragStart(entry, event) : undefined
-                              }
-                              onDropPaths={dropInto}
-                              onDropFiles={dropFilesInto}
-                              actions={actionsFor(entry)}
+                              handlers={entryHandlers}
                             />
                           ))}
                           {entries.length === 0 && (
@@ -1891,20 +1874,7 @@ export default function FilesPage() {
                 >
                   <Question />
                 </IconAction>
-                {mount && (
-                  <span className="flex min-w-0 shrink-0 items-center gap-2">
-                    <Meter
-                      value={mount.usedPercent}
-                      tone={utilisationTone(mount.usedPercent)}
-                      size="thin"
-                      label={`Disk used on ${mount.mountpoint}`}
-                      className="w-20"
-                    />
-                    <span className="numeric truncate">
-                      {bytes(mount.free)} free on {mount.mountpoint}
-                    </span>
-                  </span>
-                )}
+                <DiskRoom path={path} />
               </PaneFooter>
             </div>
 
@@ -2386,8 +2356,11 @@ function SymlinkBody({
     >
       <div className="space-y-3">
         <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">Points at</label>
+          <label htmlFor="symlink-target" className="text-xs text-muted-foreground">
+            Points at
+          </label>
           <Input
+            id="symlink-target"
             autoFocus
             value={target}
             onChange={(e) => setTarget(e.target.value)}
@@ -2396,8 +2369,11 @@ function SymlinkBody({
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">Link name</label>
+          <label htmlFor="symlink-name" className="text-xs text-muted-foreground">
+            Link name
+          </label>
           <Input
+            id="symlink-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && create()}

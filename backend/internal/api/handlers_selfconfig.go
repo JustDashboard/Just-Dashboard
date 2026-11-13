@@ -97,7 +97,7 @@ func (s *Server) handleSelfConfigCertificate(w http.ResponseWriter, r *http.Requ
 		return httpx.BadRequest("this dashboard is not set to use a Tailscale certificate, so there is none to issue")
 	}
 	if err := s.modules.certKeeper.Ensure(r.Context()); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "dashboard.config.certificate", s.Cfg.Site, nil)
 	httpx.JSON(w, http.StatusOK, selfcfg.Certificate(s.Cfg.DataDir, s.Cfg.Site))
@@ -127,7 +127,7 @@ func mapSelfConfigError(err error) error {
 	case errors.Is(err, selfcfg.ErrInProgress):
 		return httpx.Err(http.StatusConflict, "restart_in_progress", err.Error())
 	case errors.Is(err, selfcfg.ErrNoChange):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	case errors.Is(err, selfcfg.ErrNoLocation):
 		return httpx.Err(http.StatusServiceUnavailable, "config_unsupported", err.Error())
 	case errors.Is(err, selfupdate.ErrDockerUnreachable):
@@ -136,6 +136,6 @@ func mapSelfConfigError(err error) error {
 		// Everything else reaching here is a validation failure with a
 		// sentence written for the person reading it, so it is passed through
 		// rather than flattened into "internal error".
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 }

@@ -54,7 +54,7 @@ type SearchOptions struct {
 // only in total is what turns "something happened at 03:12" into "the errors
 // started at 03:12 while the traffic stayed flat".
 type Bucket struct {
-	Start  time.Time      `json:"start"`
+	Start  time.Time      `json:"start,omitzero"`
 	Total  int            `json:"total"`
 	Counts map[string]int `json:"counts"`
 }

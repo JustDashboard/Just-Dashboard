@@ -13,7 +13,7 @@ import { useHiddenSections } from "@/hooks/use-hidden-sections"
 import { useCommandPalette } from "@/components/command-palette"
 import { KEYCAP, useLauncherKeys } from "@/components/command-search/keycaps"
 import { Logo, LogoMark } from "@/components/logo"
-import { UpdateNotice } from "@/components/update/update-notice"
+import { UpdateNoticeSlot } from "@/components/update/update-notice-slot"
 import { HubNotice } from "@/components/hub-link/hub-notice"
 import { ServerSwitcher } from "@/components/hub-link/server-switcher"
 import { useShellHub } from "@/hooks/use-hub-link"
@@ -25,6 +25,7 @@ import {
   PERSONAL_NAV,
   PROJECT_NAV,
   PROJECT_SETTINGS_NAV,
+  groupedChildren,
   navMatches,
   navOwns,
   sectionEntry,
@@ -134,7 +135,12 @@ function fromSection(section: NavEntry): Panel {
   return {
     key: `section:${section.href ?? section.title}`,
     title: section.title,
-    groups: [{ items: rowsOf(section.children ?? []) }],
+    // A section whose pages name a heading is drawn under them; one that
+    // names none is the single unlabelled list it always was.
+    groups: groupedChildren(section.children ?? []).map((group) => ({
+      label: group.label,
+      items: rowsOf(group.items),
+    })),
   }
 }
 
@@ -301,7 +307,10 @@ export function AppSidebar() {
           content box is only 1.5rem, so the search button — which keeps its
           full 2rem — overflowed half a rem to the right and sat visibly off
           the line every icon below it is on. */}
-      <SidebarHeader className="gap-3 p-3 group-data-[collapsible=icon]:p-2">
+      {/* The product's name, its version and search are the page's banner:
+          outside any landmark, the version beside the wordmark was text a
+          screen reader met between regions on every page. */}
+      <SidebarHeader role="banner" className="gap-3 p-3 group-data-[collapsible=icon]:p-2">
         {/* The wordmark alone: no tile, and no "Control panel" strapline under
             it. The strapline named the product category to somebody already
             inside the product, and the tile spent a third of the header's
@@ -419,8 +428,9 @@ export function AppSidebar() {
             about the server, and it has to be seen without being looked for —
             a page for it would be a page nobody visits, which is how a
             self-hosted panel ends up eighteen months behind. It renders
-            nothing when there is nothing to say. */}
-        <UpdateNotice collapsed={collapsed} />
+            nothing when there is nothing to say, and its code is fetched
+            only when there is. */}
+        <UpdateNoticeSlot collapsed={collapsed} />
         {/* What a linked hub has to say, nearest the account card, and
             nothing at all without one. */}
         <HubNotice collapsed={collapsed} />

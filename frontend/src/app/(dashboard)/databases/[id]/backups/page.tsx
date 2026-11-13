@@ -1,6 +1,6 @@
 "use client"
 
-import { Backups } from "@/components/database/ops"
+import { Backups } from "@/components/database/ops/backups"
 import { SectionPage } from "@/components/database/shell/section-page"
 
 export default function BackupsPage() {

@@ -85,7 +85,11 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 		// A name served through Cloudflare Tunnel is not reached at this
 		// server's address and needs no certificate here: the public-IP DNS
 		// check and the certificate question say nothing about it.
-		if r.URL.Query().Get("tunnel") == "1" {
+		tunnel, err := httpx.QueryBool(r, "tunnel")
+		if err != nil {
+			return err
+		}
+		if tunnel {
 			httpx.JSON(w, http.StatusOK, s.tunnelHostnameSuggestion(ctx, chosen))
 			return nil
 		}

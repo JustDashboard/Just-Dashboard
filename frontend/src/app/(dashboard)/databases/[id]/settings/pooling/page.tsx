@@ -1,6 +1,6 @@
 "use client"
 
-import { SettingsPooling } from "@/components/database/ops"
+import { SettingsPooling } from "@/components/database/ops/settings-pooling-page"
 import { SectionPage } from "@/components/database/shell/section-page"
 
 export default function SettingsPoolingPage() {

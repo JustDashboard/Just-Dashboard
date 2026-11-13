@@ -8,7 +8,7 @@ import { CloudUpload, Download, Globe, Plus, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { downloadText } from "@/lib/metrics-export"
-import { ApiError, del, errorMessage, get, post } from "@/lib/api"
+import { ApiError, del, get, post } from "@/lib/api"
 import type {
   Certificate,
   NpmImportResult,
@@ -108,6 +108,7 @@ import {
 } from "@/components/proxy/site-filters"
 import { activeOwner, matchesSearch, upstreamTargets } from "@/components/proxy/site-details"
 import { reloadFailure, reloadOutput } from "@/components/proxy/site-outcome"
+import { sitesReadError, sitesReadFailure } from "@/components/proxy/sites-read-failure"
 import {
   KEPT_LOAD,
   disabledHint,
@@ -521,6 +522,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     setRetryFrom(read)
     refresh()
   }
+  const failure = error ? sitesReadFailure(error) : undefined
 
   // The whole of what nginx printed, one press away from the toast that
   // carries its first line.
@@ -1117,7 +1119,10 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     return (
       <Page>
         {header}
-        <ErrorState error={error} />
+        {/* The list is read from nginx, a host Caddy and the ingress
+            container, and the last can fail on a server where the first two
+            are fine: the block says which, why, and can be asked again. */}
+        <ErrorState error={sitesReadError(error)} onRetry={retry} retryable />
       </Page>
     )
   }
@@ -1265,8 +1270,19 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       {error && (
         <div role="alert">
           <Notice tone="warning" icon={Warning} title="Could not read the sites again">
-            <p className="break-words">{errorMessage(error)}</p>
+            <p className="break-words">{failure?.message}</p>
+            {failure?.reason && <p className="break-words">{failure.reason}</p>}
             <p>The sites below are from the last read, and may be out of date.</p>
+            {failure?.raw && (
+              <details className="mt-1 min-w-0">
+                <summary className="cursor-pointer hover:text-foreground">
+                  What the server said
+                </summary>
+                <pre className="mt-1 overflow-x-auto rounded-sm border border-hairline bg-surface-header/40 p-2 font-mono text-micro break-words whitespace-pre-wrap">
+                  {failure.raw}
+                </pre>
+              </details>
+            )}
             <Button
               size="xs"
               variant="outline"
@@ -1893,8 +1909,9 @@ const EDITOR_VERBS = ["open", "scan", "log", "errors", "edit", "deployment"]
 
 /** When the site's file last changed, where the listing could read it. */
 function Edited({ vhost }: { vhost: VHost }) {
-  // A link to nothing reports the link's own time, and a zero time none.
-  if (!vhost.path || vhost.modified.startsWith("0001")) return null
+  // A link to nothing reports the link's own time, and a file that could not
+  // be read none: the server leaves the field out.
+  if (!vhost.path || !vhost.modified) return null
   return <span title={vhost.modified}>edited {relativeTime(vhost.modified)}</span>
 }
 

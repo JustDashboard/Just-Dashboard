@@ -74,9 +74,12 @@ test("a supported mutation opts in and requires a received response before expli
   })
 
   await page.goto("/network/traffic")
+  // The guard is on without being asked for, and its switch is not on the
+  // page: with nothing pending the shell's notice draws nothing at all.
   await expect(
     page.getByRole("switch", { name: "Require network reconnection confirmation" }),
-  ).toBeChecked()
+  ).toHaveCount(0)
+  await expect(banner(page)).toHaveCount(0)
   await page.getByRole("button", { name: "Edit the limits on ens3" }).click()
   const sheet = page.getByRole("dialog")
   await sheet.getByRole("button", { name: "Use cake" }).click()
@@ -217,4 +220,77 @@ test("a pending SSH apply is confirmed through the same banner in SSH's words", 
   ).toBeDisabled()
   state.change = { ...state.change!, phase: "recovered", watchdog: "recovered" }
   await expect(banner(page)).toContainText("Previous SSH configuration restored")
+})
+
+// Every Network page opens on its own title: the reconnection guard's switch
+// was the first line of all nineteen, the read-only ones included. It is one
+// row on the Network overview, last on the page, and turning it off there
+// holds as the reader moves to the page that makes the change.
+for (const viewport of [
+  { width: 1280, height: 900 },
+  { width: 390, height: 844 },
+]) {
+  test(`a Network page opens on its title, and the guard is one row on the overview, at ${viewport.width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport)
+    await setup(page)
+    const guard = page.getByRole("switch", { name: "Require network reconnection confirmation" })
+    const top = async () => {
+      const scroller = (await page.locator("[data-workspace-shell-scroll]").boundingBox())!
+      const title = (await page.getByRole("heading", { level: 1 }).boundingBox())!
+      return Math.round(title.y - scroller.y)
+    }
+
+    await page.goto("/network/traffic")
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Traffic")
+    await expect(guard).toHaveCount(0)
+    await expect(banner(page)).toHaveCount(0)
+    const traffic = await top()
+    // Nothing stands between the shell's edge and the page's own header.
+    expect(traffic).toBeLessThan(80)
+
+    await page.goto("/network")
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Network")
+    expect(await top()).toBe(traffic)
+    const panel = page.getByRole("region", { name: "Managed changes" })
+    await expect(panel.getByText("Confirm managed changes after reconnecting")).toBeVisible()
+    await expect(guard).toBeChecked()
+    // Last on the page, under what the network is doing.
+    const row = (await guard.boundingBox())!
+    const topology = (await page.getByRole("heading", { name: "Topology" }).boundingBox())!
+    expect(row.y).toBeGreaterThan(topology.y + topology.height)
+    expect(row.height).toBeLessThanOrEqual(24)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+  })
+}
+
+test("the guard turned off on the overview holds on the page that makes the change", async ({
+  page,
+}) => {
+  const { state } = await setup(page)
+  let applyHeader: string | undefined = "unset"
+  await page.route("**/api/v1/network/shaping/ens3", async (route) => {
+    applyHeader = route.request().headers()["x-jd-network-apply"]
+    return json(route, { output: "ok" })
+  })
+  await page.goto("/network")
+  const guard = page.getByRole("switch", { name: "Require network reconnection confirmation" })
+  await guard.uncheck()
+  await expect(guard).not.toBeChecked()
+  // By the rail, as a reader would: the choice is the tab's, not the page's.
+  await page
+    .getByRole("navigation", { name: "Sidebar" })
+    .getByRole("link", { name: "Traffic" })
+    .click()
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Traffic")
+  await page.getByRole("button", { name: "Edit the limits on ens3" }).click()
+  const sheet = page.getByRole("dialog")
+  await sheet.getByRole("button", { name: "Use cake" }).click()
+  await sheet.getByLabel("Upload limit").fill("20")
+  await sheet.getByRole("button", { name: "Apply", exact: true }).click()
+  await expect.poll(() => applyHeader).toBeUndefined()
+  expect(state.change).toBeNull()
 })

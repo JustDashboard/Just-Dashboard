@@ -204,7 +204,12 @@ const dialog = (page: Page) => page.getByRole("dialog")
 /** A dialog has finished opening, so a picture of it shows the dialog and not the page through it. */
 async function settled(page: Page) {
   await dialog(page).evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
   )
 }
 

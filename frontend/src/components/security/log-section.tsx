@@ -200,7 +200,7 @@ export function HostLogSection({
         ) : log.error && !log.data ? (
           <ErrorState error={log.error} onRetry={log.refresh} />
         ) : !log.data ? (
-          <LoadingRows rows={6} />
+          <LoadingRows rows={6} hold />
         ) : (
           <ServiceLogs
             sources={[log.data]}

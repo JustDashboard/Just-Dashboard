@@ -1,6 +1,6 @@
 "use client"
 
-import { SettingsNetwork } from "@/components/database/ops"
+import { SettingsNetwork } from "@/components/database/ops/settings-network-page"
 import { SectionPage } from "@/components/database/shell/section-page"
 
 export default function SettingsNetworkPage() {

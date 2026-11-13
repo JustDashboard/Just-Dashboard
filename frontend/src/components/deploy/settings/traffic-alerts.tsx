@@ -637,7 +637,7 @@ export function AlertForm({
       <FieldRow>
         {kind !== "silence" && (
           <Field
-            label={kind === "latency" ? "p95 above" : "Failing share above"}
+            label={kind === "latency" ? "1 in 20 slower than" : "Failing share above"}
             htmlFor="alert-limit"
             hint={kind === "latency" && `= ${latency(limit)}`}
             error={error}

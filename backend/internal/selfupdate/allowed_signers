@@ -1,0 +1,17 @@
+# The keys that may sign a Just Dashboard release.
+#
+# This file is compiled into the dashboard. While it names no key (comment
+# lines only, as now) releases are not signed and no signature is checked.
+# From the first release that ships a key here, an install on that release
+# updates only to a tag v<version> that one of these keys has signed, and
+# refuses everything else. Turning it on, signing a release and replacing a
+# key are described under "Signed releases" in
+# docs/internal/backend/databases-proxy-platform.md. Read it first: a release
+# that ships a key and is followed by an unsigned one leaves every install
+# unable to update from the dashboard.
+#
+# One key per line, in the form ssh-keygen calls ALLOWED SIGNERS. The
+# namespaces option is required, so a key used for something else cannot sign
+# a release by accident:
+#
+#   release@just-dashboard.com namespaces="git" ssh-ed25519 AAAAC3Nza...

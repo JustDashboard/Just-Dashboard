@@ -84,13 +84,16 @@ func mapFileError(err error) error {
 	case errors.Is(err, fs.ErrExist):
 		return httpx.Err(http.StatusConflict, "already_exists", err.Error())
 	default:
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 }
 
 func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) error {
-	listing, err := s.modules.hostFiles.List(r.URL.Query().Get("path"),
-		r.URL.Query().Get("hidden") == "true")
+	hidden, err := httpx.QueryBool(r, "hidden")
+	if err != nil {
+		return err
+	}
+	listing, err := s.modules.hostFiles.List(r.URL.Query().Get("path"), hidden)
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -202,7 +205,11 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 	if dir == "" {
 		return httpx.BadRequest("path query parameter is required")
 	}
-	overwrite := r.URL.Query().Get("overwrite") == "true"
+	// Whether an upload may replace what is there is not a flag to guess at.
+	overwrite, err := httpx.QueryBool(r, "overwrite")
+	if err != nil {
+		return err
+	}
 	var expected *string
 	if r.URL.Query().Has("expectedRevision") {
 		revision := r.URL.Query().Get("expectedRevision")
@@ -397,7 +404,10 @@ func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) error 
 	if path == "" {
 		return httpx.BadRequest("path query parameter is required")
 	}
-	recursive := r.URL.Query().Get("recursive") == "true"
+	recursive, err := httpx.QueryBool(r, "recursive")
+	if err != nil {
+		return err
+	}
 	entry, err := s.modules.hostFiles.ResolveEntry(path)
 	if err != nil {
 		return mapFileError(err)
@@ -472,30 +482,36 @@ func (s *Server) handleFileSearch(w http.ResponseWriter, r *http.Request) error 
 	if q.Get("q") == "" {
 		return httpx.BadRequest("q query parameter is required")
 	}
+	flags := httpx.Query(r)
+	detailed := flags.Bool("detailed")
+	options := files.SearchOptions{
+		Root:       defaultStr(q.Get("path"), "/"),
+		Query:      q.Get("q"),
+		Content:    flags.Bool("content"),
+		Regex:      flags.Bool("regex"),
+		IgnoreCase: flags.BoolOr("ignoreCase", true),
+		MaxDepth:   atoiDefault(q.Get("depth"), 12),
+		Limit:      atoiDefault(q.Get("limit"), 500),
+		SkipHidden: !flags.BoolOr("hidden", true),
+		AllLines:   detailed,
+	}
+	if err := flags.Err(); err != nil {
+		return err
+	}
 	deadline := 60 * time.Second
-	if q.Get("detailed") == "true" {
+	if detailed {
 		deadline = 3 * time.Second
 	}
 	ctx, cancel := timeoutCtx(r, deadline)
 	defer cancel()
-	result, err := s.modules.hostFiles.SearchDetailed(ctx, files.SearchOptions{
-		Root:       defaultStr(q.Get("path"), "/"),
-		Query:      q.Get("q"),
-		Content:    q.Get("content") == "true",
-		Regex:      q.Get("regex") == "true",
-		IgnoreCase: q.Get("ignoreCase") != "false",
-		MaxDepth:   atoiDefault(q.Get("depth"), 12),
-		Limit:      atoiDefault(q.Get("limit"), 500),
-		SkipHidden: q.Get("hidden") == "false",
-		AllLines:   q.Get("detailed") == "true",
-	})
+	result, err := s.modules.hostFiles.SearchDetailed(ctx, options)
 	if err != nil {
 		if errors.Is(err, files.ErrInvalidSearch) {
-			return httpx.BadRequest("%s", err.Error())
+			return httpx.Refused(err)
 		}
 		return mapFileError(err)
 	}
-	if q.Get("detailed") == "true" {
+	if detailed {
 		httpx.JSON(w, http.StatusOK, result)
 	} else {
 		httpx.JSON(w, http.StatusOK, result.Hits)

@@ -84,19 +84,19 @@ type Source struct {
 	Malformed           int       `json:"malformed"`
 	IdentityUnavailable int       `json:"identityUnavailable"`
 	UnconnectedUDP      int       `json:"unconnectedUdp"`
-	ObservedAt          time.Time `json:"observedAt"`
+	ObservedAt          time.Time `json:"observedAt,omitzero"`
 	Values              []Socket  `json:"-"`
 }
 
 type Cycle struct {
-	At                   time.Time         `json:"at"`
-	FinishedAt           time.Time         `json:"finishedAt"`
+	At                   time.Time         `json:"at,omitzero"`
+	FinishedAt           time.Time         `json:"finishedAt,omitzero"`
 	BootID               string            `json:"bootId,omitempty"`
 	KernelRelease        string            `json:"kernelRelease,omitempty"`
 	Tool                 string            `json:"tool"`
 	ToolVersion          string            `json:"toolVersion,omitempty"`
 	ToolVersionError     string            `json:"toolVersionError,omitempty"`
-	ToolVersionCheckedAt time.Time         `json:"toolVersionCheckedAt"`
+	ToolVersionCheckedAt time.Time         `json:"toolVersionCheckedAt,omitzero"`
 	Sources              []Source          `json:"sources"`
 	DockerStatus         string            `json:"dockerStatus"`
 	DockerError          string            `json:"dockerError,omitempty"`
@@ -108,9 +108,9 @@ type Cycle struct {
 }
 
 type CoverageHour struct {
-	Hour               time.Time       `json:"hour"`
-	FirstSampleAt      time.Time       `json:"firstSampleAt"`
-	LastSampleAt       time.Time       `json:"lastSampleAt"`
+	Hour               time.Time       `json:"hour,omitzero"`
+	FirstSampleAt      time.Time       `json:"firstSampleAt,omitzero"`
+	LastSampleAt       time.Time       `json:"lastSampleAt,omitzero"`
 	Samples            int             `json:"samples"`
 	FailedSources      int             `json:"failedSources"`
 	TruncatedSources   int             `json:"truncatedSources"`
@@ -124,9 +124,9 @@ type CoverageHour struct {
 
 type Bucket struct {
 	ID                     string    `json:"id"`
-	Hour                   time.Time `json:"hour"`
-	FirstSeen              time.Time `json:"firstSeen"`
-	LastSeen               time.Time `json:"lastSeen"`
+	Hour                   time.Time `json:"hour,omitzero"`
+	FirstSeen              time.Time `json:"firstSeen,omitzero"`
+	LastSeen               time.Time `json:"lastSeen,omitzero"`
 	SourceID               string    `json:"sourceId"`
 	SourceName             string    `json:"sourceName"`
 	Namespace              string    `json:"namespace"`
@@ -166,13 +166,13 @@ type Query struct {
 }
 
 type Report struct {
-	CheckedAt          time.Time        `json:"checkedAt"`
-	From               time.Time        `json:"from"`
-	To                 time.Time        `json:"to"`
+	CheckedAt          time.Time        `json:"checkedAt,omitzero"`
+	From               time.Time        `json:"from,omitzero"`
+	To                 time.Time        `json:"to,omitzero"`
 	Status             string           `json:"status"`
 	Settings           Settings         `json:"settings"`
 	RecordingSince     *time.Time       `json:"recordingSince"`
-	CollectorStartedAt time.Time        `json:"collectorStartedAt"`
+	CollectorStartedAt time.Time        `json:"collectorStartedAt,omitzero"`
 	LastCycle          *Cycle           `json:"lastCycle"`
 	Rows               []Bucket         `json:"rows"`
 	CoverageHours      []CoverageHour   `json:"coverageHours"`
@@ -210,7 +210,7 @@ type ObserverEvidence struct {
 	AttachmentsRetained  bool            `json:"attachmentsRetained"`
 	DockerStatus         string          `json:"dockerStatus"`
 	DockerError          string          `json:"dockerError,omitempty"`
-	DockerCheckedAt      time.Time       `json:"dockerCheckedAt"`
+	DockerCheckedAt      time.Time       `json:"dockerCheckedAt,omitzero"`
 	TimestampReason      string          `json:"timestampReason,omitempty"`
 	Status               string          `json:"status"`
 	Reason               string          `json:"reason"`
@@ -219,7 +219,7 @@ type ObserverEvidence struct {
 	BootID               string          `json:"bootId,omitempty"`
 	TargetCgroup         string          `json:"targetCgroup,omitempty"`
 	StartedAt            *time.Time      `json:"startedAt"`
-	CheckedAt            time.Time       `json:"checkedAt"`
+	CheckedAt            time.Time       `json:"checkedAt,omitzero"`
 	StoppedAt            *time.Time      `json:"stoppedAt"`
 	ProgramIDs           []uint32        `json:"programIds"`
 	LinkIDs              []uint32        `json:"linkIds"`

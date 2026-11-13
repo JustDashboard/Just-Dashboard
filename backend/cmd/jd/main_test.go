@@ -185,3 +185,16 @@ func TestPlainHTTPIsRefusedOffLoopback(t *testing.T) {
 		t.Errorf("maskKey: %q %q", maskKey(goodKey), maskKey("short"))
 	}
 }
+
+// A 500 says "internal error" and nothing else. The id the envelope carries is
+// what jd prints for the person to quote; a refusal without one reads as before.
+func TestAServerErrorNamesItsRequest(t *testing.T) {
+	failed := decodeError(500, []byte(`{"error":{"code":"internal","message":"internal error","requestId":"7f3a9c1e2b4d5a60"}}`))
+	if got, want := failed.Error(), "internal (500): internal error (request 7f3a9c1e2b4d5a60)"; got != want {
+		t.Errorf("a 500 reads %q, want %q", got, want)
+	}
+	refused := decodeError(409, []byte(`{"error":{"code":"revision_conflict","message":"current revision is 4"}}`))
+	if got, want := refused.Error(), "revision_conflict (409): current revision is 4"; got != want {
+		t.Errorf("a refusal reads %q, want %q", got, want)
+	}
+}

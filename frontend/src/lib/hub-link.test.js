@@ -19,13 +19,11 @@ import {
   orderFleet,
   owedNotices,
   reportCadence,
-  returnAfterSignIn,
   sentence,
   serverAddress,
   serverEntries,
   serverReading,
   shellHub,
-  signInAddress,
   terminalCommand,
 } from "./hub-link"
 
@@ -501,47 +499,6 @@ describe("the link in words", () => {
       "sudo ./scripts/manage.sh hub connect https://hub.tailed39ba.ts.net",
     )
     expect(terminalCommand("")).toBe("sudo ./scripts/manage.sh hub connect URL")
-  })
-})
-
-// The hub opens its Connect door in a new tab, usually signed out (§8.1); the sign-in brings the
-// browser back to it, and to nowhere else.
-describe("the Connect door survives signing in", () => {
-  test("the door is carried to the sign-in page and back, re-encoded", () => {
-    expect(signInAddress("/dashboard/hub?connect=hub.tailed39ba.ts.net")).toBe(
-      "/login?next=%2Fdashboard%2Fhub%3Fconnect%3Dhub.tailed39ba.ts.net",
-    )
-    expect(returnAfterSignIn("/dashboard/hub?connect=127.0.0.1%3A9641")).toBe(
-      "/dashboard/hub?connect=127.0.0.1%3A9641",
-    )
-    // Only `connect` is kept; the page still treats it as a suggestion (`connectTarget`).
-    expect(returnAfterSignIn("/dashboard/hub?connect=hub.tailed39ba.ts.net&x=1#y")).toBe(
-      "/dashboard/hub?connect=hub.tailed39ba.ts.net",
-    )
-    expect(returnAfterSignIn("/dashboard/hub?connect=javascript:alert(1)")).toBe(
-      "/dashboard/hub?connect=javascript%3Aalert(1)",
-    )
-  })
-
-  test("any other address signs in to the Overview, as before", () => {
-    expect(signInAddress("/docker")).toBe("/login")
-    expect(signInAddress("/dashboard/hub")).toBe("/login")
-    for (const next of [
-      null,
-      undefined,
-      "",
-      "/",
-      "/dashboard/hub",
-      "/dashboard/hub?connect=",
-      "/dashboard/hubx?connect=hub.tailed39ba.ts.net",
-      "/dashboard/hub/../../evil?connect=hub",
-      "//evil.example/dashboard/hub?connect=hub",
-      "/\\evil.example/dashboard/hub?connect=hub",
-      "https://evil.example/dashboard/hub?connect=hub",
-      `/dashboard/hub?connect=${"a".repeat(301)}`,
-    ]) {
-      expect(returnAfterSignIn(next)).toBeUndefined()
-    }
   })
 })
 

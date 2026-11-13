@@ -68,11 +68,20 @@ never into `docs/audits/`.
 - Run the checks with `scripts/test-changed.sh`. It runs only what your diff can reach: Prettier and
   ESLint on the changed frontend files, `tsc --noEmit`, `bun test src`, `go build`/`go vet` and the
   Go tests beside each changed file, the clients' own checks for a change under `sdk/`, and the
-  browser specs that open a page the change renders. Do not
+  browser specs that open a page the change renders. A change to `install.sh`, `scripts/`,
+  `docker-compose.yml`, `deploy/`, `.env.example` or a Dockerfile runs `bash -n` and the
+  `scripts/test_*.py` that name the file; a file under `backend/` that is not Go, `go.mod`, and the
+  frontend's `package.json`, lock and build configuration each pick the packages or specs they reach
+  (the script's header has the rules, and `JD_TEST_CHANGED_PLAN=1` prints the picking alone).
+  A new worktree has no `tsconfig.tsbuildinfo`, and a cold type-check is three minutes and 2.4 GB, so
+  the script starts it from the copy the last passing check left in the git directory the clone's
+  worktrees share (`jd-cache/`). Do not
   run the whole browser suite or `go test ./...` locally. Install the required Chromium build once
   with `bun run test:browser:install`.
   Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from
-  the worktree under test and rebuild/restart it after source changes. `JD_BROWSER_BASE_URL` selects
+  the worktree under test and rebuild/restart it after source changes. `bun run start` serves the
+  build with the standalone server the image runs (`frontend/scripts/serve-standalone.mjs`), so what
+  the specs open is what an install serves. `JD_BROWSER_BASE_URL` selects
   an explicitly managed frontend on another port when worktrees run alongside one another.
   Set `JD_BROWSER_WORKERS=1` to limit the selected browser run on a memory-constrained host; omit
   it to use the existing Playwright worker setting.
@@ -194,7 +203,8 @@ never into `docs/audits/`.
   WebAuthn refuses the `127.0.0.1` the other specs use, so the spec opens the same server by name.
   Browser specs do not pass through Caddy; `src/lib/passkeys.test.js` reads `deploy/Caddyfile` to hold
   its `Permissions-Policy` to allowing passkeys.
-- Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
+- Installer and terminal-admin changes also run `python3 scripts/test_manage.py`,
+  `python3 scripts/test_preflight.py`, `python3 scripts/test_build_stamp.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.
 - **`bun run build` is the final frontend type-check gate.** `frontend/Dockerfile`
@@ -241,7 +251,12 @@ never into `docs/audits/`.
   to `main`, reads `latest` from `backend/internal/selfupdate/changelog.json`, and when no release
   `v<latest>` exists yet, tags that commit and publishes the release with the version's section of
   `CHANGELOG.md` as its notes. The branch a release was cut on does not matter, and a merge whose
-  version is already released publishes nothing. Never tag or publish a release by hand; a manual run of the
+  version is already released publishes nothing. The tag is what installs wait for: a version on `main`
+  with no `v<version>` tag is neither offered nor installed (`selfupdate.TagsOnly`), so a merge whose
+  Verify run fails ships to nobody until a later run is green. Release tags can also be required to be
+  signed (`backend/internal/selfupdate/allowed_signers`, which names no key yet, so nothing is checked);
+  "Signed releases" in `docs/internal/backend/databases-proxy-platform.md` has the order to turn it on in.
+  Do not add a key to that file as part of other work. Never tag or publish a release by hand; a manual run of the
   workflow on `main` retries one that failed.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run. `TestLiveSiteControlsAreMeasured` instead writes its
@@ -261,7 +276,11 @@ never into `docs/audits/`.
   new one is built without being added there. They used to run on a self-hosted runner on the release
   host, which put the fixtures' builds on the daemon that serves the dashboard, needed its BuildKit
   cache pruned after every run, and left every run waiting whenever that service was down. Each live
-  job has a 45-minute test timeout. Required live fixtures fail CI if skipped or absent. Logs and
+  job has a 45-minute test timeout. Required live fixtures fail CI if skipped or absent. A fixture
+  names exactly what it installs, in its tool's lock file or as an exact version in the manifest, and
+  `TestAppFixturesNameExactVersions` fails on a range: one that installs whatever is newest fails on
+  the day upstream releases, on every branch at once. Bump a version on purpose, in a change of its
+  own, so the live job that runs is the one that proves it. Logs and
   browser failure traces are retained for 30 days, including failed runs. CI does not replace public
   TLS, clean-host installation, remote-host, architecture or soak acceptance.
 - A test that wants the dashboard's store opens it with `storetest.Open` (`internal/store/storetest`),

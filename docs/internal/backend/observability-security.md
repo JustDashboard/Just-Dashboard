@@ -15,10 +15,45 @@ since a tab was opened, and charts that start empty every visit cannot show last
   its mean — a 100% second inside a ten-minute bucket averages away to nothing.
 - Capacity is **per filesystem** (`metric_mount_samples`, `GET /system/metrics/storage`), never a
   worst-of line: when the fullest mount stops being the fullest, one line drops to the runner-up and
-  reads as freed space on a disk that never changed. Pseudo filesystems are filtered before the write.
+  reads as freed space on a disk that never changed. Pseudo filesystems are filtered before the write,
+  and so are images that are always full (`iso9660`, `udf`, `cramfs`, `romfs`, `erofs`).
+- The mount table is the host's (`/proc/1/mountinfo`, through the shared PID namespace), so each mount
+  point is **measured in the host's mount namespace** too (`sysinfo/mounts.go`, `hostexec.InHostMounts`).
+  A `statfs` from inside the container answers for the image's own directory of that name: `/boot` was
+  recorded at the root disk's size, and `/boot/efi` or a second disk at `/data` was absent. A filesystem
+  that does not answer within two seconds (a detached volume, a dead network device) is left out of the
+  sample; its one outstanding call is shared by every collector and is not repeated until the kernel
+  answers it, so a hung mount cannot stall the recorder or pile up threads.
 - Containers are sampled into `metric_container_samples`, keyed by **name, not id** — a compose redeploy
   replaces the container and seeing across the restart is the point. Docker being absent is logged once,
   not an error. `/docker/containers/stats/history` serves a sparkline per table row in one query.
+- Every sample of a container spells the container's 64-character id out, in the row and again in the
+  `(container_id, ts)` index, which is about half of the largest table in the store. The short form
+  writes an id once, in `metric_container_ids`, and has a sample hold that row's number in
+  `container_ref` with `container_id` left empty (`metrics/container_ids.go`). **0.8.6 reads the short
+  form and does not write it** (`Recorder.numberIDs` is off; only tests turn it on), because of the
+  rollback: `manage.sh rollback` puts the previous binary back over the database as it is, and every
+  release up to 0.8.5 finds a release's samples by `container_id` alone. Read by 0.8.5, a store whose
+  samples hold numbers has empty release charts, nothing for right-sizing to judge and a different CPU
+  average in a container's chart where the container was replaced; that was measured, not supposed.
+  So the readers ship a release ahead of the writer, and the writer may be turned on only where the
+  binary a rollback returns to has them, which an install that skipped 0.8.6 does not;
+  `TestSamplesSpellTheirIdOutForTheBinaryARollbackReturnsTo` holds the present behaviour and says what
+  has to be answered first. Once the short form is written nothing is rewritten: a sample that spells
+  its id out leaves with `JD_METRICS_RETENTION` like any other, so the saving arrives over one
+  retention. Every read of a sample's identity goes through three fragments — `containerIdentityJoin`,
+  `containerIdentity` (`COALESCE(i.container_id, s.container_id)`) and `containerIdentityIn`, whose two
+  halves the `(container_id, ts)` index and the partial `(container_ref, ts)` index serve — so a
+  container whose samples are in both spellings is one series;
+  `TestTheChartsReadTheSameNumbersFromEitherSpellingOfAnId` reads every container chart and the sizing
+  figures from the same history as 0.8.5 wrote it, as this release writes it, in the short form and
+  mixed, and they are equal. A container that reports no id gets no number. The recorder remembers the
+  numbers (4,096 at most) and pruning deletes the ids no sample refers to, under the lock a write
+  holds, so a number is never used after its row has gone; ids are `AUTOINCREMENT`, so one is never
+  given to a second container. A reader outside `metrics` that needs a sample's container id must use
+  the fragments; the ones in `api` and `netx` key on `name`, which is still text in the row. That is
+  what is left of the audit's proposal: a name (and an interface's, a mount's) is short and three
+  packages read by it, so it stays until it is worth changing them all at once.
 - The sample carries `size_rw`, the writable layer, taken from the **cached** disk walk rather than by
   asking the daemon for sizes per container: a sampler running every fifteen seconds shares the bounded
   disk cache and its refresh instead of starting a separate walk per sample. It is what makes
@@ -227,6 +262,14 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   the tests drive).
 
 ## netsec: exposure and login history
+
+The Security overview's SSH reading says the riskiest fact about how a login reaches a shell, from the
+same `GET /ssh/config` the SSH page reads (an administrator's; anybody else's tile says so and asks for
+nothing): *Keys only*, *Passwords allowed* in the warning tone, or *Root can sign in* in the danger tone
+when `PermitRootLogin yes` stands beside password authentication, with the ports sshd listens on as its
+hint (`components/security/ssh-reading.ts`, unit-tested). An absent directive is read as sshd's own
+default, as the SSH page's picture reads it. The Firewall reading says *inbound policy unknown* where
+the backend reports none, rather than a dash.
 
 The Security overview's Intrusion reading describes fail2ban only: its current bans and jails,
 whether it is installed or running, or a status read that failed. It never infers that no engine

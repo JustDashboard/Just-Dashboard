@@ -708,7 +708,7 @@ func automationReason(err error) string {
 
 func mapAutomationError(err error) error {
 	if errors.Is(err, deploy.ErrInvalidNotification) {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if errors.Is(err, deploy.ErrPullRequestRateLimited) || errors.Is(err, deploy.ErrPullRequestUnreadable) ||
 		errors.Is(err, deploy.ErrPreviewAddressExhausted) || errors.Is(err, deploy.ErrPreviewAddressMissing) {
@@ -730,7 +730,7 @@ func mapAutomationError(err error) error {
 	if code != "rejected" {
 		return httpx.Err(status, code, err.Error())
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 func (s *Server) dispatchDeploymentSchedule(ctx context.Context, item deploy.ScheduleDispatch) error {

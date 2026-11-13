@@ -1,6 +1,6 @@
 "use client"
 
-import { MongoSchema } from "@/components/database/mongo"
+import { MongoSchema } from "@/components/database/mongo/schema"
 import { SqlSchema } from "@/components/database/schema"
 import { SectionPage } from "@/components/database/shell/section-page"
 

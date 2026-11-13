@@ -139,6 +139,7 @@ export function ChoiceCard({
   return (
     <BlurFade delay={index * 0.03} className="h-full">
       <SpotlightBorder resting={edge} className="h-full">
+        {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the card's name is the link or button a keyboard opens it by */}
         <div
           data-slot="choice-card"
           data-selected={selected || undefined}

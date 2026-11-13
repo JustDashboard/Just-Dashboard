@@ -196,7 +196,9 @@ test("a passing replay reads as the record matched", async ({ page }) => {
   const list = page.getByRole("list", { name: "Deployment steps" })
   const step = list.getByRole("button", { name: /Traffic replay/ })
   // Its row says what it concluded while another step is open.
-  await expect(step).toContainText("50 requests · none drifted · p95 38 ms (42 ms recorded)")
+  await expect(step).toContainText(
+    "50 requests · none drifted · 19 in 20 inside 38 ms (42 ms recorded)",
+  )
   await step.click()
   const report = page.getByRole("region", { name: "Replay report" })
   await expect(report.getByText(/Within the live release's record over 50 requests/)).toBeVisible()
@@ -232,7 +234,7 @@ test("the replay terms are saved with the runtime plan", async ({ page }) => {
   await expect(section).toContainText("Off · releases go live on their health checks alone")
 
   await section.getByRole("switch", { name: "Replay recorded requests before the cutover" }).click()
-  await expect(section).toContainText("On · the last 50 requests, 2% drift, p95 within 2×")
+  await expect(section).toContainText("On · the last 50 requests, 2% drift, at most 2× slower")
   // A count past the server's bound is named under its field, and nothing is sent.
   await section.getByLabel("Requests replayed").fill("900")
   let sent = false
@@ -247,7 +249,7 @@ test("the replay terms are saved with the runtime plan", async ({ page }) => {
   await section.getByLabel("Requests replayed").fill("120")
   await section.getByLabel("Only paths under").fill(" /docs\n/blog\n/docs")
   await expect(section).toContainText(
-    "On · the last 120 requests under 2 prefixes, 2% drift, p95 within 2×",
+    "On · the last 120 requests under 2 prefixes, 2% drift, at most 2× slower",
   )
   const saved = page.waitForRequest(
     (request) =>

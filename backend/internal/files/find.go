@@ -34,7 +34,7 @@ type FindHit struct {
 	Dir      string    `json:"dir"`
 	IsDir    bool      `json:"isDir"`
 	Size     int64     `json:"size"`
-	Modified time.Time `json:"modified"`
+	Modified time.Time `json:"modified,omitzero"`
 	Score    int       `json:"score"`
 	// Matches are the positions inside Name that matched, in the UTF-16 code
 	// units the browser slices strings by — Go counts bytes, and a highlight

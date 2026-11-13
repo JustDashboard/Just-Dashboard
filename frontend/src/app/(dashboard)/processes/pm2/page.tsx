@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/table"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { PM2Band } from "@/components/procs/pm2-band"
+import { PM2Missing } from "@/components/procs/pm2-missing"
 import { PM2DetailSheet } from "@/components/procs/pm2-detail"
 import { PM2StartDialog } from "@/components/procs/pm2-start-dialog"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
@@ -197,11 +198,7 @@ function PM2Applications() {
     return (
       <Page>
         {header}
-        <EmptyState
-          icon={ChartActivity}
-          title="PM2 is not installed"
-          description="Install PM2 for a host account (npm install -g pm2) to manage Node applications from here. The dashboard finds every account's daemon on its own."
-        />
+        <PM2Missing />
       </Page>
     )
   }
@@ -779,6 +776,7 @@ function PM2NarrowRow(props: RowProps) {
   const verbs = useRowVerbs(props)
   const limit = memoryLimitShare(process)
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- the pointer's larger target: the row's name is the link or button a keyboard opens it by
     <li
       data-workspace-item={pm2Key(process)}
       data-workspace-name={process.name}

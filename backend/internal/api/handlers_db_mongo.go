@@ -197,7 +197,7 @@ func mongoFailure(err error) error {
 	case dbx.MongoUnreachable(err):
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 // mongoReadFailed is mongoFailure for a request that only reads — a find, a
@@ -233,7 +233,7 @@ func mongoLegacyFailure(err error) error {
 	if errors.Is(err, dbx.ErrMongoWithheld) {
 		return mongoFailure(err)
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 // mongoNeedsDestructive applies, by hand, what s.destructive applies to a
@@ -244,8 +244,8 @@ func (s *Server) mongoNeedsDestructive(r *http.Request, why string) error {
 	if !p.Can(auth.CapDestructive) {
 		return httpx.Err(http.StatusForbidden, "forbidden", why+", and your role does not permit that (destructive)")
 	}
-	if !s.destrLim.Allow(p.Username() + "|mongo") {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many destructive requests, slow down")
+	if err := s.destrLim.Spend(p.Username()+"|mongo", "too many destructive requests, slow down"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -401,7 +401,7 @@ func (s *Server) handleMongoAggregate(w http.ResponseWriter, r *http.Request) er
 	}
 	info, err := dbx.MongoClassifyPipeline(req.Pipeline)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if info.Destructive() {
 		why := "this pipeline writes a collection"

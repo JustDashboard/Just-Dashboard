@@ -99,7 +99,7 @@ type PoolMember struct {
 
 // PoolEvidence is what nginx's error logs were read for, and how far.
 type PoolEvidence struct {
-	Since time.Time `json:"since"`
+	Since time.Time `json:"since,omitzero"`
 	// Logs are the error logs read: the main one and every one a site
 	// names, inside nginx's log directory.
 	Logs []string `json:"logs"`

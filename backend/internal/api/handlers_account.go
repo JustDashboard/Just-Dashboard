@@ -41,7 +41,7 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) err
 	if err := s.Auth.SetProfile(r.Context(), p.UserID(), auth.Profile{
 		Username: req.Username, DisplayName: req.DisplayName,
 	}); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	updated, err := s.Auth.UserByID(r.Context(), p.UserID())
 	if err != nil {
@@ -81,7 +81,7 @@ func (s *Server) handleSetWorkspace(w http.ResponseWriter, r *http.Request) erro
 	p := httpx.MustPrincipal(r)
 	hidden, err := s.Auth.SetHiddenSections(r.Context(), p.UserID(), req.HiddenSections)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	updated, err := s.Auth.UserByID(r.Context(), p.UserID())
 	if err != nil {
@@ -112,7 +112,7 @@ func (s *Server) handleUploadOwnAvatar(w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 	if err := s.Auth.SetAvatar(r.Context(), p.UserID(), data, mimeType); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	updated, err := s.Auth.UserByID(r.Context(), p.UserID())
 	if err != nil {

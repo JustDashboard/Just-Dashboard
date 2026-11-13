@@ -116,7 +116,7 @@ export function OffendersPanel({
         ) : error ? (
           <ErrorState error={error} className="mt-3" />
         ) : loading ? (
-          <LoadingPanel rows={4} className="mt-3" />
+          <LoadingPanel rows={4} className="mt-3" hold />
         ) : !data?.offenders.length ? (
           <EmptyState icon={Crosshair} title="Nothing has been banned yet" className="mt-3" />
         ) : (

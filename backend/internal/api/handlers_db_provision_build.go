@@ -98,7 +98,7 @@ func (s *Server) handleDBProvisionBuild(w http.ResponseWriter, r *http.Request) 
 	}
 	version, err := tmpl.version(strings.TrimSpace(req.Version))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if s.modules.docker == nil {
 		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable",

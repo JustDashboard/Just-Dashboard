@@ -55,8 +55,9 @@ export function Sparkline({
       height={height}
       preserveAspectRatio="none"
       className={cn("inline-block overflow-visible align-middle", className)}
-      role="img"
+      role={label ? "img" : undefined}
       aria-label={label}
+      aria-hidden={label ? undefined : true}
     >
       <defs>
         <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">

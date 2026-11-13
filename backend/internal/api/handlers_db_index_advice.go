@@ -52,7 +52,7 @@ func (s *Server) handleDBIndexCandidates(w http.ResponseWriter, r *http.Request)
 	}
 	statement, err := dbx.ExplainTarget(conn.Driver, req.Query)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	pool, _, err := s.dbPool(r.Context(), id)
 	if err != nil {
@@ -93,7 +93,7 @@ func (s *Server) handleDBIndexWhatIf(w http.ResponseWriter, r *http.Request) err
 	}
 	statement, err := dbx.ExplainTarget(conn.Driver, req.Query)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	pool, _, err := s.dbPool(r.Context(), id)
 	if err != nil {
@@ -123,7 +123,7 @@ func indexAdviceFailed(err error) error {
 	case errors.As(err, &missing), errors.Is(err, dbx.ErrNoWhatIf), errors.Is(err, dbx.ErrExplainUnsupported):
 		return httpx.Err(http.StatusBadRequest, "unsupported", err.Error())
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 // handleDBMissingIndexes reads SQL Server's missing-index views. It is a

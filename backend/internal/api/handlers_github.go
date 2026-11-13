@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -90,11 +91,26 @@ func ghError(err error) error {
 	if errors.Is(err, ghx.ErrNotInstalled) {
 		return httpx.Err(http.StatusServiceUnavailable, "not_installed", err.Error())
 	}
+	if ghSignedOut(err) {
+		// The code a deployment's pull requests already answer with
+		// (pullRequestsError): the request was not wrong, the server has no
+		// GitHub account to ask as.
+		return httpx.Err(http.StatusConflict, "github_login_required", "GitHub is not signed in on this server.").
+			Because("Sign in to GitHub on the Git page, then try again.", err.Error())
+	}
 	// gh's failures are almost all ordinary answers — no permission, no
 	// commits between the branches, a network that is down — and its own words
 	// are the diagnosis.
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
+
+// ghSignedOutHint is how gh ends every command run without an account: "To
+// get started with GitHub CLI, please run:  gh auth login". The hint, not the
+// bare command name: a sign-in that failed names the command too, and that is
+// a refused token, not a server without an account.
+var ghSignedOutHint = regexp.MustCompile("please run:?\\s+`?gh auth login|not logged into any GitHub hosts")
+
+func ghSignedOut(err error) bool { return ghSignedOutHint.MatchString(err.Error()) }
 
 // handleGitHubStatus answers in one shape whether or not gh is installed, so
 // the page renders "not available on this host" as information rather than as

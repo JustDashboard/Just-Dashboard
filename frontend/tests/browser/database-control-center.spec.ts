@@ -1285,6 +1285,31 @@ test.describe("adding a database", () => {
     await expect(page.getByRole("button", { name: "Connect orders-db" })).toBeVisible()
   })
 
+  // On a phone the three ways in are all in view under their short names: the
+  // strip had scrolled with the third cut at the screen's edge and nothing to
+  // say it went on.
+  test("a phone shows every way in at once", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mockFleet(page)
+    await page.goto("/databases/new")
+    const strip = page.getByRole("group", { name: "Where the database is" })
+    const ways = strip.getByRole("button")
+    // What is drawn, not what the markup holds: each way carries both names
+    // and shows the one for the width.
+    await expect(ways).toHaveText(["Start new", "Connect", "Found here"], { useInnerText: true })
+    expect(await strip.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+    const last = (await ways.last().boundingBox())!
+    expect(last.x + last.width).toBeLessThanOrEqual(390)
+    await ways.last().click()
+    await expect(ways.last()).toHaveAttribute("aria-pressed", "true")
+    // At a laptop's width each keeps its whole name.
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await expect(ways).toHaveText(
+      ["Start a new one here", "Connect to one", "Found on this server"],
+      { useInnerText: true },
+    )
+  })
+
   test("a new server answers on this server only unless the reader says otherwise, and lands on its home", async ({
     page,
   }) => {

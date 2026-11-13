@@ -37,7 +37,8 @@ export type DashboardUser = {
   totpEnabled: boolean
   disabled: boolean
   mustChangePassword: boolean
-  lastLoginAt: string
+  /** Absent for an account that has never signed in, and in the answer to its first sign-in. */
+  lastLoginAt?: string
   createdAt: string
   /** Not yet asked what the dashboard is for; the shell sends the account to `/welcome`. */
   needsOnboarding: boolean
@@ -8621,8 +8622,16 @@ export type UpdateRun = {
   image: string
   container: string
   health?: string
+  /** Installed from the repository's tag `v<toVersion>` or not at all. */
+  requireTag?: boolean
   fromCommit?: string
   toCommit?: string
+  /** `toCommit` is the commit that tag names, not wherever the branch was. */
+  tagged?: boolean
+  /** Where the dashboard's database was copied before the update, if it was. */
+  databaseCopy?: string
+  /** The images tagged `:previous` before the build replaced them. */
+  savedImages?: { current: string; previous: string }[]
   actor: string
   startedAt: string
   updatedAt: string
@@ -8630,14 +8639,29 @@ export type UpdateRun = {
   error?: string
 }
 
+/**
+ * Everything this build knows about its own past, newest first; needs no network. Served by
+ * `GET /dashboard/update/history`, apart from the report that is polled.
+ */
+export type UpdateHistory = {
+  history: Release[]
+}
+
 export type SelfUpdateReport = {
   version: string
+  /**
+   * The short commit this build was made from when it is not the release of
+   * `version` (a patch branch, a fork's head). Absent for a release.
+   */
+  commit?: string
   latest?: string
   available: boolean
+  /** The version on offer has a release tag; false is a fork's branch head. */
+  tagged: boolean
+  /** A newer version on the tracked branch with no tag yet. Not offered. */
+  pending?: string
   /** Releases newer than the installed version, newest first. */
   releases: Release[]
-  /** Everything this build knows about its own past; needs no network. */
-  history: Release[]
   breaking: boolean
   check: {
     enabled: boolean
@@ -8646,6 +8670,8 @@ export type SelfUpdateReport = {
     source?: string
     repo: string
     ref: string
+    /** Only tagged versions are offered and installed: the project's own repository. */
+    tagsOnly: boolean
   }
   install: {
     supported: boolean
@@ -11802,8 +11828,8 @@ export type Passkey = {
   name: string
   rpId: string
   createdAt: string
-  /** Zero time when it has never signed in. */
-  lastUsedAt: string
+  /** Absent when it has never signed in. */
+  lastUsedAt?: string
   /** Backed up by a password manager or a phone's keychain rather than held on one device. */
   synced: boolean
   transports: string[]

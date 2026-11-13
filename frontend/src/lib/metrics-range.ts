@@ -1,4 +1,4 @@
-import { clock, timestamp } from "@/lib/format"
+import { clock, dayMinuteAt, timestamp } from "@/lib/format"
 import type {
   ContainerHistory,
   ContainerHistoryPoint,
@@ -445,13 +445,7 @@ function gapRow(ts: number): ChartRow {
 }
 
 function shortDateTime(ts: number): string {
-  return new Date(ts).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  })
+  return dayMinuteAt(ts)
 }
 
 /**

@@ -141,7 +141,9 @@ export default function PackagesPage() {
 
   // Read once: which distribution the manager belongs to does not change
   // while the page is open.
-  const host = usePoll((signal) => get<HostInfo>("/system/host", undefined, signal), 0).data
+  const host = usePoll((signal) => get<HostInfo>("/system/host", undefined, signal), 0, [], {
+    key: "/system/host",
+  }).data
 
   const upgrade = (securityOnly: boolean) =>
     confirm({

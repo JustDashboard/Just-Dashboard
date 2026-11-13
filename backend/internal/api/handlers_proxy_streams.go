@@ -117,7 +117,7 @@ func (s *Server) handleNginxModules(w http.ResponseWriter, r *http.Request) erro
 	defer cancel()
 	report, err := s.modules.proxy.NginxModules(ctx, r.URL.Query().Get("fresh") != "")
 	if errors.Is(err, proxysvc.ErrNoNginx) {
-		return httpx.Err(http.StatusServiceUnavailable, "not_installed", err.Error())
+		return httpx.NotInstalled("nginx", err)
 	}
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "nginx_unreadable", err.Error()).Retry()
@@ -176,7 +176,7 @@ func (s *Server) handleStreamTraffic(w http.ResponseWriter, r *http.Request) err
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	}
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, traffic)
 	return nil
@@ -205,7 +205,7 @@ func (s *Server) handleStreamPath(w http.ResponseWriter, r *http.Request) error 
 	defer cancel()
 	path, err := s.modules.proxy.StreamPath(ctx, httpx.URLParam(r, "name"), time.Now())
 	if errors.Is(err, proxysvc.ErrStreamName) {
-		return httpx.BadRequest("%s", err.Error())
+		return httpx.Refused(err)
 	}
 	if errors.Is(err, proxysvc.ErrStreamNotFound) {
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
@@ -243,7 +243,7 @@ func (s *Server) handleStreamPreview(w http.ResponseWriter, r *http.Request) err
 	}
 	content, err := proxysvc.RenderStream(&req.Spec)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	warnings := proxysvc.StreamWarnings(&req.Spec)
 	// Said while the form is filled in, as the save would refuse it.
@@ -270,7 +270,7 @@ func (s *Server) handleStreamTest(w http.ResponseWriter, r *http.Request) error 
 	}
 	res, err := proxysvc.DialStream(r.Context(), req)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "proxy.stream.test", net.JoinHostPort(req.Target, strconv.Itoa(req.Port)),
 		map[string]any{"protocol": req.Protocol, "mode": req.Mode, "outcome": res.Outcome})
@@ -382,7 +382,7 @@ func (s *Server) handleStreamDelete(w http.ResponseWriter, r *http.Request) erro
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	}
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	out := map[string]any{"name": name, "reloaded": false}
 	detail := map[string]any{"reloaded": false}
@@ -440,7 +440,7 @@ func (s *Server) handleStreamToggle(w http.ResponseWriter, r *http.Request) erro
 	case errors.Is(err, proxysvc.ErrStreamNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case err != nil:
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	detail := map[string]any{"enabled": req.Enabled, "reloaded": res.Reloaded}
 	if res.ReloadError != "" {

@@ -87,7 +87,14 @@ const update = {
     },
   ],
   breaking: true,
-  check: { enabled: true, checkedAt: earlier, repo: "wayy/just-dashboard", ref: "main" },
+  tagged: true,
+  check: {
+    enabled: true,
+    checkedAt: earlier,
+    repo: "wayy/just-dashboard",
+    ref: "main",
+    tagsOnly: true,
+  },
   install: { supported: true, dir, compose: `${dir}/docker-compose.yml`, dirty: ["M Caddyfile"] },
 }
 
@@ -208,11 +215,26 @@ const usagePing = {
   nextBody: usageBody,
 }
 
+function withoutHistory(report: unknown) {
+  const status = { ...(report as Record<string, unknown>) }
+  delete status.history
+  return status
+}
+
 async function mockApi(page: Page, report: unknown = update) {
   await page.route("**/api/v1/**", async (route) => {
-    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    const url = new URL(route.request().url())
+    const path = url.pathname.replace(/^\/api\/v1/, "")
     if (path === "/auth/session") return json(route, user)
-    if (path === "/dashboard/update") return json(route, report)
+    // The page asks for the report without the changelog and reads that once from a route of
+    // its own. As on the server, a request that does not say so gets the whole of it.
+    if (path === "/dashboard/update") {
+      const asked = url.searchParams.get("history") === "false"
+      return json(route, asked ? withoutHistory(report) : report)
+    }
+    if (path === "/dashboard/update/history") {
+      return json(route, { history: (report as { history?: unknown[] }).history ?? [] })
+    }
     if (path === "/dashboard/config") return json(route, config)
     if (path === "/dashboard/uninstall") return json(route, { supported: true })
     if (path === "/dashboard/uninstall/plan") return json(route, uninstallPlan)
@@ -243,16 +265,48 @@ async function scrollsSideways(page: Page) {
   )
 }
 
-test("the version page is the history, with the update in the header", async ({ page }) => {
+test("the settling read after a load is one read, and the idle cadence it sets asks nothing", async ({
+  page,
+}) => {
+  // The load reads the cached answer, one read six seconds later picks up the
+  // check the load started, and that answer drops the poll to five minutes.
+  // The drop used to start the poll again, so the one read was two, 36 ms apart.
+  await page.clock.install()
   await mockApi(page)
+  let reads = 0
+  await page.route("**/api/v1/dashboard/update**", (route) => {
+    if (new URL(route.request().url()).pathname.endsWith("/dashboard/update")) reads += 1
+    return route.fallback()
+  })
   await page.goto("/dashboard")
   await expect(page.getByRole("heading", { name: "Version", exact: true })).toBeVisible()
+  expect(reads).toBe(1)
+  await page.clock.fastForward(6_500)
+  await expect.poll(() => reads).toBe(2)
+  await page.clock.fastForward(60_000)
+  await page.waitForTimeout(500)
+  expect(reads).toBe(2)
+})
+
+test("the version page is the history, with the update in the header", async ({ page }) => {
+  await mockApi(page)
+  // Every read of the report that is polled says it wants no changelog in it.
+  const reports: string[] = []
+  page.on("request", (request) => {
+    const url = new URL(request.url())
+    if (url.pathname === "/api/v1/dashboard/update") reports.push(url.search)
+  })
+  await page.goto("/dashboard")
+  await expect(page.getByRole("heading", { name: "Version", exact: true })).toBeVisible()
+  expect(reports.length).toBeGreaterThan(0)
+  expect(reports.filter((search) => !search.includes("history=false"))).toEqual([])
   // The readings are gone from the top; what they said is in the identity line.
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   await expect(page.getByRole("button", { name: "Update to 0.7.0" })).toBeVisible()
   await expect(page.getByText("0.7.0 available")).toBeVisible()
-  await expect(page.getByText("1 release ahead of yours")).toBeVisible()
+  // What is on offer is a release, and the page says how it knows.
+  await expect(page.getByText("1 release ahead of yours · tagged v0.7.0")).toBeVisible()
 
   // The newest release leads the history and the running one is marked.
   const history = page.locator("section", { hasText: "Version history" })
@@ -265,6 +319,52 @@ test("the version page is the history, with the update in the header", async ({ 
   await expect(history.getByRole("heading", { name: "0.7.0" })).toHaveCount(0)
 
   expect(await framedPanels(page)).toEqual([])
+})
+
+test("a version on the branch with no tag is named and not offered", async ({ page }) => {
+  await mockApi(page, {
+    ...update,
+    latest: "0.6.7",
+    available: false,
+    tagged: false,
+    pending: "0.7.0",
+    releases: [],
+    breaking: false,
+  })
+  await page.goto("/dashboard")
+  await expect(page.getByText("Up to date")).toBeVisible()
+  await expect(page.getByText("0.7.0 is on main, not released yet")).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Update to/ })).toHaveCount(0)
+})
+
+test("a build that is not a release shows the commit it was made from", async ({ page }) => {
+  await mockApi(page, { ...update, commit: "98c9349" })
+  await page.goto("/dashboard")
+  await expect(page.getByText("+98c9349")).toBeVisible()
+  await expect(
+    page.getByTitle("Built from commit 98c9349, which is not the 0.6.7 release"),
+  ).toBeVisible()
+})
+
+test("a release shows its version and no commit", async ({ page }) => {
+  await mockApi(page)
+  await page.goto("/dashboard")
+  await expect(page.getByText("Just Dashboard", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText(/^\+[0-9a-f]{7,}$/)).toHaveCount(0)
+})
+
+test("a fork is told that what it is offered has no release tag", async ({ page }) => {
+  await mockApi(page, { ...update, tagged: false, check: { ...update.check, tagsOnly: false } })
+  await page.goto("/dashboard")
+  await expect(
+    page.getByText("1 release ahead of yours · no release tag, installs main as it stands"),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Update to 0.7.0" }).click()
+  await expect(
+    page
+      .getByRole("dialog", { name: "Update to 0.7.0" })
+      .getByText("from the head of main, which has no release tag"),
+  ).toBeVisible()
 })
 
 test("the sidebar's update notice leads to the Version page and installs through its own dialog", async ({

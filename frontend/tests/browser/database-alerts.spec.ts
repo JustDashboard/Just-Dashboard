@@ -471,7 +471,12 @@ test.describe("database alerts", () => {
     const menu = page.getByRole("menu")
     await expect(menu.getByRole("menuitem", { name: "Send test" })).toBeVisible()
     await menu.evaluate((el) =>
-      Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+      Promise.all(
+        el
+          .getAnimations({ subtree: true })
+          .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+          .map((animation) => animation.finished),
+      ),
     )
     await page.screenshot({ path: `${dir}/alerts-menu-1440.png` })
     await page.keyboard.press("Escape")

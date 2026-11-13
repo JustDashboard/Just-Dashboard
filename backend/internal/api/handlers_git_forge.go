@@ -29,7 +29,7 @@ func (s *Server) handleForgeStatus(w http.ResponseWriter, r *http.Request) error
 	}
 	data, err := s.modules.forge.Status(r.Context(), path)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, 200, data)
 	return nil
@@ -46,7 +46,7 @@ func (s *Server) handleForgeAccount(w http.ResponseWriter, r *http.Request) erro
 	data, err := s.modules.forge.Configure(r.Context(), path, req)
 	httpx.SetAudit(r, "git.forge.account", path, map[string]any{"ok": err == nil, "provider": req.Kind})
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, 200, data)
 	return nil
@@ -59,7 +59,7 @@ func (s *Server) handleForgeDisconnect(w http.ResponseWriter, r *http.Request) e
 	err = s.modules.forge.Disconnect(r.Context(), path)
 	httpx.SetAudit(r, "git.forge.disconnect", path, map[string]any{"ok": err == nil})
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, 200, map[string]bool{"ok": true})
 	return nil
@@ -82,7 +82,7 @@ func (s *Server) handleForgeRequests(w http.ResponseWriter, r *http.Request) err
 	}
 	data, err := s.modules.forge.List(r.Context(), path, state, forgePage(r))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, 200, data)
 	return nil
@@ -98,7 +98,7 @@ func (s *Server) handleForgeRequest(w http.ResponseWriter, r *http.Request) erro
 	}
 	data, err := s.modules.forge.View(r.Context(), path, number)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, 200, data)
 	return nil
@@ -114,7 +114,7 @@ func (s *Server) handleForgeFiles(w http.ResponseWriter, r *http.Request) error 
 	}
 	data, err := s.modules.forge.Files(r.Context(), path, number, forgePage(r), r.URL.Query().Get("head"))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, 200, data)
 	return nil
@@ -130,7 +130,7 @@ func (s *Server) handleForgeConversation(w http.ResponseWriter, r *http.Request)
 	}
 	data, err := s.modules.forge.Conversation(r.Context(), path, number, forgePage(r))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, 200, data)
 	return nil
@@ -147,7 +147,7 @@ func (s *Server) handleForgeCreate(w http.ResponseWriter, r *http.Request) error
 	data, err := s.modules.forge.Create(r.Context(), path, req)
 	httpx.SetAudit(r, "git.forge.create", path, map[string]any{"ok": err == nil, "head": req.Head, "base": req.Base})
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, 200, data)
 	return nil
@@ -168,7 +168,7 @@ func (s *Server) handleForgeAction(w http.ResponseWriter, r *http.Request) error
 	err = s.modules.forge.Act(r.Context(), path, number, req)
 	httpx.SetAudit(r, "git.forge.action", path, map[string]any{"ok": err == nil, "number": number, "action": req.Action, "head": req.SHA})
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, 200, map[string]bool{"ok": true})
 	return nil

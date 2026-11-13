@@ -13,6 +13,9 @@ node_modules/
 /backend/dist/
 /backend/build/
 *.log
+# What running scripts/test_*.py leaves beside them.
+__pycache__/
+*.pyc
 .env
 .env.local
 .env.*.local

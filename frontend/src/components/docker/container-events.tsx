@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { CheckCircle, ChevronRight, ClockRewind, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { ApiError, errorMessage, get } from "@/lib/api"
-import { clock, plural, relativeTime, timestamp } from "@/lib/format"
+import { clock, dayAt, minuteAt, plural, relativeTime, timestamp } from "@/lib/format"
 import {
   dedupeEvents,
   eventKey,
@@ -574,17 +574,10 @@ function byHour(entries: EventEntry[]) {
       group.entries.push(entry)
       continue
     }
-    const time = hour.toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    })
+    const time = minuteAt(hour)
     groups.push({
       key,
-      label:
-        days.size > 1
-          ? `${hour.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${time}`
-          : time,
+      label: days.size > 1 ? `${dayAt(hour)} · ${time}` : time,
       entries: [entry],
     })
   }

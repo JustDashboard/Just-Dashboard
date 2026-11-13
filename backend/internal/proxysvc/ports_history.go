@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The ports history: when each listening socket appeared and when it went.
@@ -222,8 +224,9 @@ func (r *PortRecorder) Start(parent context.Context) {
 		return
 	}
 	ctx, cancel := context.WithCancel(parent)
-	r.cancel, r.done = cancel, make(chan struct{})
-	go r.loop(ctx, r.done)
+	done := make(chan struct{})
+	r.cancel, r.done = cancel, done
+	safego.Go(ctx, r.log, "listening socket recorder", r.loop, safego.Close(done))
 	r.log.Info("recording listening sockets", "interval", r.interval.String(), "retention", r.retention.String())
 }
 
@@ -242,8 +245,7 @@ func (r *PortRecorder) Stop() {
 	<-done
 }
 
-func (r *PortRecorder) loop(ctx context.Context, done chan struct{}) {
-	defer close(done)
+func (r *PortRecorder) loop(ctx context.Context) {
 	r.prune(ctx)
 	lastPrune := r.now()
 	r.sampleAndLog(ctx)
@@ -453,11 +455,11 @@ type PortEvent struct {
 	// At is the sample that saw the change and After the one before it: the
 	// socket opened or closed between the two. They are a minute apart while
 	// the dashboard runs, and further across a restart or a failed walk.
-	At    time.Time `json:"at"`
-	After time.Time `json:"after"`
+	At    time.Time `json:"at,omitzero"`
+	After time.Time `json:"after,omitzero"`
 	// Since is when the socket was first seen listening. Baseline says it was
 	// already listening when recording began, so it opened before then.
-	Since    time.Time `json:"since"`
+	Since    time.Time `json:"since,omitzero"`
 	Baseline bool      `json:"baseline,omitempty"`
 }
 
@@ -474,7 +476,7 @@ type PortHistory struct {
 	IntervalSeconds int  `json:"intervalSeconds"`
 	RetentionDays   int  `json:"retentionDays"`
 	// Since is the start of the window the events are from.
-	Since time.Time `json:"since"`
+	Since time.Time `json:"since,omitzero"`
 	// Events are newest first; within one sample by port, a socket's closing
 	// before its opening, so a socket that changed hands reads in order.
 	Events []PortEvent `json:"events"`

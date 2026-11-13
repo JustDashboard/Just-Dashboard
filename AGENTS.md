@@ -59,8 +59,17 @@ It reads the diff (committed, staged, unstaged and untracked) and runs Prettier 
 changed frontend files, `tsc --noEmit`, `bun test src`, `go build ./...` and `go vet` on the changed
 packages, the Go tests beside each changed file, the deployment API clients' own checks for a change
 under `sdk/`, and the browser specs that open a page the change renders, with `design-system.spec.ts`
-for any UI change. The header of the script says how each is
-picked. Use it while working and again before a pull request. There is no separate full gate.
+for any UI change. A change that is not source has its checks too: the whole package for a file
+under `backend/` that is not Go or that a package's tests read from outside it, the packages a
+changed line of `go.mod` reaches, the whole lint and the two specs that open every page for the
+frontend's dependencies and build configuration, and `bash -n` with the `scripts/test_*.py` that name
+the file for `install.sh`, `scripts/`, `docker-compose.yml`, `deploy/`, `.env.example` and the
+Dockerfiles. The header of the script says how each is
+picked, and `JD_TEST_CHANGED_PLAN=1` prints what it picked without running it. Use it while working
+and again before a pull request. There is no separate full gate.
+The type-check of a new worktree starts from what the last passing check in any worktree of this
+clone learnt (`tsconfig.tsbuildinfo`, kept in the shared git directory under `jd-cache/`), so it
+re-checks what differs rather than the whole program.
 Set `JD_BROWSER_WORKERS=1` when concurrent worktrees leave little memory for browser workers;
 without this override, the existing Playwright configuration controls concurrency.
 
@@ -73,12 +82,13 @@ under a second. Anything expressible there belongs there rather than in a browse
 cd frontend && bun run build && bun run start --hostname 127.0.0.1 --port 43117   # once per build
 ```
 
-Rebuild and restart it after a source change, or the specs test the old build. `JD_BROWSER_BASE_URL`
+`bun run start` is the standalone server the image runs, with the same files copied beside it, not
+`next start`. Rebuild and restart it after a source change, or the specs test the old build. `JD_BROWSER_BASE_URL`
 points them at a server on another port when worktrees run side by side. To iterate on one spec, run
 it directly: `bunx playwright test tests/browser/docker-ui.spec.ts` (~30s).
 
 Install the browser once with `bun run test:browser:install`. Deployment changes have additional live,
-race, and browser requirements in [`CONTRIBUTING.md`](CONTRIBUTING.md). `go.mod` requires Go 1.26.10.
+race, and browser requirements in [`CONTRIBUTING.md`](CONTRIBUTING.md). `go.mod` requires Go 1.26.11.
 
 ## Security requirements
 
@@ -108,6 +118,7 @@ explicitly rather than silently changing the contract.
   `backend/internal/selfupdate/changelog.json`, then run `scripts/release.sh <version>`.
 - Do not create Git tags or GitHub releases by hand. Once Verify passes on a push to `main` whose version
   has no release yet, `.github/workflows/release.yml` tags it `v<version>` and publishes the release.
+  That tag is the release: installs are offered a version, and install it, only once it exists.
 - Read the licence sections of [`CONTRIBUTING.md`](CONTRIBUTING.md) before adding dependencies. The
   project is AGPL-3.0 with an additional contributor grant to the owner, and its source files carry no
   licence headers.

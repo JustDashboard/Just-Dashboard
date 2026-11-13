@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Target is one deployment environment a drain may read.
@@ -121,7 +122,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	if err := m.Reload(ctx); err != nil {
 		return err
 	}
-	go func() {
+	safego.Go(ctx, nil, "log drain collector", func(ctx context.Context) {
 		ticker := time.NewTicker(reconcileEvery)
 		defer ticker.Stop()
 		for {
@@ -134,7 +135,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			}
 			m.reconcileSources(ctx)
 		}
-	}()
+	})
 	return nil
 }
 
@@ -365,6 +366,9 @@ func (m *Manager) follow(parent context.Context, container Container, target Tar
 	}
 	go func() {
 		defer close(r.done)
+		// The collector's next pass finds this container without a reader
+		// and starts one again.
+		defer safego.Recover(nil, "log drain reader")
 		for ctx.Err() == nil {
 			lines, closer, err := m.containers.Follow(ctx, container.ID, since)
 			if err == nil {
@@ -398,6 +402,7 @@ func (m *Manager) tail(parent context.Context, target Target) *reader {
 	r := &reader{cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(r.done)
+		defer safego.Recover(nil, "log drain request reader")
 		cursor := accesslog.FromNow
 		ticker := time.NewTicker(requestPollEvery)
 		defer ticker.Stop()

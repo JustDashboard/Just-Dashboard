@@ -3,6 +3,8 @@ package dockerx
 import (
 	"context"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // ContainerUpdate is immutable once published. Inventory and stats retain the
@@ -88,6 +90,10 @@ func (c *Client) publishContainers(f *containerFeed, update ContainerUpdate) {
 }
 
 func (c *Client) runContainerFeed(ctx context.Context, f *containerFeed) {
+	// Started by the first page that subscribes, outside any request's
+	// recovery. Deferred first so it runs last: the readers are closed below
+	// as for any feed that ended, and the next subscriber starts a new one.
+	defer safego.Recover(nil, "container feed")
 	defer func() {
 		c.feedMu.Lock()
 		defer c.feedMu.Unlock()

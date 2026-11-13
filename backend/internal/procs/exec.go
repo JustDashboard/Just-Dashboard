@@ -22,7 +22,13 @@ import (
 
 var (
 	ErrNotInstalled = errors.New("not installed on this host")
-	ErrInvalidName  = errors.New("name contains characters that are not allowed")
+	// ErrNoSystemd is systemctl here and no systemd for it to ask: a host
+	// booted with another init, or a container without the host's
+	// /run/systemd. systemctl itself says so with exit status 1 and "System
+	// has not been booted with systemd as init system", which reached the
+	// Services page as 502 command_failed.
+	ErrNoSystemd   = errors.New("systemd is not running on this host")
+	ErrInvalidName = errors.New("name contains characters that are not allowed")
 )
 
 // Unit and application names are restricted to what systemd and PM2 actually
@@ -50,6 +56,12 @@ type CommandResult struct {
 }
 
 func run(ctx context.Context, timeout time.Duration, name string, args ...string) (*CommandResult, error) {
+	// Every systemctl call passes here, the ones behind a button included.
+	// Without a manager each would run, fail and be answered as a command
+	// that failed; none is started instead.
+	if name == "systemctl" && binaryExists(name) && !systemdBooted() {
+		return &CommandResult{Command: name + " " + strings.Join(args, " ")}, ErrNoSystemd
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -68,6 +80,20 @@ func run(ctx context.Context, timeout time.Duration, name string, args ...string
 func binaryExists(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+// SystemdRunDir is the directory systemd creates when it is the init
+// system, which is what sd_booted(3) looks for. systemctl runs on this side
+// and reaches the host's manager through /run/systemd, so on this side is
+// where it is looked for: in the dashboard's container it is the host's,
+// mounted, and it is missing there exactly when systemctl would have nothing
+// to talk to. A variable so a test with a systemctl of its own can stand a
+// manager beside it.
+var SystemdRunDir = "/run/systemd/system"
+
+func systemdBooted() bool {
+	info, err := os.Stat(SystemdRunDir)
+	return err == nil && info.IsDir()
 }
 
 func runPrepared(ctx context.Context, cmd *exec.Cmd, timeout time.Duration, name string, args ...string) (*CommandResult, error) {
@@ -89,7 +115,9 @@ func runPrepared(ctx context.Context, cmd *exec.Cmd, timeout time.Duration, name
 		return res, fmt.Errorf("%s %w", name, ErrNotInstalled)
 	}
 	if ctx.Err() == context.DeadlineExceeded {
-		return res, fmt.Errorf("%s timed out after %s", name, timeout)
+		// The deadline stays in the chain so the API answers it as a
+		// timeout, 504 and worth another try, not as a command that failed.
+		return res, fmt.Errorf("%s timed out after %s: %w", name, timeout, context.DeadlineExceeded)
 	}
 	if stdout.truncated || stderr.truncated {
 		return res, fmt.Errorf("%s output exceeded 4 MiB", name)

@@ -157,7 +157,7 @@ export function ConnectPanel({
               <span className="text-xs text-muted-foreground">or from a terminal</span>
               <Well className="flex min-w-0 items-center gap-3 py-1.5 pr-1.5 pl-3">
                 <span className="min-w-0 truncate">
-                  <span aria-hidden className="text-muted-foreground/60 select-none">
+                  <span aria-hidden className="text-faint select-none">
                     ${" "}
                   </span>
                   <ShellWords command={command} />

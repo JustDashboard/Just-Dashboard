@@ -17,12 +17,13 @@ import (
 	"strings"
 	"time"
 
-	// The x/crypto OpenPGP package is frozen, and it is used for the one
-	// thing it still has to do here: make a key in the format WAL-G encrypts
-	// with. Nothing is signed or decrypted with it in this process.
-	"golang.org/x/crypto/openpgp"
-	"golang.org/x/crypto/openpgp/armor"
-	"golang.org/x/crypto/openpgp/packet"
+	// The maintained fork of the OpenPGP package x/crypto froze and then moved
+	// out as unsafe (GO-2026-5932), and the library WAL-G itself reads keys
+	// with. It makes a key in the format WAL-G encrypts with and reads one
+	// back for its fingerprint; nothing is signed or decrypted in this process.
+	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp/armor"
+	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
 // The tool a server archives with.
@@ -252,7 +253,9 @@ func WriteWALGConfigTar(w io.Writer, cfg map[string]string, uid, gid int) error 
 // recovered from it. A server that is broken into therefore cannot read its
 // own archive back.
 func NewWALKey(name string) (public, private string, err error) {
-	config := &packet.Config{RSABits: 3072, DefaultHash: crypto.SHA256}
+	// Named rather than left to the library's defaults, which move: a version
+	// 4 RSA key is what every WAL-G this dashboard has shipped reads.
+	config := &packet.Config{Algorithm: packet.PubKeyAlgoRSA, RSABits: 3072, DefaultHash: crypto.SHA256}
 	entity, err := openpgp.NewEntity(name, "point-in-time recovery", "", config)
 	if err != nil {
 		return "", "", err

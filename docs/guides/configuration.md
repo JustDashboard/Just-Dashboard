@@ -8,7 +8,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 
 | Variable | Description |
 | --- | --- |
-| `JD_MASTER_KEY` | 64 hex characters. Encrypts every stored secret. `openssl rand -hex 32`. |
+| `JD_MASTER_KEY` | 64 hex characters. Encrypts every stored secret. `openssl rand -hex 32`. Set it once: [it cannot be changed yet](../../SECURITY.md#when-someone-who-had-an-account-should-no-longer-be-trusted) without losing them. |
 
 **Network perimeter**
 
@@ -40,13 +40,14 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | `JD_DEPLOY_HEAVY_SLOTS` | `1` | Concurrent deployment build/activation workers. Valid range: 1–8. |
 | `JD_DEPLOY_LIGHT_SLOTS` | `2` | Concurrent validation/metadata deployment workers. Valid range: 1–8. |
 | `JD_DEPLOY_LEASE_TTL` | `30s` | Time before a silent deployment worker claim is reconciled after a crash. Valid range: 5s–5m. |
+| `JD_DEPLOY_HISTORY_RUNS` | `200` | How many of each environment's newest runs keep everything they printed. An older run keeps the last 200 lines of its output and all the rest of its record — its steps, its diagnosis, its variables, its release — so history, a retry and a rollback read as before; only the bulk of an old build log is removed. The run that built what is live, the runs behind pinned releases and the runs behind the releases a rollback can still reach keep their whole output whatever their age. Applied a minute after the dashboard starts and every hour. `0` keeps every run whole. An install updated from a version without this setting has its older runs cut by the first pass, and removed output cannot be brought back: to keep it, set `0` before updating. The database file does not shrink when output is removed; the space is used again by what is written next. Valid range: 0–100000. |
 | `JD_METRICS_INTERVAL` | `15s` | How often the backend samples the host, and every running container, into its own history. Clamped to 5s and 5m. |
 | `JD_METRICS_RETENTION` | `7d` | How long that history is kept — and with it the sizes of the volumes deployments own, sampled every 15 minutes for the capacity forecast. Right-sizing needs a day of it before it suggests a limit. Accepts days. `0` records nothing and leaves only the live feed. A deployment's container events (exits, OOM kills, restarts, health changes) are kept for 30 days or this, whichever is longer, whatever this is set to. |
 | `JD_UPDATE_CHECK` | `true` | Whether the dashboard may ask GitHub whether a newer version of *itself* exists — one unauthenticated GET of one file, every two hours and at most every five minutes while pages are being opened, carrying nothing but a version number. `false` turns it off; the release notes for the version you run stay readable, since they are compiled in. |
 | `JD_ACME_DIRECTORY` | Let's Encrypt | Another ACME directory to order deployment certificates from: Let's Encrypt's staging endpoint for a rehearsal that spends no rate limit, or a private authority on a network that never sees the internet. Both the managed Caddy and certbot follow it — the Certificates page's orders and a deployment run's, over HTTP-01 and DNS-01 alike — and certbot registers an account with that directory rather than reusing one it has with another. |
 | `JD_ACME_CA_ROOT` | system roots | A PEM bundle to trust when that authority signs with its own roots — its issuing roots, and the root behind its directory's TLS listener if that is private too. Caddy is given it as its trusted roots and certbot as `REQUESTS_CA_BUNDLE`, so keep it where both read it (under `/etc`, `/srv`, `/opt` or the data directory, which the stack mounts at the same paths). With it set, the public-DNS check before an order is skipped, because a private authority validates however it was set up to. |
-| `JD_UPDATE_REPO` | `JustDashboard/Just-Dashboard` | The repository releases are read from. Change it to follow a fork. |
-| `JD_UPDATE_BRANCH` | `main` | The branch whose changelog decides what "newest" means, and which an in-app update fast-forwards to, unless the announced version has a tag `v<version>`, which is then installed exactly. |
+| `JD_UPDATE_REPO` | `JustDashboard/Just-Dashboard` | The repository releases are read from. With the default, a version is offered and installed only once it has a release tag `v<version>` there, which the project makes after the version's checks pass. The code itself comes from the `origin` of your checkout, so if you cloned a fork, name the fork here; left on the default, the update refuses a version whose tag the fork does not have. Change it to follow a fork: a fork's tagged versions are installed exactly too, and a version it has not tagged is installed from the head of `JD_UPDATE_BRANCH`, which the Version page says before you install. |
+| `JD_UPDATE_BRANCH` | `main` | The branch whose changelog says which versions exist. Only a fork is ever updated to this branch's head; see `JD_UPDATE_REPO`. |
 | `JD_ACCOUNT_LINK` | `true` | Whether this server may be linked to a just-dashboard.com account. Linking is always something an administrator does; `false` removes the Settings page's controls, the installer's question and the terminal command, and silences a link that already exists, so nothing is ever sent. |
 | `JD_ACCOUNT_URL` | `https://just-dashboard.com` | The site this install may link to: an origin only, with no path, query or credentials. `https://` everywhere; `http://` only for `localhost`, `127.0.0.1` or `[::1]`, to develop the site beside the dashboard. Anything else refuses to start. |
 | `JD_HUB_LINK` | `true` | Whether this server may be [connected to a Just Hub](linking-and-usage.md#connecting-to-just-hub) on its own tailnet. Connecting is always something an administrator does; `false` removes the hub's discovery answer, the Settings page's controls and the terminal command, and silences a connection that already exists, so nothing is ever sent. Independent of `JD_ACCOUNT_LINK`. |
@@ -102,6 +103,8 @@ printed once in `docker compose logs backend`.
 | --- | --- |
 | `scripts/test-changed.sh` | Runs exactly the checks, Go tests and browser specs your diff can reach — run it before a pull request |
 | `scripts/go-test-race.sh` | Runs Go packages under the race detector, split across processes |
+| `scripts/deps-check.sh` | Reports the advisories that reach the code (`govulncheck`, `bun audit`) and the dependencies that are behind; fails on an advisory it does not list as accepted |
+| `scripts/pin-images.py` | Rewrites the digest of every base image and of Caddy to what its tag names today; `--check` fails, offline, if one has no digest |
 | `scripts/release.sh <version>` | Cuts a release: bumps the version everywhere and regenerates the changelog from `backend/internal/selfupdate/changelog.json` |
 
 See [CONTRIBUTING.md](../../CONTRIBUTING.md) before opening a pull request.

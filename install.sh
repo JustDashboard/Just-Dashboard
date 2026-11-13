@@ -2,7 +2,7 @@
 #
 # One-command setup for Just Dashboard.
 #
-#   git clone https://github.com/JustDashboard/Just-Dashboard.git
+#   git clone --depth 1 --single-branch --branch main https://github.com/JustDashboard/Just-Dashboard.git
 #   cd Just-Dashboard && sudo ./install.sh
 #
 # It asks a handful of questions, writes .env, builds the stack and leaves you
@@ -163,11 +163,36 @@ say "${DIM}Prepare host  →  Configure  →  Start stack  →  Ready${RESET}"
 [ -f docker-compose.yml ] || die "run this from inside the cloned repository (docker-compose.yml is not here)."
 
 stage 1 "Prepare the host"
+
+# Before anything is installed or written: can this machine build and run the
+# dashboard at all. An architecture the images cannot be built for and a host
+# without systemd stop here, in a sentence, instead of minutes into a build
+# with an error that names neither. Too little memory or disk is a warning with
+# the numbers, said again if the build then fails.
+step "This server"
+# shellcheck source=scripts/preflight.sh
+source scripts/preflight.sh
+PREFLIGHT_STOP=""
+PREFLIGHT_WARNINGS=""
+while IFS=$'\t' read -r kind found; do
+	case "$kind" in
+	ok) ok "$found" ;;
+	warn)
+		warn "$found"
+		PREFLIGHT_WARNINGS="${PREFLIGHT_WARNINGS:+$PREFLIGHT_WARNINGS }$found"
+		;;
+	stop) PREFLIGHT_STOP="${PREFLIGHT_STOP:+$PREFLIGHT_STOP }$found" ;;
+	esac
+done < <(jd_preflight)
+[ -z "$PREFLIGHT_STOP" ] || die "$PREFLIGHT_STOP Nothing was installed or changed. Requirements: docs/guides/install.md"
+
 step "Required host tools"
 source scripts/install-dependencies.sh
 source scripts/dotenv.sh
 # shellcheck source=scripts/password.sh
 source scripts/password.sh
+# shellcheck source=scripts/build-stamp.sh
+source scripts/build-stamp.sh
 jd_install_dependencies || die "Required host tools could not be provisioned. See the package-manager error above; re-run setup after resolving it."
 
 # The web terminal is a shell on this host, not in the dashboard's image, so
@@ -834,12 +859,27 @@ say ""
 # 1 GB for the backend. In turn they need only the larger of the two, which is
 # what decides how small a server can install this. If the services cannot be
 # listed, the single build below fails exactly as it always did.
+#
+# A checkout that is not on a release's own commit (a patch branch, a fork, a
+# clone with commits of its own) is built with that commit stamped in, so the
+# Version page and `jd version` say 0.8.5+98c9349 where a release says 0.8.5.
+build_args=()
+build_commit="$(jd_build_commit .)"
+if [ -n "$build_commit" ]; then
+	build_args=(--build-arg "JD_COMMIT=$build_commit")
+	say "  ${DIM}This checkout is not a release: the build is stamped with commit $build_commit.${RESET}"
+fi
+build_failed() {
+	[ -z "$PREFLIGHT_WARNINGS" ] ||
+		die "The build failed, and this server is below what building needs: $PREFLIGHT_WARNINGS Fix that and run this again; nothing has been started."
+	die "The build failed; the reason is above. Fix it and run this again; nothing has been started."
+}
 if services=$($COMPOSE config --services) && [ -n "$services" ]; then
 	for service in $services; do
-		$COMPOSE build "$service"
+		$COMPOSE build ${build_args[@]+"${build_args[@]}"} "$service" || build_failed
 	done
 else
-	$COMPOSE build
+	$COMPOSE build ${build_args[@]+"${build_args[@]}"} || build_failed
 fi
 # Use the freshly built backend so installs and in-app lifecycle operations
 # share port ownership detection and update every consumer through .env.

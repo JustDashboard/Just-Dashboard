@@ -294,7 +294,7 @@ export function StringEditor({ redis, name, meta, epoch, onChanged }: KeyEditorP
             aria-invalid={typedBytes === null || undefined}
             onChange={(event) => setDraft({ as: "hex", text: event.target.value })}
             onKeyDown={(event) => saveKey(event, save)}
-            className="min-h-0 flex-1 resize-none bg-transparent p-3 font-mono text-xs leading-5 focus-ring-inset outline-none"
+            className="min-h-0 flex-1 resize-none bg-transparent p-3 font-mono text-xs leading-5 focus-ring-inset"
           />
         ) : (
           <HexDump bytes={raw ?? new Uint8Array()} />
@@ -318,7 +318,7 @@ export function StringEditor({ redis, name, meta, epoch, onChanged }: KeyEditorP
           autoComplete="off"
           onChange={(event) => setDraft({ as: "text", text: event.target.value })}
           onKeyDown={(event) => saveKey(event, save)}
-          className="min-h-0 flex-1 resize-none bg-transparent p-3 font-mono text-xs leading-relaxed focus-ring-inset outline-none"
+          className="min-h-0 flex-1 resize-none bg-transparent p-3 font-mono text-xs leading-relaxed focus-ring-inset"
         />
       )}
 

@@ -24,6 +24,7 @@ func TestRollbackWatchSchemaOnlyAddsTables(t *testing.T) {
 // release columns are added to the shipped table with their defaults, and a
 // second open window for one environment is refused by the database itself.
 func TestRollbackWatchesReachFreshAndUpgradedInstalls(t *testing.T) {
+	t.Parallel()
 	upgraded := t.TempDir()
 	script, err := os.ReadFile(filepath.Join("testdata", "0.6.6.sql"))
 	if err != nil {

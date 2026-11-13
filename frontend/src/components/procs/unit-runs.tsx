@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import { ChevronDown, RefreshClockwise, Stopwatch, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { get } from "@/lib/api"
-import { bytes, clock, duration, plural, relativeTime, timestamp } from "@/lib/format"
+import { bytes, clock, dayMinuteAt, duration, plural, relativeTime, timestamp } from "@/lib/format"
 import { journalSource } from "@/lib/log-sources"
 import { latency } from "@/lib/requests"
 import type { LogSearchResult } from "@/lib/types"
@@ -423,13 +423,7 @@ function span(ms: number) {
 function when(iso: string) {
   const d = new Date(iso)
   if (d.toDateString() === new Date().toDateString()) return clock(iso)
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  })
+  return dayMinuteAt(d)
 }
 
 function exitWords(run: UnitRun) {

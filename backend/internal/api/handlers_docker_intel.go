@@ -27,10 +27,13 @@ import (
 // container. The result is cached in the client for ten minutes; `refresh=true`
 // takes the walk again, which is what "analyze again" after a cleanup means.
 func (s *Server) handleWritableLayer(w http.ResponseWriter, r *http.Request) error {
+	refresh, err := httpx.QueryBool(r, "refresh")
+	if err != nil {
+		return err
+	}
 	ctx, cancel := timeoutCtx(r, 2*time.Minute)
 	defer cancel()
-	report, err := s.modules.docker.AnalyzeWritableLayer(ctx,
-		httpx.URLParam(r, "id"), r.URL.Query().Get("refresh") == "true")
+	report, err := s.modules.docker.AnalyzeWritableLayer(ctx, httpx.URLParam(r, "id"), refresh)
 	if err != nil {
 		return s.dockerErr(err)
 	}
@@ -54,7 +57,7 @@ func (s *Server) handleMigrationPlan(w http.ResponseWriter, r *http.Request) err
 		if errors.Is(err, dockerx.ErrUnavailable) {
 			return s.dockerErr(err)
 		}
-		return httpx.BadRequest("%s", err.Error())
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, plan)
 	return nil

@@ -258,7 +258,7 @@ func redisFail(err error, write bool) error {
 	case errors.As(err, &replied) && !write:
 		return queryFailed(err)
 	}
-	return httpx.BadRequest("%v", err)
+	return httpx.Refused(err)
 }
 
 // redisDestructive applies what s.destructive applies — the capability and
@@ -269,9 +269,8 @@ func (s *Server) redisDestructive(r *http.Request, what string) error {
 		return httpx.Err(http.StatusForbidden, "forbidden",
 			what+", and your role does not permit that (destructive)")
 	}
-	if !s.destrLim.Allow(p.Username() + "|redis") {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-			"too many destructive requests, slow down")
+	if err := s.destrLim.Spend(p.Username()+"|redis", "too many destructive requests, slow down"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -282,6 +281,10 @@ func (s *Server) handleRedisScan(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return httpx.BadRequest("invalid Redis cursor")
 	}
+	memory, err := httpx.QueryBool(r, "memory")
+	if err != nil {
+		return err
+	}
 	client, _, err := s.redisReader(r)
 	if err != nil {
 		return err
@@ -291,7 +294,7 @@ func (s *Server) handleRedisScan(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	page, err := dbx.RedisScanKeys(ctx, client, nil, dbx.RedisScanOptions{
 		Pattern: q.Get("pattern"), Cursor: cursor, Count: atoiDefault(q.Get("count"), 100),
-		Type: q.Get("type"), Memory: q.Get("memory") == "1" || q.Get("memory") == "true",
+		Type: q.Get("type"), Memory: memory,
 	})
 	if err != nil {
 		return redisFail(err, false)
@@ -317,7 +320,7 @@ func (s *Server) handleRedisGet(w http.ResponseWriter, r *http.Request) error {
 		// A 400 whatever went wrong, missing key included: it is what this
 		// route has always answered, and /keys/members is the one that says
 		// key_not_found.
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.JSON(w, http.StatusOK, val)
 	return nil

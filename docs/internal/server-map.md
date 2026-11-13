@@ -112,7 +112,10 @@ where there is not. The same reading lays out the same diagram.
 
 ## Moving it
 
-The canvas moves the way a whiteboard's does (Excalidraw's), set once in `MOVE` in `canvas.tsx`:
+The canvas moves the way a whiteboard's does (Excalidraw's), set once for every canvas of the product
+in `components/canvas-move.ts`: `CANVAS_MOVE` is spread into each `<ReactFlow>` and `useCanvasPinch`
+takes Safari's pinch, so the map and a database's Diagram answer one gesture the same way.
+`canvas-move.test.js` fails for a canvas that takes neither, or that sets one of the gestures itself.
 
 - **On a trackpad** two fingers slide it (`panOnScroll`, at the fingers' own pace) and a pinch zooms it
   about the fingers — a pinch arrives as a wheel with Ctrl held (`zoomOnPinch`). Safari sends its
@@ -125,7 +128,8 @@ The canvas moves the way a whiteboard's does (Excalidraw's), set once in `MOVE` 
   a slide. Double-clicking the canvas does not zoom.
 - **Keys**, wherever the page has the keyboard and not a field: Ctrl/⌘ `+` and `−` zoom, Ctrl/⌘ `0` is
   the real size, Shift+1 fits every system and Shift+2 what is chosen. The zoom buttons show the
-  percentage, which goes back to 100% when pressed.
+  percentage, which goes back to 100% when pressed. A database's Diagram has the three zoom keys
+  too (`zoomKey`), heard like its other keys only while the keyboard is in the diagram.
 - **Nothing changes size but by the zoom.** Every word, box and line is drawn once at its own size and
   the zoom scales the picture; from far out the boxes and their names are smaller, never re-lettered,
   faded or swapped for a title.

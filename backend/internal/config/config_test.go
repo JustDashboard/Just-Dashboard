@@ -142,6 +142,29 @@ func TestDeploymentWorkerSettingsRejectMalformedAndOutOfRangeValues(t *testing.T
 	}
 }
 
+// The history of a deployment's runs is limited unless somebody says
+// otherwise, 0 says otherwise, and a value that is not a count is refused
+// rather than read as no limit.
+func TestDeploymentHistoryKeepsTwoHundredRunsWholeByDefault(t *testing.T) {
+	read := func() (int, error) {
+		l := &loader{}
+		return l.integer("JD_DEPLOY_HISTORY_RUNS", 200, 0, 100000), l.err()
+	}
+	if got, err := read(); got != 200 || err != nil {
+		t.Fatalf("unset = %d %v, want 200", got, err)
+	}
+	t.Setenv("JD_DEPLOY_HISTORY_RUNS", "0")
+	if got, err := read(); got != 0 || err != nil {
+		t.Fatalf("0 = %d %v, want 0: keep everything", got, err)
+	}
+	for _, bad := range []string{"-1", "forever", "100001"} {
+		t.Setenv("JD_DEPLOY_HISTORY_RUNS", bad)
+		if _, err := read(); err == nil || !strings.Contains(err.Error(), "JD_DEPLOY_HISTORY_RUNS") {
+			t.Fatalf("%q was accepted: %v", bad, err)
+		}
+	}
+}
+
 func mkdir(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

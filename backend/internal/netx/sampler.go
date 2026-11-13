@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The sampler reads every device's counters every two seconds.
@@ -125,7 +127,7 @@ func (s *Sampler) Start(parent context.Context) {
 	s.stop, s.done = make(chan struct{}), make(chan struct{})
 	s.mu.Unlock()
 	s.tick(time.Now())
-	go s.loop(parent)
+	safego.Go(parent, nil, "network interface sampler", s.loop, safego.Close(s.done))
 }
 
 // Stop ends sampling and waits for the loop to finish.
@@ -141,7 +143,6 @@ func (s *Sampler) Stop() {
 }
 
 func (s *Sampler) loop(ctx context.Context) {
-	defer close(s.done)
 	live := time.NewTicker(liveStep)
 	defer live.Stop()
 	record := time.NewTicker(s.every)

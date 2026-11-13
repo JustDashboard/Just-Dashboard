@@ -719,13 +719,19 @@ test("on a phone the conversation, the chats and what it did are one pane at a t
   await ask(page, "Fix the port")
   await expect(chat(page)).toContainText("Saved.")
   await expect(page.locator("[data-slot='agent-activity']")).toBeHidden()
-  await page.getByRole("button", { name: /What it did/ }).click()
+  // The bar's stops are found by their word; how many changes are waiting
+  // is said beside the name, not in it.
+  const bar = page.getByRole("navigation", { name: "Assistant panes" })
+  const did = bar.getByRole("tab", { name: "What it did", exact: true })
+  await expect(did).toHaveAttribute("aria-description", "1")
+  await did.click()
+  await expect(did).toHaveAttribute("aria-selected", "true")
   await expect(page.locator("[data-slot='agent-activity']")).toBeVisible()
   await expect(chat(page)).toBeHidden()
-  await page.getByRole("button", { name: /^Chats/ }).click()
+  await bar.getByRole("tab", { name: "Chats", exact: true }).click()
   await expect(page.locator("[data-slot='agent-chats-list']")).toContainText("Which database")
   await expect(page.locator("[data-slot='agent-activity']")).toBeHidden()
-  await page.getByRole("button", { name: /^Chat$/ }).click()
+  await bar.getByRole("tab", { name: "Chat", exact: true }).click()
   await expect(box).toBeInViewport()
 })
 
@@ -1190,8 +1196,16 @@ test("the mode menu says plainly what each mode lets it do", async ({ page }) =>
   await expect(page.getByRole("menuitem", { name: /Full access/ })).toContainText(
     "Runs everything without asking",
   )
+  // Full access is also what makes access that outlasts the chat, and says so.
+  await expect(page.getByRole("menuitem", { name: /Full access/ })).toContainText(
+    "including what outlasts the chat: a new account, a key, a sudo rule",
+  )
   await expect(page.getByRole("menuitem", { name: /Ask before changes/ })).toContainText(
     "Every change waits for your Allow",
+  )
+  // A read that leaves the server is held like a change.
+  await expect(page.getByRole("menuitem", { name: /Ask before changes/ })).toContainText(
+    "so does a read it would send to another machine",
   )
 })
 
@@ -1463,4 +1477,27 @@ test("a command still running in the terminal says so, with the way to its windo
     "/terminal?session=ws-7",
   )
   await expect(card.getByLabel("Password for the terminal")).toHaveCount(0)
+})
+
+// On a phone the head of an assistant that is off keeps its words on their own
+// lines' width: the command sits under them at the head's full width, where it
+// had squeezed "The / assistant is / off" into a column a word wide.
+test("the head of an assistant that is off reads across a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockAssistant(page, [], { settings: off })
+  await page.goto("/assistant?view=settings")
+  const head = page.locator("[data-slot='assistant-now']")
+  const title = head.getByText("The assistant is off", { exact: true })
+  const command = head.getByRole("button", { name: "Set up the assistant" })
+  await expect(command).toBeVisible()
+  const frame = (await head.boundingBox())!
+  const words = (await title.boundingBox())!
+  const button = (await command.boundingBox())!
+  // One line of the title's 28px, not three.
+  expect(words.height).toBeLessThanOrEqual(30)
+  expect(button.y).toBeGreaterThanOrEqual(words.y + words.height)
+  expect(button.width).toBeGreaterThan(frame.width - 40)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
 })

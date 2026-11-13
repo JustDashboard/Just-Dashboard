@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -149,6 +151,88 @@ func TestInstallRefusesAVersionThatHasMovedOn(t *testing.T) {
 
 // Invariant 4: the capability check is on the route, and the UI hiding the
 // button is not what stops a limited account from pressing it.
+// From the project's own repository a version with no release tag is not on
+// offer, so asking for it installs nothing, and the refusal says where it is.
+func TestInstallRefusesAVersionThatHasNoReleaseTag(t *testing.T) {
+	calls := selfupdatetest.Docker(t)
+	s := testServer(t)
+	repo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/refs/tags/") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(publishedManifest))
+	}))
+	t.Cleanup(repo.Close)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte("name: jd\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.modules.selfUpdate = selfupdate.New(selfupdate.Options{
+		Current: "0.5", DataDir: t.TempDir(), UpdateDir: dir,
+		Repo: selfupdate.DefaultRepo, Ref: "main", CheckOnline: true,
+		BaseURL: repo.URL, DockerHost: selfupdatetest.MissingHost(t), Log: s.Log,
+	})
+	rep := s.modules.selfUpdate.Report(context.Background(), selfupdate.Forced)
+	if rep.Available || rep.Pending != "0.9" {
+		t.Fatalf("the fixture offers %q (available %v, pending %q)", rep.Latest, rep.Available, rep.Pending)
+	}
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			p := &httpx.Principal{User: &auth.User{ID: 1, Username: "tester"}, Role: auth.RoleAdmin, Kind: "session", IP: "127.0.0.1"}
+			next.ServeHTTP(w, req.WithContext(httpx.WithPrincipal(req.Context(), p)))
+		})
+	})
+	s.mountSelfUpdateRoutes(r)
+	for _, body := range []string{`{}`, `{"version":"0.9"}`} {
+		rec := drive(t, r, http.MethodPost, "/dashboard/update/install", body, "")
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "0.9 is on main but has no release tag yet") {
+			t.Errorf("install %s answered %d: %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if got := calls(); len(got) != 0 {
+		t.Fatalf("docker was reached for a version that is not released: %q", got)
+	}
+}
+
+// What an update copies first is the dashboard's real store, by the store's
+// own connection: the copy has to open as a database with the tables in it,
+// into the empty file the update module made for it.
+func TestTheStoreIsCopiedWholeBeforeAnUpdate(t *testing.T) {
+	s := testServer(t)
+	database := s.updateDatabase()
+	if database == nil || filepath.Base(database.Path) != "vpsd.db" {
+		t.Fatalf("the update module was given %+v", database)
+	}
+	if _, err := s.Store.DB.Exec(`INSERT INTO users (username, password_hash, role, created_at) VALUES ('kept', 'x', 'admin', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "copy.db")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CopyTo(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	copied, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copied.Close()
+	var kept int
+	if err := copied.QueryRow(`SELECT count(*) FROM users WHERE username = 'kept'`).Scan(&kept); err != nil || kept != 1 {
+		t.Fatalf("the copy holds %d of the account written before it: %v", kept, err)
+	}
+	if info, _ := os.Stat(path); info == nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("the copy's mode changed: %v", info)
+	}
+}
+
 func TestOnlyAnAdminCanInstallAnUpdate(t *testing.T) {
 	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited} {
 		t.Run(string(role), func(t *testing.T) {
@@ -204,7 +288,7 @@ func TestAnInstallWithNothingToRebuildSaysSo(t *testing.T) {
 	}
 	// The changelog is compiled in, so it is readable with no network, no
 	// Docker and no checkout.
-	if len(rep.History) == 0 {
+	if len(selfupdate.Local().Releases) == 0 {
 		t.Error("an install that cannot update itself also lost its own release notes")
 	}
 	if rep.Version != "0.5" {
@@ -258,5 +342,139 @@ func TestOnlyASessionChangesTheDashboardsOwnSettings(t *testing.T) {
 	}
 	if w := key.do(http.MethodPost, "/api/v1/dashboard/restart", `{}`, bearer); w.Code == http.StatusForbidden {
 		t.Fatalf("an admin key restarting = %d %s", w.Code, w.Body)
+	}
+}
+
+// offlineUpdates gives a test server an updater that never asks the network.
+func offlineUpdates(t *testing.T, s *Server) {
+	t.Helper()
+	s.modules.selfUpdate = selfupdate.New(selfupdate.Options{
+		Current: "0.5", DataDir: t.TempDir(),
+		UpdateDir: filepath.Join(t.TempDir(), "not-here"),
+		Log:       s.Log,
+	})
+}
+
+// The report is read twice per page load and every two seconds while an
+// update runs. It used to carry the whole changelog, 278 KB of it, and the
+// page now asks for it without (?history=false).
+func TestTheUpdateReportDoesNotCarryTheChangelog(t *testing.T) {
+	s := testServer(t)
+	offlineUpdates(t, s)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+	for _, spelling := range []string{"false", "0"} {
+		w := c.do(http.MethodGet, "/api/v1/dashboard/update?history="+spelling, "", nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", w.Code, w.Body)
+		}
+		var report map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &report); err != nil {
+			t.Fatal(err)
+		}
+		if _, has := report["history"]; has {
+			t.Errorf("?history=%s: the report still carries history", spelling)
+		}
+		for _, field := range []string{"version", "releases", "check", "install"} {
+			if _, has := report[field]; !has {
+				t.Errorf("the report lost %q", field)
+			}
+		}
+		if w.Body.Len() > 8<<10 {
+			t.Errorf("the report of an idle install is %d bytes", w.Body.Len())
+		}
+	}
+	if w := c.do(http.MethodGet, "/api/v1/dashboard/update?history=later", "", nil); w.Code != http.StatusBadRequest {
+		t.Errorf("?history=later = %d, want 400", w.Code)
+	}
+}
+
+// A page that was open through an update goes on polling the new server with
+// the script it loaded from the old one, and that script reads report.history
+// as a list without asking whether it is there: the sidebar notice spreads it
+// the moment the run it watched succeeds. So a request that does not ask for
+// the report without its history still gets all of it, beside every field the
+// report has without.
+func TestAPageLoadedBeforeTheUpdateStillGetsItsHistory(t *testing.T) {
+	s := testServer(t)
+	offlineUpdates(t, s)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+	read := func(query string) map[string]json.RawMessage {
+		t.Helper()
+		w := c.do(http.MethodGet, "/api/v1/dashboard/update"+query, "", nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /dashboard/update%s = %d: %s", query, w.Code, w.Body)
+		}
+		var report map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &report); err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	for _, query := range []string{"", "?nudge=true"} {
+		report := read(query)
+		var history []selfupdate.Release
+		if err := json.Unmarshal(report["history"], &history); err != nil {
+			t.Fatalf("GET /dashboard/update%s: history is %s: %v", query, report["history"], err)
+		}
+		if len(history) == 0 || len(history) != len(selfupdate.Local().Releases) {
+			t.Errorf("GET /dashboard/update%s carries %d releases, the build knows %d", query, len(history), len(selfupdate.Local().Releases))
+		}
+		for field := range read("?history=false") {
+			if _, has := report[field]; !has {
+				t.Errorf("GET /dashboard/update%s lost %q", query, field)
+			}
+		}
+	}
+}
+
+func TestTheChangelogIsServedOnceAndThenByItsTag(t *testing.T) {
+	s := testServer(t)
+	offlineUpdates(t, s)
+	c := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "reader", auth.RoleReadOnly)}
+
+	const path = "/api/v1/dashboard/update/history"
+	first := c.do(http.MethodGet, path, "", nil)
+	if first.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", first.Code, first.Body)
+	}
+	var answer struct {
+		History []selfupdate.Release `json:"history"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
+	}
+	if len(answer.History) == 0 || len(answer.History) != len(selfupdate.Local().Releases) {
+		t.Errorf("%d releases served, the build knows %d", len(answer.History), len(selfupdate.Local().Releases))
+	}
+	tag := first.Header().Get("ETag")
+	if len(tag) < 10 || !strings.HasPrefix(tag, `"`) || !strings.HasSuffix(tag, `"`) {
+		t.Fatalf("ETag %q is not a strong tag", tag)
+	}
+	// Kept by the browser and asked about every time: never served stale
+	// after an update, never stored by something shared.
+	if got := first.Header().Get("Cache-Control"); got != "private, no-cache" {
+		t.Errorf("Cache-Control %q", got)
+	}
+
+	bare := strings.Trim(tag, `"`)
+	for name, header := range map[string]string{
+		"the tag as it was sent":            tag,
+		"the tag an nginx in front weakens": "W/" + tag,
+		"the tag a Caddy in front suffixes": `"` + bare + `-gzip"`,
+		"one of several":                    `"something-else", ` + tag,
+	} {
+		again := c.do(http.MethodGet, path, "", map[string]string{"If-None-Match": header})
+		if again.Code != http.StatusNotModified || again.Body.Len() != 0 {
+			t.Errorf("%s: status %d with %d bytes, want 304 and none", name, again.Code, again.Body.Len())
+		}
+		if again.Header().Get("ETag") != tag {
+			t.Errorf("%s: the 304 does not repeat the tag", name)
+		}
+	}
+	// Another build's tag is answered in full.
+	if other := c.do(http.MethodGet, path, "", map[string]string{"If-None-Match": `"0123456789abcdef"`}); other.Code != http.StatusOK || other.Body.Len() != first.Body.Len() {
+		t.Errorf("a tag that is not this build's: status %d, %d bytes", other.Code, other.Body.Len())
 	}
 }

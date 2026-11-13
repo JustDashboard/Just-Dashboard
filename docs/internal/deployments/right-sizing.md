@@ -9,11 +9,14 @@ collector runs for right-sizing; the forecast adds one slow sampler of the volum
 **Source.** `metrics/sizing.go` holds the maths and the reader; `deploy/sizing_targets.go` reads what
 each environment is (`PlanningStore.SizingTargets`); `api/handlers_deploy_sizing.go` joins them.
 
-- **Which samples.** An environment's samples are `metric_container_samples` rows whose `container_id` is
-  one of its container releases' runtime ids (`deploy_release_runtimes`, newest 200) — the identity the
-  release recorded, never a name another container could carry. Rows from before `container_id` existed
-  are unattributed and left out. The window is the whole retained record up to now.
-- **One pass.** `Recorder.SizingUsage` reads those rows ordered by `(container_id, ts)` and folds them in
+- **Which samples.** An environment's samples are `metric_container_samples` rows taken from one of its
+  container releases' runtime ids (`deploy_release_runtimes`, newest 200) — the identity the release
+  recorded, never a name another container could carry. A row spells the id out in `container_id`,
+  which is how every release including 0.8.6 writes it, or holds it as a number (`container_ref`, into
+  `metric_container_ids`), which 0.8.6 reads and a later release will write
+  (`metrics/container_ids.go`); `containerIdentityIn` picks both. Rows from before ids were recorded at
+  all are unattributed and left out. The window is the whole retained record up to now.
+- **One pass.** `Recorder.SizingUsage` reads those rows ordered by container and time and folds them in
   Go: memory into whole-MiB buckets, CPU into half-percent buckets, the peaks, the distinct sample instants
   (two containers side by side in a blue/green cutover are one moment) and each container's CFS throttling.
   A week of one container is about 40,000 rows and 0.15 s; the window functions SQLite would run for the

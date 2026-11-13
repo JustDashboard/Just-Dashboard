@@ -101,7 +101,7 @@ type exportState struct {
 	Rows       int        `json:"rows"`
 	Format     string     `json:"format"`
 	Error      string     `json:"error,omitempty"`
-	StartedAt  time.Time  `json:"startedAt"`
+	StartedAt  time.Time  `json:"startedAt,omitzero"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }
 
@@ -405,7 +405,7 @@ func (s *Server) exportTable(w http.ResponseWriter, r *http.Request) error {
 	}
 	format, err := exportFormat(q.Get("format"))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	// The grid's conditions travel with the export, so a download taken from a
 	// narrowed view is that view rather than the whole table. They are parsed
@@ -413,11 +413,11 @@ func (s *Server) exportTable(w http.ResponseWriter, r *http.Request) error {
 	// rejected filter can only arrive as JSON inside a file called .csv.
 	browse, err := exportBrowseOptions(q)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	columns, err := exportColumns(q.Get("columns"))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	conn, dsn, err := s.dbConnRow(r.Context(), id)
 	if err != nil {
@@ -537,7 +537,7 @@ func (s *Server) handleDBExportQuery(w http.ResponseWriter, r *http.Request) err
 	}
 	parsed, err := dbx.SingleStatementFor(conn.Driver, req.SQL)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if parsed.Risk.Level != "read" {
 		return httpx.BadRequest("only a statement that reads can be exported; this one %s",
@@ -546,7 +546,7 @@ func (s *Server) handleDBExportQuery(w http.ResponseWriter, r *http.Request) err
 	statement := parsed.SQL
 	format, err := exportFormat(req.Format)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	for _, c := range req.Columns {
 		if strings.TrimSpace(c) == "" {
@@ -758,9 +758,8 @@ func (s *Server) importUploaded(w http.ResponseWriter, r *http.Request, conn *db
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"replacing a table's contents is destructive and your role does not permit it")
 		}
-		if !s.destrLim.Allow(p.Username() + "|dbimport") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-				"too many destructive imports, slow down")
+		if err := s.destrLim.Spend(p.Username()+"|dbimport", "too many destructive imports, slow down"); err != nil {
+			return err
 		}
 	}
 	ctx, cancel := timeoutCtx(r, 2*time.Hour)
@@ -803,7 +802,7 @@ func (s *Server) importUploaded(w http.ResponseWriter, r *http.Request, conn *db
 			httpx.SetAudit(r, "database.import", conn.Name,
 				map[string]any{noun: opts.Table, "mode": string(spec.Mode), "error": err.Error()})
 		}
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if spec.DryRun {
 		// Nothing was written, so there is nothing to record.
@@ -881,7 +880,7 @@ func validDumpName(name string) error {
 // must not stop the dashboard reading a file it wrote itself.
 func (s *Server) resolveDumpName(connName, name string) (string, error) {
 	if err := validDumpName(name); err != nil {
-		return "", httpx.BadRequest("%v", err)
+		return "", httpx.Refused(err)
 	}
 	dir := s.dbDumpDir(connName)
 	path, err := files.New([]string{dir}).Resolve(filepath.Join(dir, name))
@@ -1058,7 +1057,7 @@ func (s *Server) handleDBBackupUpload(w http.ResponseWriter, r *http.Request) er
 			name = filepath.Base(part.FileName())
 		}
 		if err := validDumpName(name); err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		dir := s.dbDumpDir(conn.Name)
 		// Said now, before the file is sent, where it can be; decided when
@@ -1281,7 +1280,7 @@ func (s *Server) startDBBackup(w http.ResponseWriter, r *http.Request) error {
 	// honour is something wrong with the request, and the answer to that is
 	// a 400 now, not a failed job a moment later.
 	if err := dbx.ValidateDumpOptions(conn.Driver, opts); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	base, by := auditBaseOf(r), httpx.MustPrincipal(r).Username()
 	detail := map[string]any{"database": opts.Database, "contents": dbx.ContentsOf(opts)}
@@ -1360,7 +1359,7 @@ func (s *Server) resolveRestoreSource(conn *dbConnection, req dbRestoreRequest) 
 	}
 	path, err := s.modules.files.Resolve(req.DumpPath)
 	if err != nil {
-		return "", httpx.BadRequest("%v", err)
+		return "", httpx.Refused(err)
 	}
 	st, err := os.Stat(path)
 	if err != nil {
@@ -1408,7 +1407,7 @@ func (s *Server) startDBRestore(w http.ResponseWriter, r *http.Request) error {
 	}
 	create, err := req.restoreTarget()
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	target := strings.TrimSpace(req.Database)
 	if create != "" {
@@ -1416,7 +1415,7 @@ func (s *Server) startDBRestore(w http.ResponseWriter, r *http.Request) error {
 			return httpx.BadRequest("database and target name two different databases")
 		}
 		if err := newDatabaseName(conn, create); err != nil {
-			return httpx.BadRequest("%v", err)
+			return httpx.Refused(err)
 		}
 		// Creating a database is the server page's act, and takes what it
 		// takes there. The path cannot know this request does.
@@ -1579,7 +1578,7 @@ func (s *Server) handleDBCopy(w http.ResponseWriter, r *http.Request) error {
 	}
 	name := strings.TrimSpace(req.Name)
 	if err := newDatabaseName(conn, name); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	opts := dbx.DumpOptions{SchemaOnly: req.StructureOnly}
 	if conn.Driver == dbx.DriverRedis {
@@ -1591,7 +1590,7 @@ func (s *Server) handleDBCopy(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	if err := dbx.ValidateDumpOptions(conn.Driver, opts); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	base := auditBaseOf(r)
 	detail := map[string]any{"from": conn.Database, "to": name, "structureOnly": req.StructureOnly}
@@ -1669,14 +1668,14 @@ func (s *Server) copyToServer(w http.ResponseWriter, r *http.Request, from *dbCo
 	}
 	name := strings.TrimSpace(req.Name)
 	if err := newDatabaseName(to, name); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if to.ReadOnly {
 		return protectedRefusal("%s is protected; a database cannot be copied into it", to.Name)
 	}
 	opts := dbx.DumpOptions{SchemaOnly: req.StructureOnly}
 	if err := dbx.ValidateDumpOptions(from.Driver, opts); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	if job, running := s.runningTransfer(to.ID); running {
 		return httpx.Err(http.StatusConflict, "transfer_running",

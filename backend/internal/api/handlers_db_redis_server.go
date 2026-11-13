@@ -341,7 +341,7 @@ func (s *Server) handleRedisACLSet(w http.ResponseWriter, r *http.Request) error
 	// Checked before anything is recorded: a rule that does not parse is not
 	// a rule, and its text does not belong on the trail.
 	if err := spec.Validate(); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	// The user a protected connection to this server signs in as is not
 	// re-ruled through a neighbour.

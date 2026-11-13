@@ -214,7 +214,7 @@ func (s *Server) handleSitePreview(w http.ResponseWriter, r *http.Request) error
 	s.modules.proxy.SetAccessListDir(&req.Spec)
 	content, err := proxysvc.RenderNginx(&req.Spec)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	out := map[string]any{"content": content, "warnings": proxysvc.SpecWarnings(&req.Spec)}
 	// Where the save would write, and whether a file or a sites-enabled link
@@ -310,7 +310,7 @@ func (s *Server) handleSiteApply(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) handleSiteDelete(w http.ResponseWriter, r *http.Request) error {
 	name := chi.URLParam(r, "name")
 	if err := s.modules.proxy.DeleteSite(r.Context(), name); err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	// The site is gone from disk; nginx keeps serving it until it reloads,
 	// which is reported rather than hidden.
@@ -449,7 +449,7 @@ func (s *Server) handleSiteCertificates(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 	certificates, err := s.modules.proxy.SiteCertificates(ctx, domains)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	email, _, err := s.Store.Setting(ctx, certbotEmailKey)
 	if err != nil {
@@ -501,12 +501,12 @@ func (s *Server) handleSiteControlsVerify(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	vhosts, err := s.modules.proxy.ListVHosts(ctx)
 	if err != nil {
-		return httpx.Internal(err)
+		return proxyReadError(err)
 	}
 	httpx.SetAudit(r, "proxy.site.controls.verify", name, map[string]any{"path": req.Path, "asset": req.Asset})
 	out, err := s.modules.proxy.VerifySiteControls(ctx, name, req, vhosts)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "proxy.site.controls.verify", name, map[string]any{"path": req.Path, "asset": req.Asset, "requests": out.Requests})
 	httpx.JSON(w, http.StatusOK, out)

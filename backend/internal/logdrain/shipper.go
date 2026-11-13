@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Bounds of one drain's delivery. A batch goes out a second after its first
@@ -102,7 +104,7 @@ func (s *shipper) queued() int {
 func (s *shipper) start(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
 	s.stop = cancel
-	go s.run(ctx)
+	safego.Go(ctx, s.log, "log drain shipper", s.run, safego.Close(s.done))
 }
 
 func (s *shipper) close() {
@@ -127,7 +129,6 @@ func (s *shipper) detach() ([]Record, int64) {
 }
 
 func (s *shipper) run(ctx context.Context) {
-	defer close(s.done)
 	backoff := time.Duration(0)
 	timer := time.NewTimer(batchInterval)
 	defer timer.Stop()

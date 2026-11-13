@@ -17,6 +17,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Proxy alerts: the proxy pages' readings, watched while nobody reads them.
@@ -91,8 +92,8 @@ type proxyAlertRule struct {
 	// every enabled one.
 	Channels  []int64   `json:"channels"`
 	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 }
 
 type proxyAlertWrite struct {
@@ -220,7 +221,7 @@ type proxyAlertEvent struct {
 	Delivered int       `json:"delivered"`
 	Failed    int       `json:"failed"`
 	Muted     bool      `json:"muted"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt,omitzero"`
 }
 
 // proxyAlertFinding is one subject a reading found firing at one level.
@@ -269,7 +270,7 @@ func (a *proxyAlerts) Start(ctx context.Context) {
 	if a == nil {
 		return
 	}
-	go func() {
+	safego.Go(ctx, nil, "proxy alerts", func(ctx context.Context) {
 		ticker := time.NewTicker(a.interval)
 		defer ticker.Stop()
 		for {
@@ -282,7 +283,7 @@ func (a *proxyAlerts) Start(ctx context.Context) {
 			a.Evaluate(pass)
 			cancel()
 		}
-	}()
+	})
 }
 
 // LastPass is when the last pass finished; zero before the first.
@@ -1107,6 +1108,7 @@ func (s *Server) checkWatchedDomains(ctx context.Context) ([]watchedDomain, bool
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			defer safego.Recover(nil, "watched domain check")
 			if d.Kind == proxysvc.WatchTCP {
 				if probe, err := proxysvc.CheckTCP(check, d.Domain, d.IP, d.Port); err == nil {
 					d.Probe = probe

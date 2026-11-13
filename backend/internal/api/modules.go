@@ -47,6 +47,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/storehealth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
@@ -60,6 +61,11 @@ import (
 // Docker, systemd or PM2 still serves everything else, and the corresponding
 // routes report a precise "unavailable on this host" error instead.
 type moduleSet struct {
+	// storeHealth asks the dashboard's own store for a write every few
+	// seconds and holds the space reserve for a full disk; what it finds is
+	// read at GET /dashboard/health, never at /healthz (handlers_self.go).
+	storeHealth *storehealth.Monitor
+
 	sys          *sysinfo.Collector
 	metrics      *metrics.Recorder
 	docker       *dockerx.Client
@@ -232,6 +238,19 @@ type moduleSet struct {
 }
 
 func (s *Server) initModules() {
+	// No reserve in development: 32 MB of noise in a checkout's data
+	// directory guards nothing.
+	reserve := int64(storehealth.DefaultReserve)
+	if s.Cfg.Dev {
+		reserve = 0
+	}
+	s.modules.storeHealth = storehealth.New(storehealth.Options{
+		DB: s.Store.DB, Dir: s.Cfg.DataDir, Log: s.Log, Reserve: reserve,
+		// In staging, the scratch folder every backup of the data directory
+		// must already exclude (backups/runner.go refuses a job that does
+		// not), so no archive carries the reserve.
+		ReservePath: filepath.Join(s.Cfg.DataDir, "staging", storehealth.ReserveFile),
+	})
 	s.modules.sys = sysinfo.NewCollector()
 	s.modules.docker = dockerx.New(s.Cfg.DockerHost)
 	s.initFlowAccounting()
@@ -275,10 +294,14 @@ func (s *Server) initModules() {
 	s.modules.onHost = func(fn func()) {
 		if err := hostexec.InHostMounts(fn); err != nil {
 			hostMountsWarning.Do(func() {
-				s.Log.Warn("the Files page is showing this container's filesystem, not the server's", "error", err)
+				s.Log.Warn("the Files page and the filesystem sizes are showing this container's filesystem, not the server's", "error", err)
 			})
 		}
 	}
+	// Asked once now, not when somebody first opens the Files page: the
+	// metrics recorder measures every filesystem through the same namespace
+	// (sysinfo/mounts.go) from its first sample, and has no log of its own.
+	s.modules.onHost(func() {})
 	s.modules.hostFiles = s.modules.files.OnHost(s.modules.onHost)
 	s.modules.gameVersions = gameserver.New()
 	s.modules.git = gitx.New(s.Cfg.GitRoots)
@@ -291,6 +314,7 @@ func (s *Server) initModules() {
 	// all the decisions in it — is testable without a daemon.
 	s.modules.selfUpdate = selfupdate.New(selfupdate.Options{
 		Current:     version.Version,
+		Commit:      version.Commit,
 		DataDir:     s.Cfg.DataDir,
 		UpdateDir:   s.Cfg.UpdateDir,
 		Repo:        s.Cfg.UpdateRepo,
@@ -301,6 +325,9 @@ func (s *Server) initModules() {
 		List:        s.listSiblings,
 		Log:         s.Log,
 		Adopted:     s.carryGitHubLogin,
+		// Copied before an update starts, so a rollback has data to go back
+		// to as well as code (handlers_selfupdate.go).
+		Database: s.updateDatabase(),
 	})
 	// The settings half of the same idea, and it shares the update module's
 	// answer to "where is this install" rather than working it out again: two
@@ -323,6 +350,10 @@ func (s *Server) initModules() {
 	if s.Cfg.IngressContainer != "" {
 		s.modules.proxy = proxysvc.NewWithIngressContainer(s.Cfg.NginxDir, s.Cfg.CaddyFile, s.Cfg.IngressContainer)
 	}
+	// The ingress lookup asks Docker through the client the Docker pages
+	// use. It ran the docker CLI twice each time instead, every thirty
+	// seconds and on most reads of the proxy pages.
+	s.modules.proxy.WithContainerReader(s.modules.docker)
 	// A deployment route on the name this dashboard is reached by is sent
 	// the dashboard's session cookie, whatever port either is on; the route
 	// takes it out of what the application is sent.
@@ -484,6 +515,7 @@ func (s *Server) initModules() {
 				Light: s.Cfg.DeployLightSlots,
 			},
 			LeaseTTL: s.Cfg.DeployLeaseTTL,
+			History:  deploy.HistoryPolicy{KeepRuns: s.Cfg.DeployHistoryRuns},
 		},
 		s.Log,
 	)

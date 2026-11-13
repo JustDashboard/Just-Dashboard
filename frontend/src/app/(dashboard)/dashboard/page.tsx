@@ -7,8 +7,10 @@ import { errorMessage } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { Release, SelfUpdateReport } from "@/lib/types"
+import { offerTagNote, pendingNote } from "@/lib/update-offer"
 import { useAuth } from "@/hooks/use-auth"
 import { useSelfUpdate } from "@/hooks/use-self-update"
+import { useUpdateHistory } from "@/hooks/use-update-history"
 import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph } from "@/components/product-logo"
 import { ReleaseTimeline } from "@/components/update/release-timeline"
@@ -46,7 +48,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * the timeline. *Latest* is the identity line's status ("0.7.0 available",
  * with how many releases ahead) and the first entry of the history, tagged.
  * *Checked* is the hint under that status, and a failed check turns the
- * status itself amber. What the tiles did beyond saying those numbers — put
+ * status itself amber. The same hint says whether what is offered is a tagged
+ * release, and names a version the branch carries that has no tag yet, which
+ * is never offered. What the tiles did beyond saying those numbers — put
  * "there is an update" first — the brand-faced button in the page controls does, and
  * did already.
  */
@@ -59,11 +63,13 @@ export default function DashboardVersionPage() {
   // Everything this build knows about, newest first: the releases the check
   // turned up sit above the ones compiled in, and a version in both is shown
   // once. An install with no network still has the whole of its own past.
+  // The compiled-in ones are read apart from the report, once: they change only with the build.
+  const history = useUpdateHistory(report?.version)
   const all = useMemo<Release[]>(() => {
     if (!report) return []
     const seen = new Set(report.releases.map((r) => r.version))
-    return [...report.releases, ...report.history.filter((r) => !seen.has(r.version))]
-  }, [report])
+    return [...report.releases, ...(history ?? []).filter((r) => !seen.has(r.version))]
+  }, [report, history])
   const newer = useMemo(() => new Set(report?.releases.map((r) => r.version)), [report])
 
   const visible = useMemo(() => {
@@ -192,6 +198,8 @@ export default function DashboardVersionPage() {
               newer={newer}
               expanded={Boolean(filter.trim())}
             />
+          ) : history === undefined ? (
+            <Skeleton className="h-96 rounded-xl" />
           ) : filter ? (
             <EmptyNote>
               Nothing matches that. The notes are searched by version, title and every line of every
@@ -229,11 +237,18 @@ function Identity({ report, actions }: { report: SelfUpdateReport; actions: Reac
         : { tone: "unknown" as const, label: "Version checks off" }
   const checked = report.check.checkedAt ? `checked ${relativeTime(report.check.checkedAt)}` : ""
   const hint = report.available
-    ? `${behind} ${behind === 1 ? "release" : "releases"} ahead of yours`
+    ? [
+        `${behind} ${behind === 1 ? "release" : "releases"} ahead of yours`,
+        offerTagNote(report),
+        pendingNote(report),
+      ]
+        .filter(Boolean)
+        .join(" · ")
     : report.check.enabled
       ? [
           checked,
           report.latest && report.latest !== report.version && `newest published ${report.latest}`,
+          pendingNote(report),
         ]
           .filter(Boolean)
           .join(" · ")
@@ -254,6 +269,14 @@ function Identity({ report, actions }: { report: SelfUpdateReport; actions: Reac
             <span className="numeric text-2xl leading-none font-semibold tracking-tight">
               {report.version}
             </span>
+            {report.commit && (
+              <span
+                className="font-mono text-xs text-muted-foreground"
+                title={`Built from commit ${report.commit}, which is not the ${report.version} release`}
+              >
+                +{report.commit}
+              </span>
+            )}
           </p>
           <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <a
@@ -277,6 +300,7 @@ function Identity({ report, actions }: { report: SelfUpdateReport; actions: Reac
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
+                    // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer
                     tabIndex={0}
                     className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-ring"
                   >
@@ -297,6 +321,7 @@ function Identity({ report, actions }: { report: SelfUpdateReport; actions: Reac
         {report.check.error ? (
           <Tooltip>
             <TooltipTrigger asChild>
+              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
               <span tabIndex={0} className="inline-flex cursor-help rounded-sm focus-ring">
                 <Status tone={status.tone} label={status.label} className="text-body font-medium" />
               </span>

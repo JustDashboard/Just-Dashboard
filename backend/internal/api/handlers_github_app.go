@@ -70,7 +70,7 @@ func (s *Server) handleGitHubAppManifest(w http.ResponseWriter, r *http.Request)
 	}
 	start, err := s.modules.githubApp.BeginManifest(s.dashboardEndpoint(), request)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	httpx.SetAudit(r, "deploy.githubapp.manifest", start.Manifest.Name, map[string]any{"organization": request.Organization})
 	httpx.JSON(w, http.StatusOK, start)

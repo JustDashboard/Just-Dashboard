@@ -14,6 +14,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -62,7 +63,7 @@ func privateCertificateError(what string, err error) error {
 	case errors.Is(err, proxysvc.ErrRequestNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case errors.As(err, &input):
-		return httpx.BadRequest("%v", err)
+		return httpx.Refused(err)
 	}
 	return httpx.Err(http.StatusInternalServerError, "write_failed", what+": "+err.Error())
 }
@@ -252,8 +253,7 @@ func (l *localCARenewal) Start(ctx context.Context) {
 	l.cancel, l.done = cancel, make(chan struct{})
 	l.next = l.now().Add(l.delay)
 	l.mu.Unlock()
-	go func() {
-		defer close(l.done)
+	safego.Go(ctx, nil, "local authority renewal", func(ctx context.Context) {
 		timer := time.NewTimer(l.delay)
 		defer timer.Stop()
 		for {
@@ -267,7 +267,7 @@ func (l *localCARenewal) Start(ctx context.Context) {
 			stop()
 			timer.Reset(l.interval)
 		}
-	}()
+	}, safego.Close(l.done))
 }
 
 func (l *localCARenewal) Stop() {

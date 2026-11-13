@@ -33,7 +33,7 @@ import { Button } from "@/components/ui/button"
 import { Well } from "@/components/panel"
 import { ErrorState, LoadingRows } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
-import { BarList } from "@/components/bar-list"
+import { RankList } from "@/components/rank-list"
 import {
   FileIcon,
   fileKind,
@@ -499,7 +499,9 @@ function DirectoryContents({
   }, [entry.path])
 
   const largest = usage?.largest ?? []
-  const top = Math.max(1, ...largest.map((item) => item.bytes))
+  // A share is of the folder's own total, and only when the walk reached all
+  // of it: a floor is not a whole to be a share of.
+  const whole = usage && !usage.truncated && usage.bytes > 0 ? usage.bytes : 0
 
   return (
     <Section
@@ -530,8 +532,7 @@ function DirectoryContents({
               The walk stopped at its budget, so this is a floor rather than the total.
             </p>
           )}
-          <BarList
-            className="-mx-2"
+          <RankList
             items={largest.map((item) => ({
               key: item.path,
               label: item.name,
@@ -542,7 +543,7 @@ function DirectoryContents({
                 />
               ),
               value: bytes(item.bytes),
-              share: item.bytes / top,
+              share: whole > 0 ? item.bytes / whole : undefined,
               title: item.isDir ? `Open ${item.name}` : item.name,
               onClick: item.isDir ? () => onNavigate(item.path) : undefined,
             }))}

@@ -29,7 +29,7 @@ type Container struct {
 	State        string            `json:"state"`
 	Status       string            `json:"status"`
 	Health       string            `json:"health,omitempty"`
-	CreatedAt    time.Time         `json:"createdAt"`
+	CreatedAt    time.Time         `json:"createdAt,omitzero"`
 	StartedAt    *time.Time        `json:"startedAt,omitempty"`
 	UptimeSecond int64             `json:"uptimeSeconds"`
 	Ports        []Port            `json:"ports"`

@@ -90,6 +90,87 @@ test("a temporarily unavailable session recheck preserves the current account", 
   await expect(page.getByText("Your session ended. Sign in again to continue.")).toHaveCount(0)
 })
 
+test("a first session probe that is refused or unanswered waits on the splash and keeps the page", async ({
+  page,
+}) => {
+  // What a restored window of tabs met: the limiter's 429, then a 502 from a
+  // backend still restarting. Neither says anybody is signed out.
+  const fixture = await authFixture(page, async (route, read) => {
+    if (read === 1)
+      return route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        headers: { "Retry-After": "1" },
+        body: JSON.stringify({
+          error: { code: "rate_limited", message: "too many requests, slow down" },
+        }),
+      })
+    if (read === 2)
+      return route.fulfill({ status: 502, contentType: "text/plain", body: "Bad Gateway" })
+    await route.fallback()
+  })
+  await page.goto("/account/sessions?tab=x")
+  await expect(page.getByRole("status").filter({ hasText: "Trying again" })).toBeVisible()
+  await expect(page).toHaveURL(/\/account\/sessions\?tab=x$/)
+  await expect(page.getByRole("button", { name: "Account menu for Ion", exact: true })).toBeVisible(
+    { timeout: 20_000 },
+  )
+  await expect(page).toHaveURL(/\/account\/sessions\?tab=x$/)
+  expect(fixture.reads()).toBe(3)
+  await expect(page.getByLabel("Username")).toHaveCount(0)
+})
+
+test("the session is asked for while the page's JavaScript is still on its way", async ({
+  page,
+}) => {
+  let seen = () => {}
+  const asked = new Promise<void>((resolve) => {
+    seen = resolve
+  })
+  const fixture = await authFixture(page, async (route) => {
+    seen()
+    await route.fallback()
+  })
+  // None of the app's scripts arrives before the probe has left. When the
+  // probe waited for hydration this page could never have loaded.
+  await page.route("**/_next/static/**/*.js", async (route) => {
+    await asked
+    await route.continue()
+  })
+  await page.goto("/account/sessions")
+  await expect(
+    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
+  ).toBeVisible()
+  // The provider took the document's request: it did not ask a second time.
+  expect(fixture.reads()).toBe(1)
+})
+
+test("a link opened while signed out ends on its page after signing in, with only its view kept", async ({
+  page,
+}) => {
+  const fixture = await authFixture(page, undefined, false)
+  // What an alert's link looks like the morning after the session expired,
+  // with a key a page would act on added by whoever wrote it.
+  await page.goto("/account/sessions?tab=x&sql=DROP%20TABLE%20users")
+  await expect(page).toHaveURL(/\/login\?next=%2Faccount%2Fsessions%3Ftab%3Dx$/)
+  await signIn(page)
+  await expect(page).toHaveURL(/\/account\/sessions\?tab=x$/)
+  await expect(
+    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
+  ).toBeVisible()
+
+  // Signing out is not arriving signed out: the next sign-in starts from the Overview.
+  await signOut(page)
+  await expect(page.getByLabel("Username")).toBeVisible()
+  await expect(page).toHaveURL(/\/login$/)
+
+  // A `next` that is not a page of this dashboard leads nowhere.
+  fixture.account.signedIn = false
+  await page.goto("/login?next=%2Fapi%2Fv1%2Ffiles%2Fraw%3Fpath%3D%2Fetc%2Fshadow")
+  await signIn(page)
+  await expect(page).toHaveURL(/\/$/)
+})
+
 test("a delayed expired-session recheck cannot replace a later successful sign-in", async ({
   page,
 }) => {

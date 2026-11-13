@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { relativeTime } from "@/lib/format"
 import type { PressureCount, ProtectionPressure } from "@/lib/types"
-import { BarList, type BarListItem } from "@/components/bar-list"
+import { RankList, type RankItem } from "@/components/rank-list"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import type { Series } from "@/components/metrics/metric-chart"
 import { Tag } from "@/components/tag"
@@ -20,16 +20,17 @@ const DROP_SERIES: Series[] = [
 ]
 const whole = (v: number) => Math.round(v).toLocaleString()
 
-function bars(counts: PressureCount[], mono = true): BarListItem[] {
-  const top = counts[0]?.count || 1
+/**
+ * A breakdown's rows as figures in columns: the count, and the share of the
+ * entries read that the server worked out, which is the whole each is part of.
+ */
+function ranks(counts: PressureCount[], mono = true): RankItem[] {
   return counts.map((c) => ({
     key: c.key,
     label: c.key,
     mono,
-    value: (
-      <span className="numeric">{`${c.count.toLocaleString()} · ${Math.round(c.share * 100)}%`}</span>
-    ),
-    share: c.count / top,
+    value: c.count.toLocaleString(),
+    share: c.share,
   }))
 }
 
@@ -105,19 +106,19 @@ export function PressurePanel({ pressure }: { pressure: ProtectionPressure }) {
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
         <section aria-label="By state" className="space-y-1.5">
           <p className="text-hint font-medium">By state</p>
-          <BarList items={bars(b.byState, false)} emptyLabel="Nothing tracked" />
+          <RankList items={ranks(b.byState, false)} emptyLabel="Nothing tracked" />
         </section>
         <section aria-label="By source" className="space-y-1.5">
           <p className="text-hint font-medium">Busiest sources</p>
-          <BarList items={bars(b.topSources)} emptyLabel="Nothing tracked" />
+          <RankList items={ranks(b.topSources)} emptyLabel="Nothing tracked" />
         </section>
         <section aria-label="By port" className="space-y-1.5">
           <p className="text-hint font-medium">Busiest destination ports</p>
-          <BarList items={bars(b.topPorts)} emptyLabel="Nothing tracked" />
+          <RankList items={ranks(b.topPorts)} emptyLabel="Nothing tracked" />
         </section>
         <section aria-label="By protocol" className="space-y-1.5">
           <p className="text-hint font-medium">By protocol</p>
-          <BarList items={bars(b.byProtocol, false)} emptyLabel="Nothing tracked" />
+          <RankList items={ranks(b.byProtocol, false)} emptyLabel="Nothing tracked" />
         </section>
       </div>
 

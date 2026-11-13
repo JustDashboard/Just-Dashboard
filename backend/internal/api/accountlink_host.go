@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -71,8 +70,8 @@ func (h *accountHost) dockerAnswers(ctx context.Context) error {
 // allowDestructive spends one of the destructive budget for the actor, the way
 // the routes behind s.destructive do for a person.
 func (s *Server) allowDestructive(actor string) error {
-	if !s.destrLim.Allow(actor) {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many destructive actions; try again shortly")
+	if err := s.destrLim.Spend(actor, "too many destructive actions; try again shortly"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -174,7 +173,11 @@ func (h *accountHost) InstallUpdate(ctx context.Context, actor, want string) (st
 		if rep.Check.Error != "" {
 			return "", errors.New("the newest version could not be looked up: " + rep.Check.Error)
 		}
-		return "", fmt.Errorf("this dashboard is already on %s, which is the newest published version", rep.Version)
+		if rep.Pending != "" {
+			return "", fmt.Errorf("this dashboard is already on %s, the newest released version; %s is on %s but has no release tag yet",
+				rep.Version, rep.Pending, rep.Check.Ref)
+		}
+		return "", fmt.Errorf("this dashboard is already on %s, which is the newest released version", rep.Version)
 	}
 	target := rep.Latest
 	if want != "" && selfupdate.Compare(want, target) != 0 {

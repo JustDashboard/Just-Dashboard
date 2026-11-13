@@ -20,6 +20,8 @@ import (
 	dtypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/system"
 	"github.com/docker/docker/client"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 var ErrUnavailable = errors.New("docker is not available on this host")
@@ -187,11 +189,11 @@ func (c *Client) forgetDiskUsage() {
 // WarmCaches primes the expensive queries in the background so the first
 // operator to open a page does not pay for them.
 func (c *Client) WarmCaches() {
-	go func() {
+	safego.Once(nil, "docker disk usage warm-up", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		c.diskUsage(ctx)
-	}()
+	})
 }
 
 // New never fails hard: a host without Docker should still serve the rest of

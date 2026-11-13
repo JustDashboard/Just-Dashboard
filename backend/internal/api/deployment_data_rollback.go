@@ -22,6 +22,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/docker/docker/errdefs"
 	"github.com/go-sql-driver/mysql"
 )
@@ -189,8 +190,7 @@ func (o *dataCopyOwner) Start(ctx context.Context) {
 	}
 	ctx, o.cancel = context.WithCancel(ctx)
 	o.done = make(chan struct{})
-	go func() {
-		defer close(o.done)
+	safego.Go(ctx, nil, "data rollback copies", func(ctx context.Context) {
 		ticker := time.NewTicker(o.every)
 		defer ticker.Stop()
 		for {
@@ -202,7 +202,7 @@ func (o *dataCopyOwner) Start(ctx context.Context) {
 			case <-o.poke:
 			}
 		}
-	}()
+	}, safego.Close(o.done))
 }
 
 func (o *dataCopyOwner) Stop() {
@@ -291,6 +291,7 @@ func (o *dataCopyOwner) pass(ctx context.Context) {
 			go func(copy deploy.DataCopy) {
 				defer o.restores.Done()
 				defer func() { <-o.busy }()
+				defer safego.Recover(nil, "data rollback restore")
 				o.restore(ctx, copy)
 				o.Poke()
 			}(copy)
@@ -650,7 +651,7 @@ type DataCopyComparison struct {
 	Truncated bool            `json:"truncated"`
 	CopyError string          `json:"copyError,omitempty"`
 	LiveError string          `json:"liveError,omitempty"`
-	ReadAt    time.Time       `json:"readAt"`
+	ReadAt    time.Time       `json:"readAt,omitzero"`
 }
 
 // dataCopyTableLimit bounds a comparison: every table is counted on both

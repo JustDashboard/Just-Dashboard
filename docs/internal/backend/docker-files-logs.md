@@ -590,7 +590,7 @@ format's colour, its kind and size, a folder's colour swatches, and its verbs: t
 want named and wide (Edit, View, Open folder, or Download for a binary or archive) beside glyphs for
 the rest (View, Crop, Download, Checksum). Under that, grouped sections: what is inside (the text
 head, the PDF, the archive, a folder's folder and file counts with Measure size and its largest
-entries as a `BarList`), Details (modified with the date, size with the byte count, lines, language,
+entries as a `RankList`, each with its share of the folder's total when the walk reached all of it), Details (modified with the date, size with the byte count, lines, language,
 owner and group, a link's target), Access (the mode as an owner/group/everyone grid and in one
 sentence, `access.ts`), and Location (the path as crumbs to walk up, with Copy path). It describes the
 folder being browsed while nothing in it is chosen. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a
@@ -865,7 +865,10 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
 
 Frontend `components/logs/`: the page is a workbench like the terminal — one frame, the source rail
 (`source-rail.tsx`, hideable and resizable, remembered through `view-state` and `panel-size`) beside
-`log-workspace.tsx`, a hairline between them. Over the frame the page reads as a deployment's Logs page
+`log-workspace.tsx`, a hairline between them. Below `md` the two are one full-height pane at a time, the
+log first, with a bar at the foot to reach the sources (`components/phone-panes.tsx`); from `md` to `lg`
+the rail stacks over the lines and the page scrolls. A request record's Requests view leaves its chart to
+Insights on a phone, where the pane is the window's height and the rows are what it is for. Over the frame the page reads as a deployment's Logs page
 does: the chosen source as an identity line (`SourceIdentity` in `source-facts.tsx`, the Overview's
 `HostIdentity` shape: the source drawn as its product, its name, and its kind, state, path, size and
 rotated set as facts), with Export and the shortcuts key at its end — a request record takes the same

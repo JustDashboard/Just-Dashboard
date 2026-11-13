@@ -3,13 +3,14 @@
 import { useState } from "react"
 import { useViewState } from "@/lib/view-state"
 import { get } from "@/lib/api"
-import { relativeTime } from "@/lib/format"
+import { dayAt, relativeTime, weekdayAt } from "@/lib/format"
+import { latencyWords } from "@/lib/latency-words"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentInsights } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
-import { BarList } from "@/components/bar-list"
+import { RankList } from "@/components/rank-list"
 import { Rocket } from "@/components/icons"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
@@ -60,19 +61,12 @@ function seconds(value: number) {
 
 /** "Aug 25" for a `YYYY-MM-DD` day, read as that calendar day wherever the reader is. */
 function dayLabel(date: string) {
-  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  })
+  return dayAt(new Date(`${date}T00:00:00`))
 }
 
 /** "Wed, Oct 28": the weekday is what a day's releases are usually remembered by. */
 function dayHeading(date: string) {
-  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  })
+  return weekdayAt(new Date(`${date}T00:00:00`))
 }
 
 type Day = DeploymentInsights["daily"][number]
@@ -268,7 +262,7 @@ export function Insights({
       <span>today</span>
     </p>
   )
-  // One cause has nothing to be compared with, so it is a line and no bar.
+  // One cause has nothing to be compared with, so it is a line and no list.
   const OnlyFailure = onFailureClick ? "button" : "p"
   const failureColumns = history ? "grid gap-x-10 sm:grid-cols-2 xl:grid-cols-3" : undefined
 
@@ -300,18 +294,17 @@ export function Insights({
           </OnlyFailure>
         </div>
       ) : (
-        <BarList
-          className={cn("-ml-2", failureColumns)}
+        // Figures in columns, not bars of different lengths: the count and
+        // its share of every failed release, which is a real whole whichever
+        // columns the causes land in.
+        <RankList
+          className={failureColumns}
           items={data.topFailures.map((failure) => ({
             key: failure.code,
             label: causeTitle(failure.code),
             mono: false,
             value: `×${failure.count}`,
-            // Of every failed release, not of the commonest cause: the bars
-            // then read as shares, whichever columns they land in.
-            share: failure.count / data.failed,
-            signal: 1,
-            tone: "danger",
+            share: data.failed > 0 ? failure.count / data.failed : undefined,
             title: onFailureClick ? "Show the failed deployments" : undefined,
             onClick: onFailureClick && (() => onFailureClick(failure.code)),
           }))}
@@ -417,7 +410,7 @@ export function Insights({
               <dd className={figure}>{seconds(data.medianDurationSeconds)}</dd>
               <dd className="text-hint text-muted-foreground">
                 {data.medianDurationSeconds
-                  ? `p95 ${seconds(data.p95DurationSeconds)} · claim to finish`
+                  ? `${latencyWords("p95", seconds(data.p95DurationSeconds))} · claim to finish`
                   : "no release succeeded in this window"}
               </dd>
             </div>

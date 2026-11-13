@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -63,7 +64,7 @@ type statementBaseline struct {
 // statementReading is how the newest attempt to read a server's statements
 // went: when, and what stood in the way if nothing could be read.
 type statementReading struct {
-	At        time.Time `json:"at"`
+	At        time.Time `json:"at,omitzero"`
 	Supported bool      `json:"supported"`
 	Reason    string    `json:"reason,omitempty"`
 	rowsRead  bool
@@ -131,8 +132,7 @@ func (h *statementHistory) noteReset(id int64) {
 
 func (s *Server) startStatementHistory(ctx context.Context) {
 	s.dbStatements.done = make(chan struct{})
-	go func() {
-		defer close(s.dbStatements.done)
+	safego.Go(ctx, s.Log, "statement history recorder", func(ctx context.Context) {
 		timer := time.NewTicker(statementSnapshotEvery)
 		defer timer.Stop()
 		for {
@@ -143,7 +143,7 @@ func (s *Server) startStatementHistory(ctx context.Context) {
 			case <-timer.C:
 			}
 		}
-	}()
+	}, safego.Close(s.dbStatements.done))
 }
 
 func (s *Server) recordStatementHistory(ctx context.Context) {
@@ -352,8 +352,8 @@ type statementFacts struct {
 	RetentionHours  int       `json:"retentionHours"`
 	KeptPerInterval int       `json:"keptPerInterval"`
 	BucketSeconds   int       `json:"bucketSeconds"`
-	From            time.Time `json:"from"`
-	Until           time.Time `json:"until"`
+	From            time.Time `json:"from,omitzero"`
+	Until           time.Time `json:"until,omitzero"`
 	// Intervals is how many readings were differenced in the window, and
 	// RecordedSeconds how much of it they cover.
 	Intervals       int        `json:"intervals"`

@@ -1,12 +1,20 @@
 package api
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -23,9 +31,14 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 		// read-only operator seeing "0.6 is out" is how the person who *can*
 		// install it finds out.
 		r.Method(http.MethodGet, "/update", s.handle(s.handleSelfUpdateStatus))
+		// The release notes this build was compiled with, apart from the
+		// report that is polled: the same audience, asked for once.
+		r.Method(http.MethodGet, "/update/history", s.handle(s.handleSelfUpdateHistory))
 		// The same audience as the report, which already carries this
 		// transcript's last 64 KB: this is the rest of it, asked for once.
 		r.Method(http.MethodGet, "/update/log", s.handle(s.handleSelfUpdateLog))
+		// What the dashboard reads of itself (handlers_self.go).
+		s.mountSelfRoutes(r)
 		// Where this server stands with Just Hub, and the hub's fleet and
 		// notices for the server switcher: every role reads it; only an
 		// administrator is sent the admin part (handlers_hublink.go).
@@ -115,17 +128,103 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 // immediately and starts a check behind the request, which is what makes a
 // reload a way of asking without making a reload wait. Neither parameter is
 // the ordinary poll, which asks for nothing.
+//
+// history=false leaves the release notes out, and the page always says it: they
+// are a quarter of a megabyte that changes only with the build, and it reads
+// them once from /update/history. A request that does not say it still gets
+// them, because the one caller that cannot be changed is a page loaded before
+// the update that brought this in. It goes on polling the new server with the
+// old script, and that script spreads report.history without asking whether it
+// is there: an answer without the field threw in the sidebar of every open tab
+// at the moment the update finished.
 func (s *Server) handleSelfUpdateStatus(w http.ResponseWriter, r *http.Request) error {
+	query := httpx.Query(r)
+	refresh, nudge := query.Bool("refresh"), query.Bool("nudge")
+	history := query.BoolOr("history", true)
+	if err := query.Err(); err != nil {
+		return err
+	}
 	freshness := selfupdate.Cached
 	switch {
-	case r.URL.Query().Get("refresh") == "true":
+	case refresh:
 		freshness = selfupdate.Forced
-	case r.URL.Query().Get("nudge") == "true":
+	case nudge:
 		freshness = selfupdate.OnLoad
 	}
 	rep := s.modules.selfUpdate.Report(r.Context(), freshness)
+	if history {
+		httpx.JSON(w, http.StatusOK, selfUpdateReportWithHistory{Report: rep, History: selfupdate.Local().Releases})
+		return nil
+	}
 	httpx.JSON(w, http.StatusOK, rep)
 	return nil
+}
+
+// selfUpdateReportWithHistory is the report as it was answered before the
+// release notes had a route of their own: with everything this build knows
+// about its own past in it.
+type selfUpdateReportWithHistory struct {
+	selfupdate.Report
+	History []selfupdate.Release `json:"history"`
+}
+
+// selfUpdateHistory is the release notes this build was compiled with, encoded
+// once, and the tag they are known by. The changelog is embedded in the binary,
+// so the answer is the same bytes for as long as the process lives and its tag
+// changes only with the build.
+var selfUpdateHistory = sync.OnceValues(func() ([]byte, string) {
+	body, err := json.Marshal(struct {
+		History []selfupdate.Release `json:"history"`
+	}{selfupdate.Local().Releases})
+	if err != nil {
+		body = []byte(`{"history":[]}`)
+	}
+	sum := sha256.Sum256(body)
+	return body, hex.EncodeToString(sum[:8])
+})
+
+// handleSelfUpdateHistory answers what this build knows about its own past.
+//
+// It used to ride in the status report, where it was 278 KB of every answer:
+// twice per page load, and every two seconds on every open tab while an update
+// ran, which is when the server is busiest. It needs no network and no check,
+// so it is a route of its own with an ETag: a browser keeps it and asks only
+// whether it still holds (no-cache is "ask every time", not "do not keep"), so
+// a reload costs a 304 and the notes of a new build are never the last one's.
+func (s *Server) handleSelfUpdateHistory(w http.ResponseWriter, r *http.Request) error {
+	body, tag := selfUpdateHistory()
+	h := w.Header()
+	h.Set("ETag", `"`+tag+`"`)
+	h.Set("Cache-Control", "private, no-cache")
+	if etagHolds(r.Header.Get("If-None-Match"), tag) {
+		w.WriteHeader(http.StatusNotModified)
+		return nil
+	}
+	h.Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+	return nil
+}
+
+// etagHolds reports whether an If-None-Match header names tag. A proxy that
+// compresses the answer rewrites the tag on the way out (nginx makes it weak,
+// W/"…"; Caddy appends the encoding, "…-gzip") and not every one undoes that
+// on the way back in, so both spellings are read as the tag they came from.
+func etagHolds(header, tag string) bool {
+	for candidate := range strings.SplitSeq(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" {
+			return true
+		}
+		candidate = strings.Trim(strings.TrimPrefix(candidate, "W/"), `"`)
+		for _, encoding := range []string{"-gzip", "-zstd", "-br"} {
+			candidate = strings.TrimSuffix(candidate, encoding)
+		}
+		if candidate != "" && candidate == tag {
+			return true
+		}
+	}
+	return false
 }
 
 // handleSelfUpdateInstall starts the upgrade and answers before it finishes.
@@ -138,9 +237,10 @@ func (s *Server) handleSelfUpdateInstall(w http.ResponseWriter, r *http.Request)
 	var body struct {
 		// Version is what the browser believed was newest when the operator
 		// pressed the button. It is a check, not an instruction: the only
-		// version that can be installed is whatever the tracked branch carries
-		// now, and a stale tab asking for a superseded one has to be told
-		// rather than quietly given something else.
+		// version that can be installed is the newest one on offer now (for
+		// the project's own repository the newest with a release tag), and a
+		// stale tab asking for a superseded one has to be told rather than
+		// quietly given something else.
 		Version string `json:"version"`
 	}
 	if r.ContentLength > 0 {
@@ -158,7 +258,11 @@ func (s *Server) handleSelfUpdateInstall(w http.ResponseWriter, r *http.Request)
 			return httpx.Err(http.StatusBadGateway, "check_failed",
 				"the newest version could not be looked up: "+rep.Check.Error)
 		}
-		return httpx.BadRequest("this dashboard is already on %s, which is the newest published version", rep.Version)
+		if rep.Pending != "" {
+			return httpx.BadRequest("this dashboard is already on %s, the newest released version; %s is on %s but has no release tag yet",
+				rep.Version, rep.Pending, rep.Check.Ref)
+		}
+		return httpx.BadRequest("this dashboard is already on %s, which is the newest released version", rep.Version)
 	}
 	target := rep.Latest
 	if body.Version != "" && selfupdate.Compare(body.Version, target) != 0 {
@@ -186,6 +290,31 @@ func (s *Server) handleSelfUpdateInstall(w http.ResponseWriter, r *http.Request)
 	// 202: the work has been handed to a container that outlives this process.
 	httpx.JSON(w, http.StatusAccepted, run)
 	return nil
+}
+
+// updateDatabase is the dashboard's own store as the update module sees it:
+// where the file is, for its size, and how to copy it.
+func (s *Server) updateDatabase() *selfupdate.Database {
+	if s.Store == nil {
+		return nil
+	}
+	return &selfupdate.Database{
+		Path:   filepath.Join(s.Cfg.DataDir, store.DatabaseFile),
+		CopyTo: s.copyStore,
+	}
+}
+
+// copyStore writes a consistent copy of the dashboard's own database to path,
+// which exists and is empty. It is what an update takes before it starts.
+//
+// VACUUM INTO through the store's own pool rather than a copy of the file: the
+// database is in WAL mode and being written, so the file alone is not the
+// database, and a copy made of it mid-write may not open. This is one read
+// transaction, so the copy is the whole store as of one moment while
+// everything else keeps writing.
+func (s *Server) copyStore(ctx context.Context, path string) error {
+	_, err := s.Store.DB.ExecContext(ctx, "VACUUM INTO ?", path)
+	return err
 }
 
 // handleSelfUpdateLog answers the whole transcript of the last upgrade as

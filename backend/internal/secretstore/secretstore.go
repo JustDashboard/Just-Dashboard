@@ -121,8 +121,8 @@ type Store struct {
 	AllowPreviews bool      `json:"allowPreviews"`
 	CreatedBy     string    `json:"createdBy"`
 	UpdatedBy     string    `json:"updatedBy"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	CreatedAt     time.Time `json:"createdAt,omitzero"`
+	UpdatedAt     time.Time `json:"updatedAt,omitzero"`
 	// Test is how the last Test went, if one was asked for.
 	Test *Outcome `json:"test,omitempty"`
 	// LastRead is how the last run that read this store went.
@@ -131,7 +131,7 @@ type Store struct {
 
 // Outcome is when something was tried against a store and what it answered.
 type Outcome struct {
-	At      time.Time `json:"at"`
+	At      time.Time `json:"at,omitzero"`
 	OK      bool      `json:"ok"`
 	Message string    `json:"message"`
 }

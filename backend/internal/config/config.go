@@ -88,6 +88,11 @@ type Config struct {
 	MetricsInterval  time.Duration
 	MetricsRetention time.Duration
 
+	// DeployHistoryRuns is how many of an environment's newest deployment
+	// runs keep everything they printed; an older one keeps the end of it and
+	// the rest of its record. 0 keeps every run whole.
+	DeployHistoryRuns int
+
 	// UpdateCheck is whether the dashboard may ask the repository whether a
 	// newer version exists. Turning it off leaves the compiled-in changelog
 	// readable. Deployment branch monitoring uses separate Git connections
@@ -183,6 +188,7 @@ func Load() (*Config, error) {
 		HubLink:          l.boolean("JD_HUB_LINK", true),
 		HubSignIn:        l.boolean("JD_HUB_SIGNIN", false),
 	}
+	c.DeployHistoryRuns = l.integer("JD_DEPLOY_HISTORY_RUNS", 200, 0, 100000)
 	c.AccountURL = l.accountURL()
 	c.HubLinkTestOrigin = l.hubLinkTestOrigin()
 	if c.HubSignIn && c.HubLinkTestOrigin != "" && !hubSignInTestOriginAllowed {

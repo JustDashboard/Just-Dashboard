@@ -12,6 +12,7 @@ import {
   type Vocabulary,
 } from "@/components/database/query/completion"
 import type { Dialect } from "@/components/database/query/dialect"
+import { MONACO_VS } from "@/lib/vendored"
 
 /**
  * The SQL editor's own hold on Monaco.
@@ -37,7 +38,7 @@ let ready: Promise<Monaco> | undefined
 /** Monaco, from this origin: the same loader and the same files the shared editor uses. */
 export function loadMonaco(): Promise<Monaco> {
   if (!ready) {
-    loader.config({ paths: { vs: `${window.location.origin}/monaco/vs` } })
+    loader.config({ paths: { vs: `${window.location.origin}${MONACO_VS}` } })
     ready = loader.init() as Promise<Monaco>
   }
   return ready
