@@ -75,11 +75,13 @@ async function mockShell(page: Page, shell: Shell = {}) {
 }
 
 const state = (page: Page) => page.locator("[data-slot=empty-state]")
+/** The screen for a thing that is not there (`MissingThing`): Docker's, here. */
+const missing = (page: Page) => page.locator("[data-slot=missing-thing]")
 
-/** The block is centred in the page's column and does not push it sideways. */
-async function expectHeld(page: Page, width: number) {
+/** The block is inside the page's column and does not push it sideways. */
+async function expectHeld(page: Page, width: number, block = state(page)) {
   await risen(page)
-  const box = await state(page).boundingBox()
+  const box = await block.boundingBox()
   expect(box).not.toBeNull()
   expect(box!.x).toBeGreaterThanOrEqual(0)
   expect(box!.x + box!.width).toBeLessThanOrEqual(width)
@@ -110,22 +112,22 @@ for (const width of [1280, 390]) {
       },
     })
     await page.goto("/docker")
-    await expect(state(page)).toContainText("Docker is stopped")
-    await expect(state(page)).toContainText(
+    await expect(missing(page)).toContainText("Docker is stopped")
+    await expect(missing(page)).toContainText(
       "docker.service is inactive on this server, so nothing answers at /var/run/docker.sock.",
     )
     // The client's question is one press away, not the description.
-    await expect(state(page).getByText(refusedConnection)).toBeHidden()
-    await state(page).getByText("What the server said").click()
-    await expect(state(page).getByText(refusedConnection)).toBeVisible()
-    await expect(state(page).getByRole("link", { name: "Service details" })).toHaveAttribute(
+    await expect(missing(page).getByText(refusedConnection)).toBeHidden()
+    await missing(page).getByText("What the server said").click()
+    await expect(missing(page).getByText(refusedConnection)).toBeVisible()
+    await expect(missing(page).getByRole("link", { name: "Service details" })).toHaveAttribute(
       "href",
       "/processes/services/docker.service",
     )
-    await expectHeld(page, width)
+    await expectHeld(page, width, missing(page))
     await page.screenshot({ path: testInfo.outputPath(`docker-stopped-${width}.png`) })
 
-    await state(page).getByRole("button", { name: "Start Docker" }).click()
+    await missing(page).getByRole("button", { name: "Start Docker" }).click()
     await expect
       .poll(() => posts.map((post) => post.path))
       .toContain("/systemd/docker.service/start")
@@ -145,13 +147,13 @@ for (const width of [1280, 390]) {
       }),
     })
     await page.goto("/docker")
-    await expect(state(page)).toContainText("The dashboard may not open Docker's socket")
-    await expect(state(page)).toContainText("/var/run/docker.sock is there and refused")
-    await expect(state(page)).toContainText("docker")
+    await expect(missing(page)).toContainText("The dashboard may not open Docker's socket")
+    await expect(missing(page)).toContainText("/var/run/docker.sock is there and refused")
+    await expect(missing(page)).toContainText("docker")
     // Starting a daemon that runs would fix nothing.
-    await expect(state(page).getByRole("button", { name: "Start Docker" })).toHaveCount(0)
-    await expect(state(page).getByRole("button", { name: "Check again" })).toBeVisible()
-    await expectHeld(page, width)
+    await expect(missing(page).getByRole("button", { name: "Start Docker" })).toHaveCount(0)
+    await expect(missing(page).getByRole("button", { name: "Check again" })).toBeVisible()
+    await expectHeld(page, width, missing(page))
     await page.screenshot({ path: testInfo.outputPath(`docker-refused-${width}.png`) })
   })
 }
@@ -166,9 +168,9 @@ test("a daemon that runs but does not answer is at another address", async ({ pa
     unit: () => dockerUnit("active"),
   })
   await page.goto("/docker")
-  await expect(state(page)).toContainText("Docker is running, but not where the dashboard asks")
-  await expect(state(page)).toContainText("JD_DOCKER_HOST")
-  await expect(state(page).getByRole("button", { name: "Start Docker" })).toHaveCount(0)
+  await expect(missing(page)).toContainText("Docker is running, but not where the dashboard asks")
+  await expect(missing(page)).toContainText("JD_DOCKER_HOST")
+  await expect(missing(page).getByRole("button", { name: "Start Docker" })).toHaveCount(0)
 })
 
 test("where systemd cannot be asked the block claims neither, and offers no start", async ({
@@ -183,9 +185,9 @@ test("where systemd cannot be asked the block claims neither, and offers no star
     unit: () => 503,
   })
   await page.goto("/docker")
-  await expect(state(page)).toContainText("Docker is not answering")
-  await expect(state(page).getByRole("button", { name: "Start Docker" })).toHaveCount(0)
-  await expect(state(page).getByRole("button", { name: "Check again" })).toBeVisible()
+  await expect(missing(page)).toContainText("Docker is not answering")
+  await expect(missing(page).getByRole("button", { name: "Start Docker" })).toHaveCount(0)
+  await expect(missing(page).getByRole("button", { name: "Check again" })).toBeVisible()
 })
 
 test("an account that may not control services is told, and not offered a start", async ({
@@ -201,8 +203,8 @@ test("an account that may not control services is told, and not offered a start"
     unit: () => dockerUnit("failed"),
   })
   await page.goto("/docker")
-  await expect(state(page)).toContainText("docker.service is failed on this server")
-  await expect(state(page).getByRole("button", { name: "Start Docker" })).toHaveCount(0)
+  await expect(missing(page)).toContainText("docker.service is failed on this server")
+  await expect(missing(page).getByRole("button", { name: "Start Docker" })).toHaveCount(0)
 })
 
 test("a ping the dashboard could not ask is its own failure, not a reading of Docker", async ({
@@ -221,7 +223,7 @@ test("a ping the dashboard could not ask is its own failure, not a reading of Do
   await page.goto("/docker")
   const failure = page.getByRole("alert").filter({ hasText: "backend restarting" })
   await expect(failure).toBeVisible()
-  await expect(state(page)).toHaveCount(0)
+  await expect(missing(page)).toHaveCount(0)
   failing = false
   await failure.getByRole("button", { name: "Try again" }).click()
   await expect(failure).toHaveCount(0)
