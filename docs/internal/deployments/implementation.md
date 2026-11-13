@@ -1286,7 +1286,7 @@ only renderer/executor/validation authority for their feature.
   `step_timeout`; only a cancelled context is a cancellation. The signature table and fixes are listed
   in [the recipe contract](recipes.md#failure-diagnosis).
 - A run that failed or rolled back can be asked about, on request only, of the provider an
-  administrator set up for the assistant ([the editor's assistant](../backend/databases-proxy-platform.md#the-editors-assistant)):
+  administrator set up for the assistant ([the assistant's providers](operator.md#providers)):
   `POST /deploy/{id}/runs/{run}/diagnosis` (`service.control`, the assistant's own capability, and the
   install's one budget of model calls and four answers at once; `api/handlers_deploy_diagnosis.go`).
   What is sent is decided in `deploy/run_diagnosis.go` and is what the run's page already shows any
@@ -1324,16 +1324,15 @@ only renderer/executor/validation authority for their feature.
   Nothing the answer says is applied. The live check against a real model is
   `TestLiveFailedBuildIsDiagnosedByARealModel` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
 - A deployment's environment can be asked about as a conversation from the overview's **Diagnose**:
-  `POST /deploy/{id}/assistant` (`service.control` and a session; `api/handlers_deploy_operator.go`,
-  the tools and prompt in `assistant/operator.go`). The same provider and budget answer it; it begins
+  `POST /deploy/{id}/assistant` (`service.control` and a session; `api/handlers_assistant_turn.go`,
+  the deployment's reads in `api/handlers_deploy_operator.go` and `assistant/operator.go`). The same
+  provider and budget answer it; it begins
   knowing what the overview shows and reads more — runs, a run's transcript, the live containers' last
   lines, usage and the sizing verdict, container events, host alerts (`system.admin`), the firewall's
-  rules for the deployment's ports, pending security updates — only through tools whose every call the
-  person allows or declines first, each bounded, read with the person's role and masked by the
-  diagnosis's masker. It proposes a restart, redeploy, rollback, instant rollback, the suggested
-  limits or a maintenance switch through `propose_action`, which runs nothing: the page draws a card,
-  and its press is the request the project's own button makes to that action's route, with its
-  capability, confirmation and audit. See [the deployment operator](operator.md).
+  rules for the deployment's ports, pending security updates, the source — through bounded tools read
+  with the person's role, and acts through the dashboard's own routes as the person, held by the mode
+  they chose; what it reads is masked before the provider sees it. See
+  [the deployment operator](operator.md).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
   rollback clone only available immutable artifacts and traverse the same checks/cutover path (a clone
   carries its target's own source identity and promotion provenance; a rollback moves no data, and the
@@ -1557,8 +1556,7 @@ only renderer/executor/validation authority for their feature.
   that merely moved on still holds it as an ancestor and the release builds it) each carry a fixed
   sentence as `SourceFailure`, which unwraps to `ErrSourceUnavailable`. The API answers them `502` with
   the code; the run's `acquire_source` step and terminal code carry it; the watcher records it as its
-  cursor reason, which the header's auto-deploy reading and the diagnosis (`auto_deploy_stopped`,
-  linking to the source settings or Credentials) name. The resolved revision and, when given, the
+  cursor reason, which the header's auto-deploy reading names. The resolved revision and, when given, the
   requested ref name are recorded as `{"requestedRevision", "requestedRef"}` in the run's metadata so
   the UI can say "Deploy of v1.4.2". This never touches `deploy_git_watches`: that cursor is written
   only by the watcher's own poll/webhook path, so a manual deploy of an older commit cannot make the
@@ -2642,8 +2640,8 @@ project) listing the open requests with the preview built from each — its addr
 reachable, its state in the words `lib/pull-requests.ts` decides, "Out of date" when the head moved — then
 the previews whose request is no longer open, with **Test this pull request** / **Update preview**
 (held while the preview is Ready at this commit, Building, Closing or its cleanup failed, `previewHeld`),
-**Merge** (its detail promises the preview's close only when one is open and a redeploy only when
-auto-deploy is on, `mergeDetail`), **Close preview** and **Retry cleanup** (for a `preview_remove` run
+**Merge** (its toast says the preview is closing only when one was open and that production redeploys
+only when auto-deploy is on), **Close preview** and **Retry cleanup** (for a `preview_remove` run
 that ended short of success, cancelled and superseded included) as the row's verbs
 (`pull-request-verbs.tsx` for the Overview; the Git page's strip and workspace draw the same verbs under
 the same readings from `lib/pull-requests.ts`) and a link to the checkout on the Git page when one is
