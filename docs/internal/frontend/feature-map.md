@@ -1110,10 +1110,11 @@ without advice or recommended values
 
 ### `/network/*`
 
-Nineteen reporting pages: topology/overview, interfaces/namespaces, IPv4/IPv6 routes and policy
+Eighteen reporting pages: topology/overview, interfaces/namespaces, IPv4/IPv6 routes and policy
 rules, monitored egress groups, firewall, gateway/NAT, protections/blocklists,
 WireGuard/Tailscale/Headscale, resolver/hosts/lookup and private retained native DNS policy/trust
-evidence, traffic/shaping/eBPF, connections and tools. Connection path adds source/container
+evidence, traffic/shaping/eBPF, connections and tools. Connection path (a tool of the Tools
+workbench since 0.8.7; `/network/investigate` redirects to it) adds source/container
 evidence with explicit basis and scope, the native nginx stream on the destination port as observed
 evidence with the backend leg nginx logged for a measured connection, and each forwarding site's
 service policy; Saved runs adds bounded durable lifecycle, retention, export and compatible

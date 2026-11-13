@@ -1,7 +1,8 @@
 # Connection path investigator
 
-The administrator-only `/network/investigate` page explains one source, destination, address family,
-protocol and port. `GET /api/v1/network/investigate/sources` supplies running-container names and full
+The administrator-only Connection path tool of the Tools workbench (`/network/tools?tool=path`; the
+older `/network/investigate` address redirects to it with its query) explains one source, destination,
+address family, protocol and port. `GET /api/v1/network/investigate/sources` supplies running-container names and full
 inventory IDs. `POST /api/v1/network/investigate` validates a closed typed tuple, audits
 `network.path.investigate`, and collects bounded evidence for DNS → policy rules → kernel route →
 firewall → NAT → tunnel/interface → proxy → destination owner → optional TCP connection measurement.
@@ -89,8 +90,8 @@ another status; earlier backends a retried session tried are listed. Without a m
 that did not connect, or with nothing logged in time, no backend leg is claimed. Both items link to the
 stream (`/proxy/streams?stream=<name>`). The Streams page's **Trace in Network** verb (TCP streams,
 administrators) opens `/network/investigate?target=&port=&protocol=&family=&measure=` on the stream's
-own address (loopback for a wildcard), and the investigator takes only values its form could have
-produced (`pathDraftFromQuery`). `GET /proxy/streams/{name}/path` serves the same reading to any
+own address (loopback for a wildcard), which lands on the tool with the same query, and the
+investigator takes only values its form could have produced (`pathDraftFromQuery`). `GET /proxy/streams/{name}/path` serves the same reading to any
 signed-in account, as the stream's sessions and traffic are. Tests: `TestStreamPathJoinsConfigurationSocketsAndLog`,
 `TestStreamPathSaysWhatItCannotCount`, `TestAwaitStreamSessionFindsTheMeasuredConnection`,
 `TestStreamListenerJoinsTheStreamAndItsBackendLeg`, `TestStreamBackendLegIsOnlyClaimedFromTheLog`, and
