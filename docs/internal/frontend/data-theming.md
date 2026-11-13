@@ -358,9 +358,9 @@ are dated evidence, not proof of current attachment ownership.
   refreshing, and changing tables require a fresh selection. A staged change set is scoped to one
   connection and table (`useChangeSet({ scope })` in `database/grid/change-set.ts`): leaving the table
   takes the set and its undo history with it, and the page asks before a dirty one is left. Exact
-  integer/decimal SQL values and Redis scan cursors travel as strings; `lib/db-values.ts` preserves
-  precision and rejects non-finite ordinary numeric input, the grid computes on them as strings
-  (`database/grid/decimal.ts`), and a JSON value is laid out and compared as text, token by token,
+  integer/decimal SQL values and Redis scan cursors travel as strings; the grid's cell parser keeps
+  them exact and refuses a float outside the finite range (`database/grid/values.ts`), the grid
+  computes on them as strings (`database/grid/decimal.ts`), and a JSON value is laid out and compared as text, token by token,
   never through `JSON.parse`, so a `9007199254740993` goes back as it came. NULL is never drawn or
   written as an empty string. CSV exports escape column names and carriage returns with the same
   rules as cell values.

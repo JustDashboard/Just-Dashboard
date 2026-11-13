@@ -234,13 +234,13 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
 - **Compose.** `RunComposeStream` forwards output line by line, because a request that hangs for minutes
   is indistinguishable from a broken dashboard. `composeSteps` maps actions to commands; `update` is a
   pull **then** an up, so a registry that is down leaves the running stack alone. `ValidateCompose` feeds
-  the candidate to the parser on **stdin** so a syntax error never touches disk; `WriteComposeFile` goes
-  through a temp file in the same directory and keeps `<name>.bak`, guarding what validation cannot catch
-  — a correct file that says the wrong thing. `DeclaredServices` costs a subprocess per stack and is read
+  the candidate to the parser on **stdin** so a syntax error never touches disk;
+  `WriteComposeFileChecked` goes through a temp file in the same directory and keeps `<name>.bak`,
+  guarding what validation cannot catch — a correct file that says the wrong thing. `DeclaredServices` costs a subprocess per stack and is read
   on demand for administrators; other users receive the static declared-service list from discovery.
   Compose config reads return a SHA-256 `revision`, and config saves may carry
   `expectedRevision`. The editor retains that revision with a draft across view changes; a forced
-  save of invalid YAML still checks it. `WriteComposeFileChecked` shares the Files path lock,
+  save of invalid YAML still checks it. The write shares the Files path lock,
   compares the current bytes before staging and again before replacement, and refuses stale saves
   with `409 content_conflict`. A stale save does not update the source or its backup. A failure to
   write the backup also refuses replacement. The editor keeps the draft and offers **Review current
