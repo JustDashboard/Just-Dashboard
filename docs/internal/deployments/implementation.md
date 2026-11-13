@@ -1628,10 +1628,10 @@ only renderer/executor/validation authority for their feature.
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/
   path policy applies to polling and provider/generic hooks; manual and rollback runs are not path-filtered.
-  `POST …/watch-paths/simulate` (`system.admin`, session; `{changedPaths, include, exclude}` →
-  `{matched}`, audited `deploy.trigger.test`) answers whether those paths would start a run, through the
-  same `deploy.MatchWatchPaths` the watcher and hooks use; Automation's `TryAChange`
-  (`settings/automation/webhooks.tsx`) asks it.
+  `POST …/watch-paths/simulate` (`system.admin`, session or deploy key; `{changedPaths, include,
+  exclude}` → `{matched}`, audited `deploy.trigger.test`) answers whether those paths would start a
+  run under those patterns, through the same `deploy.MatchWatchPaths` the watcher and hooks use;
+  Automation's `TryAChange` (`settings/automation/webhooks.tsx`) asks it.
   `GET …/triggers/{trigger}/deliveries` (`system.admin`, session or deploy key) reads the last 50 `deploy_webhook_deliveries`
   rows for a trigger — delivery id, event, ref, decision, reason, run id, received at — or `?limit=` of
   them, 1 to 200 (anything else reads 50), and
