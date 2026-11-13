@@ -3745,6 +3745,37 @@ what took their place (`components/network/drift/`):
   as a chain, a link amber where the later one has fallen behind. **The repair plan** is cards you
   pick, lit (§16), and the review shows each change as a diff of its before and after.
 
+**Egress groups became a list and a page in 0.8.7** (2026-11-13), in the run that brought the older
+pages to the deploy pages' look. The page had never had a design pass: four grey tiles (groups,
+carrying traffic, automated, members proven) over every group laid out in full, about a thousand
+pixels each, under a row of six equal buttons and a switch. Where each went
+(`components/network/egress/`):
+
+- **The list** (`egress-list.tsx`) opens on `HostIdentity` laid out as a project's header: the four
+  figures are its facts, whether any member is down is its state, **New group** its one command. A
+  group is a `ChoiceRow`: its mark with the carrying state in the corner, its name over
+  "sticky · 2 members", the carrying member in that state's colour, how it switches, and its verbs
+  in the `⋯`. One height whatever the group holds; a running simulation replaces the automation
+  word and lights the card's edge.
+- **A group's page** (`egress-page.tsx`, `/network/egress/[name]`) is the process page's shape: the
+  way back, the identity line with the carrying member as the state, **Run simulation** as the
+  command and fail over, fail back, enable or disable, automation, edit and remove in the menu
+  (`egress-verbs.tsx`, shared with the list's cards, each confirmation as it was), then the views
+  as an underlined strip with `?tab=` in the address, and from `xl` the list as a rail with Alt+↑
+  and Alt+↓. An account sees only the verbs it can use.
+- **The picture** (`egress-picture.tsx`) is a `WireFlow`: the selected traffic, the group, its
+  members by tier, each drawn as what carries it (a tunnel's product, else a router). Only the
+  carrying member's wire moves, and only while the group is on; a member that is down is dashed,
+  red where it is the one carrying. Every node says the same number of lines, and the loading
+  picture is drawn from the same nodes in grey, so the views under it do not move when a group of
+  two members lands.
+- **Members** stays a framed table, because its rows are read down their columns (state, round
+  trip, loss, the strip of recent samples), one line a member. The second line of each row and the
+  sixth column (path, tier, mark, table, probe source) were a member's fixed identity rather than
+  readings: they are the **Bound to** list under it, with **How it decides** (probes, thresholds,
+  holds, connections, protected addresses), which only the form showed before. What the rules would
+  do now (`advice`) is a notice above the table when they would act.
+
 **A container's page took the Overview's line in 0.7.1** (2026-10-08), at the operator's request,
 because it was the page with no life: a strip of four grey label-and-value pairs (container, image,
 id, compose stack) over a filled tab list, and an Overview of three columns of grey fields, a run
