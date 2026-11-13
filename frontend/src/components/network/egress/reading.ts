@@ -6,6 +6,7 @@ import {
   type EgressGroup,
   type EgressMemberView,
   type EgressPolicy,
+  type EgressSimulation,
 } from "@/lib/network-egress"
 
 /**
@@ -48,22 +49,55 @@ export function egressRowLine(group: Pick<EgressGroup, "sticky" | "members" | "f
   return parts.join(" · ")
 }
 
-/** What the policy selects, short enough for a fact or a node. */
-export function egressPolicyShort(policy: EgressPolicy): { title: string; hint?: string } {
+export type PolicyWords = {
+  /** The picture's node: what is selected, in a few characters. */
+  title: string
+  /** The line under it; always one, so the node keeps its height. */
+  hint: string
+  /** The title is an address, a mark or a device: drawn in mono. */
+  mono: boolean
+}
+
+/**
+ * What the policy selects, short enough for the picture's node: about twenty
+ * characters beside the rail.
+ */
+export function egressPolicyShort(policy: EgressPolicy): PolicyWords {
   switch (policy.kind) {
     case "all":
-      return { title: "All outbound traffic", hint: "what the main table sends to its default" }
-    case "selector":
-      return policy.from
-        ? { title: `From ${policy.from}`, hint: policy.to ? `to ${policy.to}` : "to anywhere" }
-        : { title: `To ${policy.to ?? "anywhere"}` }
-    case "rule":
-      return policy.fwmark
-        ? {
-            title: `Marked ${policy.fwmark}`,
-            hint: policy.iif ? `arriving on ${policy.iif}` : undefined,
-          }
-        : { title: `Arriving on ${policy.iif ?? "any device"}` }
+      return {
+        title: "All traffic",
+        hint: "to the default route",
+        mono: false,
+      }
+    case "selector": {
+      const from = policy.from
+      const to = policy.to
+      if (from)
+        return {
+          title: from,
+          hint: to ? `to ${to}` : "as the source",
+          mono: true,
+        }
+      return {
+        title: to ?? "anywhere",
+        hint: "as the destination",
+        mono: true,
+      }
+    }
+    case "rule": {
+      if (policy.fwmark)
+        return {
+          title: `mark ${policy.fwmark}`,
+          hint: policy.iif ? `arriving on ${policy.iif}` : "set by the firewall",
+          mono: true,
+        }
+      return {
+        title: policy.iif ?? "any device",
+        hint: "arriving on this device",
+        mono: true,
+      }
+    }
   }
 }
 
@@ -98,11 +132,43 @@ export function egressAutomationWord(group: Pick<EgressGroup, "automation" | "en
   return group.automation ? "Automatic" : "By hand"
 }
 
-/** A member's own state, in the words the picture and the table say. */
-export function egressMemberState(member: EgressMemberView): { label: string; tone: Tone } {
+/**
+ * The last simulation as a fact on the identity line: short, because the
+ * line is one line, and saying which configuration it was for.
+ */
+export function egressSimulationFact(
+  sim: Pick<EgressSimulation, "status" | "fingerprint"> | undefined,
+  fingerprint: string,
+): string {
+  if (!sim) return "not simulated"
+  switch (sim.status) {
+    case "running":
+      return "simulating"
+    case "passed":
+      return sim.fingerprint === fingerprint ? "simulation passed" : "simulation out of date"
+    case "failed":
+      return "simulation failed"
+    case "interrupted":
+      return "simulation interrupted"
+    default:
+      return "simulation incomplete"
+  }
+}
+
+/**
+ * A member's part in its group, in the picture's words. The member a group
+ * has decided on carries nothing while the group is off, so it is not said
+ * to: the old page tagged it "carrying" under "Not carrying traffic".
+ */
+export function egressMemberState(
+  group: Pick<EgressGroup, "enabled">,
+  member: EgressMemberView,
+): { label: string; tone: Tone } {
   if (member.state === "down") return { label: "Down", tone: "danger" }
-  if (member.state === "up" && member.proven)
-    return { label: member.active ? "Carrying" : "Standby", tone: "success" }
+  if (member.state === "up" && member.proven) {
+    if (!member.active) return { label: "Standby", tone: "success" }
+    return { label: group.enabled ? "Carrying" : "Would carry", tone: "success" }
+  }
   if (member.state === "up") return { label: "Up, evidence stale", tone: "warning" }
   return { label: "Measuring", tone: "default" }
 }

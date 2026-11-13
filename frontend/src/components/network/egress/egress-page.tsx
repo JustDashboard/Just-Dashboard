@@ -4,7 +4,6 @@ import { useCallback, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
-import { relativeTime } from "@/lib/format"
 import {
   egressDraftFromGroup,
   egressSimulationReading,
@@ -40,12 +39,11 @@ import { useEgressVerbs } from "@/components/network/egress/egress-verbs"
 import { DOT, EgressMark } from "@/components/network/egress/marks"
 import {
   EGRESS_TABS,
-  egressAutomationWord,
   egressCarrying,
   egressHref,
   egressNameOf,
-  egressPolicyShort,
   egressSibling,
+  egressSimulationFact,
   findEgressGroup,
   type EgressTab,
 } from "@/components/network/egress/reading"
@@ -206,18 +204,18 @@ export function EgressGroupPage() {
 /** The page's final shape before the read lands: the line, the picture and the strip. */
 function Loading({ name }: { name: string }) {
   return (
-    <div aria-busy className="flex min-w-0 flex-col gap-6">
+    <>
       <HostIdentity
         slot="egress-group-header"
-        logo={<span className="flex size-10 shrink-0 rounded-lg border bg-card" aria-hidden />}
+        fallback={Lifebuoy}
         title={name}
         state={<Status tone="unknown" label="Reading" />}
         facts={<TextShimmer>Reading the group…</TextShimmer>}
       />
-      <EgressPicture links={[]} loading />
+      <EgressPicture links={[]} />
       <div className="h-10 border-b border-hairline" />
       <LoadingRows rows={3} />
-    </div>
+    </>
   )
 }
 
@@ -246,7 +244,6 @@ function GroupMain({
     onRemoved: () => router.push("/network/egress"),
   })
   const carrying = egressCarrying(group)
-  const policy = egressPolicyShort(group.policy)
   const sim = egressSimulationReading(group.lastSimulation, group.fingerprint)
   const running = simulating ? view.running : undefined
 
@@ -288,32 +285,15 @@ function GroupMain({
         menu={verbs.length > 0 && <VerbMenu verbs={verbs} label="Group actions" />}
         facts={
           <>
-            <span className="min-w-0 truncate font-mono" title={policy.hint}>
-              {policy.title}
-            </span>
-            <FactDot />
-            <span>
-              {group.enabled
-                ? group.automation
-                  ? "switches automatically"
-                  : "switches by hand"
-                : egressAutomationWord(group).toLowerCase()}
-            </span>
-            <FactDot />
-            <span className={cn(sim.tone === "danger" && "text-destructive")}>
-              {sim.label === "Not simulated"
-                ? "not simulated"
-                : `simulation ${sim.label.toLowerCase()}`}
-            </span>
-            {group.decidedAt && (
+            {group.enabled && (
               <>
+                <span>{group.automation ? "automatic" : "switches by hand"}</span>
                 <FactDot />
-                <span title={new Date(group.decidedAt).toLocaleString()}>
-                  decided {relativeTime(group.decidedAt)}
-                  {group.decidedBy ? ` by ${group.decidedBy}` : ""}
-                </span>
               </>
             )}
+            <span className={cn(sim.tone === "danger" && "text-destructive")} title={sim.label}>
+              {egressSimulationFact(group.lastSimulation, group.fingerprint)}
+            </span>
             {group.runtime?.status === "verified" && (
               <>
                 <FactDot />
@@ -338,9 +318,6 @@ function GroupMain({
             ? `Missing: ${group.runtime.missing?.join(", ")}.`
             : group.runtime.error}
         </Notice>
-      )}
-      {group.automationBlock && !group.automation && (
-        <p className="-mt-2 text-hint text-muted-foreground">{group.automationBlock}</p>
       )}
 
       <EgressPicture group={group} links={links} />

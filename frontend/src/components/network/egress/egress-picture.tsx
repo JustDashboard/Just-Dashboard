@@ -1,9 +1,10 @@
 "use client"
 
-import { egressDuration, type EgressGroup } from "@/lib/network-egress"
+import { relativeTime } from "@/lib/format"
+import { egressPolicySummary, type EgressGroup, type EgressMemberView } from "@/lib/network-egress"
 import type { NetworkLink } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { Filter, Globe, Route } from "@/components/icons"
+import { Filter, Globe, Lifebuoy } from "@/components/icons"
 import { WireMark } from "@/components/deploy/wire"
 import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
 import { MemberGlyph, TONE_TEXT } from "@/components/network/egress/marks"
@@ -15,6 +16,9 @@ import {
   egressTrafficLine,
 } from "@/components/network/egress/reading"
 
+/** Room under the group's mark for its three lines, which hang below it wide. */
+const HUB = "lg:py-16"
+
 /**
  * What a group does, in the wiring every Network picture speaks: the traffic
  * its policy selects on the left, the group in the middle, its members on the
@@ -24,30 +28,19 @@ import {
  * wire of a group that is off, is configured but idle.
  *
  * Each member is drawn as what carries it — the tunnel's product, or a router
- * for a gateway — with its tier, its path and its last round trip, so the
- * picture alone answers "which way does this traffic leave, and is the other
- * way healthy".
+ * for a gateway — with its tier, its state and last round trip, and its path,
+ * so the picture alone answers "which way does this traffic leave, and is the
+ * other way healthy".
+ *
+ * Every node says the same number of lines whatever it holds, and the
+ * loading picture is drawn from the same nodes with grey where the words
+ * will be (`WireFlow`'s own `loading` gives a node one line of detail, and
+ * these have two), so a group of two members lands without moving the views
+ * under it.
  */
-export function EgressPicture({
-  group,
-  links,
-  loading,
-}: {
-  group?: EgressGroup
-  links: NetworkLink[]
-  loading?: boolean
-}) {
-  if (!group || loading)
-    return (
-      <WireFlow
-        loading
-        start={{ title: "Selected traffic", nodes: [], loadingRows: 1 }}
-        hub={{ mark: <GroupMark />, eyebrow: "Group" }}
-        end={{ title: "Members", nodes: [], loadingRows: 2 }}
-      />
-    )
+export function EgressPicture({ group, links }: { group?: EgressGroup; links: NetworkLink[] }) {
+  if (!group) return <LoadingPicture />
   const policy = egressPolicyShort(group.policy)
-  const exceptions = group.protected?.length ?? 0
   const traffic: WireFlowNode = {
     id: "traffic",
     mark: (
@@ -55,72 +48,48 @@ export function EgressPicture({
         {group.policy.kind === "all" ? <Globe aria-hidden /> : <Filter aria-hidden />}
       </WireMark>
     ),
-    eyebrow: "Selected traffic",
-    title: <span className="block truncate font-mono">{policy.title}</span>,
-    name: policy.title,
-    hint: (
-      <>
-        {policy.hint && <span className="block truncate">{policy.hint}</span>}
-        {exceptions > 0 && (
-          <span className="block truncate" title={group.protected?.join(", ")}>
-            except {exceptions === 1 ? group.protected![0] : `${exceptions} protected addresses`}
-          </span>
-        )}
-      </>
+    // The stacked picture heads the column with the same words.
+    eyebrow: <span className="max-lg:hidden">Selected traffic</span>,
+    title: (
+      <span
+        className={cn("block truncate", policy.mono && "font-mono")}
+        title={egressPolicySummary(group.policy)}
+      >
+        {policy.title}
+      </span>
     ),
+    name: policy.title,
+    hint: <span className="block truncate">{policy.hint}</span>,
     line: egressTrafficLine(group),
   }
-  const members: WireFlowNode[] = [...group.members]
+  const members = [...group.members]
     .sort((a, b) => a.priority - b.priority || a.id - b.id)
-    .map((m) => {
-      const state = egressMemberState(m)
-      const rtt = m.last?.latencyMillis
-      return {
-        id: `member:${m.id}`,
-        mark: (
-          <WireMark
-            size="md"
-            shape="square"
-            tone={m.state === "down" ? "danger" : m.active && group.enabled ? "success" : "logo"}
-          >
-            <MemberGlyph member={m} links={links} />
-          </WireMark>
-        ),
-        eyebrow: `Tier ${m.priority}${m.weight > 1 ? ` · weight ${m.weight}` : ""}`,
-        title: <span className="block truncate">{m.name}</span>,
-        name: m.name,
-        hint: (
-          <>
-            <span className={cn("block truncate", TONE_TEXT[state.tone])}>
-              {state.label}
-              {m.state === "down" && m.last?.why
-                ? ` · ${m.last.why}`
-                : rtt !== undefined
-                  ? ` · ${rtt.toFixed(1)} ms`
-                  : ""}
-            </span>
-            <span className="block truncate font-mono">{egressPath(m)}</span>
-          </>
-        ),
-        line: egressMemberLine(group, m),
+    .map((m) => memberNode(group, m, links))
+  // When the members it routes through were last decided, and by whom: the
+  // monitor, or the account that switched it by hand.
+  const decided = group.decidedAt
+    ? {
+        words: `decided ${relativeTime(group.decidedAt)}`,
+        title: `${new Date(group.decidedAt).toLocaleString()}${group.decidedBy ? ` by ${group.decidedBy}` : ""}`,
       }
-    })
+    : undefined
   return (
     <WireFlow
       className="animate-rise"
       start={{ title: "Selected traffic", nodes: [traffic] }}
       hub={{
+        className: HUB,
         mark: <GroupMark />,
         eyebrow: `Group table ${group.table}`,
         title: <span className="block truncate">{group.name}</span>,
         hint: (
           <>
-            <span className="block">
+            <span className="block truncate">
               {group.sticky ? "sticky" : "not sticky"} · fails back{" "}
               {group.failback === "automatic" ? "on its own" : "by hand"}
             </span>
-            <span className="block">
-              probed every {egressDuration(group.thresholds.intervalSeconds)}
+            <span className="block truncate" title={decided?.title}>
+              {decided?.words ?? "nothing decided yet"}
             </span>
           </>
         ),
@@ -130,10 +99,113 @@ export function EgressPicture({
   )
 }
 
+function memberNode(group: EgressGroup, m: EgressMemberView, links: NetworkLink[]): WireFlowNode {
+  const state = egressMemberState(group, m)
+  const rtt = m.last?.latencyMillis
+  const detail =
+    m.state === "down" && m.last?.why
+      ? ` · ${m.last.why}`
+      : rtt !== undefined
+        ? ` · ${rtt.toFixed(1)} ms`
+        : ""
+  return {
+    id: `member:${m.id}`,
+    mark: (
+      <WireMark
+        size="md"
+        shape="square"
+        tone={m.state === "down" ? "danger" : m.active && group.enabled ? "success" : "logo"}
+      >
+        <MemberGlyph member={m} links={links} />
+      </WireMark>
+    ),
+    eyebrow: `Tier ${m.priority}${m.weight > 1 ? ` · weight ${m.weight}` : ""}`,
+    title: <span className="block truncate">{m.name}</span>,
+    name: m.name,
+    hint: (
+      <>
+        <span
+          className={cn("block truncate", TONE_TEXT[state.tone])}
+          title={`${state.label}${detail}`}
+        >
+          {state.label}
+          {detail}
+        </span>
+        <span className="block truncate font-mono">{egressPath(m)}</span>
+      </>
+    ),
+    line: egressMemberLine(group, m),
+  }
+}
+
 function GroupMark() {
   return (
     <WireMark tone="brand" size="lg" shape="square">
-      <Route aria-hidden />
+      <Lifebuoy aria-hidden />
     </WireMark>
+  )
+}
+
+/** A line of words not read yet: grey, at the height the words will take. */
+function Bone({ className }: { className?: string }) {
+  return (
+    <span className="block">
+      <span
+        className={cn(
+          "inline-block h-2.5 animate-pulse rounded-md bg-muted align-middle",
+          className,
+        )}
+      />
+    </span>
+  )
+}
+
+function loadingNode(id: string, eyebrow: React.ReactNode, lines: number): WireFlowNode {
+  return {
+    id,
+    // No pointing at a node that is not there yet.
+    placeholder: true,
+    mark: <span className="block size-11 animate-pulse rounded-xl bg-muted" />,
+    eyebrow,
+    title: <Bone className="w-24" />,
+    hint: (
+      <>
+        <Bone className="w-28" />
+        {lines > 1 && <Bone className="w-20" />}
+      </>
+    ),
+    line: { state: "up" },
+  }
+}
+
+/** The picture's final shape before the group is read: one selection, the group, two members. */
+function LoadingPicture() {
+  return (
+    <div aria-busy aria-label="Reading the group">
+      <WireFlow
+        start={{
+          title: "Selected traffic",
+          nodes: [
+            loadingNode("traffic", <span className="max-lg:hidden">Selected traffic</span>, 1),
+          ],
+        }}
+        hub={{
+          className: HUB,
+          mark: <GroupMark />,
+          eyebrow: "Group table",
+          title: <Bone className="w-24" />,
+          hint: (
+            <>
+              <Bone className="w-32" />
+              <Bone className="w-24" />
+            </>
+          ),
+        }}
+        end={{
+          title: "Members",
+          nodes: [loadingNode("member:1", "Tier 1", 2), loadingNode("member:2", "Tier 2", 2)],
+        }}
+      />
+    </div>
   )
 }

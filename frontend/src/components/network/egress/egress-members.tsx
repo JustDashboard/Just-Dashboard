@@ -3,6 +3,8 @@
 import { cn } from "@/lib/utils"
 import {
   egressDuration,
+  egressHop,
+  egressMemberReading,
   type EgressGroup,
   type EgressMemberView,
   type EgressPoint,
@@ -20,16 +22,21 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { DOT } from "@/components/network/egress/marks"
-import { egressAdvice, egressMemberState, egressPath } from "@/components/network/egress/reading"
+import { egressAdvice } from "@/components/network/egress/reading"
 
 /** The strip holds at most this many samples, however long the loss window. */
 const STRIP = 30
 
 /**
  * The Members view: every member measured through its own mark, source and
- * device, read down its columns — the state, the round trip, the loss, the
- * last samples and what it is bound to — one line a member. What the rules
- * would do now, readiness, and how the group decides follow it.
+ * device, read down its columns — the state, the round trip, the loss and
+ * the last samples — one line a member. What the rules would do now,
+ * readiness, what each member is bound to and how the group decides follow.
+ *
+ * The table had a sixth column, the mark, table and probe source, under a
+ * second line of path and tier in the first: two lines a row, and cut off at
+ * Round trip on a phone. Those are a member's fixed identity, not a reading
+ * compared down the page, so they are the list under the table.
  */
 export function EgressMembers({ group }: { group: EgressGroup }) {
   const advice = egressAdvice(group, group.advice)
@@ -60,7 +67,6 @@ export function EgressMembers({ group }: { group: EgressGroup }) {
                   <TableHead className="text-right">Round trip</TableHead>
                   <TableHead className="text-right">Loss</TableHead>
                   <TableHead>Last {samples} samples</TableHead>
-                  <TableHead>Bound to</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -81,6 +87,7 @@ export function EgressMembers({ group }: { group: EgressGroup }) {
         </PanelBody>
       </Panel>
       <Readiness group={group} />
+      <Bindings group={group} />
       <HowItDecides group={group} />
     </div>
   )
@@ -96,10 +103,6 @@ function why(member: EgressMemberView): string | undefined {
     : undefined
 }
 
-function bound(member: EgressMemberView) {
-  return `mark ${member.mark} · table ${member.table}${member.probeSource ? ` · from ${member.probeSource}` : ""}`
-}
-
 function MemberRow({
   group,
   member,
@@ -109,24 +112,25 @@ function MemberRow({
   member: EgressMemberView
   samples: number
 }) {
-  const state = egressMemberState(member)
+  const state = egressMemberReading(member)
   const reason = why(member)
   const last = member.last
   return (
     <TableRow aria-label={`Member ${member.name}`} className="h-12">
-      <TableCell className="max-w-56">
-        <span className="flex min-w-0 items-center gap-2" title={egressPath(member)}>
+      <TableCell>
+        <span className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium">{member.name}</span>
-          {member.active && <Tag tone="success">carrying</Tag>}
+          <CarryingTag group={group} member={member} />
         </span>
       </TableCell>
-      <TableCell className="max-w-64">
+      {/* Takes the width the readings leave, and the reason gives way first. */}
+      <TableCell className="w-full max-w-0">
         <span className="flex min-w-0 items-center gap-2" title={reason}>
           <Status tone={DOT[state.tone]} label={state.label} />
           {reason && <span className="truncate text-hint text-muted-foreground">{reason}</span>}
         </span>
       </TableCell>
-      <TableCell className="numeric text-right">
+      <TableCell className="numeric text-right whitespace-nowrap">
         {last?.latencyMillis !== undefined ? `${last.latencyMillis.toFixed(1)} ms` : "—"}
       </TableCell>
       <TableCell
@@ -139,9 +143,6 @@ function MemberRow({
       </TableCell>
       <TableCell>
         <SampleStrip points={member.history.slice(-samples)} />
-      </TableCell>
-      <TableCell className="max-w-64 truncate font-mono text-hint text-muted-foreground">
-        {bound(member)}
       </TableCell>
     </TableRow>
   )
@@ -157,8 +158,9 @@ function MemberItem({
   member: EgressMemberView
   samples: number
 }) {
-  const state = egressMemberState(member)
+  const state = egressMemberReading(member)
   const last = member.last
+  const reason = why(member)
   return (
     <li
       aria-label={`Member ${member.name}`}
@@ -166,6 +168,7 @@ function MemberItem({
     >
       <span className="flex min-w-0 items-center gap-2">
         <span className="truncate text-body font-medium">{member.name}</span>
+        <CarryingTag group={group} member={member} />
         <Status tone={DOT[state.tone]} label={state.label} />
         <span className="ml-auto shrink-0">
           <SampleStrip points={member.history.slice(-Math.min(samples, 16))} />
@@ -183,11 +186,45 @@ function MemberItem({
         >
           {last ? `${Math.round(last.loss)}% loss` : "no sample"}
         </span>
-        <span className="truncate font-mono" title={bound(member)}>
-          {why(member) ?? bound(member)}
-        </span>
+        {reason && <span className="truncate">{reason}</span>}
       </span>
     </li>
+  )
+}
+
+/** The member the group routes through; only "decided" while the group is off. */
+function CarryingTag({ group, member }: { group: EgressGroup; member: EgressMemberView }) {
+  if (!member.active) return null
+  return group.enabled ? <Tag tone="success">carrying</Tag> : <Tag>decided</Tag>
+}
+
+/**
+ * What each member is bound to: its path and tier, the mark its probes and
+ * pinned connections carry, its own table and the address its probes leave
+ * from. One line a member, in mono, because they are the kernel's literals.
+ */
+function Bindings({ group }: { group: EgressGroup }) {
+  return (
+    <Panel plain>
+      <PanelHeader title="Bound to" />
+      <PanelBody>
+        <ul aria-label="What each member is bound to" className="divide-y divide-hairline">
+          {group.members.map((m) => (
+            <li
+              key={m.id}
+              className="flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-0.5 py-2 first:pt-0 last:pb-0"
+            >
+              <span className="w-32 shrink-0 truncate text-body font-medium">{m.name}</span>
+              <span className="min-w-0 font-mono text-hint break-words text-muted-foreground">
+                {egressHop(m)} · tier {m.priority}
+                {m.weight > 1 ? ` · weight ${m.weight}` : ""} · mark {m.mark} · table {m.table}
+                {m.probeSource ? ` · from ${m.probeSource}` : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </PanelBody>
+    </Panel>
   )
 }
 

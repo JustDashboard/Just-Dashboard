@@ -10,6 +10,7 @@ import {
   egressPolicyShort,
   egressRowLine,
   egressSibling,
+  egressSimulationFact,
   egressTrafficLine,
   findEgressGroup,
 } from "./reading"
@@ -70,18 +71,32 @@ test("the card's line says stickiness and how many members", () => {
   )
 })
 
-test("the policy is a title and a hint", () => {
-  expect(egressPolicyShort({ kind: "all" }).title).toBe("All outbound traffic")
-  expect(egressPolicyShort({ kind: "selector", from: "10.8.0.0/24" })).toEqual({
-    title: "From 10.8.0.0/24",
-    hint: "to anywhere",
+test("the policy is a short title and one line under it", () => {
+  expect(egressPolicyShort({ kind: "all" })).toEqual({
+    title: "All traffic",
+    hint: "to the default route",
+    mono: false,
   })
-  expect(egressPolicyShort({ kind: "selector", to: "192.0.2.0/24" }).title).toBe("To 192.0.2.0/24")
-  expect(egressPolicyShort({ kind: "rule", fwmark: "0x1", iif: "wg0" })).toEqual({
-    title: "Marked 0x1",
+  expect(egressPolicyShort({ kind: "selector", from: "10.8.0.0/24" })).toMatchObject({
+    title: "10.8.0.0/24",
+    hint: "as the source",
+    mono: true,
+  })
+  expect(
+    egressPolicyShort({ kind: "selector", from: "10.8.0.0/24", to: "192.0.2.0/24" }).hint,
+  ).toBe("to 192.0.2.0/24")
+  expect(egressPolicyShort({ kind: "selector", to: "192.0.2.0/24" })).toMatchObject({
+    title: "192.0.2.0/24",
+    hint: "as the destination",
+  })
+  expect(egressPolicyShort({ kind: "rule", fwmark: "0x1", iif: "wg0" })).toMatchObject({
+    title: "mark 0x1",
     hint: "arriving on wg0",
   })
-  expect(egressPolicyShort({ kind: "rule", iif: "wg0" }).title).toBe("Arriving on wg0")
+  expect(egressPolicyShort({ kind: "rule", iif: "wg0" }).title).toBe("wg0")
+  // Every policy says one line under its title, so the node keeps its height.
+  for (const policy of [{ kind: "all" }, { kind: "selector", to: "::/0" }, { kind: "rule" }])
+    expect(egressPolicyShort(policy).hint).toBeTruthy()
 })
 
 test("the carrying member is the group's state, red when it is down", () => {
@@ -107,12 +122,14 @@ test("automation is a word, and a group that is off switches nothing", () => {
   expect(egressAutomationWord({ enabled: false, automation: false })).toBe("Off")
 })
 
-test("a member's state names its part", () => {
-  expect(egressMemberState(member({ active: true })).label).toBe("Carrying")
-  expect(egressMemberState(member({})).label).toBe("Standby")
-  expect(egressMemberState(member({ state: "down" })).tone).toBe("danger")
-  expect(egressMemberState(member({ proven: false })).tone).toBe("warning")
-  expect(egressMemberState(member({ state: "unknown" })).label).toBe("Measuring")
+test("a member's state names its part, and nothing carries for a group that is off", () => {
+  const on = { enabled: true }
+  expect(egressMemberState(on, member({ active: true })).label).toBe("Carrying")
+  expect(egressMemberState({ enabled: false }, member({ active: true })).label).toBe("Would carry")
+  expect(egressMemberState(on, member({})).label).toBe("Standby")
+  expect(egressMemberState(on, member({ state: "down" })).tone).toBe("danger")
+  expect(egressMemberState(on, member({ proven: false })).tone).toBe("warning")
+  expect(egressMemberState(on, member({ state: "unknown" })).label).toBe("Measuring")
 })
 
 test("only the carrying member's wire moves, and only while the group is on", () => {
@@ -148,4 +165,20 @@ test("the next and previous groups walk the list, from its ends when the name is
   expect(egressSibling(groups, "a", -1)).toBeUndefined()
   expect(egressSibling(groups, "gone", 1)?.name).toBe("a")
   expect(egressSibling(groups, "gone", -1)?.name).toBe("c")
+})
+
+test("the last simulation is a short fact that says when it is for an older configuration", () => {
+  expect(egressSimulationFact(undefined, "a")).toBe("not simulated")
+  expect(egressSimulationFact({ status: "passed", fingerprint: "a" }, "a")).toBe(
+    "simulation passed",
+  )
+  expect(egressSimulationFact({ status: "passed", fingerprint: "a" }, "b")).toBe(
+    "simulation out of date",
+  )
+  expect(egressSimulationFact({ status: "failed", fingerprint: "a" }, "a")).toBe(
+    "simulation failed",
+  )
+  expect(egressSimulationFact({ status: "error", fingerprint: "a" }, "a")).toBe(
+    "simulation incomplete",
+  )
 })

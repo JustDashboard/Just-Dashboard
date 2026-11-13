@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { plural, relativeTime } from "@/lib/format"
+import { plural } from "@/lib/format"
 import {
   egressDraftFromGroup,
   emptyEgressDraft,
@@ -13,7 +13,7 @@ import {
 } from "@/lib/network-egress"
 import { cn } from "@/lib/utils"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { Lifebuoy, Plus, Route } from "@/components/icons"
+import { Lifebuoy, Plus } from "@/components/icons"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
@@ -167,11 +167,7 @@ function ListIdentity({ data, command }: { data?: EgressView; command?: React.Re
   return (
     <HostIdentity
       slot="egress-identity"
-      logo={
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-card text-foreground [&_svg]:size-5">
-          <Route aria-hidden />
-        </span>
-      }
+      fallback={Lifebuoy}
       title={TITLE}
       state={
         !data ? (
@@ -208,20 +204,16 @@ function ListIdentity({ data, command }: { data?: EgressView; command?: React.Re
                 <span className="numeric">
                   {groups.filter((g) => g.enabled && g.automation).length} automatic
                 </span>
-                <FactDot />
-                <span
-                  className={cn("numeric", down > 0 ? "text-destructive" : undefined)}
-                  title="Members whose path answered its probes recently"
-                >
-                  {proven} of {members.length} members proven
-                </span>
-              </>
-            )}
-            {data.monitoring && (
-              <>
-                <FactDot />
-                <span title={new Date(data.monitoring).toLocaleString()}>
-                  measuring since {relativeTime(data.monitoring).replace(/ ago$/, "")}
+                {/* The state beside the title says a member is down; a phone
+                    has one line for the facts. */}
+                <span className="contents max-sm:hidden">
+                  <FactDot />
+                  <span
+                    className={cn("numeric", down > 0 ? "text-destructive" : undefined)}
+                    title="Members whose path answered its probes recently"
+                  >
+                    {proven} of {members.length} members proven
+                  </span>
                 </span>
               </>
             )}

@@ -3,7 +3,7 @@
 import type { EgressGroup, EgressMemberView } from "@/lib/network-egress"
 import type { NetworkLink } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { LockClosed, Route, Router } from "@/components/icons"
+import { Lifebuoy, LockClosed, Router } from "@/components/icons"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
@@ -25,7 +25,7 @@ export const TONE_TEXT: Record<Tone, string> = {
 }
 
 /**
- * A group as a tile: the route glyph, with its carrying state in the corner
+ * A group as a tile: the section's own glyph, with its carrying state in the corner
  * the way a unit's is in the services rail, so a list of groups reads green,
  * grey and red before a name is read.
  */
@@ -42,7 +42,7 @@ export function EgressMark({
   return (
     <span className={cn("relative flex shrink-0", className)}>
       <ProductLogo
-        fallback={Route}
+        fallback={Lifebuoy}
         className={cn(
           size === "lg" && "size-10 rounded-lg [&_svg]:size-5",
           size === "md" && "size-8 rounded-lg [&_svg]:size-4",

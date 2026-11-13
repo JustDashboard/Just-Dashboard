@@ -40,7 +40,7 @@ export function EgressSimulationPanel({
     reading.tone === "success" ? "running" : reading.tone === "default" ? "stopped" : reading.tone
   return (
     <section aria-label={`Simulation of ${group.name}`} className="flex min-w-0 flex-col gap-4">
-      <div className="flex min-w-0 items-center">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-6 gap-y-1">
         {running ? (
           <Status
             tone="warning"
@@ -48,6 +48,10 @@ export function EgressSimulationPanel({
           />
         ) : (
           <Status tone={tone} label={reading.label} />
+        )}
+        {/* Why the menu's Automate is not offered yet, where what it waits on is. */}
+        {group.automationBlock && !group.automation && (
+          <p className="min-w-0 text-hint text-muted-foreground">{group.automationBlock}</p>
         )}
       </div>
       <div className="space-y-4">
