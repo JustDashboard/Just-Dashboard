@@ -365,19 +365,3 @@ func parseTailscaleStatus(raw []byte) Identity {
 	}
 	return id
 }
-
-// WithTailnet returns the allowlist with the tailnet range added, if it is not
-// already covered. Adding rather than replacing: the existing entries are the
-// operator's, and a mode switch has no business deciding they were wrong.
-func WithTailnet(list string) string {
-	if nets, err := parseCIDRList(list); err == nil {
-		if containsIP(nets, net.ParseIP("100.64.0.1")) {
-			return list
-		}
-	}
-	list = strings.TrimSpace(list)
-	if list == "" {
-		return TailnetCIDR
-	}
-	return TailnetCIDR + "," + list
-}

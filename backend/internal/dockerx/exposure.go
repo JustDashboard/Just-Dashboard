@@ -167,18 +167,6 @@ func scopeRank(s PortScope) int {
 	}
 }
 
-// PublicBindings returns the bindings that reach beyond this server, which is
-// the set every exposure finding is about.
-func PublicBindings(ports []Port) []PortExposure {
-	out := []PortExposure{}
-	for _, p := range DescribePorts(ports) {
-		if p.Scope == ScopeAll || p.Scope == ScopePrivate {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 func itoa(n int) string {
 	if n == 0 {
 		return "0"
