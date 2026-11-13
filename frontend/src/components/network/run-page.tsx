@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
@@ -84,6 +84,10 @@ export function RunPage() {
   const walk = neighbours(list.shown, id)
   const open = (next?: DiagnosticRun) => next && router.push(runHref(next.id, tab))
 
+  // The page's refresh key reads the item again as well as the list beside
+  // it; the item's read lives in the pane, which hands its refresh up here.
+  const rereadRef = useRef<() => void>(() => {})
+
   if (!admin)
     return (
       <Page>
@@ -100,7 +104,10 @@ export function RunPage() {
     <Workspace
       name="Saved run"
       stateKey="network.run.page"
-      refresh={list.poll.refresh}
+      refresh={() => {
+        list.poll.refresh()
+        rereadRef.current()
+      }}
       commands={[
         {
           id: "previous",
@@ -152,6 +159,7 @@ export function RunPage() {
           <RunMain
             key={id}
             id={id}
+            rereadRef={rereadRef}
             runs={list.runs}
             tab={tab}
             setTab={setTab}
@@ -169,6 +177,7 @@ type Step = { disabled: boolean; run: () => void }
 
 function RunMain({
   id,
+  rereadRef,
   runs,
   tab,
   setTab,
@@ -177,6 +186,7 @@ function RunMain({
   next,
 }: {
   id: string
+  rereadRef: React.RefObject<() => void>
   runs: DiagnosticRun[]
   tab: Tab
   setTab: (tab: string) => void
@@ -193,6 +203,10 @@ function RunMain({
     done ? 15_000 : 2500,
     [id],
   )
+  const refresh = poll.refresh
+  useEffect(() => {
+    rereadRef.current = refresh
+  }, [rereadRef, refresh])
   const run = poll.data
   const finished = run ? diagnosticFinished(run) : false
   if (finished !== done) setDone(finished)

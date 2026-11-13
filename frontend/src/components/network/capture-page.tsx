@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
@@ -112,6 +112,10 @@ export function CapturePage() {
   const walk = neighbours(rows, id)
   const open = (next?: CaptureRun) => next && router.push(captureHref(next.id, tab))
 
+  // The page's refresh key reads the item again as well as the list beside
+  // it; the item's read lives in the pane, which hands its refresh up here.
+  const rereadRef = useRef<() => void>(() => {})
+
   if (!admin)
     return (
       <Page>
@@ -128,7 +132,10 @@ export function CapturePage() {
     <Workspace
       name="Packet capture"
       stateKey="network.capture.page"
-      refresh={list.refresh}
+      refresh={() => {
+        list.refresh()
+        rereadRef.current()
+      }}
       commands={[
         {
           id: "previous",
@@ -177,6 +184,7 @@ export function CapturePage() {
           <CaptureMain
             key={id}
             id={id}
+            rereadRef={rereadRef}
             links={links}
             tab={tab}
             setTab={setTab}
@@ -194,6 +202,7 @@ type Step = { disabled: boolean; run: () => void }
 
 function CaptureMain({
   id,
+  rereadRef,
   links,
   tab,
   setTab,
@@ -202,6 +211,7 @@ function CaptureMain({
   next,
 }: {
   id: string
+  rereadRef: React.RefObject<() => void>
   links?: NetworkLink[]
   tab: Tab
   setTab: (tab: string) => void
@@ -218,6 +228,10 @@ function CaptureMain({
     done ? 30_000 : 1500,
     [id],
   )
+  const refresh = poll.refresh
+  useEffect(() => {
+    rereadRef.current = refresh
+  }, [rereadRef, refresh])
   const run = poll.data
   const finished = run ? captureFinished(run) : false
   if (finished !== done) setDone(finished)
