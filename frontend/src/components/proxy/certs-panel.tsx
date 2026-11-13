@@ -225,7 +225,9 @@ export function CertificatesPage() {
             )}
           </Panel>
 
-          {hasNginx ? (
+          {/* Under the list, so it waits for the list: drawn first, it was
+              pushed down when the certificates landed above it. */}
+          {!certs.data ? null : hasNginx ? (
             <CertificateCoveragePanel
               coverage={coverage}
               onIssue={
@@ -483,7 +485,7 @@ function InventoryLoading() {
     <div className="min-w-0 space-y-4" aria-busy="true" data-slot="cert-list-loading">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Skeleton className="h-8 w-full sm:w-72" />
-        <Skeleton className="h-8 w-48 max-sm:hidden" />
+        <Skeleton className="h-8 w-[10.5rem]" />
       </div>
       <Skeleton className="h-7 w-24" />
       <ul className="min-w-0 space-y-2">
