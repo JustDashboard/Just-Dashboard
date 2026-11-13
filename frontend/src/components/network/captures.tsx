@@ -4,11 +4,14 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useConfirm } from "@/components/confirm-dialog"
+import { WireMark } from "@/components/deploy/wire"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import {
   Crosshair,
   Download,
+  File,
   FileText,
+  Filter,
   MoreHorizontal,
   NetworkDevice,
   Plus,
@@ -145,7 +148,22 @@ export function Captures() {
         <ErrorState error={poll.error} onRetry={poll.refresh} retryable />
       ) : list && runs.length === 0 ? (
         <EmptyState
-          icon={Crosshair}
+          // What a capture is, before there is one: an interface, a filter, a file.
+          mark={
+            <span aria-hidden className="flex items-center gap-1.5">
+              <WireMark tone="logo" size="sm">
+                <NetworkDevice />
+              </WireMark>
+              <span className="w-5 border-t border-dashed" />
+              <WireMark tone="logo" size="sm">
+                <Filter />
+              </WireMark>
+              <span className="w-5 border-t border-dashed" />
+              <WireMark tone="logo" size="sm">
+                <File />
+              </WireMark>
+            </span>
+          }
           title="No packet captures"
           description="A capture keeps what one interface sees, bounded and private, for 24 hours."
           action={

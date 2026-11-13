@@ -221,7 +221,19 @@ export function SavedRuns({ watched }: { watched: React.ReactNode }) {
         <ErrorState error={poll.error} onRetry={poll.refresh} retryable />
       ) : poll.data && runs.length === 0 ? (
         <EmptyState
-          icon={Notes}
+          // What would be kept here: the tools, by the glyphs their runs are listed under.
+          mark={
+            <span aria-hidden className="flex items-center gap-1.5">
+              {(["dns", "ping", "port", "tls"] as const).map((tool) => {
+                const Glyph = toolGlyph({ request: { tool } })
+                return (
+                  <WireMark key={tool} tone="logo" size="sm">
+                    <Glyph />
+                  </WireMark>
+                )
+              })}
+            </span>
+          }
           title="No saved runs"
           description="Run a tool and save it to keep its result, rerun it and compare."
           action={
