@@ -50,7 +50,7 @@ export function InterfaceValues({
       hint={
         <span className="numeric">
           {differing.length > 0
-            ? `${differing.length} device${differing.length === 1 ? "" : "s"} differ from all`
+            ? `${differing.length} ${differing.length === 1 ? "device differs" : "devices differ"} from all`
             : "every device follows all"}
           {reading.omitted > 0 && ` · ${reading.omitted} container devices left out`}
         </span>

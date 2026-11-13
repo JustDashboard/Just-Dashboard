@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { Check, Globe, ListUnordered, LockOpen, Plus, ShieldCheck } from "@/components/icons"
 import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
+import { Skeleton } from "@/components/ui/skeleton"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
 import { fitColumn } from "@/components/wire-flow-model"
 import { compact, grown } from "@/components/network/gateway/reading"
@@ -33,7 +34,9 @@ export const PICTURE_ROWS = LISTS_DRAWN + 1
 
 // Four rows of a mark beside three lines, their gaps and the picture's own
 // padding. Wide only: a phone's picture is rows of marks, one height already.
-const FRAME = "lg:grid lg:min-h-[19.5rem] lg:items-center"
+// The same frame holds the grey picture (`grey`), whose nodes are drawn on
+// the lines of real ones.
+const FRAME = "lg:grid lg:min-h-[18rem] lg:items-center"
 
 /** A list's mark on a wire: its first country's flag, else the glyph of its kind. */
 export function ListWireMark({
@@ -137,14 +140,29 @@ export function ProtectionPicture({
   const moved = useMoved(view)
   if (!view)
     return (
-      <WireFlow
-        loading
-        phone="marks"
-        className={FRAME}
-        start={{ title: "Refused", nodes: [], loadingRows: rows?.start ?? 3 }}
-        end={{ title: "Gets through", nodes: [], loadingRows: rows?.end ?? 3 }}
-        hub={{ mark: <WireHost />, eyebrow: "This server" }}
-      />
+      <div data-slot="protection-picture" data-loading aria-busy>
+        <WireFlow
+          phone="marks"
+          className={FRAME}
+          start={{ title: "Refused", nodes: grey("start", rows?.start ?? 3) }}
+          end={{ title: "Gets through", nodes: grey("end", rows?.end ?? 4) }}
+          hub={{
+            mark: <WireHost />,
+            eyebrow: "This server",
+            title: <Skeleton className="inline-block h-3 w-24 align-middle" />,
+            hint: (
+              <>
+                <span className="block">
+                  <Skeleton className="inline-block h-2.5 w-32 align-middle" />
+                </span>
+                <span className="block">
+                  <Skeleton className="inline-block h-2.5 w-20 align-middle" />
+                </span>
+              </>
+            ),
+          }}
+        />
+      </div>
     )
 
   const totals = protectionTotals(view)
@@ -310,50 +328,82 @@ export function ProtectionPicture({
   )
 
   return (
-    <WireFlow
-      phone="marks"
-      className={FRAME}
-      start={{
-        title: "Refused",
-        nodes: refused,
-        max: LISTS_DRAWN,
-        more: { href: "#blocklists", words: (n) => plural(n, "more list") },
-      }}
-      end={{ title: "Gets through", nodes: through }}
-      hub={{
-        mark: <WireHost />,
-        eyebrow: "This server",
-        title: (
-          <span className={cn(totals.inForce && !view.loaded && "text-warning")}>
-            {!totals.inForce ? "Nothing in force" : view.loaded ? "Filter in force" : "Not loaded"}
-          </span>
-        ),
-        hint: table.available ? (
-          <>
-            <span
-              role="meter"
-              aria-label="Connection table fullness"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={table.percent}
-              className={cn(
-                "numeric block",
-                table.level === "warning" && "text-warning",
-                table.level === "critical" && "text-destructive",
-              )}
-            >
-              connection table {table.percent}% full
+    <div data-slot="protection-picture">
+      <WireFlow
+        phone="marks"
+        className={FRAME}
+        start={{
+          title: "Refused",
+          nodes: refused,
+          max: LISTS_DRAWN,
+          more: { href: "#blocklists", words: (n) => plural(n, "more list") },
+        }}
+        end={{ title: "Gets through", nodes: through }}
+        hub={{
+          mark: <WireHost />,
+          eyebrow: "This server",
+          title: (
+            <span className={cn(totals.inForce && !view.loaded && "text-warning")}>
+              {!totals.inForce
+                ? "Nothing in force"
+                : view.loaded
+                  ? "Filter in force"
+                  : "Not loaded"}
             </span>
-            <span className="numeric block">
-              {table.count.toLocaleString()} of {table.max.toLocaleString()}
-            </span>
-          </>
-        ) : (
-          "connections not tracked"
-        ),
-      }}
-    />
+          ),
+          hint: table.available ? (
+            <>
+              <span
+                role="meter"
+                aria-label="Connection table fullness"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={table.percent}
+                className={cn(
+                  "numeric block",
+                  table.level === "warning" && "text-warning",
+                  table.level === "critical" && "text-destructive",
+                )}
+              >
+                connection table {table.percent}% full
+              </span>
+              <span className="numeric block">
+                {table.count.toLocaleString()} of {table.max.toLocaleString()}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="block">connections not tracked</span>
+              {/* The second line the hint has when the table is tracked. */}
+              <span className="block">&nbsp;</span>
+            </>
+          ),
+        }}
+      />
+    </div>
   )
+}
+
+/**
+ * The picture before its read: grey nodes on the lines of drawn ones. They
+ * are nodes rather than `WireFlow`'s own loading rows because those are a
+ * little taller than a node with three one-line parts, on a phone as well as
+ * wide, and this picture is held to the height of the drawn one.
+ */
+function grey(side: string, count: number): WireFlowNode[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `${side}:grey:${i}`,
+    placeholder: true,
+    mark: (size) => <Skeleton className={cn("rounded-xl", size === "sm" ? "size-9" : "size-11")} />,
+    eyebrow: <Skeleton className="inline-block h-2 w-14 align-middle" />,
+    title: <Skeleton className="inline-block h-3 w-28 align-middle" />,
+    hint: (
+      <span className="block">
+        <Skeleton className="inline-block h-2.5 w-24 align-middle" />
+      </span>
+    ),
+    line: { state: "up" },
+  }))
 }
 
 /** The rows each side of the picture holds for so many lists and limits, for the grey one. */

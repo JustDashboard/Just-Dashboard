@@ -132,7 +132,7 @@ export function ConnectionTable({
       <div className="min-w-0 space-y-2">
         <BarReading
           title="Connection table"
-          label="Connection table by state"
+          label="How full the connection table is"
           list="States that fill the table"
           fixed
           parts={parts}

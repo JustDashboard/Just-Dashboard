@@ -198,300 +198,305 @@ export default function NetworkProtectionPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Protection" />
-      <HostIdentity
-        label="About protection"
-        fallback={ShieldCheck}
-        title="Protection"
-        state={
-          failed ? (
-            <Status tone="danger" label="Not read" />
-          ) : !view || !totals ? (
-            <Skeleton className="h-4 w-20" />
-          ) : (
-            <>
-              <Status
-                tone={!totals.inForce ? "stopped" : view.loaded ? "running" : "warning"}
-                label={
-                  !totals.inForce ? "Nothing in force" : view.loaded ? "In force" : "Not loaded"
-                }
-              />
-              {totals.failing > 0 && (
-                <Status tone="danger" label={`${plural(totals.failing, "list")} not fetched`} />
-              )}
-            </>
-          )
-        }
-        facts={
-          failed ? (
-            <span>The lists and limits could not be read.</span>
-          ) : !totals ? (
-            <span className={FACTS}>
-              <Skeleton className="my-0.5 h-3 w-72 max-w-full" />
-            </span>
-          ) : (
-            <span className={FACTS}>
-              <span className="numeric">{plural(totals.lists, "blocklist")}</span>
-              <FactDot />
-              <span className="numeric">{plural(totals.limits, "limit")}</span>
-              <FactDot />
-              <span className="numeric">
-                <span className="text-foreground">{totals.dropped.toLocaleString()}</span> dropped
-                since load
-              </span>
-              <FactDot />
-              <span className="numeric">
-                <span className="text-foreground">{totals.refused.toLocaleString()}</span> refused
-              </span>
-            </span>
-          )
-        }
-        command={
-          admin && (
-            <Button size="sm" onClick={newList} disabled={!view}>
-              <Plus className="size-3.5" />
-              New blocklist
-            </Button>
-          )
-        }
-        menu={<VerbMenu verbs={verbs} label="Protection actions" />}
-      />
-      {view && (
-        <NetworkReadWarning
-          error={protection.error}
-          refresh={protection.refresh}
-          lastSuccess={protection.lastSuccess}
-        />
-      )}
-      {view && totals?.inForce && !view.loaded && (
-        <Notice tone="warning" icon={Warning} title="Protection is not loaded into the kernel">
-          Its lists and limits are saved but not in force: the host was started without the unit
-          that loads them, or something deleted the table. Saving any of them loads it again.
-        </Notice>
-      )}
-
-      {failed ? (
-        <ErrorState error={protection.error!} onRetry={protection.refresh} />
-      ) : (
-        <Tabs value={tab} onValueChange={setTab} className="gap-0">
-          <TabsPrimitive.List
-            aria-label="Views of protection"
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-          >
-            {views.map((v) => (
-              <TabsPrimitive.Trigger
-                key={v.key}
-                value={v.key}
-                className={tabClasses(tab === v.key, "h-10")}
-              >
-                {v.label}
-                {v.key === "kernel" && staged > 0 && (
-                  <ChipCount className="text-[var(--git-modified)]">{staged}</ChipCount>
+      {/* The line and its views are one block, as a process's page has them:
+          the strip's hairline is the rule under the line. */}
+      <div className="flex min-w-0 flex-col gap-4">
+        <HostIdentity
+          label="About protection"
+          className="border-b-0 pb-0"
+          fallback={ShieldCheck}
+          title="Protection"
+          state={
+            failed ? (
+              <Status tone="danger" label="Not read" />
+            ) : !view || !totals ? (
+              <Skeleton className="h-4 w-20" />
+            ) : (
+              <>
+                <Status
+                  tone={!totals.inForce ? "stopped" : view.loaded ? "running" : "warning"}
+                  label={
+                    !totals.inForce ? "Nothing in force" : view.loaded ? "In force" : "Not loaded"
+                  }
+                />
+                {totals.failing > 0 && (
+                  <Status tone="danger" label={`${plural(totals.failing, "list")} not fetched`} />
                 )}
-              </TabsPrimitive.Trigger>
-            ))}
-          </TabsPrimitive.List>
+              </>
+            )
+          }
+          facts={
+            failed ? (
+              <span>The lists and limits could not be read.</span>
+            ) : !totals ? (
+              <span className={FACTS}>
+                <Skeleton className="my-0.5 h-3 w-72 max-w-full" />
+              </span>
+            ) : (
+              <span className={FACTS}>
+                <span className="numeric">{plural(totals.lists, "blocklist")}</span>
+                <FactDot />
+                <span className="numeric">{plural(totals.limits, "limit")}</span>
+                <FactDot />
+                <span className="numeric">
+                  <span className="text-foreground">{totals.dropped.toLocaleString()}</span> dropped
+                  since load
+                </span>
+                <FactDot />
+                <span className="numeric">
+                  <span className="text-foreground">{totals.refused.toLocaleString()}</span> refused
+                </span>
+              </span>
+            )
+          }
+          command={
+            admin && (
+              <Button size="sm" onClick={newList} disabled={!view}>
+                <Plus className="size-3.5" />
+                New blocklist
+              </Button>
+            )
+          }
+          menu={<VerbMenu verbs={verbs} label="Protection actions" />}
+        />
+        {view && (
+          <NetworkReadWarning
+            error={protection.error}
+            refresh={protection.refresh}
+            lastSuccess={protection.lastSuccess}
+          />
+        )}
+        {view && totals?.inForce && !view.loaded && (
+          <Notice tone="warning" icon={Warning} title="Protection is not loaded into the kernel">
+            Its lists and limits are saved but not in force: the host was started without the unit
+            that loads them, or something deleted the table. Saving any of them loads it again.
+          </Notice>
+        )}
 
-          <TabsContent value="overview" className="flex min-w-0 flex-col gap-6 pt-4 md:gap-8">
-            <ProtectionPicture
-              view={view}
-              rows={pictureRows(shape.lists, shape.limits)}
-              writable={admin}
-              onNewList={newList}
-              onNewLimit={newLimit}
-              onOpenList={(list) => setEditor({ kind: "list", list })}
-              onOpenLimit={(limit) => setEditor({ kind: "limit", limit })}
-            />
+        {failed ? (
+          <ErrorState error={protection.error!} onRetry={protection.refresh} />
+        ) : (
+          <Tabs value={tab} onValueChange={setTab} className="gap-0">
+            <TabsPrimitive.List
+              aria-label="Views of protection"
+              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
+            >
+              {views.map((v) => (
+                <TabsPrimitive.Trigger
+                  key={v.key}
+                  value={v.key}
+                  className={tabClasses(tab === v.key, "h-10")}
+                >
+                  {v.label}
+                  {v.key === "kernel" && staged > 0 && (
+                    <ChipCount className="text-[var(--git-modified)]">{staged}</ChipCount>
+                  )}
+                </TabsPrimitive.Trigger>
+              ))}
+            </TabsPrimitive.List>
 
-            <Panel plain id="blocklists" className="scroll-mt-6">
-              <PanelHeader title="Blocklists">
-                <SectionFact>
-                  {totals && totals.lists > 0 && (
-                    <>
-                      {totals.networks.toLocaleString()} networks in{" "}
-                      {plural(totals.listsOn, "list")} · {bytes(totals.droppedBytes)} dropped since
-                      load
-                      {totals.droppedSince &&
-                        ` · ${compact(totals.droppedEver)} packets since ${calendarDate(totals.droppedSince)}`}
-                    </>
-                  )}
-                </SectionFact>
-              </PanelHeader>
-              <PanelBody>
-                <div className="flex min-w-0 flex-col gap-4">
-                  {view && holdingYou.length > 0 && (
-                    <Notice
-                      tone="warning"
-                      icon={Warning}
-                      title={`${holdingYou.map((l) => l.name).join(", ")} ${holdingYou.length === 1 ? "holds" : "hold"} your own address`}
-                    >
-                      Nothing is cut off while{" "}
-                      <span className="font-mono text-foreground">{view.client}</span> stays among
-                      the addresses never refused.
-                    </Notice>
-                  )}
+            <TabsContent value="overview" className="flex min-w-0 flex-col gap-6 pt-2 md:gap-8">
+              <ProtectionPicture
+                view={view}
+                rows={pictureRows(shape.lists, shape.limits)}
+                writable={admin}
+                onNewList={newList}
+                onNewLimit={newLimit}
+                onOpenList={(list) => setEditor({ kind: "list", list })}
+                onOpenLimit={(limit) => setEditor({ kind: "limit", limit })}
+              />
+
+              <Panel plain id="blocklists" className="scroll-mt-6">
+                <PanelHeader title="Blocklists">
+                  <SectionFact>
+                    {totals && totals.lists > 0 && (
+                      <>
+                        {totals.networks.toLocaleString()} networks in{" "}
+                        {plural(totals.listsOn, "list")} · {bytes(totals.droppedBytes)} dropped
+                        since load
+                        {totals.droppedSince &&
+                          ` · ${compact(totals.droppedEver)} packets since ${calendarDate(totals.droppedSince)}`}
+                      </>
+                    )}
+                  </SectionFact>
+                </PanelHeader>
+                <PanelBody>
+                  <div className="flex min-w-0 flex-col gap-4">
+                    {view && holdingYou.length > 0 && (
+                      <Notice
+                        tone="warning"
+                        icon={Warning}
+                        title={`${holdingYou.map((l) => l.name).join(", ")} ${holdingYou.length === 1 ? "holds" : "hold"} your own address`}
+                      >
+                        Nothing is cut off while{" "}
+                        <span className="font-mono text-foreground">{view.client}</span> stays among
+                        the addresses never refused.
+                      </Notice>
+                    )}
+                    {!view ? (
+                      <SectionSkeleton rows={shape.lists} card />
+                    ) : lists.length === 0 ? (
+                      <EmptyState
+                        className={EMPTY}
+                        mark={
+                          <span aria-hidden className="flex items-center gap-1.5">
+                            <ProductLogo size="sm" fallback={Globe} />
+                            <ProductLogo size="sm" fallback={ListUnordered} />
+                          </span>
+                        }
+                        title="No network is blocked"
+                        action={
+                          admin && (
+                            <Button size="sm" variant="outline" onClick={newList}>
+                              <Plus aria-hidden />
+                              Block a country, a feed or addresses
+                            </Button>
+                          )
+                        }
+                      />
+                    ) : (
+                      <BlocklistList
+                        lists={lists}
+                        presets={view.presets}
+                        onOpen={(list) => setEditor({ kind: "list", list })}
+                        onChanged={protection.refresh}
+                      />
+                    )}
+                  </div>
+                </PanelBody>
+              </Panel>
+
+              <Panel plain id="limits" className="scroll-mt-6">
+                <PanelHeader
+                  title="Rate limits"
+                  actions={
+                    admin && (
+                      <Button size="xs" variant="outline" onClick={newLimit} disabled={!view}>
+                        <Plus aria-hidden />
+                        New limit
+                      </Button>
+                    )
+                  }
+                >
+                  <SectionFact>
+                    {totals && totals.limits > 0 && (
+                      <>
+                        {totals.limitsOn} in force · {bytes(totals.refusedBytes)} refused since load
+                        {totals.refusedSince &&
+                          ` · ${compact(totals.refusedEver)} packets since ${calendarDate(totals.refusedSince)}`}
+                      </>
+                    )}
+                  </SectionFact>
+                </PanelHeader>
+                <PanelBody>
                   {!view ? (
-                    <SectionSkeleton rows={shape.lists} card />
-                  ) : lists.length === 0 ? (
+                    <SectionSkeleton rows={shape.limits} card />
+                  ) : limits.length === 0 ? (
                     <EmptyState
                       className={EMPTY}
-                      mark={
-                        <span aria-hidden className="flex items-center gap-1.5">
-                          <ProductLogo size="sm" fallback={Globe} />
-                          <ProductLogo size="sm" fallback={ListUnordered} />
-                        </span>
-                      }
-                      title="No network is blocked"
+                      mark={<LimitMarks view={view} />}
+                      title="No port is limited"
                       action={
                         admin && (
-                          <Button size="sm" variant="outline" onClick={newList}>
+                          <Button size="sm" variant="outline" onClick={newLimit}>
                             <Plus aria-hidden />
-                            Block a country, a feed or addresses
+                            Limit a port
                           </Button>
                         )
                       }
                     />
                   ) : (
-                    <BlocklistList
-                      lists={lists}
-                      presets={view.presets}
-                      onOpen={(list) => setEditor({ kind: "list", list })}
+                    <LimitList
+                      limits={limits}
+                      pressure={pressure.data}
+                      onOpen={(limit) => setEditor({ kind: "limit", limit })}
                       onChanged={protection.refresh}
                     />
                   )}
-                </div>
-              </PanelBody>
-            </Panel>
+                </PanelBody>
+              </Panel>
 
-            <Panel plain id="limits" className="scroll-mt-6">
-              <PanelHeader
-                title="Rate limits"
-                actions={
-                  admin && (
-                    <Button size="xs" variant="outline" onClick={newLimit} disabled={!view}>
-                      <Plus aria-hidden />
-                      New limit
-                    </Button>
-                  )
-                }
-              >
-                <SectionFact>
-                  {totals && totals.limits > 0 && (
+              <Panel plain id="exceptions" className="scroll-mt-6">
+                <PanelHeader
+                  title="Exceptions"
+                  actions={
                     <>
-                      {totals.limitsOn} in force · {bytes(totals.refusedBytes)} refused since load
-                      {totals.refusedSince &&
-                        ` · ${compact(totals.refusedEver)} packets since ${calendarDate(totals.refusedSince)}`}
-                    </>
-                  )}
-                </SectionFact>
-              </PanelHeader>
-              <PanelBody>
-                {!view ? (
-                  <SectionSkeleton rows={shape.limits} card />
-                ) : limits.length === 0 ? (
-                  <EmptyState
-                    className={EMPTY}
-                    mark={<LimitMarks view={view} />}
-                    title="No port is limited"
-                    action={
-                      admin && (
-                        <Button size="sm" variant="outline" onClick={newLimit}>
+                      {view && (
+                        <span className="numeric text-hint text-muted-foreground">
+                          {exceptions.length}
+                        </span>
+                      )}
+                      {mayExcept && (
+                        <Button size="xs" variant="outline" onClick={newException} disabled={!view}>
                           <Plus aria-hidden />
-                          Limit a port
+                          New exception
                         </Button>
-                      )
-                    }
-                  />
-                ) : (
-                  <LimitList
-                    limits={limits}
-                    pressure={pressure.data}
-                    onOpen={(limit) => setEditor({ kind: "limit", limit })}
-                    onChanged={protection.refresh}
-                  />
-                )}
-              </PanelBody>
-            </Panel>
+                      )}
+                    </>
+                  }
+                />
+                <PanelBody flush={exceptions.length > 0 || (!view && shape.exceptions > 0)}>
+                  {!view ? (
+                    <SectionSkeleton rows={shape.exceptions} />
+                  ) : (
+                    <ExceptionList
+                      exceptions={exceptions}
+                      onChanged={protection.refresh}
+                      onNew={mayExcept ? newException : undefined}
+                    />
+                  )}
+                </PanelBody>
+              </Panel>
 
-            <Panel plain id="exceptions" className="scroll-mt-6">
-              <PanelHeader
-                title="Exceptions"
-                actions={
-                  <>
-                    {view && (
+              <Panel plain id="never-refused" className="scroll-mt-6">
+                <PanelHeader
+                  title="Never refused"
+                  actions={
+                    view && (
                       <span className="numeric text-hint text-muted-foreground">
-                        {exceptions.length}
+                        {view.trusted.length}
                       </span>
-                    )}
-                    {mayExcept && (
-                      <Button size="xs" variant="outline" onClick={newException} disabled={!view}>
-                        <Plus aria-hidden />
-                        New exception
-                      </Button>
-                    )}
-                  </>
-                }
-              />
-              <PanelBody flush={exceptions.length > 0 || (!view && shape.exceptions > 0)}>
-                {!view ? (
-                  <SectionSkeleton rows={shape.exceptions} />
-                ) : (
-                  <ExceptionList
-                    exceptions={exceptions}
-                    onChanged={protection.refresh}
-                    onNew={mayExcept ? newException : undefined}
-                  />
-                )}
-              </PanelBody>
-            </Panel>
+                    )
+                  }
+                />
+                <PanelBody flush>
+                  {!view ? (
+                    <SectionSkeleton rows={shape.trusted} />
+                  ) : (
+                    <TrustedList view={view} onChanged={protection.refresh} />
+                  )}
+                </PanelBody>
+              </Panel>
+            </TabsContent>
 
-            <Panel plain id="never-refused" className="scroll-mt-6">
-              <PanelHeader
-                title="Never refused"
-                actions={
-                  view && (
-                    <span className="numeric text-hint text-muted-foreground">
-                      {view.trusted.length}
-                    </span>
-                  )
-                }
-              />
-              <PanelBody flush>
-                {!view ? (
-                  <SectionSkeleton rows={shape.trusted} />
+            {admin && (
+              <TabsContent value="table" className="min-w-0 pt-6">
+                {view ? (
+                  <ConnectionTable table={view.conntrack} read={pressure} />
                 ) : (
-                  <TrustedList view={view} onChanged={protection.refresh} />
+                  <Skeleton className="h-24 w-full rounded-xl" />
                 )}
-              </PanelBody>
-            </Panel>
-          </TabsContent>
+              </TabsContent>
+            )}
 
-          {admin && (
-            <TabsContent value="table" className="min-w-0 pt-6">
+            <TabsContent value="kernel" className="min-w-0 pt-6">
               {view ? (
-                <ConnectionTable table={view.conntrack} read={pressure} />
+                <KernelSettings
+                  settings={view.settings}
+                  resetNote={view.resetNote}
+                  profiles={view.kernelProfiles}
+                  interfaces={view.interfaces}
+                  draft={draft}
+                  onDraft={setDraft}
+                  onChanged={protection.refresh}
+                />
               ) : (
-                <Skeleton className="h-24 w-full rounded-xl" />
+                <KernelSkeleton />
               )}
             </TabsContent>
-          )}
-
-          <TabsContent value="kernel" className="min-w-0 pt-6">
-            {view ? (
-              <KernelSettings
-                settings={view.settings}
-                resetNote={view.resetNote}
-                profiles={view.kernelProfiles}
-                interfaces={view.interfaces}
-                draft={draft}
-                onDraft={setDraft}
-                onChanged={protection.refresh}
-              />
-            ) : (
-              <KernelSkeleton />
-            )}
-          </TabsContent>
-        </Tabs>
-      )}
+          </Tabs>
+        )}
+      </div>
 
       {view && editor?.kind === "list" && (
         <BlocklistModal

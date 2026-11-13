@@ -50,8 +50,8 @@ import {
   feedName,
   fetchWords,
   isFetched,
+  listSource,
   listState,
-  listWhat,
   REFRESH_CHOICES,
   type BlocklistRequest,
 } from "@/components/network/protection/reading"
@@ -220,9 +220,10 @@ export function BlocklistList({
               description={
                 <>
                   <span className="max-sm:hidden">
-                    {[listWhat(list, presets), coverageShort(list.coverage)]
-                      .filter(Boolean)
-                      .join(" · ")}
+                    <span className={list.kind === "feed" ? "font-mono" : undefined}>
+                      {listSource(list)}
+                    </span>
+                    {coverageShort(list.coverage) && ` · ${coverageShort(list.coverage)}`}
                   </span>
                   {/* The columns start at `sm`; on a phone the state leads the
                       line and the figures follow it. The switch beside it
@@ -240,10 +241,12 @@ export function BlocklistList({
               }
               trailing={
                 <span className="flex items-center gap-4">
-                  <span className="hidden w-40 text-right leading-tight xl:grid">
-                    <span className="truncate text-hint">{fetch?.fetched ?? "typed here"}</span>
+                  <span className="hidden w-44 text-right leading-tight xl:grid">
+                    <span className="truncate text-hint">{fetch?.fetched ?? "kept as typed"}</span>
+                    {/* Held when there is nothing to say, so the line above
+                        sits where it does on every row. */}
                     <span className="truncate font-mono text-micro text-muted-foreground">
-                      {fetch?.next ?? "kept as typed"}
+                      {fetch?.next || "\u00a0"}
                     </span>
                   </span>
                   <span
@@ -255,7 +258,7 @@ export function BlocklistList({
                       {compact(list.packets)} dropped
                     </span>
                   </span>
-                  <span className="hidden w-40 md:flex" title={list.error || undefined}>
+                  <span className="hidden w-36 md:flex" title={list.error || undefined}>
                     <Status tone={state.tone} label={state.label} />
                   </span>
                   {admin && (

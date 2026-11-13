@@ -127,13 +127,13 @@ export function LimitList({
             verb={admin ? `Edit ${limit.name}` : `Open ${limit.name}`}
             description={
               <>
-                {[limitSentence(limit), metersWord(limit)].filter(Boolean).join(" · ")}
-                {/* The figure has a column from `sm`; on a phone it joins the line. */}
+                {/* The figure has a column from `sm`; on a phone it leads the
+                    line, which is cut at its end. */}
                 <span className="numeric sm:hidden">
-                  {" · "}
                   {!admin && (limit.enabled ? "in force · " : "off · ")}
-                  {compact(limit.packets)} refused
+                  {compact(limit.packets)} refused{" · "}
                 </span>
+                {[limitSentence(limit), metersWord(limit)].filter(Boolean).join(" · ")}
               </>
             }
             trailing={

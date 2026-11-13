@@ -100,6 +100,9 @@ export function ExceptionList({
               title={<Cidr cidr={e.address} />}
               subtitle={
                 <>
+                  {/* The figure has a column from `sm`; on a phone it leads
+                      the line, which is cut at its end. */}
+                  <span className="numeric sm:hidden">{compact(e.packets)} let through · </span>
                   {[
                     e.reason,
                     e.scope === "all" ? "every list and limit" : e.scopeName,
@@ -107,10 +110,6 @@ export function ExceptionList({
                   ]
                     .filter(Boolean)
                     .join(" · ")}
-                  <span className="numeric sm:hidden">
-                    {" · "}
-                    {compact(e.packets)} let through
-                  </span>
                 </>
               }
               trailing={

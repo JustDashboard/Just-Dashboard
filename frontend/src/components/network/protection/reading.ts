@@ -498,17 +498,42 @@ export function fetchWords(
   when: (iso: string) => string,
 ) {
   if (list.kind === "manual") return undefined
-  const label = REFRESH_CHOICES.find((c) => c.value === (list.refresh || "24h"))?.label ?? "Daily"
+  const schedule = list.refresh || "24h"
+  const label =
+    schedule === "manual"
+      ? "by hand"
+      : (REFRESH_CHOICES.find((c) => c.value === schedule)?.label ?? "Daily").toLowerCase()
   const failures = list.failures ?? 0
+  // "in 3h", where the page's clock says "3h from now": the column is narrow.
+  const next = list.enabled && list.nextRefresh ? when(list.nextRefresh) : undefined
   return {
-    fetched: list.refreshed ? `fetched ${when(list.refreshed)}` : "not fetched yet",
+    fetched: `${label} · ${list.refreshed ? `fetched ${when(list.refreshed)}` : "not fetched yet"}`,
     next: [
-      label.toLowerCase(),
       failures > 0 ? `${failures} failed ${failures === 1 ? "try" : "tries"}` : undefined,
-      list.enabled && list.nextRefresh ? `next ${when(list.nextRefresh)}` : undefined,
+      next
+        ? next.endsWith(" from now")
+          ? `next in ${next.slice(0, -" from now".length)}`
+          : `next ${next}`
+        : undefined,
     ]
       .filter(Boolean)
       .join(" · "),
+  }
+}
+
+/**
+ * What a row says under a list's name: its countries, the host its feed is
+ * read from, how many addresses were typed. A feed is said by its host rather
+ * than its preset's name, which is nearly always the list's own name again.
+ */
+export function listSource(list: ProtectionBlocklist) {
+  switch (list.kind) {
+    case "country":
+      return countriesWord(list.countries)
+    case "feed":
+      return feedName([], "", list.url) || list.url
+    default:
+      return count(list.entries.length, "address", "addresses") + " typed"
   }
 }
 
