@@ -167,7 +167,7 @@ export function ExternalChecks({
                         {relativeTime(checkTime(check))}
                       </time>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="py-0 text-right">
                       <CheckVerbs
                         check={check}
                         name={name}

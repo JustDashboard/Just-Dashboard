@@ -7,10 +7,10 @@ import { Page, PageContext } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Status } from "@/components/status-dot"
 import { EmptyState, ErrorState } from "@/components/state"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
+import { IdentityFacts, IdentityStateLoading } from "@/components/network/identity-facts"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -131,7 +131,7 @@ export function AddressPlanningPage() {
         label="About address planning"
         state={
           !admin ? undefined : loading ? (
-            <Skeleton className="h-4 w-32" />
+            <IdentityStateLoading />
           ) : !data ? undefined : view.error ? (
             <Status tone="warning" label="Last known plan" />
           ) : gaps > 0 ? (
@@ -141,28 +141,28 @@ export function AddressPlanningPage() {
           )
         }
         facts={
-          !admin ? (
-            <span>needs system administrator access</span>
-          ) : loading ? (
-            <Skeleton className="h-3 w-64" />
-          ) : !data ? (
-            <span>the plan could not be read</span>
-          ) : (
-            <>
-              <span className="numeric">{plural(counts.pools, "pool")}</span>
-              <FactDot />
-              <span className="numeric">{plural(counts.reservations, "reservation")} held</span>
-              <FactDot />
-              <span className="numeric">{plural(counts.observed, "native range")} observed</span>
-              <FactDot />
-              <span>
-                read{" "}
-                <time dateTime={data.inventory.checkedAt}>
-                  {relativeTime(data.inventory.checkedAt)}
-                </time>
-              </span>
-            </>
-          )
+          <IdentityFacts loading={loading}>
+            {!admin ? (
+              <span>needs system administrator access</span>
+            ) : !data ? (
+              <span>the plan could not be read</span>
+            ) : (
+              <>
+                <span className="numeric">{plural(counts.pools, "pool")}</span>
+                <FactDot />
+                <span className="numeric">{plural(counts.reservations, "reservation")} held</span>
+                <FactDot />
+                <span className="numeric">{plural(counts.observed, "native range")} observed</span>
+                <FactDot />
+                <span>
+                  read{" "}
+                  <time dateTime={data.inventory.checkedAt}>
+                    {relativeTime(data.inventory.checkedAt)}
+                  </time>
+                </span>
+              </>
+            )}
+          </IdentityFacts>
         }
         command={
           !admin || !data ? undefined : pools.length > 0 ? (

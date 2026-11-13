@@ -171,9 +171,9 @@ function PoolBand({
             <span>Retired</span>
           ) : (
             use && (
-              <span className="numeric max-sm:hidden">
-                <span className="font-medium text-foreground">{exact(use.candidateBlocks)}</span> of{" "}
-                {exact(use.totalBlocks)} free
+              <span className="numeric">
+                <span className="font-medium text-foreground">{exact(use.candidateBlocks)}</span>
+                <span className="max-sm:hidden"> of {exact(use.totalBlocks)}</span> free
               </span>
             )
           )}

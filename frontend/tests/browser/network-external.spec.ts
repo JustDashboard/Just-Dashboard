@@ -82,7 +82,7 @@ test("signed measurements preserve family and scope through a failed refresh", a
   await page
     .getByRole("row")
     .filter({ hasText: "IPv6" })
-    .getByRole("button", { name: "Controlled source A" })
+    .getByRole("button", { name: "Controlled source A", exact: true })
     .click()
   await expect(page.getByText("2001:db8::3 → 2001:db8::8:443")).toBeVisible()
   state.unavailable = true
@@ -296,7 +296,7 @@ for (const width of [1280, 390]) {
     // A measured check, a refused one and one that expired with nothing measured.
     const rows =
       width >= 768
-        ? page.getByRole("region", { name: "Checks" }).locator("tbody tr")
+        ? page.getByRole("region", { name: "Checks", exact: true }).locator("tbody tr")
         : page.getByRole("list", { name: "Checks" }).getByRole("listitem")
     await expect(rows).toHaveCount(checks.length)
     const boxes = await rows.evaluateAll((items) =>
@@ -335,7 +335,7 @@ for (const width of [1280, 390]) {
     await page.goto("/network/external")
     const identity = page.getByRole("region", { name: "About external checks" })
     const picture = page.locator('[data-slot="wire-flow"]')
-    const table = page.getByRole("region", { name: "Checks" })
+    const table = page.getByRole("region", { name: "Checks", exact: true })
     await expect(picture).toHaveAttribute("data-loading", "true")
     const before = {
       identity: await top(page, identity),

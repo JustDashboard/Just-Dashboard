@@ -150,7 +150,9 @@ test("the period is exported from the table that shows it", async ({ page }) => 
     page.waitForEvent("download"),
     page.getByRole("button", { name: "Export bounded JSON" }).click(),
   ])
-  expect(new URL(request.url()).searchParams.get("from")).toBe(recordingReport.from)
+  expect(Date.parse(new URL(request.url()).searchParams.get("from")!)).toBe(
+    Date.parse(recordingReport.from),
+  )
   expect(download.suggestedFilename()).toMatch(/^socket-observations-\d{4}-\d{2}-\d{2}\.json$/)
 })
 
@@ -230,12 +232,17 @@ test("the day's recorded hours are a strip that reads one hour at a time", async
     "true",
   )
   await expect(line).toContainText("120 samples · 0 failed source reads")
-  const before = await top(page, line)
+  // Where the line stands under its strip, whatever the page has scrolled to.
+  const under = async () => {
+    const [strip, read] = [await top(page, hours), await top(page, line)]
+    return { y: read.y - strip.y, height: read.height }
+  }
+  const before = await under()
   await hours.getByRole("button", { name: "03:00 UTC, 120 samples, incomplete" }).click()
   await expect(line).toContainText("1 failed source reads")
   await hours.getByRole("button", { name: "05:00 UTC, not recorded" }).click()
   await expect(line).toContainText("not recorded; what happened in it remains unknown")
-  expect(await top(page, line)).toEqual(before)
+  expect(await under()).toEqual(before)
   await hours.getByRole("button", { name: /^10:00 UTC/ }).click()
   await expect(line).toContainText("2 skipped intervals")
   await line.getByRole("button", { name: "Retained observer gaps" }).click()
@@ -585,7 +592,8 @@ for (const width of [1280, 390]) {
       table: await top(page, table),
     }
     release()
-    await expect(table.getByText("worker", { exact: true }).first()).toBeVisible()
+    await expect(picture).not.toHaveAttribute("data-loading", "true")
+    await loaded(page)
     const after = {
       identity: await top(page, identity),
       picture: await top(page, picture),

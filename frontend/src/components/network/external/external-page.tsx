@@ -6,15 +6,15 @@ import { Page, PageContext } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Status } from "@/components/status-dot"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
+import { IdentityFacts, IdentityStateLoading } from "@/components/network/identity-facts"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { del, errorMessage, get, post } from "@/lib/api"
-import { plural, relativeTime } from "@/lib/format"
+import { plural } from "@/lib/format"
 import {
   activeCheck,
   checkCounts,
@@ -35,12 +35,7 @@ import {
   draftScope,
   type CheckDraft,
 } from "@/components/network/external/external-sheets"
-import {
-  checkTarget,
-  checkTime,
-  newestFirst,
-  reachVerdict,
-} from "@/components/network/external/reading"
+import { checkTarget, newestFirst, reachVerdict } from "@/components/network/external/reading"
 
 type Sheet = "check" | "enroll" | "compare" | null
 
@@ -187,7 +182,6 @@ export function ExternalChecksPage() {
     },
     { key: "refresh", label: "Refresh", icon: RefreshClockwise, run: refresh },
   ]
-  const latest = rows[0]
 
   return (
     <Page className="animate-rise">
@@ -198,7 +192,7 @@ export function ExternalChecksPage() {
         label="About external checks"
         state={
           !admin ? undefined : loading ? (
-            <Skeleton className="h-4 w-36" />
+            <IdentityStateLoading />
           ) : (
             <Status
               tone={readError ? "warning" : verdict.tone}
@@ -207,33 +201,31 @@ export function ExternalChecksPage() {
           )
         }
         facts={
-          !admin ? (
-            <span>needs system administrator access</span>
-          ) : loading ? (
-            <Skeleton className="h-3 w-64" />
-          ) : (
-            <>
-              <span className="numeric">{plural(counts.enrolled, "source")} enrolled</span>
-              <FactDot />
-              <span className="numeric">{counts.pending} in flight</span>
-              <FactDot />
-              <span className="numeric">{plural(counts.retained, "measurement")} kept</span>
-              {counts.unknown > 0 && (
-                <>
-                  <FactDot />
-                  <span className="numeric" title="Expired or cancelled checks stay unknown">
-                    {counts.unknown} without evidence
-                  </span>
-                </>
-              )}
-              {latest && (
-                <>
-                  <FactDot />
-                  <span>last asked {relativeTime(checkTime(latest))}</span>
-                </>
-              )}
-            </>
-          )
+          <IdentityFacts loading={loading}>
+            {!admin ? (
+              <span>needs system administrator access</span>
+            ) : (
+              <>
+                <span className="numeric">{plural(counts.enrolled, "source")} enrolled</span>
+                {counts.pending > 0 && (
+                  <>
+                    <FactDot />
+                    <span className="numeric">{counts.pending} in flight</span>
+                  </>
+                )}
+                <FactDot />
+                <span className="numeric">{plural(counts.retained, "measurement")} kept</span>
+                {counts.unknown > 0 && (
+                  <>
+                    <FactDot />
+                    <span className="numeric" title="Expired or cancelled checks stay unknown">
+                      {counts.unknown} without evidence
+                    </span>
+                  </>
+                )}
+              </>
+            )}
+          </IdentityFacts>
         }
         command={
           admin ? (

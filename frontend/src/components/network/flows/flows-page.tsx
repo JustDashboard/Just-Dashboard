@@ -13,10 +13,10 @@ import { Page, PageContext } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Status } from "@/components/status-dot"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
+import { IdentityFacts, IdentityStateLoading } from "@/components/network/identity-facts"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { KernelObserverPanel } from "@/components/network/kernel-observer"
 import { useAuth } from "@/hooks/use-auth"
@@ -238,7 +238,7 @@ export function SocketHistoryPage() {
         label="About socket history"
         state={
           !admin ? undefined : loading ? (
-            <Skeleton className="h-4 w-28" />
+            <IdentityStateLoading />
           ) : !data ? undefined : (
             <Status
               tone={read.error ? "warning" : reading.tone}
@@ -247,35 +247,35 @@ export function SocketHistoryPage() {
           )
         }
         facts={
-          !admin ? (
-            <span>needs the admin capability</span>
-          ) : loading ? (
-            <Skeleton className="h-3 w-72" />
-          ) : !data ? (
-            <span>the recorder could not be read</span>
-          ) : (
-            <>
-              <span>
-                {data.recordingSince ? (
-                  <>
-                    recording since <UTCTime value={data.recordingSince} form="short" />
-                  </>
-                ) : (
-                  "recording has not been enabled"
-                )}
-              </span>
-              <FactDot />
-              <span className="numeric">every {data.settings.intervalSeconds}s</span>
-              <FactDot />
-              <span className="numeric">keeps {plural(data.settings.retentionDays, "day")}</span>
-              <FactDot />
-              <span className="numeric">{plural(data.retainedRows, "row")} kept</span>
-              <FactDot />
-              <span>
-                read <UTCTime value={data.checkedAt} form="clock" /> UTC
-              </span>
-            </>
-          )
+          <IdentityFacts loading={loading}>
+            {!admin ? (
+              <span>needs the admin capability</span>
+            ) : !data ? (
+              <span>the recorder could not be read</span>
+            ) : (
+              <>
+                <span>
+                  {data.recordingSince ? (
+                    <>
+                      recording since <UTCTime value={data.recordingSince} form="short" />
+                    </>
+                  ) : (
+                    "recording has not been enabled"
+                  )}
+                </span>
+                <FactDot />
+                <span className="numeric">every {data.settings.intervalSeconds}s</span>
+                <FactDot />
+                <span className="numeric">keeps {plural(data.settings.retentionDays, "day")}</span>
+                <FactDot />
+                <span className="numeric">{plural(data.retainedRows, "row")} kept</span>
+                <FactDot />
+                <span>
+                  read <UTCTime value={data.checkedAt} form="clock" /> UTC
+                </span>
+              </>
+            )}
+          </IdentityFacts>
         }
         command={admin && data && !untouched ? recordingVerb : undefined}
         menu={admin ? <VerbMenu verbs={menu} label="More recorder actions" /> : undefined}
