@@ -401,7 +401,7 @@ never into `docs/audits/`.
   the store's own words. It removes everything it made. Changes to the AWS Secrets Manager client or the
   SigV4 signer (`secretstore/aws.go`, `sigv4.go`) also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSecretsManagerReferenceReachesTheContainer -count=1 -v`,
-  which starts a real LocalStack (`localstack/localstack:2026.10.3`, pulled beforehand, Secrets Manager
+  which starts a real LocalStack (`localstack/localstack:4.14.0`, pulled beforehand, Secrets Manager
   only) on loopback, reads a JSON secret's field, its `AWSPREVIOUS` staging label and a whole plain secret
   into a real container through the dashboard's own signed client, then stops LocalStack and checks the
   next run fails in the store's words; it removes what it made. LocalStack accepts any signature, so the

@@ -207,7 +207,7 @@ the audit log's own redaction is the second line.
   step failing in its words. It needs `openbao/openbao:2.7.2`, `infisical/infisical:v0.167.4`,
   `postgres:17-alpine` and `redis:7-alpine` and removes every container, network and image it made.
   `TestLiveSecretsManagerReferenceReachesTheContainer` does the same against a real LocalStack
-  (`localstack/localstack:2026.10.3`, Secrets Manager only) through the dashboard's own SigV4 client: a
+  (`localstack/localstack:4.14.0`, Secrets Manager only) through the dashboard's own SigV4 client: a
   JSON field, its `AWSPREVIOUS` label and a whole plain secret into a real container, then LocalStack
   stopped. LocalStack accepts any signature, so the signing is proved by the unit vectors and the
   verifying fake, not there. Azure Key Vault has no server to run; the fakes are its coverage, and the
