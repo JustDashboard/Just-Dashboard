@@ -12,8 +12,9 @@ The server as a router: its links, tunnels and firewall drawn live, with the too
 - Interfaces, bridges, VLANs, namespaces, routing and policy rules
 - Firewall, port forwarding, NAT, rate limits and blocklists
 - WireGuard and Tailscale, DNS and ad-blocking, egress groups with failover
+- Address planning that reserves subnets for Docker networks and WireGuard
 - Traffic per device, program and container, plus speed limits and SQM
-- 26 diagnostics, packet captures, connection paths, drift and saved runs
+- 26 diagnostics, packet captures, connection paths, drift and saved runs, and reachability checks from probe agents you enrol elsewhere
 
 <table>
 <tr>
