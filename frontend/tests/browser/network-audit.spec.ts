@@ -13,8 +13,13 @@ const reader = { ...admin, capabilities: ["read"], user: { ...admin.user, role: 
 test("read-only accounts see network state and cannot submit mutations", async ({ page }) => {
   const mutations: Mutation[] = []
   await mockNetwork(page, mutations, { overrides, session: reader })
+  // Interfaces draws no command such an account cannot use, rather than a held one.
+  await page.goto("/network/interfaces")
+  await loaded(page)
+  await expect(page.getByRole("link", { name: "Open ens3", exact: true })).toBeVisible()
+  for (const command of ["New device", "New namespace"])
+    await expect(page.getByRole("button", { name: command, exact: true })).toHaveCount(0)
   for (const [path, commands] of [
-    ["interfaces", ["New device", "New namespace"]],
     ["routing", ["Add route", "Add rule"]],
     ["gateway", ["Forward a port", "Share a network"]],
     ["protection", ["New blocklist", "New limit"]],

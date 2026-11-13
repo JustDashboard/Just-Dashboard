@@ -337,7 +337,7 @@ test("a device's page reads its driver, offloads, error counters and address ori
   await page.getByRole("tab", { name: "Addresses" }).click()
   await expect(device.getByText(/from DHCP, valid 23 h 3 min/)).toBeVisible()
   await page.getByRole("tab", { name: "Settings" }).click()
-  const driver = device.locator("[data-slot=panel]").filter({ hasText: "Driver" })
+  const driver = device.locator("[data-slot=setting]").filter({ hasText: "Driver" })
   await expect(driver.getByText("virtio_net 1.0.0")).toBeVisible()
   await expect(driver.getByText("0000:00:03.0")).toBeVisible()
   await expect(driver.getByRole("list", { name: "Offloads" })).toContainText(
