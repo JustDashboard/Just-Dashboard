@@ -180,11 +180,6 @@ func (s rootStack) jwtLibrary() string {
 	return ""
 }
 
-func (s rootStack) goModule(module string) bool {
-	content := s.facts[path.Join(s.root, "go.mod")]
-	return content != nil && strings.Contains(string(content), module)
-}
-
 // secretRule is one self-issued secret: the exact name, the framework whose
 // presence makes it one, and the shape that framework reads.
 type secretRule struct {

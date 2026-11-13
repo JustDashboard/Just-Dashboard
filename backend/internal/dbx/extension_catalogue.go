@@ -188,12 +188,6 @@ var extensionCatalogue = map[string]ExtensionInfo{
 	"pglogical": {Category: ExtensionMaintenance, Library: "pglogical", About: "Logical replication between servers, from before it was built in."},
 }
 
-// ExtensionCatalogue returns what the catalogue knows about an extension.
-func ExtensionCatalogue(name string) (ExtensionInfo, bool) {
-	info, ok := extensionCatalogue[name]
-	return info, ok
-}
-
 // PreloadLibrary is one library the preload route may write, and what it is.
 type PreloadLibrary struct {
 	Library string

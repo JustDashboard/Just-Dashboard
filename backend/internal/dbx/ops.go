@@ -990,12 +990,3 @@ func timePtr(t sql.NullTime) *time.Time {
 	u := t.Time.UTC()
 	return &u
 }
-
-// qualifiedName renders schema.table for display, without the dot when there
-// is no schema.
-func qualifiedName(schema, table string) string {
-	if schema == "" {
-		return table
-	}
-	return schema + "." + table
-}

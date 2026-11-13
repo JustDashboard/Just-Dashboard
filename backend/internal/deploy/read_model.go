@@ -1066,19 +1066,3 @@ func (s *OrchestrationStore) ProjectRunsFiltered(
 	}
 	return result, nextBefore, nil
 }
-
-func (s *OrchestrationStore) latestProjectRun(ctx context.Context, projectID int64, active bool) (*EngineRun, error) {
-	query := `SELECT ` + engineRunColumns + ` FROM deploy_runs WHERE project_id = ?`
-	if active {
-		query += ` AND ` + activeRunWhere
-	}
-	query += ` ORDER BY requested_at DESC, id DESC LIMIT 1`
-	run, err := scanEngineRun(s.reader().QueryRowContext(ctx, query, projectID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read deployment run: %w", err)
-	}
-	return run, nil
-}

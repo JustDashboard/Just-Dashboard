@@ -335,17 +335,6 @@ func otherEcosystem(root string, s *repoShapeScan) *ecosystemMatch {
 	return nil
 }
 
-// hasDirectory says whether the walk saw any file under root/name.
-func (s *repoShapeScan) hasDirectory(root, name string) bool {
-	prefix := joinRoot(root, name) + "/"
-	for file := range s.files {
-		if strings.HasPrefix(file, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func detectEcosystem(root string, s *repoShapeScan) *ecosystemMatch {
 	if match := rubyEcosystem(root, s); match != nil {
 		return match

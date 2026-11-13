@@ -407,8 +407,3 @@ var ErrNotSupported = errors.New("this install cannot manage its own configurati
 // Deadline for the whole start-up path, so a wedged Docker daemon cannot hold
 // an HTTP handler open indefinitely.
 const startTimeout = 30 * time.Second
-
-// WithTimeout is the context every start goes through.
-func WithTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, startTimeout)
-}

@@ -14,7 +14,6 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
 
 // The operations routes, driven through the whole router: the allowlist, the
@@ -795,37 +794,4 @@ func TestRedisAccountRulesAreListedWithoutTheirPasswordHashes(t *testing.T) {
 	if roles[3].MemberOf != nil {
 		t.Errorf("an account with no rule gained one: %v", roles[3].MemberOf)
 	}
-}
-
-// opsDockerEngine is a Docker daemon running one PostgreSQL container that
-// publishes its port on every interface, with the memory limit given.
-func opsDockerEngine(t *testing.T, s *Server, hostPort int, memory int64) {
-	t.Helper()
-	container := map[string]any{
-		"Id": "c0ffee", "Names": []string{"/shop-db"}, "Image": "postgres:16", "ImageID": "sha256:abc", "State": "running",
-		"Ports": []map[string]any{{"IP": "0.0.0.0", "PrivatePort": 5432, "PublicPort": hostPort, "Type": "tcp"}},
-	}
-	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/_ping":
-			w.Header().Set("API-Version", "1.47")
-		case strings.HasSuffix(r.URL.Path, "/containers/json"):
-			_ = json.NewEncoder(w).Encode([]map[string]any{container})
-		case strings.HasSuffix(r.URL.Path, "/containers/shop-db/json"), strings.HasSuffix(r.URL.Path, "/containers/c0ffee/json"):
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"Id": "c0ffee", "Name": "/shop-db", "Image": "sha256:abc",
-				"Config":          map[string]any{"Image": "postgres:16"},
-				"State":           map[string]any{"Status": "running", "Running": true},
-				"HostConfig":      map[string]any{"Memory": memory},
-				"NetworkSettings": map[string]any{"Networks": map[string]any{}},
-			})
-		default:
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
-		}
-	}))
-	t.Cleanup(engine.Close)
-	s.modules.docker = dockerx.New(engine.URL)
-	t.Cleanup(func() { _ = s.modules.docker.Close() })
 }

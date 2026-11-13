@@ -96,7 +96,7 @@ func update(name string, change func(*Task)) {
 	change(t)
 }
 
-// Go starts fn on a goroutine of its own and keeps it running: see Run.
+// Go starts fn on a goroutine of its own and keeps it running: see run.
 //
 // after is what the loop used to do on its way out and can only do once,
 // closing the channel its Stop waits on above all: each is called, in order,
@@ -123,18 +123,14 @@ func launch(ctx context.Context, log *slog.Logger, name string, fn func(context.
 	return done
 }
 
-// Run calls fn and returns when fn returns. If fn panics, the panic is logged
+// run calls fn and returns when fn returns. If fn panics, the panic is logged
 // with its stack and fn is called again after a pause, unless ctx has ended by
 // then: ctx is what tells a task to stop, so a task whose owner cancelled it
 // is not started again, and the pause itself ends with ctx.
 //
 // fn is called more than once, so it must not do on its way out what can only
-// be done once (closing a channel, WaitGroup.Done): that belongs after Run, or
-// to the channel Go returns.
-func Run(ctx context.Context, log *slog.Logger, name string, fn func(context.Context)) {
-	run(ctx, log, name, fn, firstPause, maxPause)
-}
-
+// be done once (closing a channel, WaitGroup.Done): that belongs to Go's after
+// functions, or to the channel Go returns.
 func run(ctx context.Context, log *slog.Logger, name string, fn func(context.Context), first, longest time.Duration) {
 	pause := first
 	for {

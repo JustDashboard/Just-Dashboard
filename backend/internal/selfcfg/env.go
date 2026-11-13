@@ -85,8 +85,6 @@ func LoadEnv(path string) (*EnvFile, error) {
 	return f, nil
 }
 
-func (f *EnvFile) Path() string { return f.path }
-
 // Get returns the value recorded for key, or "" when it is absent. Quotes are
 // stripped: compose accepts both forms and an operator may well have used
 // either.
@@ -98,17 +96,6 @@ func (f *EnvFile) Get(key string) string {
 		}
 	}
 	return ""
-}
-
-// All returns every assignment in the file.
-func (f *EnvFile) All() map[string]string {
-	out := map[string]string{}
-	for _, line := range f.lines {
-		if k, v, ok := splitAssignment(line); ok {
-			out[k] = v
-		}
-	}
-	return out
 }
 
 // Set records key=value, replacing the assignment in place when it is already

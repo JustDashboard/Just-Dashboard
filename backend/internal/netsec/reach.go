@@ -124,9 +124,6 @@ type HostAddress struct {
 	DefaultRoute bool
 }
 
-// Reach grades a bind address.
-func (n HostNetwork) Reach(address string) Reach { return n.reachOf(address).class }
-
 // Place grades a bind address and names its network and interface — the
 // judgement the posture levels a finding by, in the ports page's terms.
 func (n HostNetwork) Place(address string) Placement {
@@ -225,18 +222,6 @@ func isTailnet(ip net.IP) bool {
 // tailnet is the VPN its own advice asks for.
 func (r bindReach) matters(preset ServicePreset) bool {
 	return !preset.InternetOnly || r.class.InternetFacing() || r.forwarded
-}
-
-// advice is what to do about a database or control port bound at this reach,
-// given the catalogue's note on why the service should not be reachable.
-func (r bindReach) advice(danger, address, port string) string {
-	switch r.class {
-	case ReachAll:
-		return danger + " Bind it to 127.0.0.1 instead — for a container, publish it as 127.0.0.1:" + port + ": rather than " + port + ":."
-	case ReachPublic:
-		return danger + " Bind it to 127.0.0.1 instead — for a container, publish it as 127.0.0.1:" + port + ": rather than " + net.JoinHostPort(address, port) + ":."
-	}
-	return danger + " Anything that can reach " + address + " can connect to it: " + r.who + ". Bind it to 127.0.0.1 unless something there needs it."
 }
 
 // Verdict is what a firewall does with a connection to one socket.

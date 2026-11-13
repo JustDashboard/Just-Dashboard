@@ -1261,14 +1261,6 @@ func PlanRenameColumn(driver Driver, schema, table, from, to string) (*DDLPlan, 
 	return planOf(fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s", rel, qFrom, qTo)), nil
 }
 
-func RenameColumn(ctx context.Context, db *sql.DB, driver Driver, schema, table, from, to string) (string, error) {
-	plan, err := PlanRenameColumn(driver, schema, table, from, to)
-	if err != nil {
-		return "", err
-	}
-	return plan.run(ctx, db)
-}
-
 // PlanRenameTable plans renaming a table.
 func PlanRenameTable(driver Driver, schema, table, to string) (*DDLPlan, error) {
 	d, err := ddlDialect(driver, OpRenameTable)

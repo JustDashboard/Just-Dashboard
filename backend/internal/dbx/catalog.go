@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -627,21 +626,6 @@ func scanNamed(rows *sql.Rows) (map[string]string, error) {
 		out[strings.ToLower(c)] = vals[i]
 	}
 	return out, nil
-}
-
-// sortObjects orders a group by schema, name and signature, for the engines
-// whose catalogue query cannot sort the assembled rows itself.
-func sortObjects(objects []CatalogObject) {
-	sort.SliceStable(objects, func(i, j int) bool {
-		a, b := objects[i], objects[j]
-		if a.Schema != b.Schema {
-			return a.Schema < b.Schema
-		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
-		}
-		return a.Signature < b.Signature
-	})
 }
 
 // --- reading a CREATE TABLE's own text ---------------------------------------

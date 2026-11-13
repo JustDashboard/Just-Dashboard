@@ -30,8 +30,6 @@ func (i *Identity) PublicKey() string { return base64.StdEncoding.EncodeToString
 // Fingerprint is what the approval page and this dashboard both show.
 func (i *Identity) Fingerprint() string { return Fingerprint(i.public()) }
 
-func (i *Identity) sign(msg []byte) []byte { return ed25519.Sign(i.key, msg) }
-
 func newIdentity() (*Identity, string, error) {
 	seed := make([]byte, ed25519.SeedSize)
 	if _, err := rand.Read(seed); err != nil {
