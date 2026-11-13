@@ -9,16 +9,16 @@ import (
 // nodeFixture is one repository shape and the candidate detection must make
 // of it: what serves it, from where, and what is left for the operator.
 type nodeFixture struct {
-	name                   string
-	files                  map[string]string
-	framework, build       string
-	start, output          string
-	port                   int
-	profile                WorkloadProfile
-	confidence             DetectionConfidence
-	spa                    bool
-	decision, evidence     string
-	finding, issue, notice string
+	name               string
+	files              map[string]string
+	framework, build   string
+	start, output      string
+	port               int
+	profile            WorkloadProfile
+	confidence         DetectionConfidence
+	spa                bool
+	decision, evidence string
+	finding, issue     string
 }
 
 func (fixture nodeFixture) check(t *testing.T, candidate DetectedCandidate) {

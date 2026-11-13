@@ -19,7 +19,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -345,13 +344,6 @@ func ListColumns(ctx context.Context, db *sql.DB, driver Driver, schema, table s
 	}
 	return tableColumns(ctx, db, d, schema, table)
 }
-
-// identifierRe is the strict form, used where a name becomes a path segment or
-// a shell argument rather than a quoted SQL identifier — a database name headed
-// for a dump filename, say. SQL identifiers use validateIdent plus the
-// dialect's own quoting, which is both safer and permissive enough for the
-// hyphens and non-ASCII letters real schemas contain.
-var identifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]{0,62}$`)
 
 // qualify renders a validated, quoted schema.table reference for a dialect.
 // An empty schema — the normal case for SQLite, and for an engine where the

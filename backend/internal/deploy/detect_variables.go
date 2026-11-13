@@ -46,7 +46,6 @@ var (
 	railsAppRE        = regexp.MustCompile(`<\s*Rails::Application\b`)
 	solidQueuePumaRE  = regexp.MustCompile(`(?m)^\s*plugin\s+:solid_queue\b`)
 	requireMasterKey  = regexp.MustCompile(`(?m)^\s*config\.require_master_key\s*=\s*true\b`)
-	databaseYAMLKeyRE = regexp.MustCompile(`(?m)^  ([a-z_]+):\s*$`)
 	localhostPathRE   = regexp.MustCompile(`^[A-Za-z0-9/_.\-~%]*$`)
 	simpleWordRE      = regexp.MustCompile(`^[a-z][a-z0-9_\-]{0,31}$`)
 	nextAuthMajorRE   = regexp.MustCompile(`(\d+)`)
