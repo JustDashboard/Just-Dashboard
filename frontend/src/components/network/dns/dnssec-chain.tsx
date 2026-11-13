@@ -4,14 +4,8 @@ import { useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { post } from "@/lib/api"
 import type { DNSSECChain, DNSSECLevel } from "@/lib/types"
-import { Field } from "@/components/form"
 import { Status } from "@/components/status-dot"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group"
+import { Question } from "@/components/network/dns/lookup-question"
 
 const VERDICT: Record<
   DNSSECChain["verdict"],
@@ -51,9 +45,14 @@ const SET: Record<DNSSECLevel["dnskey"]["state"], string> = {
  * outside the name's own policy scope are not asked, so a private name's
  * chain ends at its scope's edge rather than at a public resolver.
  */
-export function DNSSECChainCheck() {
+export function DNSSECChainCheck({
+  name,
+  onName,
+}: {
+  name: string
+  onName: (name: string) => void
+}) {
   const { can } = useAuth()
-  const [name, setName] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [chain, setChain] = useState<DNSSECChain>()
@@ -71,36 +70,17 @@ export function DNSSECChainCheck() {
   }
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <form
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (name.trim() && !busy) void walk()
-        }}
-      >
-        <Field
-          label="Name to trace"
-          htmlFor="dnssec-chain-name"
-          error={error}
-          hint="Asks the native resolver for each zone's DNSKEY and DS sets inside the name's own policy scope."
-        >
-          <InputGroup>
-            <InputGroupInput
-              id="dnssec-chain-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              spellCheck={false}
-              autoComplete="off"
-              className="font-mono"
-              placeholder="example.com"
-            />
-            <InputGroupAddon align="inline-end" className="gap-0 p-0">
-              <InputGroupButton type="submit" disabled={!name.trim() || busy} pending={busy}>
-                Trace
-              </InputGroupButton>
-            </InputGroupAddon>
-          </InputGroup>
-        </Field>
-      </form>
+      <Question
+        id="dnssec-chain-name"
+        name={name}
+        onName={onName}
+        verb="Trace"
+        ready={Boolean(name.trim())}
+        busy={busy}
+        error={error}
+        info="Asks the native resolver for each zone's DNSKEY and DS sets inside the name's own policy scope."
+        onSubmit={() => void walk()}
+      />
       {chain && (
         <section
           aria-label={`Chain of trust for ${chain.name}`}
