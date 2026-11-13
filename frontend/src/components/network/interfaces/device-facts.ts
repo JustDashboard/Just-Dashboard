@@ -245,8 +245,10 @@ export function devicePicture(
       id: "remote",
       kind: "remote",
       eyebrow: link.remote && !unicast(link.remote) ? "Multicast group" : "Remote end",
-      title: `${link.remote ?? "any address"}${link.remote && link.port ? `:${link.port}` : ""}`,
-      hint: `from ${link.local ?? "any address"}`,
+      // The port is said under the address: an address and its port on one
+      // line broke in two in a column of the picture.
+      title: link.remote ?? "any address",
+      hint: `${link.remote && link.port ? `UDP ${link.port} · ` : ""}from ${link.local ?? "any address"}`,
       mono: true,
     })
     for (const end of link.remotes ?? []) {

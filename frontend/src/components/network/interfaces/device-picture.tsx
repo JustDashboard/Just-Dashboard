@@ -124,7 +124,10 @@ export function DevicePicture({
             <DeviceGlyph link={link} />
           </WireMark>
         ),
-        eyebrow: `${ROLE_LABEL[link.role]} · ${kindLabel(link)}`,
+        eyebrow:
+          kindLabel(link).toLowerCase() === ROLE_LABEL[link.role].toLowerCase()
+            ? ROLE_LABEL[link.role]
+            : `${ROLE_LABEL[link.role]} · ${kindLabel(link)}`,
         title: <span className="block truncate font-mono">{link.name}</span>,
         hint: state.up ? (
           <span className="numeric font-mono">

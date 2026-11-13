@@ -167,7 +167,7 @@ test("a tunnel's far side is its remote end and every further flood end", () => 
     remotes: ["198.51.100.8"],
   })
   expect(devicePicture(vx, [vx]).away.map((n) => [n.eyebrow, n.title, n.hint])).toEqual([
-    ["Remote end", "198.51.100.7:4789", "from 203.0.113.20"],
+    ["Remote end", "198.51.100.7", "UDP 4789 · from 203.0.113.20"],
     ["Also floods to", "198.51.100.8", undefined],
   ])
   const group = link({ name: "vx9", kind: "vxlan", role: "tunnel", remote: "239.1.1.1" })

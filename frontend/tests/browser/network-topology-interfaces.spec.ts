@@ -574,7 +574,8 @@ test("a VXLAN's readiness names its checks and limits and edits its flood ends",
   await expect(device.getByText(/neither encrypted nor authenticated/)).toBeVisible()
   // Its far side is drawn: the remote and every further end it floods to.
   const away = device.getByRole("region", { name: "Leads to" })
-  await expect(away).toContainText("198.51.100.7:4789")
+  await expect(away).toContainText("198.51.100.7")
+  await expect(away).toContainText("UDP 4789")
   await expect(away).toContainText("198.51.100.8")
   await page.getByRole("tab", { name: "Settings" }).click()
   const ends = device.getByLabel("Further ends", { exact: true })
