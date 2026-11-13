@@ -34,6 +34,7 @@ import { LinkMark, OWNER_LABEL, ROLE_LABEL, kindLabel } from "@/components/netwo
 import { describeDevice, deviceState } from "./device-facts"
 
 const TILE = "size-10 rounded-lg [&_img]:size-6 [&_svg]:size-5"
+const FACTS = "flex h-4 w-full min-w-0 items-center gap-x-3 overflow-hidden whitespace-nowrap"
 
 /**
  * The line a device's page opens on, laid out as a project's header: the
@@ -151,8 +152,11 @@ export function DeviceIdentity({
           </>
         }
         facts={
-          <>
-            <span>
+          // One line at every width, so the line is as tall with a device on
+          // it as while it waits for one: a phone gets the first address and
+          // leaves who keeps the device to its Settings.
+          <span className={FACTS}>
+            <span className="shrink-0">
               {ROLE_LABEL[link.role]}
               {kindLabel(link).toLowerCase() !== ROLE_LABEL[link.role].toLowerCase() &&
                 ` · ${kindLabel(link)}`}
@@ -160,14 +164,17 @@ export function DeviceIdentity({
             {link.managed && (
               <>
                 <FactDot />
-                <span>made here</span>
+                <span className="shrink-0">made here</span>
               </>
             )}
             <FactDot />
-            <AddressLine addresses={link.addresses} />
-            <FactDot />
-            <span className="truncate">{describeDevice(link, OWNER_LABEL)}</span>
-          </>
+            <AddressLine addresses={link.addresses} max={1} className="sm:hidden" />
+            <AddressLine addresses={link.addresses} className="shrink-0 max-sm:hidden" />
+            <span className="contents max-sm:hidden">
+              <FactDot />
+              <span className="truncate">{describeDevice(link, OWNER_LABEL)}</span>
+            </span>
+          </span>
         }
         command={
           admin && !link.adminUp ? (
@@ -246,7 +253,7 @@ export function DeviceIdentityLoading({ name }: { name: string }) {
       logo={<span className="size-10 shrink-0 rounded-lg border border-hairline bg-control" />}
       title={<span className="truncate font-mono">{name}</span>}
       state={<TextShimmer className="text-xs font-medium">Reading…</TextShimmer>}
-      facts={<span>&nbsp;</span>}
+      facts={<span className={FACTS}>&nbsp;</span>}
     />
   )
 }

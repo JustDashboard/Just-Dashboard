@@ -21,6 +21,7 @@ import { LinkMark, kindLabel } from "@/components/network/marks"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { ReadingWords } from "./device-detail"
 import { deviceHref, deviceState } from "./device-facts"
+import { SECOND_LINE } from "./device-list"
 import { describeVlans, sameVlans } from "./device-reading"
 
 /** A bridge read as a switch: its settings, what each port carries and what it has learned. */
@@ -77,7 +78,7 @@ export function DevicePorts({ link, links }: { link: NetworkLink; links: Network
                     }
                     verb={`Open ${port.name}`}
                     description={
-                      <span data-slot="port-vlans">
+                      <span data-slot="port-vlans" className={SECOND_LINE}>
                         {port.container ? `${port.container} · ` : ""}
                         {!v ? (
                           " "

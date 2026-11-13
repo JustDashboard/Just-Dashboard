@@ -1336,7 +1336,24 @@ Its [source-matched build, 13 interaction cases and phone/desktop inspection](..
 pass, as do the [combined reachable checks](../../audits/2026-10-08-network-capability-report/implementation-evidence/native-dns-integrated-acceptance.md).
 Broader P17 acceptance remains open.
 
-Network interface sheets add the administrator-only native persistent profile editor
+**Interfaces** (`app/(dashboard)/network/interfaces/`, `components/network/interfaces/`) opens on one
+line (how many devices, which is the uplink, how many were made here, **New device**), lists the
+devices by what they are for as one-line cards, then the namespaces as cards with their device count
+(a namespace's routes, resolver and listeners stay its sheet) and the link log. A device is a page,
+`/network/interfaces/[name]` (`device-page.tsx`; the old `?device=` address redirects there), on the
+process page's shape: its line with its state and guard, **Set up** as the command of a device that
+is down, **Set down** and **Delete** in the menu; the views **Traffic** (a `WireFlow` picture of what
+it is wired to, the last fifteen minutes, what it carried since it was made, link errors, a tunnel's
+readiness), **Addresses**, **Ports** (a bridge's ports as cards, the switch and its forwarding
+database), **Settings** (MTU, bridge membership, VLANs and flood ends as sections under one save bar,
+each its own write and a destructive one confirmed; the driver) and, for an administrator,
+**History** (the audit trail's `network.link.`, `network.address.` and `network.native.` entries for
+that device, narrowed in the page) with `?tab=` in the address; and from `xl` the list as a rail
+(`device-rail.tsx`) with the list's own search and Everything switch, Alt+↑/↓ to walk it. The pure
+part (`device-facts.ts`: grouping, state, views, the picture's two sides, a change in words) is
+tested in `bun test src`.
+
+A device's Settings view adds the administrator-only native persistent profile editor
 (`components/network/interfaces/native-profile.tsx`). It reads the supported existing owner, including
 standalone veth profiles verified by the backend's private reciprocal-peer fences, and retains
 typed IPv4/IPv6 address, DNS/domain and route drafts after refusals, and requires a reviewed generation

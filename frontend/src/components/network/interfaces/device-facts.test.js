@@ -186,9 +186,10 @@ test("a change reads as what was done and what it was changed to", () => {
   expect(changeWords({ action: "network.link.master", detail: '{"master":""}' }).value).toBe(
     "no bridge",
   )
-  expect(
-    changeWords({ action: "network.address.add", detail: '{"cidr":"10.0.0.1/24"}' }),
-  ).toEqual({ title: "Address added", value: "10.0.0.1/24" })
+  expect(changeWords({ action: "network.address.add", detail: '{"cidr":"10.0.0.1/24"}' })).toEqual({
+    title: "Address added",
+    value: "10.0.0.1/24",
+  })
   expect(changeWords({ action: "network.link.down", detail: "" })).toEqual({ title: "Set down" })
   expect(changeWords({ action: "network.link.remotes", detail: '{"remotes":[]}' }).value).toBe(
     "none",

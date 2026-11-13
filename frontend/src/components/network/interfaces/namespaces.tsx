@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Cidr } from "@/components/network/address"
+import { SECOND_LINE } from "./device-list"
 
 const NONE = "__none"
 
@@ -173,19 +174,21 @@ function NamespaceRow({
       }
       verb={`Inspect ${ns.name}`}
       description={
-        ns.readError ? (
-          <span className="text-warning" title={ns.readError}>
-            devices unknown
-          </span>
-        ) : first ? (
-          <span className="inline-flex min-w-0 items-center gap-2">
-            <span className="font-mono">{first.name}</span>
-            {first.addresses[0] ? <Cidr cidr={first.addresses[0]} /> : <span>no address</span>}
-            {ns.pid ? <span className="truncate">· pid {ns.pid}</span> : null}
-          </span>
-        ) : (
-          <span>loopback only{ns.pid ? ` · pid ${ns.pid}` : ""}</span>
-        )
+        <span className={SECOND_LINE}>
+          {ns.readError ? (
+            <span className="text-warning" title={ns.readError}>
+              devices unknown
+            </span>
+          ) : first ? (
+            <>
+              <span className="font-mono">{first.name}</span>
+              {first.addresses[0] ? <Cidr cidr={first.addresses[0]} /> : <span>no address</span>}
+              {ns.pid ? <span className="truncate">· pid {ns.pid}</span> : null}
+            </>
+          ) : (
+            <span>loopback only{ns.pid ? ` · pid ${ns.pid}` : ""}</span>
+          )}
+        </span>
       }
       trailing={
         <span

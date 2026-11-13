@@ -3,6 +3,7 @@
 import { get } from "@/lib/api"
 import type { NetworkLinkDetail, NetworkReading } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Detail, DetailList } from "@/components/page"
 import { LoadingRows, Notice } from "@/components/state"
@@ -27,13 +28,11 @@ export function useDeviceDetail(name: string) {
 type DetailRead = ReturnType<typeof useDeviceDetail>
 
 /** The reading's own states, around whatever a section draws from it. */
-function DetailSection({
-  title,
+function DetailBody({
   detail,
   rows,
   children,
 }: {
-  title: string
   detail: DetailRead
   /** How many lines the section holds while it reads. */
   rows: number
@@ -41,102 +40,106 @@ function DetailSection({
 }) {
   const d = detail.data
   return (
-    <Panel plain>
-      <PanelHeader title={title} />
-      <PanelBody>
-        {d && (
-          <NetworkReadWarning
-            error={detail.error}
-            refresh={detail.refresh}
-            lastSuccess={detail.lastSuccess}
-            reading="device detail"
-          />
-        )}
-        {!d ? (
-          detail.error ? (
-            <Notice tone="warning" title="The device detail could not be read">
-              {detail.error.message}
-            </Notice>
-          ) : (
-            <LoadingRows rows={rows} />
-          )
+    <>
+      {d && (
+        <NetworkReadWarning
+          error={detail.error}
+          refresh={detail.refresh}
+          lastSuccess={detail.lastSuccess}
+          reading="device detail"
+        />
+      )}
+      {!d ? (
+        detail.error ? (
+          <Notice tone="warning" title="The device detail could not be read">
+            {detail.error.message}
+          </Notice>
         ) : (
-          children(d)
-        )}
-      </PanelBody>
-    </Panel>
+          <LoadingRows rows={rows} />
+        )
+      ) : (
+        children(d)
+      )}
+    </>
   )
 }
 
 /** Every error counter the kernel keeps for the link, the ones that counted anything. */
 export function DeviceErrors({ detail }: { detail: DetailRead }) {
   return (
-    <DetailSection title="Link errors" detail={detail} rows={2}>
-      {(d) =>
-        d.errorsRead.state !== "ok" ? (
-          <ReadingWords reading={d.errorsRead} />
-        ) : errorRows(d.errors).length === 0 ? (
-          <p className="text-body text-muted-foreground">
-            No CRC, frame, FIFO, carrier or drop has been counted.
-          </p>
-        ) : (
-          <DetailList aria-label="Link errors">
-            {errorRows(d.errors).map((row) => (
-              <Detail key={row.label} label={row.label}>
-                <span className="numeric text-warning">{row.value.toLocaleString()}</span>
-              </Detail>
-            ))}
-          </DetailList>
-        )
-      }
-    </DetailSection>
+    <Panel plain>
+      <PanelHeader title="Link errors" />
+      <PanelBody>
+        <DetailBody detail={detail} rows={2}>
+          {(d) =>
+            d.errorsRead.state !== "ok" ? (
+              <ReadingWords reading={d.errorsRead} />
+            ) : errorRows(d.errors).length === 0 ? (
+              <p className="text-body text-muted-foreground">
+                No CRC, frame, FIFO, carrier or drop has been counted.
+              </p>
+            ) : (
+              <DetailList aria-label="Link errors">
+                {errorRows(d.errors).map((row) => (
+                  <Detail key={row.label} label={row.label}>
+                    <span className="numeric text-warning">{row.value.toLocaleString()}</span>
+                  </Detail>
+                ))}
+              </DetailList>
+            )
+          }
+        </DetailBody>
+      </PanelBody>
+    </Panel>
   )
 }
 
-/** The driver behind the device and the work its NIC takes off the kernel. */
+/** The driver behind the device and the work its NIC takes off the kernel, as a settings section. */
 export function DeviceDriver({ detail }: { detail: DetailRead }) {
   return (
-    <DetailSection title="Driver" detail={detail} rows={3}>
-      {(d) => (
-        <div className="flex flex-col gap-4">
-          <DetailList>
-            <Detail label="Driver">
-              {d.driver ? (
-                <span className="font-mono">
-                  {d.driver.name}
-                  {d.driver.version ? ` ${d.driver.version}` : ""}
-                </span>
-              ) : (
-                <ReadingWords reading={d.driverRead} />
-              )}
-            </Detail>
-            {d.driver?.firmware && <Detail label="Firmware">{d.driver.firmware}</Detail>}
-            {d.driver?.bus && (
-              <Detail label="Bus">
-                <span className="font-mono">{d.driver.bus}</span>
+    <SettingSection title="Driver">
+      <DetailBody detail={detail} rows={3}>
+        {(d) => (
+          <div className="flex flex-col gap-4">
+            <DetailList>
+              <Detail label="Driver">
+                {d.driver ? (
+                  <span className="font-mono">
+                    {d.driver.name}
+                    {d.driver.version ? ` ${d.driver.version}` : ""}
+                  </span>
+                ) : (
+                  <ReadingWords reading={d.driverRead} />
+                )}
               </Detail>
-            )}
-          </DetailList>
-          <div>
-            <p className="eyebrow mb-2">Offloads</p>
-            {d.offloadsRead.state !== "ok" ? (
-              <ReadingWords reading={d.offloadsRead} />
-            ) : (
-              <ul className="flex flex-wrap gap-1.5" aria-label="Offloads">
-                {d.offloads.map((o) => (
-                  <li key={o.name}>
-                    <Tag className={o.enabled ? undefined : "text-muted-foreground line-through"}>
-                      {o.name}
-                      {o.fixed ? " · fixed" : ""}
-                    </Tag>
-                  </li>
-                ))}
-              </ul>
-            )}
+              {d.driver?.firmware && <Detail label="Firmware">{d.driver.firmware}</Detail>}
+              {d.driver?.bus && (
+                <Detail label="Bus">
+                  <span className="font-mono">{d.driver.bus}</span>
+                </Detail>
+              )}
+            </DetailList>
+            <div>
+              <p className="eyebrow mb-2">Offloads</p>
+              {d.offloadsRead.state !== "ok" ? (
+                <ReadingWords reading={d.offloadsRead} />
+              ) : (
+                <ul className="flex flex-wrap gap-1.5" aria-label="Offloads">
+                  {d.offloads.map((o) => (
+                    <li key={o.name}>
+                      <Tag className={o.enabled ? undefined : "text-muted-foreground line-through"}>
+                        {o.name}
+                        {o.fixed ? " · fixed" : ""}
+                      </Tag>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-        </div>
-      )}
-    </DetailSection>
+        )}
+      </DetailBody>
+    </SettingSection>
   )
 }
 

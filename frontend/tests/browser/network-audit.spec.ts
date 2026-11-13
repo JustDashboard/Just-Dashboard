@@ -303,12 +303,13 @@ test("failed interface address writes retain the user's draft", async ({ page })
     ),
   )
   await page.goto("/network/interfaces")
-  await page.getByRole("button", { name: "Open jd-lab" }).click()
-  const dialog = page.getByRole("dialog")
-  await dialog.getByLabel("Address in CIDR form").fill("192.168.50.2/24")
-  await dialog.getByRole("button", { name: "Add", exact: true }).click()
+  await page.getByRole("link", { name: "Open jd-lab" }).click()
+  await page.getByRole("tab", { name: "Addresses" }).click()
+  const device = page.locator("[data-slot=page]")
+  await device.getByLabel("Address in CIDR form").fill("192.168.50.2/24")
+  await device.getByRole("button", { name: "Add", exact: true }).click()
   await expect(page.getByText("The address is already in use")).toBeVisible()
-  await expect(dialog.getByLabel("Address in CIDR form")).toHaveValue("192.168.50.2/24")
+  await expect(device.getByLabel("Address in CIDR form")).toHaveValue("192.168.50.2/24")
 })
 
 test("private DNS verification names accompany upstream changes", async ({ page }) => {

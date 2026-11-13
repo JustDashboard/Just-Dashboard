@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { Globe, Hash, Layers, LockClosed, RotateClockwise, Router } from "@/components/icons"
+import { Globe, Layers, LockClosed, RotateClockwise, Router, Servers } from "@/components/icons"
 import { rate } from "@/lib/format"
 import type { NetworkLink } from "@/lib/types"
 import { WireMark } from "@/components/deploy/wire"
@@ -169,7 +169,7 @@ function NodeMark({
       case "remote":
         return <Router aria-hidden />
       case "address":
-        return <Hash aria-hidden />
+        return <Servers aria-hidden />
       case "namespace": {
         // A container's namespace is drawn as what the container runs.
         const image = links.find(

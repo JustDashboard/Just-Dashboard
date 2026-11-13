@@ -13,6 +13,12 @@ import { describeDevice, deviceHref, deviceState, groupDevices } from "./device-
 export { GROUPS } from "./device-facts"
 
 /**
+ * A card's second line as a box of the line's own height, set on the top of
+ * its line: its height then does not depend on which fonts stand in it.
+ */
+export const SECOND_LINE = "inline-flex h-4 max-w-full min-w-0 items-center gap-2 align-top"
+
+/**
  * Every device, grouped by what it is for. Each row opens the device's page
  * (its traffic, its addresses, its settings), so each is a lit card (§16):
  * the mark it was made by, its name and kind, its addresses with the prefix
@@ -88,7 +94,9 @@ function DeviceRow({ link, points }: { link: NetworkLink; points?: NetworkLivePo
       }
       verb={`Open ${link.name}`}
       description={
-        <span className="inline-flex min-w-0 items-center gap-2">
+        // One height whether it holds a mono address or "no address": a mono
+        // word raised the line a pixel, so a card with an address was taller.
+        <span className={SECOND_LINE}>
           <AddressLine addresses={link.addresses} />
           <span className="text-muted-foreground/50">·</span>
           <span className="truncate">{describeDevice(link, OWNER_LABEL)}</span>

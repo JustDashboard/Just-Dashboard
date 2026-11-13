@@ -112,23 +112,27 @@ function Interfaces() {
           )
         }
         facts={
-          devices ? (
-            <>
-              <span className="numeric">{plural(facts.devices, "device")}</span>
-              {facts.uplinks.length > 0 && (
-                <>
-                  <FactDot />
-                  <span>
-                    uplink <span className="font-mono">{facts.uplinks.join(", ")}</span>
-                  </span>
-                </>
-              )}
-              <FactDot />
-              <span className="numeric">{facts.made} made here</span>
-            </>
-          ) : (
-            <span>&nbsp;</span>
-          )
+          // A box of the line's own height: the uplink's name is mono, and a
+          // mono word in the line made it a pixel taller than while it waited.
+          <span className="flex h-4 min-w-0 items-center gap-x-3 whitespace-nowrap">
+            {devices ? (
+              <>
+                <span className="numeric">{plural(facts.devices, "device")}</span>
+                {facts.uplinks.length > 0 && (
+                  <>
+                    <FactDot />
+                    <span className="truncate">
+                      uplink <span className="font-mono">{facts.uplinks.join(", ")}</span>
+                    </span>
+                  </>
+                )}
+                <FactDot />
+                <span className="numeric shrink-0">{facts.made} made here</span>
+              </>
+            ) : (
+              <>&nbsp;</>
+            )}
+          </span>
         }
         command={
           admin ? (
