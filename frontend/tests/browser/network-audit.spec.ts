@@ -25,15 +25,15 @@ test("read-only accounts see network state and cannot submit mutations", async (
     for (const command of commands)
       await expect(page.getByRole("button", { name: command, exact: true })).toBeDisabled()
   }
+  await page.goto("/network/routing")
+  await expect(page.getByRole("switch", { name: "IPv4 forwarding", exact: true })).toBeDisabled()
+  await page.goto("/network/traffic")
+  await expect(page.getByRole("switch", { name: /BBR/ })).toBeDisabled()
   // The DNS settings draw a reader's records without the commands that change them.
   await page.goto("/network/dns?tab=settings")
   await loaded(page)
   await expect(page.getByRole("textbox", { name: "Address of record 1" })).toBeDisabled()
   await expect(page.getByRole("button", { name: "Add record", exact: true })).toHaveCount(0)
-  await page.goto("/network/routing")
-  await expect(page.getByRole("switch", { name: "IPv4 forwarding", exact: true })).toBeDisabled()
-  await page.goto("/network/traffic")
-  await expect(page.getByRole("switch", { name: /BBR/ })).toBeDisabled()
   expect(mutations).toEqual([])
 })
 
