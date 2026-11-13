@@ -232,8 +232,3 @@ export function extendTranscript(
   if (at < 0) return { text: tail, overlapped: false }
   return { text: full.slice(0, at) + fresh, overlapped: true }
 }
-
-/** Where a transcript is in its run: the commands it has reached, in order. */
-export function commandsIn(lines: TranscriptLine[]): string[] {
-  return lines.filter((line) => line.kind === "command").map((line) => line.text.slice(2))
-}

@@ -15,15 +15,9 @@ export {
   ProtectedTag,
   environmentHue,
 } from "@/components/database/kit/environment-tag"
-export { JsonTree } from "@/components/database/kit/json-tree"
-export {
-  SectionError,
-  SectionFrame,
-  SectionLoading,
-  WORKBENCH_FRAME,
-} from "@/components/database/kit/section"
+export { SectionError, SectionFrame, WORKBENCH_FRAME } from "@/components/database/kit/section"
 export { SqlReview } from "@/components/database/kit/sql-review"
-export { VALUE_KIND_CLASS, ValueText, alignsRight } from "@/components/database/kit/value-text"
+export { VALUE_KIND_CLASS, ValueText } from "@/components/database/kit/value-text"
 export {
   binarySize,
   jsonPath,

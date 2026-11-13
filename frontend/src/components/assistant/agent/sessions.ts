@@ -149,8 +149,6 @@ const sessions = new Map<string, AgentSession>()
 /** The chat in front for each subject. */
 const current = new Map<string, string>()
 let version = 0
-/** Bumped when a chat is begun, ends a press, or is renamed or deleted. */
-let chatsEpoch = 0
 let snapshot: AgentSession[] = []
 const listeners = new Set<() => void>()
 const chatListeners = new Set<() => void>()
@@ -164,7 +162,6 @@ function publish() {
 
 /** The saved chats changed: every list of them reads itself again. */
 function chatsChanged() {
-  chatsEpoch += 1
   for (const listener of chatListeners) listener()
 }
 
@@ -702,13 +699,4 @@ export function useAgentSessions(): AgentSession[] {
     () => 0,
   )
   return list
-}
-
-/** The number that moves when the saved chats do. */
-export function useAgentChatsEpoch() {
-  return useSyncExternalStore(
-    onAgentChatsChanged,
-    () => chatsEpoch,
-    () => 0,
-  )
 }

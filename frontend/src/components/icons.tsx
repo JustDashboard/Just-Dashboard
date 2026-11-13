@@ -80,7 +80,6 @@ import {
   FolderOpenIcon,
   FolderPlusIcon,
   FunnelIcon,
-  GifIcon,
   GlobeAltIcon,
   HashtagIcon,
   HeartIcon,
@@ -104,7 +103,6 @@ import {
   MusicalNoteIcon,
   NoSymbolIcon,
   NumberedListIcon,
-  PaintBrushIcon,
   PaperAirplaneIcon,
   PauseIcon,
   PencilSquareIcon,
@@ -197,8 +195,6 @@ export type IconProps = SVGProps<SVGSVGElement> & {
 
 /** What every icon in this file is, for anything that takes one as a value. */
 export type Icon = ForwardRefExoticComponent<Omit<IconProps, "ref"> & RefAttributes<SVGSVGElement>>
-
-export type { Icon as IconComponent }
 
 type HeroIcon = ForwardRefExoticComponent<
   Omit<SVGProps<SVGSVGElement>, "ref"> & {
@@ -573,8 +569,5 @@ export const Video: Icon = adapt(FilmIcon, "Video")
 export const Music: Icon = adapt(MusicalNoteIcon, "Music")
 export const Location: Icon = adapt(MapPinIcon, "Location")
 export const AcronymCsv: Icon = adapt(TableCellsIcon, "AcronymCsv")
-export const AcronymGif: Icon = adapt(GifIcon, "AcronymGif")
-export const AcronymJpg: Icon = adapt(PhotoIcon, "AcronymJpg")
 export const AcronymJson: Icon = adapt(CodeBracketIcon, "AcronymJson")
 export const AcronymMarkdown: Icon = adapt(DocumentTextIcon, "AcronymMarkdown")
-export const AcronymSvg: Icon = adapt(PaintBrushIcon, "AcronymSvg")

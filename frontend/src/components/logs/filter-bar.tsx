@@ -65,15 +65,6 @@ function ownsSlash(id: string) {
   return owner === id
 }
 
-/** The settings behind Options that narrow or widen what is read, as the filter row draws them. */
-export type LogOptions = {
-  context: number
-  archives: boolean
-  boot: boolean
-  /** The lens the reader forced: "" for the detected one, "none" for none. */
-  lens: string
-}
-
 /**
  * One filter for both questions.
  *

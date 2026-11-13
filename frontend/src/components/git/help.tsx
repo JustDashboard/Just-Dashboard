@@ -94,27 +94,6 @@ export const GIT_GLOSSARY: Record<string, { title: string; body: string }> = {
   },
 }
 
-/** A term with its plain-language meaning one hover away, for use inside a sentence. */
-export function GitTerm({ name, children }: { name: string; children?: React.ReactNode }) {
-  const entry = GIT_GLOSSARY[name]
-  return (
-    <HoverCard openDelay={150}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          className="cursor-help underline decoration-dotted underline-offset-4 hover:text-foreground"
-        >
-          {children ?? entry?.title ?? name}
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-80 text-xs leading-relaxed">
-        <p className="mb-1 text-body font-medium">{entry?.title ?? name}</p>
-        <p className="text-muted-foreground">{entry?.body ?? "No description available."}</p>
-      </HoverCardContent>
-    </HoverCard>
-  )
-}
-
 /** The same definition behind a small icon, for a label with no sentence to hold it. */
 export function GitExplain({ name, className }: { name: string; className?: string }) {
   const entry = GIT_GLOSSARY[name]

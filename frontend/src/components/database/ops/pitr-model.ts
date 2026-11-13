@@ -114,12 +114,6 @@ export function locationWords(
   return `s3://${parts.join("/")}`
 }
 
-export const TARGET_LABEL: Record<PitrTargetKind, string> = {
-  local: "A directory on this server",
-  s3: "Amazon S3 or any S3-compatible bucket",
-  b2: "Backblaze B2",
-}
-
 /** How long an archive keeps what it holds. */
 export function keepsWords(days: number): string {
   return days > 0 ? `the last ${plural(days, "day")}` : "everything"

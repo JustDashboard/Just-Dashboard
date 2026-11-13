@@ -2,8 +2,7 @@
 
 import { cn } from "@/lib/utils"
 import { Page, PageContext } from "@/components/page"
-import { Pane } from "@/components/panel"
-import { ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
+import { ErrorState } from "@/components/state"
 import type { SectionId } from "@/components/database/engine"
 import { useDatabase } from "@/components/database/shell/database-context"
 
@@ -57,26 +56,6 @@ export function SectionFrame({
       />
       {children}
     </Page>
-  )
-}
-
-/**
- * A page of a database whose first read has not landed, in the frame it will
- * have: a workbench waits as the pane it becomes, a reading page as the plain
- * blocks it becomes, and the name in the `h1` is already the page's own.
- */
-export function SectionLoading({ section, rows = 6 }: { section: SectionId; rows?: number }) {
-  const { engine } = useDatabase()
-  return (
-    <SectionFrame section={section}>
-      {engine.section(section)?.workbench ? (
-        <Pane className="min-h-0 flex-1">
-          <LoadingRows rows={rows} className="p-3" />
-        </Pane>
-      ) : (
-        <LoadingPanel plain rows={rows} />
-      )}
-    </SectionFrame>
   )
 }
 

@@ -1,8 +1,7 @@
 "use client"
 
 import { External, Globe, LockClosed, Servers, Shield } from "@/components/icons"
-import { cn } from "@/lib/utils"
-import type { PortExposure, PortRoute } from "@/lib/types"
+import type { PortExposure } from "@/lib/types"
 import { Tag } from "@/components/tag"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 
@@ -148,76 +147,5 @@ export function PortList({ ports, max = 3 }: { ports: PortExposure[]; max?: numb
         </HoverCard>
       )}
     </div>
-  )
-}
-
-const REACH_STYLE = {
-  external: { label: "Reachable from outside", tone: "text-warning", icon: Globe },
-  proxied: { label: "Through the reverse proxy", tone: "text-foreground", icon: Shield },
-  "server-only": { label: "This server only", tone: "text-muted-foreground", icon: LockClosed },
-  blocked: { label: "Blocked by the firewall", tone: "text-muted-foreground", icon: Shield },
-  unknown: { label: "Reachability unknown", tone: "text-muted-foreground", icon: Globe },
-} as const
-
-/**
- * One published port traced all the way out: binding, reverse proxy, firewall.
- *
- * The correlation nothing else in this class of tool does, and the place it
- * would be easiest to overclaim. Every verdict carries the reasoning that
- * produced it, and one that was worked out rather than read says so.
- *
- * A row in a hairline list, not a fenced card: three ports were three boxes
- * inside the detail panel, and the frames separated them from nothing.
- */
-export function RouteRow({ route }: { route: PortRoute }) {
-  const style = REACH_STYLE[route.reach] ?? REACH_STYLE.unknown
-  const Icon = style.icon
-  return (
-    <li className="space-y-1.5 py-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="flex items-center gap-2 font-mono text-xs">
-          <Icon className={cn("size-3.5 shrink-0", style.tone)} />
-          {route.hostIp || "0.0.0.0"}:{route.hostPort} → {route.containerPort}
-          {route.protocol !== "tcp" && `/${route.protocol}`}
-        </span>
-        <span className={cn("text-hint font-medium", style.tone)}>
-          {style.label}
-          {route.inferred && <span className="ml-1 font-normal opacity-70">· inferred</span>}
-        </span>
-      </div>
-
-      <p className="text-hint leading-relaxed text-muted-foreground">{route.reasoning}</p>
-
-      {route.url && (
-        <a
-          href={route.url}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 text-hint text-primary hover:underline"
-        >
-          {route.url}
-          <External className="size-2.5" />
-        </a>
-      )}
-
-      {route.firewall.known ? (
-        <p className="text-hint text-muted-foreground">
-          Firewall: {route.firewall.backend}
-          {route.firewall.enabled === false && " (not enabled)"}
-          {route.firewall.rule ? ` — ${route.firewall.rule}` : ` — no rule names this port`}
-          {route.firewall.dockerBypass && (
-            <span className="text-warning">
-              {" "}
-              · Docker&apos;s NAT rules are consulted before {route.firewall.backend}&apos;s, so
-              rules about this port do not apply to it
-            </span>
-          )}
-        </p>
-      ) : (
-        <p className="text-hint text-muted-foreground">
-          No firewall this dashboard can read, so external reachability cannot be judged from here.
-        </p>
-      )}
-    </li>
   )
 }

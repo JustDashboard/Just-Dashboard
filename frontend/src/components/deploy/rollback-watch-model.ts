@@ -273,25 +273,3 @@ export function skewLine(on: boolean, policy: RollbackPolicy) {
   const minutes = Math.round(policy.windowSeconds / 60)
   return `A visitor stays on the release that answered them for up to ${minutes} ${minutes === 1 ? "minute" : "minutes"} after a cutover.`
 }
-
-/** Why a closed window closed, in the words of its end reason. */
-export function endLabel(reason: string | undefined) {
-  switch (reason) {
-    case "rolled_back":
-      return "Rolled back"
-    case "window_passed":
-      return "Window passed"
-    case "superseded":
-      return "Another run started"
-    case "kept":
-      return "Kept"
-    case "memory":
-      return "Host memory low"
-    case "warm_lost":
-      return "Warm container lost"
-    case "rollback_failed":
-      return "Rollback failed"
-    default:
-      return reason ?? ""
-  }
-}

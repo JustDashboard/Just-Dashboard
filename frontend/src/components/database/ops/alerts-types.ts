@@ -23,18 +23,6 @@ export type DbAlertRule = {
   updatedAt: string
 }
 
-/** What a form sends; an absent figure takes the kind's default. */
-export type DbAlertWrite = {
-  connectionId: number | null
-  kind: DbAlertKind
-  threshold?: number
-  minutes?: number
-  cooldownMinutes?: number
-  notifyRecovery?: boolean
-  channels: number[]
-  enabled?: boolean
-}
-
 /**
  * Where a subject stands: holding before it is told (`pending`), told
  * (`firing`), kept back by the cooldown (`held`), not judged on the last pass

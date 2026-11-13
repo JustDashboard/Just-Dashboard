@@ -215,36 +215,3 @@ export const readChQueries = (id: number, signal?: AbortSignal) =>
 
 export const readSqliteFile = (id: number, signal?: AbortSignal) =>
   read<SqliteFile>(`${base(id)}/sqlite/file`, (answer) => record(answer.objects), undefined, signal)
-
-/** A statement the page asked the server to classify, as the Query page would before running it. */
-export type DbRisk = { destructive: boolean; level: string; reasons?: string[] }
-
-export const classifyStatement = (id: number, query: string, signal?: AbortSignal) =>
-  post<DbRisk>(`${base(id)}/classify`, { query }, { signal })
-
-/** One statement of a script, as the server ran it. */
-export type DbScriptStep = {
-  index: number
-  sql: string
-  status: "ok" | "error" | "skipped"
-  error?: string
-}
-
-export type DbScriptResult = {
-  statements: DbScriptStep[]
-  /** The index of the statement that stopped the script, or -1. */
-  failed: number
-}
-
-/**
- * Runs statements in order on one session, stopping at the first that fails.
- * The server decides what the role may run by the worst statement among them,
- * exactly as it does for the Query page.
- */
-export async function runScript(id: number, script: string): Promise<DbScriptResult> {
-  const result = await post<DbScriptResult>(`${base(id)}/script`, { script })
-  if (!record(result) || !Array.isArray(result.statements)) {
-    throw new Error("The server answered in a form this page does not read.")
-  }
-  return result
-}

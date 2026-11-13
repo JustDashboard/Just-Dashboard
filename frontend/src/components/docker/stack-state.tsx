@@ -54,11 +54,6 @@ export function StackStateBadge({
   )
 }
 
-/** The full sentence, for a card header or a detail panel. */
-export function StackSummary({ stack, className }: { stack: ComposeStack; className?: string }) {
-  return <span className={cn("text-hint text-muted-foreground", className)}>{stack.summary}</span>
-}
-
 /**
  * Compose's own vocabulary, translated — and kept, because an operator who
  * knows compose should be able to see what is actually being run.

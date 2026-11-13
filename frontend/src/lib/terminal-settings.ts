@@ -143,16 +143,6 @@ function loadSnippets(): Snippet[] {
   return snippets
 }
 
-export function setSnippets(next: Snippet[]) {
-  snippets = next
-  try {
-    window.localStorage.setItem(SNIPPET_KEY, JSON.stringify(next))
-  } catch {
-    // As above: the change applies for this session either way.
-  }
-  for (const listener of snippetListeners) listener()
-}
-
 export function useSnippets(): Snippet[] {
   return useSyncExternalStore(
     (listener) => {

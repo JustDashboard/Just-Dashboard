@@ -100,14 +100,6 @@ export function shareBetween(
   return (hit / (hit + miss)) * 100
 }
 
-export function shares(
-  samples: readonly Sample[],
-  hits: string | readonly string[],
-  misses: string | readonly string[],
-): (number | undefined)[] {
-  return samples.slice(1).map((sample, index) => shareBetween(samples[index], sample, hits, misses))
-}
-
 /**
  * The share over everything held, and failing that over the server's whole
  * life: an idle minute moves neither counter, and the tile still has a true

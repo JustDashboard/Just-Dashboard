@@ -309,5 +309,3 @@ export const ALERT_KINDS = {
     read: (observed: number) => `${observed} requests`,
   },
 } as const
-
-export type AlertKind = keyof typeof ALERT_KINDS

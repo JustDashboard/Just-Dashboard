@@ -17,6 +17,3 @@
  * here.
  */
 export type Tone = "default" | "success" | "warning" | "danger"
-
-/** The tones that carry a hue, for the callers that switch on only those. */
-export type SignalTone = Exclude<Tone, "default">
