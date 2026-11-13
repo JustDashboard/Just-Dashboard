@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useState } from "react"
 import { Field } from "@/components/form"
+import { Play } from "@/components/icons"
 import { Detail, DetailList } from "@/components/page"
 import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -90,6 +91,7 @@ export function SubnetTool() {
             className="h-8 min-w-0 flex-1 font-mono text-xs"
           />
           <Button size="sm" onClick={run} disabled={busy || !input.trim()} pending={busy}>
+            <Play />
             Run
           </Button>
           {info && (

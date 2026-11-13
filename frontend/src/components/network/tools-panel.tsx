@@ -10,7 +10,6 @@ import { Pane, PaneHeader } from "@/components/panel"
 import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { ChoiceCard } from "@/components/choice-card"
 import { WireHost } from "@/components/deploy/wire"
-import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/hooks/use-auth"
 import { PATH_HINT, PathTool } from "./tools/path-tool"
@@ -99,11 +98,6 @@ export function ToolsPanel() {
   return (
     <>
       <PageContext eyebrow="Network" title="Tools" />
-      {!admin && (
-        <Notice title="Server diagnostics need the admin capability" className="max-md:m-4">
-          The subnet calculator runs locally in your browser and is available with read access.
-        </Notice>
-      )}
       {/* One frame around the whole workbench: the strip, then the rail and
           the pane with a hairline between them. Below `md` it runs to the
           window's edges, one pane at a time with a bar at the foot. */}
@@ -129,19 +123,32 @@ export function ToolsPanel() {
               <Link href="/network/runs">Saved runs</Link>
             </Button>
           )}
-          {/* A phone has this as a stop on the bar at the foot. */}
-          <Button
-            size="xs"
-            variant="ghost"
-            className="text-muted-foreground max-md:hidden"
-            onClick={() => {
-              setQuery("")
-              document.querySelector<HTMLInputElement>('[aria-label="Filter tools"]')?.focus()
-            }}
-          >
-            Every tool
-          </Button>
+          {/* A phone has this as a stop on the bar at the foot, and a reader
+              has one tool. */}
+          {admin && (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="text-muted-foreground max-md:hidden"
+              onClick={() => {
+                setQuery("")
+                document.querySelector<HTMLInputElement>('[aria-label="Filter tools"]')?.focus()
+              }}
+            >
+              Every tool
+            </Button>
+          )}
         </PaneHeader>
+        {/* Why a reader's rail holds one tool, inside the frame so the
+            workbench still has the whole window. */}
+        {!admin && (
+          <p className="shrink-0 border-b border-hairline px-3 py-2 text-hint text-muted-foreground">
+            <span className="font-medium text-foreground">
+              Server diagnostics need the admin capability
+            </span>{" "}
+            <span>The subnet calculator runs in your browser and needs only read access.</span>
+          </p>
+        )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
           <Pane
             flush
@@ -150,14 +157,14 @@ export function ToolsPanel() {
               paneShown(pane === "catalogue", "md"),
             )}
           >
-            <div className="shrink-0 p-3 pb-1">
+            <div className={cn("shrink-0 p-3 pb-1", !admin && "hidden")}>
               <SearchInput
                 dense
                 aria-label="Filter tools"
                 placeholder="Find a diagnostic"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                containerClassName="w-full"
+                containerClassName="sm:w-full"
               />
             </div>
             <nav aria-label="Diagnostics" className="min-h-0 space-y-4 overflow-y-auto p-3 pt-2">

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import { Play } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { Field } from "@/components/form"
 import { ErrorState } from "@/components/state"
@@ -49,7 +50,20 @@ export function ToolPanel({
 
   return (
     <div className={cn("min-w-0 space-y-5", prefill?.target && "animate-rise")}>
-      <ToolHead tool={def.key} hue={hue} label={def.label} hint={def.hint} outward={def.outward} />
+      <ToolHead
+        tool={def.key}
+        hue={hue}
+        label={def.label}
+        hint={def.hint}
+        outward={def.outward}
+        actions={
+          (t.result || t.error || t.past.length > 0) && (
+            <Button size="sm" variant="ghost" onClick={t.clear} disabled={t.busy}>
+              Clear
+            </Button>
+          )
+        }
+      />
       <div className="min-w-0 space-y-2.5">
         {/* Only the tool in view has its fields in the page: its inputs live in
             `useToolRun`, so nothing is lost, and twenty-six hidden forms no
@@ -160,6 +174,9 @@ export function ToolPanel({
               </>
             )}
             <Button onClick={t.run} disabled={t.busy || !t.canRun} pending={t.busy}>
+              {/* A glyph for the spinner to stand in for: the button keeps its
+                  width while the probe is out, and the row does not move. */}
+              <Play />
               Run
             </Button>
             <SaveDiagnosticRun
@@ -167,11 +184,6 @@ export function ToolPanel({
               label={def.label}
               disabled={t.busy || !t.canRun}
             />
-            {(t.result || t.error || t.past.length > 0) && (
-              <Button size="sm" variant="ghost" onClick={t.clear} disabled={t.busy}>
-                Clear
-              </Button>
-            )}
           </div>
         )}
 

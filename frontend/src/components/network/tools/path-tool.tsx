@@ -4,6 +4,8 @@ import { useEffect, useState } from "react"
 import { PathReport } from "@/components/network/path-report"
 import { SaveInvestigationRun } from "@/components/network/save-investigation-run"
 import { Disclosure, Field, InfoTip } from "@/components/form"
+import { Play } from "@/components/icons"
+import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -71,7 +73,7 @@ export function PathTool({
   }
   const [result, setResult] = useState<PathResult>()
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string>()
+  const [error, setError] = useState<Error>()
 
   useEffect(() => {
     if (!opened) return
@@ -96,10 +98,13 @@ export function PathTool({
     try {
       setResult(await post<PathResult>("/network/investigate", request))
     } catch (err) {
-      setError(errorMessage(err))
+      setError(err instanceof Error ? err : new Error(String(err)))
     } finally {
       setBusy(false)
     }
+  }
+  const onEnter = (event: React.KeyboardEvent) => {
+    if (event.key === "Enter") void submit()
   }
   const sameScope =
     result &&
@@ -113,13 +118,9 @@ export function PathTool({
       {/* As every tool: the fields are in the page only while it is in view.
           The draft is this component's, so a switch loses nothing. */}
       {active && (
-        <form
-          className="min-w-0 space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void submit()
-          }}
-        >
+        // Not a <form>: inside one, each Select adds a hidden native control
+        // beside its trigger, which pushed the selects off the inputs' line.
+        <div className="min-w-0 space-y-4">
           <div className="flex min-w-0 flex-wrap items-end gap-3">
             <Field
               label="Source"
@@ -148,6 +149,7 @@ export function PathTool({
                 onChange={(event) =>
                   setDraft((d) => ({ ...d, target: event.target.value, address: "" }))
                 }
+                onKeyDown={onEnter}
                 disabled={busy}
                 placeholder="private.corp or 192.0.2.8"
                 spellCheck={false}
@@ -155,6 +157,8 @@ export function PathTool({
                 className="font-mono"
               />
             </Field>
+          </div>
+          <div className="flex min-w-0 flex-wrap items-end gap-3">
             <Field label="Family" htmlFor="path-family">
               <PathSelect
                 id="path-family"
@@ -189,10 +193,42 @@ export function PathTool({
                 inputMode="numeric"
                 value={draft.port}
                 onChange={(event) => change("port", event.target.value)}
+                onKeyDown={onEnter}
                 disabled={busy}
                 className="w-24 font-mono"
               />
             </Field>
+            {/* The verbs stand before everything optional, so a field that
+                arrives with a report (the DNS answers) never moves them. */}
+            <div className="flex flex-wrap items-center gap-3 sm:ml-auto">
+              <Button onClick={() => void submit()} pending={busy} disabled={!request || busy}>
+                <Play />
+                Run
+              </Button>
+              {request ? (
+                <SaveInvestigationRun request={request} disabled={busy} />
+              ) : (
+                <Button type="button" variant="outline" disabled>
+                  Run and save
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <label className="flex min-h-9 min-w-0 items-center gap-2.5 text-body">
+              <Checkbox
+                aria-label="Measure a TCP connection"
+                checked={draft.measure && supportedProbe}
+                onCheckedChange={(value) => change("measure", value === true)}
+                disabled={busy || !supportedProbe}
+              />
+              Measure one TCP connection
+            </label>
+            <InfoTip label="What measuring does">
+              {supportedProbe
+                ? "Sends one bounded TCP handshake from the chosen source to the pinned address and port. It does not test TLS, login or inbound access."
+                : "UDP and explicit marks have model evidence only; the TCP adapter cannot reproduce these probes, and no substitute is sent."}
+            </InfoTip>
           </div>
           <Disclosure summary="Route selectors" quiet facts="Source address and packet mark">
             <div className="flex min-w-0 flex-wrap items-end gap-3">
@@ -205,6 +241,7 @@ export function PathTool({
                   id="path-source-address"
                   value={draft.sourceAddress}
                   onChange={(event) => change("sourceAddress", event.target.value)}
+                  onKeyDown={onEnter}
                   disabled={busy}
                   placeholder="the kernel's choice"
                   spellCheck={false}
@@ -216,6 +253,7 @@ export function PathTool({
                   id="path-mark"
                   value={draft.mark}
                   onChange={(event) => change("mark", event.target.value)}
+                  onKeyDown={onEnter}
                   disabled={busy}
                   placeholder="0x1"
                   spellCheck={false}
@@ -235,41 +273,17 @@ export function PathTool({
               />
             </Field>
           )}
-          <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-3">
-            <label className="flex min-h-9 items-center gap-2.5 text-body">
-              <Checkbox
-                aria-label="Measure a TCP connection"
-                checked={draft.measure && supportedProbe}
-                onCheckedChange={(value) => change("measure", value === true)}
-                disabled={busy || !supportedProbe}
-              />
-              Measure one TCP connection
-            </label>
-            <InfoTip label="What measuring does">
-              {supportedProbe
-                ? "Sends one bounded TCP handshake from the chosen source to the pinned address and port. It does not test TLS, login or inbound access."
-                : "UDP and explicit marks have model evidence only; the TCP adapter cannot reproduce these probes, and no substitute is sent."}
-            </InfoTip>
-            <div className="flex flex-wrap items-center gap-3 sm:ml-auto">
-              <Button type="submit" pending={busy} disabled={!request || busy}>
-                Run
-              </Button>
-              {request ? (
-                <SaveInvestigationRun request={request} disabled={busy} />
-              ) : (
-                <Button type="button" variant="outline" disabled>
-                  Run and save
-                </Button>
+          {error && (
+            <div className="space-y-1.5">
+              <ErrorState error={error} onRetry={request && !busy ? submit : undefined} />
+              {result && (
+                <p className="text-hint text-muted-foreground">
+                  The previous report stays below with its own scope.
+                </p>
               )}
             </div>
-          </div>
-          {error && (
-            <p role="alert" className="text-body text-destructive">
-              {error}
-              {result && " The previous report stays below with its own scope."}
-            </p>
           )}
-        </form>
+        </div>
       )}
       {result ? (
         <div className={cn("border-t border-hairline pt-5", busy && "opacity-60")}>

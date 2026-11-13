@@ -3,6 +3,7 @@
 import { InfoTip } from "@/components/form"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { ToolMark } from "./tool-marks"
 
 /**
@@ -17,15 +18,21 @@ export function ToolHead({
   label,
   hint,
   outward,
+  actions,
 }: {
   tool: string
   hue?: string
   label: string
   hint: string
   outward?: boolean
+  /**
+   * A verb that comes and goes with a result (Clear), at the far end of the
+   * title line: in the fields' row its arrival moved Run.
+   */
+  actions?: React.ReactNode
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-3">
+    <div className="flex min-h-8 min-w-0 items-center gap-3">
       <ToolMark tool={tool} hue={hue} size="md" />
       <h2 className="truncate text-title font-medium">{label}</h2>
       <InfoTip label={`What ${label} does`}>{hint}.</InfoTip>
@@ -34,6 +41,7 @@ export function ToolHead({
           outward
         </Tag>
       )}
+      {actions && <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
   )
 }
@@ -65,8 +73,20 @@ export function ToolEmpty({
       className="flex min-w-0 flex-col items-center gap-3 border-t border-hairline px-2 py-10 text-center"
     >
       <ToolMark tool={tool} hue={hue} size="lg" />
-      <p className="max-w-md text-body text-balance text-muted-foreground" aria-live="polite">
-        {busy ? "Running diagnostic…" : sentence}
+      {/* The sentence keeps its lines while the run is out and the word
+          stands over them, so the pane is one height either way. */}
+      <p
+        className="relative max-w-md text-body text-balance text-muted-foreground"
+        aria-live="polite"
+      >
+        <span className={cn(busy && "invisible")} aria-hidden={busy || undefined}>
+          {sentence}
+        </span>
+        {busy && (
+          <span className="absolute inset-0 flex items-center justify-center">
+            Running diagnostic…
+          </span>
+        )}
       </p>
       {example && onExample && (
         <Button size="sm" variant="outline" disabled={busy} onClick={onExample}>
