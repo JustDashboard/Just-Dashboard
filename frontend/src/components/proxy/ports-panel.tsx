@@ -535,89 +535,94 @@ function PortsView() {
             </span>
           }
         />
-        <Toolbar className="justify-between gap-x-4">
-          <SearchInput
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Port, process, user or address"
-            aria-label="Search sockets"
-            className="pr-8"
-            trailing={
-              <span className="flex size-7 items-center justify-center">
-                <InfoTip label="Search syntax">
-                  Words match the port, process, command, user, address and reach. Narrow by field
-                  with <code>:443</code>, <code>[::]:22</code>, <code>0.0.0.0:80</code>,{" "}
-                  <code>port:8000-8100</code>, <code>port:5432,6379</code>, <code>proto:udp</code>,{" "}
-                  <code>user:postgres</code> or <code>pid:812</code>.
-                </InfoTip>
-              </span>
-            }
-          />
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-            <ChipStrip role="group" aria-label="Reach">
-              {(Object.keys(REACH_LABEL) as ReachFilter[])
-                .filter((key) => key === "all" || key === reach || facets.reach[key] > 0)
-                .map((key) => (
-                  <FilterChip key={key} selected={reach === key} onClick={() => setReach(key)}>
-                    {REACH_LABEL[key]} <ChipCount>{facets.reach[key]}</ChipCount>
-                  </FilterChip>
-                ))}
-            </ChipStrip>
-            <ChipStrip role="group" aria-label="Protocol">
-              {(Object.keys(PROTO_LABEL) as Exclude<ProtoFilter, "all">[])
-                .filter((key) => key === proto || facets.proto[key] > 0)
-                .map((key) => (
-                  // A second press on the chosen protocol lists both again.
-                  <FilterChip
-                    key={key}
-                    selected={proto === key}
-                    onClick={() => setProto(proto === key ? "all" : key)}
-                  >
-                    {PROTO_LABEL[key]} <ChipCount>{facets.proto[key]}</ChipCount>
-                  </FilterChip>
-                ))}
-            </ChipStrip>
-          </div>
-        </Toolbar>
-        <Toolbar className="mt-2 gap-x-3">
-          <FilterChip selected={grouped} onClick={() => setGrouped(!grouped)}>
-            Group by application
-          </FilterChip>
-          {(fresh.length > 0 || onlyNew) && (
-            <FilterChip
-              selected={onlyNew}
-              onClick={() => setOnlyNew(!onlyNew)}
-              title="Sockets the ports history first saw listening in the last 24 hours"
-            >
-              New in 24 hours <ChipCount>{newCount}</ChipCount>
-            </FilterChip>
-          )}
-          {range && ephemeralOnHost > 0 && (
-            <FilterChip
-              selected={hideEphemeral}
-              onClick={() => setHideEphemeral(!hideEphemeral)}
-              title={`Loopback sockets on ports ${range.low}–${range.high}, which the kernel hands to a program that asks for any port`}
-            >
-              Hide loopback ephemeral ports <ChipCount>{facets.ephemeral}</ChipCount>
-            </FilterChip>
-          )}
-          {!wide && (
-            <div className="ml-auto">
-              <Select value={sortParam(sort)} onValueChange={setSort}>
-                <SelectTrigger size="sm" className="w-48" aria-label="Sort">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SORT_CHOICES.map((choice) => (
-                    <SelectItem key={choice.value} value={choice.value}>
-                      {choice.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-        </Toolbar>
+        {/* With nothing listening there is nothing to search or narrow. */}
+        {all.length > 0 && (
+          <>
+            <Toolbar className="justify-between gap-x-4">
+              <SearchInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Port, process, user or address"
+                aria-label="Search sockets"
+                className="pr-8"
+                trailing={
+                  <span className="flex size-7 items-center justify-center">
+                    <InfoTip label="Search syntax">
+                      Words match the port, process, command, user, address and reach. Narrow by
+                      field with <code>:443</code>, <code>[::]:22</code>, <code>0.0.0.0:80</code>,{" "}
+                      <code>port:8000-8100</code>, <code>port:5432,6379</code>,{" "}
+                      <code>proto:udp</code>, <code>user:postgres</code> or <code>pid:812</code>.
+                    </InfoTip>
+                  </span>
+                }
+              />
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                <ChipStrip role="group" aria-label="Reach">
+                  {(Object.keys(REACH_LABEL) as ReachFilter[])
+                    .filter((key) => key === "all" || key === reach || facets.reach[key] > 0)
+                    .map((key) => (
+                      <FilterChip key={key} selected={reach === key} onClick={() => setReach(key)}>
+                        {REACH_LABEL[key]} <ChipCount>{facets.reach[key]}</ChipCount>
+                      </FilterChip>
+                    ))}
+                </ChipStrip>
+                <ChipStrip role="group" aria-label="Protocol">
+                  {(Object.keys(PROTO_LABEL) as Exclude<ProtoFilter, "all">[])
+                    .filter((key) => key === proto || facets.proto[key] > 0)
+                    .map((key) => (
+                      // A second press on the chosen protocol lists both again.
+                      <FilterChip
+                        key={key}
+                        selected={proto === key}
+                        onClick={() => setProto(proto === key ? "all" : key)}
+                      >
+                        {PROTO_LABEL[key]} <ChipCount>{facets.proto[key]}</ChipCount>
+                      </FilterChip>
+                    ))}
+                </ChipStrip>
+              </div>
+            </Toolbar>
+            <Toolbar className="mt-2 gap-x-3">
+              <FilterChip selected={grouped} onClick={() => setGrouped(!grouped)}>
+                Group by application
+              </FilterChip>
+              {(fresh.length > 0 || onlyNew) && (
+                <FilterChip
+                  selected={onlyNew}
+                  onClick={() => setOnlyNew(!onlyNew)}
+                  title="Sockets the ports history first saw listening in the last 24 hours"
+                >
+                  New in 24 hours <ChipCount>{newCount}</ChipCount>
+                </FilterChip>
+              )}
+              {range && ephemeralOnHost > 0 && (
+                <FilterChip
+                  selected={hideEphemeral}
+                  onClick={() => setHideEphemeral(!hideEphemeral)}
+                  title={`Loopback sockets on ports ${range.low}–${range.high}, which the kernel hands to a program that asks for any port`}
+                >
+                  Hide loopback ephemeral ports <ChipCount>{facets.ephemeral}</ChipCount>
+                </FilterChip>
+              )}
+              {!wide && (
+                <div className="ml-auto">
+                  <Select value={sortParam(sort)} onValueChange={setSort}>
+                    <SelectTrigger size="sm" className="w-48" aria-label="Sort">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SORT_CHOICES.map((choice) => (
+                        <SelectItem key={choice.value} value={choice.value}>
+                          {choice.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </Toolbar>
+          </>
+        )}
         <PanelBody flush>
           {visible.length === 0 ? (
             empty
