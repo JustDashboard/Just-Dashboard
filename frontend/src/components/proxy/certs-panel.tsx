@@ -4,14 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
-import {
-  ArrowRight,
-  CloudUpload,
-  FileText,
-  RefreshClockwise,
-  ShieldCheck,
-  ShieldOff,
-} from "@/components/icons"
+import { CloudUpload, FileText, RefreshClockwise, ShieldCheck, ShieldOff } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { renewalReading } from "@/lib/certificates"
 import { plural } from "@/lib/format"
@@ -60,7 +53,7 @@ import { CertificateRun, useCertificateWork } from "@/components/proxy/certifica
 import { RenewalLog } from "@/components/proxy/renewal-log"
 import { LocalCAPanel } from "@/components/proxy/local-ca-panel"
 import { certificateProduct } from "@/components/proxy/marks"
-import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
+import { EngineSetup } from "@/components/proxy/engine-setup"
 import { IssueCommand } from "@/components/proxy/private-cert-dialog"
 import { ReloadHookOption, RenewalRecord, RenewalRuns } from "@/components/proxy/renewal-health"
 import { SigningRequests } from "@/components/proxy/signing-requests"
@@ -103,7 +96,7 @@ export function CertificatesPage() {
   const router = useRouter()
   const params = useSearchParams()
   const work = useCertificateWork()
-  const { status } = useProxy()
+  const { status, refresh: refreshStatus } = useProxy()
   const { admin, hasNginx, certs, certbot, certbotGone } = work
 
   // The sheet's address, from the overview, the TLS report, the server map:
@@ -242,26 +235,20 @@ export function CertificatesPage() {
               }
             />
           ) : (
-            status && (
-              <Panel plain aria-label="Coverage">
-                <PanelHeader title="Coverage" />
-                <PanelBody flush>
-                  <OverviewEmpty
-                    mark={<EmptyMark product="nginx" corner={ShieldOff} />}
-                    title="Coverage is read from nginx"
-                    action={
-                      <Button asChild size="sm" variant="outline">
-                        <Link href="/proxy">
-                          Set up nginx <ArrowRight />
-                        </Link>
-                      </Button>
-                    }
-                  >
-                    Which site names a certificate covers, and which it misses, comes from the sites
-                    nginx serves. This server has no nginx.
-                  </OverviewEmpty>
-                </PanelBody>
-              </Panel>
+            // Which names a certificate covers is read from nginx's sites, so
+            // a server with no engine at all is offered the section's own
+            // install screen where Coverage would be; the certificates above
+            // stand without it, certbot's standalone ones among them.
+            status &&
+            !status.caddy && (
+              <EngineSetup
+                status={status}
+                admin={admin}
+                onInstalled={() => {
+                  refreshStatus()
+                  certs.refresh()
+                }}
+              />
             )
           )}
         </TabsContent>

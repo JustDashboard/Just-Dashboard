@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
-import { certs, json, mockProxy, user, yesterday } from "./proxy-fixtures"
+import { availability, certs, json, mockProxy, user, yesterday } from "./proxy-fixtures"
 import { certbotState, stagingCertificate } from "./fixtures/proxy/certs"
 import { risen } from "./risen"
 
@@ -367,4 +367,22 @@ test("a certificate's page is one pane on a phone", async ({ page }) => {
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
     ),
   ).toBe(true)
+})
+
+test("a server with no engine keeps its certificates, and is offered the section's install screen", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockCertificates(page)
+  await page.route("**/api/v1/proxy/status", (route) =>
+    json(route, { ...availability, nginx: false, caddy: false }),
+  )
+  await page.goto("/proxy/certificates")
+  await expect(rows(page)).toHaveCount(inventory.length)
+  const setup = page.locator("[data-slot='engine-setup']")
+  await expect(setup).toBeVisible()
+  await expect(
+    setup.getByRole("heading", { name: "Put nginx in front of this server" }),
+  ).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Coverage" })).toHaveCount(0)
 })
