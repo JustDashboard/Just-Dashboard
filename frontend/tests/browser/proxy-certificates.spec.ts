@@ -355,6 +355,8 @@ async function mockStagingInventory(page: Page, overrides: Record<string, unknow
 test("a test certificate in the inventory reads as one, without the Let's Encrypt mark, and its verb is the real issuance", async ({
   page,
 }) => {
+  // The list, the certificate's page, the form and the list again.
+  test.slow()
   await mockProxy(page, { included: true })
   await mockStagingInventory(page)
   const issued = await capture(page, "**/api/v1/certificates/issue", () =>
