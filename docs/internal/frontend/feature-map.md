@@ -179,7 +179,11 @@ inspector names each line; boxes drag and stay where they were put, and a whole 
 its head, per account; the canvas moves like a whiteboard's (two fingers slide it, a pinch zooms, a
 mouse drags open ground) and nothing on it changes size but by the zoom. No bar runs over the
 canvas. Below `lg` it is the canvas alone, and a tap floats one *Open* button to the box's page.
-Read-only: every box opens its own page
+Read-only: every box opens its own page. With no place left behind and every system at once too
+small to read, it opens on the dashboard's own system; what a source did not answer for is one
+line per cause in the inspector ("Docker is not answering: containers, stacks and volumes not
+drawn", **Open Docker**); and the inspector's *On this server* is a row per kind that lights that
+kind's boxes
 
 **Implementation:** `app/(dashboard)/map/`, `components/map/`, `lib/server-systems.ts` and
 `lib/server-map.ts` (unit-tested); [server map](../server-map.md); checked by
@@ -903,11 +907,17 @@ in [`../backend/git-backups-users.md`](../backend/git-backups-users.md#git-worki
 
 Every log source in one place: a source rail (`source-rail.tsx`) beside one pane with Live, History
 and Insights (`log-workspace.tsx`), the same readings and views a service's own page reads through
-`service-logs.tsx`
+`service-logs.tsx`. The whole journal's identity line carries the systemd logo, how many units
+write to it, its size on disk and its oldest line (`GET /logs/source?source=journal:`, asked once
+the journal is the source on screen; the two facts keep their room while they are asked). A kind
+of source that is absent is one line in the rail with the thing's mark and the page that says
+more (`MissingLine`, worded by `logKindMissing`): "Docker is not running" to `/docker`, "PM2 is
+not installed" to `/processes/pm2`, "No systemd on this server" to `/processes/services`
 
 **Implementation:** logs page, `components/logs/`, `lib/log-filter.ts`, `lib/log-lenses.ts`,
 `lib/log-sources.ts`; checked by `tests/browser/logs-ui.spec.ts`, `logs-lens.spec.ts`,
-`logs-views.spec.ts`, `logs-handoff.spec.ts` and `logs-buffer.spec.ts`; backend contract in
+`logs-views.spec.ts`, `logs-handoff.spec.ts`, `logs-buffer.spec.ts` and `missing-states.spec.ts`;
+backend contract in
 [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md#logs)
 
 ### `/packages`
@@ -1081,6 +1091,14 @@ the same sheet without verbs, and one left to systemd says so first and links th
 (`?timer=`) has its next and last run and how long that took, the service it starts, and the
 service's Runs with Live and History. The job editor sheet asks what runs, then when — its frequency
 a grid of toggles — over a preview of the schedule in words, its week and its next three runs
+
+**Where there is no systemd** (a container, a host started by another init, or the dashboard's own
+container without `/run/systemd`), the Services list, a unit's page and Scheduled's Timers draw
+one screen (`procs/no-systemd.tsx` over `MissingThing`): the systemd logo, why, **Open Processes**
+and the mount to copy. A unit's page is that screen whole, with no rail, whether the list answered
+`available: false` or the unit's read answered `systemd_not_running`, and systemctl's own refusal
+is behind *What the server said*; on Scheduled it is one block under Timers and the cron jobs
+above it are drawn as usual
 
 **Implementation:** processes layout and pages, `components/procs/` (`process-page.tsx`,
 `process-rail.tsx`, `process-overview.tsx`, `process-views.tsx`, `process-detail.tsx`,
