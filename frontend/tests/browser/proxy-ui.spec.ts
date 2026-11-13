@@ -131,12 +131,12 @@ test("the overview draws each domain wired through nginx to what answers it", as
   // A port the engine itself holds is "open": the line hangs under nginx's tile.
   await expect(picture.getByText(":443 open")).toBeVisible()
 
-  // The hour's traffic is shared out by site, and a site opens its traffic.
+  // The hour's traffic is shared out by site, and a site opens its page.
   const traffic = page.getByRole("region", { name: "Traffic", exact: true })
   await expect(traffic.getByText("requests this hour")).toBeVisible()
   await expect(traffic).toContainText("1.3k")
   await traffic.getByRole("button", { name: "Open app.example.com's requests" }).click()
-  await expect(page).toHaveURL(/\/proxy\/traffic\?site=app\.example\.com$/)
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com$/)
 })
 
 test("/proxy/sites keeps the band's blocks and height while the traffic summary lands", async ({
