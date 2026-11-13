@@ -93,11 +93,12 @@ export function RoutesTable({
   const { confirm, dialog } = useConfirm()
 
   const all = routeRows(tables)
-  const covering = target
-    ? all.filter((row) => target.matches.get(row.table.id)?.covering.includes(row.route))
-    : all
+  // A set, so a table of a few thousand routes is narrowed in one pass.
+  const covered = target && new Set([...target.matches.values()].flatMap((m) => m.covering))
+  const covering = covered ? all.filter((row) => covered.has(row.route)) : all
   const rows = scope === undefined ? covering : covering.filter((row) => row.table.id === scope)
-  const count = (id: number) => covering.filter((row) => row.table.id === id).length
+  const counts = new Map<number, number>()
+  for (const row of covering) counts.set(row.table.id, (counts.get(row.table.id) ?? 0) + 1)
   const selected = (row: RouteRow) => target?.matches.get(row.table.id)?.selected === row.route
   // The kernel's table, where it was asked; before that every table's choice counts alike.
   const answers = (row: RouteRow) =>
@@ -177,7 +178,7 @@ export function RoutesTable({
             >
               {table.id === 52 && <ProductGlyph id="tailscale" className="size-3.5" />}
               {table.name}
-              <ChipCount>{count(table.id)}</ChipCount>
+              <ChipCount>{counts.get(table.id) ?? 0}</ChipCount>
             </FilterChip>
           ))}
         </ChipStrip>
