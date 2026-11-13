@@ -444,6 +444,19 @@ test.describe("an account", () => {
     await expect(weak).toContainText("too short to be safe")
   })
 
+  for (const width of [1440, 390]) {
+    test(`a key is one line at ${width}, whatever limits it`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await open(page, "/system-users/user/ion")
+      await risen(page)
+      // One has three restrictions, one is weak, one has nothing to say.
+      await expectOneHeight(rowsIn(page, "Sign-in"), 1.25)
+      await expect(keyRows(page).filter({ hasText: "github-actions" })).toContainText(
+        "Expires 2027-01-01",
+      )
+    })
+  }
+
   test("a generated private key is shown once and then is gone", async ({ page }) => {
     await open(page, "/system-users/user/ion")
     await page.getByRole("button", { name: "Add key" }).click()
