@@ -28,6 +28,7 @@ import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import type { ChartRowLike, Series } from "@/components/metrics/metric-chart"
@@ -245,7 +246,24 @@ function TrafficPage() {
         </div>
       )}
 
-      {nginx || tab === "errors" ? (
+      {/* The strip is drawn while the status is read, so it does not arrive
+          under the reader; a host with no nginx has no error log to tab to. */}
+      {sites?.length === 0 && nginx ? (
+        // No site has nothing to rank: nginx's own log is all there is.
+        <Panel plain>
+          <PanelHeader title="Error log" />
+          <PanelBody>
+            <ErrorsView
+              poll={errors}
+              site={site}
+              onSite={setSite}
+              sites={nginxSites}
+              range={range}
+              onRange={setRange}
+            />
+          </PanelBody>
+        </Panel>
+      ) : !status || nginx ? (
         <Tabs value={tab} onValueChange={setTab} className="gap-0">
           <TabsPrimitive.List
             aria-label="Traffic views"
@@ -420,7 +438,7 @@ function HourReadings({ hour }: { hour: EdgeHour | undefined }) {
         hint={
           hour
             ? `${hour.failed.toLocaleString()} of ${hour.total.toLocaleString()} answered 5xx · ${hour.refused.toLocaleString()} refused with a 4xx`
-            : " "
+            : undefined
         }
         trend={
           hour &&
@@ -460,7 +478,7 @@ function HourReadings({ hour }: { hour: EdgeHour | undefined }) {
         name="Response time"
         hint={
           !hour
-            ? " "
+            ? undefined
             : slow
               ? hour.timed > 1
                 ? `the slowest of ${hour.timed} timed sites, ${slow.site}`
@@ -487,7 +505,7 @@ function HourReadings({ hour }: { hour: EdgeHour | undefined }) {
         name="Served"
         hint={
           !hour
-            ? " "
+            ? undefined
             : hour.complete
               ? "sent in the last hour"
               : "sent in the last hour, at least: a log's tail is all that is held"
@@ -529,15 +547,20 @@ function HourChart({ hour }: { hour: EdgeHour | undefined }) {
       plain
       title="Requests"
       actions={
-        hour && (
-          <span className="numeric truncate text-hint text-muted-foreground">
-            {hour.total.toLocaleString()}
-            <span className="text-muted-foreground/50"> · </span>
-            <span className={cn(hour.failed > 0 && "text-destructive")}>
-              {hour.failed.toLocaleString()} failed
-            </span>
-          </span>
-        )
+        // Held while the hour is read, so the title line keeps its height.
+        <span className="numeric truncate text-hint text-muted-foreground">
+          {hour ? (
+            <>
+              {hour.total.toLocaleString()}
+              <span className="text-muted-foreground/50"> · </span>
+              <span className={cn(hour.failed > 0 && "text-destructive")}>
+                {hour.failed.toLocaleString()} failed
+              </span>
+            </>
+          ) : (
+            "\u00a0"
+          )}
+        </span>
       }
       rows={rows}
       series={SERIES}
@@ -671,17 +694,20 @@ function SitesView({
   const whole = sites.reduce((n, s) => n + (s.status === "available" ? s.requests : 0), 0)
   return (
     <div className="space-y-3" data-slot="traffic-sites">
-      <SplitBar
-        label="Requests this hour by site"
-        parts={[
-          ...lanes.map((r) => ({
-            key: r.key,
-            count: readings.get(r.key)?.requests ?? 0,
-            color: lane.get(r.key)!,
-          })),
-          { key: "rest", count: whole - laned, color: "var(--muted-foreground)" },
-        ]}
-      />
+      {/* Nothing logged is nothing to share out: the card above says why. */}
+      {whole > 0 && (
+        <SplitBar
+          label="Requests this hour by site"
+          parts={[
+            ...lanes.map((r) => ({
+              key: r.key,
+              count: readings.get(r.key)?.requests ?? 0,
+              color: lane.get(r.key)!,
+            })),
+            { key: "rest", count: whole - laned, color: "var(--muted-foreground)" },
+          ]}
+        />
+      )}
       <RankList
         items={rows.map((row) => {
           const reading = readings.get(row.key)!

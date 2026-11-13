@@ -243,9 +243,9 @@ test("a site's error log is the Errors view narrowed to it", async ({ page }) =>
 test("an hour that is failing says so at the line's end and on the reading", async ({ page }) => {
   await open(page, [hour("app.example.com", [minute(2, 100, 10), minute(1, 100, 10)])])
   await expect(identity(page)).toContainText("10.0% failing")
-  await expect(reading(page, "Failing").locator(".text-destructive")).toContainText(
-    "10.0% of requests failed",
-  )
+  await expect(
+    reading(page, "Failing").getByText("10.0% of requests failed", { exact: true }),
+  ).toHaveClass(/text-destructive/)
 })
 
 test("a log with no timing says so rather than a figure", async ({ page }) => {
@@ -263,6 +263,12 @@ test("a host with no sites says so once, with the way to add one", async ({ page
   )
   await expect(readings(page)).toHaveCount(0)
   await expect(page.getByText("0 requests a minute")).toHaveCount(0)
+  // Nothing to rank, so no empty Sites view: nginx's own log is what is left.
+  await expect(page.getByRole("tab")).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Error log" })).toBeVisible()
+  await expect(page.locator("[data-slot='traffic-errors']")).toContainText(
+    "The application took too long to answer",
+  )
 })
 
 test("sites that keep no access log claim no zero and point at the fix", async ({ page }) => {
