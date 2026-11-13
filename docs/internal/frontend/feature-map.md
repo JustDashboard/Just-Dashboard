@@ -1130,6 +1130,14 @@ the stream's page; checked by `tests/browser/proxy-streams.spec.ts`
 **Implementation:** `app/(dashboard)/proxy/`, `components/proxy/`; backend in
 [`../backend/proxy.md`](../backend/proxy.md#proxy)
 
+Traffic (`/proxy/traffic`, every account) is the last hour across every site from
+`GET /proxy/traffic`: requests a minute, the failing share, the slowest site's response time in
+words and bytes sent, the hour by the minute, the sites busiest first (each opening its site page,
+where its requests are read), and nginx's error log grouped from `GET /proxy/errors` over a window,
+for every site or one (`?tab=errors&site=`). The old one-site address `?site=<name>` redirects to
+`/proxy/sites/<name>`. Checked by `tests/browser/proxy-traffic.spec.ts`; the logic is
+`components/proxy/site-traffic.ts` (unit-tested)
+
 ### `/network/*`
 
 Nineteen reporting pages: topology/overview, interfaces/namespaces, IPv4/IPv6 routes and policy
