@@ -1099,7 +1099,11 @@ Traffic show observed inventories and records. Alerts (`/proxy/alerts`, administ
 page: what the rules watch wired to the channels told, what fires with its mute, the rules edited in
 a sheet, and a test per channel (the parts that do not know the proxy's kinds are
 `components/alerts/alert-parts.tsx`, shared with `/metrics/alerts`); the overview's identity bar
-links there with the firing count. Site/stream configuration, certificate issuance/renewal,
+links there with the firing count. Ports (`/proxy/ports`) opens on its counts, a picture of which
+networks reach which listening programs and the list of sockets; each listening port has its own page
+(`/proxy/ports/[port]`, keyed `tcp-443` or `udp-53-127.0.0.53` where two rows share a port) with its
+reach, owner, clients and history, and the list as a rail; the old `?socket=` sheet address opens
+it. Site/stream configuration, certificate issuance/renewal,
 requested TLS scans, nginx tests/lint and traffic diagnostics keep their own controls and
 authorization. The overview has no automatic attention list or domain suggestions. Certificate
 hygiene and finding snoozes are removed; nginx Settings exposes current values and edit constraints
