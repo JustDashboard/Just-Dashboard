@@ -1,4 +1,4 @@
-import { chromium } from "playwright"
+import { chromium } from "@playwright/test"
 import assert from "node:assert/strict"
 
 // Run against a disposable frontend: bun dev --hostname 127.0.0.1 --port 3107
