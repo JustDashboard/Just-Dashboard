@@ -3,6 +3,7 @@ import { pm2Apps } from "./pm2-shared"
 import {
   pm2AppHref,
   pm2AppState,
+  pm2AppTargets,
   pm2Lead,
   pm2LegacyHref,
   pm2Matches,
@@ -11,6 +12,7 @@ import {
   pm2Reading,
   pm2Resolve,
   pm2RestartWords,
+  pm2VerbWords,
 } from "./pm2-facts"
 
 const proc = (over) => ({
@@ -213,5 +215,39 @@ describe("pm2Reading", () => {
   test("sums the history only over the stretch every worker has", () => {
     const young = row(102, { history: [{ cpu: 5, rss: 50, read: 0, write: 0 }] })
     expect(pm2Reading(pm2Apps(cluster)[0], [row(100), young]).history.cpu).toEqual([7])
+  })
+})
+
+// A verb pressed on the application's page goes to the workers it means: the
+// sheet sent it to one and said the application's name.
+describe("pm2AppTargets", () => {
+  const mixed = pm2Apps([
+    cluster[1],
+    { ...cluster[0], id: 4, status: "stopped", pid: 0 },
+    { ...cluster[0], id: 1, status: "errored", pid: 0 },
+  ])[0]
+  const ids = (action) => pm2AppTargets(mixed, action).map((p) => p.id)
+
+  test("starts what is down and reloads or stops what is up, in PM2's order", () => {
+    expect(ids("start")).toEqual([1, 4])
+    expect(ids("reload")).toEqual([2])
+    expect(ids("stop")).toEqual([2])
+  })
+
+  test("restarts, resets and deletes every worker", () => {
+    expect(ids("restart")).toEqual([1, 2, 4])
+    expect(ids("reset")).toEqual([1, 2, 4])
+    expect(ids("delete")).toEqual([1, 2, 4])
+  })
+
+  // PM2 flushes by name, and the workers share their files.
+  test("flushes once", () => {
+    expect(ids("flush")).toEqual([2])
+  })
+
+  test("says what a verb does in the terms of what it runs as", () => {
+    expect(pm2VerbWords("reload", true)).toBe("Replaces its workers one at a time.")
+    expect(pm2VerbWords("reload", false)).toBe("Restarts it, with a short gap.")
+    expect(pm2VerbWords("cwd", false)).toBe("")
   })
 })
