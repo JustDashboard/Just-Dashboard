@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils"
 import type { MapBoard } from "@/components/map/board"
 import { VIA_LABEL, wireLabel } from "@/components/map/edges"
 import { ItemMark, KIND_GLYPH, TONE_DOT } from "@/components/map/marks"
+import type { UnreadNotice } from "@/components/map/unread"
+import { MissingLine } from "@/components/missing-thing"
 import { nodeKindLabel } from "@/components/map/nodes"
 
 type Point = (id: string | null) => void
@@ -35,6 +37,9 @@ export function MapInspector({
   systems,
   system,
   node,
+  notices = [],
+  kinds,
+  onKinds,
   onChoose,
   onHover,
   onFocus,
@@ -44,6 +49,12 @@ export function MapInspector({
   systems: System[]
   system: System | undefined
   node: SystemNode | undefined
+  /** What could not be read, one line per cause, said above whatever is being read. */
+  notices?: UnreadNotice[]
+  /** The kinds selected on the canvas from the whole view's rows. */
+  kinds?: readonly string[] | null
+  /** Select every box of those kinds on the canvas, or let them go. */
+  onKinds?: (kinds: string[] | null) => void
   /** Choose a box by its node id. */
   onChoose: (id: string) => void
   onHover: Point
@@ -69,6 +80,8 @@ export function MapInspector({
         </span>
       </div>
 
+      {notices.length > 0 && <UnreadNotices notices={notices} />}
+
       <div
         key={node?.id ?? system?.id ?? "server"}
         className="min-h-0 flex-1 animate-rise overflow-y-auto"
@@ -86,7 +99,7 @@ export function MapInspector({
         ) : system ? (
           <SystemView board={board} system={system} onChoose={onChoose} onHover={onHover} />
         ) : (
-          <WholeView board={board} systems={systems} />
+          <WholeView board={board} systems={systems} kinds={kinds} onKinds={onKinds} />
         )}
       </div>
 
@@ -465,8 +478,60 @@ function SystemView({
   )
 }
 
-function WholeView({ board, systems }: { board: MapBoard; systems: System[] }) {
+/**
+ * What the map could not read, in the inspector rather than over the canvas
+ * it could not draw: one line per cause, the cause drawn as itself, the page
+ * that fixes it, and the source's own words one press away.
+ */
+export function UnreadNotices({
+  notices,
+  className,
+}: {
+  notices: UnreadNotice[]
+  className?: string
+}) {
+  return (
+    <ul
+      aria-label="Not read"
+      data-slot="map-unread"
+      className={cn("shrink-0 space-y-2 border-b border-hairline px-4 py-3", className)}
+    >
+      {notices.map((notice) => (
+        <li key={notice.key} className="min-w-0 space-y-1">
+          <MissingLine thing={notice.thing} href={notice.href} label={notice.label}>
+            <span className="text-foreground">{notice.sentence}</span>
+          </MissingLine>
+          {notice.raw && (
+            <details className="min-w-0 text-hint">
+              <summary className="cursor-pointer rounded-sm text-muted-foreground focus-ring hover:text-foreground">
+                What the server said
+              </summary>
+              <pre className="mt-1 overflow-x-auto rounded-sm border border-hairline bg-surface-header/40 p-2 font-mono text-micro break-words whitespace-pre-wrap">
+                {notice.raw}
+              </pre>
+            </details>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function WholeView({
+  board,
+  systems,
+  kinds,
+  onKinds,
+}: {
+  board: MapBoard
+  systems: System[]
+  kinds?: readonly string[] | null
+  onKinds?: (kinds: string[] | null) => void
+}) {
   const whole = board.whole(systems)
+  // A board that names what its figures count gets rows that select them;
+  // one that does not keeps the figures.
+  const selectable = onKinds !== undefined && whole.facts.every((fact) => fact.kinds?.length)
   return (
     <>
       <Identity
@@ -480,7 +545,46 @@ function WholeView({ board, systems }: { board: MapBoard; systems: System[] }) {
       />
       {whole.facts.length > 0 && (
         <Section title={whole.heading}>
-          <Facts facts={whole.facts} />
+          {selectable ? (
+            <ul className="-mx-2 space-y-0.5">
+              {whole.facts.map((fact) => {
+                const own = fact.kinds ?? []
+                const Glyph = KIND_GLYPH[own[0]] ?? Layers
+                const pressed = kinds != null && own.every((kind) => kinds.includes(kind))
+                return (
+                  <li key={fact.label}>
+                    <button
+                      type="button"
+                      aria-pressed={pressed}
+                      data-kind={own.join(" ")}
+                      title={
+                        pressed ? "Let them go" : `Show the ${fact.label.toLowerCase()} on the map`
+                      }
+                      onClick={() => onKinds?.(pressed ? null : own)}
+                      className={cn(
+                        "flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-1.5 text-left text-body focus-ring transition-colors hover:bg-row-hover",
+                        pressed && "bg-accent",
+                      )}
+                    >
+                      <Glyph
+                        aria-hidden
+                        className={cn(
+                          "size-4 shrink-0",
+                          pressed ? "text-foreground" : "text-muted-foreground",
+                        )}
+                      />
+                      <span className={cn("min-w-0 flex-1 truncate", pressed && "font-medium")}>
+                        {fact.label}
+                      </span>
+                      <span className="numeric shrink-0 text-muted-foreground">{fact.value}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <Facts facts={whole.facts} />
+          )}
         </Section>
       )}
     </>

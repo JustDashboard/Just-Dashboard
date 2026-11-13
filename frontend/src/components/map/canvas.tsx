@@ -45,7 +45,7 @@ import { cn } from "@/lib/utils"
 import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
 import { SERVER_BOARD, type MapBoard } from "@/components/map/board"
 import { edgeTypes, type WireData } from "@/components/map/edges"
-import { MapInspector } from "@/components/map/inspector"
+import { MapInspector, UnreadNotices } from "@/components/map/inspector"
 import {
   nodeTypes,
   type FaceData,
@@ -55,8 +55,16 @@ import {
   type StackData,
 } from "@/components/map/nodes"
 import { SystemRail } from "@/components/map/rail"
+import { unreadNotices } from "@/components/map/unread"
 
 const ZOOM = { min: 0.06, max: 2 }
+/**
+ * Below this, a box's name is not read: where every system at once would be
+ * drawn smaller, a board with a home opens on that system instead.
+ */
+const READABLE = 0.4
+/** The room `fitView` leaves round what it fits, as a share of the canvas. */
+const FIT_PADDING = 0.06
 /** A system flown to fills the canvas, but a small one is not blown up past its own size. */
 const FLY = { padding: 0.04, maxZoom: 1 }
 
@@ -131,7 +139,10 @@ export function MapCanvas({
 }: {
   /** Every system, laid out on its own (`detectSystems`, `detectDatabaseSystems`). */
   systems: System[]
-  /** What could not be read, each said over the canvas. */
+  /**
+   * What could not be read: each said over the canvas, or, on a board that
+   * asks for it (`board.unread`), one line per cause in the inspector.
+   */
   unread: Unread[]
   board?: MapBoard
   /** What the canvas says with no system to draw. */
@@ -184,6 +195,9 @@ export function MapCanvas({
 
   const [chosen, setChosen] = useState<string | null>(null)
   const [focus, setFocus] = useState<string | null>(initialSystem ?? doc.focus ?? null)
+  // The kinds picked from the inspector's account of the whole canvas: every
+  // box of them is lit, on every system, and the rest step back.
+  const [kinds, setKinds] = useState<readonly string[] | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
   // The system whose head was tapped on a phone, for the way on to its page.
   const [tapped, setTapped] = useState<string | null>(null)
@@ -222,6 +236,7 @@ export function MapCanvas({
   const showAll = useCallback(() => {
     setFocus(null)
     setChosen(null)
+    setKinds(null)
     update({ focus: undefined })
     void flow.fitView({ padding: 0.06, duration: 450 })
   }, [flow, update])
@@ -229,6 +244,7 @@ export function MapCanvas({
     (id: string, fly = true) => {
       setFocus(id)
       setChosen(null)
+      setKinds(null)
       update({ focus: id })
       if (fly) flyTo(id)
     },
@@ -314,9 +330,43 @@ export function MapCanvas({
         })
       } else if (wanted && bySystem.has(wanted)) flyTo(wanted, 0)
       else if (doc.viewport) void flow.setViewport(doc.viewport)
-      else void flow.fitView({ padding: 0.06 })
+      else {
+        // Nothing asked for and nothing left behind. Every system at once is
+        // the answer while their names can be read; past that it is a
+        // scatter of boxes, and the board's own system is where to start.
+        // Looked at, not chosen: it is not written down as the reader's.
+        const home = board.home?.(placed.map((p) => p.system))
+        const height = canvasRef.current?.clientHeight
+        const rects = placed.map((p) => frameRect(p.system.id)).filter((r) => r !== null)
+        const left = Math.min(...rects.map((r) => r.x))
+        const top = Math.min(...rects.map((r) => r.y))
+        const all = {
+          width: Math.max(...rects.map((r) => r.x + r.width)) - left,
+          height: Math.max(...rects.map((r) => r.y + r.height)) - top,
+        }
+        const room = 1 - FIT_PADDING * 2
+        const zoom =
+          width && height && all.width > 0 && all.height > 0
+            ? Math.min((width * room) / all.width, (height * room) / all.height)
+            : 1
+        if (home && bySystem.has(home) && zoom < READABLE) {
+          setFocus(home)
+          flyTo(home, 0)
+        } else void flow.fitView({ padding: FIT_PADDING })
+      }
     }, 0)
-  }, [placed, bare, frameRect, initialSystem, doc.focus, doc.viewport, bySystem, flyTo, flow])
+  }, [
+    placed,
+    bare,
+    board,
+    frameRect,
+    initialSystem,
+    doc.focus,
+    doc.viewport,
+    bySystem,
+    flyTo,
+    flow,
+  ])
 
   // Carrying a system: its head is pressed, and the whole diagram follows the
   // pointer once it has gone a few pixels — less is a click, which the frame
@@ -412,11 +462,13 @@ export function MapCanvas({
           data: {
             frame: f,
             // Stepped back with the rest unless it, or one of its containers, is lit.
-            dimmed:
-              lit !== null &&
-              chosenSeat?.system.id === sid &&
-              !lit.has(f.id) &&
-              !s.nodes.some((n) => n.frame === f.itemId && lit.has(n.id)),
+            dimmed: lit
+              ? chosenSeat?.system.id === sid &&
+                !lit.has(f.id) &&
+                !s.nodes.some((n) => n.frame === f.itemId && lit.has(n.id))
+              : kinds !== null &&
+                !kinds.includes("stacks") &&
+                !s.nodes.some((n) => n.frame === f.itemId && kinds.includes(n.kind)),
           } satisfies StackData,
         })
       }
@@ -439,6 +491,7 @@ export function MapCanvas({
         if (chosen === n.id) state = "chosen"
         else if (hovered === n.id) state = "hit"
         else if (lit && chosenSeat?.system.id === sid) state = lit.has(n.id) ? "lit" : "dim"
+        else if (!lit && kinds) state = kinds.includes(n.kind) ? "lit" : "dim"
         out.push({
           id: n.id,
           type: n.face,
@@ -452,7 +505,20 @@ export function MapCanvas({
       }
     }
     return out
-  }, [placed, settled, frameRect, corner, board, bare, focus, lit, chosenSeat, chosen, hovered])
+  }, [
+    placed,
+    settled,
+    frameRect,
+    corner,
+    board,
+    bare,
+    focus,
+    lit,
+    kinds,
+    chosenSeat,
+    chosen,
+    hovered,
+  ])
 
   const edges = useMemo(() => {
     const out: Edge[] = []
@@ -478,7 +544,7 @@ export function MapCanvas({
             also: e.also,
             shape: e.shape,
             lit: on,
-            dimmed: inSystem && lit !== null && !on,
+            dimmed: lit !== null ? inSystem && !on : kinds !== null,
             // A stack's frame stands in for its containers; it carries while they run.
             carries: (s?.item.tone ?? "ok") === "ok" && (t?.item.tone ?? "ok") === "ok",
             live: (e.sessions ?? 0) > 0,
@@ -489,7 +555,7 @@ export function MapCanvas({
       }
     }
     return out
-  }, [placed, chosenSeat, chosen, lit])
+  }, [placed, chosenSeat, chosen, lit, kinds])
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -530,9 +596,34 @@ export function MapCanvas({
       if (!seat) return
       setChosen(id)
       setTapped(null)
+      setKinds(null)
       setFocus(seat.system.id)
     },
     [seats],
+  )
+
+  // Every box of some kinds, wherever it is drawn: lit, and brought into
+  // view together. A stack is its frame, which holds no box of its own kind.
+  const selectKinds = useCallback(
+    (next: string[] | null) => {
+      setKinds(next)
+      if (!next) return
+      setChosen(null)
+      setFocus(null)
+      const ids: string[] = []
+      for (const p of placed) {
+        for (const n of p.system.nodes) if (next.includes(n.kind)) ids.push(n.id)
+        if (next.includes("stacks")) for (const f of p.system.frames) ids.push(f.id)
+      }
+      if (ids.length === 0) return
+      void flow.fitView({
+        nodes: ids.map((id) => ({ id })),
+        padding: 0.12,
+        duration: 400,
+        maxZoom: 1,
+      })
+    },
+    [placed, flow],
   )
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -547,8 +638,15 @@ export function MapCanvas({
       router.push(chosenNode.item.href)
     } else if (e.key === "Escape") {
       setChosen(null)
+      setKinds(null)
     }
   }
+
+  // A board that says what went unread in its inspector: one line per cause.
+  const notices = useMemo(
+    () => (board.unread === "inspector" ? unreadNotices(unread) : null),
+    [board, unread],
+  )
 
   const tappedSystem = tapped ? bySystem.get(tapped)?.system : undefined
   // What a phone's one button opens: nothing draws "Everything else" a page of its own.
@@ -613,6 +711,7 @@ export function MapCanvas({
               onPaneClick={() => {
                 setChosen(null)
                 setTapped(null)
+                setKinds(null)
               }}
               onMoveEnd={(event, viewport: Viewport) => {
                 if (event && restored.current && !bare) update({ viewport })
@@ -670,7 +769,18 @@ export function MapCanvas({
               </Button>
             </div>
           )}
-          {unread.length > 0 && (
+          {notices && notices.length > 0 && !inspecting && (
+            // With no inspector to say it in (it is put away, or this is a
+            // phone), the same lines float here: one per cause, never the
+            // sources' own words.
+            <div className="pointer-events-none absolute top-3 left-3 max-w-[min(26rem,calc(100%-1.5rem))]">
+              <UnreadNotices
+                notices={notices.map((notice) => ({ ...notice, raw: undefined }))}
+                className="pointer-events-auto rounded-md border border-hairline bg-popover px-3 py-2"
+              />
+            </div>
+          )}
+          {!notices && unread.length > 0 && (
             <div className="pointer-events-none absolute top-3 left-3 max-w-[min(28rem,80%)] space-y-1">
               {unread.map((k) => (
                 <p
@@ -694,6 +804,9 @@ export function MapCanvas({
             systems={systems}
             system={chosenSeat?.system ?? focusSystem}
             node={chosenNode}
+            notices={notices ?? undefined}
+            kinds={kinds}
+            onKinds={selectKinds}
             onChoose={(id) => {
               choose(id)
               frameNode(id)
