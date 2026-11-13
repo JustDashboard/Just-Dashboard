@@ -385,10 +385,11 @@ export function ProtectionPicture({
 }
 
 /**
- * The picture before its read: grey nodes on the lines of drawn ones. They
- * are nodes rather than `WireFlow`'s own loading rows because those are a
- * little taller than a node with three one-line parts, on a phone as well as
- * wide, and this picture is held to the height of the drawn one.
+ * The picture before its read: grey nodes on the lines of drawn ones, and a
+ * hub with both of its hint's lines. They are nodes rather than `WireFlow`'s
+ * own `loading` because on a phone that draws the hub's name and not the
+ * lines under it, so the rows of marks stood two lines higher until the read
+ * landed, and this picture is held to the drawn one's shape at both widths.
  */
 function grey(side: string, count: number): WireFlowNode[] {
   return Array.from({ length: count }, (_, i) => ({

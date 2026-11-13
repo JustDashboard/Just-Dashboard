@@ -3640,8 +3640,8 @@ where all of it would land. Where each figure went (`components/network/protecti
   addresses never refused. A wire pulses when its counter grew since the last read and is dashed
   while its entry is off. It keeps one height: three lists and "N more", one or two limits, in a
   frame with room for four rows, so the lists under it never move. Its grey state is nodes of its
-  own on the drawn nodes' lines, because `WireFlow`'s `loading` rows are taller than a node with
-  three one-line parts.
+  own on the drawn nodes' lines, because `WireFlow`'s `loading` draws a phone's hub without the
+  lines under its name.
 - **Rows at one height.** A blocklist's coverage is on the line under its name; when it was fetched
   and when it next is, its networks and drops, and its one state (`listState`: a failed fetch in
   red before a stale copy before a verified set) are columns; the error's words, the enforcement
