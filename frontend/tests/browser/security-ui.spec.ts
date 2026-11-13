@@ -979,6 +979,9 @@ test("the firewall page reads what its rules did, with the day's counts in its g
   await expect(page.getByRole("button", { name: "Block at the firewall" })).toHaveCount(0)
   // A packet this host sent names the host as its source: no verbs for it.
   await lines.getByText(/\[UFW AUDIT\] IN= OUT=ens3 SRC=198\.51\.100\.87/).click()
+  // The pane of the line pressed before stays up until this one's is drawn,
+  // and its menu is that line's: wait for the press to have opened this line.
+  await expect(lines.locator('[aria-current="true"]')).toContainText("[UFW AUDIT] IN= OUT=ens3")
   await page.getByRole("button", { name: "More actions for this line" }).click()
   await expect(page.getByRole("menuitem", { name: "Copy line" })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: "Who owns this address" })).toHaveCount(0)
