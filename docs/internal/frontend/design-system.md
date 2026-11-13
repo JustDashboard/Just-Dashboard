@@ -233,6 +233,24 @@ taking a frame:
   and with nothing below it the first surface the body draws — a row's hover wash, a table header —
   butted into it and the rule read as an edge of that surface rather than as the line under the title.
 
+**A picture of things wired through one hub is `WireFlow`.** Most of the pictures above have one
+shape — a column of things on the left, this server (or an engine, a tunnel, a resolver) in the middle,
+a column on the right, a line from each thing to the hub — and until 0.8.7 each drew it by hand on
+`deploy/wire`, 250 to 500 lines apiece. `components/wire-flow.tsx` draws it from data: each node is a
+mark, an eyebrow, a name and a hint, optionally a link or a button; its line is a `WireLine` whose state
+is the vocabulary above (`up` and `moving` or still, `down` dashed, `warning` amber, `danger` red, `idle`
+dashed for configured but not in use); a column has a title (and a count beside it where it is part of
+something larger), a `max` past which the rest are one "N more" tile, and what it says when it is empty;
+pointing at a node steps the rest back, keeping what `related` says travels with it. `loading` draws the
+final shape — the hub and grey rows where the nodes will go — so nothing under it moves when the data
+lands. On a phone it does one of the two things the pictures did: `stack`, the columns under their
+headings with every word and no lines, for a picture that is the only place its nodes are named (the
+Network overview, the gateway); or `marks`, the hub's words over a row of marks, the hub, and a row of
+marks with the lines running down, for a picture a list under it names again (Notifications, Backups,
+the proxy's alerts). The Network overview and the gateway draw through it since 0.8.7; a new picture of
+this shape uses it, and lays its nodes by hand only when it is not this shape (the routing decision's
+two columns, a project's Runtime lanes).
+
 **And one kind of block came back to the frame: a table.** The 2026-09-21 pass found what sweeping
 tables into the second bullet had cost. A table's container is `overflow-auto`, so at any width where
 its columns stop fitting the grid is *already* clipped — and with nothing drawn at the boundary, a row
