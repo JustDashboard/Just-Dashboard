@@ -124,11 +124,7 @@ export function ConfigPicture({
   const lanes = Array.from({ length: map.depth }, (_, index) =>
     map.reached.filter((node) => node.depth === index + 1),
   )
-  const columns = [
-    "auto",
-    ...lanes.flatMap(() => ["minmax(2.5rem,0.6fr)", "auto"]),
-    ...(map.unread.length > 0 ? ["minmax(2rem,0.4fr)", "auto"] : []),
-  ].join(" ")
+  const columns = ["auto", ...lanes.flatMap(() => ["minmax(2.5rem,0.6fr)", "auto"])].join(" ")
 
   return (
     <div ref={container} className="relative mx-auto max-w-5xl py-4">
@@ -194,35 +190,38 @@ export function ConfigPicture({
                     />
                   </li>
                 ))}
+                {/* The folders nginx reads nothing in close the last lane,
+                    unwired: a lane of their own ran past the picture's edge. */}
+                {last && map.unread.length > 0 && (
+                  <li className="mt-3 min-w-0 space-y-3">
+                    <p className="eyebrow">Not read</p>
+                    <ul className="flex flex-col gap-3">
+                      {map.unread.map((node) => (
+                        <li key={node.folder} className="min-w-0">
+                          <WireNode
+                            mark={
+                              <FolderMark
+                                node={node}
+                                onFolder={onFolder}
+                                label={label(node.folder)}
+                              />
+                            }
+                            title={
+                              <span className="font-mono text-muted-foreground">
+                                {label(node.folder)}
+                              </span>
+                            }
+                            hint={plural(node.files, "file")}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                )}
               </ul>
             </li>,
           ]
         })}
-        {map.unread.length > 0 && (
-          <>
-            <li aria-hidden />
-            <li className="min-w-0">
-              <p className="eyebrow mb-3">Not read</p>
-              <ul className="flex flex-col gap-3">
-                {map.unread.map((node) => (
-                  <li key={node.folder} className="min-w-0">
-                    <WireNode
-                      mark={
-                        <FolderMark node={node} onFolder={onFolder} label={label(node.folder)} />
-                      }
-                      title={
-                        <span className="font-mono text-muted-foreground">
-                          {label(node.folder)}
-                        </span>
-                      }
-                      hint={plural(node.files, "file")}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </li>
-          </>
-        )}
       </ol>
     </div>
   )

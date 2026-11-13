@@ -301,11 +301,7 @@ function Connected({
         <PanelHeader
           title="Hostnames"
           actions={
-            <span className="numeric text-hint text-muted-foreground">
-              {counts.hostnames > 0 && status.api.available
-                ? `${counts.routed} routed · ${counts.records} with a record · ${counts.hostnames}`
-                : counts.hostnames}
-            </span>
+            <span className="numeric text-hint text-muted-foreground">{counts.hostnames}</span>
           }
         />
         <PanelBody className="pt-4">
@@ -382,56 +378,55 @@ function HostnameRow({ hostname, tunnelId }: { hostname: TunnelHostname; tunnelI
         void copyText(`${hostname.hostname}. CNAME ${cnameTarget(tunnelId)}`, "Record copied"),
     })
   }
+  // A ChoiceRow is its own list item.
   return (
-    <li>
-      <ChoiceRow
-        href={hostname.projectId ? `/deploy/${hostname.projectId}/settings/domains` : undefined}
-        disabled={!hostname.projectId}
-        verb={`${hostname.hostname} in ${hostname.project || "its project"}'s Domains`}
-        className="min-h-0 gap-3 px-3 py-2.5"
-        leading={
-          <WireMark tone={record.tone === "danger" ? "danger" : "logo"} size="sm">
-            <Globe aria-hidden />
-          </WireMark>
-        }
-        title={<span className="font-mono">{hostname.hostname}</span>}
-        description={
-          refused ? (
-            <span className="text-destructive" title={hostname.error}>
-              {hostname.error}
-            </span>
-          ) : (
-            hostname.project || "going live"
-          )
-        }
-        trailing={
-          <span className="hidden items-center gap-4 sm:flex">
-            <span className="w-24">
-              <Status
-                tone={hostname.routed ? "running" : "unknown"}
-                label={hostname.routed ? "Routed" : "Not routed"}
-              />
-            </span>
-            <span className="w-48 truncate">
-              <Status tone={record.tone} label={record.label} />
-            </span>
+    <ChoiceRow
+      href={hostname.projectId ? `/deploy/${hostname.projectId}/settings/domains` : undefined}
+      disabled={!hostname.projectId}
+      verb={`${hostname.hostname} in ${hostname.project || "its project"}'s Domains`}
+      className="min-h-0 gap-3 px-3 py-2.5"
+      leading={
+        <WireMark tone={record.tone === "danger" ? "danger" : "logo"} size="sm">
+          <Globe aria-hidden />
+        </WireMark>
+      }
+      title={<span className="font-mono">{hostname.hostname}</span>}
+      description={
+        refused ? (
+          <span className="text-destructive" title={hostname.error}>
+            {hostname.error}
           </span>
-        }
-        actions={<VerbMenu verbs={verbs} label={`More for ${hostname.hostname}`} />}
-      >
-        {/* A phone has no width for the two columns, so they are the row's
-            second line there — on every row, so every row is one height. */}
-        <span className="flex min-w-0 items-center gap-4 pl-12 text-hint sm:hidden">
-          <Status
-            tone={hostname.routed ? "running" : "unknown"}
-            label={hostname.routed ? "Routed" : "Not routed"}
-          />
-          <span className="min-w-0 truncate">
+        ) : (
+          hostname.project || "going live"
+        )
+      }
+      trailing={
+        <span className="hidden items-center gap-4 sm:flex">
+          <span className="w-24">
+            <Status
+              tone={hostname.routed ? "running" : "unknown"}
+              label={hostname.routed ? "Routed" : "Not routed"}
+            />
+          </span>
+          <span className="w-48 truncate">
             <Status tone={record.tone} label={record.label} />
           </span>
         </span>
-      </ChoiceRow>
-    </li>
+      }
+      actions={<VerbMenu verbs={verbs} label={`More for ${hostname.hostname}`} />}
+    >
+      {/* A phone has no width for the two columns, so they are the row's
+            second line there — on every row, so every row is one height. */}
+      <span className="flex min-w-0 items-center gap-4 pl-12 text-hint sm:hidden">
+        <Status
+          tone={hostname.routed ? "running" : "unknown"}
+          label={hostname.routed ? "Routed" : "Not routed"}
+        />
+        <span className="min-w-0 truncate">
+          <Status tone={record.tone} label={record.label} />
+        </span>
+      </span>
+    </ChoiceRow>
   )
 }
 
@@ -679,6 +674,28 @@ function Setup({
   const [way, setWay] = useState<"token" | "api">(() => defaultSetup(status))
   return (
     <>
+      <TunnelIdentityShell
+        title="Cloudflare Tunnel"
+        facts={
+          <>
+            <Status tone="unknown" label="not connected" />
+            <FactDot />
+            <span className={cn(!status.api.available && "text-muted-foreground")}>
+              {status.api.available
+                ? "Cloudflare credentials saved"
+                : "no Cloudflare credentials saved"}
+            </span>
+            {status.origin && (
+              <>
+                <FactDot />
+                <span>
+                  to <span className="font-mono text-[0.9em]">{status.origin.service}</span>
+                </span>
+              </>
+            )}
+          </>
+        }
+      />
       <TunnelPicture status={status} />
       <p className="mx-auto max-w-2xl text-center text-body text-pretty text-muted-foreground">
         cloudflared dials out from this server to Cloudflare, which answers for your domains over
@@ -692,7 +709,7 @@ function Setup({
           </Notice>
         ) : (
           <>
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-hairline pb-4">
+            <div className="border-b border-hairline pb-4">
               <Segments
                 label="How to connect"
                 value={way}
@@ -701,14 +718,6 @@ function Setup({
                   { value: "token", label: "Paste a token" },
                   { value: "api", label: "Create with the API" },
                 ]}
-              />
-              <Status
-                tone={status.api.available ? "running" : "unknown"}
-                label={
-                  status.api.available
-                    ? "Cloudflare credentials saved"
-                    : "No Cloudflare credentials saved"
-                }
               />
             </div>
             {way === "token" ? (
@@ -753,7 +762,7 @@ function TokenForm({
 
   return (
     <form
-      aria-label="Paste a tunnel token"
+      aria-label="Connect with a token"
       className="min-w-0 space-y-5"
       onSubmit={(event) => {
         event.preventDefault()
@@ -806,7 +815,7 @@ function CreateForm({
     return (
       <OverviewEmpty
         mark={<EmptyMark product="cloudflare" corner={Key} tone="warning" />}
-        title="No Cloudflare credentials are saved"
+        title="Creating a tunnel takes a Cloudflare API token"
         action={
           <Button asChild size="sm" variant="outline">
             <Link href="/proxy/certificates">Open Certificates</Link>

@@ -214,17 +214,17 @@ function HistoryBody({
       )}
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[16rem_minmax(0,1fr)] [&>*]:min-w-0">
         <RowList aria-label="Revisions" className="max-h-64 overflow-y-auto lg:max-h-none">
+          {/* A Row is its own list item. */}
           {revisions.map((revision) => (
-            <li key={revision.id}>
-              <Row
-                onClick={() => setPicked(revision.id)}
-                className={cn("px-3 py-2", revision.id === selected && "bg-accent")}
-                title={actionLabel(revision)}
-                subtitle={`${revision.actor ? `${revision.actor} · ` : ""}${when(revision)}${
-                  revision.existed ? ` · ${bytes(revision.size)}` : ""
-                }`}
-              />
-            </li>
+            <Row
+              key={revision.id}
+              onClick={() => setPicked(revision.id)}
+              className={cn("px-3 py-2", revision.id === selected && "bg-accent")}
+              title={actionLabel(revision)}
+              subtitle={`${revision.actor ? `${revision.actor} · ` : ""}${when(revision)}${
+                revision.existed ? ` · ${bytes(revision.size)}` : ""
+              }`}
+            />
           ))}
         </RowList>
 
