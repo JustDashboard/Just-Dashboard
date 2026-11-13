@@ -1126,6 +1126,13 @@ Connected now, and Settings (the form as a settings column with one save bar, ad
 `?tab=` in the address. New stream stays a sheet (`stream-form.tsx`); the verbs both places share are
 `stream-verbs.tsx`, and what they say is `stream-facts.ts` (unit-tested). `?stream=<name>` lands on
 the stream's page; checked by `tests/browser/proxy-streams.spec.ts`
+Configuration (`/proxy/config`) opens on nginx's directory as an identity line with Test config, the
+include picture over the files by folder, and for administrators What nginx loads, Settings (one
+column, one save bar, a reload switch), Lint and History as `?tab=` views; a file's revisions and
+restore are the config editor's History view (`?view=history`, the old `?history=` link lands
+there). Tunnel (`/proxy/tunnel`) opens on the tunnel's identity line with Check now, the picture of
+hostname → Cloudflare's edge → connector → this server, and the hostnames as one-line cards; not
+connected, the dashed picture, a choice of token or API and one form (administrators only).
 
 **Implementation:** `app/(dashboard)/proxy/`, `components/proxy/`; backend in
 [`../backend/proxy.md`](../backend/proxy.md#proxy)

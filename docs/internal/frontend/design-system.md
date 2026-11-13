@@ -2019,6 +2019,30 @@ log is turned on, or Sites) rather than four zeros; a host with no reverse proxy
 `EngineSetup`. One site's requests were a second, older copy of that site's own page here
 (`?site=`); that address now lands on the site's page, and `?site=…&view=errors` is the Errors view
 narrowed to it. `proxy-traffic.spec.ts` covers every state at 1280 and 390.
+**Configuration and Tunnel open on what they are about.** Configuration (`/proxy/config`) is an
+identity line — nginx's mark, its directory in mono, how many files in how many folders, how many
+nginx reads, how many the dashboard wrote, and for an administrator the last config test as a
+coloured word — with Test config as the line's brand command and a `⋯` of Read again, the main
+file, the last test and the engine overview. Under it the views are an underlined strip in the
+address (`?tab=effective`, `settings`, `lint`, `history`; Files has none), administrators only as
+before. Files opens on the directory as nginx walks it (`config-picture.tsx`, its lanes from
+`includeMap` in `config-tree.ts`): the main file, the folders it includes, the folders their files
+include — sites-enabled's links into sites-available, a site into snippets — and, closing the last
+lane unwired and dashed, the folders nginx reads nothing in; a folder's line is red where a link in
+it points at nothing, and pressing a folder narrows the list under it. Settings is the deploy
+settings' column (`SettingSection`s by what the directives decide, each a field with the file and
+line that sets it at its right, the line a change writes previewed under it, an Applying switch for
+the reload, one save bar); its four tiles are the identity line's facts. A file's history is the
+editor sheet's History view beside its File view (`?view=history`), restore where it was; the old
+`?history=` address lands there. Without nginx the page is the section's install screen. Tunnel
+(`/proxy/tunnel`) is Cloudflare's mark and the tunnel's name, its edge connections as a state, how
+it was made, the connector and how old the reading is, with Check now as the command and Disconnect
+in the `⋯`; then the way a visitor arrives — each hostname into Cloudflare's edge, through the
+connector, to this server's proxy, a line moving only where both ends are up and red and dashed
+where one is not — and the hostnames as one-line cards with their route and record in aligned
+columns, a refused record's reason taking the project's place on the line. Not connected, the same
+line says so, the same picture is drawn dashed, one sentence, `Segments` between pasting a token and
+creating one with the API, and that one form; a reader gets the picture and a Notice, no form.
 
 **A Sites list that could not be read says which read failed, why, and can be asked again.** The list
 is read from nginx, a Caddy on the host and the Caddy container that holds the public ports, and the
