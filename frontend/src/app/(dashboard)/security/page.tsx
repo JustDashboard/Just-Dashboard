@@ -56,7 +56,7 @@ export default function SecurityOverviewPage() {
       ? {
           value: "Unreadable",
           tone: "warning",
-          hint: "sshd's configuration could not be read",
+          hint: "its settings could not be read",
         }
       : sshReading(sshd.data ?? undefined)
 

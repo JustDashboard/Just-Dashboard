@@ -140,8 +140,11 @@ async function settle(page: Page, waiting: boolean | undefined) {
 test.describe("captures", () => {
   test.skip(!SHOTS, "set JD_SECURITY_SHOTS to a folder to take the captures")
 
-  for (const width of [1280, 390]) {
+  // A small laptop's width too, for the two full pages: five marks in a row
+  // have the least room there.
+  for (const width of [1280, 390, 1024]) {
     for (const state of STATES) {
+      if (width === 1024 && !state.name.endsWith("-full")) continue
       test(`${state.name} at ${width}`, async ({ page }) => {
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
         await mockLogins(page, [], { session: state.session, overrides: state.overrides })

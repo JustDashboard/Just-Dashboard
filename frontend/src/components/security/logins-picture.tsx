@@ -73,9 +73,17 @@ export function LoginsPicture({
 
   const start = useMemo<WireFlowNode[]>(() => {
     const from = origins.map((origin) => originNode(origin))
+    // Those still getting through to sshd before those the firewall already
+    // turns away, each in the record's own order (most attempts first).
+    const ranked = (attacks?.attackers ?? []).map((attacker) => ({
+      attacker,
+      blocked: refused(attacker.address),
+    }))
     const trying: WireFlowNode[] = []
-    for (const attacker of attacks?.attackers ?? []) {
-      const blocked = refused(attacker.address)
+    for (const { attacker, blocked } of [
+      ...ranked.filter((entry) => !entry.blocked),
+      ...ranked.filter((entry) => entry.blocked),
+    ]) {
       trying.push({
         id: `attacker:${attacker.address}`,
         name: `${attacker.address}, ${plural(attacker.attempts, "failed attempt")}`,

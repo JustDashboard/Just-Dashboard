@@ -419,11 +419,15 @@ export function Perimeter({
               }
               eyebrow="You"
               title={
-                <span className="block truncate font-mono">
-                  {exposure?.client || "Address unavailable"}
-                </span>
+                exposure ? (
+                  <span className="block truncate font-mono">
+                    {exposure.client || "Address unavailable"}
+                  </span>
+                ) : (
+                  <Unread failed={false} />
+                )
               }
-              hint={network.label}
+              hint={exposure ? network.label : "not read yet"}
             />
           </li>
           <li className="min-w-0">
