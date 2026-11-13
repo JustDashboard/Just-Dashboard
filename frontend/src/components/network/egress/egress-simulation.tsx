@@ -8,7 +8,6 @@ import {
   type EgressGroup,
   type EgressView,
 } from "@/lib/network-egress"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { Disclosure } from "@/components/form"
 import { CheckCircle, CrossCircle } from "@/components/icons"
@@ -22,11 +21,11 @@ import {
 } from "@/components/ui/table"
 
 /**
- * What the monitor decided when this configuration's members were shown
- * flapping, loss, latency and an outage in disposable namespaces: the
- * expectations it was judged against, phase by phase, and the topology and
- * limits of the model. Automation waits on a passed run of exactly this
- * configuration.
+ * The Simulation view: what the monitor decided when this configuration's
+ * members were shown flapping, loss, latency and an outage in disposable
+ * namespaces — the expectations it was judged against, phase by phase, and
+ * the topology and limits of the model. Automation waits on a passed run of
+ * exactly this configuration, so the view opens on whether it has one.
  */
 export function EgressSimulationPanel({
   group,
@@ -40,21 +39,18 @@ export function EgressSimulationPanel({
   const tone =
     reading.tone === "success" ? "running" : reading.tone === "default" ? "stopped" : reading.tone
   return (
-    <Panel plain>
-      <PanelHeader
-        title="Simulation"
-        actions={
-          running ? (
-            <Status
-              tone="warning"
-              label={`Running · sample ${running.step + 1} of ${running.steps} · ${running.phase}`}
-            />
-          ) : (
-            <Status tone={tone} label={reading.label} />
-          )
-        }
-      />
-      <PanelBody className="space-y-4">
+    <section aria-label={`Simulation of ${group.name}`} className="flex min-w-0 flex-col gap-4">
+      <div className="flex min-w-0 items-center">
+        {running ? (
+          <Status
+            tone="warning"
+            label={`Running · sample ${running.step + 1} of ${running.steps} · ${running.phase}`}
+          />
+        ) : (
+          <Status tone={tone} label={reading.label} />
+        )}
+      </div>
+      <div className="space-y-4">
         {!sim ? (
           <p className="text-hint text-muted-foreground">
             No simulation of this group yet. A run builds disposable network namespaces standing for
@@ -122,15 +118,15 @@ export function EgressSimulationPanel({
             )}
           </>
         )}
-      </PanelBody>
-    </Panel>
+      </div>
+    </section>
   )
 }
 
 function Phases({ group }: { group: EgressGroup }) {
   const phases = egressPhaseSummary(group.lastSimulation!)
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-xl border">
       <Table aria-label="Simulated phases">
         <TableHeader>
           <TableRow>
