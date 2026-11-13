@@ -43,12 +43,16 @@ export function originWord(cert: Certificate): string {
   return SOURCE_LABELS[certSource(cert)]
 }
 
-/** Who names it: the one site, or how many sites and streams do. */
+/** Who names it: the one site or stream, or how many of each. */
 export function usedByWord(cert: Certificate): string {
-  const users = [...cert.usedBy, ...(cert.usedByStreams ?? []).map((name) => `stream ${name}`)]
-  if (users.length === 0) return "used by nothing"
-  if (users.length === 1) return users[0]
-  return plural(users.length, cert.usedByStreams?.length ? "user" : "site")
+  const sites = cert.usedBy.length
+  const streams = cert.usedByStreams?.length ?? 0
+  if (sites + streams === 0) return "used by nothing"
+  if (sites === 1 && streams === 0) return cert.usedBy[0]
+  if (sites === 0 && streams === 1) return `stream ${cert.usedByStreams?.[0]}`
+  return [sites > 0 && plural(sites, "site"), streams > 0 && plural(streams, "stream")]
+    .filter(Boolean)
+    .join(", ")
 }
 
 /**

@@ -375,9 +375,16 @@ function HeaderVerbs({ name, verbs }: { name: string; verbs: Verb[] }) {
   return (
     <div className="flex items-center gap-2">
       {primary && (
-        <Button size="sm" disabled={primary.disabled} onClick={primary.run}>
+        // certbot's word for a renewal names the day it falls due, which is
+        // the button's title here rather than a sentence on its face.
+        <Button
+          size="sm"
+          disabled={primary.disabled}
+          onClick={primary.run}
+          title={primary.key === "renew" ? primary.label : undefined}
+        >
           <primary.icon className="size-3.5" />
-          {primary.label}
+          {primary.key === "renew" ? "Renew" : primary.label}
         </Button>
       )}
       {rest.length > 0 && <VerbMenu verbs={rest} label={`More actions for ${name}`} />}

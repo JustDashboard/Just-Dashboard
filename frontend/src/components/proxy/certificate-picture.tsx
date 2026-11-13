@@ -102,7 +102,7 @@ export function CertificatePicture({ cert, vhosts }: { cert: Certificate; vhosts
           />
         ))}
 
-        <ol className="grid min-w-0 gap-y-7 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)] lg:items-center lg:gap-x-6 lg:pb-16">
+        <ol className="grid min-w-0 gap-y-7 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)] lg:items-center lg:gap-x-6 lg:pb-10">
           <li className="min-w-0">
             <WireNode
               nodeRef={authorityNode}

@@ -66,6 +66,13 @@ import { ReloadHookOption, RenewalRecord, RenewalRuns } from "@/components/proxy
 import { SigningRequests } from "@/components/proxy/signing-requests"
 import { WatchedDomains } from "@/components/proxy/watched-domains"
 
+/**
+ * The width of a view that manages rather than lists: these were drawn for a
+ * 22rem side column, and across a laptop's whole width a lineage's meter was
+ * a thousand pixels of bar.
+ */
+const COLUMN = "max-w-3xl"
+
 /** The section the Renewal view's "Show log" brings into view. */
 const RUNS_ID = "renewal-runs"
 
@@ -198,7 +205,7 @@ export function CertificatesPage() {
               <EmptyState
                 icon={ShieldOff}
                 title="No certificates on this server"
-                description="certbot's, imported ones, every one a site names and what the Docker ingress's Caddy serves are listed here."
+                description="Issue one, import a pair, or point a site at one, and it is listed here."
                 action={
                   admin && (
                     <IssueCommand
@@ -263,7 +270,7 @@ export function CertificatesPage() {
           {shown === "renewal" && <RenewalView onShowLog={showRuns} />}
         </TabsContent>
 
-        <TabsContent value="dns" className="pt-6">
+        <TabsContent value="dns" className={`${COLUMN} pt-6`}>
           {shown === "dns" && admin && (
             <>
               {work.providers.loading && !work.providers.data ? (
@@ -290,7 +297,7 @@ export function CertificatesPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="accounts" className="pt-6">
+        <TabsContent value="accounts" className={`${COLUMN} pt-6`}>
           {shown === "accounts" &&
             admin &&
             (certbotGone ? (
@@ -306,15 +313,15 @@ export function CertificatesPage() {
             ))}
         </TabsContent>
 
-        <TabsContent value="authority" className="pt-6">
+        <TabsContent value="authority" className={`${COLUMN} pt-6`}>
           {shown === "authority" && <AuthorityView />}
         </TabsContent>
 
-        <TabsContent value="requests" className="pt-6">
+        <TabsContent value="requests" className={`${COLUMN} pt-6`}>
           {shown === "requests" && <RequestsView />}
         </TabsContent>
 
-        <TabsContent value="watched" className="space-y-8 pt-6">
+        <TabsContent value="watched" className={`${COLUMN} space-y-8 pt-6`}>
           {shown === "watched" && (
             <>
               <WatchedDomains admin={admin} added={work.watchedAdded} />
@@ -366,7 +373,7 @@ function CertificatesIdentity() {
 
   return (
     <HostIdentity
-      className="animate-rise"
+      className="animate-rise border-b-0 pb-0"
       logo={
         marks.length > 0 ? (
           <span className="flex h-12 shrink-0 items-center">
@@ -527,7 +534,7 @@ function RenewalView({ onShowLog }: { onShowLog: () => void }) {
   const lineages = certbot.data?.certs ?? []
   return (
     <>
-      <Panel plain aria-label="Renewal schedule">
+      <Panel plain aria-label="Renewal schedule" className={COLUMN}>
         <PanelHeader
           title="Schedule"
           actions={
@@ -580,7 +587,7 @@ function RenewalView({ onShowLog }: { onShowLog: () => void }) {
       </Panel>
 
       {certbot.data && !certbotGone && (
-        <Panel plain aria-label="certbot's certificates">
+        <Panel plain aria-label="certbot's certificates" className={COLUMN}>
           <PanelHeader
             title="certbot's certificates"
             actions={
