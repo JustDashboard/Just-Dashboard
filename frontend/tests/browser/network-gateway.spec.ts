@@ -784,7 +784,9 @@ test.describe("protection lifecycle", () => {
   }) => {
     const mutations: Mutation[] = []
     await open(page, "/network/protection", mutations)
-    await expect(page.getByText("120 let through").filter({ visible: true })).toBeVisible()
+    await expect(
+      page.locator("#exceptions").getByText("120 let through").filter({ visible: true }),
+    ).toBeVisible()
     await expect(page.getByText(/Partner monitoring · FireHOL level 1 · made by/)).toBeVisible()
     await expect(page.getByText(/^Ends .* from now$/)).toBeVisible()
     await page.getByRole("button", { name: "New exception" }).click()
@@ -878,7 +880,7 @@ test.describe("protection lifecycle", () => {
       return json(route, pressure)
     })
     await page.goto("/network/protection?tab=table")
-    await expect(page.getByRole("button", { name: "Open SSH" })).toBeVisible()
+    await expect(page.locator("#limits").getByRole("button", { name: "Open SSH" })).toBeVisible()
     expect(asked).toBe(false)
     // Its view is not offered, and its address opens the overview instead.
     await expect(page.getByRole("tab", { name: "Connection table" })).toHaveCount(0)

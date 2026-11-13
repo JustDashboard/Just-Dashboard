@@ -198,6 +198,7 @@ const openBlocklist = async (
   await loaded(page)
   // The evidence is in the list's editor: a row is one line.
   await page
+    .locator("#blocklists")
     .getByRole("button", {
       name: `${session === admin ? "Edit" : "Open"} ${list.name}`,
       exact: true,
@@ -206,9 +207,9 @@ const openBlocklist = async (
   return page.getByLabel(`${list.name} enforcement evidence`, { exact: true })
 }
 
-/** The list's one state word, in its row. */
+/** The list's one state word, in its row: found by its place, since the editor over it hides the page from roles. */
 const rowState = (page: Page, label: string) =>
-  page.getByRole("listitem").getByText(label, { exact: true }).filter({ visible: true })
+  page.locator("#blocklists li").getByText(label, { exact: true }).filter({ visible: true })
 
 for (const [status, error] of [
   ["missing", "The cached blocklist is missing."],
@@ -282,7 +283,7 @@ test("an unreadable kernel set reports an unknown count and retains reader acces
   // menu, the page's command or a Save in the editor it is reading.
   const editor = page.getByRole("dialog")
   await expect(editor.getByRole("button", { name: "Save list" })).toHaveCount(0)
-  await expect(editor.getByLabel("Name")).toBeDisabled()
+  await expect(editor.getByRole("textbox", { name: "Name" })).toBeDisabled()
   await editor.getByRole("button", { name: "Close" }).first().click()
   await expect(
     page.getByRole("switch", { name: `${list.name} in force`, exact: true }),

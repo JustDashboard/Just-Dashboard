@@ -220,7 +220,9 @@ export function BlocklistList({
               description={
                 <>
                   <span className="max-sm:hidden">
-                    <span className={list.kind === "feed" ? "font-mono" : undefined}>
+                    {/* Its own line box is the letters' height, or the mono
+                        face's taller one makes a feed's row a pixel taller. */}
+                    <span className={list.kind === "feed" ? "font-mono leading-none" : undefined}>
                       {listSource(list)}
                     </span>
                     {coverageShort(list.coverage) && ` · ${coverageShort(list.coverage)}`}

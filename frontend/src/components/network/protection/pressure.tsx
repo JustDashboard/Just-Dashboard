@@ -123,7 +123,7 @@ export function ConnectionTable({
   if (!pressure && read.error)
     return (
       <div aria-label="Connection table pressure">
-        <ErrorState error={read.error} onRetry={read.refresh} />
+        <ErrorState error={read.error} onRetry={read.refresh} retryable />
       </div>
     )
 
@@ -198,7 +198,7 @@ export function ConnectionTable({
         )}
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-h-[17rem] [&>*]:min-w-0">
+      <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-h-[19.5rem] [&>*]:min-w-0">
         <ChartPanel
           plain
           title="Tracked connections, last day"

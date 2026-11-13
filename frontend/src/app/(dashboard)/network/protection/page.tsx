@@ -274,7 +274,7 @@ export default function NetworkProtectionPage() {
         )}
 
         {failed ? (
-          <ErrorState error={protection.error!} onRetry={protection.refresh} />
+          <ErrorState error={protection.error!} onRetry={protection.refresh} retryable />
         ) : (
           <Tabs value={tab} onValueChange={setTab} className="gap-0">
             <TabsPrimitive.List

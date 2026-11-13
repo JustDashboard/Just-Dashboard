@@ -42,6 +42,13 @@ const box = async (page: Page, locator: Locator) => {
   return found
 }
 
+/**
+ * One height, to the hairline: rows divided by a rule carry it as their own
+ * edge, so all but the last of a run are a pixel taller than the last.
+ */
+const sameHeight = (height: number, other: number) =>
+  expect(Math.abs(height - other), `${height} against ${other}`).toBeLessThanOrEqual(1)
+
 const section = (page: Page, id: string) => page.locator(`#${id}`)
 const rows = (page: Page, id: string) => section(page, id).getByRole("listitem")
 const picture = (page: Page) => page.locator("[data-slot=protection-picture]")
@@ -240,7 +247,7 @@ for (const width of [1280, 390]) {
         const all = rows(page, id)
         const first = await box(page, all.nth(0))
         for (let i = 1; i < (await all.count()); i++) {
-          expect((await box(page, all.nth(i))).height).toBe(first.height)
+          sameHeight((await box(page, all.nth(i))).height, first.height)
         }
       }
       // An exception's standing is a state word, not a tag on its address.
@@ -377,7 +384,7 @@ test("the kernel's settings are one column of rows at one height, saved by one b
     const row = await box(page, settings.nth(i))
     expect(row.x).toBe(first.x)
     expect(row.width).toBe(first.width)
-    expect(row.height).toBe(first.height)
+    sameHeight(row.height, first.height)
   }
   expect(first.width).toBeLessThanOrEqual(768)
   // No bar until something is staged, and no Save in any section.
@@ -389,19 +396,26 @@ test("the kernel's settings are one column of rows at one height, saved by one b
   // and move no row under them.
   const redirects = settings.filter({ hasText: "Accept ICMP redirects (IPv6)" })
   const below = settings.filter({ hasText: "Send ICMP redirects" })
-  const belowAt = await box(page, below)
+  // The page may scroll to a control it is asked to press, so a row's place
+  // is read against the row over it.
+  const gap = async (upper: Locator, lower: Locator) =>
+    (await box(page, lower)).y - (await box(page, upper)).y
+  const redirectsAt = await box(page, redirects)
+  const belowAt = await gap(redirects, below)
   await page.getByRole("switch", { name: "Accept ICMP redirects (IPv6)" }).click()
   await expect(redirects).toContainText("running On")
   await expect(redirects).toHaveAttribute("data-edited", "true")
-  expect((await box(page, redirects)).height).toBe(first.height)
-  expect((await box(page, below)).y).toBe(belowAt.y)
+  expect((await box(page, redirects)).height).toBe(redirectsAt.height)
+  expect(await gap(redirects, below)).toBe(belowAt)
 
   const retries = settings.filter({ hasText: "SYN-ACK retries" })
+  const tableSize = settings.filter({ hasText: "Connection tracking table size" })
   const retriesAt = await box(page, retries)
+  const tableSizeAt = await gap(retries, tableSize)
   await page.getByLabel("SYN-ACK retries", { exact: true }).fill("9")
   await expect(retries.getByRole("alert")).toHaveText("A whole number from 1 to 5.")
-  expect((await box(page, retries)).height).toBe(first.height)
-  expect((await box(page, retries)).y).toBe(retriesAt.y)
+  expect((await box(page, retries)).height).toBe(retriesAt.height)
+  expect(await gap(retries, tableSize)).toBe(tableSizeAt)
   await expect(bar.getByRole("button", { name: "Save" })).toBeDisabled()
   await page.getByLabel("SYN-ACK retries", { exact: true }).fill("3")
   await expect(bar).toContainText("2 unsaved changes")
@@ -588,7 +602,7 @@ test("a reader is shown no control it cannot use", async ({ page }) => {
   await expect(rows(page, "blocklists").nth(3)).toContainText("Off")
   await expect(rows(page, "limits").nth(0)).toContainText("In force")
   // A row still opens, to be read.
-  await page.getByRole("button", { name: "Open SSH" }).click()
+  await section(page, "limits").getByRole("button", { name: "Open SSH" }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog.getByLabel("Ports")).toBeDisabled()
   await expect(dialog.getByRole("button", { name: /Save|Make|Remove/ })).toHaveCount(0)

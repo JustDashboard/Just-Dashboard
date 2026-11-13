@@ -209,7 +209,7 @@ export function KernelSettings({
                 <SelectTrigger
                   size="sm"
                   aria-label="Stage a workload profile"
-                  className="w-full sm:w-64"
+                  className="w-auto min-w-0 flex-1 sm:w-64 sm:flex-none"
                 >
                   <SelectValue placeholder="Stage a workload profile" />
                 </SelectTrigger>
