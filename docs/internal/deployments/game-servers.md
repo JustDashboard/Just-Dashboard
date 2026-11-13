@@ -82,7 +82,7 @@ longer reach the image as variables. The itzg images apply every property whose 
 **every** start, so the Server settings page used to be overwritten by the deployment's own
 environment at the next restart; now the image applies only what the dashboard still sets (Java's
 `ENABLE_RCON` and `RCON_PASSWORD`, so rotating the console password still reaches the
-file; nothing on Bedrock), and an edit made on Server settings survives restarts and
+file; Bedrock's `TRANSPORT`), and an edit made on Server settings survives restarts and
 redeploys. Changing one of those inputs in the source after the first release changes nothing for
 that reason; the input descriptions say so.
 
