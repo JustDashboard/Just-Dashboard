@@ -83,8 +83,12 @@ describe("drainFigure", () => {
       }),
     ).toEqual({ text: "3 dropped", warning: true })
     expect(drainFigure(shipping)).toEqual({ text: "1,240 shipped", warning: false })
-    // A paused drain is not refusing anything: its queue is not the figure.
+    // A paused drain is refusing and dropping nothing now: neither is its figure.
     expect(drainFigure(paused)).toEqual({ text: "1,240 shipped", warning: false })
+    expect(drainFigure({ enabled: false, status: status({ shipped: 9, dropped: 3 }) })).toEqual({
+      text: "9 shipped",
+      warning: false,
+    })
   })
 })
 

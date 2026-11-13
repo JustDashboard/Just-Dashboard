@@ -448,9 +448,10 @@ function StoresPicture({
             <SecretStoreMark kind={store.kind} />
           </WireMark>
         ),
+        eyebrow: storeKind(store.kind).title,
         title: <span className="font-mono">{store.name}</span>,
         name: `${store.name}: ${state}`,
-        hint: `${storeKind(store.kind).title} · ${state}`,
+        hint: state,
         line: storeLine(store),
       }
     }),
@@ -464,6 +465,7 @@ function StoresPicture({
           fallback={LockClosed}
         />
       ),
+      eyebrow: "Not connected",
       title: <span className="text-muted-foreground">{kind.title}</span>,
       name: kind.title,
       hint: kind.short,
@@ -509,7 +511,9 @@ function StoresPicture({
         nodes: sources,
         max: PICTURE_TARGETS,
         more: { words: (hidden) => plural(hidden, "more store") },
-        loadingRows: 3,
+        // One store or five, the column is this many rows: the kinds not
+        // connected fill what the stores leave.
+        loadingRows: PICTURE_TARGETS,
       }}
       hub={{
         mark: (size) => <WireHost size={size} />,

@@ -54,7 +54,8 @@ export function drainFigure(drain: Pick<LogDrain, "enabled" | "status">): {
   const { status } = drain
   if (drainState(drain) === "failing" && status.queued > 0)
     return { text: `${status.queued.toLocaleString()} waiting`, warning: true }
-  if (status.dropped > 0)
+  // A paused drain is dropping nothing now; what it dropped is in its detail.
+  if (drain.enabled && status.dropped > 0)
     return { text: `${status.dropped.toLocaleString()} dropped`, warning: true }
   return { text: `${status.shipped.toLocaleString()} shipped`, warning: false }
 }

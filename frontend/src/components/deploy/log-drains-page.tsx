@@ -468,7 +468,7 @@ function DrainsPicture({
             id: project.id,
             name: project.name,
             deployment: project,
-            hint: `${project.environmentName} · ${taking === 0 ? "not copied" : plural(taking, "drain")}`,
+            hint: taking === 0 ? "not copied" : `to ${plural(taking, "drain")}`,
           })
         })
   const missing = KINDS.filter((kind) => !list.some((drain) => drain.kind === kind.kind)).slice(
@@ -506,9 +506,10 @@ function DrainsPicture({
                   <ProductGlyph id={DRAIN_PRODUCT[drain.kind]} />
                 </WireMark>
               ),
+              eyebrow: KIND_TITLE[drain.kind],
               title: drain.name,
               name: `${drain.name}: ${state}`,
-              hint: `${KIND_TITLE[drain.kind]} · ${state}`,
+              hint: state,
               line: drainLine(drain),
             }
           }),
@@ -516,6 +517,7 @@ function DrainsPicture({
             id: `add:${kind.kind}`,
             placeholder: true,
             mark: (size) => <WirePlaceholder size={size} product={DRAIN_PRODUCT[kind.kind]} />,
+            eyebrow: "Not added",
             title: <span className="text-muted-foreground">{kind.title}</span>,
             name: kind.title,
             hint: kind.short,

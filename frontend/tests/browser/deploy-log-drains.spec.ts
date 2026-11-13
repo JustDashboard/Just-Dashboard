@@ -99,16 +99,30 @@ test("a failing drain says what the destination answered, and its verbs reach th
   await page.goto("/deploy/drains")
   const list = page.getByRole("list", { name: "Log drains" })
   const cloud = list.locator("[data-slot=choice-row]", { hasText: "Grafana Cloud" })
-  await expect(
-    cloud.getByText(
-      /Failing since .*refused the credentials \(401\): invalid token · 86 records waiting/,
-    ),
-  ).toBeVisible()
-  await expect(cloud.locator(".text-warning")).toHaveCount(1)
+  // On the row: a dot and a word, and what waits. The destination's own
+  // words are a press on that word away.
+  await expect(cloud.getByText("Failing 1m")).toBeVisible()
+  await expect(cloud.getByText("86 waiting")).toBeVisible()
   await expect(cloud.getByText("output and requests of every project")).toBeVisible()
+  await cloud.getByRole("button", { name: /^Failing 1m/ }).click()
+  const answer = page.getByText(
+    /Failing since .*refused the credentials \(401\): invalid token · 86 records waiting/,
+  )
+  await expect(answer).toBeVisible()
+  await expect(answer).toHaveClass(/text-warning/)
+  await expect(page.getByText("Authorization, sealed")).toBeVisible()
+  await page.keyboard.press("Escape")
   const loki = list.locator("[data-slot=choice-row]", { hasText: "Local Loki" })
-  await expect(loki.getByText(/52 records shipped · last delivery/)).toBeVisible()
+  await expect(loki.getByText("Shipping")).toBeVisible()
+  await expect(loki.getByText("52 shipped")).toBeVisible()
   await expect(loki.getByText("requests of api-production")).toBeVisible()
+  await loki.getByRole("button", { name: /^Shipping/ }).click()
+  await expect(page.getByText(/52 records shipped · last delivery/)).toBeVisible()
+  await page.keyboard.press("Escape")
+  // The head counts them and says which need a look.
+  await expect(
+    page.locator("[data-slot=panel-header]").filter({ hasText: "Drains" }),
+  ).toContainText("2 drains · 1 failing")
 
   await cloud.getByRole("button", { name: "Send test" }).click()
   await expect(page.getByText("Grafana Cloud took the test record")).toBeVisible()

@@ -39,7 +39,8 @@ export const projectNodeId = (id: number) => `project:${id}`
  * One project as a node. `deployment` is its summary where the fleet has it;
  * a project the fleet has not answered for yet, or no longer lists, keeps the
  * tile with the rocket in it, so the column does not change shape when the
- * fleet lands.
+ * fleet lands. Its environment stands over its name, so the node is the three
+ * lines a waiting picture holds room for (`WireFlow`'s `loading`).
  */
 export function projectNode({
   id,
@@ -62,6 +63,7 @@ export function projectNode({
       ) : (
         <ProductLogo size={size === "sm" ? "sm" : "md"} fallback={Rocket} />
       ),
+    eyebrow: deployment?.environmentName ?? "Project",
     title: name,
     name,
     hint,

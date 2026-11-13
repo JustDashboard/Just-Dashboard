@@ -42,6 +42,7 @@ import {
   templateDeployHref,
   templateFilename,
   templateId,
+  templateOrigin,
   templateRuns,
   templateUse,
 } from "@/components/deploy/templates"
@@ -212,9 +213,16 @@ export function TemplatesPage() {
                         <CloudUpload className="size-3.5" />
                         Import…
                       </Button>
-                      <Button size="sm" onClick={() => setComposeOpen(true)}>
+                      {/* A phone's head has room for the count, Import and one
+                          word: the button keeps its name. */}
+                      <Button
+                        size="sm"
+                        aria-label="Add from Compose file"
+                        onClick={() => setComposeOpen(true)}
+                      >
                         <Plus className="size-3.5" />
-                        Add from Compose file
+                        <span className="sm:hidden">Add</span>
+                        <span className="max-sm:hidden">Add from Compose file</span>
                       </Button>
                     </>
                   )}
@@ -372,6 +380,10 @@ function TemplateCard({
   )
 }
 
+// Wide, the room three services take, with a shorter template centred in
+// it: choosing another card must not move the cards under the picture.
+const ROOM = "lg:flex lg:min-h-64 lg:flex-col lg:justify-center"
+
 const ROLE_WORD: Record<BlueprintServiceSummary["role"], string> = {
   app: "Application",
   worker: "Worker",
@@ -388,9 +400,11 @@ const ROLE_WORD: Record<BlueprintServiceSummary["role"], string> = {
  * moves: a template is a definition, and nothing travels along its lines
  * until something is deployed from it.
  *
- * It is the only place a template's services are named, so on a phone the
- * three parts stack with every word kept. With no template yet it is the
- * picture's final shape in grey, held until the list answers.
+ * Wide it keeps the room three services take, so choosing another card moves
+ * nothing under it. On a phone it is the marks alone, a height that does not
+ * depend on the template either: the card names the services, and the hub
+ * says how it was made. With no template yet it is the picture's final shape
+ * in grey, held until the list answers.
  */
 function TemplatePicture({
   template,
@@ -403,6 +417,8 @@ function TemplatePicture({
     return (
       <WireFlow
         loading
+        className={ROOM}
+        phone="marks"
         start={{ title: "Made from", nodes: [], loadingRows: 1 }}
         hub={{ mark: <Skeleton className="size-12 rounded-xl" />, eyebrow: "Template" }}
         end={{ title: "Runs", nodes: [], loadingRows: 2 }}
@@ -416,7 +432,18 @@ function TemplatePicture({
     template.source === "deployment" && from
       ? {
           id: "origin",
-          mark: (size) => <ProjectMark deployment={from} size={size === "sm" ? "sm" : "md"} />,
+          // In the box a wire mark of this size takes, so the picture is one
+          // height whichever way the template was made.
+          mark: (size) => (
+            <span
+              className={cn(
+                "flex items-center justify-center",
+                size === "sm" ? "size-9" : "size-11",
+              )}
+            >
+              <ProjectMark deployment={from} size={size === "sm" ? "sm" : "md"} />
+            </span>
+          ),
           eyebrow: "Saved from",
           title: from.name,
           name: from.name,
@@ -458,7 +485,11 @@ function TemplatePicture({
           eyebrow: service.public ? "Public" : ROLE_WORD[service.role],
           title: <span className="font-mono">{service.name}</span>,
           name: service.name,
-          hint: <span className="font-mono break-all">{service.image}</span>,
+          hint: (
+            <span className="block truncate font-mono" title={service.image}>
+              {service.image}
+            </span>
+          ),
         }))
       : [
           {
@@ -469,7 +500,11 @@ function TemplatePicture({
               </WireMark>
             ),
             eyebrow: "Image",
-            title: <span className="font-mono break-all">{summary.image}</span>,
+            title: (
+              <span className="block truncate font-mono" title={summary.image}>
+                {summary.image}
+              </span>
+            ),
             name: summary.image,
             hint: `${summary.memoryMb} MB`,
           },
@@ -479,8 +514,9 @@ function TemplatePicture({
       // Keyed by the template, so choosing another one rises in rather than
       // swapping words under the reader.
       key={template.id}
-      className="animate-rise"
+      className={cn("animate-rise", ROOM)}
       hubShare={0.9}
+      phone="marks"
       start={{ title: "Made from", nodes: [origin] }}
       hub={{
         mark: <ProductLogo id={imageProduct(summary.image)} size="lg" />,
@@ -495,6 +531,11 @@ function TemplatePicture({
               {usable
                 ? templateUse(template.deployments)
                 : summary.unavailableReason || "This dashboard cannot deploy it"}
+            </span>
+            {/* A phone draws the marks alone, so what the first one says wide
+                is said here. */}
+            <span className="block lg:hidden">
+              {templateOrigin(template)} by {added}
             </span>
           </>
         ),

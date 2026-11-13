@@ -127,11 +127,10 @@ function ReachPicture({
           {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Glyph />}
         </WireMark>
       ),
+      eyebrow: variable.sensitivity === "secret" ? "Secret" : "Config",
       title: <span className="font-mono break-all">{variable.name}</span>,
       name: variable.name,
-      hint: `${variable.sensitivity === "secret" ? "secret" : "config"} · ${
-        read === 0 ? "not read" : `read by ${read}`
-      }${notLiveYet(variable) ? " · not live yet" : ""}`,
+      hint: `${read === 0 ? "not read" : `read by ${read}`}${notLiveYet(variable) ? " · not live yet" : ""}`,
       line: read === 0 ? { state: "idle" } : { state: "up" },
     }
   })
@@ -174,7 +173,6 @@ function ReachPicture({
         nodes: sources,
         max: PICTURE_VARIABLES,
         more: { words: (hidden) => plural(hidden, "more variable") },
-        loadingRows: 3,
       }}
       hub={{
         mark: (size) => <WireHost size={size} />,
