@@ -15,7 +15,7 @@ instead, and credentials that fail are counted per address (below).
 - **Allowlist before auth** (`httpx.AllowlistCIDRs`): an off-network attacker cannot reach the login
   handler at all. `httpx.RealIP` trusts `X-Forwarded-For` only from `JD_TRUSTED_PROXIES`, or the
   allowlist could be spoofed past.
-- **Three limiters**, `NewLimiter(perMinute, burst)`: `loginLim` (10/5, per address, on top of the
+- **Five limiters**, `NewLimiter(perMinute, burst)`: `loginLim` (10/5, per address, on top of the
   per-account lockout), `apiLim` (600/120, per credential), `destrLim` (30/10, destructive routes).
   `apiLim` is `PerCredential`: a browser session and each API key have a bucket of their own
   (`httpx.credentialKey`), so a CI job's key cannot empty the bucket an open page polls from, even
@@ -133,7 +133,7 @@ instead, and credentials that fail are counted per address (below).
   ambient cookies and are deliberately outside that check. The one browser-session group without it
   is Remote Desktop's stream bridge (`/remote-desktop/bridge/*`), whose own page cannot know the
   header: there every write and every socket must carry this dashboard's `Origin` instead
-  (`wsx.Upgrader.SameSite`), on a rate limit of its own.
+  (`wsx.Upgrader.SameSite`), on a rate limit of its own (`streamLim`, 3000/600).
 - **WebSocket origins** are checked by `wsx` against the request host, port and the scheme Caddy serves:
   HTTPS for `JD_TLS=internal` or `tailscale`, HTTP for `JD_TLS=off` or local development. An explicit
   `JD_ALLOWED_ORIGINS` entry remains the only cross-origin exception. The backend's loopback HTTP hop
