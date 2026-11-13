@@ -11,6 +11,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status, type Verdict } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { reloadToast } from "@/components/proxy/load-proof"
+import { sitePath } from "@/components/proxy/site-verbs"
 
 const STATE: Record<TLSOrigin["state"], { verdict: Verdict; label: string }> = {
   current: { verdict: "ok", label: "Serving the current file" },
@@ -33,8 +34,22 @@ const MATCH: Record<NonNullable<TLSOrigin["match"]>, string> = {
  * what visitors get until nginx reads it again, and this is the one place the
  * file and the handshake are side by side, so the reload is offered here and
  * the scan asked again once it is done, which is how the reader sees it took.
+ *
+ * The reload is offered only to an account that may test and reload nginx:
+ * a read-only reader of a stored report was offered one the server refuses.
+ * The site opens on its own page, where a site is read; it went to the Sites
+ * list's edit form.
  */
-export function TLSServedBy({ origin, onRescan }: { origin: TLSOrigin; onRescan: () => void }) {
+export function TLSServedBy({
+  origin,
+  onRescan,
+  admin,
+}: {
+  origin: TLSOrigin
+  onRescan: () => void
+  /** May test and reload nginx and create a site. */
+  admin: boolean
+}) {
   const { reloading, reload } = useNginxReload(onRescan)
   const state = STATE[origin.state]
 
@@ -51,7 +66,7 @@ export function TLSServedBy({ origin, onRescan }: { origin: TLSOrigin; onRescan:
             <Detail label="Site">
               {origin.site ? (
                 <Link
-                  href={`/proxy/sites?site=${encodeURIComponent(origin.site)}`}
+                  href={sitePath(origin.site)}
                   className="font-mono wrap-anywhere underline-offset-4 hover:underline"
                 >
                   {origin.site}
@@ -70,7 +85,7 @@ export function TLSServedBy({ origin, onRescan }: { origin: TLSOrigin; onRescan:
             {origin.file && <CertificateFact label="File" cert={origin.file} />}
             {origin.served && <CertificateFact label="Answered with" cert={origin.served} />}
           </DetailList>
-          {origin.state === "stale" && (
+          {admin && origin.state === "stale" && (
             <Button
               type="button"
               size="xs"
@@ -81,7 +96,7 @@ export function TLSServedBy({ origin, onRescan }: { origin: TLSOrigin; onRescan:
               Reload nginx
             </Button>
           )}
-          {origin.state === "unserved" && (
+          {admin && origin.state === "unserved" && (
             <Button variant="outline" size="xs" asChild>
               <Link href="/proxy/sites">Create a site on the Sites page</Link>
             </Button>
