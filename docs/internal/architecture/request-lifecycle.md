@@ -17,6 +17,8 @@ instead, and credentials that fail are counted per address (below).
   allowlist could be spoofed past.
 - **Five limiters**, `NewLimiter(perMinute, burst)`: `loginLim` (10/5, per address, on top of the
   per-account lockout), `apiLim` (600/120, per credential), `destrLim` (30/10, destructive routes).
+  The other two are narrower and described where they apply, below: `passkeyLim` (60/20, a passkey
+  sign-in's begin) and `streamLim` (3000/600, Remote Desktop's stream bridge).
   `apiLim` is `PerCredential`: a browser session and each API key have a bucket of their own
   (`httpx.credentialKey`), so a CI job's key cannot empty the bucket an open page polls from, even
   where an SSH tunnel puts them both on one address. The assistant is not a credential: it works
