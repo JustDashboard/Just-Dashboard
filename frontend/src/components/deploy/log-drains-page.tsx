@@ -1,45 +1,47 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import Link from "next/link"
-import {
-  ChartActivity,
-  CodeBracket,
-  Lightning,
-  Pause,
-  Pencil,
-  Play,
-  Plus,
-  Trash,
-  type Icon,
-} from "@/components/icons"
+import { Lightning, Pause, Pencil, Play, Plus, Trash } from "@/components/icons"
 import { ApiError, del, get, post, put } from "@/lib/api"
-import { plural } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
-import type {
-  DeploymentFleet,
-  DeploymentSummary,
-  LogDrain,
-  LogDrainKind,
-  LogDrainStream,
-} from "@/lib/types"
+import type { DeploymentSummary, LogDrain, LogDrainKind, LogDrainStream } from "@/lib/types"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { SidePanel } from "@/components/side-panel"
-import { Tag } from "@/components/tag"
+import { Status } from "@/components/status-dot"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
-import { ProductGlyph } from "@/components/product-logo"
+import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { VerbActions, type Verb } from "@/components/verbs"
+import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
 import { ProjectMark } from "@/components/deploy/project-mark"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import {
+  noProjectNode,
+  projectNode,
+  projectNodeId,
+  useFleet,
+} from "@/components/deploy/section-picture"
+import {
+  DRAIN_PRODUCT,
+  drainFigure,
+  drainLine,
+  drainStateWord,
+  drainTakes,
+  drainsCount,
+} from "@/components/deploy/log-drain-state"
 import {
   drainEndpointProblem,
   drainHealth,
@@ -84,22 +86,14 @@ const KIND_TITLE: Record<LogDrainKind, string> = {
   http: "JSON lines",
 }
 
-// Grafana as a glyph the cards draw beside their titles like the others' marks.
-function GrafanaMark({ className }: { className?: string }) {
-  return <ProductGlyph id="grafana" className={className} />
-}
-
-const KIND_MARK: Record<LogDrainKind, Icon | typeof GrafanaMark> = {
-  otlp: ChartActivity,
-  loki: GrafanaMark,
-  http: CodeBracket,
-}
-
+/** A format's own mark, bare, beside its name in the sheet's chooser. */
 function KindMark({ kind, className }: { kind: LogDrainKind; className?: string }) {
-  if (kind === "loki") return <ProductGlyph id="grafana" className={className} />
-  const Glyph: Icon = kind === "otlp" ? ChartActivity : CodeBracket
-  return <Glyph aria-hidden className={className} />
+  return <ProductGlyph id={DRAIN_PRODUCT[kind]} className={className} />
 }
+
+// The drains and the formats not added yet that the picture has room for;
+// past it the rest are one "N more" node and the list names them.
+const PICTURE_TARGETS = 5
 
 const ENDPOINT_HINT: Record<LogDrainKind, string> = {
   otlp: "The OTLP base address, as an exporter takes it: /v1/logs, and /v1/traces for traces, are added unless already there.",
@@ -166,10 +160,12 @@ function draftOf(drain: LogDrain): Draft {
 
 /**
  * Log drains: where deployments' output and requests are copied while they
- * happen. A card per drain says where it sends, what, and how its last
- * delivery went — in amber the moment a destination stops taking records,
- * with the destination's own words. The sheet asks for the format, the
- * address and the credential, then what to send.
+ * happen. The page reads as Notifications beside it does: a picture of the
+ * projects, this server and each drain as the service it sends to, then a
+ * one-line card per drain — where it sends and what, a dot and a word for how
+ * it is doing, and the one figure that matters most. The destination's own
+ * words, when it refuses, are a press on that word away. The sheet asks for
+ * the format, the address and the credential, then what to send.
  */
 export function LogDrainsPage() {
   const { can } = useAuth()
@@ -179,12 +175,11 @@ export function LogDrainsPage() {
     5000,
     [],
   )
-  const fleet = usePoll(
-    (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
-    60000,
-    [],
-  )
-  const projects = fleet.data?.deployments ?? []
+  const fleet = useFleet()
+  const projects = fleet.projects
+  // Beside the name where a row has the room, under it on a phone, as a
+  // channel's card does.
+  const wide = useMediaQuery("(min-width: 640px)")
   const [draft, setDraft] = useState<Draft>()
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string>()
@@ -303,64 +298,78 @@ export function LogDrainsPage() {
         }
         title="Log drains"
       />
-      <Panel plain>
-        <PanelHeader
-          title="Drains"
-          actions={
-            <span className="flex flex-wrap items-center gap-3">
-              {list && list.length > 0 && (
-                <span className="numeric text-hint text-muted-foreground">
-                  {plural(list.length, "drain")}
+      {drains.error && !list ? (
+        <ErrorState error={drains.error} onRetry={drains.refresh} />
+      ) : (
+        <>
+          {/* On the page's own ground, as Notifications' picture is. */}
+          <div className="mx-auto w-full max-w-5xl lg:py-2">
+            <DrainsPicture
+              drains={list}
+              projects={projects}
+              loading={!list || fleet.waiting}
+              onAdd={admin ? (kind) => open(emptyDraft(kind)) : undefined}
+            />
+          </div>
+          <Panel plain>
+            <PanelHeader
+              title="Drains"
+              actions={
+                <span className="flex flex-wrap items-center gap-3">
+                  {list && list.length > 0 && (
+                    <span className="numeric text-hint text-muted-foreground">
+                      {drainsCount(list)}
+                    </span>
+                  )}
+                  {admin && list && list.length > 0 && (
+                    <Button size="sm" onClick={() => open(emptyDraft("otlp"))}>
+                      <Plus className="size-3.5" />
+                      Add drain
+                    </Button>
+                  )}
                 </span>
+              }
+            />
+            <PanelBody>
+              {!list ? (
+                <LoadingRows rows={2} className="[&>*]:h-14 [&>*]:rounded-xl" />
+              ) : list.length === 0 ? (
+                admin ? (
+                  // The empty page is the sheet's first question: which format.
+                  <ChoiceGrid columns={3} className="animate-rise">
+                    {KINDS.map((option, index) => (
+                      <ChoiceCard
+                        key={option.kind}
+                        verb={`Add ${option.title}`}
+                        logo={<ProductLogo id={DRAIN_PRODUCT[option.kind]} />}
+                        title={option.title}
+                        description={option.hint}
+                        index={index}
+                        onClick={() => open(emptyDraft(option.kind))}
+                      />
+                    ))}
+                  </ChoiceGrid>
+                ) : (
+                  <EmptyNote>No log drains</EmptyNote>
+                )
+              ) : (
+                <ChoiceList aria-label="Log drains" className="animate-rise">
+                  {list.map((drain) => (
+                    <DrainRow
+                      key={drain.id}
+                      drain={drain}
+                      projects={projects}
+                      wide={wide}
+                      verbs={verbsFor(drain)}
+                      onEdit={admin ? () => open(draftOf(drain)) : undefined}
+                    />
+                  ))}
+                </ChoiceList>
               )}
-              {admin && list && list.length > 0 && (
-                <Button size="sm" onClick={() => open(emptyDraft("otlp"))}>
-                  <Plus className="size-3.5" />
-                  Add drain
-                </Button>
-              )}
-            </span>
-          }
-        />
-        <PanelBody>
-          {drains.error ? (
-            <ErrorState error={drains.error} onRetry={drains.refresh} />
-          ) : drains.loading && !list ? (
-            <LoadingRows rows={2} />
-          ) : (list?.length ?? 0) === 0 ? (
-            admin ? (
-              // The empty page is the sheet's first question: which format.
-              <ChoiceGrid columns={3} className="animate-rise">
-                {KINDS.map((option, index) => (
-                  <ChoiceCard
-                    key={option.kind}
-                    verb={`Add ${option.title}`}
-                    mark={KIND_MARK[option.kind]}
-                    title={option.title}
-                    description={option.hint}
-                    index={index}
-                    onClick={() => open(emptyDraft(option.kind))}
-                  />
-                ))}
-              </ChoiceGrid>
-            ) : (
-              <EmptyNote>No drain copies deployments&apos; logs anywhere yet.</EmptyNote>
-            )
-          ) : (
-            <ChoiceList aria-label="Log drains" className="animate-rise">
-              {list?.map((drain) => (
-                <DrainCard
-                  key={drain.id}
-                  drain={drain}
-                  projects={projects}
-                  verbs={verbsFor(drain)}
-                  onEdit={admin ? () => open(draftOf(drain)) : undefined}
-                />
-              ))}
-            </ChoiceList>
-          )}
-        </PanelBody>
-      </Panel>
+            </PanelBody>
+          </Panel>
+        </>
+      )}
 
       <SidePanel
         open={Boolean(draft)}
@@ -411,48 +420,270 @@ function ready(draft: Draft) {
 }
 
 /**
- * One drain: its format's mark, its name, and on one line where it sends,
- * what, and how the last delivery went. Paused drains say so before
- * anything else, and a failing one says what the destination answered.
+ * Where the logs go: the projects on one side, this server in the middle (it
+ * is what reads every container's output and every request the ingress
+ * served) and a mark for each drain on the other, each the service it sends
+ * to. It is Notifications' picture with records in place of messages.
+ *
+ * The line to a drain carries a pulse while its last delivery arrived, stands
+ * amber and still while the destination refuses, dashed while it is paused.
+ * The formats not added yet are their marks in dashed rings, pressed to add
+ * one by an administrator; before there is any drain one ring stands where
+ * the first will go, and the cards under the picture ask which format.
+ * Pointing at a drain steps back the projects it does not carry.
+ *
+ * On a phone the list under it names every drain, so the picture is the
+ * marks alone: the projects over this server over the drains.
  */
-function DrainCard({
+function DrainsPicture({
+  drains,
+  projects,
+  loading,
+  onAdd,
+}: {
+  drains: LogDrain[] | undefined
+  projects: DeploymentSummary[]
+  loading: boolean
+  onAdd?: (kind: LogDrainKind) => void
+}) {
+  const list = drains ?? NO_DRAINS
+  const related = useCallback(
+    (focus: string, id: string) => {
+      const takes = (drainId: string, projectId: string) => {
+        const drain = list.find((candidate) => drainNodeId(candidate.id) === drainId)
+        const project = projects.find((candidate) => projectNodeId(candidate.id) === projectId)
+        return Boolean(drain && project && drain.enabled && drainTakes(drain, project.id))
+      }
+      return takes(focus, id) || takes(id, focus)
+    },
+    [list, projects],
+  )
+  const copying = list.filter((drain) => drain.enabled)
+  const sources: WireFlowNode[] =
+    projects.length === 0
+      ? [noProjectNode("each is copied once it deploys")]
+      : projects.map((project) => {
+          const taking = copying.filter((drain) => drainTakes(drain, project.id)).length
+          return projectNode({
+            id: project.id,
+            name: project.name,
+            deployment: project,
+            hint: `${project.environmentName} · ${taking === 0 ? "not copied" : plural(taking, "drain")}`,
+          })
+        })
+  const missing = KINDS.filter((kind) => !list.some((drain) => drain.kind === kind.kind)).slice(
+    0,
+    Math.max(0, PICTURE_TARGETS - list.length),
+  )
+  const targets: WireFlowNode[] =
+    list.length === 0
+      ? [
+          {
+            id: "drain:none",
+            placeholder: true,
+            mark: (size) => (
+              <WirePlaceholder size={size}>
+                <Plus />
+              </WirePlaceholder>
+            ),
+            title: <span className="font-normal text-muted-foreground">No drain yet</span>,
+            name: "No drain yet",
+            hint: "the first one goes here",
+            line: { state: "idle" },
+          },
+        ]
+      : [
+          ...list.map((drain): WireFlowNode => {
+            const state = drainStateWord(drain).label.toLowerCase()
+            return {
+              id: drainNodeId(drain.id),
+              mark: (size) => (
+                <WireMark
+                  tone="logo"
+                  size={size}
+                  className={cn(!drain.enabled && "opacity-50 grayscale")}
+                >
+                  <ProductGlyph id={DRAIN_PRODUCT[drain.kind]} />
+                </WireMark>
+              ),
+              title: drain.name,
+              name: `${drain.name}: ${state}`,
+              hint: `${KIND_TITLE[drain.kind]} · ${state}`,
+              line: drainLine(drain),
+            }
+          }),
+          ...missing.map((kind): WireFlowNode => ({
+            id: `add:${kind.kind}`,
+            placeholder: true,
+            mark: (size) => <WirePlaceholder size={size} product={DRAIN_PRODUCT[kind.kind]} />,
+            title: <span className="text-muted-foreground">{kind.title}</span>,
+            name: kind.title,
+            hint: kind.short,
+            onPress: onAdd ? () => onAdd(kind.kind) : undefined,
+            label: `Add ${kind.title}`,
+            line: { state: "idle" },
+          })),
+        ]
+  return (
+    <WireFlow
+      className="animate-rise"
+      phone="marks"
+      loading={loading}
+      related={related}
+      start={{
+        title: "Projects copied",
+        nodes: sources,
+        max: 3,
+        more: { href: "/deploy", words: (hidden) => plural(hidden, "more project") },
+      }}
+      hub={{
+        mark: (size) => <WireHost size={size} />,
+        eyebrow: "This server",
+        title: "Deployments' logs",
+        hint:
+          copying.length === 0
+            ? "copied nowhere yet"
+            : `copied to ${plural(copying.length, "drain")}`,
+      }}
+      end={{
+        title: "Where the logs go",
+        nodes: targets,
+        max: PICTURE_TARGETS,
+        more: { words: (hidden) => plural(hidden, "more drain") },
+        loadingRows: 3,
+      }}
+    />
+  )
+}
+
+const NO_DRAINS: LogDrain[] = []
+const drainNodeId = (id: number) => `drain:${id}`
+
+/**
+ * One drain on one line: the service it sends to, its name over the host and
+ * what it carries, then how it is doing as a dot and a word, and one figure.
+ * Every state is the same height: the destination's own words, which were a
+ * second line under a failing drain, open from the state word.
+ *
+ * A phone has no room for the state and the figure beside the name, and
+ * keeps them on a second line under it, on every row alike.
+ */
+function DrainRow({
   drain,
   projects,
+  wide,
   verbs,
   onEdit,
 }: {
   drain: LogDrain
   projects: DeploymentSummary[]
+  wide: boolean
   verbs: Verb[]
   onEdit?: () => void
 }) {
-  const health = drainHealth(drain)
   let host = drain.endpoint
   try {
     host = new URL(drain.endpoint).host
   } catch {
     // Shown as typed.
   }
+  const reach = drainReach(drain, projects)
+  const state = <DrainStatus drain={drain} />
+  const figure = drainFigure(drain)
+  const reading = (
+    <span className={cn("numeric text-hint whitespace-nowrap", figure.warning && "text-warning")}>
+      {figure.text}
+    </span>
+  )
   return (
     <ChoiceRow
-      leading={<KindMark kind={drain.kind} className="size-5" />}
+      leading={
+        <ProductLogo
+          id={DRAIN_PRODUCT[drain.kind]}
+          size="sm"
+          className={cn(!drain.enabled && "opacity-50 grayscale")}
+        />
+      }
       title={drain.name}
       verb={`Edit ${drain.name}`}
       onSelect={onEdit}
       disabled={!onEdit}
       description={
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <span>
-            <span className="font-mono">{host}</span> · {drainReach(drain, projects)}
-          </span>
-          <span className={health.tone === "warning" ? "text-warning" : undefined}>
-            {health.line}
-          </span>
-        </span>
+        <>
+          <span className="font-mono">{host}</span>
+          {wide && ` · ${reach}`}
+        </>
       }
-      trailing={<Tag>{KIND_TITLE[drain.kind]}</Tag>}
+      trailing={
+        wide && (
+          // Fixed widths, so down a list the states are one column and the
+          // figures end on one edge.
+          <span className="flex items-center gap-3 text-muted-foreground">
+            <span className="flex w-28">{state}</span>
+            <span className="flex w-28 justify-end">{reading}</span>
+          </span>
+        )
+      }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${drain.name}`} />}
-    />
+    >
+      {!wide && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground">
+          <div className="basis-full">{state}</div>
+          <span className="min-w-0 flex-1 truncate">{reach}</span>
+          {reading}
+        </div>
+      )}
+    </ChoiceRow>
+  )
+}
+
+/**
+ * How a drain is doing, as a dot and a word that open on the rest: the
+ * destination's answer in its own words, what was shipped, dropped and is
+ * waiting, and the address in full. It was a second line under the name,
+ * which made a failing drain a taller card than a healthy one.
+ */
+function DrainStatus({ drain }: { drain: LogDrain }) {
+  const word = drainStateWord(drain)
+  const health = drainHealth(drain)
+  const { status } = drain
+  const facts: [string, string][] = [
+    ["Shipped", plural(status.shipped, "record")],
+    ["Dropped", plural(status.dropped, "record")],
+    ["Waiting", plural(status.queued, "record")],
+    ["Deliveries", status.batches.toLocaleString()],
+    ["Last delivery", status.lastSuccessAt ? relativeTime(status.lastSuccessAt) : "never"],
+  ]
+  if (drain.headerNames.length > 0) facts.push(["Sends", `${drain.headerNames.join(", ")}, sealed`])
+  return (
+    <Popover>
+      <PopoverTrigger
+        aria-label={`${word.label}: how ${drain.name} is doing`}
+        className="rounded-sm focus-ring"
+      >
+        <Status tone={word.tone} label={word.label} />
+      </PopoverTrigger>
+      {/* A press in here reaches the row through React even from a portal, and
+          the row would open its editor. */}
+      <PopoverContent align="end" className="w-80" onClick={(event) => event.stopPropagation()}>
+        <div className="space-y-3 text-hint">
+          <p className={cn("break-words", health.tone === "warning" && "text-warning")}>
+            {health.line}
+          </p>
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
+            {facts.map(([name, value]) => (
+              <div key={name} className="contents">
+                <dt className="text-muted-foreground">{name}</dt>
+                <dd className="numeric min-w-0 text-right break-words">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="font-mono break-all text-muted-foreground">
+            {KIND_TITLE[drain.kind]} · {drain.endpoint}
+          </p>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 
