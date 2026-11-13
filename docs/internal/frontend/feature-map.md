@@ -1123,14 +1123,21 @@ monitor connects to on its schedule, with each connect time, check-now and stop 
 check's **Watch on a schedule**; Packet captures adds bounded immutable scope, dated native
 progress/cleanup, original private PCAP access and separately redacted support export; reload never
 starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
-selected owned repair with mandatory reconnection. Egress groups (`components/network/egress/`) read
-each group's policy and carrying member, every member measured through its own path (state, round
-trip, loss, a strip of recent samples, its mark, table and probe source), the rules' current advice,
-runtime readback and readiness, a decision timeline whose evidence opens on the routes before and
-after, the measurements and the connections moved, pinned and flushed, and the last simulation's
-expectations and phases; destructive confirmations guard fail over/fail back now, enable, disable,
-removal and turning automation on, which stays disabled until a passed simulation of the current
-configuration. Address planning joins held reservations with fresh overlap coverage and native owner
+selected owned repair with mandatory reconnection. Egress groups (`components/network/egress/`) are
+a list and a page a group: `/network/egress` opens on an identity line (how many of the six slots
+are used, how many carry traffic, how many switch on their own, members proven) over one card a
+group (its carrying member as the state, how it switches, its verbs in a menu), and
+`/network/egress/[name]` is the group: the carrying member as its state, **Run simulation** as the
+command, a `WireFlow` picture of the selected traffic, the group and its members (the carrying wire
+moves, a failed member is dashed), then views in the address (`?tab=`): Members (state, round trip,
+loss and a strip of recent samples a member, the rules' current advice, readiness, what each member
+is bound to and how the group decides), Decisions (a timeline whose evidence opens on the routes
+before and after, the measurements and the connections moved, pinned and flushed) and Simulation
+(the last run's expectations and phases). From `xl` the list stands beside it as a rail; Alt+↑/↓
+walk it with the view kept. Destructive confirmations guard fail over/fail back now, enable,
+disable, removal and turning automation on, which stays disabled until a passed simulation of the
+current configuration; an account that cannot use a verb is not shown it.
+Address planning joins held reservations with fresh overlap coverage and native owner
 handoffs; External checks retain scoped signed source evidence; Socket history defaults off and
 separates native TCP deltas from explicitly reviewed kernel TCP/UDP payload subtotals, retained
 ownership and coverage gaps. Traffic explicitly distinguishes download policing from owned IFB/CAKE
