@@ -36,6 +36,7 @@ export function CapturePicture({ run, className }: { run: CaptureRun; className?
   return (
     <WireFlow
       className={cn("animate-rise", className)}
+      hubShare={1.4}
       start={{
         title: "Interface",
         nodes: [
@@ -71,12 +72,19 @@ export function CapturePicture({ run, className }: { run: CaptureRun; className?
             <Filter aria-hidden />
           </WireMark>
         ),
+        // Three lines of words under the mark: room for them, so they never
+        // run into the block under the picture.
+        className: "py-12",
         eyebrow: "Filter",
         title: filter.title,
         hint: (
           <>
-            <span className="block font-mono break-all">from {filter.from}</span>
-            <span className="block font-mono break-all">to {filter.to}</span>
+            <span className="block max-w-64 truncate font-mono" title={filter.from}>
+              from {filter.from}
+            </span>
+            <span className="block max-w-64 truncate font-mono" title={filter.to}>
+              to {filter.to}
+            </span>
             <span className="block">first {request.snapshotLength} bytes of each packet</span>
           </>
         ),

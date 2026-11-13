@@ -292,7 +292,7 @@ function CaptureRow({ run, onChanged }: { run: CaptureRun; onChanged: () => void
           >
             {timestamp(run.createdAt)}
           </time>
-          <span className="flex w-36 justify-end max-sm:w-auto">
+          <span className="flex w-36 justify-end max-sm:hidden">
             <Status {...reading} />
           </span>
         </span>

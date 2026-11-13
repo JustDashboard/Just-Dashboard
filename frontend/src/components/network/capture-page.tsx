@@ -336,8 +336,6 @@ function CaptureIdentity({
           <>
             <span className="font-mono text-foreground">{run.request.interface}</span>
             <FactDot />
-            <span>{familyWord(run.request.family)}</span>
-            <FactDot />
             <span>{filter.title}</span>
             {run.result && (
               <>
@@ -349,7 +347,7 @@ function CaptureIdentity({
             )}
             <FactDot />
             <span className="numeric">
-              <time dateTime={run.createdAt}>{timestamp(run.createdAt)}</time> by {run.createdBy}
+              <time dateTime={run.createdAt}>{timestamp(run.createdAt)}</time>
             </span>
           </>
         }

@@ -173,7 +173,7 @@ export function SavedRuns({ watched }: { watched: React.ReactNode }) {
                   <button
                     type="button"
                     onClick={() => setRetention(true)}
-                    className="numeric rounded-sm focus-ring hover:text-foreground hover:underline"
+                    className="rounded-sm focus-ring hover:text-foreground hover:underline"
                   >
                     {retentionWords(policy.data)}
                   </button>
@@ -313,8 +313,7 @@ function RunRow({ run, onChanged }: { run: DiagnosticRun; onChanged: () => void 
       busy={!diagnosticFinished(run)}
       description={
         <>
-          <span>{runTool(run)}</span>
-          <span className="text-muted-foreground/60"> · </span>
+          {`${runTool(run)} · `}
           <span className="font-mono">{runRequestLine(run)}</span>
         </>
       }
@@ -326,7 +325,7 @@ function RunRow({ run, onChanged }: { run: DiagnosticRun; onChanged: () => void 
           >
             {timestamp(run.createdAt)}
           </time>
-          <span className="flex w-44 justify-end max-sm:w-auto">
+          <span className="flex w-44 justify-end max-sm:hidden">
             <Status label={reading.label} tone={reading.tone} />
           </span>
         </span>
