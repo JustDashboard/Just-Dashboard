@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  logKindMissing,
   missingFromError,
   moduleOff,
   noSystemd,
@@ -131,5 +132,48 @@ describe("a sentence that is a daemon nobody reached", () => {
     expect(saysDockerUnreachable("docker is not available on this host")).toBe(true)
     expect(saysDockerUnreachable("permission denied")).toBe(false)
     expect(saysDockerUnreachable(undefined)).toBe(false)
+  })
+})
+
+describe("a kind of log source that is absent", () => {
+  test("Docker's question becomes a sentence and the way to the Docker page", () => {
+    const line = logKindMissing("docker", daemon)
+    expect(line).toEqual({
+      thing: "docker",
+      sentence: "Docker is not running",
+      href: "/docker",
+      label: "Open Docker",
+    })
+    // A socket that refused the dashboard is a daemon that runs.
+    expect(logKindMissing("docker", "permission denied").sentence).toBe("Docker did not answer")
+  })
+
+  test("PM2 says which of its three reasons it is", () => {
+    expect(logKindMissing("pm2", "PM2 is not installed on this host").sentence).toBe(
+      "PM2 is not installed",
+    )
+    expect(logKindMissing("pm2", "PM2 has no managed processes").sentence).toBe(
+      "PM2 runs no applications",
+    )
+    expect(logKindMissing("pm2", "exit status 1")).toMatchObject({
+      sentence: "PM2 did not answer",
+      href: "/processes/pm2",
+    })
+  })
+
+  test("the journal without systemd points at Services, which says why", () => {
+    expect(logKindMissing("journal", "systemd is not running on this host")).toEqual({
+      thing: "systemd",
+      sentence: "No systemd on this server",
+      href: "/processes/services",
+      label: "Open Services",
+    })
+  })
+
+  test("a kind this does not know keeps its reason, as a sentence", () => {
+    expect(logKindMissing("nginx", "no access log is written")).toEqual({
+      sentence: "No access log is written",
+    })
+    expect(logKindMissing("app", undefined).sentence).toBe("Not on this server")
   })
 })

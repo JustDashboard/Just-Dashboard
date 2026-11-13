@@ -1,5 +1,5 @@
 import { Fragment } from "react"
-import { bytes, relativeTime } from "@/lib/format"
+import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import type { LogSource } from "@/lib/types"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { ProductLogos, imageProducts } from "@/components/product-logo"
@@ -66,14 +66,76 @@ export function SourceFacts({ source }: { source: Omit<LogSource, "rotated"> }) 
  */
 export function SourceIdentity({
   source,
+  journal,
   aside,
 }: {
   source: ServiceLogSource
+  /**
+   * The whole journal's own facts: how many units write to it, what it holds
+   * on disk and how far back it goes. It opened on an instruction ("pick one
+   * below to narrow it") where every other source says what it is.
+   */
+  journal?: JournalFacts
   aside?: React.ReactNode
 }) {
   const stack = source.kind === "stack" && source.images?.length ? source.images : undefined
   const hasSize = source.size !== undefined && source.size > 0
-  const facts = [
+  const facts = journal ? journalFacts(journal) : sourceFacts(source, hasSize)
+  return (
+    <HostIdentity
+      className="animate-rise pb-4"
+      mark={source.product}
+      logo={stack ? <ProductLogos ids={imageProducts(stack)} size="md" /> : undefined}
+      fallback={kindIcon(source.kind)}
+      title={source.label}
+      facts={facts.map((fact, i) => (
+        <Fragment key={i}>
+          {i > 0 && <FactDot />}
+          {fact}
+        </Fragment>
+      ))}
+      aside={aside}
+    />
+  )
+}
+
+export type JournalFacts = {
+  /** Units with a journal of their own, as the source index lists them. */
+  units?: number
+  /** Bytes on disk; absent until the journal has been asked, zero where it would not say. */
+  size?: number
+  /** When its first record was written. */
+  oldest?: string
+}
+
+/**
+ * The journal's line. The unit count is there with the page; the size and
+ * the age arrive a moment later, on the same line, so nothing under it
+ * moves.
+ */
+function journalFacts(journal: JournalFacts) {
+  return [
+    <Tag key="kind">{KIND_TAG.journal}</Tag>,
+    journal.units !== undefined && (
+      <span key="units" className="numeric whitespace-nowrap">
+        {plural(journal.units, "unit")}
+      </span>
+    ),
+    journal.size ? (
+      <span key="size" className="numeric whitespace-nowrap">
+        {bytes(journal.size)} on disk
+      </span>
+    ) : null,
+    journal.oldest && (
+      <span key="oldest" className="numeric min-w-0 truncate" title={timestamp(journal.oldest)}>
+        oldest line {relativeTime(journal.oldest)}
+      </span>
+    ),
+  ].filter(Boolean)
+}
+
+function sourceFacts(source: ServiceLogSource, hasSize: boolean) {
+  return [
     <Tag key="kind">{KIND_TAG[source.kind]}</Tag>,
     source.status && <Status key="status" state={source.status} />,
     source.path && (
@@ -98,20 +160,4 @@ export function SourceIdentity({
       </span>
     ),
   ].filter(Boolean)
-  return (
-    <HostIdentity
-      className="animate-rise pb-4"
-      mark={source.product}
-      logo={stack ? <ProductLogos ids={imageProducts(stack)} size="md" /> : undefined}
-      fallback={kindIcon(source.kind)}
-      title={source.label}
-      facts={facts.map((fact, i) => (
-        <Fragment key={i}>
-          {i > 0 && <FactDot />}
-          {fact}
-        </Fragment>
-      ))}
-      aside={aside}
-    />
-  )
 }

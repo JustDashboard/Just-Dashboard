@@ -183,3 +183,55 @@ export function saysDockerUnreachable(text: string | undefined): boolean {
     lower.includes("docker.sock")
   )
 }
+
+/** One line for a place that is already inside something (`MissingLine`). */
+export type MissingLineWords = {
+  thing?: string
+  sentence: string
+  href?: string
+  /** The link's words. */
+  label?: string
+}
+
+/**
+ * Why a kind of log source is absent, as one sentence and the page that says
+ * more. The source index hands the reason over as whatever the subsystem
+ * said, which for Docker is the client's own question ("Is the docker daemon
+ * running?"); the rail printed it whole.
+ */
+export function logKindMissing(kind: string, said: string | undefined): MissingLineWords {
+  const lower = (said ?? "").toLowerCase()
+  switch (kind) {
+    case "docker":
+      return {
+        thing: "docker",
+        sentence: saysDockerUnreachable(said) ? "Docker is not running" : "Docker did not answer",
+        href: "/docker",
+        label: "Open Docker",
+      }
+    case "pm2":
+      return {
+        thing: "pm2",
+        sentence: lower.includes("not installed")
+          ? "PM2 is not installed"
+          : lower.includes("no managed processes")
+            ? "PM2 runs no applications"
+            : "PM2 did not answer",
+        href: "/processes/pm2",
+        label: "Open PM2",
+      }
+    case "journal":
+      return {
+        thing: "systemd",
+        sentence: "No systemd on this server",
+        href: "/processes/services",
+        label: "Open Services",
+      }
+    default: {
+      const text = (said ?? "").trim()
+      return {
+        sentence: text ? text.charAt(0).toUpperCase() + text.slice(1) : "Not on this server",
+      }
+    }
+  }
+}
