@@ -2,29 +2,26 @@
 
 import { useId, useState } from "react"
 import Link from "next/link"
-import { Inspect, NetworkDevice, Router } from "@/components/icons"
+import { Inspect, NetworkDevice } from "@/components/icons"
 import { errorMessage, post } from "@/lib/api"
 import { plural, timestamp } from "@/lib/format"
 import type { PortIdentification } from "@/lib/types"
 import { Field, FormSection } from "@/components/form"
 import { Detail, DetailList } from "@/components/page"
-import { ProductLogo, portProduct } from "@/components/product-logo"
-import { DashboardMark } from "@/components/backups/marks"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import {
   ownerLabel,
   ownerLinks,
-  ownerTitle,
   socketAddresses,
   socketClients,
   socketHolders,
   type Socket,
 } from "@/components/proxy/ports"
 import { FirewallVerdict } from "@/components/proxy/ports-firewall"
-import { formatEndpoint } from "@/components/proxy/ports-list"
 import { proxyWords } from "@/components/proxy/ports-proxy"
 import { DockerPath, ExternalProof } from "@/components/proxy/port-reachability"
-import { SidePanel } from "@/components/side-panel"
-import { EmptyState, Notice } from "@/components/state"
+import { reachNotes, ReachWord } from "@/components/proxy/port-marks"
+import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -43,218 +40,66 @@ const MANAGER_WORDS: Record<NonNullable<Socket["manager"]>, string> = {
 }
 
 /**
- * One socket in full, opened from its row at `?socket=tcp:0.0.0.0:443`: the
- * whole command a row cuts, every process holding the socket rather than the
- * one a row names, the chain from the process up to whoever supervises it,
- * where it answers and what the firewall and the proxy do with it, who is
- * connected now, and — for an admin — what the socket says when asked.
+ * A port's views, as its page draws them under its identity line
+ * (`port-page.tsx`). They were the side sheet's sections, opened from a row
+ * at `?socket=tcp:0.0.0.0:443`, until a port had a page of its own.
  *
- * `socket` is absent when the address named one that is no longer listening:
- * the sheet says so rather than closing on a link someone followed.
+ * Reach: where it answers and what stands in front of it — the addresses,
+ * the reach and why, the firewall's verdict, the proxy, the provider no
+ * reading here can see — and, for an admin, the proof from outside, the path
+ * Docker publishes it by, and what the socket says when asked.
  */
-export function PortSheet({
-  param,
-  socket,
-  reach,
-  actions,
-  admin,
-  onClose,
-}: {
-  param: string | null
-  socket: Socket | undefined
-  /** The row's own reach reading, so the sheet words it as the list does. */
-  reach: React.ReactNode
-  actions: React.ReactNode
-  admin: boolean
-  onClose: () => void
-}) {
-  const open = param !== null
-  const endpoint = socket ? formatEndpoint(socket.address, socket.port) : (param ?? "")
-  return (
-    <SidePanel
-      open={open}
-      onOpenChange={(next) => !next && onClose()}
-      width="md"
-      initialFocus="body"
-      title={
-        socket ? (
-          <>
-            {socket.self ? (
-              <DashboardMark />
-            ) : (
-              <ProductLogo id={portProduct(socket.port)} size="sm" fallback={Router} />
-            )}
-            <span className="numeric font-mono">{socket.port}</span>
-            <span className="text-hint text-muted-foreground uppercase">{socket.protocol}</span>
-            <span className="truncate">{ownerTitle(socket)}</span>
-            {socket.self && <Tag>This dashboard</Tag>}
-          </>
-        ) : (
-          "Socket"
-        )
-      }
-      description={`The listening socket ${endpoint}`}
-      actions={socket ? actions : undefined}
-    >
-      {socket ? (
-        // Keyed on the socket so an identification never shows under another.
-        <SocketDetail key={endpoint} socket={socket} reach={reach} admin={admin} />
-      ) : (
-        <EmptyState
-          icon={Router}
-          title="Nothing listens there now"
-          description={`No socket in the last listing matches ${param ?? ""}.`}
-        />
-      )}
-    </SidePanel>
-  )
-}
-
-function SocketDetail({
-  socket,
-  reach,
-  admin,
-}: {
-  socket: Socket
-  reach: React.ReactNode
-  admin: boolean
-}) {
+export function PortReach({ socket, admin }: { socket: Socket; admin: boolean }) {
   const nat = socket.source === "docker-nat"
-  const holders = socketHolders(socket)
-  const clients = socketClients(socket)
-  const label = ownerLabel(socket)
-  const links = ownerLinks(socket)
   const proxy = proxyWords(socket)
+  const notes = reachNotes(socket)
   return (
     <div className="space-y-8">
-      <FormSection title="Process">
-        {nat ? (
-          <p className="text-body text-muted-foreground">
-            Forwarded by Docker&apos;s NAT rules; no process listens.
-          </p>
-        ) : (
-          <>
-            <pre className="font-mono text-xs break-all whitespace-pre-wrap">
-              {socket.cmdline || "No command reported"}
-            </pre>
-            <DetailList>
-              <Detail label="User">{socket.user || "unknown"}</Detail>
-              <Detail label={holders.length === 1 ? "Process" : "Processes"}>
-                {holders.length === 0 ? (
-                  "None this account can see"
-                ) : (
-                  <span className="flex flex-wrap gap-x-2 gap-y-1">
-                    {holders.map((pid) => (
-                      <Link
-                        key={pid}
-                        href={processHref(pid)}
-                        className="numeric rounded-sm font-mono underline-offset-2 focus-ring hover:underline"
-                      >
-                        {pid}
-                        {pid === socket.pid && holders.length > 1 && " (owner)"}
-                      </Link>
-                    ))}
-                  </span>
-                )}
-              </Detail>
-              {socket.startedAt && <Detail label="Started">{timestamp(socket.startedAt)}</Detail>}
-            </DetailList>
-          </>
-        )}
-      </FormSection>
-
-      <FormSection title="Owner">
-        <ol className="space-y-1.5 text-xs">
-          {!nat && socket.pid > 0 && (
-            <li>
-              <span className="text-muted-foreground">Process </span>
-              {socket.displayName || socket.process}{" "}
-              <span className="numeric font-mono text-muted-foreground">PID {socket.pid}</span>
-            </li>
-          )}
-          {!nat && socket.ppid !== undefined && socket.ppid > 0 && (
-            <li>
-              <span className="text-muted-foreground">started by </span>
-              <Link
-                href={processHref(socket.ppid)}
-                className="numeric rounded-sm font-mono underline-offset-2 focus-ring hover:underline"
-              >
-                PID {socket.ppid}
-              </Link>
-            </li>
-          )}
-          {socket.manager && (
-            <li>
-              <span className="text-muted-foreground">supervised by </span>
-              {MANAGER_WORDS[socket.manager]}
-              {socket.managerName && <span className="font-mono"> {socket.managerName}</span>}
-            </li>
-          )}
-          {socket.socketUnit && (
-            <li>
-              <span className="text-muted-foreground">socket unit </span>
-              <span className="font-mono">{socket.socketUnit}</span>
-              {socket.activates && (
-                <>
-                  <span className="text-muted-foreground"> starts </span>
-                  <span className="font-mono">{socket.activates}</span>
-                </>
-              )}
-            </li>
-          )}
-          {label && (
-            <li>
-              <span className="text-muted-foreground">answers for </span>
-              {label}
-            </li>
-          )}
-        </ol>
-        {links.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {links.map((link) => (
-              <Button key={link.key} asChild variant="outline" size="xs">
-                <Link href={link.href}>{link.label}</Link>
-              </Button>
-            ))}
-          </div>
-        )}
-      </FormSection>
-
-      <FormSection title="Where it answers">
-        <DetailList>
-          <Detail label={socketAddresses(socket).length > 1 ? "Addresses" : "Address"}>
-            <span className="font-mono">{socketAddresses(socket).join(", ")}</span>
-          </Detail>
-          <Detail label="Reach">{reach}</Detail>
-          <Detail label="Firewall">
-            <FirewallVerdict socket={socket} />
-          </Detail>
-          <Detail label="Proxy">{proxy ?? "Nothing in the proxy routes to it"}</Detail>
-          {/* Every grade above is the host's own reading. What stands in
+      <Panel plain>
+        <PanelHeader title="Where it answers" />
+        <PanelBody className="space-y-3">
+          <DetailList>
+            <Detail label={socketAddresses(socket).length > 1 ? "Addresses" : "Address"}>
+              <span className="font-mono">{socketAddresses(socket).join(", ")}</span>
+            </Detail>
+            <Detail label="Reach">
+              <span className="block">
+                <ReachWord socket={socket} />
+              </span>
+              {notes.map((note) => (
+                <span key={note} className="mt-0.5 block text-hint text-muted-foreground">
+                  {note}
+                </span>
+              ))}
+            </Detail>
+            <Detail label="Firewall">
+              <FirewallVerdict socket={socket} />
+            </Detail>
+            <Detail label="Proxy">{proxy ?? "Nothing in the proxy routes to it"}</Detail>
+            {/* Every grade above is the host's own reading. What stands in
               front of the host is not visible from it, and a port graded
               open here can still be closed upstream, or the reverse. */}
-          {socket.exposed && (
-            <Detail label="Provider">
-              <span className="text-muted-foreground">
-                Not visible — no provider adapter. Reaching it from outside is unproven until an
-                external check measures it.
-              </span>
-            </Detail>
+            {socket.exposed && (
+              <Detail label="Provider">
+                <span className="text-muted-foreground">
+                  Not visible — no provider adapter. Reaching it from outside is unproven until an
+                  external check measures it.
+                </span>
+              </Detail>
+            )}
+          </DetailList>
+          {(socket.routes ?? []).length > 1 && (
+            <ul aria-label="Sites routing to it" className="space-y-1 text-xs">
+              {(socket.routes ?? []).map((route) => (
+                <li key={route.site} className="flex items-center gap-2">
+                  <span className="font-mono">{route.serverName || route.site}</span>
+                  {route.tls && <Tag>TLS</Tag>}
+                </li>
+              ))}
+            </ul>
           )}
-        </DetailList>
-        {(socket.routes ?? []).length > 1 && (
-          <ul className="space-y-1 text-xs">
-            {(socket.routes ?? []).map((route) => (
-              <li key={route.site} className="flex items-center gap-2">
-                <span className="font-mono">{route.serverName || route.site}</span>
-                {route.tls && <Tag>TLS</Tag>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </FormSection>
-
-      {clients && <Clients port={socket.port} clients={clients} />}
+        </PanelBody>
+      </Panel>
 
       {admin && socket.exposed && <ExternalProof socket={socket} />}
 
@@ -265,60 +110,178 @@ function SocketDetail({
   )
 }
 
-/** Who is connected now, from the listing's own walk of the socket tables. */
-function Clients({
-  port,
-  clients,
-}: {
-  port: number
-  clients: NonNullable<ReturnType<typeof socketClients>>
-}) {
+/**
+ * Owner: the whole command a row cuts, every process holding the socket
+ * rather than the one a row names, and the chain from the process up to
+ * whoever supervises it, with the owner's own pages.
+ */
+export function PortOwner({ socket }: { socket: Socket }) {
+  const nat = socket.source === "docker-nat"
+  const holders = socketHolders(socket)
+  const label = ownerLabel(socket)
+  const links = ownerLinks(socket)
   return (
-    <FormSection
-      title="Clients"
-      actions={
-        <Button asChild variant="outline" size="xs">
-          <Link href={`/network/connections?q=${port}`}>
-            <NetworkDevice />
-            Open in Connections
-          </Link>
-        </Button>
-      }
-    >
-      {clients.count === 0 ? (
-        <p className="text-body text-muted-foreground">
-          No connection was open when it was listed.
-        </p>
-      ) : (
-        <>
-          <p className="text-body">
-            <span className="numeric">{plural(clients.count, "connection")}</span>
-            {/* Only the busiest five arrive, so a sixth caller is not counted here. */}
-            {clients.peers.length < CLIENT_PEERS_SENT && (
-              <span className="text-muted-foreground">
-                {" "}
-                from {plural(clients.peers.length, "address", "addresses")}
-              </span>
-            )}
-          </p>
-          <ul aria-label="Top peers" className="divide-y divide-hairline">
-            {clients.peers.map((peer) => (
-              <li key={peer.address} className="flex items-center justify-between gap-3 py-1.5">
-                <Link
-                  href={`/network/connections?q=${encodeURIComponent(peer.address)}`}
-                  className="truncate rounded-sm font-mono text-xs underline-offset-2 focus-ring hover:underline"
-                >
-                  {peer.address}
-                </Link>
-                <span className="numeric shrink-0 text-hint text-muted-foreground">
-                  {peer.count}
-                </span>
+    <div className="space-y-8">
+      <Panel plain>
+        <PanelHeader title="Command" />
+        <PanelBody className="space-y-3">
+          {nat ? (
+            <p className="text-body text-muted-foreground">
+              Forwarded by Docker&apos;s NAT rules; no process listens.
+            </p>
+          ) : (
+            <>
+              <pre className="rounded-lg border bg-card px-4 py-3 font-mono text-xs break-all whitespace-pre-wrap">
+                {socket.cmdline || "No command reported"}
+              </pre>
+              <DetailList>
+                <Detail label="User">{socket.user || "unknown"}</Detail>
+                <Detail label={holders.length === 1 ? "Process" : "Processes"}>
+                  {holders.length === 0 ? (
+                    "None this account can see"
+                  ) : (
+                    <span className="flex flex-wrap gap-x-2 gap-y-1">
+                      {holders.map((pid) => (
+                        <Link
+                          key={pid}
+                          href={processHref(pid)}
+                          className="numeric rounded-sm font-mono underline-offset-2 focus-ring hover:underline"
+                        >
+                          {pid}
+                          {pid === socket.pid && holders.length > 1 && " (owner)"}
+                        </Link>
+                      ))}
+                    </span>
+                  )}
+                </Detail>
+                {socket.startedAt && <Detail label="Started">{timestamp(socket.startedAt)}</Detail>}
+              </DetailList>
+            </>
+          )}
+        </PanelBody>
+      </Panel>
+
+      <Panel plain>
+        <PanelHeader title="Who runs it" />
+        <PanelBody className="space-y-3">
+          <ol className="space-y-1.5 text-xs">
+            {!nat && socket.pid > 0 && (
+              <li>
+                <span className="text-muted-foreground">Process </span>
+                {socket.displayName || socket.process}{" "}
+                <span className="numeric font-mono text-muted-foreground">PID {socket.pid}</span>
               </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </FormSection>
+            )}
+            {!nat && socket.ppid !== undefined && socket.ppid > 0 && (
+              <li>
+                <span className="text-muted-foreground">started by </span>
+                <Link
+                  href={processHref(socket.ppid)}
+                  className="numeric rounded-sm font-mono underline-offset-2 focus-ring hover:underline"
+                >
+                  PID {socket.ppid}
+                </Link>
+              </li>
+            )}
+            {socket.manager && (
+              <li>
+                <span className="text-muted-foreground">supervised by </span>
+                {MANAGER_WORDS[socket.manager]}
+                {socket.managerName && <span className="font-mono"> {socket.managerName}</span>}
+              </li>
+            )}
+            {socket.socketUnit && (
+              <li>
+                <span className="text-muted-foreground">socket unit </span>
+                <span className="font-mono">{socket.socketUnit}</span>
+                {socket.activates && (
+                  <>
+                    <span className="text-muted-foreground"> starts </span>
+                    <span className="font-mono">{socket.activates}</span>
+                  </>
+                )}
+              </li>
+            )}
+            {label && (
+              <li>
+                <span className="text-muted-foreground">answers for </span>
+                {label}
+              </li>
+            )}
+          </ol>
+          {links.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {links.map((link) => (
+                <Button key={link.key} asChild variant="outline" size="xs">
+                  <Link href={link.href}>{link.label}</Link>
+                </Button>
+              ))}
+            </div>
+          )}
+        </PanelBody>
+      </Panel>
+    </div>
+  )
+}
+
+/** Clients: who is connected now, from the listing's own walk of the socket tables. */
+export function PortClients({ socket }: { socket: Socket }) {
+  const clients = socketClients(socket)
+  return (
+    <Panel plain>
+      <PanelHeader
+        title="Connected now"
+        actions={
+          <Button asChild variant="outline" size="xs">
+            <Link href={`/network/connections?q=${socket.port}`}>
+              <NetworkDevice />
+              Open in Connections
+            </Link>
+          </Button>
+        }
+      />
+      <PanelBody flush className="pt-3">
+        {!clients ? (
+          <p className="text-body text-muted-foreground">
+            {socket.protocol === "udp"
+              ? "A UDP socket keeps no connections to count."
+              : "The listing did not count this socket's connections."}
+          </p>
+        ) : clients.count === 0 ? (
+          <p className="text-body text-muted-foreground">
+            No connection was open when it was listed.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-body">
+              <span className="numeric">{plural(clients.count, "connection")}</span>
+              {/* Only the busiest five arrive, so a sixth caller is not counted here. */}
+              {clients.peers.length < CLIENT_PEERS_SENT && (
+                <span className="text-muted-foreground">
+                  {" "}
+                  from {plural(clients.peers.length, "address", "addresses")}
+                </span>
+              )}
+            </p>
+            <ul aria-label="Top peers" className="divide-y divide-hairline">
+              {clients.peers.map((peer) => (
+                <li key={peer.address} className="flex h-9 items-center justify-between gap-3">
+                  <Link
+                    href={`/network/connections?q=${encodeURIComponent(peer.address)}`}
+                    className="truncate rounded-sm font-mono text-xs underline-offset-2 focus-ring hover:underline"
+                  >
+                    {peer.address}
+                  </Link>
+                  <span className="numeric shrink-0 text-hint text-muted-foreground">
+                    {peer.count}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </PanelBody>
+    </Panel>
   )
 }
 
