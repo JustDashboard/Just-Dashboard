@@ -424,9 +424,10 @@ for (const width of [390, 1280, 1720]) {
         const cards = page
           .getByRole("list", { name: "Streams" })
           .locator("[data-slot='choice-row']")
+        // One line per stream since 0.8.7: the second under the first, as tall.
         const first = await cards.nth(0).boundingBox()
         const second = await cards.nth(1).boundingBox()
-        expect(Math.abs(first!.y - second!.y)).toBeLessThan(1)
+        expect(second!.y).toBeGreaterThan(first!.y + first!.height - 1)
         expect(Math.abs(first!.height - second!.height)).toBeLessThan(1)
       }
       await page.screenshot({

@@ -1864,7 +1864,7 @@
     `GET /proxy/streams/{name}/traffic?window=1h|24h|7d` reads at most 8 MiB from the end of the log and its
     `.1` rotation (a `.2.gz` left unread makes `complete` false): sessions by bucket (by the time they
     ended), status mix, bytes each way, session-length percentiles and the 12 busiest clients.
-    `GET /proxy/streams/traffic` is the last hour of every logging stream for the cards (1 MiB each), and
+    `GET /proxy/streams/traffic` is the last hour of every logging stream for the list (1 MiB each), and
     `GET /proxy/streams/{name}/sessions` lists the ESTABLISHED TCP sockets on the stream's port whose owner
     is nginx or unknown (gopsutil; a UDP-only stream has no per-client socket and says so). All three are
     readable by every account, like the nginx access logs in the log viewer; a Deny or Allow on a client

@@ -1105,6 +1105,20 @@ authorization. The overview has no automatic attention list or domain suggestion
 hygiene and finding snoozes are removed; nginx Settings exposes current values and edit constraints
 without advice or recommended values
 
+Streams (`/proxy/streams`, 0.8.7) opens on its identity line — the forwards as the services their
+ports are, the stream module's state, how many forward and how many are open to anyone, the hour's
+sessions, the verdict (a press narrows the list to what it counts) and New stream — then the wiring
+picture of the host's ports through nginx to where they go (`stream-picture.tsx`), the module and
+include steps where they are still to do (`stream-setup.tsx`), and the forwards as one-line rows,
+each a way to its own page. Without nginx it is the overview's install screen (`engine-setup.tsx`).
+A stream's page (`/proxy/streams/<name>`, `stream-page.tsx`, with the list as a rail from `xl`,
+`stream-rail.tsx`) holds what the traffic sheet and the edit form did: Overview (the forward drawn,
+what it carried as reading lines and its sessions and outcomes), Clients (with Deny or Allow),
+Connected now, and Settings (the form as a settings column with one save bar, administrators only),
+`?tab=` in the address. New stream stays a sheet (`stream-form.tsx`); the verbs both places share are
+`stream-verbs.tsx`, and what they say is `stream-facts.ts` (unit-tested). `?stream=<name>` lands on
+the stream's page; checked by `tests/browser/proxy-streams.spec.ts`
+
 **Implementation:** `app/(dashboard)/proxy/`, `components/proxy/`; backend in
 [`../backend/proxy.md`](../backend/proxy.md#proxy)
 
