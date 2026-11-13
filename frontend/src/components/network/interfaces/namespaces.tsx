@@ -6,10 +6,14 @@ import { Box, Layers, Plus, Trash } from "@/components/icons"
 import { del, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { NetworkLink, NetworkNamespace } from "@/lib/types"
+import { plural } from "@/lib/format"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Modal } from "@/components/modal"
 import { Field, FieldRow } from "@/components/form"
+import { EmptyState } from "@/components/state"
 import { Tag } from "@/components/tag"
+import { VerbMenu } from "@/components/verbs"
 import { ProductLogo, imageProduct } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -23,7 +27,6 @@ import {
 } from "@/components/ui/select"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Cidr } from "@/components/network/address"
-import { LinkGlyph } from "@/components/network/marks"
 
 const NONE = "__none"
 
@@ -32,8 +35,9 @@ const NONE = "__none"
  * the dashboard's own, with their veth into a bridge, removable — and each
  * running container's, read and never changed, because Docker owns them.
  * A namespace is a separate network: its own devices, addresses, routes and
- * firewall. What each holds is listed under it, so "what does this container
- * see" is answered without a shell.
+ * firewall. Each is one card with how many devices it holds, and opens the
+ * sheet that reads it, so "what does this container see" is answered without
+ * a shell.
  */
 export function Namespaces({
   namespaces,
@@ -71,12 +75,14 @@ export function Namespaces({
         onChanged()
       },
     })
+  const shown = [...named, ...(showContainers ? containers : [])]
   return (
     <Panel plain>
       <PanelHeader
         title="Namespaces"
         actions={
           <span className="flex items-center gap-3">
+            <span className="numeric text-hint text-muted-foreground">{shown.length}</span>
             <label className="flex items-center gap-2 text-hint text-muted-foreground">
               Containers&rsquo; too
               <Switch
@@ -85,87 +91,41 @@ export function Namespaces({
                 aria-label="Show containers' namespaces"
               />
             </label>
-            <Button size="xs" variant="outline" onClick={() => setCreating(true)} disabled={!admin}>
-              <Plus aria-hidden />
-              New namespace
-            </Button>
+            {admin && (
+              <Button size="xs" variant="outline" onClick={() => setCreating(true)}>
+                <Plus aria-hidden />
+                New namespace
+              </Button>
+            )}
           </span>
         }
       />
       <PanelBody>
-        {named.length === 0 && !showContainers ? (
-          <p className="text-body text-muted-foreground">
-            No named namespace. One is a separate network on this machine — for a service that must
-            reach only a bridge, or a test that must not touch the real one.
-          </p>
+        {shown.length === 0 ? (
+          <EmptyState
+            icon={Layers}
+            title="No named namespace"
+            description="A separate network on this machine, for a service that must reach only a bridge or a test that must not touch the real one."
+            action={
+              admin ? (
+                <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+                  <Plus aria-hidden />
+                  New namespace
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
-          <ul className="grid min-w-0 gap-x-10 gap-y-5 lg:grid-cols-2">
-            {[...named, ...(showContainers ? containers : [])].map((ns) => (
-              <li key={`${ns.kind}:${ns.name}`} className="min-w-0">
-                <div className="flex min-w-0 items-center gap-3">
-                  <ProductLogo
-                    id={ns.image ? imageProduct(ns.image) : undefined}
-                    size="sm"
-                    fallback={ns.kind === "named" ? Layers : Box}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-2 text-body font-medium">
-                      <button
-                        type="button"
-                        onClick={() => onOpen(ns)}
-                        aria-label={`Inspect ${ns.name}`}
-                        className="truncate font-mono underline-offset-2 focus-ring hover:underline"
-                      >
-                        {ns.name}
-                      </button>
-                      {ns.managed && <Tag>made here</Tag>}
-                      {ns.kind === "container" && <Tag>container</Tag>}
-                    </p>
-                    <p className="truncate text-hint text-muted-foreground">
-                      {ns.readError
-                        ? "devices unknown"
-                        : `${ns.devices.length} device${ns.devices.length === 1 ? "" : "s"}`}
-                      {ns.pid ? ` · pid ${ns.pid}` : ""}
-                    </p>
-                  </div>
-                  {admin && can("destructive") && ns.managed && (
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label={`Delete namespace ${ns.name}`}
-                      onClick={() => remove(ns)}
-                    >
-                      <Trash aria-hidden />
-                    </Button>
-                  )}
-                </div>
-                {ns.readError && (
-                  <p
-                    role="status"
-                    className="mt-2 border-l border-rule-warning pl-4 text-hint text-warning"
-                  >
-                    Its devices could not be read: {ns.readError}
-                  </p>
-                )}
-                <ul className="mt-2 flex flex-col gap-1 border-l border-hairline pl-4">
-                  {ns.devices.map((d) => (
-                    <li key={d.name} className="flex min-w-0 items-center gap-2 text-hint">
-                      <LinkGlyph kind="veth" className="size-3 shrink-0 text-muted-foreground" />
-                      <span className="font-mono">{d.name}</span>
-                      <span className="flex min-w-0 gap-2 truncate">
-                        {d.addresses.length ? (
-                          d.addresses.map((a) => <Cidr key={a} cidr={a} />)
-                        ) : (
-                          <span className="text-muted-foreground">no address</span>
-                        )}
-                      </span>
-                      <span className="ml-auto shrink-0 text-muted-foreground">{d.state}</span>
-                    </li>
-                  ))}
-                </ul>
-              </li>
+          <ChoiceList aria-label="Namespaces">
+            {shown.map((ns) => (
+              <NamespaceRow
+                key={`${ns.kind}:${ns.name}`}
+                namespace={ns}
+                onOpen={() => onOpen(ns)}
+                onDelete={admin && can("destructive") && ns.managed ? () => remove(ns) : undefined}
+              />
             ))}
-          </ul>
+          </ChoiceList>
         )}
       </PanelBody>
       <CreateNamespace
@@ -176,6 +136,78 @@ export function Namespaces({
       />
       {dialog}
     </Panel>
+  )
+}
+
+/**
+ * One namespace as a card of the list's one height: what runs in it, its
+ * name, the devices inside with where the first answers, and how many there
+ * are. Its routes, resolver and listeners are its sheet's; a namespace whose
+ * devices could not be read says so on the line rather than reading as empty.
+ */
+function NamespaceRow({
+  namespace: ns,
+  onOpen,
+  onDelete,
+}: {
+  namespace: NetworkNamespace
+  onOpen: () => void
+  onDelete?: () => void
+}) {
+  const first = ns.devices[0]
+  return (
+    <ChoiceRow
+      leading={
+        <ProductLogo
+          id={ns.image ? imageProduct(ns.image) : undefined}
+          size="sm"
+          fallback={ns.kind === "named" ? Layers : Box}
+        />
+      }
+      title={
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <span className="truncate font-mono">{ns.name}</span>
+          {ns.managed && <Tag>made here</Tag>}
+          {ns.kind === "container" && <Tag>container</Tag>}
+        </span>
+      }
+      verb={`Inspect ${ns.name}`}
+      description={
+        ns.readError ? (
+          <span className="text-warning" title={ns.readError}>
+            devices unknown
+          </span>
+        ) : first ? (
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <span className="font-mono">{first.name}</span>
+            {first.addresses[0] ? <Cidr cidr={first.addresses[0]} /> : <span>no address</span>}
+            {ns.pid ? <span className="truncate">· pid {ns.pid}</span> : null}
+          </span>
+        ) : (
+          <span>loopback only{ns.pid ? ` · pid ${ns.pid}` : ""}</span>
+        )
+      }
+      trailing={
+        <span
+          data-slot="namespace-members"
+          className="numeric w-20 text-right text-hint text-muted-foreground"
+        >
+          {ns.readError ? "unread" : plural(ns.devices.length, "device")}
+        </span>
+      }
+      actions={
+        onDelete ? (
+          <VerbMenu
+            label={`More for ${ns.name}`}
+            verbs={[{ key: "delete", label: "Delete", icon: Trash, run: onDelete, danger: true }]}
+          />
+        ) : (
+          // The menu's place, so every card's count stands in one column.
+          <span aria-hidden className="size-8" />
+        )
+      }
+      onSelect={onOpen}
+    />
   )
 }
 
