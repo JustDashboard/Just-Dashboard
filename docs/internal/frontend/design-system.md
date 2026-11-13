@@ -97,6 +97,9 @@ taking a frame:
   streams inventories and the ports table with their toolbars; the Renewals section on
   Certificates; a site's own page, its route picture on the page's ground and its logs one `Pane`
   under it; the TLS report's findings, protocol, certificate, chain, HTTP and
+  streams inventories and the ports table with their toolbars; the Renewal view's sections on
+  Certificates and a certificate's own page; a site's own page, its route picture on the page's
+  ground and its logs one `Pane` under it; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
   preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
   connection rows; the password files and DNS provider lists),
   the runtime-health bar, and every block of the deployment section — the fleet
@@ -1918,25 +1921,46 @@ details of one nothing trusts by default say where it is trusted in a hint line,
 rail adds Signing requests at its head only while one waits — what the operator owes an answer to —
 and a Local CA panel after DNS providers, which is an administrator's offer to create one and nothing
 to a reader until it exists.
+Certificates (overhauled in 0.8.7) opens on its identity line rather than four figure tiles: the
+issuers' marks, certbot, how many certificates, how many expire inside the renewal window and in how
+many days, how many browsers refuse (expired, test or unreadable, the split in its title) and the
+renewal reading as a link to the Renewal view, with the verdict and the split Issue command at the far
+end and Import and Paste a certificate in its `⋯` menu. Under it the page's jobs are views in the
+address (`?tab=`): Certificates, then what issues and renews them — Renewal, DNS challenge, ACME
+accounts (administrators), Local CA, Signing requests — then Watched domains, with the transparency
+logs. Each certificate is one `ChoiceRow` read down its columns — issuer mark, name over its names in
+mono, where it came from, who names it, the expiry date and its status — with every verb in its row's
+menu and the slot held where there is none, so a Caddy, test, unreadable or busy certificate is the
+height of the rest; the grid/table toggle went with the four-line cards. The line, the strip and the
+list's toolbar are drawn at once and rows of the list's height stand in while it loads, so nothing
+moves when the reads land (the page used to grow as six reads arrived). A certificate opens on its
+own page, `/proxy/certificates/<name>` (`?path=` where two share a name), in the process page's
+shape: the way back with its one command on the brand face (the real issuance for a test
+certificate, a renewal for certbot's, a new pair for an import) and the rest in `⋯`, its identity
+line with its state in the tile's corner, a picture of who signed it, the certificate with its time
+left and the sites and streams that serve it (a line carries only where the certificate is accepted
+and the site is on), its facts and identity, then Key, Chain, Files and Timeline as views, and from
+`xl` the list as a rail walked with Alt+↑ and Alt+↓. The sheet's address, `?cert=<file>`, lands
+there. An unreadable certificate's error and a test certificate's sentence with its verb are Notices
+on its page. What the server makes itself is said where it is read: the local CA's certificates read
+`local CA` where the source is, and the page of one nothing trusts by default says where it is
+trusted in a hint line. The Renewal view opens on the schedule — its recent certbot runs, what the
+timer's last run did (a failed run is a danger Notice naming each certificate and certbot's reason, a
+passing run whose hook failed a warning Notice with the hook's own words, each with Run now and Show
+log; otherwise a Status and the next run), the "Reload nginx after every renewal" OptionRow — then
+certbot's lineages, each run as certbot printed it (Show log brings it into view; it was a sheet),
+and the renewal service's journal as a log `Pane`. A lineage's last failure is a line in its row, its
+webroot folders wrapping mono paths rather than tags, and a certain next failure a warning Notice.
 A watched domain opens a live report and preserves its nonstandard port. Password files, access
 lists and watched-domain setup use the deployment settings' sections, each head over its fields; an
 access list is a row you read (its addresses as mono tags, its sites as links, its include line with
-Copy) with Edit inline and Delete in its menu. Certificate renewal lineages and
-DNS providers remain readings with their own actions, laid out to fit the management column. The
-providers are one list of choices, each a row of one height (mark, name, verbs): a plugin that is not
+Copy) with Edit inline and Delete in its menu. DNS providers remain readings with their own
+actions. The providers are one list of choices, each a row of one height (mark, name, verbs): a plugin that is not
 installed and credentials nobody saved are the expected answer for a provider nobody chose, so only a
 provider with a token saved, or one a lineage renews through, says where it stands (*credentials
 saved*, *plugin missing*, *no credentials*), and those stand first. The name keeps its width before
 anything beside it; the plugin's id, the propagation wait and why a plugin cannot be installed from
-here are behind the name. Until 0.8.6 all eight carried an amber *plugin missing* line. Every
-run certbot made, the timer's included, follows the two columns as Renewals, a log `Pane` across the
-page's width, which a log needs and the management column does not have. The
-renewal column opens on its recent certbot runs (in the body, where they wrap, not in the narrow
-column's header), then what the timer's last run did — a failed run is a danger Notice naming each
-certificate and certbot's reason, a passing run whose hook failed a warning Notice with the hook's
-own words, each with Run now and Show log; otherwise a Status and the next run — then the "Reload
-nginx after every renewal" OptionRow; a lineage's last failure is a line in its row, its webroot
-folders wrapping mono paths rather than tags, and a certain next failure a warning Notice. The TLS
+here are behind the name. Until 0.8.6 all eight carried an amber *plugin missing* line. The TLS
 report keeps findings, protocol checks and HTTP readings beside the live certificate and its
 vertical chain; long header values wrap instead of hiding the verdict. Its scan field is one input
 group, the address and its port, with a hint naming what will be scanned and a native datalist of

@@ -321,10 +321,11 @@ test("once nginx is reading them, the stream form promises a live forward again"
 
 test("the certificates page offers to turn the renewal timer on", async ({ page }) => {
   await mockProxy(page, { included: true })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
 
   await expect(page.getByText("Nothing is scheduled to renew these")).toBeVisible()
   await expect(page.getByRole("button", { name: "Turn it on" })).toBeVisible()
+  await page.getByRole("tab", { name: "Certificates" }).click()
   // The installed list says which site uses a certificate, and draws each
   // as who signed it: R11 is one of Let's Encrypt's intermediates.
   const installed = page
@@ -333,9 +334,9 @@ test("the certificates page offers to turn the renewal timer on", async ({ page 
   const row = installed.filter({ hasText: "old.example.com" })
   await expect(row.getByText("Used by nothing")).toBeVisible()
   await expect(row.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
-  // And the expired one is first, over a meter with nothing left in it.
+  // And the expired one is first, saying so.
   await expect(installed.first()).toContainText("old.example.com")
-  await expect(row.getByRole("meter")).toHaveAttribute("aria-valuenow", "0")
+  await expect(row.getByText("expired", { exact: true })).toBeVisible()
 })
 
 test("a stream is drawn as the service its port is", async ({ page }) => {
@@ -447,15 +448,16 @@ test("certificate cards filter, reveal complete details and link to their owning
   await page.getByPlaceholder("Name, a host it covers, or issuer").fill("app.example.com")
   const list = page.getByRole("list", { name: "Installed certificates" })
   await expect(list.locator("[data-slot='choice-row']")).toHaveCount(1)
-  await list.getByRole("button", { name: "Inspect app.example.com" }).click()
-  const detail = page.getByRole("dialog")
+  // A certificate is a page of its own, as a site is.
+  await list.getByRole("link", { name: "Open app.example.com" }).click()
+  await expect(page).toHaveURL(/\/proxy\/certificates\/app\.example\.com$/)
+  const detail = page.locator("[data-slot='page']")
   await expect(detail.getByText(certs[0].path)).toBeVisible()
   // A site is a page of its own now, which a reader without the form can open too.
-  await expect(detail.getByRole("link", { name: "app.example.com", exact: true })).toHaveAttribute(
-    "href",
-    "/proxy/sites/app.example.com",
-  )
-  await detail.getByRole("button", { name: "More actions for app.example.com" }).click()
+  await expect(
+    detail.getByRole("link", { name: "app.example.com", exact: true }).first(),
+  ).toHaveAttribute("href", "/proxy/sites/app.example.com")
+  await page.getByRole("button", { name: "More actions for app.example.com" }).click()
   const menu = page.getByRole("menu")
   await expect(menu.getByRole("menuitem", { name: "Copy path" })).toBeVisible()
   await menu.getByRole("menuitem", { name: "TLS report for app.example.com" }).click()
@@ -464,7 +466,7 @@ test("certificate cards filter, reveal complete details and link to their owning
 
 test("a watched service retains its port when opening the live report", async ({ page }) => {
   await mockShowcase(page)
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const watched = page.getByRole("list", { name: "Watched domains" })
   await expect(watched.getByRole("link", { name: "Inspect mail.example.com" })).toHaveAttribute(
     "href",
@@ -497,11 +499,7 @@ test("read-only users can inspect certificates without proxy mutation controls o
   await expect(page.getByRole("button", { name: "New site", exact: true })).toHaveCount(0)
   await page.goto("/proxy/certificates")
   await expect(page.getByRole("button", { name: "Issue certificate", exact: true })).toHaveCount(0)
-  await page.getByRole("button", { name: "Inspect app.example.com", exact: true }).click()
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "More actions for app.example.com" })
-    .click()
+  await page.getByRole("button", { name: "Actions for app.example.com", exact: true }).click()
   await expect(page.getByRole("menu").getByRole("menuitem", { name: /TLS report/ })).toHaveCount(0)
   await page.goto("/proxy/tls")
   await expect(page.getByRole("button", { name: "Scan", exact: true })).toBeDisabled()
@@ -540,9 +538,8 @@ test("unreadable certificates keep their error in the detail surface without ove
       .locator("[data-slot='page']")
       .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
   ).toBe(true)
-  await inventory.getByRole("button", { name: "Inspect app.example.com" }).click()
-  const detail = page.getByRole("dialog")
-  await expect(detail).toBeInViewport({ ratio: 1 })
+  await inventory.getByRole("link", { name: "Open app.example.com" }).click()
+  const detail = page.locator("[data-slot='page']")
   await expect(detail.getByText(message)).toBeVisible()
   for (const label of ["Issued", "Expires", "Self-signed"]) {
     await expect(detail.locator(`dt:has-text("${label}") + dd`)).toHaveText("—")
@@ -1019,7 +1016,7 @@ test("/proxy reads the engine's own log inline", async ({ page }) => {
 test("/proxy/certificates reads every renewal certbot ran", async ({ page }) => {
   await mockProxy(page, { included: true })
   const logs = await mockLogs(page)
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=renewal")
 
   await expect(page.getByRole("heading", { name: "Renewals" })).toBeVisible()
   await expect(
