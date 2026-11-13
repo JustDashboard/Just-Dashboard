@@ -1,15 +1,17 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import Link from "next/link"
-import { Lightning, Pencil, Plus, Trash } from "@/components/icons"
+import { Lightning, LockClosed, Pencil, Plus, Trash } from "@/components/icons"
 import { ApiError, del, get, post, put } from "@/lib/api"
-import { plural } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
+  DeploymentSummary,
   SecretStore,
   SecretStoreKind,
   SecretStoreSettings,
@@ -19,17 +21,29 @@ import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { SidePanel } from "@/components/side-panel"
-import { Tag } from "@/components/tag"
+import { Status } from "@/components/status-dot"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
+import { ProductLogo } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { VerbActions, type Verb } from "@/components/verbs"
+import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
 import { SecretStoreMark } from "@/components/deploy/secret-store-picker"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import { projectNode, projectNodeId, useFleet } from "@/components/deploy/section-picture"
+import {
+  storeLine,
+  storeReaders,
+  storeStateWord,
+  storeUsesByProject,
+  storesCount,
+} from "@/components/deploy/secret-store-state"
 import {
   AZURE_CLOUDS,
   STORE_KINDS,
@@ -105,11 +119,41 @@ function storeWhere(store: Pick<SecretStore, "kind" | "settings">) {
 }
 
 /**
+ * A store's product on a tile, as a row and an empty card lead with it.
+ * OpenBao's only published file is a wordmark that does not read at this
+ * size (`SecretStoreMark`), so its tile holds the lock.
+ */
+function StoreLogo({
+  kind,
+  size = "sm",
+  className,
+}: {
+  kind: SecretStoreKind
+  size?: "sm" | "md"
+  className?: string
+}) {
+  return (
+    <ProductLogo
+      id={kind === "openbao" ? undefined : kind}
+      size={size}
+      fallback={LockClosed}
+      className={className}
+    />
+  )
+}
+
+// The stores and the kinds not connected yet that the picture has room for;
+// past it the rest are one "N more" node and the list names them.
+const PICTURE_TARGETS = 5
+
+/**
  * Secret stores: the Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager
  * and Azure Key Vault connections that deployment variables read as
- * `${{store.NAME/path#KEY}}`. A card per store says where it is, how it signs
- * in, who reads it and how the last test or run's read went — in amber, in
- * the store's own words, when it refused.
+ * `${{store.NAME/path#KEY}}`. The page reads as Notifications beside it does:
+ * a picture of the stores, this server and the projects whose variables read
+ * them, then a one-line card per store: where it is and how it signs in, a
+ * dot and a word for how it last answered, and how many variables read it.
+ * The store's own words, when it refused, are a press on that word away.
  */
 export function SecretStoresPage() {
   const { can } = useAuth()
@@ -119,6 +163,9 @@ export function SecretStoresPage() {
     10000,
     [],
   )
+  const fleet = useFleet()
+  // Beside the name where a row has the room, under it on a phone.
+  const wide = useMediaQuery("(min-width: 640px)")
   const [draft, setDraft] = useState<Draft>()
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string>()
@@ -226,65 +273,80 @@ export function SecretStoresPage() {
         }
         title="Secret stores"
       />
-      <Panel plain>
-        <PanelHeader
-          title="Stores"
-          actions={
-            <span className="flex flex-wrap items-center gap-3">
-              {list && list.length > 0 && (
-                <span className="numeric text-hint text-muted-foreground">
-                  {plural(list.length, "store")}
-                </span>
-              )}
-              {admin && list && list.length > 0 && (
-                <Button size="sm" onClick={() => open(emptyDraft("vault"))}>
-                  <Plus className="size-3.5" />
-                  Add store
-                </Button>
-              )}
-            </span>
-          }
-        />
-        <PanelBody>
-          {stores.error ? (
-            <ErrorState error={stores.error} onRetry={stores.refresh} />
-          ) : stores.loading && !list ? (
-            <LoadingRows rows={2} />
-          ) : (list?.length ?? 0) === 0 ? (
-            admin ? (
-              // The empty page is the sheet's first question: which store.
-              <ChoiceGrid columns={2} className="animate-rise">
-                {STORE_KINDS.map((option, index) => (
-                  <ChoiceCard
-                    key={option.kind}
-                    verb={`Add ${option.title}`}
-                    mark={({ className }: { className?: string }) => (
-                      <SecretStoreMark kind={option.kind} className={className} />
-                    )}
-                    title={option.title}
-                    description={option.hint}
-                    index={index}
-                    onClick={() => open(emptyDraft(option.kind))}
-                  />
-                ))}
-              </ChoiceGrid>
-            ) : (
-              <EmptyNote>No secret store is connected yet.</EmptyNote>
-            )
-          ) : (
-            <ChoiceList aria-label="Secret stores" className="animate-rise">
-              {list?.map((store) => (
-                <StoreCard
-                  key={store.id}
-                  store={store}
-                  verbs={verbsFor(store)}
-                  onEdit={admin ? () => open(draftOf(store)) : undefined}
-                />
-              ))}
-            </ChoiceList>
+      {stores.error && !list ? (
+        <ErrorState error={stores.error} onRetry={stores.refresh} />
+      ) : (
+        <>
+          {/* Nothing is wired before the first store, and a picture of two
+              empty rings says less than the cards under it: no picture then. */}
+          {(!list || list.length > 0) && (
+            <div className="mx-auto w-full max-w-5xl lg:py-2">
+              <StoresPicture
+                stores={list}
+                projects={fleet.projects}
+                loading={!list || fleet.waiting}
+                onAdd={admin ? (kind) => open(emptyDraft(kind)) : undefined}
+              />
+            </div>
           )}
-        </PanelBody>
-      </Panel>
+          <Panel plain>
+            <PanelHeader
+              title="Stores"
+              actions={
+                <span className="flex flex-wrap items-center gap-3">
+                  {list && list.length > 0 && (
+                    <span className="numeric text-hint text-muted-foreground">
+                      {storesCount(list)}
+                    </span>
+                  )}
+                  {admin && list && list.length > 0 && (
+                    <Button size="sm" onClick={() => open(emptyDraft("vault"))}>
+                      <Plus className="size-3.5" />
+                      Add store
+                    </Button>
+                  )}
+                </span>
+              }
+            />
+            <PanelBody>
+              {!list ? (
+                <LoadingRows rows={2} className="[&>*]:h-14 [&>*]:rounded-xl" />
+              ) : list.length === 0 ? (
+                admin ? (
+                  // The empty page is the sheet's first question: which store.
+                  <ChoiceGrid columns={3} className="animate-rise">
+                    {STORE_KINDS.map((option, index) => (
+                      <ChoiceCard
+                        key={option.kind}
+                        verb={`Add ${option.title}`}
+                        logo={<StoreLogo kind={option.kind} size="md" />}
+                        title={option.title}
+                        description={option.short}
+                        index={index}
+                        onClick={() => open(emptyDraft(option.kind))}
+                      />
+                    ))}
+                  </ChoiceGrid>
+                ) : (
+                  <EmptyNote>No secret stores</EmptyNote>
+                )
+              ) : (
+                <ChoiceList aria-label="Secret stores" className="animate-rise">
+                  {list.map((store) => (
+                    <StoreRow
+                      key={store.id}
+                      store={store}
+                      wide={wide}
+                      verbs={verbsFor(store)}
+                      onEdit={admin ? () => open(draftOf(store)) : undefined}
+                    />
+                  ))}
+                </ChoiceList>
+              )}
+            </PanelBody>
+          </Panel>
+        </>
+      )}
 
       <SidePanel
         open={Boolean(draft)}
@@ -333,19 +395,163 @@ function ready(draft: Draft) {
 }
 
 /**
- * One store: its product's mark, its name, and under it where it is and how
- * it signs in, how the newest test or read went, and who reads it.
+ * What reads what: each store on one side, drawn as the product it is, this
+ * server in the middle (it signs in and reads a key when a run starts), and
+ * on the other side the projects whose variables read a store, each with how
+ * many of them do.
+ *
+ * A store's line carries a pulse while it last answered and stands amber and
+ * still once it refused; a project's line is amber while a store it reads is
+ * refusing, because its next run will not get that value. The kinds not
+ * connected yet are their marks in dashed rings, pressed to add one by an
+ * administrator. Pointing at a store steps back the projects that do not
+ * read it.
+ *
+ * On a phone the list under it names every store, so the picture is the
+ * marks alone: the stores over this server over the projects.
  */
-function StoreCard({
+function StoresPicture({
+  stores,
+  projects,
+  loading,
+  onAdd,
+}: {
+  stores: SecretStore[] | undefined
+  projects: DeploymentSummary[]
+  loading: boolean
+  onAdd?: (kind: SecretStoreKind) => void
+}) {
+  const list = stores ?? NO_STORES
+  const readers = storeReaders(list)
+  const related = useCallback(
+    (focus: string, id: string) => {
+      const reads = (storeId: string, projectId: string) =>
+        list.some(
+          (store) =>
+            storeNodeId(store.id) === storeId &&
+            store.usedBy.some((use) => projectNodeId(use.projectId) === projectId),
+        )
+      return reads(focus, id) || reads(id, focus)
+    },
+    [list],
+  )
+  const missing = STORE_KINDS.filter(
+    (kind) => !list.some((store) => store.kind === kind.kind),
+  ).slice(0, Math.max(0, PICTURE_TARGETS - list.length))
+  const sources: WireFlowNode[] = [
+    ...list.map((store): WireFlowNode => {
+      const state = storeStateWord(store).label.toLowerCase()
+      return {
+        id: storeNodeId(store.id),
+        mark: (size) => (
+          <WireMark tone="logo" size={size}>
+            <SecretStoreMark kind={store.kind} />
+          </WireMark>
+        ),
+        title: <span className="font-mono">{store.name}</span>,
+        name: `${store.name}: ${state}`,
+        hint: `${storeKind(store.kind).title} · ${state}`,
+        line: storeLine(store),
+      }
+    }),
+    ...missing.map((kind): WireFlowNode => ({
+      id: `add:${kind.kind}`,
+      placeholder: true,
+      mark: (size) => (
+        <WirePlaceholder
+          size={size}
+          product={kind.kind === "openbao" ? undefined : kind.kind}
+          fallback={LockClosed}
+        />
+      ),
+      title: <span className="text-muted-foreground">{kind.title}</span>,
+      name: kind.title,
+      hint: kind.short,
+      onPress: onAdd ? () => onAdd(kind.kind) : undefined,
+      label: `Add ${kind.title}`,
+      line: { state: "idle" },
+    })),
+  ]
+  const targets: WireFlowNode[] =
+    readers.length === 0
+      ? [
+          {
+            id: "reader:none",
+            placeholder: true,
+            mark: (size) => (
+              <WirePlaceholder size={size}>
+                <Plus />
+              </WirePlaceholder>
+            ),
+            title: <span className="font-normal text-muted-foreground">No reader yet</span>,
+            name: "No reader yet",
+            hint: "a variable reads a key by reference",
+            line: { state: "idle" },
+          },
+        ]
+      : readers.map((reader) =>
+          projectNode({
+            id: reader.projectId,
+            name: reader.projectName,
+            deployment: projects.find((project) => project.id === reader.projectId),
+            hint: `${plural(reader.variables, "variable")}${reader.refused ? " · a store refuses" : ""}`,
+            line: { state: reader.refused ? "warning" : "up" },
+          }),
+        )
+  return (
+    <WireFlow
+      className="animate-rise"
+      phone="marks"
+      loading={loading}
+      related={related}
+      start={{
+        title: "Stores",
+        nodes: sources,
+        max: PICTURE_TARGETS,
+        more: { words: (hidden) => plural(hidden, "more store") },
+        loadingRows: 3,
+      }}
+      hub={{
+        mark: (size) => <WireHost size={size} />,
+        eyebrow: "This server",
+        title: "Every run",
+        hint: `reads ${plural(list.length, "store")} as it starts`,
+      }}
+      end={{
+        title: "Projects reading them",
+        nodes: targets,
+        max: 3,
+        more: { href: "/deploy", words: (hidden) => plural(hidden, "more project") },
+        loadingRows: 2,
+      }}
+    />
+  )
+}
+
+const NO_STORES: SecretStore[] = []
+const storeNodeId = (id: number) => `store:${id}`
+
+/**
+ * One store on one line: its product's mark, its name over where it is and
+ * how it signs in, then how it last answered as a dot and a word, and how
+ * many variables read it. Every state is the same height: the store's own
+ * words and the variables that read it, which were a second and a third line
+ * under the name, open from the state word and from the count.
+ *
+ * A phone has no room for the two beside the name, and keeps them on a second
+ * line under it, on every row alike.
+ */
+function StoreRow({
   store,
+  wide,
   verbs,
   onEdit,
 }: {
   store: SecretStore
+  wide: boolean
   verbs: Verb[]
   onEdit?: () => void
 }) {
-  const health = storeHealth(store)
   const endpoint = store.endpoint || store.address
   let host = endpoint
   try {
@@ -353,38 +559,135 @@ function StoreCard({
   } catch {
     // Shown as typed.
   }
-  const readers = store.usedBy
+  const where = `${storeWhere(store)}${store.allowPreviews ? " · previews too" : ""}`
+  const state = <StoreStatus store={store} />
   return (
     <ChoiceRow
-      leading={<SecretStoreMark kind={store.kind} className="size-5" />}
+      leading={<StoreLogo kind={store.kind} />}
       title={<span className="font-mono">{store.name}</span>}
       verb={`Edit ${store.name}`}
       onSelect={onEdit}
       disabled={!onEdit}
       description={
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <span>
-            <span className="font-mono">{host}</span> · {storeWhere(store)}
-            {store.allowPreviews && " · previews too"}
-          </span>
-          <span className={health.tone === "warning" ? "text-warning" : undefined}>
-            {health.line}
-          </span>
-          <span>
-            {readers.length === 0
-              ? "No variable reads it yet"
-              : `Read by ${readers
-                  .slice(0, 3)
-                  .map((use) => `${use.projectName} (${use.environmentName}) as ${use.variable}`)
-                  .join(", ")}${readers.length > 3 ? ` and ${readers.length - 3} more` : ""}`}
-          </span>
-        </span>
+        <>
+          <span className="font-mono">{host}</span>
+          {wide && ` · ${where}`}
+        </>
       }
-      // At phone width the mark already says which product, and the row's
-      // room goes to where it is and how it last answered.
-      trailing={<Tag className="max-sm:hidden">{storeKind(store.kind).title}</Tag>}
+      trailing={
+        wide && (
+          // Fixed widths, so down a list the states are one column and the
+          // counts end on one edge.
+          <span className="flex items-center gap-3 text-muted-foreground">
+            <span className="flex w-32">{state}</span>
+            <StoreReaders store={store} className="w-16 text-right" />
+          </span>
+        )
+      }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${store.name}`} />}
-    />
+    >
+      {!wide && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground">
+          <div className="basis-full">{state}</div>
+          <span className="min-w-0 flex-1 truncate">{where}</span>
+          <StoreReaders store={store} />
+        </div>
+      )}
+    </ChoiceRow>
+  )
+}
+
+/**
+ * How a store last answered, as a dot and a word that open on the rest: the
+ * newest test or read in the store's own words, the one before it, how it
+ * signs in and where it is in full. It was a second line under the name,
+ * which made a refusing store a taller card than an answering one.
+ */
+function StoreStatus({ store }: { store: SecretStore }) {
+  const word = storeStateWord(store)
+  const health = storeHealth(store)
+  const tried: [string, typeof store.test][] = [
+    ["Last test", store.test],
+    ["A run's last read", store.lastRead],
+  ]
+  return (
+    <Popover>
+      <PopoverTrigger
+        aria-label={`${word.label}: how ${store.name} last answered`}
+        className="rounded-sm focus-ring"
+      >
+        <Status tone={word.tone} label={word.label} />
+      </PopoverTrigger>
+      {/* A press in here reaches the row through React even from a portal, and
+          the row would open its editor. */}
+      <PopoverContent align="end" className="w-80" onClick={(event) => event.stopPropagation()}>
+        <div className="space-y-3 text-hint">
+          <p className={cn("break-words", health.tone === "warning" && "text-warning")}>
+            {health.line}
+          </p>
+          <dl className="space-y-2">
+            {tried.map(
+              ([name, outcome]) =>
+                outcome && (
+                  <div key={name}>
+                    <dt className="text-muted-foreground">
+                      {name} · {relativeTime(outcome.at)}
+                    </dt>
+                    <dd className="break-words">{outcome.message}</dd>
+                  </div>
+                ),
+            )}
+          </dl>
+          <p className="font-mono break-all text-muted-foreground">
+            {storeKind(store.kind).title} · {store.endpoint || store.address}
+          </p>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/**
+ * How many variables read this store, opening on which: each project once,
+ * a link to its variables, then the environment, the variable and the key it
+ * reads. The readers were a sentence under the row, which named three and
+ * counted the rest.
+ */
+function StoreReaders({ store, className }: { store: SecretStore; className?: string }) {
+  const shape = cn("numeric shrink-0 text-hint whitespace-nowrap text-muted-foreground", className)
+  if (store.usedBy.length === 0) return <span className={shape}>Not read</span>
+  const count = `Read by ${store.usedBy.length}`
+  return (
+    <Popover>
+      <PopoverTrigger
+        aria-label={count}
+        className={cn(shape, "rounded-sm focus-ring hover:text-foreground")}
+      >
+        {count}
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80" onClick={(event) => event.stopPropagation()}>
+        <ul aria-label={`Variables reading ${store.name}`} className="space-y-2 text-hint">
+          {storeUsesByProject(store.usedBy).map((project) => (
+            <li key={project.projectId} className="min-w-0 text-muted-foreground">
+              <Link
+                href={`/deploy/${project.projectId}/settings/variables`}
+                className="rounded-sm font-medium text-foreground focus-ring hover:underline"
+              >
+                {project.projectName}
+              </Link>
+              {project.uses.map((use) => (
+                <span key={`${use.environmentId}-${use.variable}`} className="block break-words">
+                  {use.environmentName} as <span className="font-mono">{use.variable}</span>
+                  <span className="block font-mono break-all text-muted-foreground/80">
+                    {use.reference}
+                  </span>
+                </span>
+              ))}
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
   )
 }
 
