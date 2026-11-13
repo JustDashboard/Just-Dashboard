@@ -302,7 +302,7 @@ export default function BackupsPage() {
           gone quiet. What is not covered is the Coverage list's to say — a
           finding repeating its count was the same sentence twice. */}
 
-        {jobs.error && <ErrorState error={jobs.error} onRetry={jobs.refresh} />}
+        {jobs.error && <ErrorState error={jobs.error} onRetry={jobs.refresh} retryable />}
         {jobs.data && list.length === 0 && (
           <EmptyState
             icon={Archive}
@@ -360,7 +360,9 @@ export default function BackupsPage() {
           confirm={confirm}
         />
 
-        {coverage.error && <ErrorState error={coverage.error} onRetry={coverage.refresh} />}
+        {coverage.error && (
+          <ErrorState error={coverage.error} onRetry={coverage.refresh} retryable />
+        )}
         <CoveragePanel
           report={coverage.data}
           containers={containers}
