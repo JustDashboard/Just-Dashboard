@@ -662,7 +662,7 @@ test.describe("DNS", () => {
     )
     await expect(page.getByRole("link", { name: "Per-link DNS" })).toHaveAttribute(
       "href",
-      "#dns-links",
+      "/network/dns#dns-links",
     )
   })
 

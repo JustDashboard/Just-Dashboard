@@ -103,6 +103,8 @@ export type UpstreamIdentity = {
   bare?: boolean
   /** The path to it is already a tunnel's, so plain DNS on it is not readable from outside. */
   tunnel?: boolean
+  /** It is a program listening on this server, so a question to it does not leave the host. */
+  local?: boolean
 }
 
 /**
@@ -128,6 +130,7 @@ export function identify(up: Upstream, view: DNSView): UpstreamIdentity {
       product: KIND_PRODUCT[listener.kind],
       name: adblocker?.name ?? KIND_NAME[listener.kind],
       detail: adblocker ? "blocks ads" : undefined,
+      local: true,
     }
   }
   if (address === "100.100.100.100" || up.scope.startsWith("tailscale")) {
@@ -280,6 +283,15 @@ export function upstreamWords(view: DNSView): { words: string; product?: string 
         chosen.length > 1
           ? `asked directly with ${chosen.length - 1} more, unencrypted`
           : "asked directly, unencrypted",
+    }
+  }
+  // A resolver on this host is asked over loopback: "unencrypted" would warn
+  // of a path nobody else is on.
+  if (identities.every((i) => i.local)) {
+    const products = [...new Set(identities.map((i) => i.product))]
+    return {
+      words: `${namesOf(identities.map((i) => i.name))} on this server`,
+      product: products.length === 1 ? products[0] : undefined,
     }
   }
   const products = [...new Set(identities.map((i) => i.product))]

@@ -158,6 +158,7 @@ test("an upstream is named only by what its address proves", () => {
   expect(identify(up("10.0.4.9"), host)).toMatchObject({
     name: "AdGuard Home",
     detail: "blocks ads",
+    local: true,
   })
   expect(identify(up("100.100.100.100", "tailscale0"), host)).toMatchObject({
     name: "MagicDNS",
@@ -190,6 +191,9 @@ test("a host with no stub does not say its nameserver twice", () => {
     "asked directly with 2 more, unencrypted",
   )
   expect(upstreamWords(direct(["1.1.1.1"])).words).toBe("Cloudflare unencrypted")
+  const cached = direct(["127.0.0.1"])
+  cached.listeners = [{ address: "127.0.0.1", protocol: "udp", loopback: true, kind: "dnsmasq" }]
+  expect(upstreamWords(cached).words).toBe("dnsmasq on this server")
 })
 
 test("the page is about the stub where programs ask it, and the file where they do not", () => {

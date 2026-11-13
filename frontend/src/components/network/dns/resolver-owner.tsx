@@ -30,9 +30,11 @@ export function OwnerHandoff({ owner }: { owner: ResolverOwner }) {
       Open the interfaces
     </Link>
   ) : (
-    <a className="underline" href={owner.handoffHref}>
+    // An anchor of the page's first view, linked whole so it also leads there
+    // from the settings, where the same hand-off is said.
+    <Link className="underline" href={`/network/dns${owner.handoffHref}`}>
       Per-link DNS
-    </a>
+    </Link>
   )
 }
 
