@@ -292,7 +292,7 @@ test("what a row has no room for is listed in the list's editor", async () => {
   expect(coverageShort(undefined)).toBeUndefined()
   expect(fetchWords(blocklist({ refresh: "24h", failures: 3, nextRefresh: "x" }), when)).toEqual({
     fetched: "daily · fetched 5h ago",
-    next: "3 failed tries · next 5h ago",
+    next: "3 failed · next 5h ago",
   })
   // The page's clock says "3h from now"; the column says "in 3h".
   expect(

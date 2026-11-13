@@ -509,7 +509,7 @@ export function fetchWords(
   return {
     fetched: `${label} · ${list.refreshed ? `fetched ${when(list.refreshed)}` : "not fetched yet"}`,
     next: [
-      failures > 0 ? `${failures} failed ${failures === 1 ? "try" : "tries"}` : undefined,
+      failures > 0 ? `${failures} failed` : undefined,
       next
         ? next.endsWith(" from now")
           ? `next in ${next.slice(0, -" from now".length)}`

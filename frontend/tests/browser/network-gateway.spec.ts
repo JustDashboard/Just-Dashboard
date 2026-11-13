@@ -673,7 +673,7 @@ test.describe("protection lifecycle", () => {
     await expect(drop.getByText(/every 6 hours · fetched/)).toBeVisible()
     await expect(drop.getByText(/next in \d/)).toBeVisible()
     const firehol = blocklistRow(page, "FireHOL level 1")
-    await expect(firehol.getByText(/3 failed tries · next in/)).toBeVisible()
+    await expect(firehol.getByText(/3 failed · next in/)).toBeVisible()
     // What the row has no room for is the head of the list's editor.
     await page.getByRole("button", { name: "Edit China and Russia" }).click()
     const about = page.getByRole("region", { name: "About China and Russia" })

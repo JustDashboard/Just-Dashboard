@@ -53,6 +53,7 @@ import {
   listSource,
   listState,
   REFRESH_CHOICES,
+  refreshWord,
   type BlocklistRequest,
 } from "@/components/network/protection/reading"
 
@@ -243,7 +244,10 @@ export function BlocklistList({
               }
               trailing={
                 <span className="flex items-center gap-4">
-                  <span className="hidden w-44 text-right leading-tight xl:grid">
+                  <span
+                    className="hidden w-44 text-right leading-tight xl:grid"
+                    title={refreshWord(list, relativeTime)}
+                  >
                     <span className="truncate text-hint">{fetch?.fetched ?? "kept as typed"}</span>
                     {/* Held when there is nothing to say, so the line above
                         sits where it does on every row. */}
@@ -252,7 +256,7 @@ export function BlocklistList({
                     </span>
                   </span>
                   <span
-                    className="numeric hidden min-w-[4.5rem] text-right leading-tight sm:grid"
+                    className="numeric hidden w-24 text-right leading-tight sm:grid"
                     title={totalWord(list.total, calendarDate)}
                   >
                     <span className="text-body font-medium">{list.count.toLocaleString()}</span>

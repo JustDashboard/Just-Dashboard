@@ -143,7 +143,7 @@ export function LimitList({
                   points={pressure?.limits.find((l) => l.id === limit.id)?.refused}
                 />
                 <span
-                  className="numeric hidden min-w-[4.5rem] text-right leading-tight sm:grid"
+                  className="numeric hidden w-24 text-right leading-tight sm:grid"
                   title={totalWord(limit.total, calendarDate)}
                 >
                   <span className="text-body font-medium">{compact(limit.packets)}</span>
