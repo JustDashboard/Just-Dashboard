@@ -139,8 +139,9 @@ export function AddressPicture({
             </>
           ),
           // The hub's words hang under its mark, and one address is a single
-          // row: the cell keeps the room they need.
-          className: "lg:py-20",
+          // row: the cell keeps the room they need. Stacked down a phone it
+          // stands on the edge the other marks stand on.
+          className: "max-lg:justify-start lg:py-20",
         }}
         end={{
           title: "What it reached",
