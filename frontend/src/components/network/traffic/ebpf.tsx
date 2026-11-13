@@ -1,19 +1,19 @@
 "use client"
 
-import { useState } from "react"
+import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import type { EBPFView } from "@/lib/types"
+import type { EBPFPlatform } from "@/lib/network-traffic"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { usePoll } from "@/hooks/use-poll"
-import { Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { RowList, Row } from "@/components/row-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
-import { NumberTicker } from "@/components/ui/number-ticker"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -24,50 +24,82 @@ import {
 } from "@/components/ui/table"
 import { InstallHandoff, InstallFollowUp } from "@/components/network/install"
 import { LinkGlyph } from "@/components/network/marks"
-import { EBPFProgramSheet } from "@/components/network/traffic/ebpf-detail"
-import type { EBPFPlatform } from "@/lib/network-traffic"
+import { programHref } from "./address"
+import { ebpfWords } from "./words"
 
 const num = (value: number) => value.toLocaleString()
 
 /**
  * The eBPF programs loaded into this kernel, read with `bpftool` and drawn as
- * an inventory: how many, of which types, what is attached to which device,
- * and each program with when it was loaded and what it holds. Everything here
- * is what the kernel reports at the moment — systemd's cgroup filters, an XDP
- * program on the uplink, whatever Cilium or a tracer loaded — and nothing is
- * a probe this dashboard runs. Without `bpftool` the section says what it
- * would read and offers the package, as every absent tool here does.
+ * an inventory: each program with its type, when it was loaded and what it
+ * holds, and what is attached to which device. Everything here is what the
+ * kernel reports at the moment — systemd's cgroup filters, an XDP program on
+ * the uplink, whatever Cilium or a tracer loaded — and nothing is a probe
+ * this dashboard runs. Without `bpftool` the view says what it would read and
+ * offers the package, as every absent tool here does.
  *
- * The type counts are filters: a press narrows the table to that type, and the
- * run counts are drawn only where the kernel keeps them (`bpf_stats_enabled`),
- * because a column of zeros would read as programs that never ran. What the
- * kernel offers eBPF — JIT, unprivileged loading, BTF, the bpf filesystem —
- * is read from its own files and stated under the figures; a program opens
- * into its maps, every place it is attached and its cost per run, and the
- * programs of the dashboard's own kernel observer are marked as such.
+ * It opened on four tiles. The program count is the table's own and its
+ * chips'; the locked memory, the device attachments and the cgroup
+ * attachments are one line of words over the table, with what the kernel
+ * offers eBPF — JIT, unprivileged loading, BTF, the bpf filesystem — under
+ * it. The table stays a table: an inventory of what may be hundreds of
+ * programs is read down its columns, one line each, the name the way in.
+ *
+ * The type chips are filters and the type is in the address (`?type=`), so a
+ * program's page knows which list it was opened from. Run counts are drawn
+ * only where the kernel keeps them (`bpf_stats_enabled`): a column of zeros
+ * would read as programs that never ran. A program opens its own page — its
+ * maps, every place it is attached and its cost per run — and the programs of
+ * the dashboard's own kernel observer are marked as such.
  */
-export function EBPFSection() {
+export function EBPFPrograms() {
   const ebpf = usePoll<EBPFView>((signal) => get("/network/ebpf", undefined, signal), 30_000)
-  const [type, setType] = useState<string>()
-  const [opened, setOpened] = useState<number>()
+  const params = useSearchParams()
+  const type = params.get("type") ?? undefined
+  const setType = (next: string | undefined) => {
+    const url = new URL(window.location.href)
+    if (next) url.searchParams.set("type", next)
+    else url.searchParams.delete("type")
+    window.history.replaceState(null, "", `${url.pathname}${url.search}`)
+  }
 
   if (!ebpf.data) {
-    return (
-      <Section title="eBPF">
-        {ebpf.error ? <ErrorState error={ebpf.error} onRetry={ebpf.refresh} /> : <LoadingPanel />}
-      </Section>
+    return ebpf.error ? (
+      <ErrorState error={ebpf.error} onRetry={ebpf.refresh} />
+    ) : (
+      <Panel plain aria-label="eBPF programs">
+        <PanelHeader title="Programs" />
+        <PanelBody className="flex flex-col gap-4">
+          <span aria-hidden className="flex flex-col gap-2">
+            <Skeleton className="my-0.5 h-3.5 w-2/3" />
+            <Skeleton className="my-0.5 h-3 w-1/2" />
+          </span>
+          <div aria-hidden className={FRAME}>
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i} className="flex h-10 items-center gap-6 border-b border-hairline px-4">
+                <Skeleton className="h-3 w-10" />
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-3 w-40" />
+              </div>
+            ))}
+          </div>
+        </PanelBody>
+      </Panel>
     )
   }
   const view = ebpf.data
+  const warning = (
+    <NetworkReadWarning
+      error={ebpf.error}
+      refresh={ebpf.refresh}
+      lastSuccess={ebpf.lastSuccess}
+      reading="eBPF inventory"
+    />
+  )
   if (!view.installed) {
     return (
-      <Section title="eBPF">
-        <NetworkReadWarning
-          error={ebpf.error}
-          refresh={ebpf.refresh}
-          lastSuccess={ebpf.lastSuccess}
-          reading="eBPF inventory"
-        />
+      <div className="flex min-w-0 flex-col gap-4">
+        {warning}
         <InstallHandoff
           pkg={view.package ?? "bpftool"}
           products={["linux"]}
@@ -75,65 +107,136 @@ export function EBPFSection() {
           description="The kernel runs eBPF programs for its firewalls, tracers and packet filters; bpftool is the tool that lists them. Once it is in, what is loaded and where it is attached appears here."
           onInstalled={ebpf.refresh}
         />
-      </Section>
+      </div>
     )
   }
-  const programs = type ? view.programs.filter((p) => p.type === type) : view.programs
+  const known = view.byType.some((t) => t.type === type) ? type : undefined
+  const programs = known ? view.programs.filter((p) => p.type === known) : view.programs
   const stats = view.bpfStatsEnabled
-  const memlock = view.programs.reduce((n, p) => n + p.memlock, 0)
   const observer = new Set(view.observerProgramIds ?? [])
 
   return (
-    <Section title="eBPF">
-      <NetworkReadWarning
-        error={ebpf.error}
-        refresh={ebpf.refresh}
-        lastSuccess={ebpf.lastSuccess}
-        reading="eBPF inventory"
-      />
-      <InstallFollowUp pkg={view.package ?? "bpftool"} />
-      {view.error && <Notice title="bpftool reported a problem">{view.error}</Notice>}
-      <StatGrid columns={4}>
-        <StatTile
-          label="Programs"
-          value={<NumberTicker value={view.total} />}
-          hint={`${plural(view.byType.length, "type")} loaded`}
-        />
-        <StatTile
-          label="Locked memory"
-          value={bytes(memlock)}
-          hint="held by the programs while they are loaded"
-        />
-        <StatTile
-          label="Attached"
-          value={<NumberTicker value={view.attachments.length} />}
-          hint={
-            view.attachments.length > 0
-              ? [...new Set(view.attachments.map((a) => a.device))].join(", ")
-              : "to no network device"
+    <div className="flex min-w-0 flex-col gap-8">
+      <Panel plain aria-label="eBPF programs">
+        <PanelHeader
+          title="Programs"
+          actions={
+            <span className="numeric text-hint text-muted-foreground">
+              {known ? `${programs.length} of ${view.total}` : plural(view.total, "program")}
+            </span>
           }
         />
-        <StatTile
-          label="On cgroups"
-          value={
-            view.cgroupAttachments === undefined ? (
-              "—"
-            ) : (
-              <NumberTicker value={view.cgroupAttachments} />
-            )
-          }
-          hint={
-            view.cgroupAttachments === undefined
-              ? "the cgroup tree could not be read"
-              : "service firewalls, device filters and observers"
-          }
-        />
-      </StatGrid>
-      {view.platform && <PlatformFacts platform={view.platform} />}
+        <PanelBody className="flex flex-col gap-4">
+          {warning}
+          <InstallFollowUp pkg={view.package ?? "bpftool"} />
+          {view.error && <Notice title="bpftool reported a problem">{view.error}</Notice>}
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="numeric text-body" aria-label="eBPF inventory">
+              {ebpfWords(view)}
+            </p>
+            {view.platform && <PlatformFacts platform={view.platform} />}
+          </div>
+          <div className={FRAME}>
+            {view.byType.length > 1 && (
+              <div className="border-b border-hairline px-4 py-2.5">
+                <ChipStrip>
+                  <FilterChip selected={known === undefined} onClick={() => setType(undefined)}>
+                    All <ChipCount>{view.total}</ChipCount>
+                  </FilterChip>
+                  {view.byType.map((t) => (
+                    <FilterChip
+                      key={t.type}
+                      selected={known === t.type}
+                      onClick={() => setType(known === t.type ? undefined : t.type)}
+                    >
+                      <span className="font-mono">{t.type}</span> <ChipCount>{t.count}</ChipCount>
+                    </FilterChip>
+                  ))}
+                </ChipStrip>
+              </div>
+            )}
+            <Table containerClassName="max-h-[32rem]" aria-label="Loaded eBPF programs">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-right">ID</TableHead>
+                  <TableHead className="max-sm:hidden">Type</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="max-md:hidden">Loaded</TableHead>
+                  <TableHead className="text-right">Memory</TableHead>
+                  {stats && <TableHead className="text-right">Runs</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {programs.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell className="numeric text-right font-mono text-muted-foreground">
+                      {p.id}
+                    </TableCell>
+                    <TableCell className="font-mono whitespace-nowrap max-sm:hidden">
+                      {p.type}
+                    </TableCell>
+                    <TableCell className="w-full max-w-0">
+                      <span className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
+                        <Link
+                          href={programHref(p.id, known)}
+                          aria-label={`Open program ${p.id}`}
+                          className="min-w-0 truncate rounded-sm underline-offset-4 focus-ring hover:underline"
+                        >
+                          {p.name ? (
+                            <span className="font-mono">{p.name}</span>
+                          ) : (
+                            <span className="text-muted-foreground">unnamed</span>
+                          )}
+                        </Link>
+                        {observer.has(p.id) && (
+                          <Tag className="shrink-0">this dashboard&rsquo;s observer</Tag>
+                        )}
+                        {p.owners && p.owners.length > 0 && (
+                          <span className="min-w-0 truncate text-hint text-muted-foreground">
+                            {p.owners.join(", ")}
+                          </span>
+                        )}
+                      </span>
+                      <span className="block truncate font-mono text-hint text-muted-foreground sm:hidden">
+                        {p.type}
+                      </span>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground max-md:hidden">
+                      {p.loadedAt ? relativeTime(p.loadedAt) : "—"}
+                    </TableCell>
+                    <TableCell className="numeric text-right whitespace-nowrap">
+                      {bytes(p.memlock)}
+                    </TableCell>
+                    {stats && (
+                      <TableCell className="numeric text-right">
+                        {p.runCount === undefined ? "—" : num(p.runCount)}
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <p className="text-hint text-muted-foreground">
+            Read with bpftool. The dashboard loads programs only when its kernel observer is on in{" "}
+            <Link href="/network/flows" className="underline underline-offset-4">
+              Socket history
+            </Link>
+            .{!stats && " Run counts are off: kernel.bpf_stats_enabled is 0."}
+          </p>
+        </PanelBody>
+      </Panel>
 
       {view.attachments.length > 0 && (
-        <Panel plain>
-          <PanelHeader title="Attached to devices" />
+        <Panel plain aria-label="Attached to devices">
+          <PanelHeader
+            title="Attached to devices"
+            actions={
+              <span className="numeric text-hint text-muted-foreground">
+                {plural(view.attachments.length, "attachment")}
+              </span>
+            }
+          />
           <PanelBody flush>
             <RowList>
               {view.attachments.map((a) => (
@@ -143,115 +246,28 @@ export function EBPFSection() {
                   title={<span className="font-mono">{a.device}</span>}
                   subtitle={
                     <>
-                      {a.name ?? "unnamed"} · program <span className="numeric">{a.programId}</span>
+                      <Link
+                        href={programHref(a.programId)}
+                        className="underline-offset-4 hover:underline"
+                      >
+                        {a.name ?? "unnamed"} · program{" "}
+                        <span className="numeric">{a.programId}</span>
+                      </Link>
                       {a.mode && ` · ${a.mode} mode`}
                     </>
                   }
-                  trailing={<Tag>{a.kind}</Tag>}
+                  trailing={<span className="font-mono text-hint">{a.kind}</span>}
                 />
               ))}
             </RowList>
           </PanelBody>
         </Panel>
       )}
-
-      <Panel>
-        <PanelHeader
-          title="Programs"
-          actions={
-            <span className="numeric text-hint text-muted-foreground">
-              {type ? `${programs.length} of ${view.total}` : plural(view.total, "program")}
-            </span>
-          }
-        />
-        {view.byType.length > 1 && (
-          <div className="border-b border-hairline px-4 py-2.5">
-            <ChipStrip>
-              <FilterChip selected={type === undefined} onClick={() => setType(undefined)}>
-                All <ChipCount>{view.total}</ChipCount>
-              </FilterChip>
-              {view.byType.map((t) => (
-                <FilterChip
-                  key={t.type}
-                  selected={type === t.type}
-                  onClick={() => setType(type === t.type ? undefined : t.type)}
-                >
-                  <span className="font-mono">{t.type}</span> <ChipCount>{t.count}</ChipCount>
-                </FilterChip>
-              ))}
-            </ChipStrip>
-          </div>
-        )}
-        <PanelBody flush>
-          <Table containerClassName="max-h-[28rem]">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-right">ID</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead className="max-md:hidden">Loaded</TableHead>
-                <TableHead className="text-right">Memory</TableHead>
-                {stats && <TableHead className="text-right">Runs</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {programs.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell className="numeric text-right font-mono text-muted-foreground">
-                    {p.id}
-                  </TableCell>
-                  <TableCell className="font-mono whitespace-nowrap">{p.type}</TableCell>
-                  <TableCell>
-                    <button
-                      type="button"
-                      aria-label={`Open program ${p.id}`}
-                      onClick={() => setOpened(p.id)}
-                      className="rounded-sm text-left underline-offset-4 focus-ring hover:underline"
-                    >
-                      {p.name ? (
-                        <span className="font-mono">{p.name}</span>
-                      ) : (
-                        <span className="text-muted-foreground">unnamed</span>
-                      )}
-                    </button>
-                    {observer.has(p.id) && (
-                      <Tag className="ml-2">this dashboard&rsquo;s observer</Tag>
-                    )}
-                    {p.owners && p.owners.length > 0 && (
-                      <span className="ml-2 text-hint text-muted-foreground">
-                        {p.owners.join(", ")}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground max-md:hidden">
-                    {p.loadedAt ? relativeTime(p.loadedAt) : "—"}
-                  </TableCell>
-                  <TableCell className="numeric text-right whitespace-nowrap">
-                    {bytes(p.memlock)}
-                  </TableCell>
-                  {stats && (
-                    <TableCell className="numeric text-right">
-                      {p.runCount === undefined ? "—" : num(p.runCount)}
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </PanelBody>
-      </Panel>
-      <p className="text-hint text-muted-foreground">
-        This is what the kernel has loaded right now, read with bpftool. The dashboard loads
-        programs only when its kernel observer is turned on in Socket history, and they are marked
-        here.
-        {!stats && " Run counts are off: kernel.bpf_stats_enabled is 0."}
-      </p>
-      {opened !== undefined && (
-        <EBPFProgramSheet id={opened} onClose={() => setOpened(undefined)} />
-      )}
-    </Section>
+    </div>
   )
 }
+
+const FRAME = "min-w-0 overflow-hidden rounded-xl border bg-card"
 
 const JIT_WORD: Record<string, string> = { "0": "off", "1": "on", "2": "on, with debug output" }
 const UNPRIVILEGED_WORD: Record<string, string> = {

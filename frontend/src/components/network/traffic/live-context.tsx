@@ -1,63 +1,45 @@
 "use client"
 
-import type { NetworkLink } from "@/lib/types"
-import {
-  millis,
-  observationAge,
-  packetRate,
-  retransmitShare,
-  shareLabel,
-} from "@/lib/network-traffic"
-import { plural, relativeTime } from "@/lib/format"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { ArrowUpDown, Monitoring } from "@/components/icons"
+import { WireMark } from "@/components/deploy/wire"
 import { TileTrend } from "@/components/metrics/sparkline"
-import { useNow } from "@/components/deploy/vocabulary"
+import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import type { LiveTraffic } from "@/components/network/use-live-traffic"
+import { packetWords, tcpWords } from "./words"
 
 /**
- * What the live byte rates cannot say on their own, over the same two-second
- * steps: how old the newest reading is, the uplink's packets, how much of
- * what TCP sent had to be sent again, and TCP's own round-trip estimate on
- * the host's live sockets. Every figure is something the kernel measured on
- * real traffic; nothing here is a probe.
+ * What the byte rates cannot say on their own, over the same two-second
+ * steps: the uplink's packets, and how TCP is faring — the share of what it
+ * sent that had to be sent again, and its own round-trip estimate on the
+ * host's live sockets. Every figure is something the kernel measured on real
+ * traffic; nothing here is a probe.
  *
- * Age is the first figure because a chart that keeps drawing its last answer
- * looks exactly like a quiet link: past three missed steps it says stale.
+ * These were four tiles. How old the newest reading is went to the identity
+ * line, where the state of the page's readings is said; the other three are
+ * two lines here, each with its last five minutes at its end. A line is one
+ * height in every state, so a first reading landing moves nothing under it.
  */
-export function LiveContext({
-  live,
-  links,
-}: {
-  live: LiveTraffic
-  links: NetworkLink[] | undefined
-}) {
-  const now = useNow(1000) / 1000
-  const age = observationAge(live.sampledAt, now, live.stepSeconds ?? 2)
-  const stale = age.stale || Boolean(live.error)
-  const uplink = links?.find((l) => l.role === "uplink")?.name
+export function LiveContext({ live, uplink }: { live: LiveTraffic; uplink: string | undefined }) {
   const points = uplink ? live.series[uplink] : undefined
-  const last = points?.at(-1)
-  const share = retransmitShare(live.tcp, 30)
-  const recent = live.tcp.slice(-30)
-  const resets = recent.reduce((n, p) => n + p.resets, 0) * (live.stepSeconds ?? 2)
-  const latency = live.latency
+  const packets = packetWords(points?.at(-1))
+  const tcp = tcpWords({
+    tcp: live.tcp,
+    tcpError: live.tcpError,
+    latency: live.latency,
+    stepSeconds: live.stepSeconds,
+  })
+  const waiting = live.now === 0 && !live.error
   return (
-    <StatGrid columns={4} aria-label="Live context">
-      <StatTile
-        label="Newest reading"
-        value={live.sampledAt ? `${age.seconds}s old` : "—"}
-        tone={stale ? "warning" : "default"}
-        hint={
-          live.error
-            ? "the last poll failed; figures are the last answer"
-            : age.stale
-              ? "the sampler has not stepped; figures are stale"
-              : `sampled every ${live.stepSeconds ?? 2}s`
+    <ReadingLines aria-label="Live context" role="group">
+      <ReadingLine
+        mark={
+          <WireMark size="md" hue="var(--chart-1)">
+            <ArrowUpDown />
+          </WireMark>
         }
-      />
-      <StatTile
-        label={uplink ? `Packets on ${uplink}` : "Packets"}
-        value={last?.rxp !== undefined ? packetRate((last.rxp ?? 0) + (last.txp ?? 0)) : "—"}
+        name={uplink ? <>Packets on {uplink}</> : "Packets"}
+        hint={waiting ? undefined : packets.hint}
         trend={
           <TileTrend
             values={(points ?? []).slice(-150).map((p) => (p.rxp ?? 0) + (p.txp ?? 0))}
@@ -65,16 +47,27 @@ export function LiveContext({
             label="Uplink packets a second over the last five minutes"
           />
         }
-        hint={
-          last?.rxp !== undefined
-            ? `${packetRate(last.rxp)} in · ${packetRate(last.txp)} out`
-            : "no uplink reading yet"
+      >
+        {waiting ? (
+          <TextShimmer>Reading the uplink…</TextShimmer>
+        ) : (
+          (packets.reading ?? <NoReading>No reading yet</NoReading>)
+        )}
+      </ReadingLine>
+      <ReadingLine
+        mark={
+          tcp.warning ? (
+            <WireMark size="md" tone="warning">
+              <Monitoring />
+            </WireMark>
+          ) : (
+            <WireMark size="md" hue="var(--chart-3)">
+              <Monitoring />
+            </WireMark>
+          )
         }
-      />
-      <StatTile
-        label="TCP resent"
-        value={shareLabel(share)}
-        tone={share !== undefined && share > 0.02 ? "warning" : "default"}
+        name="TCP health"
+        hint={waiting ? undefined : tcp.hint}
         trend={
           <TileTrend
             values={live.tcp
@@ -84,25 +77,13 @@ export function LiveContext({
             label="Share of TCP segments sent again over the last five minutes"
           />
         }
-        hint={
-          live.tcpError
-            ? `TCP counters unreadable: ${live.tcpError}`
-            : `of segments in the last minute · ${plural(Math.round(resets), "reset")}`
-        }
-      />
-      <StatTile
-        label="TCP round trip"
-        value={latency && !latency.error && latency.sockets > 0 ? millis(latency.medianMs) : "—"}
-        hint={
-          !latency
-            ? "measuring…"
-            : latency.error
-              ? latency.error
-              : latency.sockets === 0
-                ? "no non-loopback TCP socket to measure"
-                : `median of ${plural(latency.sockets, "socket")} · 9 in 10 inside ${millis(latency.p90Ms)} · read ${relativeTime(latency.at)}`
-        }
-      />
-    </StatGrid>
+      >
+        {waiting ? (
+          <TextShimmer>Reading TCP&rsquo;s counters…</TextShimmer>
+        ) : (
+          (tcp.reading ?? <NoReading>Nothing sent yet</NoReading>)
+        )}
+      </ReadingLine>
+    </ReadingLines>
   )
 }
