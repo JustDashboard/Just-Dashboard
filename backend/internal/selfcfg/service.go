@@ -403,7 +403,3 @@ func hostPath(loc *selfupdate.Location, visible string) string {
 // ErrNotSupported is returned to handlers when the install has no stack to
 // act on, so the API can answer 503 rather than 500.
 var ErrNotSupported = errors.New("this install cannot manage its own configuration")
-
-// Deadline for the whole start-up path, so a wedged Docker daemon cannot hold
-// an HTTP handler open indefinitely.
-const startTimeout = 30 * time.Second
