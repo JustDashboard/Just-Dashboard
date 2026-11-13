@@ -16,7 +16,7 @@ protected-connection guard, and each surface registers its own routes from its o
 `…UpgradeRoutes` and `…AssistantRoutes` — grouped by the capability it needs. [Routes](#routes) lists every one with its
 capability, whether it is destructive, the
 action it is audited as and what a protected connection does with it. The pages over them are the
-`/databases/*` row of the [frontend feature map](../frontend/feature-map.md), and the checks that
+`/databases` section of the [frontend feature map](../frontend/feature-map.md), and the checks that
 depend on what a request carries are stated once in
 [request lifecycle](../architecture/request-lifecycle.md#checks-that-depend-on-what-a-request-carries).
 
