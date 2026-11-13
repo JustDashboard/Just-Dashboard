@@ -1,3 +1,9 @@
+// Package config resolves the dashboard's settings from the environment once
+// at boot (Load): each JD_* variable with its default and bounds, the VPSD_*
+// name an older install still carries (Env), and the refusals to start (no
+// allowlist on an address that is not loopback, a malformed value). It only
+// reads: changing a setting from the page is selfcfg's. The settings are
+// listed in docs/guides/configuration.md.
 package config
 
 import (

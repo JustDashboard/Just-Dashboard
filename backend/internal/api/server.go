@@ -1,3 +1,10 @@
+// Package api is the dashboard's HTTP surface: the one router (Routes, in
+// routes.go), the Server whose fields are the feature modules (server.go,
+// modules.go), and the handlers, one handlers_<area>*.go group per area with
+// its mount function. A handler decodes, names its audit action and calls the
+// feature package that owns the work; what joins several features lives here
+// too. It must not reorder what Routes fixes (allowlist, authentication, rate
+// limit, capability). See docs/internal/architecture/request-lifecycle.md.
 package api
 
 import (

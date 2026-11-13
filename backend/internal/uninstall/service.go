@@ -1,3 +1,10 @@
+// Package uninstall removes the dashboard from the server it manages: the plan
+// the dialog shows (Plan), the backend's half (Begin: pause the deployment
+// machinery and, for a wipe, remove the deployments) and the sibling
+// container's half (RunUninstall, the binary's -self-uninstall mode), which
+// takes the stack down and deletes the files. The typed phrase and capability
+// are the route's to check (api/handlers_uninstall.go), not this package's.
+// See docs/internal/backend/databases-proxy-platform.md.
 package uninstall
 
 import (

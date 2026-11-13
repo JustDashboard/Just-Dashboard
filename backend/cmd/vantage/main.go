@@ -1,5 +1,9 @@
-// The optional controlled-vantage executable is rootless and outbound-only.
-// It does not start the dashboard, bind a listener or execute host commands.
+// Command vantage is the optional controlled-vantage agent of the network
+// section's external checks (internal/netvantage): a rootless, outbound-only
+// program that enrols once (-enroll) and then polls the dashboard for the
+// scoped checks it was approved for. It does not start the dashboard, bind a
+// listener or execute host commands. See
+// docs/internal/backend/network-external-checks.md.
 package main
 
 import (
