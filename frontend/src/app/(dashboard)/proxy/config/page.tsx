@@ -244,6 +244,7 @@ function ConfigurationPage() {
     <Page>
       {header}
       <ConfigIdentity
+        root={status.nginxDir}
         tree={tree}
         error={files.error}
         admin={admin}
@@ -363,6 +364,7 @@ function FilesPicture({
  * the line is drawn at its final height with the facts still coming.
  */
 function ConfigIdentity({
+  root,
   tree,
   error,
   loading,
@@ -372,6 +374,8 @@ function ConfigIdentity({
   onOpenMain,
   onShowEngine,
 }: {
+  /** The directory the status names, so the line has its title before the list lands. */
+  root?: string
   tree?: ProxyConfigFiles
   error?: Error
   loading?: boolean
@@ -415,7 +419,7 @@ function ConfigIdentity({
   return (
     <HostIdentity
       mark="nginx"
-      title={<span className="font-mono">{tree?.root ?? "nginx configuration"}</span>}
+      title={<span className="font-mono">{tree?.root ?? root ?? "nginx configuration"}</span>}
       facts={
         error ? (
           <span className="font-medium text-warning" title={errorMessage(error)}>
