@@ -1,25 +1,46 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ArrowLeft, Cross, Download, Globe } from "@/components/icons"
-import { downloadUrl, get } from "@/lib/api"
-import { bytes, minuteSpan } from "@/lib/format"
-import { latencyHead, latencyWords } from "@/lib/latency-words"
-import { latency, perMinute, REQUEST_RANGES, type RequestRange } from "@/lib/requests"
-import type { RequestEntry, SiteTraffic, SiteTrafficSummary, SiteTrafficTail } from "@/lib/types"
+import { Tabs as TabsPrimitive } from "radix-ui"
+import {
+  ArrowRight,
+  ArrowUp,
+  Bell,
+  Box,
+  ChartActivity,
+  CheckCircle,
+  Globe,
+  Logs,
+  RefreshClockwise,
+  Stopwatch,
+  Warning,
+} from "@/components/icons"
+import { get } from "@/lib/api"
+import { bytes, plural, relativeTime } from "@/lib/format"
+import { LANES } from "@/lib/hue"
+import { latencyTerm, latencyWords } from "@/lib/latency-words"
+import { latency, latencyTone, perMinute, REQUEST_RANGES } from "@/lib/requests"
+import type { SiteTrafficReading, SiteTrafficSummary, VHost } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
+import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, Pane } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { RankList } from "@/components/rank-list"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { FilterChip, tabClasses } from "@/components/tabs"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { ChartPanel } from "@/components/metrics/chart-panel"
+import type { ChartRowLike, Series } from "@/components/metrics/metric-chart"
+import { TileTrend } from "@/components/metrics/sparkline"
+import { HUE } from "@/components/overview/readings"
+import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
+import { RankList, RankSkeleton, SplitBar } from "@/components/rank-list"
+import { ErrorState, LoadingPanel } from "@/components/state"
+import { Status, type DotTone } from "@/components/status-dot"
+import { ChipCount, tabClasses } from "@/components/tabs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
   Select,
   SelectContent,
@@ -27,481 +48,729 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { RequestChart } from "@/components/deploy/request-chart"
-import { RequestConsole } from "@/components/deploy/request-console"
-import { TrafficFacets } from "@/components/deploy/traffic-facets"
-import { SiteErrors } from "@/components/proxy/site-errors"
+import { NumberTicker } from "@/components/ui/number-ticker"
+import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
+import { VerbMenu, type Verb } from "@/components/verbs"
+import { WireMark } from "@/components/deploy/wire"
+import { ProjectFavicon } from "@/components/deploy/project-mark"
+import { Segments } from "@/components/deploy/settings/segments"
+import { EngineSetup } from "@/components/proxy/engine-setup"
+import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
+import { engineProduct } from "@/components/proxy/marks"
+import { useProxy, useProxyRead } from "@/components/proxy/proxy-context"
+import { siteBackend } from "@/components/proxy/route-map"
+import { ErrorLog, actionableCount, useErrorReport } from "@/components/proxy/site-errors"
 import {
   busiestSites,
-  compactCount,
+  edgeHour,
   errorRateTone,
-  share,
-  type TrafficView,
+  failingWords,
+  legacySiteTarget,
+  trafficTab,
+  type EdgeHour,
+  type TrafficTab,
 } from "@/components/proxy/site-traffic"
 
-/** What the reader narrowed the window to, from the facets and the rows. */
-type Narrowing = {
-  path: string
-  client: string
-  host: string
-  agent: string
-  referer: string
-  status?: number
-  minMs?: number
-  since?: string
-  until?: string
-}
+/** The windows the error log is read over: the request record's own presets. */
+type ErrorWindow = (typeof REQUEST_RANGES)[number]["id"]
+const ERROR_WINDOWS = REQUEST_RANGES.map((r) => ({ value: r.id, label: windowWord(r.id) }))
 
-const NONE: Narrowing = { path: "", client: "", host: "", agent: "", referer: "" }
-
-/** The query the window, the tail and the export share, so the three agree. */
-function trafficQuery(range: RequestRange, n: Narrowing) {
-  return {
-    window: range === "custom" ? undefined : range,
-    since: n.since,
-    until: n.until,
-    path: n.path || undefined,
-    client: n.client || undefined,
-    host: n.host || undefined,
-    agent: n.agent || undefined,
-    referer: n.referer || undefined,
-    status: n.status,
-    minMs: n.minMs,
-  }
+function windowWord(id: ErrorWindow) {
+  return id === "15m" ? "15 min" : id
 }
 
 /**
- * One nginx site's traffic and errors, read from the logs its file names; with
- * no ?site= it is every site's last hour and nginx's own error log. The chart,
- * facets and console are the deployment Logs page's, answered in its shape.
+ * The deployment Logs page's request series, for the edge's hour: volume as an
+ * area, the two families that mean trouble as lines over it. Module constants,
+ * because `ChartPanel` is memoised on its props.
+ */
+const SERIES: Series[] = [
+  { key: "total", label: "Requests", color: "var(--chart-1)", kind: "area" },
+  { key: "refused", label: "4xx client error", color: "var(--warning)", kind: "line" },
+  { key: "failed", label: "5xx server error", color: "var(--destructive)", kind: "line" },
+]
+const COUNT = (value: number) => Math.round(value).toLocaleString()
+const CHART_HEIGHT = 132
+
+/**
+ * The last hour at the edge, every site at once, read like a project's Logs
+ * page reads one deployment: what the page is about on one line, then the
+ * hour as readings in words (requests a minute, the share that failed, how
+ * long the slowest site took, what was sent), the hour drawn minute by
+ * minute, and two views in the address — the sites that carried it, busiest
+ * first, and what nginx wrote in its error log.
+ *
+ * It opened on four bare tiles and a window select that moved only the error
+ * log. One site's requests were a second copy of what that site's own page
+ * draws in the deployment's workspace; `?site=` lands there now, and a site's
+ * error log, which only this page groups and explains, is the Errors view
+ * narrowed to it.
  */
 export function SiteTrafficView() {
   const params = useSearchParams()
   const router = useRouter()
-  const site = params.get("site") ?? undefined
-  const [view, setView] = useState<TrafficView>(
-    params.get("view") === "errors" ? "errors" : "requests",
-  )
-  const [range, setRange] = useSessionState<RequestRange>("proxy.traffic.range", "1h")
-  const [narrowing, setNarrowing] = useState<Narrowing>(NONE)
-  // Each site starts from its whole window; a narrowing made on one site is
-  // not a question about the next.
-  const [narrowedFor, setNarrowedFor] = useState(site)
-  if (narrowedFor !== site) {
-    setNarrowedFor(site)
-    setNarrowing(NONE)
+  const legacy = legacySiteTarget(params)
+  useEffect(() => {
+    if (legacy) router.replace(legacy)
+  }, [legacy, router])
+  if (legacy) {
+    return (
+      <Page>
+        <PageContext title="Traffic" />
+      </Page>
+    )
   }
-  const shownRange: RequestRange = range === "custom" && !narrowing.since ? "1h" : range
-  const query = trafficQuery(shownRange, narrowing)
-  // The error log is read by preset; a span dragged out of the chart reads
-  // the day around it.
-  const span = shownRange === "custom" ? "24h" : shownRange
+  return <TrafficPage />
+}
+
+function TrafficPage() {
+  const params = useSearchParams()
+  const router = useRouter()
+  const { can } = useAuth()
+  const admin = can("system.admin")
+  const { status, refresh: refreshStatus } = useProxy()
+  const vhosts = useProxyRead("vhosts")
+  const ports = useProxyRead("ports")
+
+  const [tab, setTabState] = useState<TrafficTab>(() => trafficTab(params))
+  const [site, setSiteState] = useState(() => params.get("site") ?? "")
+  // The view and the site it is narrowed to are in the address, so a link to
+  // a site's error log opens on it; replaced, not pushed: a view is not a
+  // place Back should step through.
+  const write = useCallback((next: { tab: TrafficTab; site: string }) => {
+    const url = new URL(window.location.href)
+    url.searchParams.delete("view")
+    if (next.tab === "errors") url.searchParams.set("tab", "errors")
+    else url.searchParams.delete("tab")
+    if (next.site) url.searchParams.set("site", next.site)
+    else url.searchParams.delete("site")
+    window.history.replaceState(null, "", `${url.pathname}${url.search}`)
+  }, [])
+  const setTab = (next: string) => {
+    const chosen: TrafficTab = next === "errors" ? "errors" : "sites"
+    setTabState(chosen)
+    write({ tab: chosen, site })
+  }
+  const setSite = (next: string) => {
+    setSiteState(next)
+    write({ tab, site: next })
+  }
+
+  const [stored, setRange] = useSessionState<string>("proxy.traffic.range", "1h")
+  const range: ErrorWindow = ERROR_WINDOWS.some((w) => w.value === stored)
+    ? (stored as ErrorWindow)
+    : "1h"
 
   const summary = usePoll(
     (signal) => get<SiteTrafficSummary>("/proxy/traffic", undefined, signal),
     60_000,
-    [],
-    { enabled: !site },
   )
-  const traffic = usePoll(
-    (signal) => get<SiteTraffic>(`/proxy/traffic/${encodeURIComponent(site ?? "")}`, query, signal),
-    30_000,
-    [site ?? "", JSON.stringify(query)],
-    { enabled: Boolean(site) },
-  )
-  const data = traffic.error ? undefined : traffic.data
+  // nginx's error log is nginx's: a host whose only engine is the Docker
+  // Caddy ingress has none to read.
+  const nginx = status?.nginx ?? false
+  const errors = useErrorReport(site || undefined, range, nginx)
+  const refresh = () => {
+    summary.refresh()
+    errors.refresh()
+  }
 
-  const header = (
-    <PageContext
-      eyebrow={
-        <span className="flex min-w-0 items-center gap-1.5">
-          <Link
-            href={site ? "/proxy/traffic" : "/proxy"}
-            className="flex items-center gap-1 font-medium hover:text-foreground"
-          >
-            <ArrowLeft className="size-3" /> {site ? "Traffic" : "Proxy"}
-          </Link>
-          {site && <span className="truncate font-medium text-foreground">/ {site}</span>}
-        </span>
-      }
-      title={site ? `${site} traffic` : "Traffic"}
-      actions={
-        <div className="flex items-center gap-2">
-          <Select value={shownRange} onValueChange={(value) => setRange(value as RequestRange)}>
-            <SelectTrigger size="sm" className="w-40 shrink-0" aria-label="Traffic window">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {REQUEST_RANGES.map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {r.label}
-                </SelectItem>
-              ))}
-              {shownRange === "custom" && narrowing.since && (
-                <SelectItem value="custom">
-                  {minuteSpan(narrowing.since, narrowing.until)}
-                </SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-          {site && data?.status === "available" && (
-            <Button asChild size="sm" variant="outline">
-              <a
-                href={downloadUrl(`/proxy/traffic/${encodeURIComponent(site)}/export`, query)}
-                download
-                title="Download this window as CSV — every matching request, not only the rows shown"
-              >
-                <Download className="size-3.5" />
-                Export
-              </a>
-            </Button>
-          )}
-        </div>
-      }
-    />
-  )
+  const sites = summary.error ? undefined : summary.data?.sites
+  const hour = useMemo(() => (sites ? edgeHour(sites) : undefined), [sites])
+  const engineMissing = status && !status.nginx && !status.caddy && !status.ingressContainer
 
-  const tabs = (
-    <nav aria-label="Traffic views" className="flex gap-1 border-b border-hairline">
-      {(
-        [
-          ["requests", site ? "Requests" : "Sites"],
-          ["errors", "Errors"],
-        ] as const
-      ).map(([key, label]) => (
-        <button
-          key={key}
-          type="button"
-          aria-pressed={view === key}
-          onClick={() => setView(key)}
-          className={tabClasses(view === key, "h-10")}
-        >
-          {label}
-        </button>
-      ))}
-    </nav>
-  )
+  const verbs: Verb[] = [
+    { key: "refresh", label: "Refresh", icon: RefreshClockwise, run: refresh },
+    { key: "sites", label: "Open Sites", icon: Globe, run: () => router.push("/proxy/sites") },
+    ...(admin && nginx
+      ? [
+          {
+            key: "alerts",
+            label: "Alert rules",
+            icon: Bell,
+            run: () => router.push("/proxy/alerts"),
+          },
+        ]
+      : []),
+  ]
 
-  if (!site) {
-    const sites = summary.error ? undefined : summary.data?.sites
+  if (engineMissing) {
     return (
       <Page className="animate-rise">
-        {header}
-        <FleetReadings sites={sites} loading={summary.loading} />
-        {tabs}
-        {view === "errors" ? (
-          <SiteErrors range={span} />
-        ) : summary.error ? (
-          <ErrorState error={summary.error} onRetry={summary.refresh} />
-        ) : !sites ? (
-          <LoadingPanel />
-        ) : (
-          <BusiestSites sites={sites} onOpen={(href) => router.push(href)} />
-        )}
+        <PageContext title="Traffic" />
+        <HostIdentity
+          fallback={ChartActivity}
+          title="Traffic"
+          facts={<span>No reverse proxy on this host</span>}
+        />
+        <EngineSetup status={status} admin={admin} onInstalled={refreshStatus} />
       </Page>
     )
   }
 
+  const empty = sites && (sites.length === 0 || hour?.logging === 0)
+  const errorCount = actionableCount(errors.error ? undefined : errors.data)
+  const nginxSites = (vhosts.data ?? []).filter((v) => v.kind === "nginx")
+
   return (
     <Page className="animate-rise">
-      {header}
-      <SiteReadings data={data} loading={traffic.loading} />
-      {tabs}
-      {view === "errors" ? (
-        <SiteErrors site={site} range={span} />
-      ) : traffic.error ? (
-        <ErrorState error={traffic.error} onRetry={traffic.refresh} />
-      ) : !data ? (
-        <LoadingPanel />
-      ) : data.status !== "available" ? (
-        <EmptyState
-          icon={Globe}
-          title="No requests to show"
-          description={data.reason ?? "This site's access log could not be read."}
-        />
+      <PageContext title="Traffic" />
+      <HostIdentity
+        mark={engineProduct(status)}
+        fallback={ChartActivity}
+        title="Traffic"
+        facts={
+          <IdentityFacts
+            sites={sites}
+            hour={hour}
+            error={summary.error}
+            observedAt={summary.data?.observedAt}
+          />
+        }
+        aside={
+          <span className="flex items-center gap-3">
+            {hour && !empty && <HourVerdict hour={hour} />}
+            <VerbMenu verbs={verbs} label="More actions for traffic" />
+          </span>
+        }
+      />
+
+      {summary.error ? (
+        <ErrorState error={summary.error} onRetry={summary.refresh} />
+      ) : empty ? (
+        <NothingToCount sites={sites} admin={admin} />
       ) : (
-        <Requests
-          site={site}
-          data={data}
-          query={query}
-          narrowing={narrowing}
-          custom={shownRange === "custom"}
-          onNarrow={setNarrowing}
-          onZoom={(since, until) => {
-            setNarrowing({ ...narrowing, since, until })
-            setRange("custom")
-          }}
-          onReset={() => {
-            setNarrowing({ ...narrowing, since: undefined, until: undefined })
-            setRange("1h")
-          }}
+        <div data-slot="traffic-hour" className="space-y-6">
+          <HourReadings hour={hour} />
+          <HourChart hour={hour} />
+        </div>
+      )}
+
+      {nginx || tab === "errors" ? (
+        <Tabs value={tab} onValueChange={setTab} className="gap-0">
+          <TabsPrimitive.List
+            aria-label="Traffic views"
+            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
+          >
+            <TabsPrimitive.Trigger value="sites" className={tabClasses(tab === "sites", "h-10")}>
+              Sites
+              {sites && sites.length > 0 && <ChipCount>{sites.length}</ChipCount>}
+            </TabsPrimitive.Trigger>
+            <TabsPrimitive.Trigger value="errors" className={tabClasses(tab === "errors", "h-10")}>
+              Errors
+              {errorCount !== undefined && errorCount > 0 && (
+                <ChipCount>{errorCount.toLocaleString()}</ChipCount>
+              )}
+            </TabsPrimitive.Trigger>
+          </TabsPrimitive.List>
+          <TabsContent value="sites" className="pt-4">
+            <SitesView
+              sites={sites}
+              error={summary.error}
+              vhosts={vhosts.data}
+              listeners={ports.data}
+            />
+          </TabsContent>
+          <TabsContent value="errors" className="pt-4">
+            <ErrorsView
+              poll={errors}
+              site={site}
+              onSite={setSite}
+              sites={nginxSites}
+              range={range}
+              onRange={setRange}
+            />
+          </TabsContent>
+        </Tabs>
+      ) : (
+        <SitesView
+          sites={sites}
+          error={summary.error}
+          vhosts={vhosts.data}
+          listeners={ports.data}
         />
       )}
     </Page>
   )
 }
 
-function SiteReadings({ data, loading }: { data: SiteTraffic | undefined; loading: boolean }) {
-  const s = data?.status === "available" ? data.summary : undefined
-  const figure = (value: React.ReactNode) =>
-    loading && !data ? <Skeleton className="my-1.5 h-5 w-12" /> : (value ?? "—")
+/** What the page covers, on the identity line: the hour, the sites, and how old the read is. */
+function IdentityFacts({
+  sites,
+  hour,
+  error,
+  observedAt,
+}: {
+  sites: SiteTrafficReading[] | undefined
+  hour: EdgeHour | undefined
+  error: Error | undefined
+  observedAt: string | undefined
+}) {
+  if (error) return <span className="text-warning">{"couldn't read the sites' access logs"}</span>
+  if (!sites || !hour) return <TextShimmer>{"Reading the sites' access logs…"}</TextShimmer>
+  const unlogged = hour.unlogged
   return (
-    <StatGrid columns={4} dense>
-      <StatTile
-        label="Requests"
-        value={figure(s && s.total.toLocaleString())}
-        hint={s && `${perMinute(s.perMinute)}/min · ${s.pages.toLocaleString()} pages`}
-      />
-      <StatTile
-        label="5xx rate"
-        value={figure(s && share(s.errorRate))}
-        hint={s && `${(s.classes["5xx"] ?? 0).toLocaleString()} failed`}
-        tone={s ? errorRateTone(s.errorRate) : "default"}
-      />
-      <StatTile
-        label={latencyHead("p95")}
-        value={figure(s && (s.latency ? latency(s.latency.p95) : undefined))}
-        hint={
-          s &&
-          (s.latency
-            ? latencyWords("p50", latency(s.latency.p50))
-            : "nginx's log format has no timing")
+    <>
+      <span>last hour</span>
+      <FactDot />
+      <HostFact>
+        <Link href="/proxy/sites" className="rounded-sm hover:text-foreground hover:underline">
+          {plural(hour.sites, "site")}
+        </Link>
+      </HostFact>
+      {unlogged.length > 0 && hour.sites > 0 && (
+        <>
+          <FactDot />
+          <span
+            className="text-warning"
+            title={unlogged.map((s) => `${s.site}: ${s.reason ?? "no log"}`).join("\n")}
+          >
+            {unlogged.length === hour.sites
+              ? "none keeps an access log"
+              : `${unlogged.length} with no access log`}
+          </span>
+        </>
+      )}
+      {!hour.complete && (
+        <>
+          <FactDot />
+          <span title="A log is longer than the part the dashboard holds, so its counts are floors">
+            counts are floors
+          </span>
+        </>
+      )}
+      {observedAt && (
+        <>
+          <FactDot />
+          <span>read {relativeTime(observedAt)}</span>
+        </>
+      )}
+    </>
+  )
+}
+
+/** Whether the hour went well, in the colour the section gives a failing share. */
+function HourVerdict({ hour }: { hour: EdgeHour }) {
+  const tone = errorRateTone(hour.rate)
+  const dot: DotTone = tone === "danger" ? "danger" : tone === "warning" ? "warning" : "running"
+  const label =
+    hour.total === 0
+      ? "No requests this hour"
+      : tone === "default"
+        ? "Answering"
+        : `${(hour.rate * 100).toFixed(1)}% failing`
+  return <Status tone={hour.total === 0 ? "stopped" : dot} label={label} className="text-xs" />
+}
+
+/**
+ * The hour in four readings, said as a project's Logs page says them: a rate,
+ * the share that failed, how long the slowest site took in words, and what
+ * was sent. Each line keeps its height before the read lands.
+ */
+function HourReadings({ hour }: { hour: EdgeHour | undefined }) {
+  const waiting = <NoReading>No reading yet</NoReading>
+  const totals = hour?.points.map((p) => p.total) ?? []
+  const tone = hour ? errorRateTone(hour.rate) : "default"
+  const slow = hour?.slowest
+  return (
+    <ReadingLines>
+      <ReadingLine
+        mark={
+          <WireMark size="md" hue={HUE.net}>
+            <Globe aria-hidden />
+          </WireMark>
         }
-      />
-      <StatTile
-        label="Bandwidth"
-        value={figure(s && bytes(s.bytes))}
-        hint={s && !data?.complete ? "a floor: only the log's tail is held" : undefined}
-      />
-    </StatGrid>
-  )
-}
-
-function FleetReadings({
-  sites,
-  loading,
-}: {
-  sites: SiteTrafficSummary["sites"] | undefined
-  loading: boolean
-}) {
-  const logging = sites?.filter((s) => s.status === "available") ?? []
-  const total = logging.reduce((n, s) => n + s.requests, 0)
-  const failed = logging.reduce((n, s) => n + s.requests * s.errorRate, 0)
-  const sent = logging.reduce((n, s) => n + s.bytes, 0)
-  const rate = total > 0 ? failed / total : 0
-  const figure = (value: React.ReactNode) =>
-    loading && !sites ? <Skeleton className="my-1.5 h-5 w-12" /> : sites ? value : "—"
-  return (
-    <StatGrid columns={4} dense>
-      <StatTile label="Requests" value={figure(compactCount(total))} hint="last hour" />
-      <StatTile
-        label="5xx rate"
-        value={figure(share(rate))}
-        tone={sites ? errorRateTone(rate) : "default"}
-      />
-      <StatTile
-        label="Sites logging"
-        value={figure(logging.length)}
-        hint={sites && `of ${sites.length}`}
-      />
-      <StatTile label="Bandwidth" value={figure(bytes(sent))} hint="last hour" />
-    </StatGrid>
-  )
-}
-
-function BusiestSites({
-  sites,
-  onOpen,
-}: {
-  sites: SiteTrafficSummary["sites"]
-  onOpen: (href: string) => void
-}) {
-  return (
-    <Panel plain>
-      <PanelHeader title="Busiest sites" />
-      {/* Figures in columns: each site's hour and its share of the edge's
-          whole, with the failing share in its tone beside the name. */}
-      <PanelBody flush>
-        <RankList
-          className="animate-rise"
-          items={busiestSites(sites).map((site) => ({
-            key: site.key,
-            label: site.label,
-            value: site.value,
-            share: site.share,
-            hint: (
-              <span
-                className={cn(
-                  site.tone === "danger" && "text-destructive",
-                  site.tone === "warning" && "text-warning",
-                )}
-              >
-                {site.hint}
-              </span>
-            ),
-            title: site.title,
-            onClick: () => onOpen(site.href),
-          }))}
-          emptyLabel="No sites on this host."
-        />
-      </PanelBody>
-    </Panel>
+        name="Requests"
+        hint={
+          hour
+            ? `${hour.total.toLocaleString()} in the last hour across ${plural(hour.logging, "site")}`
+            : "Reading the access logs…"
+        }
+        trend={
+          hour && <TileTrend values={totals} label="Requests a minute, last hour" color={HUE.net} />
+        }
+      >
+        {hour ? (
+          <>
+            <NumberTicker
+              value={Number(perMinute(hour.perMinute))}
+              decimalPlaces={hour.perMinute < 10 ? 2 : hour.perMinute < 100 ? 1 : 0}
+            />{" "}
+            {hour.perMinute === 1 ? "request" : "requests"} a minute
+          </>
+        ) : (
+          waiting
+        )}
+      </ReadingLine>
+      <ReadingLine
+        mark={
+          hour ? (
+            <WireMark
+              size="md"
+              tone={tone === "default" ? "success" : tone === "danger" ? "danger" : "warning"}
+            >
+              {tone === "default" ? <CheckCircle aria-hidden /> : <Warning aria-hidden />}
+            </WireMark>
+          ) : (
+            <WireMark size="md">
+              <CheckCircle aria-hidden className="text-muted-foreground" />
+            </WireMark>
+          )
+        }
+        name="Failing"
+        hint={
+          hour
+            ? `${hour.failed.toLocaleString()} of ${hour.total.toLocaleString()} answered 5xx · ${hour.refused.toLocaleString()} refused with a 4xx`
+            : " "
+        }
+        trend={
+          hour &&
+          hour.failed > 0 && (
+            <TileTrend
+              values={hour.points.map((p) => p.failed)}
+              label="Requests answered 5xx a minute, last hour"
+              color="var(--destructive)"
+            />
+          )
+        }
+      >
+        {hour ? (
+          <span
+            className={cn(
+              tone === "danger" && "text-destructive",
+              tone === "warning" && "text-warning",
+            )}
+          >
+            {failingWords(hour.rate)}
+          </span>
+        ) : (
+          waiting
+        )}
+      </ReadingLine>
+      <ReadingLine
+        mark={
+          <WireMark
+            size="md"
+            {...(latencyTone(slow?.p95) === "warning"
+              ? { tone: "warning" as const }
+              : { hue: "var(--chart-3)" })}
+          >
+            <Stopwatch aria-hidden />
+          </WireMark>
+        }
+        name="Response time"
+        hint={
+          !hour
+            ? " "
+            : slow
+              ? hour.timed > 1
+                ? `the slowest of ${hour.timed} timed sites, ${slow.site}`
+                : slow.site
+              : "nginx's log format records no timing"
+        }
+      >
+        {!hour ? (
+          waiting
+        ) : slow ? (
+          <span title={latencyTerm("p95")}>
+            {latencyWords("p95", latency(slow.p95)).replace(/^./, (c) => c.toUpperCase())}
+          </span>
+        ) : (
+          <NoReading>No timing recorded</NoReading>
+        )}
+      </ReadingLine>
+      <ReadingLine
+        mark={
+          <WireMark size="md" hue="var(--chart-2)">
+            <ArrowUp aria-hidden />
+          </WireMark>
+        }
+        name="Served"
+        hint={
+          !hour
+            ? " "
+            : hour.complete
+              ? "sent in the last hour"
+              : "sent in the last hour, at least: a log's tail is all that is held"
+        }
+        trend={
+          hour && (
+            <TileTrend
+              values={hour.points.map((p) => p.bytes)}
+              label="Bytes sent a minute, last hour"
+              color="var(--chart-2)"
+            />
+          )
+        }
+      >
+        {hour ? `${bytes(hour.bytes)} sent` : waiting}
+      </ReadingLine>
+    </ReadingLines>
   )
 }
 
 /**
- * The Requests tab: the chart over the window, what it was made of, and the
- * rows — followed live on request, by polling the tail from the window's
- * cursor so nothing between the two reads is missed or shown twice.
+ * The hour minute by minute, every site added up: the deployment Logs page's
+ * request chart over the edge, with its legend on one line. Drawn the same
+ * height before the read lands, with the sentence where the plot will be.
  */
-function Requests({
-  site,
-  data,
-  query,
-  narrowing,
-  custom,
-  onNarrow,
-  onZoom,
-  onReset,
-}: {
-  site: string
-  data: SiteTraffic
-  query: ReturnType<typeof trafficQuery>
-  narrowing: Narrowing
-  custom: boolean
-  onNarrow: (n: Narrowing) => void
-  onZoom: (since: string, until: string) => void
-  onReset: () => void
-}) {
-  const [live, setLive] = useState(false)
-  const [tail, setTail] = useState<RequestEntry[]>([])
-  const cursor = useRef<number | undefined>(undefined)
-  usePoll(
-    async (signal) => {
-      const res = await get<SiteTrafficTail>(
-        `/proxy/traffic/${encodeURIComponent(site)}/tail`,
-        { ...query, after: cursor.current ?? data.coverage.cursor },
-        signal,
-      )
-      cursor.current = res.cursor
-      if (res.entries.length > 0) {
-        setTail((held) => [...[...res.entries].reverse(), ...held].slice(0, 2000))
-      }
-      return res.cursor
-    },
-    2000,
-    [site, JSON.stringify(query)],
-    { enabled: live },
+function HourChart({ hour }: { hour: EdgeHour | undefined }) {
+  const rows = useMemo<ChartRowLike[]>(
+    () =>
+      (hour?.points ?? []).map((p) => ({
+        ts: Date.parse(p.start),
+        total: p.total,
+        refused: p.refused,
+        failed: p.failed,
+      })),
+    [hour],
   )
-  const toggleLive = () => {
-    cursor.current = undefined
-    setTail([])
-    setLive(!live)
-  }
-  const rows = useMemo(() => {
-    if (!live || tail.length === 0) return data.entries
-    const fresh = tail.filter((e) => !e.seq || e.seq > data.coverage.cursor)
-    return [...fresh, ...data.entries]
-  }, [live, tail, data])
-
-  const chips = (
-    [
-      ["path", narrowing.path && `Path ${narrowing.path}`],
-      ["client", narrowing.client && `Client ${narrowing.client}`],
-      ["host", narrowing.host && `Host ${narrowing.host}`],
-      ["agent", narrowing.agent && `Agent ${narrowing.agent}`],
-      ["referer", narrowing.referer && `Referer ${narrowing.referer}`],
-      ["status", narrowing.status && `Status ${narrowing.status}`],
-      ["minMs", narrowing.minMs !== undefined && `Slower than ${latency(narrowing.minMs)}`],
-    ] as const
-  ).filter(([, label]) => label)
-
   return (
-    <div className="space-y-6">
-      {data.summary.buckets.length > 0 && (
-        <RequestChart
-          buckets={data.summary.buckets}
-          bucketSeconds={data.summary.bucketSeconds}
-          latencyKnown={data.latency}
-          total={data.summary.total}
-          failed={data.summary.classes["5xx"] ?? 0}
-          custom={custom}
-          onReset={onReset}
-          onZoom={(from, to) => onZoom(from.toISOString(), to.toISOString())}
-        />
-      )}
-
-      {chips.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          {chips.map(([key, label]) => (
-            <Button
-              key={key}
-              size="xs"
-              variant="outline"
-              onClick={() =>
-                onNarrow({
-                  ...narrowing,
-                  [key]: key === "status" || key === "minMs" ? undefined : "",
-                })
-              }
-              aria-label={`Clear ${String(label)}`}
-            >
-              {label}
-              <Cross className="size-3" />
-            </Button>
+    <ChartPanel
+      plain
+      title="Requests"
+      actions={
+        hour && (
+          <span className="numeric truncate text-hint text-muted-foreground">
+            {hour.total.toLocaleString()}
+            <span className="text-muted-foreground/50"> · </span>
+            <span className={cn(hour.failed > 0 && "text-destructive")}>
+              {hour.failed.toLocaleString()} failed
+            </span>
+          </span>
+        )
+      }
+      rows={rows}
+      series={SERIES}
+      height={CHART_HEIGHT}
+      format={COUNT}
+      showPeaks={false}
+      legend={false}
+      note={hour ? "No requests in the last hour." : "Reading the sites' access logs…"}
+      footer={
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
+          {SERIES.map((s) => (
+            <span key={s.key} className="flex items-center gap-1.5">
+              <span aria-hidden className="size-1.5 rounded-full" style={{ background: s.color }} />
+              {s.label}
+            </span>
           ))}
-        </div>
-      )}
+          <span className="ml-auto">One point is 1 min, every site added up.</span>
+        </span>
+      }
+    />
+  )
+}
 
-      <TrafficFacets
-        summary={data.summary}
-        slowest={data.slowest}
-        latencyKnown={data.latency}
-        onFilterPath={(path) => onNarrow({ ...narrowing, path })}
-        onFilterClient={(client) => onNarrow({ ...narrowing, client })}
-        onFilterHost={(host) => onNarrow({ ...narrowing, host })}
-        onFilterAgent={(agent) => onNarrow({ ...narrowing, agent })}
-        onFilterReferer={(referer) => onNarrow({ ...narrowing, referer })}
-        onFilterStatus={(status) => onNarrow({ ...narrowing, status })}
-        onFilterSlow={(ms) => onNarrow({ ...narrowing, minMs: Math.floor(ms) })}
+/**
+ * A host with nothing to count: one sentence and the press that changes it.
+ * No site at all is a site to add; sites that keep no access log the
+ * dashboard reads are a log to turn on, in the one site's form when there is
+ * one, on the Sites list when there are several.
+ */
+function NothingToCount({
+  sites,
+  admin,
+}: {
+  sites: SiteTrafficReading[] | undefined
+  admin: boolean
+}) {
+  if (!sites || sites.length === 0) {
+    return (
+      <OverviewEmpty
+        mark={<EmptyMark product="nginx-static" fallback={Globe} corner={Box} />}
+        title="No sites to count"
+        action={
+          <Button asChild size="xs" variant="outline">
+            <Link href={admin ? "/proxy/sites?new=1" : "/proxy/sites"}>
+              {admin ? "New site" : "Open Sites"}
+              <ArrowRight />
+            </Link>
+          </Button>
+        }
+      >
+        Traffic is counted per site, and this host serves none yet.
+      </OverviewEmpty>
+    )
+  }
+  const one = sites.length === 1 ? sites[0] : undefined
+  return (
+    <OverviewEmpty
+      tone="warning"
+      mark={<EmptyMark product="nginx-static" fallback={Globe} corner={Logs} tone="warning" />}
+      title="No access log to read"
+      action={
+        <Button asChild size="xs" variant="outline">
+          <Link href={one ? `/proxy/sites/${encodeURIComponent(one.site)}` : "/proxy/sites"}>
+            {one ? (admin ? "Turn its access log on" : `Open ${one.site}`) : "Open Sites"}
+            <ArrowRight />
+          </Link>
+        </Button>
+      }
+    >
+      <span title={sites.map((s) => `${s.site}: ${s.reason ?? "no log"}`).join("\n")}>
+        {one
+          ? (one.reason ?? `${one.site} keeps no access log the dashboard can read.`)
+          : `None of the ${sites.length} sites keeps an access log the dashboard can read.`}
+      </span>
+    </OverviewEmpty>
+  )
+}
+
+/** A site's mark: the project it is, else the product it reaches, else its engine. */
+function SiteGlyph({
+  reading,
+  backend,
+}: {
+  reading: SiteTrafficReading
+  backend?: { product?: string; projectId?: number }
+}) {
+  const engine = reading.engine === "caddy-ingress" ? "caddy" : "nginx-static"
+  return (
+    <ProjectFavicon
+      projectId={backend?.projectId}
+      className="size-3.5"
+      fallback={<ProductGlyph id={hasProductLogo(backend?.product) ? backend.product : engine} />}
+    />
+  )
+}
+
+/**
+ * Who carried the hour: one strip shared out by site, each of the busiest a
+ * hue of its own, and under it every site busiest first with its figure and
+ * its share of the whole; a site whose log cannot be read last, saying so. A
+ * row opens the site's page, where its requests are read.
+ */
+function SitesView({
+  sites,
+  error,
+  vhosts,
+  listeners,
+}: {
+  sites: SiteTrafficReading[] | undefined
+  error: Error | undefined
+  vhosts: VHost[] | undefined
+  listeners: Parameters<typeof siteBackend>[1] | undefined
+}) {
+  const router = useRouter()
+  const byName = useMemo(() => new Map((vhosts ?? []).map((v) => [v.name, v])), [vhosts])
+  if (error) return null
+  if (!sites) {
+    return (
+      <div className="space-y-3" data-slot="traffic-sites">
+        <SplitBar parts={[]} label="Requests this hour by site" />
+        <RankSkeleton rows={4} />
+      </div>
+    )
+  }
+  if (sites.length === 0) return null
+  const rows = busiestSites(sites)
+  const readings = new Map(sites.map((s) => [s.site, s]))
+  const lanes = rows.filter((r) => r.share !== undefined && r.share > 0).slice(0, LANES.length)
+  const lane = new Map(lanes.map((r, i) => [r.key, LANES[i]]))
+  const laned = lanes.reduce((n, r) => n + (readings.get(r.key)?.requests ?? 0), 0)
+  const whole = sites.reduce((n, s) => n + (s.status === "available" ? s.requests : 0), 0)
+  return (
+    <div className="space-y-3" data-slot="traffic-sites">
+      <SplitBar
+        label="Requests this hour by site"
+        parts={[
+          ...lanes.map((r) => ({
+            key: r.key,
+            count: readings.get(r.key)?.requests ?? 0,
+            color: lane.get(r.key)!,
+          })),
+          { key: "rest", count: whole - laned, color: "var(--muted-foreground)" },
+        ]}
       />
+      <RankList
+        items={rows.map((row) => {
+          const reading = readings.get(row.key)!
+          const vhost = byName.get(row.key)
+          const backend = vhost ? siteBackend(vhost, listeners ?? []) : undefined
+          const label = vhost?.serverNames?.[0] ?? row.label
+          return {
+            key: row.key,
+            label,
+            mono: false,
+            swatch: lane.get(row.key) ?? "var(--meter-track)",
+            mark: <SiteGlyph reading={reading} backend={backend} />,
+            value: row.value,
+            share: row.share,
+            hint: row.hint && (
+              <span
+                className={cn(
+                  row.tone === "danger" && "text-destructive",
+                  row.tone === "warning" && "text-warning",
+                )}
+              >
+                {row.hint}
+              </span>
+            ),
+            title:
+              reading.status === "available"
+                ? `Open ${label}'s requests`
+                : `${label}: ${reading.reason ?? "no access log"}`,
+            onClick: () => router.push(row.href),
+          }
+        })}
+      />
+    </div>
+  )
+}
 
-      {/* A working region with its own scroll: the console follows the newest
-          row, and the page around it must not scroll with it. */}
-      <Pane className="h-[32rem]">
-        <RequestConsole
-          entries={rows}
-          summary={data.summary}
-          latencyKnown={data.latency}
-          onFilterPath={(path) => onNarrow({ ...narrowing, path })}
-          onFilterClient={(client) => onNarrow({ ...narrowing, client })}
-          leading={
-            <FilterChip
-              selected={live}
-              onClick={toggleLive}
-              title="Add new requests as they arrive, checked every two seconds"
-            >
-              Live
-            </FilterChip>
-          }
-          status={
-            <span className="numeric whitespace-nowrap">
-              {live ? "Following every 2s" : `${data.summary.pages.toLocaleString()} page views`}
-            </span>
-          }
-          footer={
-            <span className="truncate font-mono" title={data.logs.access}>
-              {data.logs.access}
-            </span>
-          }
-          empty={
-            <EmptyState
-              title="No requests in this window"
-              description="Widen the window or clear a filter."
-            />
-          }
+/**
+ * nginx's error log over a window, grouped and explained, for every site or
+ * narrowed to one: a site's own log, or nginx's narrowed to its names.
+ */
+function ErrorsView({
+  poll,
+  site,
+  onSite,
+  sites,
+  range,
+  onRange,
+}: {
+  poll: ReturnType<typeof useErrorReport>
+  site: string
+  onSite: (site: string) => void
+  sites: VHost[]
+  range: ErrorWindow
+  onRange: (range: ErrorWindow) => void
+}) {
+  const report = poll.error ? undefined : poll.data
+  // A site the address names is offered even before the list of sites lands,
+  // so the select never shows a blank for the one it is narrowed to.
+  const names = [...new Set([...(site ? [site] : []), ...sites.map((v) => v.name)])].sort()
+  return (
+    <div className="space-y-4" data-slot="traffic-errors">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <Select value={site || "*"} onValueChange={(value) => onSite(value === "*" ? "" : value)}>
+          <SelectTrigger size="sm" className="w-56 max-w-full" aria-label="Site">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="*">Every site</SelectItem>
+            {names.map((name) => (
+              <SelectItem key={name} value={name}>
+                {name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Segments
+          label="Error log window"
+          value={range}
+          options={ERROR_WINDOWS}
+          onChange={onRange}
         />
-      </Pane>
+      </div>
+      {poll.error ? (
+        <ErrorState error={poll.error} onRetry={poll.refresh} />
+      ) : !report ? (
+        <LoadingPanel plain rows={4} />
+      ) : (
+        <ErrorLog report={report} site={site || undefined} />
+      )}
     </div>
   )
 }
