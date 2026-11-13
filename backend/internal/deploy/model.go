@@ -103,7 +103,7 @@ var (
 // Validate checks a project against the configured deploy roots.
 //
 // "Absolute" was the only rule the repository path had to satisfy, so a deploy
-// project could name any directory on the filesystem and the JD_DEPLOY_ROOT
+// project could name any directory on the filesystem and the JD_DEPLOY_ROOTS
 // setting that was supposed to bound it went unread. Every other place the
 // dashboard takes a host path from a client — files, git, compose, logs — is
 // bounded by a configured root, and this is now one of them.

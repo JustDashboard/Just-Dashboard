@@ -7,7 +7,7 @@
 // A Client calls one dashboard with a key: a deploy key (what jd and CI use),
 // or an API key, which reaches every route that does not need a session.
 //
-//	c := {{.Package}}.NewClient("https://dash.example.com", os.Getenv("JD_TOKEN"))
+//	c := {{.Package}}.NewClient("https://dash.example.com", os.Getenv("JD_KEY"))
 //	run, err := c.DeploymentRunCreate(ctx, deploymentID, environmentID,
 //		{{.Package}}.DeploymentRunCreateRequest{Operation: {{.Package}}.DeployOperationDeploy})
 //
