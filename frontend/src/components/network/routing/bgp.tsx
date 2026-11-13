@@ -57,7 +57,7 @@ export function BGPPanel({ read }: { read: PollState<BGPView> }) {
         <PanelHeader title="BGP" />
         <PanelBody>
           {read.error ? (
-            <ErrorState error={read.error} onRetry={read.refresh} />
+            <ErrorState error={read.error} onRetry={read.refresh} retryable />
           ) : (
             <Skeleton className="h-56 w-full rounded-xl" />
           )}
@@ -314,6 +314,7 @@ function RouteBrowser({ families }: { families: string[] }) {
   const [busy, setBusy] = useState(false)
   const [view, setView] = useState<BGPRoutesView>()
   const [error, setError] = useState<string>()
+  const wide = useMediaQuery("(min-width: 768px)")
   if (supported.length === 0) return null
   const read = async () => {
     if (busy) return
@@ -348,7 +349,7 @@ function RouteBrowser({ families }: { families: string[] }) {
           }}
         >
           <Select value={family} onValueChange={setFamily}>
-            <SelectTrigger size="sm" aria-label="Family" className="w-36">
+            <SelectTrigger size="sm" aria-label="Family" className="w-36 max-sm:flex-1">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -364,7 +365,7 @@ function RouteBrowser({ families }: { families: string[] }) {
             value={prefix}
             onChange={(event) => setPrefix(event.target.value)}
             placeholder="One prefix, or the whole table"
-            className="h-10 min-w-0 flex-1 font-mono sm:h-8 sm:max-w-64"
+            className="h-10 min-w-0 font-mono placeholder:font-sans max-sm:order-first max-sm:basis-full sm:h-8 sm:max-w-64 sm:flex-1"
           />
           <Button type="submit" size="sm" variant="outline" pending={busy} disabled={busy}>
             Read routes
@@ -382,6 +383,30 @@ function RouteBrowser({ families }: { families: string[] }) {
           <EmptyNote>Not read yet.</EmptyNote>
         ) : view.routes.length === 0 ? (
           <EmptyNote>No path {view.prefix ? `to ${view.prefix}` : "in this table"}.</EmptyNote>
+        ) : !wide ? (
+          <ul
+            aria-label="BGP routes"
+            className="max-h-[24rem] divide-y divide-hairline overflow-y-auto"
+          >
+            {view.routes.map((r, index) => (
+              <li
+                key={`${r.prefix}:${r.peer}:${index}`}
+                className="flex h-14 min-w-0 flex-col justify-center gap-1 px-4 text-xs"
+              >
+                <span className="flex items-center gap-2 whitespace-nowrap">
+                  <span className="font-mono">{r.prefix}</span>
+                  {r.best && <Tag tone="success">best</Tag>}
+                  {r.multipath && <Tag>multipath</Tag>}
+                  {!r.valid && <Tag tone="warning">invalid</Tag>}
+                </span>
+                <span className="truncate font-mono text-muted-foreground">
+                  via {r.nexthops.join(", ") || "—"} · path {r.path || "local"}
+                  {r.localPref !== undefined && ` · pref ${r.localPref}`}
+                  {r.med !== undefined && ` · MED ${r.med}`}
+                </span>
+              </li>
+            ))}
+          </ul>
         ) : (
           <Table containerClassName="max-h-[24rem]">
             <TableHeader>

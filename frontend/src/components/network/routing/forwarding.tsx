@@ -224,7 +224,7 @@ function ForwardingPicture({ forwarding }: { forwarding: NetworkForwarding }) {
   return (
     <WireFlow
       className="pb-2"
-      start={{ title: "Arrives as", nodes: start }}
+      start={{ title: "Arrives as", nodes: start, heading: "always" }}
       hub={{
         mark: <WireHost />,
         eyebrow: "This server",

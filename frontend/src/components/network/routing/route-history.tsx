@@ -93,7 +93,7 @@ export function RouteHistoryPanel({
           />
         )}
         {!data && history.error ? (
-          <ErrorState error={history.error} onRetry={history.refresh} />
+          <ErrorState error={history.error} onRetry={history.refresh} retryable />
         ) : !data ? (
           <ul aria-busy className="divide-y divide-hairline">
             {Array.from({ length: 3 }, (_, i) => (
@@ -133,10 +133,12 @@ function Change({ event }: { event: NetworkRouteEvent }) {
   return (
     <li
       data-slot="route-change"
-      className="grid min-h-14 min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1 py-2.5 sm:grid-cols-[5.5rem_minmax(0,1fr)_auto]"
+      className="grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 py-2.5 sm:grid-cols-[5.5rem_minmax(0,1fr)_auto]"
     >
       <Status tone={change.tone} label={change.label} />
-      <div className="min-w-0 space-y-1">
+      {/* On a phone the change and when share the first line, and what
+          changed has the whole width under them. */}
+      <div className="min-w-0 space-y-1 max-sm:order-3 max-sm:col-span-2">
         <p className="font-mono text-xs break-all">
           {event.before && (
             <span
@@ -163,29 +165,17 @@ function Change({ event }: { event: NetworkRouteEvent }) {
           <span className={event.managed ? "text-brand" : undefined}>
             {event.managed ? "made here" : event.owner}
           </span>
-          <span className="sm:hidden">
-            · <When event={event} />
-          </span>
         </p>
       </div>
-      <p className="text-right text-hint text-muted-foreground max-sm:hidden">
-        <When event={event} />
+      <p className="text-right text-hint text-muted-foreground max-sm:order-2">
+        <time dateTime={event.observedAt} title={timestamp(event.observedAt)}>
+          {relativeTime(event.observedAt)}
+        </time>
+        <span className="sm:block">
+          {" "}
+          {event.acrossRestart ? "while not reading" : `after ${timestamp(event.previousAt)}`}
+        </span>
       </p>
     </li>
-  )
-}
-
-/** When it was seen, and the reading before it: a change is only known to lie between the two. */
-function When({ event }: { event: NetworkRouteEvent }) {
-  return (
-    <>
-      <time dateTime={event.observedAt} title={timestamp(event.observedAt)}>
-        {relativeTime(event.observedAt)}
-      </time>
-      <span className="sm:block">
-        {" "}
-        {event.acrossRestart ? "while not reading" : `after ${timestamp(event.previousAt)}`}
-      </span>
-    </>
   )
 }

@@ -189,8 +189,7 @@ export function AnswerLine({
           <span className="text-destructive">The source is not an address.</span>
         ) : (
           <>
-            <span>Routes covering</span>
-            <span className={mono}>{typed}</span>
+            <span>Routes covering</span> <span className={mono}>{typed}</span>{" "}
             <span>are marked below · the kernel answers for one address</span>
           </>
         )
@@ -205,32 +204,30 @@ export function AnswerLine({
         </span>
       ) : (
         <>
-          <span className={mono}>{lookup.result.address}</span>
+          <span className={mono}>{lookup.result.address}</span>{" "}
           {lookup.result.local ? (
-            <span>is this host&rsquo;s own address</span>
+            <span>is this host&rsquo;s own address </span>
           ) : (
             <>
-              <span>leaves on</span>
+              <span>leaves on</span>{" "}
               <span className={mono}>
                 {lookup.result.device ?? "a device the kernel did not name"}
-              </span>
+              </span>{" "}
               {lookup.result.source && (
                 <>
-                  <span>from</span>
-                  <span className={mono}>{lookup.result.source}</span>
+                  <span>from</span> <span className={mono}>{lookup.result.source}</span>{" "}
                 </>
               )}
               {lookup.result.gateway ? (
                 <>
-                  <span>via</span>
-                  <span className={mono}>{lookup.result.gateway}</span>
+                  <span>via</span> <span className={mono}>{lookup.result.gateway}</span>{" "}
                 </>
               ) : (
-                <span>directly</span>
+                <span>directly </span>
               )}
             </>
           )}
-          <span aria-hidden>·</span>
+          <span aria-hidden>·</span>{" "}
           <span>
             {lookup.result.table ? (
               <>
@@ -239,9 +236,8 @@ export function AnswerLine({
             ) : (
               "table not reported"
             )}
-          </span>
-          <span aria-hidden>·</span>
-          <span>the kernel&rsquo;s answer</span>
+          </span>{" "}
+          <span aria-hidden>·</span> <span>the kernel&rsquo;s answer</span>{" "}
           <InfoTip label="What the answer proves">
             The route the kernel would pick now. Nothing was sent, so it does not prove a connection
             succeeds.
@@ -259,44 +255,40 @@ function Replies({ routing, family }: { routing: NetworkRouting; family: RouteFa
   const highlight = replyHighlight(routing, own)
   return (
     <>
-      <span>Your replies to</span>
-      <span className={mono}>{path.address}</span>
+      <span>Your replies to</span> <span className={mono}>{path.address}</span>{" "}
       {path.device ? (
         <>
-          <span>leave on</span>
-          <span className={mono}>{path.device}</span>
+          <span>leave on</span> <span className={mono}>{path.device}</span>{" "}
         </>
       ) : (
-        <span>have no path the kernel reported</span>
+        <span>have no path the kernel reported </span>
       )}
       {path.source && (
         <>
-          <span>from</span>
-          <span className={mono}>{path.source}</span>
+          <span>from</span> <span className={mono}>{path.source}</span>{" "}
         </>
       )}
       {path.gateway && (
         <>
-          <span>via</span>
-          <span className={mono}>{path.gateway}</span>
+          <span>via</span> <span className={mono}>{path.gateway}</span>{" "}
         </>
       )}
       {own !== family ? (
         <>
-          <span aria-hidden>·</span>
-          <span>over {own === "inet6" ? "IPv6" : "IPv4"}, not drawn here</span>
+          <span aria-hidden>·</span>{" "}
+          <span>over {own === "inet6" ? "IPv6" : "IPv4"}, not drawn here</span>{" "}
         </>
       ) : (
         highlight && (
           <>
-            <span aria-hidden>·</span>
+            <span aria-hidden>·</span>{" "}
             <span>
               {highlight.basis === "kernel"
                 ? "table from the kernel, rule evaluated"
                 : highlight.basis === "table"
                   ? "table from the kernel, rule not named"
                   : "inferred from the routes"}
-            </span>
+            </span>{" "}
             <InfoTip label="How the highlight was decided">
               {highlight.basis === "kernel"
                 ? "The lit table is the one the kernel reports answering your replies; the lit rule is the one the evaluated rules reach it by."

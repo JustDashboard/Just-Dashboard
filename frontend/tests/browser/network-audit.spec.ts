@@ -15,7 +15,6 @@ test("read-only accounts see network state and cannot submit mutations", async (
   await mockNetwork(page, mutations, { overrides, session: reader })
   for (const [path, commands] of [
     ["interfaces", ["New device", "New namespace"]],
-    ["routing", ["Add route", "Add rule"]],
     ["gateway", ["Forward a port", "Share a network"]],
     ["protection", ["New blocklist", "New limit"]],
     ["dns", ["Add record", "Resolve"]],
@@ -25,8 +24,14 @@ test("read-only accounts see network state and cannot submit mutations", async (
     for (const command of commands)
       await expect(page.getByRole("button", { name: command, exact: true })).toBeDisabled()
   }
+  // Routing draws no control such an account cannot use, rather than a disabled one.
   await page.goto("/network/routing")
-  await expect(page.getByRole("switch", { name: "IPv4 forwarding", exact: true })).toBeDisabled()
+  await loaded(page)
+  for (const command of ["Add route", "Add rule"])
+    await expect(page.getByRole("button", { name: command, exact: true })).toHaveCount(0)
+  await page.getByRole("tab", { name: "Forwarding" }).click()
+  await expect(page.getByText("IPv4 forwarding", { exact: true })).toBeVisible()
+  await expect(page.getByRole("switch")).toHaveCount(0)
   await page.goto("/network/traffic")
   await expect(page.getByRole("switch", { name: /BBR/ })).toBeDisabled()
   expect(mutations).toEqual([])

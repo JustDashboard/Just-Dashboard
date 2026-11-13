@@ -565,18 +565,21 @@ export function TableWaiting({
   title,
   rows,
   wideFrom,
+  chips,
 }: {
   title: string
   rows: number
   /** The width from which the table is a table rather than two-line rows. */
   wideFrom: string
+  /** The title line holds a strip of chips, which takes a line of its own on a phone. */
+  chips?: boolean
 }) {
   const wide = useMediaQuery(`(min-width: ${wideFrom})`)
   return (
     <Panel aria-label={title} aria-busy>
       <PanelHeader title={title}>
         {/* The line's own height: the chips or the verb that will stand on it. */}
-        <span aria-hidden className="h-7" />
+        <span aria-hidden className={cn("h-7", chips && "max-sm:basis-full")} />
       </PanelHeader>
       <PanelBody flush>
         {wide && <div className="h-10 border-b" />}

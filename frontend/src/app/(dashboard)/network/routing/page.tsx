@@ -9,7 +9,7 @@ import type { BGPView, NetworkLink, NetworkRoute, NetworkRouting } from "@/lib/t
 import { usePoll } from "@/hooks/use-poll"
 import { useViewState } from "@/lib/view-state"
 import { Page, PageContext } from "@/components/page"
-import { ErrorState, LoadingPanel } from "@/components/state"
+import { ErrorState } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -64,10 +64,48 @@ const FIRST_SHAPE: Shape = { rules: 4, tables: 4, routes: 8, allRules: 5 }
 export default function NetworkRoutingPage() {
   return (
     // The view and the handoff live in the query string, which the App Router
-    // only hands out inside a Suspense boundary.
-    <Suspense fallback={<LoadingPanel plain />}>
+    // only hands out inside a Suspense boundary. What stands there meanwhile
+    // is the page's own first paint, so the page does not change shape when
+    // the address arrives.
+    <Suspense fallback={<Waiting />}>
       <Routing />
     </Suspense>
+  )
+}
+
+const STRIP =
+  "flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
+const OVERVIEW = "flex min-w-0 flex-col gap-6 pt-6 md:gap-8"
+
+/** The first view before the first read: the picture and both tables at the size they had last. */
+function OverviewWaiting({ shape }: { shape: Shape }) {
+  return (
+    <>
+      <DecisionMapWaiting rules={shape.rules} tables={shape.tables} />
+      <TableWaiting title="Routes" rows={shape.routes} wideFrom="1100px" chips />
+      <TableWaiting title="Policy rules" rows={shape.allRules} wideFrom="768px" />
+    </>
+  )
+}
+
+function Waiting() {
+  return (
+    <Page className="gap-5 md:gap-5">
+      <PageContext eyebrow="Network" title="Routing" />
+      <RoutingIdentity onRefresh={() => {}} />
+      <div>
+        <div aria-hidden className={STRIP}>
+          {VIEWS.map((v) => (
+            <span key={v.key} className={tabClasses(v.key === "overview", "h-10")}>
+              {v.label}
+            </span>
+          ))}
+        </div>
+        <div className={OVERVIEW}>
+          <OverviewWaiting shape={FIRST_SHAPE} />
+        </div>
+      </div>
+    </Page>
   )
 }
 
@@ -174,10 +212,7 @@ function Routing() {
         )}
 
         <Tabs value={view} onValueChange={open} className="gap-0">
-          <TabsPrimitive.List
-            aria-label="Views of routing"
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-          >
+          <TabsPrimitive.List aria-label="Views of routing" className={STRIP}>
             {VIEWS.map((v) => (
               <TabsPrimitive.Trigger
                 key={v.key}
@@ -189,15 +224,11 @@ function Routing() {
             ))}
           </TabsPrimitive.List>
 
-          <TabsContent value="overview" className="flex min-w-0 flex-col gap-6 pt-6 md:gap-8">
+          <TabsContent value="overview" className={OVERVIEW}>
             {failed ? (
-              <ErrorState error={routing.error!} onRetry={routing.refresh} />
+              <ErrorState error={routing.error!} onRetry={routing.refresh} retryable />
             ) : !data ? (
-              <>
-                <DecisionMapWaiting rules={shape.rules} tables={shape.tables} />
-                <TableWaiting title="Routes" rows={shape.routes} wideFrom="1100px" />
-                <TableWaiting title="Policy rules" rows={shape.allRules} wideFrom="768px" />
-              </>
+              <OverviewWaiting shape={shape} />
             ) : (
               <>
                 <DecisionMap
@@ -244,7 +275,9 @@ function Routing() {
           >
             <div className="mx-auto w-full max-w-3xl min-w-0 pb-20">
               {failed ? (
-                <ErrorState error={routing.error!} onRetry={routing.refresh} />
+                view === "forwarding" && (
+                  <ErrorState error={routing.error!} onRetry={routing.refresh} retryable />
+                )
               ) : !data ? (
                 <div aria-busy className="space-y-4">
                   <Skeleton className="h-5 w-28" />

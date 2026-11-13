@@ -67,16 +67,21 @@ export function RoutingIdentity({
         routing ? (
           <>
             {way ? (
-              <span className="min-w-0 break-all">
-                default{" "}
+              // Each word its own box: mono set inside a line of the body
+              // face makes that line a pixel taller than the one it replaces.
+              <span className="flex min-w-0 flex-wrap items-center gap-x-1">
+                <span>default</span>{" "}
                 {way.gateway && (
                   <>
-                    via <span className="font-mono text-foreground">{way.gateway}</span>{" "}
+                    <span>via</span>{" "}
+                    <span className="min-w-0 font-mono break-all text-foreground">
+                      {way.gateway}
+                    </span>{" "}
                   </>
                 )}
                 {way.device && (
                   <>
-                    on <span className="font-mono text-foreground">{way.device}</span>
+                    <span>on</span> <span className="font-mono text-foreground">{way.device}</span>
                   </>
                 )}
               </span>
@@ -92,7 +97,7 @@ export function RoutingIdentity({
           </>
         ) : (
           // The facts' own line, held while there is nothing to put on it.
-          <span aria-hidden className="max-sm:min-h-[2lh]">
+          <span aria-hidden className="max-sm:min-h-9">
             &nbsp;
           </span>
         )
