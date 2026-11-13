@@ -235,8 +235,8 @@ Each is a checklist. The linked document owns the rule; this only says which fil
    section also goes in `SECTION_KEYS` (`lib/sidebar-sections.ts`).
 3. Decide the page's register first ("16. Two registers" in the design system), then build from
    the primitives.
-4. Add a spec and, if the area has none, a fixture; add the row to
-   [`../frontend/feature-map.md`](../frontend/feature-map.md) and to the table above.
+4. Add a spec and, if the area has none, a fixture; add its section to
+   [`../frontend/feature-map.md`](../frontend/feature-map.md) and its row to the table above.
 
 **Add a setting.** [`../../guides/configuration.md`](../../guides/configuration.md)
 
