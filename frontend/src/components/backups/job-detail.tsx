@@ -305,8 +305,8 @@ export function JobPage() {
                     <>
                       <FactDot />
                       <span>
-                        pauses <span className="font-mono">{pauses.join(", ")}</span> while it
-                        archives
+                        pauses <span className="mx-0.5 font-mono">{pauses.join(", ")}</span> while
+                        it archives
                       </span>
                     </>
                   )}

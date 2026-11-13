@@ -72,6 +72,9 @@ const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1
 
 const hostOf = (state: MetricsState) => state.host
 
+/** A row's action, underlined while the pointer is on the button it names. */
+const NAME = "text-xs underline-offset-2 group-hover/entry:underline"
+
 /**
  * Who changed this server, and what they changed.
  *
@@ -423,7 +426,7 @@ export default function AuditPage() {
                                   className="max-w-[15rem] 2xl:max-w-[20rem]"
                                 >
                                   <ActionMark action={entry.action} />
-                                  <ActionName action={entry.action} className="text-xs" />
+                                  <ActionName action={entry.action} className={NAME} />
                                 </EntryButton>
                               </TableCell>
                               {/* The column that yields: `max-w-0` beside `w-full` lets it
@@ -484,7 +487,7 @@ export default function AuditPage() {
                                 <span className="flex min-w-0 items-baseline gap-2">
                                   <ActionName
                                     action={entry.action}
-                                    className="text-xs font-medium"
+                                    className={cn(NAME, "font-medium")}
                                   />
                                   <span className="numeric shrink-0 text-hint text-muted-foreground">
                                     {clock(entry.ts)}
@@ -767,14 +770,16 @@ function EntryButton({
           type="button"
           data-workspace-primary
           className={cn(
-            "flex min-w-0 items-center gap-2.5 rounded-md text-left underline-offset-2 focus-ring hover:underline",
+            "group/entry flex min-w-0 items-center gap-2.5 rounded-md text-left focus-ring",
             className,
           )}
         >
           {children}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[26rem]">
+      {/* Kept off the window's edge: on a phone the entry is as wide as the
+          screen allows, and a card flush with both sides reads as a sheet. */}
+      <PopoverContent align="start" collisionPadding={12} className="w-[26rem]">
         <EntryDetail entry={entry} />
       </PopoverContent>
     </Popover>
