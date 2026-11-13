@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises"
 import { expect, test, type Page } from "@playwright/test"
 import { answer, forbidden, json, mockAudit, trail, type Entry } from "./audit-fixture"
 import { risen } from "./risen"
@@ -10,7 +11,8 @@ import { risen } from "./risen"
  * identity line and the day as one strip, in the same place loading and
  * loaded, with no row of tiles; the trail is one line to a row, the same
  * height whatever a row carries; the action is the row's button and opens the
- * entry whole; every filter, the pager and the address still work; and an account that may not read the
+ * entry whole; every filter, the pager and the address still work; the export
+ * hands over what the filters match; and an account that may not read the
  * trail is told so and offered nothing. system-ui.spec.ts keeps the marks.
  */
 
@@ -240,7 +242,7 @@ test("a filter in the address lands on the filtered trail", async ({ page }) => 
   await expect(rows(page).first()).toContainText("403")
 })
 
-/** A trail long enough to page. */
+/** A trail long enough to page and to export in more than one request. */
 function long(count: number): Entry[] {
   const [first] = trail()
   return Array.from({ length: count }, (_, index) => ({
@@ -266,6 +268,48 @@ test("the pager walks the trail a hundred at a time", async ({ page }) => {
   await expect(rows(page)).toHaveCount(30)
   await page.getByRole("button", { name: "Previous" }).click()
   await expect(footer).toContainText("101–200 of 230")
+})
+
+test("Export hands over what the filters match, every page of it", async ({ page }) => {
+  const entries = [...long(620), ...trail().slice(5, 6)]
+  const asked: URL[] = []
+  await mockAudit(page, {
+    entries,
+    audit: (route, url) => {
+      if (url.searchParams.has("until")) asked.push(url)
+      return undefined
+    },
+  })
+  await page.goto("/audit")
+  await expect(rows(page).first()).toBeVisible()
+
+  await identity(page).getByRole("button", { name: "Audit log actions" }).click()
+  const whole = page.waitForEvent("download")
+  await page.getByRole("menuitem", { name: "Export as CSV" }).click()
+  const file = await whole
+  expect(file.suggestedFilename()).toMatch(/^audit-\d{4}-\d{2}-\d{2}\.csv$/)
+  const lines = (await readFile(await file.path(), "utf8")).trimEnd().split("\n")
+  expect(lines[0]).toBe(
+    "id,time,user,role,actor,key,key id,hub user,session,address,action,target,method,path,status,result,detail",
+  )
+  expect(lines).toHaveLength(622)
+  expect(lines.at(-1)).toContain(",mira,operator,token,ci-deploy,12,")
+  await expect(page.getByText("Exported 621 entries")).toBeVisible()
+  // Two pages of five hundred, none of it newer than the press.
+  expect(asked.map((url) => url.searchParams.get("offset"))).toEqual(["0", "500"])
+  expect(asked.every((url) => url.searchParams.get("limit") === "500")).toBe(true)
+  expect(new Set(asked.map((url) => url.searchParams.get("until"))).size).toBe(1)
+
+  // Narrowed, it is the narrowed trail, and the menu says so.
+  await user(page).fill("mira")
+  await expect(rows(page)).toHaveCount(1)
+  await identity(page).getByRole("button", { name: "Audit log actions" }).click()
+  const narrowed = page.waitForEvent("download")
+  await page.getByRole("menuitem", { name: "Export what matches as CSV" }).click()
+  const one = await narrowed
+  expect(one.suggestedFilename()).toMatch(/^audit-mira-\d{4}-\d{2}-\d{2}\.csv$/)
+  expect((await readFile(await one.path(), "utf8")).trimEnd().split("\n")).toHaveLength(2)
+  expect(asked.at(-1)?.searchParams.get("username")).toBe("mira")
 })
 
 test("an account that may not read the trail is told so and offered nothing", async ({ page }) => {

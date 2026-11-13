@@ -4,10 +4,12 @@ import { Fragment, useMemo, useState } from "react"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useFilterHistory } from "@/components/workspace/history"
 import { useHeldList } from "@/components/workspace/held-list"
-import { CrossCircle, FileText, Notes, RefreshClockwise } from "@/components/icons"
+import { CrossCircle, Download, FileText, Notes, RefreshClockwise } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { calendarDate, clock, plural, relativeTime, timestamp } from "@/lib/format"
+import { downloadText } from "@/lib/metrics-export"
 import type { MetricsState } from "@/lib/metrics-store"
+import { notify } from "@/lib/toast"
 import type { AuditEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -17,6 +19,7 @@ import { useArrivals } from "@/hooks/use-arrivals"
 import { dayReading, dayStart, failedWords, peopleWords } from "@/components/audit/day"
 import { DayStrip } from "@/components/audit/day-strip"
 import { EntryDetail, EntryResult } from "@/components/audit/entry-detail"
+import { EXPORT_MOST, EXPORT_PAGE, auditCsv, exportName } from "@/components/audit/export"
 import {
   AUDIT_SECTIONS,
   ActionMark,
@@ -75,7 +78,7 @@ const hostOf = (state: MetricsState) => state.host
  * The page opens on what it is about, as a project's page does: an identity
  * line saying how the last day went (how much was changed, how much of it the
  * server refused, who did it, drawn as their faces, and where the last sign-in
- * came from). Under it the day is one strip,
+ * came from), with the export behind its menu. Under it the day is one strip,
  * an hour to a stretch in the colour of how its changes went
  * (`audit/day-strip`). Both are read from their own query, so a filter narrows
  * the trail without narrowing the day above it. Four tiles said this until
@@ -186,7 +189,59 @@ export default function AuditPage() {
     day.refresh()
   }
 
-  const verbs: Verb[] = [{ key: "refresh", label: "Refresh", icon: RefreshClockwise, run: refresh }]
+  // What the filters match, as a file: every page of it, up to a bound, and
+  // none of it newer than the press, so an entry written while the pages are
+  // being read moves no row from one page onto the next.
+  const [exporting, setExporting] = useState(false)
+  const exportTrail = async () => {
+    if (exporting) return
+    setExporting(true)
+    try {
+      const until = new Date().toISOString()
+      const rows: AuditEntry[] = []
+      let matching = 0
+      while (rows.length < EXPORT_MOST) {
+        const page = await get<AuditPage>("/audit/", {
+          username,
+          action,
+          failed: onlyFailed,
+          until,
+          limit: EXPORT_PAGE,
+          offset: rows.length,
+        })
+        matching = page.total
+        rows.push(...page.entries)
+        if (page.entries.length < EXPORT_PAGE || rows.length >= page.total) break
+      }
+      if (rows.length === 0) {
+        notify.info(
+          filtered ? "No entries match, so there is nothing to export" : "Nothing to export",
+        )
+        return
+      }
+      downloadText(exportName({ username, action, failed: onlyFailed }, new Date()), auditCsv(rows))
+      notify.success(`Exported ${plural(rows.length, "entry", "entries")}`, {
+        description:
+          matching > rows.length
+            ? `The newest ${rows.length.toLocaleString()} of ${matching.toLocaleString()}. Narrow the trail to export the rest.`
+            : undefined,
+      })
+    } catch (err) {
+      notify.error("Could not export the trail", err)
+    } finally {
+      setExporting(false)
+    }
+  }
+  const verbs: Verb[] = [
+    {
+      key: "export",
+      label: filtered ? "Export what matches as CSV" : "Export as CSV",
+      icon: Download,
+      disabled: exporting,
+      run: () => void exportTrail(),
+    },
+    { key: "refresh", label: "Refresh", icon: RefreshClockwise, run: refresh },
+  ]
 
   // The trail is an administrator's: it names every account, address and key.
   // The server refuses anyone else, so the page says that in place of a toolbar
