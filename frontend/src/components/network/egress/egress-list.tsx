@@ -66,8 +66,10 @@ export function EgressListPage() {
       <PageContext title={TITLE} />
       <ListIdentity
         data={data}
+        failed={Boolean(read.error)}
         command={
-          admin ? (
+          // With no group yet, the empty state's own button is the step.
+          admin && (!data || data.groups.length > 0) ? (
             <Button
               size="sm"
               disabled={!data || data.groups.length >= data.capacity}
@@ -158,7 +160,16 @@ export function MemoryOnly() {
  * any member is down as the state. Drawn at its final height before the read
  * lands, so the cards under it do not move.
  */
-function ListIdentity({ data, command }: { data?: EgressView; command?: React.ReactNode }) {
+function ListIdentity({
+  data,
+  failed,
+  command,
+}: {
+  data?: EgressView
+  /** The read failed: said in place of "Reading" before anything was read. */
+  failed: boolean
+  command?: React.ReactNode
+}) {
   const groups = data?.groups ?? []
   const members = groups.flatMap((g) => g.members)
   const down = members.filter((m) => m.state === "down").length
@@ -171,7 +182,11 @@ function ListIdentity({ data, command }: { data?: EgressView; command?: React.Re
       title={TITLE}
       state={
         !data ? (
-          <Status tone="unknown" label="Reading" />
+          failed ? (
+            <Status tone="danger" label="Not read" />
+          ) : (
+            <Status tone="unknown" label="Reading" />
+          )
         ) : groups.length === 0 ? (
           <Status tone="stopped" label="None yet" />
         ) : failing > 0 ? (
@@ -188,7 +203,11 @@ function ListIdentity({ data, command }: { data?: EgressView; command?: React.Re
       command={command}
       facts={
         !data ? (
-          <TextShimmer>Reading the groups…</TextShimmer>
+          failed ? (
+            <span>The groups could not be read</span>
+          ) : (
+            <TextShimmer>Reading the groups…</TextShimmer>
+          )
         ) : (
           <>
             <span className="numeric">

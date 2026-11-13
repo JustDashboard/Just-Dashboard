@@ -144,7 +144,8 @@ export function EgressGroupPage() {
             groups={groups}
             current={group?.id}
             tab={tab}
-            loading={!read.data}
+            loading={!read.data && !read.error}
+            failed={!read.data && Boolean(read.error)}
           />
           <div className="flex min-w-0 flex-1 flex-col gap-5 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
             <PageContext

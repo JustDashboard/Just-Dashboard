@@ -460,6 +460,8 @@ test.describe("the list", () => {
     await mockEgress(page, [], { data: { ...view, groups: [] } })
     await expect(page.getByText("No egress groups")).toBeVisible()
     await expect(page.locator('[data-slot="egress-identity"]')).toContainText("0 of 6 groups")
+    // One way to make the first group, not two.
+    await expect(page.getByRole("button", { name: "New group" })).toHaveCount(1)
     await page
       .locator('[data-slot="empty-state"]')
       .getByRole("button", { name: "New group" })
@@ -483,7 +485,7 @@ test.describe("the list", () => {
     )
     await page.goto("/network/egress")
     await expect(page.getByText("netlink is not answering")).toBeVisible()
-    await expect(page.locator('[data-slot="egress-identity"]')).toBeVisible()
+    await expect(page.locator('[data-slot="egress-identity"]')).toContainText("Not read")
     fail = false
     await page.getByRole("button", { name: "Try again" }).click()
     await expect(cards(page)).toHaveCount(2)
@@ -938,6 +940,17 @@ test.describe("a group's page", () => {
     await expect(page).toHaveURL(/\/network\/egress\/providers\?tab=decisions$/)
     await rail.getByRole("link", { name: "vpn clients" }).click()
     await expect(page).toHaveURL(/\/network\/egress\/vpn%20clients\?tab=decisions$/)
+  })
+
+  test("a read that fails says so, with the way back", async ({ page }) => {
+    await mockNetwork(page, [])
+    await page.route("**/api/v1/network/egress", (route) =>
+      json(route, { error: { code: "unavailable", message: "netlink is not answering" } }, 503),
+    )
+    await page.goto("/network/egress/providers")
+    await expect(page.getByText("netlink is not answering")).toBeVisible()
+    await expect(page.getByRole("link", { name: "Egress groups" }).first()).toBeVisible()
+    await expect(page.getByText("Reading the group")).toHaveCount(0)
   })
 
   test("a name no group has says so and leads back", async ({ page }) => {

@@ -19,12 +19,15 @@ export function EgressRail({
   current,
   tab,
   loading,
+  failed,
   className,
 }: {
   groups: EgressGroup[]
   current?: number
   tab: string
   loading: boolean
+  /** The first read failed: the column says so instead of counting nothing. */
+  failed?: boolean
   className?: string
 }) {
   const list = useRef<HTMLOListElement>(null)
@@ -40,9 +43,11 @@ export function EgressRail({
       className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
     >
       <p className="shrink-0 pb-3 text-hint text-muted-foreground">
-        {loading && groups.length === 0
-          ? "Reading the groups…"
-          : `${groups.length} ${groups.length === 1 ? "group" : "groups"}`}
+        {failed
+          ? "Not read"
+          : loading && groups.length === 0
+            ? "Reading the groups…"
+            : `${groups.length} ${groups.length === 1 ? "group" : "groups"}`}
       </p>
       <ol
         ref={list}
