@@ -254,6 +254,17 @@ the proxy's alerts). The Network overview and the gateway draw through it since 
 this shape uses it, and lays its nodes by hand only when it is not this shape (the routing decision's
 two columns, a project's Runtime lanes).
 
+**A picture whose nodes are not three lines draws its own waiting state.** `loading` draws rows of an
+eyebrow, a name and a hint, each bar on its line's own height. That is the loaded height of a three-line
+node and not of any other: Socket history's nodes are a name and one line, an approved service on
+External checks carries two lines of hint, and each page moved under its picture when the first read
+landed. Those two keep every node to one shape in every state and pass `WireFlow` nodes whose unread
+words are a `LinePlaceholder` (`components/network/identity-facts.tsx`): a
+grey bar after a real space, so the line box is the one the words will have. The same file holds
+`IdentityFacts`, which keeps two lines' room for an identity line's facts on a phone, where four facts
+wrap and a single bar in their place did not. Both pictures are `marks` on a phone, since the lists under
+them name each node again, which is also what stops a stacked column growing with every source.
+
 **And one kind of block came back to the frame: a table.** The 2026-09-21 pass found what sweeping
 tables into the second bullet had cost. A table's container is `overflow-auto`, so at any width where
 its columns stop fitting the grid is *already* clipped — and with nothing drawn at the boundary, a row
