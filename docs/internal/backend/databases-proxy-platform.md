@@ -5591,14 +5591,15 @@ volume with the tunable, the label and its restart policy, and the fleet must th
   A file at that name without the `# Managed by Just Dashboard` marker is `foreign` and is left alone
   (409 `hook_foreign`). `CertbotState.reloadHook` carries the state (`installed`, `missing`,
   `modified`, `foreign`) and the other deploy and post hooks certbot runs. The dashboard's own
-  issuance and renewal jobs reload the sites serving a lineage themselves (`SitesServingLineages`),
+  issuance and renewal jobs reload nginx themselves when an enabled site serves a lineage they
+  changed (`reloadAfterRenewal`, `SitesServingLineages`),
   since certbot runs no deploy hook for a new lineage. `GET /certificates/renewal/log` reads the
   renewal schedule's record (the timer's service journal, or certbot's log where cron renews), and
   `POST /certificates/renewal/run` (system.admin, audited as `certificates.renewal.run`) starts that
   service as a `certbot.renewal` job, 409 `renewal_not_systemd` where cron renews. `GET
   /certificates/certbot` is `CertbotState` (503 `certbot_unavailable` without certbot); `POST
-  /certificates/certbot/install` (system.admin, `certificates.certbot.install`) installs certbot or one
-  DNS plugin through the host's package manager; `GET /certificates/dns-providers` lists the DNS
+  /certificates/certbot/install` (system.admin, `certificates.certbot.install`) installs certbot, its
+  nginx plugin or one DNS plugin through the host's package manager; `GET /certificates/dns-providers` lists the DNS
   plugins with whether each is installed and has saved credentials; and `POST /certificates/revoke`
   (inside `s.destructive`, `certificates.revoke`) runs `certbot revoke --delete-after-revoke` as a job.
 
