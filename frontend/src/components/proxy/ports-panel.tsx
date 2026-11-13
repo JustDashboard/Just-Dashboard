@@ -428,7 +428,9 @@ function PortsView() {
             <span className={cn("numeric", internetTone)} title={internetHint(all)}>
               {counts.internet > 0
                 ? `${counts.internet} internet-facing`
-                : internetHint(all).replace(/^\+/, "")}
+                : onTheUplink > 0
+                  ? `${onTheUplink} internet-facing if the uplink is mapped`
+                  : "nothing the internet can reach"}
             </span>
             {counts.private > 0 && (
               <>
@@ -853,21 +855,28 @@ function Owner({ socket }: { socket: Socket }) {
   const label = ownerLabel(socket)
   const proxy = proxyWords(socket)
   const pids = socketPids(socket)
-  const detail = nat ? NAT_WORDS : socket.cmdline || "No command reported"
+  // How it runs says more than the command where something supervises it:
+  // "ssh.socket → ssh.service" over "/lib/systemd/systemd".
+  const command = nat ? NAT_WORDS : socket.cmdline || "No command reported"
+  const detail = label ?? command
   const who = [socket.user || "unknown user", pids.length > 0 && `PID ${pids.join(", ")}`]
     .filter(Boolean)
     .join(" · ")
   return (
     <div
       className="flex min-w-0 items-center gap-2.5"
-      title={[label, proxy, detail, nat ? undefined : who].filter(Boolean).join("\n")}
+      title={[label, proxy, command, nat ? undefined : who].filter(Boolean).join("\n")}
     >
       <ProcessMark listener={socket} className="size-7 rounded-md [&_img]:size-4" />
       <span className="max-w-[70%] shrink-0 truncate text-body font-medium">
         {ownerTitle(socket)}
       </span>
       {socket.self && <Tag>This dashboard</Tag>}
-      <span className="min-w-0 truncate font-mono text-hint text-muted-foreground">{detail}</span>
+      <span
+        className={cn("min-w-0 truncate text-hint text-muted-foreground", !label && "font-mono")}
+      >
+        {detail}
+      </span>
     </div>
   )
 }

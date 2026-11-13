@@ -793,7 +793,7 @@ export const LANE_WORDS: Record<ReachLane, string> = {
   vpn: "A VPN",
   private: "A private network",
   docker: "Docker's networks",
-  local: "This server only",
+  local: "Only this server",
 }
 
 export function reachLane(listener: Pick<Listener, "reach" | "network">): ReachLane {

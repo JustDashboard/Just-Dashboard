@@ -124,7 +124,14 @@ export function PortsPicture({
         })}
 
         <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(4rem,14vw,14rem)_minmax(0,1fr)] lg:items-center">
-          <Lane title="Who can reach it" count={model.lanes.length} className="lg:text-right">
+          {/* Narrow, each program says who reaches it, and the chips under the
+              picture narrow by it, so the networks are not drawn twice. */}
+          <Lane
+            title="Who can reach it"
+            count={model.lanes.length}
+            className="lg:text-right"
+            outerClassName="max-lg:hidden"
+          >
             {model.lanes.map(({ lane, sockets: count, tone }) => {
               const filter = laneFilter(lane)
               const pressed = reach === filter
@@ -286,6 +293,7 @@ function Lane({
   count,
   className,
   dense,
+  outerClassName,
   children,
 }: {
   title: string
@@ -293,10 +301,16 @@ function Lane({
   className?: string
   /** Smaller marks, closer together: the programs outnumber the networks. */
   dense?: boolean
+  outerClassName?: string
   children: React.ReactNode
 }) {
   return (
-    <div className="min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center lg:py-4">
+    <div
+      className={cn(
+        "min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center lg:py-4",
+        outerClassName,
+      )}
+    >
       <div className="lg:relative">
         <p className={cn("eyebrow mb-4 lg:absolute lg:inset-x-0 lg:bottom-full", className)}>
           {title}
