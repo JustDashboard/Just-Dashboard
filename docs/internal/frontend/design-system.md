@@ -666,7 +666,10 @@ holding Save — on the argument that things filled in one at a time read best a
 which is the wrong shape for a page that *is* a form. `settings/setting-card.tsx` draws them now.
 `SettingsPage` reads the configuration, then draws what is saved but not live yet (a strip with no
 button: the project context row already carries the one "Deploy changes", and a second brand face a
-hundred and fifty pixels under it was two commands on one surface), the page's readings, and its
+hundred and fifty pixels under it was two commands on one surface; `PendingStrip` in
+`settings/pending-strip.tsx` draws it from a headline and a list of items — a mark, a name, a word for
+what happened to it, where it is changed — and `pending-changes.tsx` feeds it the deployment's, so any
+settings form can say what it holds that is not in force yet), the page's readings, and its
 forms in one run of sections. `SettingForm` is one `<form>` and one write, and may span several
 sections, because what one PUT writes is one form — Runtime is five. `SettingSection`
 is a section's head carrying what the section currently is as data (the host and branch it builds
