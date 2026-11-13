@@ -972,9 +972,11 @@ editor, its answers streamed by the mock, and Ask from another page),
 `database-schema.spec.ts`, `database-programs.spec.ts` (functions, procedures and triggers), `database-rls.spec.ts` (row-level
 security, the role test, and function and column grants), `database-redis.spec.ts`, `database-mongo.spec.ts`,
 `database-performance.spec.ts` and `database-logos.spec.ts`, and the rest of the areas' own:
-`database-alerts`, `-creation`, `-extensions`, `-import`, `-metrics-export`, `-operate`, `-pitr`,
-`-pooling`, `-provisioning-catalogue`, `-reach`, `-resources`, `-seed`, `-statements-setup`, `-tls` and
-`-upgrade.spec.ts`.
+`database-alerts.spec.ts`, `database-creation.spec.ts`, `database-extensions.spec.ts`,
+`database-import.spec.ts`, `database-metrics-export.spec.ts`, `database-operate.spec.ts`,
+`database-pitr.spec.ts`, `database-pooling.spec.ts`, `database-provisioning-catalogue.spec.ts`,
+`database-reach.spec.ts`, `database-resources.spec.ts`, `database-seed.spec.ts`,
+`database-statements-setup.spec.ts`, `database-tls.spec.ts` and `database-upgrade.spec.ts`.
 `scripts/test-changed.sh` picks the ones a change can reach: it follows a
 changed file through its imports to the pages that use it and runs the specs
 that name those pages' addresses. A generator's file reaches the Generate page
