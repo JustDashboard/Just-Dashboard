@@ -356,7 +356,7 @@ function CaptureIdentity({
             <Button asChild size="sm">
               <a href={actions.pcap} download>
                 <Download className="size-3.5" />
-                Download original PCAP
+                Download PCAP
               </a>
             </Button>
           ) : actions.stop ? (

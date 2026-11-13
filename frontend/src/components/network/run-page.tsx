@@ -334,7 +334,7 @@ function RunView({
                     ? `from ${run.scope.source}`
                     : run.scope.vantage.replaceAll("_", " ")}
               </span>
-              {finished && (
+              {finished && diagnosticDuration(run) !== "Not recorded" && (
                 <>
                   <FactDot />
                   <span className="numeric">{diagnosticDuration(run)}</span>

@@ -61,7 +61,7 @@ export function RunComparison({ run, runs }: { run: DiagnosticRun; runs: Diagnos
               }}
               disabled={busy}
             >
-              <SelectTrigger aria-label="Baseline run">
+              <SelectTrigger aria-label="Baseline run" className="w-full">
                 <SelectValue placeholder="Choose a compatible run" />
               </SelectTrigger>
               <SelectContent>

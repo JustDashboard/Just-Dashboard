@@ -75,10 +75,14 @@ export function RunResult({ run }: { run: DiagnosticRun }) {
       )}
       {!run.hasResult && (
         <p className="text-body text-muted-foreground">
-          {finished
-            ? "No answer was retained. The lifecycle and the tool's error are under Details."
-            : "Awaiting the tool’s result."}
+          {finished ? "No answer was retained." : "Awaiting the tool’s result."}
         </p>
+      )}
+      {/* With no answer, what the tool said when it failed is the result. */}
+      {!run.hasResult && run.error && (
+        <Well className="max-h-48 break-all whitespace-pre-wrap" aria-label="Probe error">
+          {run.error}
+        </Well>
       )}
       {run.scope.limitations.length > 0 && (
         <ul className="space-y-1" aria-label="Scope limits">
@@ -207,7 +211,7 @@ export function RunDetails({ run }: { run: DiagnosticRun }) {
       <Panel plain aria-label="Bounded tool evidence">
         <PanelHeader title="Tool output" />
         <PanelBody className="space-y-3">
-          {run.error && (
+          {run.error && run.hasResult && (
             <Well className="max-h-48 break-all whitespace-pre-wrap" aria-label="Probe error">
               {run.error}
             </Well>

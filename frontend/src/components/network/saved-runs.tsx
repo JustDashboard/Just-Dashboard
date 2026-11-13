@@ -251,7 +251,9 @@ export function SavedRuns({ watched }: { watched: React.ReactNode }) {
             }
           />
           <PanelBody className="space-y-3">
-            <RunChips list={list} />
+            {/* The chips' row is held while the list loads, so the cards land where
+                their grey places stood. */}
+            {poll.data ? <RunChips list={list} /> : <div aria-hidden className="h-7" />}
             {!poll.data ? (
               <LoadingRows rows={4} className="[&>*]:h-14 [&>*]:rounded-xl" />
             ) : shown.length === 0 ? (
