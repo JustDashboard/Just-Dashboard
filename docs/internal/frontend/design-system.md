@@ -1895,6 +1895,26 @@ the config test panel; `proxy-insights.spec.ts` covers Live traffic, the ingress
 `proxy-alerts.spec.ts` covers the Alerts page — its picture, what fires, the rule form — and the
 overview bar's firing count.
 
+**Traffic reads the edge's hour as a project's Logs page reads one deployment** (`/proxy/traffic`,
+`site-traffic-view.tsx`, 0.8.7). It opens on its identity line — the engine's mark, "Traffic", the
+hour, the sites (a link to Sites), how many keep no access log, whether the counts are floors and how
+old the read is, then the hour's verdict ("Answering", "3.2% failing") and a `⋯` with Refresh, Open
+Sites and, for administrators, Alert rules — and then four `ReadingLine`s in place of the four bare
+tiles it had: requests a minute, the share that failed in the Logs page's words ("1.0% of requests
+failed", "12 of 1,260 answered 5xx · 30 refused with a 4xx"), the slowest site's time in words ("19
+in 20 inside 412ms") and what was sent, each with its hour as a trend in its own hue. Under them the
+hour minute by minute, every site added up, in the request chart's series with its legend on one
+line. Sites and Errors are tabs in the address (`?tab=errors`; `?view=errors` still opens it): Sites
+is one `SplitBar` shared out by site in `LANES` hues over a `RankList`, busiest first, a site with no
+readable log last saying so, each row opening the site's page; Errors is nginx's error log grouped and
+explained (`ErrorLog`), over a window as `Segments` and narrowed to one site by a select, its tab
+counting what it lists. A host with no site, or none whose log can be read, says so in one
+`OverviewEmpty` card with the press that changes it (New site, the one site's page where its access
+log is turned on, or Sites) rather than four zeros; a host with no reverse proxy draws the section's
+`EngineSetup`. One site's requests were a second, older copy of that site's own page here
+(`?site=`); that address now lands on the site's page, and `?site=…&view=errors` is the Errors view
+narrowed to it. `proxy-traffic.spec.ts` covers every state at 1280 and 390.
+
 **A Sites list that could not be read says which read failed, why, and can be asked again.** The list
 is read from nginx, a Caddy on the host and the Caddy container that holds the public ports, and the
 last can fail on a server where the first two are fine (Docker not answering, two public Caddy
@@ -2605,8 +2625,8 @@ The passes, in order. Each one is a diff you can review on its own.
    certificate as a dot on a runway with certbot's renewal stretch marked over the five soonest as the
    expiry `BarList`, each block opening on its figure at the 24px reading size. Each head holds its
    one figure now (requests this hour, days to the next expiry or how many need attention, server
-   errors this hour), and a site opens its traffic, or for an ingress route, its site page, which reads
-   the deployment's record. The
+   errors this hour), and a site opens its own page, where its requests are read (for an ingress
+   route, from the deployment's record). The
    route cards lead with the application's own mark and the engine in the tile's corner
    (`RouteMark`), and are one line: what serves the route and the way a request goes (its names,
    only where they differ from the route's own, then the upstream or folder) under the name, and
