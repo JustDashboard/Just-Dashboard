@@ -286,3 +286,8 @@ where it has one, and otherwise its mono path filled with the brand's colour
 (openrouter's #94A3FF and lmstudio's #7B8CFF on the L 0.72 rung, groq's #F55036,
 and white for xAI's black mark), because a mono file's currentColor is black in an
 image and disappears on a dark ground.
+
+opentelemetry.svg, the mark of a log drain that speaks OTLP, is devicon's
+opentelemetry-original.svg as of v2.18.0, under the MIT License above, with
+the blue #425cc7 of its lower half lifted to #819fff, the same hue at the
+L 0.72 rung, so it reads on a dark ground. dashboard-icons has no file for it.

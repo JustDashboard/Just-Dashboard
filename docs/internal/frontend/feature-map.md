@@ -723,13 +723,18 @@ beside the reviewed catalogue ([implementation](../deployments/implementation.md
 `/deploy/new` opens on *Your templates* above the shelves, with a *Yours* chip, each a card like a
 built-in's drawn by its public image's product, and its empty state saying the two ways to make one
 with a link to Templates; a chosen one says *Added … on this dashboard* where a built-in says
-*Reviewed*. `/deploy/templates` (Deployments → Templates, `templates-page.tsx`) lists them as rows
-into the picker with the template chosen — id, version, how it was made and by whom, what it runs,
-how many deployments use it — with *Export as JSON* and *Remove template* (whose confirmation says
-those deployments keep running from their own copy), *Import…* for an exported file, and *Add from
-Compose file*, a sheet whose *Check* shows what the template will ask before it is added
-(`template-preview.tsx`) and says the catalogue's refusal under the form; empty, it offers the three
-ways as cards. Settings → General carries *Save as template…* on a deployment that runs published
+*Reviewed*. `/deploy/templates` (Deployments → Templates, `templates-page.tsx`) draws them as the
+picker does, a card each (the product its image is, what it runs, Compose stack or image, *Used by
+N*), and the chosen card (the first until another is pressed) as a picture over the grid: what it
+was made from, by whom and when; the template under its id and version with how many deployments
+use it, or why this dashboard cannot deploy it; and each service it runs with its image, the public
+one marked. A card's own verbs are *Deploy* (into the picker with it chosen, not offered for a
+template that cannot be deployed), *Export as JSON* and *Remove template* (whose confirmation says
+those deployments keep running from their own copy); the head counts them (*3 templates · 1 in
+use*) and carries *Import…* for an exported file and *Add from Compose file*, a sheet whose *Check*
+shows what the template will ask before it is added (`template-preview.tsx`) and says the
+catalogue's refusal under the form; empty, it offers the three ways as cards, each with a product's
+mark. Settings → General carries *Save as template…* on a deployment that runs published
 images (`settings/save-as-template.tsx`): a dialog that reads the live release's plan as it opens
 and says what the template will run, ask when it is chosen and ask on the Variables screen, or why
 it cannot be one. The words are in `templates.ts` (unit-tested). The new-project build step and
@@ -1637,9 +1642,12 @@ and the exact masked text that was sent — is kept with the run, and an adminis
 up from there (`deploy-run-diagnosis.spec.ts`). `/deploy/notifications`
 (`components/deploy/notifications-page.tsx`) manages Discord, Slack, Microsoft Teams, Mattermost,
 Telegram, ntfy, Gotify, Pushover, e-mail and signed webhook channels with event selection, pause/resume, test delivery and delivery history.
-`/deploy/variables` (`components/deploy/shared-variables.tsx`, Deployments → Shared variables) lists the
+`/deploy/variables` (`components/deploy/shared-variables-page.tsx` over the list in
+`shared-variables.tsx`, Deployments → Shared variables) lists the
 server's shared variables and Settings → Variables a project's own under *Project variables*, the same
-list in both: each row the name, the `${{server.NAME}}` or `${{project.NAME}}` it is read as, who changed
+list in both; the server's page opens on a picture of what they reach (each variable, this server, the
+projects whose variables read one, a dashed line to a project still on an earlier value;
+`shared-variables-reading.ts`) and counts them on its head (*4 variables · 2 not live yet*): each row the name, the `${{server.NAME}}` or `${{project.NAME}}` it is read as, who changed
 it when, how many variables read it and, under it, those readers by project and environment (each a link
 to that project's Variables page), with *Saved · not live yet* on the row and *(not live yet)* on a reader
 whose live release started before the value changed. Copy reference, Reveal value (the audited reveal),
@@ -1650,16 +1658,24 @@ variables by name beside the linked databases (`SharedReferencePicker`), and cho
 the variable secret too; a variable reading one draws `server.NAME` or `project.NAME` as a link to where it
 is defined. Checked by `deploy-shared-variables.spec.ts`; the Automatic
 deployment section on General carries the GitHub commit-status switch. `/deploy/drains`
-(`components/deploy/log-drains-page.tsx`, its sentences in `log-drains.ts`) lists the log drains with
-each one's reach and delivery health, and adds or edits one in a side panel: format, endpoint, sealed
+(`components/deploy/log-drains-page.tsx`, its sentences in `log-drains.ts`, its state word, figure and
+line in `log-drain-state.ts`) reads as Notifications does: a picture of the projects, this server and
+each drain as the service it sends to (OpenTelemetry, Grafana, the webhook mark for JSON lines; the
+formats not added as dashed rings an administrator presses), then one line per drain: the host and
+what it carries, a dot and a word (*Shipping*, *Failing 3m*, *Paused*, *Nothing sent*) and one figure
+(what waits, what was dropped, else what was shipped), the count on the head (*2 drains · 1 failing*).
+The destination's own words and the totals open from the state word. It adds or edits one in a side panel: format, endpoint, sealed
 headers, streams — container output, requests and, for an OpenTelemetry drain, traces with the link
 its service opens one at — and projects. A request opened in a project's Logs names its trace and
 links to it through the first drain that exports the project's traces with a link (`traceLinkFor`). `/deploy/secret-stores` (`components/deploy/secret-stores-page.tsx`, its
 sentences and the reference grammar in `secret-stores.ts`) lists the Vault, OpenBao, Infisical, Doppler, AWS
-Secrets Manager and Azure Key Vault connections: each card the product's mark, the name, the endpoint (derived
+Secrets Manager and Azure Key Vault connections under a picture of the stores, this server and the projects
+whose variables read them (`secret-store-state.ts`; the kinds not connected as dashed rings): each store one
+line with the product's mark, the name, the endpoint (derived
 from the region or the vault name for the last two) with the mount, namespace and sign-in (or the Infisical
-environment, the region, the tenant), the newest test or run's read in the store's own words (amber when it
-failed), and who reads it. The side panel takes the store, the name (shown as the reference it is read as, fixed once
+environment, the region, the tenant), a dot and a word for the newest test or run's read (*Answering*,
+*Refused 2m ago*, *Not tested*) that opens on the store's own words, and *Read by N*, which opens on every
+variable that reads it by project, each project a link to its Variables; the head counts them (*3 stores · 1 refused*). The side panel takes the store, the name (shown as the reference it is read as, fixed once
 saved), the address, the kind's settings, an optional CA, the sealed credentials and whether previews may read
 it; an edit adds Test with an optional path and key, which shows the version found and never the value. An
 environment variable's editor, with *Reference* on, offers the connected stores with path, key and an
