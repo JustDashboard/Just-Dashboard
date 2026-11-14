@@ -810,7 +810,8 @@ switches on Runtime, Build and Domains each carried three or four lines under th
 traffic replay sends and withholds, what sleeping keeps, how a rehearsal restores its copy), read
 again on every visit. An `OptionRow`'s hint is one clause now, the section's facts line still says
 what the section currently is, and the paragraph a reader wants once is an `InfoTip` at the end of
-that line (`settings/facts-line.tsx`, `FactsLine`): there rather than on a field the switch reveals,
+that line (`settings/facts-line.tsx`, `FactsLine`; a tooltip a keyboard opened stays open while the
+page scrolls to its mark, `ui/tooltip.tsx`): there rather than on a field the switch reveals,
 because those fields are not on the page while the switch is off, which is when the question is
 asked. **A list inside a settings form is one line per thing, and the line opens its small form.**
 Health checks and release tasks were framed boxes of fields, open all the time, so two of either
@@ -1415,7 +1416,9 @@ above:
   sixty times a second (`design-system.spec.ts` counts the frames a page with wires asks for).
   The element a `BorderBeam` is put in clips (`overflow-hidden`) when it is not the frame itself:
   the light is a square centred on the edge it lights, so half of it lies outside the frame, and on
-  a phone that half reached past the page and scrolled it sideways each lap;
+  a phone that half reached past the page and scrolled it sideways each lap. Since 0.8.7 the
+  light's own box clips it (`ui/border-beam.tsx`), so a busy `ChoiceRow` and a working
+  `ProductCard` need nothing of their holder;
 - *once* — `Confetti` fires only when a release goes live in front of the reader — on the run page,
   on the Overview when a run watched there from start to finish ends in success, and from the
   sidebar's update notice when an update of the dashboard itself finishes while the tab is open —
@@ -1967,7 +1970,8 @@ a time as a view in the address (`?tab=fail2ban|crowdsec|suricata`, the first in
 without one), and the addresses every engine and the firewall refuse are the fourth view,
 `?tab=blocked`. Each engine's view opens on its own line (`engine-head.tsx`). Its tiles are
 `ReadingLine`s, a log lens's reading among them through `lens-reading-line.tsx`, which keeps the
-press that narrows the log; Suricata's severities are one `BarReading`; repeat offenders are a
+press that narrows the log (`ReadingLine`'s own `onPress`: a button laid over the line, named by
+`label`; `BarReading`'s line under a band has its own slot, `bar-reading-line`); Suricata's severities are one `BarReading`; repeat offenders are a
 `RankList`. A blocked address, a decision and an alert are one line a row at one height
 (`line-list.tsx`: a grid every row shares where the list has 42rem of its own width, two fixed
 lines where it has not, measured on the list and not the window). A jail's detail is a page of its
@@ -1978,7 +1982,9 @@ error under a fold, and an absent one hands off to its package as CrowdSec and S
 SSH's four readings are lines on a hue each (`--tag-green` for a login, amber for a failure, red
 for an unknown account, violet for the addresses behind them), and its directives are one centred
 column of `SettingSection`s: a switch for a yes or no, `Segments` for three short words, a list
-otherwise, each row one height with *sshd runs …* under a staged value. The floating save bar
+otherwise, each row one height with *sshd runs …* under a staged value. While the draft changes
+something an *Edited N* chip stands at the end of the first section's title line and narrows the
+page to those rows; no chip stands over the settings when nothing is edited. The floating save bar
 (`save-bar.tsx`) replaced an apply bar of the page's own; **Save** opens a review that lists each old
 and new value, what the change does to the dashboard's access boundary and which recovery stands
 behind it, and a change that would cut the way in holds the review's button.
