@@ -1078,7 +1078,9 @@ unit-tested); checked by `tests/browser/docker-network-page.spec.ts` and
 The host's files as a workbench: a sidebar of places and starred folders (`files-sidebar.tsx`,
 `places-menu.tsx`), the path bar, list and grid views with selection, drag and drop and uploads,
 name and content search (`quick-open.tsx`, `search.ts`) and a preview and details panel
-(`preview-panel.tsx`)
+(`preview-panel.tsx`). Below `lg` it is one pane at a time (Places, Folder, Details) with a bar at the
+foot (`phone-panes.tsx`) under a one-row strip: back, the path, find, New, and the rest as words in
+`more-menu.tsx`
 
 **Implementation:** files page and `components/files/`; checked by `tests/browser/files-ui.spec.ts`;
 backend contract in [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md#files)
@@ -1086,7 +1088,10 @@ backend contract in [`../backend/docker-files-logs.md`](../backend/docker-files-
 ### `/files/editor`
 
 A file opened as a page: a folder tree (`file-tree.tsx`) beside the text editor (`file-editor.tsx`)
-or the image editor (`image-editor.tsx`), with name and content search
+or the image editor (`image-editor.tsx`), with name and content search. The editor's commands are
+grouped (`editor-toolbar.tsx`), with text size, indentation and the command palette in a menu. Below
+`lg` the tree and the editor are one pane at a time with a bar at the foot, both kept mounted so an
+unsaved draft outlives a look at the tree
 
 **Implementation:** files/editor page and shared `components/files/` editors; checked by
 `tests/browser/files-ui.spec.ts`
