@@ -173,8 +173,6 @@ const PANES: PaneStop<FilesPane>[] = [
 const RAIL = { base: 264, min: 200, max: 440 }
 const INSPECTOR = { base: 320, min: 260, max: 560 }
 const EMPTY = new Set<string>()
-/** A verb as a phone's menu words it: there is no Ctrl to name beside it. */
-const withoutShortcut = (verb: Verb): Verb => ({ ...verb, shortcut: undefined })
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
 // Reading register: the workbench owns its scroll boundaries; directory and
@@ -975,24 +973,14 @@ export default function FilesPage() {
     onColour: (colour) => void setColour(entry, colour),
   })
 
-  const pasteVerbs: Verb[] =
-    canWrite && clip
-      ? [
-          {
-            id: "paste",
-            label: `Paste ${plural(clip.paths.length, "item")}`,
-            icon: Clipboard,
-            onSelect: () => void paste(),
-            shortcut: "⌃V",
-          },
-        ]
-      : []
+  // Worded once for both menus. The right-click menu names the key beside
+  // each; a phone's menu does not, having no Ctrl to name.
+  const pasteLabel = canWrite && clip ? `Paste ${plural(clip.paths.length, "item")}` : null
   const selectAllVerb: Verb = {
     id: "select-all",
     label: "Select all",
     icon: Check,
     onSelect: () => setSelected(new Set(entries.map((e) => e.path))),
-    shortcut: "⌃A",
   }
   const refreshVerb: Verb = {
     id: "refresh",
@@ -1026,8 +1014,18 @@ export default function FilesPage() {
           },
         ]
       : [],
-    pasteVerbs,
-    [selectAllVerb, refreshVerb],
+    pasteLabel
+      ? [
+          {
+            id: "paste",
+            label: pasteLabel,
+            icon: Clipboard,
+            onSelect: () => void paste(),
+            shortcut: "⌃V",
+          },
+        ]
+      : [],
+    [{ ...selectAllVerb, shortcut: "⌃A" }, refreshVerb],
     canWrite && here
       ? [
           ...starVerbs,
@@ -1092,7 +1090,9 @@ export default function FilesPage() {
               },
             ],
           },
-          ...pasteVerbs.map(withoutShortcut),
+          ...(pasteLabel
+            ? [{ id: "paste", label: pasteLabel, icon: Clipboard, onSelect: () => void paste() }]
+            : []),
         ]
       : [],
     [
@@ -1151,7 +1151,7 @@ export default function FilesPage() {
       },
     ],
     [
-      withoutShortcut(selectAllVerb),
+      selectAllVerb,
       ...starVerbs,
       ...(canWrite
         ? [
