@@ -150,6 +150,18 @@ export function GatewayPicture({
   )
 }
 
+/** The picture before the gateway has answered: this server and grey rows where its entries will be. */
+export function GatewayPictureLoading({ rows = 4 }: { rows?: number }) {
+  return (
+    <WireFlow
+      loading
+      start={{ title: "Arrives", nodes: [], loadingRows: rows }}
+      end={{ title: "Goes to", nodes: [], loadingRows: rows }}
+      hub={{ mark: <WireHost />, eyebrow: "This server" }}
+    />
+  )
+}
+
 /**
  * A dashed ring where an entry would go. With `onPress` it is the button that
  * opens the form that makes one; without, it is only the other end of the wire

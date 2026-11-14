@@ -4,7 +4,8 @@ import { useState } from "react"
 import { ApiError, del, post, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { GatewayNAT, NetworkLink } from "@/lib/types"
+import type { EntryFlow, GatewayNAT, NetworkLink } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { Linked } from "@/components/icons"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -24,8 +25,13 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Cidr } from "@/components/network/address"
-import { ForwardingOff, forwardingFamily } from "@/components/network/gateway/notices"
-import { arrivalDevices } from "@/components/network/gateway/forwards"
+import { flowOf } from "@/components/network/gateway/evidence"
+import {
+  EntryEvidence,
+  ForwardingOff,
+  forwardingFamily,
+} from "@/components/network/gateway/notices"
+import { STATE_COLUMN, arrivalDevices } from "@/components/network/gateway/forwards"
 import { ImpactList, useGatewayPreview } from "@/components/network/gateway/impacts"
 import {
   compact,
@@ -33,33 +39,38 @@ import {
   natRequest,
   natWord,
   ownerOf,
-  readinessWord,
   splitList,
   type NATMode,
   type NATRequest,
 } from "@/components/network/gateway/reading"
-import { Tag } from "@/components/tag"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
 
 /**
- * Every NAT entry as a lit card: the network, where it leaves, what it
- * carried, and a switch. One the VPN page made is the VPN page's to change —
- * the server answers `not_managed` for it — so its row names the product that
- * keeps it, leads to the VPN page and has no switch to offer.
+ * Every NAT entry as a lit card: the network and where it leaves over how,
+ * then its state as a dot and a word, what it carried, and a switch. One the
+ * VPN page made is the VPN page's to change (the server answers `not_managed`
+ * for it), so its row names the product that keeps it, leads to the VPN page
+ * and has no switch to offer. The state word is the forwards' (`entryState`),
+ * with this entry's evidence behind it.
  */
 export function NATList({
   entries,
+  flows,
   writable = true,
   onOpen,
   onChanged,
 }: {
   entries: GatewayNAT[]
+  /** Each enabled entry's flow as modelled, from the gateway's read. */
+  flows?: EntryFlow[]
   writable?: boolean
   onOpen: (entry: GatewayNAT) => void
   onChanged: () => void
 }) {
   const { confirm, dialog } = useConfirm()
   const { can } = useAuth()
+  const wide = useMediaQuery("(min-width: 640px)")
   const [busy, setBusy] = useState<number>()
   const label = (n: GatewayNAT) => `${n.source} out through ${n.interface}`
   const toggle = (n: GatewayNAT, enabled: boolean) => {
@@ -95,6 +106,20 @@ export function NATList({
       <ChoiceList>
         {entries.map((n, index) => {
           const owner = n.owner ? ownerOf(n.owner) : undefined
+          const movable =
+            !owner && writable && can("system.admin") && (!n.enabled || can("destructive"))
+          const state = (
+            <EntryEvidence
+              name={label(n)}
+              enabled={n.enabled}
+              readiness={n.readiness}
+              flow={flowOf(flows, "nat", n.id)}
+            />
+          )
+          const carried = {
+            packets: compact(n.packets + (n.inPackets ?? 0)),
+            bytes: bytes(n.bytes + (n.inBytes ?? 0)),
+          }
           return (
             <ChoiceRow
               key={n.id}
@@ -107,16 +132,9 @@ export function NATList({
                 )
               }
               title={
-                <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
-                  <span className={n.enabled ? undefined : "text-muted-foreground"}>
-                    <Cidr cidr={n.source} /> <span className="text-muted-foreground">→</span>{" "}
-                    <span className="font-mono">{n.interface}</span>
-                  </span>
-                  {n.enabled && n.readiness && readinessWord(n.readiness).tone !== "default" && (
-                    <Tag tone={readinessWord(n.readiness).tone}>
-                      {readinessWord(n.readiness).label}
-                    </Tag>
-                  )}
+                <span className={n.enabled ? undefined : "text-muted-foreground"}>
+                  <Cidr cidr={n.source} /> <span className="text-muted-foreground">→</span>{" "}
+                  <span className="font-mono">{n.interface}</span>
                 </span>
               }
               verb={owner ? `Open ${owner.name} on the VPN page` : `Edit ${label(n)}`}
@@ -128,33 +146,36 @@ export function NATList({
               }
               trailing={
                 <span className="flex items-center gap-4">
+                  {wide && <span className={cn("flex min-w-0", STATE_COLUMN)}>{state}</span>}
                   <span className="numeric hidden min-w-[4.5rem] text-right font-mono text-micro leading-tight text-muted-foreground sm:grid">
-                    <span>{compact(n.packets + (n.inPackets ?? 0))} packets</span>
-                    <span>{bytes(n.bytes + (n.inBytes ?? 0))}</span>
+                    <span>{carried.packets} packets</span>
+                    <span>{carried.bytes}</span>
                   </span>
-                  {owner ? (
-                    <Status
-                      tone={n.enabled ? "running" : "stopped"}
-                      label={n.enabled ? "In force" : "Off"}
-                      className="hidden sm:inline-flex"
-                    />
-                  ) : (
+                  {movable ? (
                     <Switch
                       checked={n.enabled}
-                      disabled={
-                        !writable ||
-                        busy === n.id ||
-                        !can("system.admin") ||
-                        (n.enabled && !can("destructive"))
-                      }
+                      disabled={busy === n.id}
                       onCheckedChange={(next) => toggle(n, next)}
                       aria-label={`${label(n)} in force`}
                     />
+                  ) : (
+                    // The switch's place, so the columns before it line up
+                    // with the rows that have one.
+                    wide && writable && can("system.admin") && <span aria-hidden className="w-9" />
                   )}
                 </span>
               }
               onSelect={owner ? undefined : () => onOpen(n)}
-            />
+            >
+              {!wide && (
+                <span className="flex min-w-0 items-center justify-between gap-3 pl-11">
+                  {state}
+                  <span className="numeric shrink-0 font-mono text-micro text-muted-foreground">
+                    {carried.packets} packets · {carried.bytes}
+                  </span>
+                </span>
+              )}
+            </ChoiceRow>
           )
         })}
       </ChoiceList>

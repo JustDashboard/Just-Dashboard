@@ -4,7 +4,8 @@ import { useState } from "react"
 import { ApiError, del, post, put } from "@/lib/api"
 import { bytes, calendarDate } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { GatewayForward, NetworkLink } from "@/lib/types"
+import type { EntryFlow, GatewayForward, NetworkLink } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
@@ -26,7 +27,12 @@ import { Switch } from "@/components/ui/switch"
 import { Segments } from "@/components/deploy/settings/segments"
 import { Endpoint, Port, TargetLogo } from "@/components/network/gateway/marks"
 import { ImpactList, useGatewayPreview } from "@/components/network/gateway/impacts"
-import { ForwardingOff, forwardingFamily } from "@/components/network/gateway/notices"
+import { flowOf } from "@/components/network/gateway/evidence"
+import {
+  EntryEvidence,
+  ForwardingOff,
+  forwardingFamily,
+} from "@/components/network/gateway/notices"
 import { ForwardReadiness } from "@/components/network/gateway/readiness"
 import {
   compact,
@@ -35,13 +41,13 @@ import {
   forwardTitle,
   hostPort,
   reachabilityWord,
-  readinessWord,
   splitList,
   targetPortOf,
   totalWord,
   type ForwardRequest,
 } from "@/components/network/gateway/reading"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
 
 const ANY = "__any"
 
@@ -49,28 +55,45 @@ const ANY = "__any"
 export const arrivalDevices = (links: NetworkLink[]) =>
   links.filter((l) => l.role !== "container" && l.owner !== "kernel")
 
+/** The column every row keeps for its state word, so the words start on one edge. */
+export const STATE_COLUMN = "w-44"
+
 /**
- * Every forward as a lit card that opens its editor, with what it has carried
- * and the switch that puts it in force. A forward is *taken* — pressed to
- * change — so each is a `ChoiceRow` (§16); the switch inside it is a control
- * of its own and does not open the row.
+ * Every forward as a lit card that opens its editor: what it passes on and
+ * to where over its facts, then in columns of their own its state as a dot
+ * and a word, what it has carried, and the switch that puts it in force. A
+ * forward is *taken* (pressed to change), so each is a `ChoiceRow` (§16);
+ * the state word and the switch inside it are controls of their own and do
+ * not open the row.
  *
- * Switching one off is destructive — the port stops answering — so it asks
- * first; switching it on does not.
+ * The state word is the worst thing known about the forward (`entryState`):
+ * what is installed, what the host's other chains would do to its traffic as
+ * modelled, what was measured from outside. It was a tag after the name on
+ * some rows and a line in a block of prose at the top of the page; behind it
+ * is that evidence, for this forward alone. On a phone the word and the
+ * counters are the row's second line, under its name.
+ *
+ * Switching one off is destructive (the port stops answering), so it asks
+ * first; switching it on does not. The switch is drawn only for an account
+ * that can move it.
  */
 export function ForwardList({
   forwards,
+  flows,
   writable = true,
   onOpen,
   onChanged,
 }: {
   forwards: GatewayForward[]
+  /** Each enabled entry's flow as modelled, from the gateway's read. */
+  flows?: EntryFlow[]
   writable?: boolean
   onOpen: (forward: GatewayForward) => void
   onChanged: () => void
 }) {
   const { confirm, dialog } = useConfirm()
   const { can } = useAuth()
+  const wide = useMediaQuery("(min-width: 640px)")
   const [busy, setBusy] = useState<number>()
   const setEnabled = async (f: GatewayForward, enabled: boolean) => {
     setBusy(f.id)
@@ -105,54 +128,75 @@ export function ForwardList({
   return (
     <>
       <ChoiceList>
-        {forwards.map((f, index) => (
-          <ChoiceRow
-            key={f.id}
-            index={index}
-            leading={<TargetLogo ports={f.ports} targetPort={f.targetPort} />}
-            title={
-              <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
-                <span className={f.enabled ? undefined : "text-muted-foreground"}>
-                  <Port port={f.ports} /> <span className="text-muted-foreground">→</span>{" "}
-                  <Endpoint address={f.target} port={targetPortOf(f)} />
+        {forwards.map((f, index) => {
+          // Turning one on is an administrator's; turning one off is destructive.
+          const movable = writable && can("system.admin") && (!f.enabled || can("destructive"))
+          const state = (
+            <EntryEvidence
+              name={forwardTitle(f)}
+              enabled={f.enabled}
+              readiness={f.readiness}
+              flow={flowOf(flows, "forward", f.id)}
+            />
+          )
+          return (
+            <ChoiceRow
+              key={f.id}
+              index={index}
+              leading={<TargetLogo ports={f.ports} targetPort={f.targetPort} />}
+              title={
+                <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+                  <span className={f.enabled ? undefined : "text-muted-foreground"}>
+                    <Port port={f.ports} /> <span className="text-muted-foreground">→</span>{" "}
+                    <Endpoint address={f.target} port={targetPortOf(f)} />
+                  </span>
+                  {f.decision?.drift && <Tag tone="warning">auto decision drifted</Tag>}
                 </span>
-                {f.enabled && f.readiness && readinessWord(f.readiness).tone !== "default" && (
-                  <Tag tone={readinessWord(f.readiness).tone}>
-                    {readinessWord(f.readiness).label}
-                  </Tag>
-                )}
-                {f.decision?.drift && <Tag tone="warning">auto decision drifted</Tag>}
-              </span>
-            }
-            verb={`Edit ${forwardTitle(f)}`}
-            description={[...forwardFacts(f), f.enabled ? reachabilityWord(f.readiness) : undefined]
-              .filter(Boolean)
-              .join(" · ")}
-            trailing={
-              <span className="flex items-center gap-4">
-                <span
-                  className="numeric hidden min-w-[4.5rem] text-right font-mono text-micro leading-tight text-muted-foreground sm:grid"
-                  title={totalWord(f.total, calendarDate)}
-                >
-                  <span>{compact(f.packets)} packets</span>
-                  <span>{bytes(f.bytes)}</span>
+              }
+              verb={`Edit ${forwardTitle(f)}`}
+              description={[
+                ...forwardFacts(f),
+                f.enabled ? reachabilityWord(f.readiness) : undefined,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              trailing={
+                <span className="flex items-center gap-4">
+                  {wide && <span className={cn("flex min-w-0", STATE_COLUMN)}>{state}</span>}
+                  <span
+                    className="numeric hidden min-w-[4.5rem] text-right font-mono text-micro leading-tight text-muted-foreground sm:grid"
+                    title={totalWord(f.total, calendarDate)}
+                  >
+                    <span>{compact(f.packets)} packets</span>
+                    <span>{bytes(f.bytes)}</span>
+                  </span>
+                  {movable ? (
+                    <Switch
+                      checked={f.enabled}
+                      disabled={busy === f.id}
+                      onCheckedChange={(next) => toggle(f, next)}
+                      aria-label={`${forwardTitle(f)} in force`}
+                    />
+                  ) : (
+                    // The switch's place, where other rows of the list have
+                    // one, so the columns before it line up.
+                    wide && writable && can("system.admin") && <span aria-hidden className="w-9" />
+                  )}
                 </span>
-                <Switch
-                  checked={f.enabled}
-                  disabled={
-                    !writable ||
-                    busy === f.id ||
-                    !can("system.admin") ||
-                    (f.enabled && !can("destructive"))
-                  }
-                  onCheckedChange={(next) => toggle(f, next)}
-                  aria-label={`${forwardTitle(f)} in force`}
-                />
-              </span>
-            }
-            onSelect={() => onOpen(f)}
-          />
-        ))}
+              }
+              onSelect={() => onOpen(f)}
+            >
+              {!wide && (
+                <span className="flex min-w-0 items-center justify-between gap-3 pl-11">
+                  {state}
+                  <span className="numeric shrink-0 font-mono text-micro text-muted-foreground">
+                    {compact(f.packets)} packets · {bytes(f.bytes)}
+                  </span>
+                </span>
+              )}
+            </ChoiceRow>
+          )
+        })}
       </ChoiceList>
       {dialog}
     </>
