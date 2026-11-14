@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useEffectEvent, useSyncExternalStore } from "react"
+import { useEffect, useEffectEvent } from "react"
 import { createPortal } from "react-dom"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
@@ -11,6 +11,7 @@ import { ChipCount } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { PendingStrip } from "@/components/deploy/settings/pending-strip"
+import { saveShortcut, useSaveBarHost } from "@/components/deploy/settings/save-bar"
 import {
   SETTINGS_VIEWS,
   SETTINGS_VIEW_LABEL,
@@ -174,20 +175,15 @@ export type SaveCommand = {
   pending: boolean
 }
 
-// The content area beside the rail, which the bar centres on, as a
-// deployment's does. It is in the document for the whole life of the shell.
-const subscribe = () => () => {}
-const contentArea = () => document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]')
-const noContentArea = () => null
-
-// Read once the bar is on screen, which is only ever in the browser.
-const shortcut = () => (/Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘S" : "Ctrl S")
-
 /**
  * The page's one Save, floating at the foot of the window while there is
  * something to save. `headline` says what that is — the unsaved changes, or
  * a file the form would rewrite — and `note` what the save does, which was
  * the sheet's footer line. The primary command takes Ctrl or Cmd+S.
+ *
+ * Its own bar, not `SaveBarProvider`'s: that one is many forms and one Save,
+ * and this is one draft with two saves whose difference matters. It floats
+ * where that one does (`useSaveBarHost`).
  */
 export function SiteSaveBar({
   headline,
@@ -208,7 +204,7 @@ export function SiteSaveBar({
   disabled: boolean
   saving: boolean
 }) {
-  const host = useSyncExternalStore(subscribe, contentArea, noContentArea)
+  const host = useSaveBarHost()
   if (!host) return null
   return createPortal(
     <div className="pointer-events-none absolute inset-x-0 bottom-4 z-40 flex justify-center px-3 md:bottom-6">
@@ -272,7 +268,7 @@ export function SiteSaveBar({
                 primary.pending && "hidden",
               )}
             >
-              {shortcut()}
+              {saveShortcut()}
             </kbd>
           </Button>
         </div>

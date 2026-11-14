@@ -779,7 +779,13 @@ revision the last write handed back and fills what a form does not own from that
 that owns only a field of a part (Build's release tasks are a field of `build`) passes a function
 of the latest copy. A refused form keeps its edits and says why under the field, and the bar stays
 with what is left; when everything went through it says *Saved* and when it applies, then leaves —
-so the forms no longer toast their own success. A clean page has nothing to save and no button:
+so the forms no longer toast their own success. What the bar says is one rule
+(`settings/save-bar-words.ts`): a form's `applies` is one of four kinds (at once, when nginx next
+reloads, when the server restarts, on the next deployment), a page holding several is told which is
+soonest and what the rest wait for, a form whose save does something none of them says gives the
+line and the command in its own words (`note`, `verb`), and a value that cannot be saved is said
+before either. A column beside a rail asks for the bar `inline`, at the foot of that column. A proxy
+site's form keeps a bar of its own, since it is one draft with two saves. A clean page has nothing to save and no button:
 re-checking an untouched Source means saving an edit to it. The game server's settings take the
 same bar, and hold its Save while a value is outside its declared range; so does Account → Workspace,
 whose purposes and rail switches are one draft of the sidebar, and the profile, whose display name
