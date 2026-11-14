@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test"
+import { expect, type Page } from "@playwright/test"
 
 /**
  * The chrome the four workbenches of a database share (Data, Query, Schema,
@@ -15,6 +15,10 @@ export async function headMenu(page: Page, name: string | RegExp) {
     .getByRole("button", { name: /^Actions for / })
     .click()
   await page.getByRole("menuitem", { name }).click()
+  // The menu hands focus back to its trigger as it unmounts, after its exit.
+  // On a loaded runner that came after the next press had opened a popover,
+  // and the popover closed on losing focus.
+  await expect(page.getByRole("menu")).toHaveCount(0)
 }
 
 /** The bar at the foot of the frame on a phone. */
