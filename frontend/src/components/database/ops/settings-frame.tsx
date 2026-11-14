@@ -5,6 +5,7 @@ import { FormSections } from "@/components/form"
 import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
 import { SectionFrame } from "@/components/database/kit"
 import { BlockedState } from "@/components/database/kit/blocked-state"
+import { SettingsPending } from "@/components/database/ops/settings-pending"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { settingsPages, type SettingsPageKey } from "@/components/database/shell/settings-pages"
@@ -25,8 +26,9 @@ const MISSING: Record<SettingsPageKey, string> = {
  * One page of a database's settings, in the shape every settings page in the
  * product has (`deploy/settings/setting-card.tsx`): one centred column of
  * sections divided by hairlines, each head over its fields carrying what the
- * section currently is, and the page's one Save floating at its foot while an
- * edit is held.
+ * section currently is, the page's one Save floating at its foot while an
+ * edit is held, and at the column's head what the server has stored and not
+ * yet read (`settings-pending.tsx`), with Restart beside it.
  *
  * The pages are the rail's (`settingsPages`), so a page the engine has no use
  * for is not listed; reached by its address all the same, it says so in the
@@ -73,8 +75,10 @@ export function SettingsFrame({
     <SectionFrame section="settings" part={page === "general" ? undefined : listed.title}>
       <SaveBarProvider>
         {/* The room at the foot is the save bar's, so it never lies over the last field. */}
-        <div className="mx-auto w-full max-w-3xl min-w-0 pb-20">
-          <FormSections>{children(confirm)}</FormSections>
+        <div className="mx-auto w-full max-w-3xl min-w-0 space-y-8 pb-20">
+          <SettingsPending page={page} confirm={confirm}>
+            <FormSections>{children(confirm)}</FormSections>
+          </SettingsPending>
         </div>
       </SaveBarProvider>
       {dialog}

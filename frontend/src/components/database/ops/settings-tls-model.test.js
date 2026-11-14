@@ -5,6 +5,7 @@ import {
   changeEffects,
   changedWords,
   daysUntil,
+  portWords,
   shortFingerprint,
   tlsState,
 } from "./settings-tls-model"
@@ -55,6 +56,18 @@ describe("the state of a server's TLS", () => {
   test("only a server with TLS on counts as on", () => {
     expect(tlsState(base).on).toBe(false)
     expect(tlsState({ ...base, enabled: true }).on).toBe(true)
+  })
+
+  test("the port's caption says what it accepts", () => {
+    expect(portWords(base)).toContain("plain text")
+    expect(portWords({ ...base, supported: false })).toBe("its own configuration decides")
+    expect(portWords({ ...base, enabled: true })).toBe("takes TLS or plain text")
+    expect(portWords({ ...base, enabled: true, require: true })).toBe(
+      "refuses a client without TLS",
+    )
+    expect(portWords({ ...base, enabled: true, require: true, canOptional: false })).toBe(
+      "speaks TLS and nothing else",
+    )
   })
 })
 

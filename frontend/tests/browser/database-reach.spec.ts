@@ -1,5 +1,7 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
-import { mockDatabases, type DatabaseMock } from "./database-fixture"
+import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
+import { risen } from "./risen"
+import { tallShot } from "./database-settings-shots"
 
 /**
  * Where a database can be reached from, on its Network settings page: the
@@ -7,13 +9,17 @@ import { mockDatabases, type DatabaseMock } from "./database-fixture"
  * addresses, or a list of the addresses that may connect.
  *
  * The claims are the ones the page makes to an operator who is not a network
- * engineer. A list is built and taken apart as a draft, says why an entry it
- * will not take is wrong, offers the address the reader is on, and names the
- * networks that get in whatever it says. Nothing runs until the server has
- * said what it would run — the gateway's own rules among it — and the reader
- * has confirmed that. The picture says who may reach the port and who is
- * refused. An answer that this machine cannot give is drawn with the reason,
- * not offered. And none of it is drawn for a role that may not read it.
+ * engineer. The answer is a field of the page, saved by its bar. A list is
+ * built and taken apart as a draft, says why an entry it will not take is
+ * wrong, offers the address the reader is on, and names the networks that get
+ * in whatever it says. Nothing runs until the page is saved, the server has
+ * said what it would run (the gateway's own rules among it) and the reader
+ * has confirmed that; a confirmation that is cancelled sends nothing, and a
+ * change that is refused leaves the answer as it was chosen. The picture says
+ * who may reach the port and who is refused, and carries the warning for a
+ * port only a password guards. An answer that this machine cannot give is
+ * drawn with the reason, not offered. And none of it is drawn for a role that
+ * may not read it.
  */
 
 const expect = baseExpect.configure({ timeout: 15_000 })
@@ -183,28 +189,29 @@ async function visit(page: Page, path: string) {
 const NETWORK = "/databases/1/settings/network"
 const reach = (page: Page) => page.locator("section#reachability")
 const choices = (page: Page) =>
-  reach(page).getByRole("group", { name: "Where it is reachable from" })
+  reach(page).getByRole("radiogroup", { name: "Where it is reachable from" })
+const choice = (page: Page, name: string) => choices(page).getByRole("radio", { name, exact: true })
+const picture = (page: Page) => reach(page).getByRole("list", { name: "Who can reach it" })
 const editor = (page: Page) => reach(page).locator("[data-slot=reach-allowlist]")
 const picker = (page: Page) => reach(page).locator("[data-slot=reach-address]")
 const dialog = (page: Page) => page.getByRole("dialog")
+const saveBar = (page: Page) => page.getByRole("region", { name: "Save changes" })
+const save = (page: Page) => saveBar(page).getByRole("button", { name: "Save", exact: true })
 
 test("a list is built as a draft, reviewed with the gateway's own rules, and then kept", async ({
   page,
 }) => {
   const server = await mockReach(page)
   await visit(page, NETWORK)
-  await expect(choices(page).getByRole("button", { name: /Anywhere/ })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  await expect(choice(page, "Anywhere")).toBeChecked()
   await expect(editor(page)).toHaveCount(0)
 
-  await choices(page)
-    .getByRole("button", { name: /Allowed addresses/ })
-    .click()
+  await choice(page, "Allowed").click()
   await expect(editor(page)).toContainText("No address is on the list yet")
+  // An answer is an edit of the page; a list with nobody on it cannot be saved.
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  await expect(save(page)).toBeDisabled()
   const add = editor(page).getByLabel("Add an address or a network")
-  await expect(add).toBeFocused()
 
   // What it will not take is said before anything is sent.
   await add.fill("the office")
@@ -216,7 +223,9 @@ test("a list is built as a draft, reviewed with the gateway's own rules, and the
   await add.fill("203.0.113.50")
   await editor(page).getByRole("button", { name: "Add", exact: true }).click()
   await add.fill("198.51.100.0/24")
+  // Enter adds the entry: it does not save the page.
   await add.press("Enter")
+  await expect(dialog(page)).toHaveCount(0)
   await add.fill("203.0.113.50")
   await expect(editor(page)).toContainText("Already on the list.")
   await add.fill("")
@@ -234,7 +243,7 @@ test("a list is built as a draft, reviewed with the gateway's own rules, and the
   await expect(editor(page)).toContainText("100.64.0.0/10")
   expect(server.sent).toEqual([])
 
-  await editor(page).getByRole("button", { name: "Allow only these addresses" }).click()
+  await save(page).click()
   await expect(dialog(page)).toContainText("Allow only listed addresses to reach shop")
   await expect(dialog(page)).toContainText("refuses new connections to port 5432")
   await expect(dialog(page)).toContainText("ufw: Add: allow in 5432/tcp from 198.51.100.0/24")
@@ -252,20 +261,16 @@ test("a list is built as a draft, reviewed with the gateway's own rules, and the
     .poll(() => server.sent.find((one) => one.request === "PUT /access")?.body)
     .toEqual({ exposure: "allowlist", allow: ["203.0.113.50", "198.51.100.0/24"] })
 
-  // The page reads it back: the list in force, who is refused, and what the
-  // firewall now says.
-  await expect(choices(page).getByRole("button", { name: /Allowed addresses/ })).toHaveAttribute(
-    "aria-pressed",
-    "true",
+  // The page reads it back: the list in force, and on the picture who is
+  // refused, how often, and what the firewall now lets in.
+  await expect(choice(page, "Allowed")).toBeChecked()
+  await expect(picture(page)).toContainText("Allowed addresses")
+  await expect(picture(page)).toContainText("refused by the gateway")
+  await expect(picture(page)).toContainText("1,284 attempts so far")
+  await expect(picture(page)).toContainText(
+    "ufw lets port 5432 in from 198.51.100.0/24 and 203.0.113.50",
   )
-  const picture = reach(page).getByRole("list", { name: "Who can reach it" })
-  await expect(picture).toContainText("Allowed addresses")
-  await expect(picture).toContainText("refused by the gateway")
-  await expect(reach(page)).toContainText("1,284 attempts so far")
-  await expect(reach(page)).toContainText(
-    "ufw is on, and lets port 5432 in from 198.51.100.0/24 and 203.0.113.50.",
-  )
-  await expect(editor(page).getByRole("button", { name: "Save the list" })).toBeDisabled()
+  await expect(save(page)).toHaveCount(0)
 })
 
 test("one address is picked from the ones this machine has, and confirmed with the recreate", async ({
@@ -281,20 +286,21 @@ test("one address is picked from the ones this machine has, and confirmed with t
     },
   })
   await visit(page, NETWORK)
-  await choices(page)
-    .getByRole("button", { name: /One address of this machine/ })
-    .click()
+  // This machine's own addresses are beside "This server" until it is published to anywhere.
+  await expect(picture(page)).toContainText("This server · 203.0.113.7")
+  await choice(page, "One address").click()
   const addresses = picker(page).getByRole("group", { name: "This machine's addresses" })
   await expect(addresses.getByRole("button")).toHaveCount(3)
   await expect(addresses.getByRole("button", { name: /100\.101\.12\.4/ })).toHaveAttribute(
     "aria-pressed",
     "true",
   )
-  await expect(addresses).toContainText("Every device on your tailnet reaches it.")
+  await expect(picker(page)).toContainText("Every device on your tailnet reaches it.")
   await addresses.getByRole("button", { name: /10\.20\.0\.8/ }).click()
   await expect(picker(page)).toContainText("if wg0 is down when the container starts")
+  expect(server.sent).toEqual([])
 
-  await picker(page).getByRole("button", { name: "Publish on 10.20.0.8" }).click()
+  await save(page).click()
   await expect(dialog(page)).toContainText("Publish shop on one address")
   await expect(dialog(page)).toContainText("published on 10.20.0.8 (wg0)")
   await expect(dialog(page)).toContainText("Every open session is dropped")
@@ -302,8 +308,9 @@ test("one address is picked from the ones this machine has, and confirmed with t
   await expect
     .poll(() => server.sent.find((one) => one.request === "PUT /access")?.body)
     .toEqual({ exposure: "private", address: "10.20.0.8" })
-  await expect(reach(page)).toContainText("Published on")
-  await expect(reach(page)).toContainText("10.20.0.8")
+  await expect(picture(page)).toContainText("10.20.0.8")
+  await expect(picture(page)).toContainText("published on wg0")
+  await expect(choice(page, "One address")).toBeChecked()
 })
 
 test("an answer this machine cannot give is drawn with its reason, and nothing is offered empty", async ({
@@ -324,15 +331,76 @@ test("an answer this machine cannot give is drawn with its reason, and nothing i
     },
   })
   await visit(page, NETWORK)
-  await expect(choices(page).getByRole("button", { name: /Allowed addresses/ })).toBeDisabled()
-  await expect(choices(page)).toContainText("nftables is not installed on this host")
-  await expect(
-    choices(page).getByRole("button", { name: /One address of this machine/ }),
-  ).toBeDisabled()
-  await expect(choices(page)).toContainText("no tailnet, VPN or local-network address")
+  await expect(choice(page, "Allowed")).toBeDisabled()
+  await expect(reach(page)).toContainText("nftables is not installed on this host")
+  await expect(choice(page, "One address")).toBeDisabled()
+  await expect(reach(page)).toContainText("no tailnet, VPN or local-network address")
 })
 
-test("a list not in force says so, and a refused review sends nothing further", async ({
+test("restricting a published server is asked too, and sends only the answer", async ({ page }) => {
+  const server = await mockReach(page, {
+    change: {
+      access: { ...ACCESS, exposure: "local", firewall: { ...ACCESS.firewall, open: false } },
+      firewall: "closed",
+      gateway: "unchanged",
+    },
+  })
+  await visit(page, NETWORK)
+  // The picture carries the warning: only the password guards a port published to anywhere.
+  await expect(reach(page).locator("[data-slot=reach-warning]")).toHaveText(
+    "only the password is in the way",
+  )
+  await expect(picture(page)).toContainText("ufw lets port 5432 in from anywhere")
+  await choice(page, "This server").click()
+  await save(page).click()
+  await expect(dialog(page)).toContainText("Restrict shop")
+  await expect(dialog(page)).toContainText("bound to this machine only")
+  await expect(dialog(page)).toContainText("Every open session is dropped")
+  await dialog(page).getByRole("button", { name: "Restrict", exact: true }).click()
+  await expect
+    .poll(() => server.sent.map((one) => [one.request, one.body]))
+    .toEqual([["PUT /access", { exposure: "local" }]])
+  await expect(choice(page, "This server")).toBeChecked()
+  await expect(reach(page).locator("[data-slot=reach-warning]")).toHaveText("cannot reach it")
+  await expect(picture(page)).toContainText("ufw keeps port 5432 closed")
+})
+
+test("a confirmation that is cancelled sends nothing, and a refused change keeps the answer chosen", async ({
+  page,
+}) => {
+  const server = await mockReach(page, {
+    access: { ...ACCESS, exposure: "local", firewall: { ...ACCESS.firewall, open: false } },
+    change: refusal("docker_failed", "the container could not be recreated", 502),
+  })
+  await visit(page, NETWORK)
+  await choice(page, "Anywhere").click()
+  await save(page).click()
+  await expect(dialog(page)).toContainText("Publish shop to anywhere")
+  await dialog(page).getByRole("button", { name: "Cancel" }).click()
+  await expect(dialog(page)).toHaveCount(0)
+  // Nothing was sent, and the page still holds the answer, unsaved.
+  expect(server.sent).toEqual([])
+  await expect(choice(page, "Anywhere")).toBeChecked()
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+
+  await save(page).click()
+  await dialog(page).getByRole("button", { name: "Publish", exact: true }).click()
+  // The refusal is under the form, in the server's words, with the bar still up beside it.
+  await expect(
+    page.getByRole("form", { name: "Where it is reachable from" }).getByRole("alert"),
+  ).toHaveText("It was not changed. the container could not be recreated")
+  await expect(reach(page)).toContainText("Not saved")
+  expect(server.sent.map((one) => one.request)).toEqual(["PUT /access"])
+  // What the server has is unchanged, and what the reader chose is still there to save again.
+  await expect(reach(page)).toContainText("This server only")
+  await expect(choice(page, "Anywhere")).toBeChecked()
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  // Discard puts the answer back to the one in force.
+  await saveBar(page).getByRole("button", { name: "Discard" }).click()
+  await expect(choice(page, "This server")).toBeChecked()
+})
+
+test("a list not in force says so on the picture, and a refused review sends nothing further", async ({
   page,
 }) => {
   const server = await mockReach(page, {
@@ -340,19 +408,26 @@ test("a list not in force says so, and a refused review sends nothing further", 
     preview: refusal("gateway_unavailable", "this host cannot keep a port to a list", 409),
   })
   await visit(page, NETWORK)
-  await expect(reach(page)).toContainText("The list is not in force")
+  await expect(reach(page).locator("[data-slot=reach-warning]")).toContainText(
+    "not refused: the gateway’s table is not loaded",
+  )
   // The list in force is the field's starting draft.
   const list = editor(page).getByRole("list", { name: "Allowed addresses" })
   await expect(list.getByRole("listitem")).toHaveCount(2)
   await editor(page).getByLabel("Add an address or a network").fill("192.0.2.80")
   await editor(page).getByLabel("Add an address or a network").press("Enter")
-  await editor(page).getByRole("button", { name: "Save the list" }).click()
-  await expect(page.getByText("Could not work out what the change would do")).toBeVisible()
+  await expect(list.getByRole("listitem")).toHaveCount(3)
+  await save(page).click()
+  await expect(
+    page.getByRole("form", { name: "Where it is reachable from" }).getByRole("alert"),
+  ).toContainText(
+    "Could not work out what the change would do. this host cannot keep a port to a list",
+  )
   await expect(dialog(page)).toHaveCount(0)
   expect(server.sent.map((one) => one.request)).toEqual(["POST /access/preview"])
 
   // Discard puts the draft back to what is kept.
-  await editor(page).getByRole("button", { name: "Discard" }).click()
+  await saveBar(page).getByRole("button", { name: "Discard" }).click()
   await expect(list.getByRole("listitem")).toHaveCount(2)
 })
 
@@ -389,6 +464,39 @@ test("an administrator who may not recreate a container reads the list and chang
   await expect(editor(page)).toHaveCount(0)
 })
 
+test("the picture has its shape before the binding is read, and the read landing moves nothing", async ({
+  page,
+}) => {
+  const local = { ...ACCESS, exposure: "local", firewall: { ...ACCESS.firewall, open: false } }
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 1100 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    const read = hold()
+    await mockReach(page, { summaries: { 1: { container: { id: "c1", name: "shop-db" } } } })
+    await page.route("**/api/v1/databases/1/access", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback()
+      await read.until
+      return route.fulfill({ json: local })
+    })
+    await visit(page, NETWORK)
+    // The container the summary names is drawn while the binding is read, and
+    // the answers' place is kept.
+    const container = picture(page).getByRole("link", { name: "shop-db" })
+    await expect(container).toBeVisible()
+    await expect(reach(page).locator("[data-slot=reach-loading]")).toBeVisible()
+    await risen(page)
+    const below = page.locator("section#tls")
+    const before = { container: await container.boundingBox(), below: await below.boundingBox() }
+    read.release()
+    await expect(choices(page)).toBeVisible()
+    await risen(page)
+    expect((await container.boundingBox())?.x, `the container at ${width}`).toBe(
+      before.container?.x,
+    )
+    expect((await below.boundingBox())?.y, `the section under it at ${width}`).toBe(before.below?.y)
+  }
+})
+
 test("at a phone's width the list and its picture fit without scrolling sideways", async ({
   page,
 }) => {
@@ -397,6 +505,11 @@ test("at a phone's width the list and its picture fit without scrolling sideways
   await visit(page, NETWORK)
   await expect(editor(page).getByRole("list", { name: "Allowed addresses" })).toBeVisible()
   await expect(reach(page)).toContainText("refused by the gateway")
+  // Four answers fit the width: none is cut off.
+  for (const name of ["This server", "One address", "Allowed", "Anywhere"]) {
+    const box = await choice(page, name).boundingBox()
+    expect(box && box.x >= 0 && box.x + box.width <= 390, `${name} is inside the screen`).toBe(true)
+  }
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -406,60 +519,53 @@ test("at a phone's width the list and its picture fit without scrolling sideways
 
 /**
  * Clears what a shot should not be of: the toast a change left up, which lies
- * over the foot of the section, and the focus ring a click leaves on a card,
- * which reads as a second selection.
+ * over the foot of the section, and the focus ring a click leaves on a
+ * control, which reads as a second selection.
  */
 async function settle(page: Page) {
-  for (const close of await page.locator("[data-sonner-toast] [data-close-button]").all()) {
-    await close.click({ force: true }).catch(() => undefined)
-  }
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0)
+  await page.addStyleTag({ content: "[data-sonner-toaster]{display:none!important}" })
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 }
 
 test("the reach states, for the record @shots", async ({ page }) => {
   test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to take the screenshots")
+  test.setTimeout(240_000)
   const shots = process.env.JD_SHOTS
-  await page.setViewportSize({ width: 1440, height: 900 })
-
-  await mockReach(page)
-  await visit(page, NETWORK)
-  await expect(reach(page)).toContainText("Anything that can reach this machine can try it")
-  await page.screenshot({ path: `${shots}/reach-anywhere-1440.png`, fullPage: true })
-
-  await choices(page)
-    .getByRole("button", { name: /Allowed addresses/ })
-    .click()
-  const add = editor(page).getByLabel("Add an address or a network")
-  for (const entry of ["198.51.100.0/24", "203.0.113.50"]) {
-    await add.fill(entry)
-    await add.press("Enter")
+  const shot = async (name: string, width: number) => {
+    await risen(page)
+    await tallShot(page, `${shots}/after-network-${name}-${width}.png`)
   }
-  await add.fill("office.example")
-  await expect(editor(page)).toContainText("Not an address or a network")
-  await editor(page)
-    .getByRole("button", { name: "Allow only these addresses" })
-    .scrollIntoViewIfNeeded()
-  await page.screenshot({ path: `${shots}/reach-list-draft-1440.png`, fullPage: true })
-  await add.fill("")
 
-  await editor(page).getByRole("button", { name: "Allow only these addresses" }).click()
-  await expect(dialog(page)).toContainText("The gateway's rules")
-  await page.screenshot({ path: `${shots}/reach-list-review-1440.png` })
-  await dialog(page).getByRole("button", { name: "Allow these addresses" }).click()
-  await expect(reach(page)).toContainText("1,284 attempts so far")
-  await settle(page)
-  await page.screenshot({ path: `${shots}/reach-listed-1440.png`, fullPage: true })
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockReach(page)
+    await visit(page, NETWORK)
+    await expect(reach(page).locator("[data-slot=reach-warning]")).toBeVisible()
+    await shot("anywhere", width)
 
-  await choices(page)
-    .getByRole("button", { name: /One address of this machine/ })
-    .click()
-  await expect(picker(page)).toBeVisible()
-  await settle(page)
-  await page.screenshot({ path: `${shots}/reach-one-address-1440.png`, fullPage: true })
+    await choice(page, "Allowed").click()
+    const add = editor(page).getByLabel("Add an address or a network")
+    for (const entry of ["198.51.100.0/24", "203.0.113.50"]) {
+      await add.fill(entry)
+      await add.press("Enter")
+    }
+    await add.fill("office.example")
+    await expect(editor(page)).toContainText("Not an address or a network")
+    await shot("list-draft", width)
+    await add.fill("")
 
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.reload()
-  await expect(reach(page)).toContainText("refused by the gateway")
-  await page.screenshot({ path: `${shots}/reach-listed-390.png`, fullPage: true })
+    await save(page).click()
+    await expect(dialog(page)).toContainText("The gateway's rules")
+    await page.screenshot({ path: `${shots}/after-network-list-review-${width}.png` })
+    await dialog(page).getByRole("button", { name: "Allow these addresses" }).click()
+    await expect(picture(page)).toContainText("1,284 attempts so far")
+    await settle(page)
+    await shot("listed", width)
+
+    await choice(page, "One address").click()
+    await expect(picker(page)).toBeVisible()
+    await settle(page)
+    await shot("one-address", width)
+  }
 })

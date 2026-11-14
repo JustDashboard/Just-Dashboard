@@ -1,5 +1,7 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
-import { mockDatabases, type DatabaseMock } from "./database-fixture"
+import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
+import { risen } from "./risen"
+import { tallShot } from "./database-settings-shots"
 
 /**
  * A PostgreSQL database's Pooling page, and the pooled string Connect offers
@@ -197,7 +199,7 @@ test("a database with no pooler says what one is and turns it on with the settin
   await expect(pooler).toContainText("Off")
   await expect(pooler).toContainText("shares a few server connections between many clients")
   await expect(section(page, "addresses")).toHaveCount(0)
-  await expect(section(page, "activity")).toHaveCount(0)
+  await expect(section(page, "pools")).toHaveCount(0)
 
   // The form starts from what the server says is sensible.
   await expect(pooler.getByRole("radiogroup", { name: "Pool mode" })).toBeVisible()
@@ -236,18 +238,41 @@ test("numbers out of range hold Turn on and say what is allowed", async ({ page 
   expect(server.sent).toEqual([])
 })
 
-test("a running pooler lists where it is reached and reads its pools and statistics", async ({
+/** The way a connection goes, which carries the pooler's figures. */
+const picture = (page: Page) =>
+  section(page, "pooler").getByRole("list", { name: "How a connection goes through the pooler" })
+
+test("a running pooler lists where it is reached and carries its figures on the picture", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
   await mockPooling(page, { pooler: ON })
   await visit(page, PAGE)
 
   const pooler = section(page, "pooler")
   await expect(pooler).toContainText("Running")
   await expect(pooler).toContainText("edoburu/pgbouncer:v1.25.2-p0")
-  await expect(
-    pooler.getByRole("list", { name: "How a connection goes through the pooler" }),
-  ).toContainText("shop-db-pgbouncer")
+  await expect(picture(page)).toContainText("shop-db-pgbouncer")
+
+  // Who is connected and who waits are on the line in; the server's
+  // connections on the line out; the wait for one, in words, at the pooler.
+  await expect(pooler).toContainText("15 clients")
+  await expect(pooler).toContainText("2 waiting")
+  await expect(pooler).toContainText("7 active")
+  await expect(pooler).toContainText("6 idle")
+  await expect(picture(page)).toContainText("PgBouncer 1.25.2")
+  const wait = picture(page).locator("[data-slot=pooler-wait]")
+  await expect(wait).toContainText("waits 0.4 ms for a connection")
+  await expect(wait).toContainText("the longest now 1 s")
+  await expect(picture(page).locator("[data-slot=pooler-work]")).toContainText(
+    "96 queries · 38 transactions a second",
+  )
+  await expect(picture(page).locator("[data-slot=pooler-cost]")).toContainText(
+    "1.5 ms a query · 1,204,551 queries so far",
+  )
+  // No heading of figures, and no table in a settings page.
+  await expect(section(page, "activity")).toHaveCount(0)
+  await expect(page.getByRole("table")).toHaveCount(0)
 
   const addresses = section(page, "addresses")
   const list = addresses.getByRole("list", { name: "Pooler addresses" })
@@ -255,29 +280,77 @@ test("a running pooler lists where it is reached and reads its pools and statist
   await expect(list).toContainText("127.0.0.1:6433")
   await expect(list).toContainText("db-1-pool.jd.internal:6432")
   await expect(list).toContainText("${{database.1.pooled}}")
-  await expect(addresses).toContainText("The pooler is published on this server only")
-  await expect(addresses).toContainText(
+  // What the pooled string is, is the caption of the address it is made with.
+  await expect(list).toContainText("the direct string with this address")
+  await expect(addresses).toContainText("Published on this server only")
+  await addresses.getByRole("button", { name: "Why it is published there" }).hover()
+  await expect(page.getByRole("tooltip")).toContainText(
     "Opening the database to anywhere under Network moves the pooler with it",
   )
 
-  const activity = section(page, "activity")
-  await expect(activity).toContainText("PgBouncer 1.25.2")
-  await expect(activity).toContainText("15 active, 2 waiting")
-  await expect(activity).toContainText("7 active, 6 idle")
-  await expect(activity).toContainText("96 a second")
-  await expect(activity).toContainText("1.5 ms on average")
-  const pools = activity.getByRole("table", { name: "Pools" })
-  await expect(pools.getByRole("row").filter({ hasText: "reports" })).toContainText("1 active")
-  await expect(pools.getByRole("row").filter({ hasText: "app" }).first()).toContainText("2 waiting")
-  await expect(activity.getByRole("table", { name: "Statistics" })).toContainText("1204551")
+  // Each pool on a line of its own, under the section's count.
+  const pools = section(page, "pools")
+  await expect(pools).toContainText("2 pools")
+  const rows = pools.getByRole("list", { name: "Pools" }).getByRole("listitem")
+  await expect(rows).toHaveCount(2)
+  await expect(rows.filter({ hasText: "reports" })).toContainText("1 active")
+  await expect(rows.filter({ hasText: "app" }).first()).toContainText("2 waiting")
+  await expect(rows.filter({ hasText: "app" }).first()).toContainText("6 active, 4 idle")
+  await expect(rows.filter({ hasText: "app" }).first()).toContainText("1 s")
+  // Inside its hairline, which the last row of a list does not have.
+  const heights = await rows.evaluateAll((all) => all.map((row) => row.clientHeight))
+  expect(new Set(heights).size, `pool rows: ${heights.join(", ")}`).toBe(1)
 })
 
-test("a pooler nothing has used says so instead of drawing empty tables", async ({ page }) => {
+test("the figures landing move nothing: the picture has its room from the first paint", async ({
+  page,
+}) => {
+  const read = hold()
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await mockPooling(page, { pooler: ON })
+  await page.route("**/api/v1/databases/1/pooler/stats", async (route) => {
+    await read.until
+    return route.fallback()
+  })
+  await visit(page, PAGE)
+  await expect(picture(page)).toContainText("shop-db-pgbouncer")
+  await risen(page)
+  const field = section(page, "pooler").getByRole("radiogroup", { name: "Pool mode" })
+  const before = await field.boundingBox()
+  read.release()
+  await expect(picture(page).locator("[data-slot=pooler-wait]")).toBeVisible()
+  await risen(page)
+  expect((await field.boundingBox())?.y).toBe(before?.y)
+})
+
+test("on a phone the lines have no room for words, so the figures join the captions", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockPooling(page, { pooler: ON })
+  await visit(page, PAGE)
+  await expect(picture(page).locator("[data-slot=pooler-work]")).toContainText(
+    "15 clients, 2 waiting · 96 queries",
+  )
+  await expect(picture(page).locator("[data-slot=pooler-cost]")).toContainText(
+    "7 active, 6 idle · 1.5 ms a query",
+  )
+  // A pool says its three readings in words under its name: none is lost off the edge.
+  const row = section(page, "pools").getByRole("listitem").first()
+  await expect(row).toContainText("14 active, 2 waiting clients")
+  await expect(row).toContainText("6 active, 4 idle servers")
+  await expect(row).toContainText("waited 1 s")
+  const box = await row.boundingBox()
+  expect(box && box.x >= 0 && box.x + box.width <= 390).toBe(true)
+})
+
+test("a pooler nothing has used says so on the picture and lists no pool", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
   await mockPooling(page, { pooler: ON, stats: IDLE })
   await visit(page, PAGE)
-  const activity = section(page, "activity")
-  await expect(activity).toContainText("Nothing has gone through it yet.")
-  await expect(activity.getByRole("table")).toHaveCount(0)
+  await expect(picture(page)).toContainText("nothing has gone through it yet")
+  await expect(section(page, "pooler")).toContainText("no client yet")
+  await expect(section(page, "pools")).toHaveCount(0)
 })
 
 test("statistics that cannot be read say so and can be asked for again", async ({ page }) => {
@@ -291,12 +364,13 @@ test("statistics that cannot be read say so and can be asked for again", async (
     },
   })
   await visit(page, PAGE)
-  const activity = section(page, "activity")
-  await expect(activity).toContainText("Could not read the pooler's statistics")
-  await expect(activity).toContainText("the console refused the connection")
-  await expect(activity.getByRole("button", { name: "Try again" })).toBeVisible()
-  // The rest of the page is still there.
+  const pooler = section(page, "pooler")
+  await expect(pooler).toContainText("Could not read the pooler's statistics")
+  await expect(pooler).toContainText("the console refused the connection")
+  await expect(pooler.getByRole("button", { name: "Try again" })).toBeVisible()
+  // The rest of the page is still there, and its form still works.
   await expect(section(page, "addresses")).toBeVisible()
+  await expect(pooler.getByLabel("Pool size")).toHaveValue("20")
 })
 
 test("a stopped pooler says it starts with its database and is not asked for statistics", async ({
@@ -305,10 +379,8 @@ test("a stopped pooler says it starts with its database and is not asked for sta
   const server = await mockPooling(page, { pooler: { ...ON, state: "exited" } })
   await visit(page, PAGE)
   await expect(section(page, "pooler")).toContainText("Stopped")
-  await expect(section(page, "activity")).toContainText("The pooler is not running")
-  await expect(section(page, "activity")).toContainText(
-    "It stops with its database and starts with it",
-  )
+  await expect(section(page, "pooler")).toContainText("starts with its database")
+  await expect(section(page, "pools")).toHaveCount(0)
   expect(server.stats).toEqual([])
 })
 
@@ -348,7 +420,13 @@ test("changing how clients authenticate warns that it restarts the pooler", asyn
   await expect(page.getByText("restarts the pooler")).toHaveCount(0)
   await pooler.getByRole("radio", { name: "auth_query" }).click()
   await expect(page.getByText("restarts the pooler, which drops the connections")).toBeVisible()
-  await expect(pooler).toContainText("a function this adds")
+  // What each way of authenticating does is behind the label's ⓘ, not under the field.
+  await expect(pooler).not.toContainText("a function this adds")
+  await pooler
+    .getByText("Authentication", { exact: true })
+    .locator("xpath=following-sibling::button")
+    .hover()
+  await expect(page.getByRole("tooltip")).toContainText("a function this adds")
   await pooler.getByRole("radio", { name: "Userlist" }).click()
   await expect(page.getByText("restarts the pooler, which drops")).toHaveCount(0)
 })
@@ -399,8 +477,9 @@ test("a pooler the access switch published says so beside its addresses", async 
   const addresses = section(page, "addresses")
   await expect(addresses).toContainText("Published to anywhere")
   await expect(addresses).toContainText("This server and anywhere")
-  await expect(addresses).toContainText(
-    "restricting it there brings the pooler back to this server",
+  await addresses.getByRole("button", { name: "Why it is published there" }).hover()
+  await expect(page.getByRole("tooltip")).toContainText(
+    "Restricting it there brings the pooler back to this server",
   )
 })
 
@@ -414,7 +493,7 @@ test("a protected connection shows its pooler and offers no way to change it", a
   await expect(pooler.getByRole("button")).toHaveCount(0)
   await expect(pooler.getByRole("radio")).toHaveCount(0)
   await expect(pooler.getByRole("textbox")).toHaveCount(0)
-  await expect(section(page, "activity")).toContainText("15 active, 2 waiting")
+  await expect(picture(page).locator("[data-slot=pooler-work]")).toContainText("96 queries")
   expect(server.sent).toEqual([])
 })
 
@@ -429,7 +508,8 @@ test("a protected connection with no pooler offers no Turn on", async ({ page })
 test("opening the database to anywhere says the pooler goes with it", async ({ page }) => {
   await mockPooling(page, { pooler: ON })
   await visit(page, "/databases/1/settings/network")
-  await page.getByRole("button", { name: /Anywhere/ }).click()
+  await page.getByRole("radio", { name: "Anywhere" }).click()
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
   await expect(dialog(page)).toContainText(
     "shop-db-pgbouncer (PgBouncer) is published with it, on port 6433",
   )
@@ -457,7 +537,8 @@ test("a role that may only read sees the figures and no control", async ({ page 
   await expect(pooler.getByRole("button")).toHaveCount(0)
   await expect(pooler.getByRole("radio")).toHaveCount(0)
   await expect(pooler.getByRole("textbox")).toHaveCount(0)
-  await expect(section(page, "activity")).toContainText("15 active, 2 waiting")
+  await expect(picture(page).locator("[data-slot=pooler-work]")).toContainText("96 queries")
+  await expect(section(page, "pools").getByRole("listitem")).toHaveCount(2)
 })
 
 test("a role that may not destroy can change the pooler but not turn it off", async ({ page }) => {
@@ -574,7 +655,7 @@ for (const [label, viewport] of [
     await page.setViewportSize(viewport)
     await mockPooling(page, { pooler: ON })
     await visit(page, PAGE)
-    await expect(section(page, "activity")).toContainText("15 active, 2 waiting")
+    await expect(section(page, "pools").getByRole("listitem")).toHaveCount(2)
     const sideways = await page.evaluate(() =>
       [document.documentElement, ...document.querySelectorAll("[data-slot=page]")]
         .map((el) => el.parentElement ?? el)
@@ -592,89 +673,79 @@ for (const [label, viewport] of [
 
 test("every state of the Pooling page, for the pull request @shots", async ({ page }) => {
   test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to save the screenshots")
+  test.setTimeout(240_000)
   const shots = process.env.JD_SHOTS as string
-  await page.setViewportSize({ width: 1440, height: 900 })
-  const server = await mockPooling(page)
-  await page.route("**/api/v1/databases/1/url**", (route) =>
-    route.fulfill({
-      json: {
-        id: 1,
-        name: "shop",
-        driver: "postgres",
-        reference: "",
-        url: "postgres://app:s3cret@127.0.0.1:6433/shop_main?sslmode=disable",
+  const shot = async (name: string, width: number) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await settle(page)
+    await tallShot(page, `${shots}/after-pooling-${name}-${width}.png`)
+  }
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    const server = await mockPooling(page)
+
+    // Off: what it is, and the settings it would start with.
+    await visit(page, PAGE)
+    await expect(section(page, "pooler")).toContainText("Off")
+    await shot("off", width)
+
+    // On, with a busy database behind it.
+    await section(page, "pooler").getByRole("button", { name: "Turn on" }).click()
+    await expect(section(page, "pools").getByRole("listitem")).toHaveCount(2)
+    await page.locator("[data-sonner-toast]").first().waitFor({ state: "detached", timeout: 15000 })
+    await shot("full", width)
+
+    // A setting changed and not yet saved.
+    const pooler = section(page, "pooler")
+    await pooler.getByLabel("Pool size").fill("35")
+    await pooler.getByRole("radio", { name: "Session" }).click()
+    await expect(saveBar(page)).toContainText("2 unsaved changes")
+    await shot("unsaved", width)
+    await saveBar(page).getByRole("button", { name: "Discard" }).click()
+
+    // Turning it off asks first.
+    await page.getByRole("button", { name: "Turn off" }).click()
+    await expect(dialog(page)).toContainText("Turn off pooling for shop")
+    await dialog(page).evaluate((el) =>
+      Promise.all(
+        el
+          .getAnimations({ subtree: true })
+          .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+          .map((a) => a.finished),
+      ),
+    )
+    await page.screenshot({ path: `${shots}/after-pooling-turn-off-${width}.png` })
+    await page.keyboard.press("Escape")
+
+    // Nothing has gone through it; stopped with its database; its figures unreadable.
+    server.set({ ...ON, state: "exited" })
+    await visit(page, PAGE)
+    await expect(section(page, "pooler")).toContainText("Stopped")
+    await shot("stopped", width)
+
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockPooling(page, { pooler: ON, stats: IDLE })
+    await visit(page, PAGE)
+    await expect(picture(page)).toContainText("nothing has gone through it yet")
+    await shot("empty", width)
+
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockPooling(page, {
+      pooler: ON,
+      stats: {
+        status: 502,
+        body: { error: { code: "pooler_unreachable", message: "the console refused" } },
       },
-    }),
-  )
+    })
+    await visit(page, PAGE)
+    await expect(section(page, "pooler")).toContainText("Could not read")
+    await shot("failed", width)
 
-  // Off: what it is, and the settings it would start with.
-  await visit(page, PAGE)
-  await expect(section(page, "pooler")).toContainText("Off")
-  await settle(page)
-  await page.screenshot({ path: `${shots}/off-1440.png` })
-
-  // On, with a busy database behind it.
-  await section(page, "pooler").getByRole("button", { name: "Turn on" }).click()
-  await expect(section(page, "activity")).toContainText("15 active, 2 waiting")
-  await page.evaluate(() => window.scrollTo(0, 0))
-  await settle(page)
-  await page.screenshot({ path: `${shots}/running-1440.png` })
-  await section(page, "activity").scrollIntoViewIfNeeded()
-  await settle(page)
-  await page.screenshot({ path: `${shots}/pools-1440.png` })
-
-  // A setting changed and not yet saved.
-  await page.evaluate(() => window.scrollTo(0, 0))
-  const pooler = section(page, "pooler")
-  await pooler.getByLabel("Pool size").fill("35")
-  await pooler.getByRole("radio", { name: "Session" }).click()
-  await expect(saveBar(page)).toContainText("2 unsaved changes")
-  await settle(page)
-  await page.screenshot({ path: `${shots}/unsaved-1440.png` })
-  await saveBar(page).getByRole("button", { name: "Discard" }).click()
-
-  // Connect, with the pooled string beside the direct one.
-  await page.getByRole("button", { name: "Connect" }).click()
-  const popover = page.locator("[data-slot=connect-popover]")
-  await popover.getByRole("radio", { name: "The pooler" }).click()
-  await settle(page)
-  await popover.evaluate((el) =>
-    Promise.all(
-      el
-        .getAnimations({ subtree: true })
-        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
-        .map((a) => a.finished),
-    ),
-  )
-  await page.screenshot({ path: `${shots}/connect-pooled-1440.png` })
-  await page.keyboard.press("Escape")
-
-  // Turning it off asks first.
-  await page.getByRole("button", { name: "Turn off" }).click()
-  await expect(dialog(page)).toContainText("Turn off pooling for shop")
-  await dialog(page).evaluate((el) =>
-    Promise.all(
-      el
-        .getAnimations({ subtree: true })
-        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
-        .map((a) => a.finished),
-    ),
-  )
-  await page.screenshot({ path: `${shots}/turn-off-1440.png` })
-  await page.keyboard.press("Escape")
-
-  // Stopped with its database.
-  server.set({ ...ON, state: "exited" })
-  await visit(page, PAGE)
-  await expect(section(page, "pooler")).toContainText("Stopped")
-  await settle(page)
-  await page.screenshot({ path: `${shots}/stopped-1440.png` })
-
-  // A phone.
-  server.set(ON)
-  await page.setViewportSize({ width: 390, height: 844 })
-  await visit(page, PAGE)
-  await expect(section(page, "pooler")).toContainText("Running")
-  await settle(page)
-  await page.screenshot({ path: `${shots}/running-390.png` })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockPooling(page, { viewer: true, pooler: ON })
+    await visit(page, PAGE)
+    await expect(section(page, "pools").getByRole("listitem")).toHaveCount(2)
+    await shot("readonly", width)
+  }
 })
