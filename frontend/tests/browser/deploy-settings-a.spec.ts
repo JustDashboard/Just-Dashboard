@@ -361,11 +361,25 @@ test.describe("Build settings", () => {
     ).toBeVisible()
 
     await tasksCard.getByRole("button", { name: "Add release task" }).click()
-    // A new task takes the keyboard at its name, and every field is labelled.
-    await expect(tasksCard.getByLabel("Release task 1 name")).toBeFocused()
-    await expect(tasksCard.getByRole("group", { name: /^Task 1/ })).toContainText("seconds")
-    await tasksCard.getByLabel("Release task 1 name").fill("Migrate database")
-    await tasksCard.getByLabel("Release task 1 command").fill("./bin/migrate")
+    // A new task opens its small form, takes the keyboard at its name, and
+    // every field is labelled.
+    const sheet = page.getByRole("dialog")
+    await expect(sheet.getByLabel("Release task 1 name")).toBeFocused()
+    await expect(sheet).toContainText("seconds")
+    await sheet.getByLabel("Release task 1 name").fill("Migrate database")
+    await sheet.getByLabel("Release task 1 command").fill("./bin/migrate")
+    // Closing the form saves nothing: the task is a line on the page, and the
+    // page's one Save sends it.
+    await sheet.getByRole("button", { name: "Done", exact: true }).click()
+    await expect(sheet).toHaveCount(0)
+    expect(writes).toHaveLength(0)
+    const row = tasksCard
+      .getByRole("list", { name: "Release tasks, in the order they run" })
+      .getByRole("listitem")
+    await expect(row).toHaveCount(1)
+    await expect(row).toContainText("Migrate database")
+    await expect(row).toContainText("./bin/migrate")
+    await expect(row).toContainText("5 min")
     await saveSettings(page)
     await expectSaved(page)
 
@@ -553,12 +567,22 @@ test.describe("Runtime settings", () => {
     await expect(unverified).toBeVisible()
 
     await checksCard.getByRole("button", { name: "Add check" }).click()
-    await checksCard.getByLabel("Health check 1 name").fill("HTTP readiness")
-    await expect(checksCard.getByRole("radio", { name: "HTTP" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    )
-    await expect(checksCard.getByText("GET / → 2xx · 20 × 3 s").first()).toBeVisible()
+    // A new check opens its small form.
+    const sheet = page.getByRole("dialog")
+    await sheet.getByLabel("Health check 1 name").fill("HTTP readiness")
+    await expect(sheet.getByRole("radio", { name: "HTTP" })).toHaveAttribute("aria-checked", "true")
+    await expect(sheet.getByText("GET / → 2xx · 20 × 3 s")).toBeVisible()
+    // Closing the form saves nothing: the check is one line on the page, in
+    // its phase's list, and the page's one Save sends it.
+    await sheet.getByRole("button", { name: "Done", exact: true }).click()
+    await expect(sheet).toHaveCount(0)
+    expect(writes).toHaveLength(0)
+    const row = checksCard.getByRole("list", { name: "Readiness checks" }).getByRole("listitem")
+    await expect(row).toHaveCount(1)
+    await expect(row).toContainText("HTTP readiness")
+    await expect(row).toContainText("GET / → 2xx · 20 × 3 s")
+    await expect(row).toContainText("gives up ~2m 40s")
+    await expect(row).toContainText("Required")
     await expect(unverified).toHaveCount(0)
     await saveSettings(page)
     await expectSaved(page)
@@ -684,9 +708,10 @@ test.describe("Runtime settings, drafts and refusals", () => {
     await page.goto("/deploy/7/settings/runtime")
     const checksCard = page.getByRole("form", { name: "Health checks" })
     await checksCard.getByRole("button", { name: "Add check" }).click()
-    await checksCard.getByRole("radio", { name: "Command" }).click()
+    const sheet = page.getByRole("dialog")
+    await sheet.getByRole("radio", { name: "Command" }).click()
 
-    const argv = checksCard.getByLabel("Command argv")
+    const argv = sheet.getByLabel("Command argv")
     await argv.click()
     await page.keyboard.type("pg_isready")
     await page.keyboard.press("Enter")
@@ -695,13 +720,18 @@ test.describe("Runtime settings, drafts and refusals", () => {
     await page.keyboard.press("Enter")
     await page.keyboard.type("postgres")
     await expect(argv).toHaveValue("pg_isready\n-U \n\npostgres")
+    await expect(sheet.getByText("$ pg_isready -U postgres")).toBeVisible()
+    await sheet.getByRole("button", { name: "Done", exact: true }).click()
+    // The line on the page says the command as it will run.
     await expect(checksCard.getByText("$ pg_isready -U postgres")).toBeVisible()
 
     await saveSettings(page)
     await expectSaved(page)
     const saved = writes.at(-1) as { checks: Array<{ config: Record<string, unknown> }> }
     expect(saved.checks[0].config.command).toEqual(["pg_isready", "-U", "postgres"])
+    await checksCard.getByRole("button", { name: "Edit Readiness check" }).click()
     await expect(argv).toHaveValue("pg_isready\n-U\npostgres")
+    await sheet.getByRole("button", { name: "Done", exact: true }).click()
     await expect(checksCard.getByText("Unsaved changes", { exact: true })).toHaveCount(0)
   })
 })
@@ -1238,5 +1268,272 @@ test.describe("Build settings for static output and Python", () => {
       path: test.info().outputPath("build-railpack-390.png"),
       fullPage: true,
     })
+  })
+})
+
+test.describe("Settings lists are one line each, and a line opens its small form", () => {
+  for (const width of [1280, 390]) {
+    test(`health checks at ${width}: one height, columns in line, the form edits the page's draft`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 })
+      const writes: Array<{ checks: Array<Record<string, unknown>> }> = []
+      await mockProject(page, { normalized: true, showcase: true })
+      await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+        if (route.request().method() === "PUT") writes.push(route.request().postDataJSON())
+        await route.fallback()
+      })
+      await page.goto("/deploy/7/settings/runtime")
+      // No row of figures opens a settings page.
+      await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
+
+      const form = page.getByRole("form", { name: "Health checks" })
+      const readiness = form.getByRole("list", { name: "Readiness checks" }).getByRole("listitem")
+      const smoke = form.getByRole("list", { name: "Smoke checks" }).getByRole("listitem")
+      await expect(readiness).toHaveCount(1)
+      await expect(smoke).toHaveCount(1)
+      await expect(readiness).toContainText("GET /health → 2xx · 20 × 3 s")
+      await expect(readiness).toContainText("Required")
+      await expect(smoke).toContainText("Optional")
+      // No check's fields are on the page until its line is opened.
+      await expect(form.getByLabel("Health check 1 name")).toHaveCount(0)
+
+      await risen(page)
+      const first = (await readiness.boundingBox())!
+      const second = (await smoke.boundingBox())!
+      expect(first.height).toBe(second.height)
+      expect(first.x + first.width).toBeLessThanOrEqual(width)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        width,
+      )
+
+      // The line opens the check's form, which edits the draft: the line
+      // changes its word, keeps its height, and the row under it stays put.
+      await form.getByRole("button", { name: "Edit Answers on /health" }).click()
+      const sheet = page.getByRole("dialog")
+      await expect(sheet.getByLabel("Health check 1 name")).toHaveValue("Answers on /health")
+      await sheet.getByRole("switch", { name: "Required" }).click()
+      await sheet.getByRole("button", { name: "Done", exact: true }).click()
+      await expect(sheet).toHaveCount(0)
+      await expect(readiness).toContainText("Optional")
+      await risen(page)
+      const after = (await readiness.boundingBox())!
+      expect(after.height).toBe(first.height)
+      // Measured from the row above: the page may have scrolled under the form.
+      expect((await smoke.boundingBox())!.y - after.y).toBe(second.y - first.y)
+      expect(writes).toHaveLength(0)
+      await expect(saveBar(page)).toContainText("Health checks")
+
+      // Removing is on the line, and in the form's foot.
+      await form.getByRole("button", { name: "Remove health check Checkout page renders" }).click()
+      await expect(smoke).toHaveCount(0)
+      await saveSettings(page)
+      await expectSaved(page)
+      expect(writes.at(-1)!.checks).toEqual([
+        expect.objectContaining({ name: "Answers on /health", required: false }),
+      ])
+    })
+
+    test(`release tasks at ${width}: one height with and without a last run, and the order is changed on the line`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 })
+      const writes: Array<{ build: { releaseTasks: Array<Record<string, unknown>> } }> = []
+      await mockProject(page, { normalized: true, showcase: true })
+      await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+        if (route.request().method() === "PUT") writes.push(route.request().postDataJSON())
+        await route.fallback()
+      })
+      await page.goto("/deploy/7/settings/build")
+      await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
+
+      const form = page.getByRole("form", { name: "Release tasks" })
+      const rows = form
+        .getByRole("list", { name: "Release tasks, in the order they run" })
+        .getByRole("listitem")
+      await expect(rows).toHaveCount(1)
+      await expect(rows.first()).toContainText("Migrate the database")
+      await expect(rows.first()).toContainText("bun run db:migrate")
+      await expect(rows.first()).toContainText("5 min")
+      await expect(form.getByLabel("Release task 1 command")).toHaveCount(0)
+
+      // A second task, from a starter: its form opens on the command.
+      await form.getByRole("button", { name: "Add release task", exact: true }).click()
+      const sheet = page.getByRole("dialog")
+      await sheet.getByLabel("Release task 2 name").fill("Warm the cache")
+      await sheet.getByLabel("Release task 2 command").fill("bun run warm")
+      await sheet.getByRole("button", { name: "Done", exact: true }).click()
+      await expect(rows).toHaveCount(2)
+
+      await risen(page)
+      const first = (await rows.nth(0).boundingBox())!
+      const second = (await rows.nth(1).boundingBox())!
+      expect(first.height).toBe(second.height)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        width,
+      )
+
+      // The order they run in is changed on the line, and the keyboard
+      // follows the task.
+      await rows.nth(1).getByRole("button", { name: "Move up" }).click()
+      await expect(rows.nth(0)).toContainText("Warm the cache")
+      await expect(rows.nth(1)).toContainText("Migrate the database")
+      await risen(page)
+      const moved = (await rows.nth(0).boundingBox())!
+      expect(moved.height).toBe(first.height)
+      expect((await rows.nth(1).boundingBox())!.y - moved.y).toBe(second.y - first.y)
+
+      // Removing is in the form's foot.
+      await form.getByRole("button", { name: "Edit release task Migrate the database" }).click()
+      await sheet.getByRole("button", { name: "Remove", exact: true }).click()
+      await expect(sheet).toHaveCount(0)
+      await expect(rows).toHaveCount(1)
+      await saveSettings(page)
+      await expectSaved(page)
+      expect(writes.at(-1)!.build.releaseTasks).toEqual([
+        expect.objectContaining({ name: "Warm the cache", command: "bun run warm" }),
+      ])
+    })
+  }
+
+  test("a read-only account opens a check and a task to read them, with nothing to change them by", async ({
+    page,
+  }) => {
+    await mockProject(page, { normalized: true, showcase: true })
+    await page.route("**/api/v1/auth/session", (route) =>
+      json(route, {
+        authenticated: true,
+        needsTotp: false,
+        needsEnrollment: false,
+        require2fa: false,
+        capabilities: ["read"],
+      }),
+    )
+    await page.goto("/deploy/7/settings/runtime")
+    const checks = page.getByRole("form", { name: "Health checks" })
+    await expect(checks.getByRole("button", { name: "Add check" })).toHaveCount(0)
+    await expect(checks.getByRole("button", { name: /^Remove health check/ })).toHaveCount(0)
+    await checks.getByRole("button", { name: "Open Answers on /health" }).click()
+    const sheet = page.getByRole("dialog")
+    await expect(sheet.getByLabel("Health check 1 name")).toHaveAttribute("readonly", "")
+    await expect(sheet.getByRole("switch", { name: "Required" })).toBeDisabled()
+    await expect(sheet.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0)
+    await sheet.getByRole("button", { name: "Done", exact: true }).click()
+    await expect(saveBar(page)).toHaveCount(0)
+
+    await page.goto("/deploy/7/settings/build")
+    const tasks = page.getByRole("form", { name: "Release tasks" })
+    await expect(tasks.getByRole("button", { name: "Add release task" })).toHaveCount(0)
+    await expect(tasks.getByRole("button", { name: "Move up" })).toHaveCount(0)
+    await tasks.getByRole("button", { name: "Open release task Migrate the database" }).click()
+    await expect(sheet.getByLabel("Release task 1 command")).toHaveAttribute("readonly", "")
+    await expect(sheet.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0)
+  })
+
+  test("a switch says one clause, and the reasoning is behind the mark on its section's facts line", async ({
+    page,
+  }) => {
+    await mockProject(page, { normalized: true, showcase: true })
+    await page.goto("/deploy/7/settings/runtime")
+    const replay = page.locator("#replay")
+    await expect(replay).toContainText("Stops a release that answers them differently, or slower")
+    await expect(replay.getByText(/without cookies, credentials or bodies/)).toHaveCount(0)
+    await replay.getByRole("button", { name: "How traffic replay works" }).hover()
+    await expect(page.getByRole("tooltip")).toContainText("without cookies, credentials or bodies")
+    await page.mouse.move(0, 0)
+
+    const sleep = page.locator("#sleep")
+    await expect(sleep).toContainText("The next request wakes it, and waits for it")
+    await expect(sleep.getByRole("button", { name: "How sleeping works" })).toBeVisible()
+
+    // What the strategy does with the two releases is a picture.
+    const picture = page.getByRole("list", {
+      name: "Which release the route sends requests to during a deployment",
+    })
+    await expect(picture).toContainText("Release #2")
+    await expect(picture).toContainText("takes every request once its checks pass")
+    await page.getByRole("button", { name: "Release stop first" }).click()
+    await expect(picture).toContainText("starts after it: a moment of downtime")
+  })
+})
+
+test.describe("Danger, Storage, Databases and Domains read at a glance", () => {
+  for (const width of [1280, 390]) {
+    test(`the danger zone's lifecycle reads in full at ${width}, and an act's reach is marks`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await mockProject(page, { normalized: true, showcase: true })
+      await page.goto("/deploy/7/settings/danger")
+      const strip = page.getByRole("list", { name: "Now: In use" })
+      for (const step of ["In use", "Archived", "Deleted"]) {
+        const word = strip.getByText(step, { exact: true })
+        await expect(word).toBeVisible()
+        // The whole word, not its first letters.
+        expect(
+          await word.evaluate((el) => el.scrollWidth <= el.clientWidth),
+          `${step} is cut off`,
+        ).toBe(true)
+      }
+      await expect(strip.getByRole("listitem").first()).toHaveAttribute("aria-current", "step")
+
+      const stops = page.getByRole("list", { name: "Stops" })
+      await expect(stops.getByRole("listitem")).toHaveText([
+        "git watching on main",
+        "2 webhooks",
+        "1 schedule",
+        "1 preview environment",
+      ])
+      // Each thing is drawn as what it is beside its count.
+      await expect(stops.locator("svg, img")).toHaveCount(4)
+      await expect(page.getByRole("list", { name: "Keeps" }).getByRole("listitem")).toHaveText([
+        "its runtime",
+        "3 domains",
+        "1 volume",
+        "2 releases",
+      ])
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        width,
+      )
+    })
+  }
+
+  test("Storage says what the mounts are under its title, and names its columns once", async ({
+    page,
+  }) => {
+    await mockProject(page, { normalized: true, showcase: true })
+    await page.goto("/deploy/7/settings/storage")
+    const section = page.locator('[data-slot="setting"]').first()
+    await expect(section).toContainText(/2 mounts · [\d.]+ MB · 1 missing/)
+    const rows = section.getByRole("list", { name: "Mounts" }).getByRole("listitem")
+    await expect(rows).toHaveCount(2)
+    // Every field keeps its name for a screen reader; only the first row draws it.
+    await expect(rows.nth(1).getByLabel("Source")).toBeVisible()
+    const drawn = async (row: number) =>
+      rows
+        .nth(row)
+        .locator("label", { hasText: "Source" })
+        .evaluate((el) => el.getBoundingClientRect().height > 4)
+    expect(await drawn(0)).toBe(true)
+    expect(await drawn(1)).toBe(false)
+
+    // Stacked on a phone, each row carries its own names again.
+    await page.setViewportSize({ width: 390, height: 900 })
+    expect(await drawn(1)).toBe(true)
+  })
+
+  test("Databases says what the last gate did on the backup section's head, with no empty section under the page", async ({
+    page,
+  }) => {
+    await mockProject(page, { normalized: true })
+    await page.goto("/deploy/7/settings/databases")
+    await expect(page.getByRole("heading", { name: "Backup before a release" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Latest backup gate evidence" })).toHaveCount(0)
+    const head = page.locator('[data-slot="setting"]', {
+      has: page.getByRole("heading", { name: "Backup before a release" }),
+    })
+    await expect(head).toContainText(
+      /Last gate: deployment #\d+ ran no backup policy|No deployment has run the gate yet/,
+    )
   })
 })
