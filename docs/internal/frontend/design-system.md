@@ -2791,11 +2791,14 @@ The passes, in order. Each one is a diff you can review on its own.
    other package in one muted span. Its figures glide on arrival and to a new inventory; a press
    narrows Installed to that group, including its dependencies. Updates waiting, a queue of rows until
    0.8.5, is one bar with a span per pending package, security first in amber, the first five named
-   and each opening its package's readout; the strip's end carries the security/all-upgrade decisions.
-   No advisory data is said rather than counted as no security updates. The sheet is one scroll, with version changes and size over commands, registered services,
-   file links, the manual, inspectable dependencies and metadata. Catalogue suggestions and results,
-   and the sheet's service/file destinations, take the lit choice edge (pass 3). Tables retain
-   their frame and gain fixed responsive columns and a measured size bar per installed row.
+   and each opening its package's page; the strip's end carries the security/all-upgrade decisions.
+   No advisory data is said rather than counted as no security updates. A package's detail, a sheet
+   until 0.8.7, is its own page (`/packages/[name]`, `components/packages/package-page.tsx`): the
+   identity line with its state and one command, the picture of what it needs and what it gives, its
+   views in the address and the installed list as a rail. Catalogue suggestions and results, and the
+   page's service/file/dependency destinations, take the lit choice edge (pass 3). Tables retain
+   their frame, one line a row with the size as a figure in its column (the bar under each size went:
+   it re-drew every row when a filter changed), and are a card a package below 1024px.
 
    The Docker overview took the same exit on 2026-10-08, at the operator's request, because it was
    the still page of its section: four grey tiles — running, runtime health, attention, compose
