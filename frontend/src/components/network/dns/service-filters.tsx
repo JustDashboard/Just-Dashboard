@@ -31,7 +31,7 @@ function FilterSection({ title, value }: { title: string; value: DNSFilterSectio
   const configured = value.evidence.state === "configured"
   return (
     <section className="min-w-0 space-y-4" aria-label={title}>
-      <div className="border-panel-border flex min-w-0 items-baseline justify-between gap-3 border-b pb-3">
+      <div className="flex min-w-0 items-baseline justify-between gap-3 border-b border-hairline pb-3">
         <h4 className="text-title font-semibold">{title}</h4>
         {configured && (
           <span
@@ -45,7 +45,7 @@ function FilterSection({ title, value }: { title: string; value: DNSFilterSectio
       <Reading label="Configured inventory" value={value.evidence} />
       <Reading label="Entry identity" value={value.identity} />
       {value.entries.length > 0 ? (
-        <ul className="divide-panel-border min-w-0 divide-y">
+        <ul className="min-w-0 divide-y divide-hairline">
           {value.entries.map((entry, index) => (
             <li key={`${index}-${entry.fingerprint}`} className="min-w-0 space-y-2 py-3 text-body">
               <p className="font-medium break-words">
@@ -122,7 +122,7 @@ export function DNSServiceFilters({
   const inventory = filter.data?.inventory
   return (
     <section className="min-w-0 space-y-6" aria-label="Native DNS filter inventory">
-      <div className="border-panel-border flex min-w-0 flex-wrap items-baseline justify-between gap-3 border-b pb-3">
+      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-3 border-b border-hairline pb-3">
         <h3 className="text-base font-semibold">Native filter inventory</h3>
         <Button variant="outline" onClick={filter.refresh} disabled={ownerStale}>
           Read native filters

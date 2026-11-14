@@ -36,7 +36,7 @@ function InventorySection({
 }) {
   return (
     <section className="min-w-0 space-y-4" aria-label={title}>
-      <div className="border-panel-border flex min-w-0 items-baseline justify-between gap-3 border-b pb-3">
+      <div className="flex min-w-0 items-baseline justify-between gap-3 border-b border-hairline pb-3">
         <h3 className="text-base font-semibold">{title}</h3>
         {count !== undefined && (
           <span
@@ -80,7 +80,7 @@ function Values({ values, empty }: { values: string[]; empty: string }) {
 
 function Groups({ groups }: { groups: DNSNativeGroup[] }) {
   return groups.length ? (
-    <ul className="divide-panel-border min-w-0 divide-y">
+    <ul className="min-w-0 divide-y divide-hairline">
       {groups.map((group, index) => (
         <li key={`${index}-${group.id}-${group.name}`} className="min-w-0 space-y-1 py-3 text-body">
           <p className="font-medium break-words">
@@ -287,7 +287,7 @@ function Inventory({
     )
   return (
     <div className="flex min-w-0 flex-col gap-8" aria-label="Native DNS service inventory">
-      <div className="border-panel-border flex min-w-0 flex-wrap items-start justify-between gap-3 border-b pb-3">
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 border-b border-hairline pb-3">
         <div className="min-w-0 space-y-1">
           <p className="text-base font-semibold">
             {view.connection.name} · {dnsEngineName(view.connection.engine)}
@@ -348,7 +348,7 @@ function Inventory({
             )}
           </InventorySection>
           <InventorySection title="Configured listeners" count={snapshot.listeners.length}>
-            <ul className="divide-panel-border min-w-0 divide-y">
+            <ul className="min-w-0 divide-y divide-hairline">
               {snapshot.listeners.map((listener, index) => (
                 <li key={index} className="min-w-0 py-3 text-body">
                   <p className="font-mono break-all">
@@ -413,7 +413,7 @@ function Inventory({
             }
           >
             <Reading label="Client evidence" value={snapshot.clientEvidence} />
-            <ul className="divide-panel-border min-w-0 divide-y">
+            <ul className="min-w-0 divide-y divide-hairline">
               {snapshot.clients.map((client, index) => (
                 <li key={`${index}-${client.id}`} className="min-w-0 space-y-1 py-3 text-body">
                   <p className="font-medium break-words">
@@ -438,7 +438,7 @@ function Inventory({
           </InventorySection>
           <InventorySection title="Authoritative zones" count={snapshot.zones.length}>
             <Reading label="Zone evidence" value={snapshot.zoneEvidence} />
-            <ul className="divide-panel-border min-w-0 divide-y">
+            <ul className="min-w-0 divide-y divide-hairline">
               {snapshot.zones.map((zone, index) => (
                 <li key={`${index}-${zone.name}`} className="min-w-0 py-3 text-body">
                   <p className="font-mono break-all">
@@ -454,7 +454,7 @@ function Inventory({
           </InventorySection>
           <InventorySection title="Local overrides" count={snapshot.localOverrides.length}>
             <Reading label="Override evidence" value={snapshot.overrideEvidence} />
-            <ul className="divide-panel-border min-w-0 divide-y">
+            <ul className="min-w-0 divide-y divide-hairline">
               {snapshot.localOverrides.map((override, index) => (
                 <li
                   key={`${index}-${override.name}`}
@@ -478,7 +478,7 @@ function Inventory({
             title="Named networks"
             count={Object.keys(snapshot.namedNetworks).length}
           >
-            <dl className="divide-panel-border min-w-0 divide-y">
+            <dl className="min-w-0 divide-y divide-hairline">
               {Object.entries(snapshot.namedNetworks).map(([name, scopes]) => (
                 <div
                   key={name}
@@ -522,7 +522,7 @@ function Inventory({
           </InventorySection>
           <InventorySection title="Native query history" count={snapshot.queries.length}>
             <Reading label="Query evidence" value={snapshot.queryEvidence} />
-            <ol className="divide-panel-border min-w-0 divide-y">
+            <ol className="min-w-0 divide-y divide-hairline">
               {snapshot.queries.map((query, index) => (
                 <li key={`${index}-${query.at}`} className="min-w-0 space-y-1 py-3 text-body">
                   <p className="font-mono break-all">
