@@ -338,8 +338,11 @@ export function WireFlow({
             ))}
           </Column>
         </div>
+        {/* Inside the lines' own box, not beside it: a page may lay the
+            picture out as a grid or a centred column, where a second child
+            would take a share of the room. */}
+        <div ref={room} data-slot="wire-hub-room" aria-hidden />
       </div>
-      <div ref={room} data-slot="wire-hub-room" aria-hidden />
     </div>
   )
 }
