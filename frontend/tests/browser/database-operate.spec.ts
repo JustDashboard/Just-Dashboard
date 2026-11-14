@@ -1,5 +1,6 @@
 import { expect as baseExpect, test, type Page } from "@playwright/test"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
+import { risen } from "./risen"
 
 /**
  * A database's Access, Backups and Settings pages, and the verbs its menu
@@ -17,7 +18,7 @@ import { mockDatabases, type DatabaseMock } from "./database-fixture"
  * for the role that may use it, nothing that writes is drawn on a protected
  * connection, and the account the dashboard itself signs in with keeps what
  * would lock the dashboard out. Work that is staged or typed is not lost to a
- * slip — in a dialog or in an account's panel — and a secret shown once has
+ * slip — in a dialog or on an account's page — and a secret shown once has
  * one way out. On a server that numbers its databases a dump is of the
  * connection's own number unless the reader widens it, and a dump that
  * reaches other numbers is restored only by a press that says so.
@@ -473,6 +474,8 @@ const ANSWERS: Record<string, Answer> = {
   "GET 1/server/grants": { supported: true, truncated: false, grants: REPORTING_GRANTS },
   "GET 1/server/roles/reporting": detail("reporting", { grants: REPORTING_GRANTS }),
   "GET 1/server/roles/app": detail("app"),
+  "GET 1/server/roles/readers": detail("readers"),
+  "GET 1/server/roles/pg_monitor": detail("pg_monitor"),
   "GET 1/catalog": CATALOG,
   "GET 4/backups": {
     dir: "/var/backups/jd/databases/cache",
@@ -1971,9 +1974,17 @@ const accounts = (page: Page) => page.getByRole("region", { name: "Accounts" })
 const account = (page: Page, name: string) =>
   accounts(page)
     .locator("[data-slot=choice-row]")
-    .filter({ has: page.getByRole("button", { name: `Open ${name}`, exact: true }) })
-const panel = (page: Page) => page.getByRole("dialog")
+    .filter({ has: page.getByRole("link", { name: `Open ${name}`, exact: true }) })
+/** An account's own page: the line it opens on, its views, and the list beside it. */
+const identity = (page: Page) => page.locator("[data-slot=account-identity]")
+const accountRail = (page: Page) => page.locator("[data-slot=account-rail]")
+const view = (page: Page, name: string | RegExp) => page.getByRole("tab", { name })
 const matrix = (page: Page) => page.locator("[data-slot=grants-matrix]")
+const pending = (page: Page) => page.locator("[data-slot=grants-pending]")
+const leaving = (page: Page) => page.getByRole("dialog", { name: "Unsaved changes" })
+/** The way back to the list, over the account's line: not the rail's own link to the page. */
+const back = (page: Page) =>
+  page.locator("[data-slot=page-context]").getByRole("link", { name: "Access" })
 
 test("accounts open on who can sign in, with the dashboard's own account marked", async ({
   page,
@@ -1981,6 +1992,7 @@ test("accounts open on who can sign in, with the dashboard's own account marked"
   await mockOperate(page)
   await visit(page, "/databases/1/access")
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
 
   await expect(account(page, "app")).toContainText("this connection")
   await expect(account(page, "app")).toContainText("administrator")
@@ -2091,34 +2103,150 @@ test("a new password is the only thing sent, and the connection's own account sa
   })
 })
 
+test("an account is a page of its own: its line, its views in the address, the list beside it", async ({
+  page,
+}) => {
+  const server = await mockOperate(page, {
+    answers: { "PUT 1/server/roles/reporting": { ok: true } },
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await visit(page, "/databases/1/access")
+  await account(page, "reporting").getByRole("link", { name: "Open reporting" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access/reporting")
+
+  // It opens on what it is about, with no sheet over the list and no row of figures.
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  await expect(identity(page)).toContainText("reporting")
+  await expect(identity(page)).toContainText("1 session now")
+  await expect(identity(page)).toContainText("Granted on 1 database, 2 tables")
+  // One command, in the brand's face: the rest are behind the menu.
+  await expect(identity(page).getByRole("button", { name: "Change password" })).toBeVisible()
+  await identity(page).getByRole("button", { name: "Actions for reporting" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText(["Drop account"])
+  await page.keyboard.press("Escape")
+
+  // The views are in the address, and the first is the bare one.
+  await expect(view(page, /^Grants/)).toHaveAttribute("aria-selected", "true")
+  await view(page, /^Settings/).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access/reporting?tab=settings")
+  await expect(page.getByRole("form", { name: "Account attributes" })).toBeVisible()
+
+  // The list is beside it, the one on screen filled; the view goes with the reader.
+  await expect(accountRail(page).getByRole("link")).toHaveText([
+    /app/,
+    /reporting/,
+    /readers/,
+    /pg_monitor/,
+  ])
+  await expect(accountRail(page).getByRole("link", { name: "reporting" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
+  await accountRail(page).getByRole("link", { name: "app", exact: true }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access/app?tab=settings")
+  await expect(identity(page)).toContainText("this connection")
+  // Alt+↓ and Alt+↑ walk the list.
+  await page.keyboard.press("Alt+ArrowDown")
+  await expect.poll(() => where(page)).toBe("/databases/1/access/reporting?tab=settings")
+  await page.getByRole("button", { name: "Previous account" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access/app?tab=settings")
+
+  // The way back is the list.
+  await back(page).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access")
+  expect(server.sent).toEqual([])
+})
+
+test("the list beside an account is the list as it was filtered, and the way back keeps the filter", async ({
+  page,
+}) => {
+  await mockOperate(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await visit(page, "/databases/1/access")
+  await page.getByRole("button", { name: "Cannot sign in" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access?show=blocked")
+  await account(page, "readers").getByRole("link", { name: "Open readers" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access/readers")
+
+  await expect(accountRail(page).getByRole("link")).toHaveCount(2)
+  await expect(accountRail(page)).toContainText("2 of 4 · cannot sign in")
+  await expect(page.getByRole("button", { name: "Previous account" })).toBeDisabled()
+  // Back is the list, as it was left.
+  await page.goBack()
+  await expect.poll(() => where(page)).toBe("/databases/1/access?show=blocked")
+  await expect(accounts(page).locator("[data-slot=choice-row]")).toHaveCount(2)
+  await page.goForward()
+  await back(page).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access?show=blocked")
+
+  // The filter is taken off from the rail too, and an account outside it stays on its own list.
+  await visit(page, "/databases/1/access/app")
+  await expect(accountRail(page).getByRole("link")).toHaveText([/app/, /readers/, /pg_monitor/])
+  await accountRail(page).getByRole("button", { name: "Clear filters" }).click()
+  await expect(accountRail(page).getByRole("link")).toHaveCount(4)
+  await accountRail(page).getByLabel("Search the accounts").fill("report")
+  await expect(accountRail(page).getByRole("link")).toHaveText([/app/, /reporting/])
+})
+
+test("an address that opened an account's sheet lands on the account's page", async ({ page }) => {
+  await mockOperate(page, {
+    answers: {
+      "GET 2/server/roles": {
+        supported: true,
+        roles: [role("root", { host: "%", superuser: true }), role("blogger", { host: "10.%" })],
+      },
+      "GET 2/server/privileges": { supported: true, editable: ["password"], levels: [] },
+      "GET 2/server/grants": { supported: true, truncated: false, grants: [] },
+      "GET 2/server/roles/blogger": detail("blogger", { host: "10.%", editable: ["password"] }),
+    },
+  })
+  await visit(page, "/databases/1/access?account=reporting")
+  await expect.poll(() => where(page)).toBe("/databases/1/access/reporting")
+  await expect(identity(page)).toContainText("1 session now")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+
+  // What narrowed the list is not the account's to carry; the host is.
+  await visit(page, "/databases/2/access?show=admins&account=blogger&host=10.%25")
+  await expect.poll(() => where(page)).toBe("/databases/2/access/blogger?host=10.%25")
+  await expect(identity(page)).toContainText("blogger@10.%")
+
+  await visit(page, "/databases/5/access?account=api&host=app_main")
+  await expect.poll(() => where(page)).toBe("/databases/5/access/api?host=app_main")
+  await expect(identity(page)).toContainText("kept in app_main")
+})
+
 test("an account's attributes are saved one switch at a time, and its own account keeps what would lock it out", async ({
   page,
 }) => {
   const server = await mockOperate(page, {
     answers: { "PUT 1/server/roles/reporting": { ok: true } },
   })
-  await visit(page, "/databases/1/access?account=reporting")
-  const form = panel(page).getByRole("form", { name: "Account attributes" })
-  const save = form.getByRole("button", { name: "Save attributes" })
-  await expect(save).toBeDisabled()
+  await visit(page, "/databases/1/access/reporting?tab=settings")
+  const form = page.getByRole("form", { name: "Account attributes" })
+  // One save for the page, and none while nothing is edited: no button per section.
+  await expect(form.getByRole("switch", { name: "It can create databases" })).toBeVisible()
+  await expect(saveBar(page)).toHaveCount(0)
+  await expect(form.getByRole("button", { name: /save/i })).toHaveCount(0)
   await form.getByRole("switch", { name: "It can create databases" }).click()
-  await expect(form).toContainText("Only this attribute is sent")
-  await save.click()
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  await saveBar(page).getByRole("button", { name: "Save" }).click()
   await expect
     .poll(() => server.sent.find((one) => one.request === "PUT 1/server/roles/reporting")?.body)
     .toEqual({ createDb: true })
 
   // The account this connection signs in with.
-  await visit(page, "/databases/1/access?account=app")
-  const own = panel(page).getByRole("form", { name: "Account attributes" })
+  await visit(page, "/databases/1/access/app?tab=settings")
+  const own = page.getByRole("form", { name: "Account attributes" })
   await expect(own.getByRole("switch", { name: "It can sign in" })).toBeDisabled()
   await expect(
     own.getByRole("switch", { name: "Administrator of the whole server" }),
   ).toBeDisabled()
   await expect(own).toContainText("This connection signs in with it.")
   await expect(own.getByRole("switch", { name: "It can create databases" })).toBeEnabled()
-  // And it cannot be dropped from here.
-  await expect(panel(page).getByRole("button", { name: "Drop account" })).toHaveCount(0)
+  // And it cannot be dropped from here: its line has a new password and no menu.
+  await expect(identity(page).getByRole("button", { name: "Change password" })).toBeVisible()
+  await expect(identity(page).getByRole("button", { name: /^Actions for/ })).toHaveCount(0)
 })
 
 test("grants are pressed on a matrix, read as the server's statements, and only then applied", async ({
@@ -2150,7 +2278,7 @@ test("grants are pressed on a matrix, read as the server's statements, and only 
       },
     },
   })
-  await visit(page, "/databases/1/access?account=reporting")
+  await visit(page, "/databases/1/access/reporting")
   // It opens on the level the account holds the most at.
   await expect(matrix(page).getByRole("button", { name: /^Tables/ })).toHaveAttribute(
     "aria-pressed",
@@ -2162,12 +2290,11 @@ test("grants are pressed on a matrix, read as the server's statements, and only 
 
   await matrix(page).getByRole("button", { name: "UPDATE on orders" }).click()
   await select("customers").click()
-  const pending = panel(page).locator("[data-slot=grants-pending]")
-  await expect(pending).toContainText("2 changes not applied")
+  await expect(pending(page)).toContainText("2 changes not applied")
   // Nothing has been sent: a press only stages.
   expect(server.sent).toEqual([])
 
-  await pending.getByRole("button", { name: "Review…" }).click()
+  await pending(page).getByRole("button", { name: "Review…" }).click()
   const review = page.getByRole("dialog", { name: "Change what reporting holds" })
   await expect(review).toContainText('REVOKE SELECT ON TABLE "public"."customers" FROM "reporting"')
   await expect(review).toContainText('GRANT UPDATE ON TABLE "public"."orders" TO "reporting"')
@@ -2177,6 +2304,7 @@ test("grants are pressed on a matrix, read as the server's statements, and only 
 
   await review.getByRole("button", { name: "Apply" }).click()
   await expect(review).toHaveCount(0)
+  await expect(pending(page)).toHaveCount(0)
   const applied = server.sent.filter((one) => one.query === "")
   expect(applied.map((one) => [one.request, one.body])).toEqual([
     [
@@ -2190,73 +2318,51 @@ test("grants are pressed on a matrix, read as the server's statements, and only 
   ])
 })
 
-test("staged grants and edited attributes are not lost to a slip in the account's panel", async ({
+test("staged grants and edited attributes are kept across the views, and the page asks before it is left over them", async ({
   page,
 }) => {
   const server = await mockOperate(page)
-  await visit(page, "/databases/1/access?account=reporting")
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await visit(page, "/databases/1/access/reporting")
   await expect(matrix(page).locator("[data-object=orders]")).toBeVisible()
 
-  // Nothing staged: Escape closes it.
-  await page.keyboard.press("Escape")
-  await expect(panel(page)).toHaveCount(0)
+  // Nothing staged: the way back is taken at once.
+  await back(page).click()
   await expect.poll(() => where(page)).toBe("/databases/1/access")
+  await account(page, "reporting").getByRole("link", { name: "Open reporting" }).click()
 
-  await account(page, "reporting").getByRole("button", { name: "Open reporting" }).click()
   await matrix(page).getByRole("button", { name: "UPDATE on orders" }).click()
   await matrix(page).getByRole("button", { name: "SELECT on customers" }).click()
-  await panel(page).getByRole("switch", { name: "It can create databases" }).click()
+  // A look at another view loses nothing, and each view says it holds work.
+  await view(page, /^Settings/).click()
+  await page.getByRole("switch", { name: "It can create databases" }).click()
+  await expect(view(page, /^Grants/)).toContainText("unsaved changes")
+  await expect(view(page, /^Settings/)).toContainText("unsaved changes")
+  // Each view's own bar is the one on screen: the grants' is not drawn over the settings.
+  await expect(pending(page)).toBeHidden()
+  await expect(saveBar(page)).toContainText("1 unsaved change")
 
-  // Escape, the corner's close and a press outside all ask first.
+  // The way back, another account in the rail and the arrows all ask first.
+  await back(page).click()
+  await expect(leaving(page)).toContainText("3 changes")
+  await leaving(page).getByRole("button", { name: "Keep editing" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access/reporting?tab=settings")
+  await accountRail(page).getByRole("link", { name: "readers" }).click()
+  await expect(leaving(page)).toContainText("3 changes")
+  // A slip while it is asking means "no".
   await page.keyboard.press("Escape")
-  await expect(panel(page)).toContainText("Close and lose 3 changes that were not saved?")
-  await panel(page).getByRole("button", { name: "Keep editing" }).click()
-  await expect(panel(page).locator("[data-slot=grants-pending]")).toContainText(
-    "2 changes not applied",
-  )
-  await panel(page).getByRole("button", { name: "Close", exact: true }).click()
-  await expect(panel(page)).toContainText("Close and lose 3 changes that were not saved?")
-  // A second slip while it is asking means "no".
-  await page.keyboard.press("Escape")
-  await expect(panel(page).getByRole("button", { name: "Close anyway" })).toHaveCount(0)
-  await expect(panel(page).locator("[data-slot=grants-pending]")).toBeVisible()
-  await expect(panel(page).getByRole("switch", { name: "It can create databases" })).toBeChecked()
+  await expect(leaving(page)).toHaveCount(0)
+  await expect(page.getByRole("switch", { name: "It can create databases" })).toBeChecked()
+  await view(page, /^Grants/).click()
+  await expect(pending(page)).toContainText("2 changes not applied")
+  await expect(saveBar(page)).toHaveCount(0)
 
-  await page.keyboard.press("Escape")
-  await panel(page).getByRole("button", { name: "Close anyway" }).click()
-  await expect(panel(page)).toHaveCount(0)
-  await expect.poll(() => where(page)).toBe("/databases/1/access")
-  // Nothing was sent, and the keyboard is back on the row that opened the panel.
+  await page.keyboard.press("Alt+ArrowDown")
+  await leaving(page).getByRole("button", { name: "Discard and go on" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access/readers")
+  await expect(pending(page)).toHaveCount(0)
+  // Nothing was sent.
   expect(server.sent).toEqual([])
-  await expect(
-    account(page, "reporting").getByRole("button", { name: "Open reporting" }),
-  ).toBeFocused()
-})
-
-test("opening an account is a step: Back closes its panel and leaves the list as it was", async ({
-  page,
-}) => {
-  await mockOperate(page)
-  await visit(page, "/databases/1/access")
-  await page.getByRole("button", { name: "Administrators" }).click()
-  await expect.poll(() => where(page)).toBe("/databases/1/access?show=admins")
-  await account(page, "app").getByRole("button", { name: "Open app" }).click()
-  await expect(panel(page)).toBeVisible()
-  await expect.poll(() => where(page)).toBe("/databases/1/access?show=admins&account=app")
-
-  await page.goBack()
-  await expect(panel(page)).toHaveCount(0)
-  await expect.poll(() => where(page)).toBe("/databases/1/access?show=admins")
-  await expect(accounts(page).locator("[data-slot=choice-row]")).toHaveCount(1)
-
-  // Closed from the panel itself, it leaves no second entry to go back through.
-  await account(page, "app").getByRole("button", { name: "Open app" }).click()
-  await expect(panel(page)).toBeVisible()
-  await page.keyboard.press("Escape")
-  await expect(panel(page)).toHaveCount(0)
-  await expect.poll(() => where(page)).toBe("/databases/1/access?show=admins")
-  await page.goForward()
-  await expect(panel(page)).toBeVisible()
 })
 
 test("memberships list the roles an account is in, and another is added from a menu", async ({
@@ -2278,8 +2384,8 @@ test("memberships list the roles an account is in, and another is added from a m
       }),
     },
   })
-  await visit(page, "/databases/1/access?account=reporting")
-  const members = panel(page).locator("[data-slot=memberships]")
+  await visit(page, "/databases/1/access/reporting")
+  const members = page.locator("[data-slot=memberships]")
   // Only what it is in: the server's other roles are not drawn as if it were a member of each.
   await expect(members.getByRole("button", { name: "readers" })).toHaveAttribute(
     "aria-pressed",
@@ -2288,16 +2394,15 @@ test("memberships list the roles an account is in, and another is added from a m
   await expect(members.getByRole("group").getByRole("button")).toHaveCount(1)
   await expect(members).not.toContainText("app")
 
+  // The section's one verb is on its title line.
   await members.getByRole("button", { name: "Add to a role" }).click()
   // The engine's own roles are not offered, and the one it is in is not offered again.
   await expect(page.getByRole("menuitem")).toHaveText(["app"])
   await page.getByRole("menuitem", { name: "app" }).click()
   await members.getByRole("button", { name: "readers" }).click()
-  await expect(panel(page).locator("[data-slot=grants-pending]")).toContainText(
-    "2 changes not applied",
-  )
+  await expect(pending(page)).toContainText("2 changes not applied")
 
-  await panel(page).getByRole("button", { name: "Review…" }).click()
+  await pending(page).getByRole("button", { name: "Review…" }).click()
   const review = page.getByRole("dialog", { name: "Change what reporting holds" })
   await expect(review).toContainText('GRANT "app" TO "reporting"')
   await expect(review).toContainText('REVOKE "readers" FROM "reporting"')
@@ -2323,12 +2428,9 @@ test("a privilege pressed on every table is one request for the schema, and can 
       },
     },
   })
-  await visit(page, "/databases/1/access?account=reporting")
+  await visit(page, "/databases/1/access/reporting")
   await matrix(page).getByRole("button", { name: "INSERT on every table in public" }).click()
-  await panel(page)
-    .locator("[data-slot=grants-pending]")
-    .getByRole("button", { name: "Review…" })
-    .click()
+  await pending(page).getByRole("button", { name: "Review…" }).click()
   const review = page.getByRole("dialog", { name: "Change what reporting holds" })
   await expect(review).toContainText('GRANT INSERT ON ALL TABLES IN SCHEMA "public" TO "reporting"')
   await review.getByRole("switch", { name: "Also for what is created later in public" }).click()
@@ -2340,6 +2442,58 @@ test("a privilege pressed on every table is one request for the schema, and can 
     privileges: ["INSERT"],
     future: true,
   })
+})
+
+test("an account's sessions are the ones Performance lists for it, each a way to its panel there", async ({
+  page,
+}) => {
+  const session = (pid: string, user: string, over: Record<string, unknown> = {}) => ({
+    pid,
+    user,
+    database: "shop_main",
+    status: "idle",
+    seconds: 0,
+    idleSeconds: 40,
+    application: "storefront",
+    client: "10.0.0.7",
+    ...over,
+  })
+  const server = await mockOperate(page, {
+    answers: {
+      "GET 1/activity": {
+        supported: true,
+        sessions: [
+          session("4101", "app"),
+          session("4102", "reporting", {
+            status: "active",
+            seconds: 12,
+            query: "SELECT count(*) FROM orders",
+            application: "metabase",
+          }),
+          session("4103", "app", { application: "" }),
+        ],
+      },
+    },
+  })
+  await visit(page, "/databases/1/access/reporting?tab=sessions")
+  const sessions = page.getByRole("region", { name: "Sessions" })
+  await expect(sessions.locator("[data-slot=choice-row]")).toHaveCount(1)
+  await expect(sessions).toContainText("metabase")
+  await expect(sessions).toContainText("SELECT count(*) FROM orders")
+  await expect(sessions).toContainText("Active")
+  await expect(
+    sessions.getByRole("link", { name: "Open session 4102 in Performance" }),
+  ).toHaveAttribute("href", "/databases/1/performance?view=sessions&session=4102")
+  // A session with and without a statement is one height.
+  await visit(page, "/databases/1/access/app?tab=sessions")
+  await expect(sessions.locator("[data-slot=choice-row]")).toHaveCount(2)
+  const heights = await sessions
+    .locator("[data-slot=choice-row]")
+    .evaluateAll((rows) => rows.map((row) => Math.round(row.getBoundingClientRect().height)))
+  expect(new Set(heights).size).toBe(1)
+  // Nothing is stopped from here: the page that owns the sessions does that.
+  await expect(sessions.getByRole("button")).toHaveCount(0)
+  expect(server.sent).toEqual([])
 })
 
 test("dropping an account is asked with the account named, and never offered on the engine's own", async ({
@@ -2360,11 +2514,29 @@ test("dropping an account is asked with the account named, and never offered on 
 
   await account(page, "pg_monitor").getByRole("button", { name: "Actions for pg_monitor" }).click()
   await expect(page.getByRole("menuitem", { name: "Drop account" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  // From the account's own page it is the same question, and it ends on the list.
+  await visit(page, "/databases/1/access/reporting")
+  await identity(page).getByRole("button", { name: "Actions for reporting" }).click()
+  await page.getByRole("menuitem", { name: "Drop account" }).click()
+  await expect(dialog(page)).toContainText("Sessions now")
+  await dialog(page).getByRole("button", { name: "Drop", exact: true }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access")
+  expect(
+    server.sent.filter((one) => one.request === "DELETE 1/server/roles/reporting"),
+  ).toHaveLength(2)
+  // The engine's own account has no menu on its page either.
+  await visit(page, "/databases/1/access/pg_monitor")
+  await expect(identity(page)).toContainText("system")
+  await expect(identity(page).getByRole("button", { name: /^Actions for/ })).toHaveCount(0)
 })
 
 test("an engine whose accounts have hosts names each by both, and carries the host in what it sends", async ({
   page,
 }) => {
+  // A name the path cannot hold as written, at a host that is a pattern.
+  const odd = role("50%@shop", { host: "10.%" })
   const server = await mockOperate(page, {
     answers: {
       "GET 2/server/roles": {
@@ -2373,6 +2545,7 @@ test("an engine whose accounts have hosts names each by both, and carries the ho
           role("root", { host: "%", superuser: true }),
           role("root", { host: "localhost", superuser: true }),
           role("blogger", { host: "10.%" }),
+          odd,
         ],
       },
       "GET 2/server/privileges": {
@@ -2381,9 +2554,22 @@ test("an engine whose accounts have hosts names each by both, and carries the ho
         levels: [],
       },
       "GET 2/server/grants": { supported: true, truncated: false, grants: [] },
+      "GET 2/server/roles/root": (_call: number, url: URL) =>
+        detail("root", {
+          host: url.searchParams.get("host"),
+          superuser: true,
+          editable: ["password", "locked"],
+        }),
+      // The request's own path, as the mock reads it: the name written into it once.
+      "GET 2/server/roles/50%25%40shop": detail("50%@shop", {
+        host: "10.%",
+        editable: ["password", "locked"],
+      }),
+      "PUT 2/server/roles/50%25%40shop": { ok: true },
       "DELETE 2/server/roles/blogger": { ok: true },
     },
   })
+  await page.setViewportSize({ width: 1440, height: 900 })
   await visit(page, "/databases/2/access")
   await expect(account(page, "root@%")).toBeVisible()
   await expect(account(page, "root@localhost")).toBeVisible()
@@ -2395,20 +2581,58 @@ test("an engine whose accounts have hosts names each by both, and carries the ho
   await expect
     .poll(() => server.sent.find((one) => one.request === "DELETE 2/server/roles/blogger")?.query)
     .toBe("?host=10.%25")
+
+  // Its page is at its name, with the host beside it; both come back as they were.
+  await account(page, "50%@shop@10.%").getByRole("link", { name: "Open 50%@shop@10.%" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/2/access/50%25%40shop?host=10.%25")
+  await expect(identity(page)).toContainText("50%@shop@10.%")
+  await expect(accountRail(page).getByRole("link", { name: "50%@shop@10.%" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
+  await view(page, /^Settings/).click()
+  await expect
+    .poll(() => where(page))
+    .toBe("/databases/2/access/50%25%40shop?host=10.%25&tab=settings")
+  await page.getByRole("switch", { name: /^Locked/ }).click()
+  await saveBar(page).getByRole("button", { name: "Save" }).click()
+  await expect
+    .poll(() => server.sent.find((one) => one.request === "PUT 2/server/roles/50%25%40shop")?.body)
+    .toEqual({ locked: true, host: "10.%" })
+  // A reload opens the same account.
+  await page.reload()
+  await expect(identity(page)).toContainText("50%@shop@10.%")
+
+  // Two accounts of one name are two pages, told apart by the host.
+  await accountRail(page).getByRole("link", { name: "root@localhost" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/2/access/root?host=localhost&tab=settings")
+  await expect(identity(page)).toContainText("root@localhost")
+  await accountRail(page).getByRole("link", { name: "root@%" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/2/access/root?host=%25&tab=settings")
+  await expect(identity(page)).toContainText("root@%")
 })
 
 test("a viewer reads the accounts and what each holds, and is offered nothing that changes them", async ({
   page,
 }) => {
   const server = await mockOperate(page, { viewer: true })
-  await visit(page, "/databases/1/access?account=reporting")
-  await expect(panel(page).getByRole("button", { name: "Change password" })).toHaveCount(0)
-  await expect(panel(page).getByRole("button", { name: "Drop account" })).toHaveCount(0)
-  await expect(panel(page).getByRole("button", { name: "Save attributes" })).toHaveCount(0)
+  await visit(page, "/databases/1/access/reporting")
+  await expect(identity(page)).toContainText("1 session now")
+  await expect(identity(page).getByRole("button")).toHaveCount(0)
   // What it holds is read; nothing on it can be pressed.
   await expect(matrix(page).locator("[data-object=orders]")).toContainText("SELECT")
   await expect(matrix(page).getByRole("button", { name: "SELECT on orders" })).toHaveCount(0)
-  await page.keyboard.press("Escape")
+  await expect(page.getByRole("button", { name: "Add to a role" })).toHaveCount(0)
+  // Its attributes are said in words: a switch that cannot be thrown is not drawn.
+  await view(page, /^Settings/).click()
+  const settings = page.getByRole("form", { name: "Account attributes" })
+  await expect(settings).toContainText("It can create databases")
+  await expect(settings.getByRole("switch")).toHaveCount(0)
+  await expect(settings.getByRole("textbox")).toHaveCount(0)
+  await expect(saveBar(page)).toHaveCount(0)
+
+  await visit(page, "/databases/1/access")
+  await expect(account(page, "reporting")).toBeVisible()
   await expect(accounts(page).getByRole("button", { name: "New account" })).toHaveCount(0)
   await expect(accounts(page).getByRole("button", { name: /^Actions for/ })).toHaveCount(0)
   expect(server.sent).toEqual([])
@@ -2418,11 +2642,16 @@ test("a protected connection reads its accounts and draws no way to change one",
   page,
 }) => {
   const server = await mockOperate(page, { rows: { 1: { readOnly: true } } })
-  await visit(page, "/databases/1/access?account=reporting")
+  await visit(page, "/databases/1/access/reporting")
   await expect(matrix(page).locator("[data-object=orders]")).toContainText("SELECT")
   await expect(matrix(page).getByRole("button", { name: "SELECT on orders" })).toHaveCount(0)
-  await expect(panel(page).getByRole("button", { name: "Change password" })).toHaveCount(0)
-  await page.keyboard.press("Escape")
+  await expect(identity(page)).toContainText("protected")
+  await expect(identity(page).getByRole("button")).toHaveCount(0)
+  await view(page, /^Settings/).click()
+  await expect(
+    page.getByRole("form", { name: "Account attributes" }).getByRole("switch"),
+  ).toHaveCount(0)
+  await visit(page, "/databases/1/access")
   await expect(accounts(page)).toContainText("This connection is protected")
   await expect(accounts(page).getByRole("button", { name: "New account" })).toHaveCount(0)
   // Not even a preview is asked: the server refuses those on a protected connection too.
@@ -2435,6 +2664,12 @@ test("accounts that cannot be read say so in the server's words without metric c
   await mockOperate(page, {
     answers: {
       "GET 1/server/roles": refusal("query_failed", "SELECT command denied for table user", 502),
+      "GET 1/server/roles/ghost": refusal("not_found", "not found", 404),
+      "GET 1/server/roles/reporting": refusal(
+        "query_failed",
+        "permission denied for pg_authid",
+        502,
+      ),
     },
   })
   await visit(page, "/databases/1/access")
@@ -2442,6 +2677,20 @@ test("accounts that cannot be read say so in the server's words without metric c
   await expect(accounts(page)).toContainText("SELECT command denied for table user")
   await expect(accounts(page).getByRole("button", { name: "Try again" })).toBeVisible()
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+
+  // An account that is not there is said calmly, with the way back; one that could not be read, with a retry.
+  await visit(page, "/databases/1/access/ghost")
+  const gone = page.locator("[data-slot=empty-state]:visible")
+  await expect(gone).toContainText("No account named ghost on this server")
+  await expect(gone.getByRole("link", { name: "Back to the accounts" })).toHaveAttribute(
+    "href",
+    "/databases/1/access",
+  )
+  await visit(page, "/databases/1/access/reporting")
+  const failed = page.locator("[data-slot=page] [role=status]:visible")
+  await expect(failed).toContainText("Could not read the account")
+  await expect(failed).toContainText("permission denied for pg_authid")
+  await expect(failed.getByRole("button", { name: "Try again" })).toBeVisible()
 })
 
 test("a key–value server's users are rules, and the dashboard's own user keeps what would cut it off", async ({
@@ -2456,6 +2705,7 @@ test("a key–value server's users are rules, and the dashboard's own user keeps
       },
     },
   })
+  await page.setViewportSize({ width: 1440, height: 900 })
   await visit(page, "/databases/4/access")
   const users = page.getByRole("region", { name: "Users" })
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
@@ -2464,37 +2714,71 @@ test("a key–value server's users are rules, and the dashboard's own user keeps
   // No SQL account route is asked of it.
   expect(server.seen.some((one) => one.includes("/server/roles"))).toBe(false)
 
-  await users.getByRole("button", { name: "Open worker", exact: true }).click()
-  await expect(panel(page)).toContainText("on ~jobs:* resetchannels -@all +@read +@write")
-  await panel(page).getByLabel("Keys").fill("~jobs:*\n%R~shared:*")
-  await panel(page).getByRole("button", { name: "Save rule" }).click()
+  await users.getByRole("link", { name: "Open worker", exact: true }).click()
+  await expect.poll(() => where(page)).toBe("/databases/4/access/worker")
+  // The reading: the rule as the server holds it, and its parts.
+  const rule = page.getByRole("region", { name: "Rule" })
+  await expect(rule).toContainText("on ~jobs:* resetchannels -@all +@read +@write")
+  await expect(identity(page)).toContainText("switched on")
+  await expect(identity(page)).toContainText("1 password set")
+
+  await view(page, "Settings").click()
+  await expect.poll(() => where(page)).toBe("/databases/4/access/worker?tab=settings")
+  const form = page.getByRole("form", { name: "The user's rule" })
+  await form.getByLabel("Keys").fill("~jobs:*\n%R~shared:*")
+  await saveBar(page).getByRole("button", { name: "Save" }).click()
   // Only the part of the rule that was edited is sent.
   await expect
     .poll(() => server.sent.find((one) => one.request === "PUT 4/redis/acl/worker")?.body)
     .toEqual({
       keys: ["~jobs:*", "%R~shared:*"],
     })
-  await expect(panel(page)).toContainText("keeps its users in memory")
-  // A rule being rewritten is not lost to Escape either.
-  await panel(page).getByLabel("Channels").fill("jobs:*")
-  await page.keyboard.press("Escape")
-  await expect(panel(page)).toContainText("Close and lose the edits to this user’s rule?")
-  await panel(page).getByRole("button", { name: "Keep editing" }).click()
-  await expect(panel(page).getByLabel("Channels")).toHaveValue("jobs:*")
-  await page.keyboard.press("Escape")
-  await panel(page).getByRole("button", { name: "Close anyway" }).click()
-  await expect(panel(page)).toHaveCount(0)
+  await expect(page.locator("[data-slot=page]")).toContainText("keeps its users in memory")
+  // A rule being rewritten is not lost to a press on the way out either.
+  await form.getByLabel("Channels").fill("jobs:*")
+  await accountRail(page).getByRole("link", { name: "default" }).click()
+  await expect(leaving(page)).toContainText("1 change")
+  await leaving(page).getByRole("button", { name: "Keep editing" }).click()
+  await expect(form.getByLabel("Channels")).toHaveValue("jobs:*")
+  await accountRail(page).getByRole("link", { name: "default" }).click()
+  await leaving(page).getByRole("button", { name: "Discard and go on" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/4/access/default?tab=settings")
 
-  await users.getByRole("button", { name: "Open default", exact: true }).click()
-  await expect(panel(page).locator("[data-slot=acl-held]")).toContainText(
+  await expect(page.locator("[data-slot=acl-held]")).toContainText(
     "The dashboard connects as this user",
   )
-  await expect(
-    panel(page).getByRole("switch", { name: "Switched on: it may connect" }),
-  ).toBeDisabled()
-  await expect(panel(page).getByLabel("Commands")).toBeDisabled()
-  await expect(panel(page).getByLabel("Keys")).toBeDisabled()
-  await expect(panel(page).getByRole("button", { name: "Delete user" })).toHaveCount(0)
+  const own = page.getByRole("form", { name: "The user's rule" })
+  await expect(own.getByRole("switch", { name: "Switched on: it may connect" })).toBeDisabled()
+  await expect(own.getByLabel("Commands")).toBeDisabled()
+  await expect(own.getByLabel("Keys")).toBeDisabled()
+  await expect(identity(page).getByRole("button", { name: /^Actions for/ })).toHaveCount(0)
+})
+
+test("a key–value user is deleted from its page, with its rule named, and that ends on the list", async ({
+  page,
+}) => {
+  const server = await mockOperate(page, {
+    answers: { "DELETE 4/redis/acl/worker": { user: ACL.users[1], persisted: true } },
+  })
+  await visit(page, "/databases/4/access/worker")
+  await identity(page).getByRole("button", { name: "Actions for worker" }).click()
+  await page.getByRole("menuitem", { name: "Delete user" }).click()
+  await expect(dialog(page)).toContainText("-@all +@read +@write on ~jobs:*")
+  await dialog(page).getByRole("button", { name: "Delete", exact: true }).click()
+  await expect.poll(() => where(page)).toBe("/databases/4/access")
+  expect(server.sent.map((one) => one.request)).toEqual(["DELETE 4/redis/acl/worker"])
+})
+
+test("a reader who may not change a key–value user has its rule to read and nothing else", async ({
+  page,
+}) => {
+  const viewer = await mockOperate(page, { viewer: true })
+  await visit(page, "/databases/4/access/worker")
+  await expect(page.getByRole("region", { name: "Rule" })).toContainText("resetchannels")
+  await expect(page.getByRole("tab")).toHaveCount(0)
+  await expect(identity(page).getByRole("button")).toHaveCount(0)
+  await expect(page.locator("[data-slot=page]").getByRole("textbox")).toHaveCount(0)
+  expect(viewer.sent).toEqual([])
 })
 
 test("a new key–value user is its rule and its password, and ends on its connection string", async ({
@@ -2532,6 +2816,8 @@ test("a document database's users hold roles on databases, granted and taken one
     answers: {
       "POST 5/mongo/users/grant": { ok: true },
       "POST 5/mongo/users/revoke": { ok: true },
+      "PUT 5/mongo/users": { ok: true },
+      "DELETE 5/mongo/users": { ok: true },
     },
   })
   await visit(page, "/databases/5/access")
@@ -2540,10 +2826,16 @@ test("a document database's users hold roles on databases, granted and taken one
   await expect(list).toContainText("readWrite@app_main")
   await expect(list).toContainText("this connection")
 
-  await list.getByRole("button", { name: "Open api of app_main" }).click()
-  await panel(page).getByRole("combobox", { name: "The role" }).click()
+  await list.getByRole("link", { name: "Open api of app_main" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/5/access/api?host=app_main")
+  await expect(identity(page)).toContainText("kept in app_main")
+  await expect(identity(page)).toContainText("SCRAM-SHA-256")
+  // One view, so no strip.
+  await expect(page.getByRole("tab")).toHaveCount(0)
+  const roles = page.getByRole("region", { name: "Roles" })
+  await roles.getByRole("combobox", { name: "The role" }).click()
   await page.getByRole("option", { name: "dbAdmin" }).click()
-  await panel(page).getByRole("button", { name: "Add role" }).click()
+  await roles.getByRole("button", { name: "Add role" }).click()
   await expect
     .poll(() => server.sent.find((one) => one.request === "POST 5/mongo/users/grant")?.body)
     .toEqual({
@@ -2551,7 +2843,7 @@ test("a document database's users hold roles on databases, granted and taken one
       user: "api",
       roles: [{ role: "dbAdmin", db: "app_main" }],
     })
-  await panel(page).getByRole("button", { name: "Take readWrite@app_main away" }).click()
+  await roles.getByRole("button", { name: "Take readWrite@app_main away" }).click()
   await expect
     .poll(() => server.sent.find((one) => one.request === "POST 5/mongo/users/revoke")?.body)
     .toEqual({
@@ -2559,15 +2851,39 @@ test("a document database's users hold roles on databases, granted and taken one
       user: "api",
       roles: [{ role: "readWrite", db: "app_main" }],
     })
-  await page.keyboard.press("Escape")
 
-  // The account the dashboard signs in with cannot be dropped from here.
+  // Its one command is a new password; dropping it is in the menu and ends on the list.
+  await identity(page).getByRole("button", { name: "Change password" }).click()
+  const password = await dialog(page).getByLabel("New password").inputValue()
+  await dialog(page).getByRole("button", { name: "Change password" }).click()
+  await expect(dialog(page).locator("[data-slot=secret-shown]")).toContainText(password)
+  expect(server.sent.find((one) => one.request === "PUT 5/mongo/users")?.body).toEqual({
+    database: "app_main",
+    user: "api",
+    password,
+  })
+  await dialog(page).getByRole("button", { name: "I have saved it" }).click()
+  await identity(page).getByRole("button", { name: "Actions for api" }).click()
+  await page.getByRole("menuitem", { name: "Drop user" }).click()
+  await dialog(page).getByRole("button", { name: "Drop", exact: true }).click()
+  await expect.poll(() => where(page)).toBe("/databases/5/access")
+  expect(server.sent.find((one) => one.request === "DELETE 5/mongo/users")?.body).toEqual({
+    database: "app_main",
+    user: "api",
+  })
+
+  // The account the dashboard signs in with cannot be dropped: not from the list, not from its page.
   await list.getByRole("button", { name: "Actions for root" }).click()
   await expect(page.getByRole("menuitem", { name: "Change password" })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: "Drop user" })).toHaveCount(0)
   await page.keyboard.press("Escape")
+  await visit(page, "/databases/5/access/root?host=admin")
+  await expect(page.getByRole("region", { name: "Roles" })).toContainText("root on admin")
+  await expect(identity(page).getByRole("button", { name: /^Actions for/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Take root@admin away" })).toHaveCount(0)
 
-  // The other view of the page: what a role is.
+  // The other view of the list: what a role is.
+  await visit(page, "/databases/5/access")
   await page
     .getByRole("group", { name: "Accounts view" })
     .getByRole("button", { name: "Roles" })
@@ -2586,7 +2902,128 @@ test("a document database with no user says what that means, not that the list i
   await expect(page.getByRole("region", { name: "Accounts" })).toContainText(
     "A server with no user accepts every connection that reaches it",
   )
+  // A user that is not there is said on its page, with the way back.
+  await visit(page, "/databases/5/access/ghost?host=admin")
+  await expect(page.locator("[data-slot=empty-state]:visible")).toContainText(
+    "No user named ghost@admin on this server",
+  )
 })
+
+// What the overhaul promises of these pages: they hold still, and a row is one height.
+
+/** A read that waits until the test lets it go, so a page can be measured before and after it lands. */
+function held<T>(value: T) {
+  let release = () => {}
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return { answer: () => gate.then(() => value), release }
+}
+
+const box = async (page: Page, selector: string) => {
+  await risen(page)
+  const rect = await page.locator(selector).first().boundingBox()
+  return rect && { y: Math.round(rect.y), height: Math.round(rect.height) }
+}
+
+for (const width of [1280, 390]) {
+  test(`an account's row is one height with and without what is optional, and does not move when it lands, at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const grants = held({ supported: true, truncated: false, grants: REPORTING_GRANTS })
+    await mockOperate(page, {
+      answers: {
+        "GET 1/server/roles": {
+          supported: true,
+          roles: [
+            // Every tag there is, and none at all.
+            role("app", { superuser: true, createDb: true, createRole: true, connections: 3 }),
+            role("plain"),
+            role("reporting", { connections: 1 }),
+            role("makers", { createDb: true, createRole: true, system: true, login: false }),
+          ],
+        },
+        "GET 1/server/grants": grants.answer,
+        "GET 5/mongo/users": {
+          users: [...MONGO_USERS.users, { ...MONGO_USERS.users[1], user: "bare", mechanisms: [] }],
+        },
+        "GET 4/redis/acl": {
+          ...ACL,
+          users: [...ACL.users, { ...ACL.users[1], name: "off", enabled: false }],
+        },
+      },
+    })
+    const rows = (region: string) =>
+      page
+        .getByRole("region", { name: region })
+        .locator("[data-slot=choice-row]")
+        .evaluateAll((list) =>
+          list.map((row) => {
+            const rect = row.getBoundingClientRect()
+            return { y: Math.round(rect.y), height: Math.round(rect.height) }
+          }),
+        )
+
+    await visit(page, "/databases/1/access")
+    await expect(account(page, "plain")).toBeVisible()
+    await risen(page)
+    const before = await rows("Accounts")
+    expect(new Set(before.map((row) => row.height)).size, "one height while reading").toBe(1)
+    grants.release()
+    await expect(account(page, "reporting")).toContainText("Granted on 1 database, 2 tables")
+    await risen(page)
+    // What each holds has landed, and no row is taller or lower than it was.
+    expect(await rows("Accounts")).toEqual(before)
+
+    await visit(page, "/databases/4/access")
+    await expect(page.getByRole("region", { name: "Users" })).toContainText("worker")
+    await risen(page)
+    expect(new Set((await rows("Users")).map((row) => row.height)).size).toBe(1)
+
+    await visit(page, "/databases/5/access")
+    await expect(page.getByRole("region", { name: "Accounts" })).toContainText("bare")
+    await risen(page)
+    expect(new Set((await rows("Accounts")).map((row) => row.height)).size).toBe(1)
+  })
+
+  test(`an account's page has its shape before the account is read, at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const read = held(detail("reporting", { grants: REPORTING_GRANTS }))
+    await mockOperate(page, { answers: { "GET 1/server/roles/reporting": read.answer } })
+    await visit(page, "/databases/1/access/reporting")
+    await expect(identity(page)).toContainText("Reading the account")
+    const loading = {
+      identity: await box(page, "[data-slot=account-identity]"),
+      views: await box(page, "[data-slot=page] [role=tablist]"),
+    }
+    read.release()
+    await expect(identity(page)).toContainText("1 session now")
+    await expect(matrix(page).locator("[data-object=orders]")).toBeVisible()
+    // The line it opens on and the strip under it are where they were.
+    expect({
+      identity: await box(page, "[data-slot=account-identity]"),
+      views: await box(page, "[data-slot=page] [role=tablist]"),
+    }).toEqual(loading)
+    await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+
+    if (width < 1280) {
+      // One pane that scrolls as a whole: no list beside it, and nothing off the side.
+      await expect(accountRail(page)).toBeHidden()
+      const sideways = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+      )
+      expect(sideways).toBe(false)
+      // The two arrows still walk the list.
+      await page.getByRole("button", { name: "Next account" }).click()
+      await expect.poll(() => where(page)).toBe("/databases/1/access/readers")
+    } else {
+      await expect(accountRail(page)).toBeVisible()
+    }
+  })
+}
 
 // ---------------------------------------------------------------------------
 // The design system's rules
@@ -2705,6 +3142,12 @@ const SURFACES: [string, string][] = [
   ["/databases/1/access", "Accounts"],
   ["/databases/4/access", "Users"],
   ["/databases/5/access", "Accounts"],
+  // An account's own page, on each kind of engine, and its other views.
+  ["/databases/1/access/reporting", "Grants"],
+  ["/databases/1/access/reporting?tab=settings", "Account attributes"],
+  ["/databases/4/access/worker", "Rule"],
+  ["/databases/4/access/worker?tab=settings", "The user's rule"],
+  ["/databases/5/access/api?host=app_main", "Roles"],
   ["/databases/1/backups", "Dumps"],
   ["/databases/5/backups", "Dumps"],
 ]
@@ -2724,7 +3167,9 @@ for (const [label, viewport] of [
     await mockOperate(page)
     for (const [path, region] of SURFACES) {
       await visit(page, path)
-      await expect(page.getByRole("region", { name: region })).toBeVisible()
+      await expect(
+        page.getByRole("region", { name: region }).or(page.getByRole("form", { name: region })),
+      ).toBeVisible()
       await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
       await keepsTheRules(page, `${path}${label}`)
     }
@@ -2757,7 +3202,9 @@ for (const [label, viewport] of [
     await keepsTheRules(page, `/databases/1/settings/parameters?q=e${label}`)
   })
 
-  test(`an account's panel and the dialogs keep the rules${label}`, async ({ page }) => {
+  test(`an account's page with work staged and the dialogs keep the rules${label}`, async ({
+    page,
+  }) => {
     test.setTimeout(120_000)
     await page.setViewportSize(viewport)
     await mockOperate(page, {
@@ -2769,17 +3216,24 @@ for (const [label, viewport] of [
         },
       },
     })
-    await visit(page, "/databases/1/access?account=reporting")
+    await visit(page, "/databases/1/access/reporting")
     await expect(matrix(page).locator("[data-object=orders]")).toBeVisible()
     await matrix(page).getByRole("button", { name: "UPDATE on orders" }).click()
-    await keepsTheRules(page, `the account panel${label}`, true)
-    // The question the panel asks before it closes over staged work.
-    await page.keyboard.press("Escape")
-    await expect(panel(page).getByRole("button", { name: "Close anyway" })).toBeVisible()
-    await keepsTheRules(page, `the account panel asking${label}`, true)
+    await expect(pending(page)).toBeVisible()
+    await keepsTheRules(page, `the account page with a grant staged${label}`)
     // On a phone a privilege is a finger's height.
     const chip = await matrix(page).getByRole("button", { name: "UPDATE on orders" }).boundingBox()
     expect(chip?.height ?? 0).toBeGreaterThanOrEqual(viewport.width < 640 ? 36 : 24)
+    // The question the page asks before it is left over staged work.
+    await back(page).click()
+    await expect(leaving(page).getByRole("button", { name: "Discard and go on" })).toBeVisible()
+    await keepsTheRules(page, `the account page asking${label}`, true)
+    await leaving(page).getByRole("button", { name: "Keep editing" }).click()
+    // The settings with an edit held, under the page's one save bar.
+    await view(page, /^Settings/).click()
+    await page.getByRole("switch", { name: "It can create databases" }).click()
+    await expect(saveBar(page)).toBeVisible()
+    await keepsTheRules(page, `the account settings with an edit${label}`)
 
     await visit(page, "/databases/1/access")
     await accounts(page).getByRole("button", { name: "New account" }).click()

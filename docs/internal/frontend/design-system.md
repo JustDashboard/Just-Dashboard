@@ -767,6 +767,14 @@ choice, the file's own key on the label's hover and in the folded file view, wha
 was at the far end of its own label line so an edit moves nothing, and *Applies when the server
 restarts* on the save bar (`SettingApplies` `"restart"`).
 
+**A settings column beside a rail keeps the bar at its own foot.** The bar is centred on the content
+area, which is the column's centre only while the column is alone in it. An account of a database
+(`database/ops/access-account.tsx`, `access-redis-account.tsx`) has its settings as one view of a
+page that stands beside a rail of its siblings, so its `SaveBarProvider` is `inline`: the same bar,
+held to the foot of the column it saves rather than floated over the area. The grants staged on the
+same page wait in a bar of the same surface at the foot of their own view, ending in *Review…*
+rather than *Save*, because what it sends is read as the server's statements first.
+
 **A database's Settings are that shape too, as pages.** They were one page of six sections under a
 sticky strip of anchors, and the section a reader most often came for — the danger zone, one
 parameter — was the one at the foot of six screens. Since the 2026-10-16 pass each is a page of its
