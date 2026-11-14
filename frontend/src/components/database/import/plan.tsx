@@ -13,7 +13,12 @@ import { Input } from "@/components/ui/input"
 import type { Engine } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
 import { newDatabaseProblem } from "@/components/database/ops/backups-model"
-import { importNameProblem, sourceTotals, sourceWords } from "@/components/database/import/model"
+import {
+  importNameProblem,
+  sourceProduct,
+  sourceTotals,
+  sourceWords,
+} from "@/components/database/import/model"
 import type { DbImportInspection, DbImportMode } from "@/components/database/import/types"
 
 /** What the plan step asks, kept by the page so a step back loses none of it. */
@@ -70,12 +75,7 @@ export function PlanStep({
     replication && report
       ? sourceWords(sourceTotals(report.tables), report.sequences ?? 0)
       : undefined
-  const sourceLine = [
-    inspection.source.flavorLabel ?? inspection.source.flavor,
-    inspection.source.version,
-  ]
-    .filter(Boolean)
-    .join(" ")
+  const sourceLine = sourceProduct(inspection.source)
 
   return (
     <FlowPanel aria-label="Plan" aria-busy={starting} className="min-w-0">

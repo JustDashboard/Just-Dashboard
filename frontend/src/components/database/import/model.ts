@@ -201,7 +201,8 @@ export function replicationPath(live: Pick<DbImportLive, "subscription" | "lag">
   arriving: boolean
   /** Every table is in and nothing waits on the source. */
   settled: boolean
-  lag: { words: string; tone: "default" | "warning" }
+  /** How far behind, short enough to write on the line; `note` is why that is a warning. */
+  lag: { words: string; tone: "default" | "warning"; note?: string }
   errors: { words?: string; tone: "default" | "danger"; title?: string }
   /** How many tables are in, beside the database they fill. */
   copied: string
@@ -219,10 +220,9 @@ export function replicationPath(live: Pick<DbImportLive, "subscription" | "lag">
     applying: Boolean(subscription?.applying),
     arriving: subscribed && !idle && (ready < total || behind),
     settled: subscribed && !idle && total > 0 && ready === total && !behind,
-    lag: {
-      words: idle ? `${lagWords(lag)}, the slot is not in use` : lagWords(lag),
-      tone: idle ? "warning" : "default",
-    },
+    lag: idle
+      ? { words: lagWords(lag), tone: "warning", note: "the slot is not in use" }
+      : { words: lagWords(lag), tone: "default" },
     errors:
       errors > 0
         ? { words: plural(errors, "error"), tone: "danger" }
@@ -231,6 +231,21 @@ export function replicationPath(live: Pick<DbImportLive, "subscription" | "lag">
           : { tone: "default", title: "Errors are counted from PostgreSQL 15" },
     copied: subscribed ? `${ready} of ${plural(total, "table")} copied` : "nothing copied yet",
   }
+}
+
+/**
+ * A source as the product and version that answered. PostgreSQL's own
+ * description of itself opens with its name, which is then not said twice.
+ */
+export function sourceProduct(source: {
+  version?: string
+  flavor?: string
+  flavorLabel?: string
+}): string {
+  const label = source.flavorLabel ?? source.flavor ?? ""
+  const version = source.version ?? ""
+  if (label && version.toLowerCase().startsWith(label.toLowerCase())) return version
+  return [label, version].filter(Boolean).join(" ")
 }
 
 /**

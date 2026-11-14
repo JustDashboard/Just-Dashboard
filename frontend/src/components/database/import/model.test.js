@@ -13,6 +13,7 @@ import {
   replicationPath,
   EMPTY_SOURCE,
   sourceDsn,
+  sourceProduct,
   sourceTotals,
   sourceWords,
   statusWords,
@@ -213,6 +214,16 @@ describe("what a source holds", () => {
     expect(totals).toEqual({ tables: 2, rows: 100, size: 15, uncounted: true })
     expect(sourceTotals([]).uncounted).toBe(false)
   })
+  test("its product is named once, whichever way the server describes itself", () => {
+    expect(
+      sourceProduct({ version: "PostgreSQL 16.4", flavor: "postgres", flavorLabel: "PostgreSQL" }),
+    ).toBe("PostgreSQL 16.4")
+    expect(sourceProduct({ version: "8.0.36", flavor: "mysql", flavorLabel: "MySQL" })).toBe(
+      "MySQL 8.0.36",
+    )
+    expect(sourceProduct({ flavor: "mongodb" })).toBe("mongodb")
+    expect(sourceProduct({})).toBe("")
+  })
   test("is said in one line, with the rows as the estimate they are", () => {
     const counted = { tables: 84, rows: 1_204_000, size: 3 * 1024 ** 3, uncounted: false }
     expect(sourceWords(counted, 12)).toBe("84 tables, about 1,204,000 rows, 3.0 GB, 12 sequences")
@@ -265,7 +276,7 @@ describe("the picture of a replication", () => {
       applying: false,
       arriving: false,
       settled: false,
-      lag: { words: "1.0 KB behind, the slot is not in use", tone: "warning" },
+      lag: { words: "1.0 KB behind", tone: "warning", note: "the slot is not in use" },
       errors: { words: "3 errors", tone: "danger" },
     })
   })

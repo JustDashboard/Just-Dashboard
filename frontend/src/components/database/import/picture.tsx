@@ -43,7 +43,7 @@ export function ReplicationPicture({ live }: { live: DbImportLive }) {
     <SettingPicture
       label={`How ${imp.database} follows its source`}
       containerRef={container}
-      className="py-2"
+      className="pt-2 pb-4"
       lines={
         <>
           <AnimatedBeam
@@ -98,6 +98,7 @@ export function ReplicationPicture({ live }: { live: DbImportLive }) {
                   {lag}
                 </span>
               )}
+              {path.lag.note && <span className="text-warning"> · {path.lag.note}</span>}
             </>
           }
         />,
