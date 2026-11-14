@@ -25,12 +25,8 @@ describe("an account's own address", () => {
 
   test("writes the first view bare and names the others", () => {
     expect(accountHref(1, { name: "app" }, "grants")).toBe("/databases/1/access/app")
-    expect(accountHref(1, { name: "app" }, "sessions")).toBe(
-      "/databases/1/access/app?tab=sessions",
-    )
-    expect(accountHref(1, { name: "app" }, "settings")).toBe(
-      "/databases/1/access/app?tab=settings",
-    )
+    expect(accountHref(1, { name: "app" }, "sessions")).toBe("/databases/1/access/app?tab=sessions")
+    expect(accountHref(1, { name: "app" }, "settings")).toBe("/databases/1/access/app?tab=settings")
   })
 
   test("keeps a host beside the name, an empty one included", () => {
