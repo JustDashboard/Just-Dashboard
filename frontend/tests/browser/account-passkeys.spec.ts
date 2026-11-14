@@ -112,7 +112,7 @@ test("at an IP address the pages say why there is no passkey, rather than offeri
   ).toBeVisible()
   await expect(page.getByRole("button", { name: "Add a passkey" })).toHaveCount(0)
   await expect(
-    page.getByText("In place of the password. The code is still asked for."),
+    page.getByText("in place of the password · the code is still asked for"),
   ).toBeVisible()
 
   await page.unroute("**/api/v1/**")

@@ -10,8 +10,6 @@ import { SchemaMark } from "@/components/database/schema/rail"
 import { Composition } from "@/components/database/schema/statistics"
 import type { DbCatalog, DbTableStats, SchemaObject } from "@/components/database/schema/types"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { IconAction } from "@/components/icon-action"
-import { SidebarLeftOpen } from "@/components/icons"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
@@ -46,16 +44,12 @@ const MOST = 1000
  */
 export function SchemaLanding({
   catalog,
-  railShown,
-  onShowRail,
   creations,
   verbs,
   note,
   asked,
 }: {
   catalog: DbCatalog
-  railShown: boolean
-  onShowRail: () => void
   /** What can be made here; the first is the page's one command. */
   creations: Verb[]
   /** What can be done to the schema itself. */
@@ -119,17 +113,6 @@ export function SchemaLanding({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {!railShown && (
-        <div className="flex h-10 shrink-0 items-center border-b border-hairline bg-surface-header px-1.5">
-          <IconAction
-            label="Show the objects"
-            className="size-7 max-sm:size-8"
-            onClick={onShowRail}
-          >
-            <SidebarLeftOpen />
-          </IconAction>
-        </div>
-      )}
       <div className="@container min-h-0 flex-1 overflow-y-auto">
         <div
           className={cn(

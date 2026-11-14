@@ -7,9 +7,9 @@ import {
   Globe,
   Puzzle,
   Servers,
-  SettingsGear,
   Shield,
   TerminalWindow,
+  type Icon,
 } from "@/components/icons"
 import { ApiError } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -24,24 +24,36 @@ import type {
 } from "@/lib/types"
 import type { PollState } from "@/hooks/use-poll"
 import { useSelfUpdate } from "@/hooks/use-self-update"
-import { StatLink, StatTile } from "@/components/stat-tile"
-import type { Tone } from "@/components/tone"
+import { Bone } from "@/components/bone"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { LogoGlyph } from "@/components/logo"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import {
   ProductGlyphs,
+  ProductLogo,
   containerProducts,
   hostProduct,
   platformProduct,
 } from "@/components/product-logo"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Status, type DotTone } from "@/components/status-dot"
 import { cn } from "@/lib/utils"
+import {
+  certificateWords,
+  dockerWords,
+  gitWords,
+  packageWords,
+  remoteWords,
+  unitWords,
+  versionWords,
+  type ServiceWords,
+} from "./service-words"
 import { unitCounts } from "./order"
 
 /**
  * A module that is genuinely absent on this host, as opposed to a poll that
  * failed once. The dashboard returns a precise code for the former; a dropped
  * VPN tunnel — which is a normal Tuesday here — is anything else, and must not
- * turn a card that read "12 running" into a false claim about the host.
+ * turn a row that read "12 running" into a false claim about the host.
  */
 function moduleGone(error: Error | undefined): boolean {
   return (
@@ -53,185 +65,177 @@ function moduleGone(error: Error | undefined): boolean {
 }
 
 /**
- * One module, its headline figure, and the way to its page — a `StatTile`
- * behind a `StatLink`, exactly as the Docker overview draws its own run, so
- * the Services row reads as the top row does: figures on the page, hairlines
- * between them, and an arrow that says the tile goes somewhere.
- *
- * The figure is a count and the word after it is the tile's `trailing`, as
- * the readings at the top write "6.5 GB free": two of these share a phone's
- * width, and "3 certificates" at the figure's size did not fit half of one.
- *
- * The glyph before the name is wayfinding, not decoration: it is the same
- * mark the sidebar entry carries, so the eye finds "Docker" without reading.
- * The figure rises once when its poll lands, so a page of eight tiles fills in
- * rather than flickering from bone to number.
+ * The modules as a run of rows you open, two to a line from `lg`: the shape
+ * Databases and Backups above them have. They were eight tiles, a figure over
+ * a unit over a caption each ("9 / running / 11 containers · 2 stopped"),
+ * which the reader had to turn into the sentence a row now says.
  */
-function ServiceTile({
-  icon: Icon,
+export function ServiceList({ children }: { children: React.ReactNode }) {
+  return (
+    <ChoiceList aria-label="Services" className="grid gap-2 space-y-0 lg:grid-cols-2">
+      {children}
+    </ChoiceList>
+  )
+}
+
+/**
+ * One module: the product it is, one sentence, a state, and the way to its
+ * page. A row is drawn from the first frame with its name on it and is one
+ * height in every state: the sentence's place holds a bone while its read is
+ * out, and says so in words where the module is not on this host or its read
+ * failed. The sentence rises once when it lands (§11 *arrived*).
+ *
+ * The products the sentence counts stand before the state, as they stood
+ * after a tile's hint: the images running, the forges pushed to.
+ */
+function ServiceRow({
+  product,
+  logo,
+  fallback,
   title,
   href,
-  value,
-  unit,
-  hint,
-  tone = "default",
+  words,
   loading,
   unavailable,
   products = [],
 }: {
-  icon: React.ComponentType<{ className?: string }>
+  /** The module drawn as itself: a `product-logo` id. */
+  product?: string
+  /** A mark that is no product's file, in the tile's place. */
+  logo?: React.ReactNode
+  fallback: Icon
   title: string
   href: string
-  value?: React.ReactNode
-  /** What the figure counts, after it at the hint's size. */
-  unit?: string
-  hint?: React.ReactNode
-  /** What the figure counts, as the products themselves — `product-logo` ids. */
-  products?: string[]
-  /** Colours the figure as a reading of state, never as decoration. */
-  tone?: Tone
+  /** What the read says. Undefined while it is out, and when it failed. */
+  words?: ServiceWords
   loading?: boolean
   unavailable?: boolean
+  /** What the sentence counts, as the products themselves. */
+  products?: string[]
 }) {
-  const settled = !loading
-  const known = !loading && !unavailable && value != null
-  const figure = loading ? (
-    <Skeleton className="my-1.5 h-5 w-20" />
-  ) : unavailable ? (
-    "Not available"
-  ) : value == null ? (
-    "Unreachable"
-  ) : (
-    value
-  )
+  const state: { tone: DotTone; label: string } | undefined = loading
+    ? undefined
+    : unavailable
+      ? { tone: "stopped", label: "Not installed" }
+      : (words?.state ?? { tone: "warning", label: "Unreachable" })
   return (
-    <StatLink href={href} label={title}>
-      <StatTile
-        className="h-full transition-colors group-hover:bg-row-hover"
-        label={
-          <>
-            <Icon aria-hidden className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand" />
-            {title}
-          </>
-        }
-        value={
+    <ChoiceRow
+      href={href}
+      verb={`Open ${title}`}
+      leading={logo ?? <ProductLogo id={product} size="sm" fallback={fallback} />}
+      title={title}
+      description={
+        loading ? (
+          <Bone className="w-40" />
+        ) : (
           <span
-            key={settled ? "figure" : "skeleton"}
-            className={cn(
-              "inline-block max-w-full truncate align-bottom",
-              settled && "animate-rise",
-            )}
+            key="settled"
+            className="inline-block max-w-full animate-rise truncate align-bottom"
           >
-            {figure}
+            {unavailable ? "Not on this server" : (words?.sentence ?? "Its reading did not arrive")}
           </span>
-        }
-        trailing={known ? unit : undefined}
-        tone={known ? tone : "default"}
-        hint={
-          unavailable ? (
-            "on this host"
-          ) : (
-            <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-              {hint && <span className="truncate">{hint}</span>}
-              {/* Off on a phone, where two tiles share the width and the
-                  marks left the words one character. */}
-              {settled && (
-                <span className="shrink-0 max-sm:hidden">
-                  <ProductGlyphs ids={products} />
-                </span>
+        )
+      }
+      trailing={
+        state && (
+          <>
+            {/* Off on a phone, where the sentence needs the width. */}
+            {words && (
+              <span className="flex max-sm:hidden">
+                <ProductGlyphs ids={products} max={4} />
+              </span>
+            )}
+            <Status
+              tone={state.tone}
+              label={state.label}
+              // On a phone only a state that asks for something keeps its
+              // word: the sentence has said the rest and needs the width.
+              className={cn(
+                "animate-rise",
+                state.tone !== "warning" && state.tone !== "danger" && "max-sm:hidden",
               )}
-            </span>
-          )
-        }
-      />
-    </StatLink>
-  )
-}
-
-export function DockerTile({ read }: { read: PollState<Container[]> }) {
-  const { data, error, loading } = read
-  const running = data?.filter((c) => c.state === "running")
-  const stopped = data ? data.length - (running?.length ?? 0) : 0
-  return (
-    <ServiceTile
-      icon={Box}
-      title="Docker"
-      href="/docker"
-      products={containerProducts(running ?? [])}
-      loading={loading && !data}
-      unavailable={moduleGone(error)}
-      value={running?.length}
-      unit="running"
-      hint={
-        data
-          ? [plural(data.length, "container"), stopped > 0 && `${stopped} stopped`]
-              .filter(Boolean)
-              .join(" · ")
-          : undefined
+            />
+          </>
+        )
       }
     />
   )
 }
 
-export function ProxyTile({ read }: { read: PollState<Certificate[]> }) {
+export function DockerRow({ read }: { read: PollState<Container[]> }) {
+  const { data, error, loading } = read
+  const running = data?.filter((c) => c.state === "running") ?? []
+  return (
+    <ServiceRow
+      product="docker"
+      fallback={Box}
+      title="Docker"
+      href="/docker"
+      products={containerProducts(running)}
+      loading={loading && !data}
+      unavailable={moduleGone(error)}
+      words={data && dockerWords(data.length, running.length)}
+    />
+  )
+}
+
+export function ProxyRow({ read }: { read: PollState<Certificate[]> }) {
   const { data, error, loading } = read
   const soonest = useMemo(() => {
     if (!data || data.length === 0) return undefined
     return [...data].sort((a, b) => a.daysLeft - b.daysLeft)[0]
   }, [data])
   return (
-    <ServiceTile
-      icon={Globe}
+    <ServiceRow
+      product="nginx-static"
+      fallback={Globe}
       title="Proxy & TLS"
       href="/proxy"
-      products={data && data.length > 0 ? ["nginx-static", "lets-encrypt"] : ["nginx-static"]}
+      products={data && data.length > 0 ? ["lets-encrypt"] : []}
       loading={loading && !data}
       unavailable={moduleGone(error)}
-      value={data?.length}
-      unit={data?.length === 1 ? "certificate" : "certificates"}
-      tone={soonest?.expired ? "danger" : "default"}
-      hint={
-        soonest
-          ? soonest.expired
-            ? "One expired"
-            : `Renews in ${soonest.daysLeft}d`
-          : data
-            ? "None issued"
-            : undefined
-      }
+      words={data && certificateWords(data.length, soonest)}
     />
   )
 }
 
-export function SecurityTile({ read }: { read: PollState<Exposure> }) {
+const VERDICT_TONE = {
+  ok: "running",
+  notice: "notice",
+  warning: "warning",
+  critical: "danger",
+} as const
+const VERDICT_WORD = {
+  ok: "Private",
+  notice: "Private",
+  warning: "Public",
+  critical: "Open",
+} as const
+
+export function SecurityRow({ read }: { read: PollState<Exposure> }) {
   const { data, error, loading } = read
   const grade = data ? EXPOSURE_GRADE[data.grade] : undefined
   return (
-    <ServiceTile
-      icon={Shield}
+    <ServiceRow
+      product={data?.grade === "tailscale" ? "tailscale" : undefined}
+      fallback={Shield}
       title="Security"
       href="/security"
-      products={data?.grade === "tailscale" ? ["tailscale"] : []}
       loading={loading && !data}
       unavailable={moduleGone(error)}
-      value={grade?.label}
-      tone={
-        grade?.verdict === "critical"
-          ? "danger"
-          : grade?.verdict === "warning"
-            ? "warning"
-            : "default"
-      }
-      hint={
-        data
-          ? `${plural(data.allowlist.length, "allowed range")} · ${plural(data.interfaces.length, "interface")}`
+      words={
+        data && grade
+          ? {
+              sentence: `${grade.label}, ${plural(data.allowlist.length, "allowed range")} on ${plural(data.interfaces.length, "interface")}`,
+              state: { tone: VERDICT_TONE[grade.verdict], label: VERDICT_WORD[grade.verdict] },
+            }
           : undefined
       }
     />
   )
 }
 
-export function PackagesTile({
+export function PackagesRow({
   read,
   platform,
 }: {
@@ -239,27 +243,15 @@ export function PackagesTile({
   platform: string
 }) {
   const { data, error, loading } = read
-  const pending = data?.packages.length ?? 0
   return (
-    <ServiceTile
-      icon={Puzzle}
+    <ServiceRow
+      product={platformProduct(platform)}
+      fallback={Puzzle}
       title="Packages"
       href="/packages"
-      products={[platformProduct(platform)].filter((id): id is string => Boolean(id))}
       loading={loading && !data}
       unavailable={moduleGone(error) || data?.available === false}
-      value={data ? (pending === 0 ? "Up to date" : pending) : undefined}
-      unit={pending > 0 ? (pending === 1 ? "update" : "updates") : undefined}
-      tone={data?.rebootRequired || (data?.securityCount ?? 0) > 0 ? "warning" : "default"}
-      hint={
-        data?.rebootRequired
-          ? "Reboot required"
-          : data && data.securityCount > 0
-            ? `${data.securityCount} security`
-            : data && pending > 0 && data.securityFiltering
-              ? "None are security updates"
-              : undefined
-      }
+      words={data && packageWords(data)}
     />
   )
 }
@@ -267,74 +259,42 @@ export function PackagesTile({
 /**
  * What systemd runs, and what it gave up on: a failed unit is the one thing on
  * the machine that stopped and will not try again by itself, so while there
- * is one it is the figure, in red, rather than a word in the hint.
+ * is one it leads the sentence and the state is red.
  */
-export function UnitsTile({ read }: { read: PollState<SystemdList> }) {
+export function UnitsRow({ read }: { read: PollState<SystemdList> }) {
   const { data, error, loading } = read
-  const counts = data ? unitCounts(data.units) : undefined
-  const failed = counts?.failed ?? 0
   return (
-    <ServiceTile
-      icon={Servers}
+    <ServiceRow
+      product="systemd"
+      fallback={Servers}
       title="System services"
       href="/processes/services"
-      products={["systemd"]}
       loading={loading && !data}
       unavailable={moduleGone(error) || data?.available === false}
-      value={counts ? (failed > 0 ? failed : counts.running) : undefined}
-      unit={failed > 0 ? "failed" : "running"}
-      tone={failed > 0 ? "danger" : "default"}
-      hint={counts ? (failed > 0 ? `${counts.running} running` : "None failed") : undefined}
+      words={data && unitWords(unitCounts(data.units))}
     />
   )
 }
 
 /**
- * The working copies on this server, drawn as the forges they push to, and
- * what is waiting in them: uncommitted work first, because it is the one
- * thing here a deploy or a restore cannot bring back.
+ * The working copies on this server, with the forges they push to, and what
+ * is waiting in them: uncommitted work first, because it is the one thing
+ * here a deploy or a restore cannot bring back.
  */
-export function GitTile({ read }: { read: PollState<{ available: boolean; repos: GitRepo[] }> }) {
+export function GitRow({ read }: { read: PollState<{ available: boolean; repos: GitRepo[] }> }) {
   const { data, error, loading } = read
   const repos = data?.repos ?? []
-  const dirty = repos.filter((repo) => repo.dirty).length
-  const behind = repos.filter((repo) => repo.behind > 0).length
-  const conflicted = repos.filter((repo) => repo.conflicts > 0).length
   const forges = [...new Set(repos.flatMap((repo) => hostProduct(repo.remote) ?? []))]
   return (
-    <ServiceTile
-      icon={GitHubMark}
+    <ServiceRow
+      product="git"
+      fallback={GitHubMark}
       title="Git"
       href="/git"
       products={forges}
       loading={loading && !data}
       unavailable={moduleGone(error) || data?.available === false}
-      value={
-        !data
-          ? undefined
-          : repos.length === 0
-            ? "None yet"
-            : conflicted > 0
-              ? conflicted
-              : repos.length
-      }
-      unit={
-        repos.length === 0
-          ? undefined
-          : conflicted > 0
-            ? "in conflict"
-            : repos.length === 1
-              ? "repository"
-              : "repositories"
-      }
-      tone={conflicted > 0 ? "warning" : "default"}
-      hint={
-        !data || repos.length === 0
-          ? undefined
-          : [dirty > 0 ? `${dirty} uncommitted` : "All committed", behind > 0 && `${behind} behind`]
-              .filter(Boolean)
-              .join(" · ")
-      }
+      words={data && gitWords(repos)}
     />
   )
 }
@@ -342,45 +302,47 @@ export function GitTile({ read }: { read: PollState<{ available: boolean; repos:
 const OS_PRODUCT = { windows: "windows", macos: "apple", linux: "linux" } as const
 
 /** The computers the screen can be opened on, each drawn as its system, and which are open now. */
-export function RemoteDesktopTile({ read }: { read: PollState<RdOverview> }) {
+export function RemoteDesktopRow({ read }: { read: PollState<RdOverview> }) {
   const { data, error, loading } = read
   const computers = data?.computers ?? []
-  const open = computers.filter((computer) => computer.live > 0).length
   return (
-    <ServiceTile
-      icon={TerminalWindow}
+    <ServiceRow
+      product="guacamole"
+      fallback={TerminalWindow}
       title="Remote Desktop"
       href="/remote-desktop"
       products={[...new Set(computers.map((computer) => OS_PRODUCT[computer.os]))]}
       loading={loading && !data}
       unavailable={moduleGone(error)}
-      value={data ? (computers.length === 0 ? "None yet" : computers.length) : undefined}
-      unit={computers.length === 0 ? undefined : computers.length === 1 ? "computer" : "computers"}
-      hint={
-        !data
-          ? undefined
-          : open > 0
-            ? `${open} open now`
-            : data.engine.state === "running"
-              ? "Ready to connect"
-              : "Engine not running"
+      words={
+        data &&
+        remoteWords(
+          computers.length,
+          computers.filter((computer) => computer.live > 0).length,
+          data.engine.state === "running",
+        )
       }
     />
   )
 }
 
-export function SettingsTile() {
+export function SettingsRow() {
   const { report, loading } = useSelfUpdate()
-  const behind = report?.releases.length ?? 0
   return (
-    <ServiceTile
-      icon={SettingsGear}
+    <ServiceRow
+      logo={
+        <span
+          aria-hidden
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background text-brand"
+        >
+          <LogoGlyph small className="h-4 w-auto" />
+        </span>
+      }
+      fallback={Servers}
       title="Settings"
       href="/dashboard"
       loading={loading && !report}
-      value={report ? (behind === 0 ? "Up to date" : behind) : undefined}
-      unit={behind > 0 ? (behind === 1 ? "release behind" : "releases behind") : undefined}
-      hint={report ? `v${report.version}${report.breaking ? " · breaking change" : ""}` : undefined}
+      words={report && versionWords(report.version, report.releases.length, report.breaking)}
     />
   )
 }

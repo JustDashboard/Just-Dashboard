@@ -131,7 +131,8 @@ reader per thing a drain asks for:
 - **Status.** `deploy_log_drain_status` keeps what each drain shipped, dropped and batched, and the
   times and words of its last success and last failure; `queued` comes from the running shipper.
   The page reads a drain whose last failure is newer than its last success as failing, in amber, with
-  the destination's answer and what is waiting.
+  how long ago and what is waiting on its row; the destination's answer and the totals open from that
+  word (`log-drain-state.ts`).
 
 **Test** sends one record ("Test record from Just Dashboard: the drain … delivers here.") through the
 drain's own settings and answers with the destination's words, and a drain that sends traces is also
@@ -167,7 +168,8 @@ sent one span (`GET /just-dashboard/test`) to `/v1/traces`; neither is counted a
 - `handlers_log_drains_test.go`: roles, no header value in any answer, a test record delivered with
   the drain's header, a refused test in the destination's words, the plain-http refusal, and every
   audit entry.
-- `deploy-log-drains.spec.ts` and `log-drains.test.js`: the page's formats, a drain added with a
-  sealed header, a failing drain's line, Send test and Pause, an edit keeping headers, the
+- `deploy-log-drains.spec.ts`, `deploy-section-pages.spec.ts`, `log-drains.test.js` and
+  `log-drain-state.test.js`: the page's formats, a drain added with a
+  sealed header, a failing drain's state and what it opens on, rows of one height in every state, Send test and Pause, an edit keeping headers, the
   plain-http rules, the health and reach sentences, an OpenTelemetry drain sending traces with a link
   (and Loki offering none), and which drain a request's trace link comes from.

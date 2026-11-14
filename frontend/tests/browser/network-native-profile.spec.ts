@@ -39,7 +39,9 @@ const profile = () => ({
   boot: { status: "matching", reason: "Native owner enabled; no reboot measured." },
 })
 
-const sheet = (page: Page) => page.locator("[data-slot=sheet-content]")
+// The device's page, which holds the editor in its Settings view.
+const sheet = (page: Page) => page.locator("[data-slot=page]")
+const settings = "/network/interfaces/ens3?tab=settings"
 const banner = (page: Page) =>
   page.getByRole("complementary", { name: "Network change confirmation" })
 
@@ -57,8 +59,7 @@ async function setup(page: Page, value = profile(), reader = false) {
       "/network/changes/current": { available: true, owned: false, change: null },
     },
   })
-  await page.goto("/network/interfaces")
-  await page.getByRole("button", { name: "Open ens3", exact: true }).click()
+  await page.goto(settings)
   return mutations
 }
 
@@ -118,7 +119,6 @@ test("native apply carries the exact intent and stays pending when the managed p
   page,
 }) => {
   await setup(page)
-  await sheet(page).getByRole("button", { name: "Close", exact: true }).click()
   // The preference is one row on the Network overview; turned off there, it
   // stays off on the page that makes the change.
   const rail = page.getByRole("navigation", { name: "Sidebar" })
@@ -127,7 +127,8 @@ test("native apply carries the exact intent and stays pending when the managed p
   await expect(preference).toBeChecked()
   await preference.uncheck()
   await rail.getByRole("link", { name: "Interfaces", exact: true }).click()
-  await page.getByRole("button", { name: "Open ens3", exact: true }).click()
+  await page.getByRole("link", { name: "Open ens3", exact: true }).click()
+  await page.getByRole("tab", { name: "Settings", exact: true }).click()
   await edit(page)
   let body: unknown
   let header: string | undefined
@@ -313,8 +314,9 @@ test("read accounts open a device without requesting its private native profile"
     reads++
     return json(route, profile())
   })
-  await page.goto("/network/interfaces")
-  await page.getByRole("button", { name: "Open ens3", exact: true }).click()
+  await page.goto(settings)
+  // The Settings view is drawn, so what is missing from it is missing, not late.
+  await expect(sheet(page).getByRole("heading", { name: "Driver", exact: true })).toBeVisible()
   await expect(sheet(page).getByText("Native persistent profile", { exact: true })).toHaveCount(0)
   await expect(sheet(page).getByRole("button", { name: "Edit native profile" })).toHaveCount(0)
   expect(reads).toBe(0)
@@ -414,8 +416,7 @@ for (const change of ["generation", "owner", "read failure"] as const) {
           )
         : json(route, view)
     })
-    await page.goto("/network/interfaces")
-    await page.getByRole("button", { name: "Open ens3", exact: true }).click()
+    await page.goto(settings)
     await edit(page)
     await sheet(page).getByRole("button", { name: "Apply temporary native settings" }).click()
     const confirmation = page.getByRole("dialog", { name: "Apply native settings to ens3" })

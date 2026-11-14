@@ -66,14 +66,19 @@ export function StreamListen({
     <div className="space-y-4">
       <Field
         label="Address"
-        hint={
+        // What the choice means is behind the label; only an address nginx
+        // could not listen on is said under the field.
+        info={
           every
             ? "Every address this host has, including any added later."
             : spec.address === "::"
               ? "Every IPv6 address, as the file has it — it has no IPv4 listen."
-              : listed || addresses.length === 0
-                ? `Only reachable on ${spec.address}.`
-                : `${spec.address} is not an address of this host, so nginx could not listen on it.`
+              : `Only reachable on ${spec.address}.`
+        }
+        hint={
+          !every && spec.address !== "::" && !listed && addresses.length > 0
+            ? `${spec.address} is not an address of this host, so nginx could not listen on it.`
+            : undefined
         }
         error={error}
       >
@@ -132,12 +137,13 @@ export function StreamListen({
           <Field
             label="Last port"
             htmlFor="stream-listen-end"
+            info={`A port above ${spec.listen || "the first"}.`}
             hint={
               width > MAX_RANGE
                 ? `That is ${width} ports; a range takes at most ${MAX_RANGE}.`
                 : width > 1
                   ? `${width} ports.`
-                  : `A port above ${spec.listen || "the first"}.`
+                  : undefined
             }
           >
             <Input
@@ -181,7 +187,7 @@ export function StreamListen({
           <Field
             label="Trusted load balancers"
             htmlFor="stream-trusted-proxies"
-            hint="One address or CIDR per line. A peer not listed keeps its own address, whatever its header says."
+            info="One address or CIDR per line. A peer not listed keeps its own address, whatever its header says."
           >
             <Textarea
               id="stream-trusted-proxies"

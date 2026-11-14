@@ -4,6 +4,7 @@ import { Fragment } from "react"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { FactDot } from "@/components/metrics/host-identity"
+import type { SectionId } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit/engine-mark"
 import { EnvironmentTag, ProtectedTag } from "@/components/database/kit/environment-tag"
 import { ConnectPopover } from "@/components/database/shell/connect-popover"
@@ -14,6 +15,9 @@ import { connectionFacts } from "@/components/database/shell/facts"
 import { useDatabaseNavScope } from "@/components/database/shell/nav-scope"
 import { databasePlace } from "@/components/database/shell/routes"
 import { DatabaseStatusMark } from "@/components/database/shell/status"
+
+/** The workbenches whose frame draws the strip itself, as its head. */
+const HEADED: readonly SectionId[] = ["data", "query", "schema", "diagram"]
 
 /**
  * The frame around every page of one database.
@@ -37,11 +41,17 @@ export function DatabaseShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   useDatabaseNavScope()
   const place = databasePlace(pathname)
+  // Data, Query, Schema and the Diagram carry the strip as the head of their
+  // own frame (`workbench/chrome.tsx`). Only where the engine has the page:
+  // the statement that it has none is a reading page, under the strip.
+  const headed = Boolean(
+    place && HEADED.includes(place.section) && engine.section(place.section)?.workbench,
+  )
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* The home opens on its own identity line, large; the strip under it
           would be the same facts twice. */}
-      {place?.section !== "home" && <IdentityStrip />}
+      {place?.section !== "home" && !headed && <IdentityStrip />}
       <div key={`${conn.id}:${engine.id}`} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
         {children}
       </div>

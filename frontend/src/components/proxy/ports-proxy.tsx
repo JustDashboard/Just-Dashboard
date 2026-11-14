@@ -127,7 +127,7 @@ export function FreePortFinder() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button size="sm">
           <MagnifyingGlass />
           Find a free port
         </Button>

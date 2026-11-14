@@ -2,26 +2,23 @@
 
 import { clockMinute, plural, timestamp } from "@/lib/format"
 import type { DeploymentStep, RehearsalReport } from "@/lib/types"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { Database } from "@/components/icons"
 import { Tag } from "@/components/tag"
 import { StepMark } from "@/components/deploy/vocabulary"
-import {
-  engineName,
-  heldLocks,
-  lockMode,
-  millis,
-  sourceShort,
-  sourceWords,
-} from "@/components/deploy/rehearsal-model"
+import { engineName, heldLocks, lockMode, millis } from "@/components/deploy/rehearsal-model"
+import { RunVerdict } from "@/components/deploy/run-verdict"
+import { rehearsalVerdict } from "@/components/deploy/run-verdicts"
 
 /**
  * The rehearse_migration step's report (`deploy/rehearsal.go`), read as what
  * an operator asks of it: where the copy came from and how long it took,
  * whether the release tasks passed against it, which tables they held locked
  * and for how long — the time production's reads or writes of those tables
- * will wait for the same migration — and whether the copy is gone. A report
- * that never rehearsed has only its reason, which the step's own error or
- * warning line above already carries, so it adds nothing here.
+ * will wait for the same migration — and whether the copy is gone. It opens
+ * on the verdict as one sentence on the step's mark, with the copy's story as
+ * a line of facts (`RunVerdict`). A report that never rehearsed has only its
+ * reason, which the step's own error or warning line above already carries,
+ * so it adds nothing here.
  */
 export function RehearsalView({ step, report }: { step: DeploymentStep; report: RehearsalReport }) {
   if (!report.rehearsed) {
@@ -33,41 +30,16 @@ export function RehearsalView({ step, report }: { step: DeploymentStep; report: 
     ) : null
   }
   const locks = heldLocks(report)
-  const lock = locks[0]
-  const failed = report.tasks.find((task) => task.exitCode !== 0 || task.error)
-  const at = (iso: string) => clockMinute(iso)
   return (
     <section aria-label="Rehearsal report" className="min-w-0 space-y-5">
-      {/* Each figure's line is a few words, so four fit across the inspector;
-          the sentences under the figures say the rest. */}
-      <StatGrid columns={4} dense>
-        <StatTile
-          label="Restored"
-          value={millis(report.restoreMs)}
-          hint={
-            <span title={`from ${sourceWords(report.source, (iso) => timestamp(iso))}`}>
-              {sourceShort(report.source, at)}
-            </span>
-          }
-        />
-        <StatTile
-          label="Release tasks"
-          value={failed ? "Failed" : "Passed"}
-          tone={failed ? "danger" : "success"}
-          hint={failed ? `exit ${failed.exitCode}` : plural(report.tasks.length, "task")}
-        />
-        <StatTile
-          label="Longest lock"
-          value={lock ? millis(lock.heldMs) : "None"}
-          hint={lock ? lockMode(lock.mode) : report.locks.read ? "no table locked" : "not read"}
-        />
-        <StatTile
-          label="Copy"
-          value={report.cleanedUp ? "Removed" : "Left"}
-          tone={report.cleanedUp ? "default" : "warning"}
-          hint={report.cleanedUp ? "with its network" : "at the next start"}
-        />
-      </StatGrid>
+      <RunVerdict
+        verdict={rehearsalVerdict(
+          report,
+          (iso) => clockMinute(iso),
+          (iso) => timestamp(iso),
+        )}
+        glyph={<Database aria-hidden />}
+      />
 
       <ol aria-label="Release tasks against the copy" className="space-y-2">
         {report.tasks.map((task) => {

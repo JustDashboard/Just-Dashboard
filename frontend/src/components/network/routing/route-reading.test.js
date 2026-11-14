@@ -1,9 +1,16 @@
 import { expect, test } from "bun:test"
 import {
+  askable,
+  defaultRoute,
+  forwardingNeeds,
+  forwardingReading,
+  forwardingState,
+  needProduct,
   nexthopProblem,
   parseTarget,
   replyHighlight,
   routeCovers,
+  routeRows,
   routeVia,
   ruleSelectors,
   ruleThen,
@@ -151,4 +158,109 @@ test("a multipath draft is checked leg by leg", () => {
       }),
     ),
   ).toBe("10.0.0.1 ×2, eth1")
+})
+
+test("the page names itself by main's default route, IPv4 first and the lowest metric", () => {
+  const routing = {
+    tables: [
+      { id: 100, name: "office", routes: [route("default", { gateway: "10.8.0.10" })] },
+      {
+        id: 254,
+        name: "main",
+        routes: [
+          route("default", { family: "inet6", gateway: "fe80::1" }),
+          route("default", { gateway: "203.0.113.9", metric: 200 }),
+          route("default", { gateway: "203.0.113.1", metric: 100 }),
+          route("default", { type: "blackhole" }),
+        ],
+      },
+    ],
+  }
+  expect(defaultRoute(routing)?.gateway).toBe("203.0.113.1")
+  const six = { tables: [{ id: 254, name: "main", routes: [routing.tables[1].routes[0]] }] }
+  expect(defaultRoute(six)?.gateway).toBe("fe80::1")
+  expect(defaultRoute({ tables: [{ id: 254, name: "main", routes: [] }] })).toBeUndefined()
+  expect(defaultRoute({ tables: [] })).toBeUndefined()
+})
+
+test("every route is a row with its table, and two alike in one table keep apart", () => {
+  const rows = routeRows([
+    { id: 254, name: "main", routes: [route("10.0.0.0/8"), route("10.0.0.0/8")] },
+    { id: 52, name: "tailscale", routes: [route("100.64.0.7", { device: "tailscale0" })] },
+  ])
+  expect(rows.map((row) => row.table.name)).toEqual(["main", "main", "tailscale"])
+  expect(new Set(rows.map((row) => row.key)).size).toBe(3)
+})
+
+test("forwarding is said in one state for the page and one reading for a family", () => {
+  const family = (extra = {}) => ({
+    available: true,
+    enabled: true,
+    persisted: false,
+    neededBy: [],
+    ...extra,
+  })
+  const off = family({ enabled: false })
+  expect(forwardingState({ ipv4: family(), ipv6: family() })).toEqual({
+    on: true,
+    label: "Forwarding IPv4 and IPv6",
+  })
+  expect(forwardingState({ ipv4: family(), ipv6: off }).label).toBe("Forwarding IPv4 only")
+  expect(forwardingState({ ipv4: off, ipv6: family() }).label).toBe("Forwarding IPv6 only")
+  expect(forwardingState({ ipv4: off, ipv6: off })).toEqual({ on: false, label: "Not forwarding" })
+
+  expect(forwardingReading(family({ available: false }))).toMatchObject({
+    tone: "unknown",
+    label: "Not on this kernel",
+  })
+  expect(forwardingReading(off)).toMatchObject({ tone: "stopped", label: "Off" })
+  expect(forwardingReading(family())).toMatchObject({ tone: "running", label: "On" })
+  const health = (extra) => family({ health: { disabled: [], checkedAt: "", ...extra } })
+  expect(
+    forwardingReading(health({ status: "forwarding", ratePerSecond: 42.5, windowSeconds: 15 })),
+  ).toEqual({
+    tone: "running",
+    word: "Forwarding traffic",
+    rate: "43 datagrams/s over 15s",
+    label: "Forwarding traffic · 43 datagrams/s over 15s",
+  })
+  expect(
+    forwardingReading(health({ status: "idle", ratePerSecond: 0.25, windowSeconds: 15 })).label,
+  ).toBe("On · idle · 0.3 datagrams/s over 15s")
+  expect(forwardingReading(health({ status: "partial" }))).toMatchObject({
+    tone: "warning",
+    label: "Some devices do not forward",
+  })
+  expect(forwardingReading(health({ status: "unknown" })).label).toBe("On · not measured")
+})
+
+test("a thing that needs forwarding is listed once, with the families it needs", () => {
+  const family = (neededBy) => ({ available: true, enabled: true, persisted: false, neededBy })
+  expect(
+    forwardingNeeds({
+      ipv4: family(["5 Docker networks", "Tailscale's exit node"]),
+      ipv6: family(["Tailscale's exit node"]),
+    }),
+  ).toEqual([
+    { need: "5 Docker networks", ipv4: true, ipv6: false },
+    { need: "Tailscale's exit node", ipv4: true, ipv6: true },
+  ])
+  expect(forwardingNeeds({ ipv4: family([]), ipv6: family([]) })).toEqual([])
+})
+
+test("a dependency is drawn with the product it names", () => {
+  expect(needProduct("5 Docker networks")).toBe("docker")
+  expect(needProduct("the WireGuard exit through wg0")).toBe("wireguard")
+  expect(needProduct("Tailscale's exit node")).toBe("tailscale")
+  expect(needProduct("a NAT rule")).toBeUndefined()
+})
+
+test("the kernel is asked about one literal address, never a network", () => {
+  expect(askable("10.8.0.7", "")).toBe(true)
+  expect(askable(" 2001:db8::1 ", " 2001:db8::2 ")).toBe(true)
+  expect(askable("10.8.0.0/24", "")).toBe(false)
+  expect(askable("10.8.0.7", "10.8.0.0/24")).toBe(false)
+  expect(askable("10.8.0.7", "nope")).toBe(false)
+  expect(askable("", "")).toBe(false)
+  expect(askable("host.example", "")).toBe(false)
 })

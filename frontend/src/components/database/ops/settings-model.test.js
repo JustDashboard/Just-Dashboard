@@ -7,13 +7,14 @@ import {
   dropEffect,
   dropPhrase,
   firewallOutcome,
-  firewallWords,
   gatewayOutcome,
   joinWords,
   notesProblem,
+  reachDraft,
   reachRefusal,
   sameList,
   sourceProblem,
+  wallWords,
 } from "./settings-model"
 
 const SQL = { fileBased: false, numbered: false, documents: false }
@@ -120,21 +121,21 @@ describe("why where a server listens is not changed from the page", () => {
   })
 
   test("the firewall is said as it is: absent, off, or on with the port open or closed", () => {
-    expect(firewallWords({ firewall, port: 5432 })).toContain("No firewall")
-    expect(firewallWords({ firewall: { ...firewall, backend: "ufw" }, port: 5432 })).toContain(
+    expect(wallWords({ firewall, port: 5432 })).toBe("no firewall: the binding alone decides")
+    expect(wallWords({ firewall: { ...firewall, backend: "ufw" }, port: 5432 })).toContain(
       "switched off",
     )
+    expect(wallWords({ firewall: { ...firewall, backend: "ufw", active: true }, port: 5432 })).toBe(
+      "ufw keeps port 5432 closed",
+    )
     expect(
-      firewallWords({ firewall: { ...firewall, backend: "ufw", active: true }, port: 5432 }),
-    ).toBe("ufw is on, and port 5432 is closed.")
-    expect(
-      firewallWords({
+      wallWords({
         firewall: { ...firewall, backend: "ufw", active: true, open: true },
         port: 5432,
       }),
-    ).toBe("ufw is on, and port 5432 is open to anywhere.")
+    ).toBe("ufw lets port 5432 in from anywhere")
     expect(
-      firewallWords({
+      wallWords({
         firewall: {
           ...firewall,
           backend: "ufw",
@@ -143,7 +144,7 @@ describe("why where a server listens is not changed from the page", () => {
         },
         port: 5432,
       }),
-    ).toBe("ufw is on, and lets port 5432 in from 203.0.113.7 and 198.51.100.0/24.")
+    ).toBe("ufw lets port 5432 in from 203.0.113.7 and 198.51.100.0/24")
   })
 
   test("what a change did to the firewall is one sentence per word, and none for a word nobody knows", () => {
@@ -206,5 +207,50 @@ describe("a list of the addresses that may reach a port", () => {
     expect(addressWords({ address: "192.168.1.10", network: "uplink" }).hint).toContain(
       "the internet",
     )
+  })
+})
+
+describe("the answer the Network page holds against the one in force", () => {
+  const addresses = [{ address: "100.101.12.4" }, { address: "10.20.0.8" }]
+  const local = { exposure: "local", allow: [], addresses }
+
+  test("nothing chosen follows the server, and is nothing to save", () => {
+    expect(reachDraft(local, {})).toEqual({
+      choice: "local",
+      address: "100.101.12.4",
+      allow: [],
+      dirty: false,
+      problem: undefined,
+    })
+    expect(reachDraft({ ...local, exposure: "public" }, {}).choice).toBe("public")
+  })
+
+  test("another answer is a change; the same one chosen back is not", () => {
+    expect(reachDraft(local, { choice: "public" }).dirty).toBe(true)
+    expect(reachDraft(local, { choice: "local" }).dirty).toBe(false)
+  })
+
+  test("one address starts on the first this machine has, and on the one in force", () => {
+    expect(reachDraft(local, { choice: "private" })).toMatchObject({
+      address: "100.101.12.4",
+      dirty: true,
+      problem: undefined,
+    })
+    const published = { ...local, exposure: "private", address: "10.20.0.8" }
+    expect(reachDraft(published, {})).toMatchObject({ address: "10.20.0.8", dirty: false })
+    expect(reachDraft(published, { address: "100.101.12.4" }).dirty).toBe(true)
+    expect(reachDraft({ ...local, addresses: [] }, { choice: "private" }).problem).toBe(
+      "Pick an address.",
+    )
+  })
+
+  test("a list is a change when it names other addresses, in any order, and needs one", () => {
+    const listed = { ...local, exposure: "allowlist", allow: ["203.0.113.50", "198.51.100.0/24"] }
+    expect(reachDraft(listed, { allow: ["198.51.100.0/24", "203.0.113.50"] }).dirty).toBe(false)
+    expect(reachDraft(listed, { allow: ["203.0.113.50"] }).dirty).toBe(true)
+    expect(reachDraft(local, { choice: "allowlist" })).toMatchObject({
+      dirty: true,
+      problem: "A list needs an address.",
+    })
   })
 })

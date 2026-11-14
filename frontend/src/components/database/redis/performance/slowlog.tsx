@@ -9,7 +9,6 @@ import { useArrivals } from "@/hooks/use-arrivals"
 import { cn } from "@/lib/utils"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FormFact } from "@/components/form"
-import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyState, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -26,6 +25,7 @@ import { redisSlowlog, redisSlowlogReset } from "@/components/database/redis/api
 import { bytesLabel } from "@/components/database/redis/bytes"
 import { micros } from "@/components/database/redis/performance/samples"
 import { argsAfterCommand } from "@/components/database/redis/performance/slowlog-line"
+import { Fig, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
 import { ReadError } from "@/components/database/redis/read-error"
 import type { Redis } from "@/components/database/redis/use-redis"
 
@@ -83,16 +83,6 @@ export function SlowlogView({ redis }: { redis: Redis }) {
   return (
     <div className="space-y-6">
       {dialog}
-      <MetricStrip>
-        <Metric
-          label="Logs a command slower than"
-          value={off ? "Nothing — it is off" : micros(data.thresholdUs ?? 0)}
-        />
-        <Metric label="Keeps the last" value={(data.maxLen ?? 0).toLocaleString()} />
-        <Metric label="Holds now" value={data.length.toLocaleString()} />
-        {slowest > 0 && <Metric label="Slowest here" value={micros(slowest)} />}
-      </MetricStrip>
-
       {log.error && (
         <p role="status" className="text-hint text-warning">
           The log could not be read again just now: {log.error.message}
@@ -115,7 +105,28 @@ export function SlowlogView({ redis }: { redis: Redis }) {
               )}
             </>
           }
-        />
+        >
+          <TitleAside>
+            {/* The server's two settings and what the log holds, where four
+                tiles stood over the list. */}
+            <TitleFact>
+              {off ? (
+                "off"
+              ) : (
+                <>
+                  slower than <Fig>{micros(data.thresholdUs ?? 0)}</Fig>
+                </>
+              )}
+              , holds <Fig>{data.length.toLocaleString()}</Fig> of the last{" "}
+              <Fig>{(data.maxLen ?? 0).toLocaleString()}</Fig>
+              {slowest > 0 && (
+                <>
+                  , the slowest <Fig>{micros(slowest)}</Fig>
+                </>
+              )}
+            </TitleFact>
+          </TitleAside>
+        </PanelHeader>
         <PanelBody flush className="group-data-[plain]/panel:-mx-4">
           {data.entries.length === 0 ? (
             <EmptyState

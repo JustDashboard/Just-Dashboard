@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { FormNote, OptionList, OptionRow, Statement } from "@/components/form"
 import { Modal } from "@/components/modal"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { StatusDot } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -103,8 +105,12 @@ const PRIVILEGE_CHIP = "h-9 px-2.5 font-mono text-micro sm:h-6 sm:px-2"
  * menu of the others — a list of every role on the server would read as a
  * list of memberships.
  *
- * `onPending` is told how many changes are staged, so that the sheet around
- * it can ask before it closes over them.
+ * It is the whole of the account page's Grants view: the roles it is in and
+ * what it holds are two sections, each a title and a hairline, and the
+ * changes staged across both wait in one bar at the view's foot.
+ *
+ * `onPending` is told how many changes are staged, so that the page around
+ * it can ask before it is left over them.
  */
 export function GrantsMatrix({
   detail,
@@ -363,342 +369,387 @@ export function GrantsMatrix({
       ? heldLater(detail.grants, { level: level.level, schema: currentScope }, level)
       : []
 
+  // USAGE at the server's level is the engine's word for "may sign in": it grants nothing.
+  const server = detail.grants
+    .filter((grant) => grant.level === "server")
+    .flatMap((grant) => grant.privileges)
+    .filter((privilege) => privilege.toUpperCase() !== "USAGE")
+  const heldObjects = objectLevels.reduce((sum, one) => sum + heldCount(one.level), 0)
+
   return (
-    <div className="space-y-4" data-slot="grants-matrix">
+    <div className="space-y-8 pb-20" data-slot="grants-matrix">
       {memberships && (roles.length > 0 || inRoles.length > 0) && (
-        <div className="space-y-1.5" data-slot="memberships">
-          <p className="text-body font-medium">Member of</p>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
-            {inRoles.length === 0 ? (
-              <span className="text-hint text-muted-foreground">No other role.</span>
-            ) : editable ? (
-              <ChipStrip
-                role="group"
-                aria-label="Roles it is a member of: press one to take it out"
-              >
-                {inRoles.map((role) => {
-                  const was = Boolean(detail.memberOf?.includes(role))
-                  const now = memberNow(role)
-                  return (
-                    <FilterChip
-                      key={role}
-                      selected={now}
-                      className={cn("font-mono", was && !now && "line-through")}
-                      style={
-                        now !== was
-                          ? { color: `var(--git-${now ? "added" : "deleted"})` }
-                          : undefined
-                      }
-                      onClick={() => pressMember(role)}
-                    >
-                      <span style={now === was ? { color: nameHue(role) } : undefined}>{role}</span>
-                    </FilterChip>
-                  )
-                })}
-              </ChipStrip>
-            ) : (
-              <span className="flex flex-wrap gap-1.5">
-                {inRoles.map((role) => (
-                  <Tag key={role} mono>
-                    {role}
-                  </Tag>
-                ))}
-              </span>
-            )}
-            {editable && addable.length > 0 && (
-              <VerbMenu
-                align="start"
-                verbs={addable.map((role) => ({
-                  key: role,
-                  label: role,
-                  icon: UserPlus,
-                  run: () => pressMember(role),
-                }))}
-                trigger={
-                  <Button size="xs" variant="ghost">
-                    <Plus />
-                    Add to a role
-                  </Button>
-                }
-              />
-            )}
-          </div>
-          {detail.members.length > 0 && (
-            <FormNote>
-              Its own members: <span className="font-mono">{detail.members.join(", ")}</span>
-            </FormNote>
-          )}
-        </div>
-      )}
-
-      <div className="space-y-3">
-        <div
-          role="group"
-          aria-label="Grants by level"
-          className="flex min-w-0 gap-4 overflow-x-auto border-b border-hairline"
-        >
-          {objectLevels.map((one) => (
-            <button
-              key={one.level}
-              type="button"
-              aria-pressed={one.level === level.level}
-              onClick={() => {
-                setView(one.level)
-                setScope("")
-                setTable("")
-              }}
-              className={cn(tabClasses(one.level === level.level, "h-9"), "gap-1.5")}
-            >
-              {LEVEL_WORD[one.level].tab}
-              <ChipCount>{heldCount(one.level)}</ChipCount>
-            </button>
-          ))}
-        </div>
-
-        {scoped && scopes.length > 1 && (
-          <ChipStrip role="group" aria-label={byDatabase ? "Which database" : "Which schema"}>
-            {scopes.map((name) => (
-              <FilterChip
-                key={name}
-                selected={name === currentScope}
-                className="font-mono"
-                onClick={() => setScope(name)}
-              >
-                {name}
-              </FilterChip>
-            ))}
-          </ChipStrip>
-        )}
-        {!byDatabase && level.level !== "database" && (
-          <FormNote>
-            {LEVEL_WORD[level.level].tab} of <span className="font-mono">{conn.database}</span>, the
-            database this connection is on. Another database&rsquo;s are granted from a connection
-            to it.
-          </FormNote>
-        )}
-        {level.level === "column" && tables.length > 0 && (
-          <div className="flex min-w-0 items-center gap-2">
-            <span id={`${tablePickerId}-label`} className="shrink-0 text-body font-medium">
-              Columns of
-            </span>
-            <Select value={chosenTable} onValueChange={setTable}>
-              <SelectTrigger
-                aria-labelledby={`${tablePickerId}-label`}
-                className="h-8 w-56 max-w-full font-mono text-xs"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {tables.map((name) => (
-                  <SelectItem key={name} value={name} className="font-mono text-xs">
-                    {name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-        {level.level === "column" && (
-          <FormNote>
-            A privilege on the whole table covers every column of it. What is pressed here is held
-            on the column alone, and a revoke here takes only that.
-          </FormNote>
-        )}
-        {level.level === "function" && (
-          <FormNote>
-            A function can be run by every role until EXECUTE is taken from PUBLIC, so granting it
-            here changes nothing for a role while PUBLIC holds it. The functions an extension
-            installed are not listed.
-          </FormNote>
-        )}
-
-        {loading ? (
-          <div className="space-y-2.5 py-1" aria-hidden>
-            {[52, 40, 64].map((width) => (
-              <Skeleton key={width} className="h-6" style={{ width: `${width}%` }} />
-            ))}
-          </div>
-        ) : failed ? (
-          <FormNote tone="danger" role="alert">
-            The {LEVEL_WORD[level.level].tab.toLowerCase()} could not be listed:{" "}
-            {errorMessage(failed)}
-          </FormNote>
-        ) : objects.length === 0 ? (
-          <FormNote>
-            There is no {LEVEL_WORD[level.level].one}
-            {level.level === "column"
-              ? ` to list: ${chosenTable ? `${chosenTable} has none` : `${currentScope} has no table`}`
-              : scoped
-                ? ` in ${currentScope}`
-                : ""}
-            .
-          </FormNote>
-        ) : (
-          <ul className="divide-y divide-hairline" aria-label={LEVEL_WORD[level.level].tab}>
-            {editable && level.allObjects && objects.length > 1 && (
-              <li className="flex min-w-0 flex-col gap-1.5 py-2 sm:flex-row sm:items-start sm:gap-3">
-                <span className="w-40 shrink-0 pt-1 text-xs font-medium">
-                  {LEVEL_WORD[level.level].every}
-                </span>
-                <span className="flex min-w-0 flex-1 flex-wrap gap-1.5 sm:gap-1">
-                  {/* The rows under it open with ALL: this one keeps that
-                      column empty, so a privilege stands over itself. */}
-                  {hasAll && (
-                    <span
-                      aria-hidden
-                      className={cn("invisible inline-flex shrink-0 border", PRIVILEGE_CHIP)}
-                    >
-                      ALL
-                    </span>
-                  )}
-                  {domain.map((privilege) => {
-                    const everywhere = objects.every(({ cell }) => {
-                      return (wanted[cellKey(cell)]?.privileges ?? holds(cell).privileges).includes(
-                        privilege,
-                      )
-                    })
+        <Panel plain aria-label="Member of" data-slot="memberships">
+          <PanelHeader
+            title="Member of"
+            actions={
+              <>
+                {inRoles.length > 0 && (
+                  <span className="numeric text-hint text-muted-foreground">{inRoles.length}</span>
+                )}
+                {editable && addable.length > 0 && (
+                  <VerbMenu
+                    align="end"
+                    verbs={addable.map((role) => ({
+                      key: role,
+                      label: role,
+                      icon: UserPlus,
+                      run: () => pressMember(role),
+                    }))}
+                    trigger={
+                      <Button size="xs" variant="outline">
+                        <Plus />
+                        Add to a role
+                      </Button>
+                    }
+                  />
+                )}
+              </>
+            }
+          />
+          <PanelBody className="space-y-2 pt-3">
+            <div className="flex min-h-7 min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+              {inRoles.length === 0 ? (
+                <span className="text-body text-muted-foreground">No other role.</span>
+              ) : editable ? (
+                <ChipStrip
+                  role="group"
+                  aria-label="Roles it is a member of: press one to take it out"
+                >
+                  {inRoles.map((role) => {
+                    const was = Boolean(detail.memberOf?.includes(role))
+                    const now = memberNow(role)
                     return (
                       <FilterChip
-                        key={privilege}
-                        selected={everywhere}
-                        className={PRIVILEGE_CHIP}
-                        aria-label={`${privilege} on every ${LEVEL_WORD[level.level].one} in ${currentScope}`}
-                        onClick={() => pressEvery(privilege)}
+                        key={role}
+                        selected={now}
+                        className={cn("font-mono", was && !now && "line-through")}
+                        style={
+                          now !== was
+                            ? { color: `var(--git-${now ? "added" : "deleted"})` }
+                            : undefined
+                        }
+                        onClick={() => pressMember(role)}
                       >
-                        {privilege}
+                        <span style={now === was ? { color: nameHue(role) } : undefined}>
+                          {role}
+                        </span>
                       </FilterChip>
                     )
                   })}
+                </ChipStrip>
+              ) : (
+                <span className="flex flex-wrap gap-1.5">
+                  {inRoles.map((role) => (
+                    <Tag key={role} mono>
+                      {role}
+                    </Tag>
+                  ))}
                 </span>
-              </li>
+              )}
+            </div>
+            {detail.members.length > 0 && (
+              <FormNote>
+                Its own members: <span className="font-mono">{detail.members.join(", ")}</span>
+              </FormNote>
             )}
-            {objects.map(({ key: name, label, aria, cell }) => {
-              const held = holds(cell)
-              const want = wanted[cellKey(cell)]?.privileges
-              const now = want ?? held.privileges
-              if (!editable && held.privileges.length === 0 && held.other.length === 0) return null
-              const full = domain.every((one) => now.includes(one))
-              return (
-                <li
+          </PanelBody>
+        </Panel>
+      )}
+
+      <Panel plain aria-label="Grants">
+        <PanelHeader
+          title="Grants"
+          actions={
+            heldObjects > 0 && (
+              <span className="numeric text-hint text-muted-foreground">
+                {plural(heldObjects, "object")}
+              </span>
+            )
+          }
+        />
+        <PanelBody className="space-y-3 pt-3">
+          <ServerGrants privileges={server} superuser={detail.superuser} />
+          <div
+            role="group"
+            aria-label="Grants by level"
+            className="flex min-w-0 gap-4 overflow-x-auto border-b border-hairline"
+          >
+            {objectLevels.map((one) => (
+              <button
+                key={one.level}
+                type="button"
+                aria-pressed={one.level === level.level}
+                onClick={() => {
+                  setView(one.level)
+                  setScope("")
+                  setTable("")
+                }}
+                className={cn(tabClasses(one.level === level.level, "h-9"), "gap-1.5")}
+              >
+                {LEVEL_WORD[one.level].tab}
+                <ChipCount>{heldCount(one.level)}</ChipCount>
+              </button>
+            ))}
+          </div>
+
+          {scoped && scopes.length > 1 && (
+            <ChipStrip role="group" aria-label={byDatabase ? "Which database" : "Which schema"}>
+              {scopes.map((name) => (
+                <FilterChip
                   key={name}
-                  data-object={name}
-                  className="flex min-w-0 flex-col gap-1.5 py-2 sm:flex-row sm:items-start sm:gap-3"
+                  selected={name === currentScope}
+                  className="font-mono"
+                  onClick={() => setScope(name)}
                 >
-                  <span className="w-40 shrink-0 truncate pt-1 font-mono text-xs" title={label}>
-                    {label}
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 sm:gap-1">
-                    {editable ? (
-                      <>
-                        {hasAll && (
-                          <FilterChip
-                            selected={full}
-                            className={PRIVILEGE_CHIP}
-                            aria-label={`ALL on ${aria}`}
-                            onClick={() => pressAll(cell)}
-                          >
-                            ALL
-                          </FilterChip>
-                        )}
-                        {domain.map((privilege) => {
-                          const was = held.privileges.includes(privilege)
-                          const is = now.includes(privilege)
-                          const owned = held.owned.includes(privilege)
-                          return (
-                            <FilterChip
-                              key={privilege}
-                              selected={is}
-                              disabled={owned}
-                              aria-label={`${privilege} on ${aria}`}
-                              className={cn(
-                                PRIVILEGE_CHIP,
-                                was && !is && "line-through",
-                                owned && "opacity-60",
-                              )}
-                              style={
-                                was !== is
-                                  ? { color: `var(--git-${is ? "added" : "deleted"})` }
-                                  : undefined
-                              }
-                              onClick={() => press(cell, privilege)}
-                            >
-                              {privilege}
-                            </FilterChip>
-                          )
-                        })}
-                      </>
-                    ) : (
-                      held.privileges.map((privilege) => (
-                        <Tag key={privilege} mono>
-                          {privilege}
-                        </Tag>
-                      ))
-                    )}
-                    {held.other.map((privilege) => (
-                      <Tag
-                        key={privilege}
-                        mono
-                        title="Listed by the server; changed in the console"
-                      >
-                        {privilege}
-                      </Tag>
-                    ))}
-                    {held.owned.length > 0 && <Tag>owner</Tag>}
-                    {held.grantable && <Tag>may grant it on</Tag>}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-        {!editable &&
-          !loading &&
-          !failed &&
-          objects.length > 0 &&
-          objects.every(({ cell }) => {
-            const held = holds(cell)
-            return held.privileges.length === 0 && held.other.length === 0
-          }) && (
+                  {name}
+                </FilterChip>
+              ))}
+            </ChipStrip>
+          )}
+          {!byDatabase && level.level !== "database" && (
             <FormNote>
-              It holds nothing on a {LEVEL_WORD[level.level].one}
-              {scoped ? ` in ${currentScope}` : ""}.
+              {LEVEL_WORD[level.level].tab} of <span className="font-mono">{conn.database}</span>,
+              the database this connection is on. Another database&rsquo;s are granted from a
+              connection to it.
             </FormNote>
           )}
-        {later.length > 0 && (
-          <FormNote>
-            On {LEVEL_WORD[level.level].tab.toLowerCase()} created later in{" "}
-            <span className="font-mono">{currentScope}</span> it gets{" "}
-            <span className="font-mono">{later.join(", ")}</span>.
-          </FormNote>
-        )}
-        {detail.grantsTruncated && (
-          <FormNote tone="warning">
-            The server listed the first thousand of its grants; an object further down may hold more
-            than is shown.
-          </FormNote>
-        )}
-      </div>
+          {level.level === "column" && tables.length > 0 && (
+            <div className="flex min-w-0 items-center gap-2">
+              <span id={`${tablePickerId}-label`} className="shrink-0 text-body font-medium">
+                Columns of
+              </span>
+              <Select value={chosenTable} onValueChange={setTable}>
+                <SelectTrigger
+                  aria-labelledby={`${tablePickerId}-label`}
+                  className="h-8 w-56 max-w-full font-mono text-xs"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {tables.map((name) => (
+                    <SelectItem key={name} value={name} className="font-mono text-xs">
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {level.level === "column" && (
+            <FormNote>
+              A privilege on the whole table covers every column of it. What is pressed here is held
+              on the column alone, and a revoke here takes only that.
+            </FormNote>
+          )}
+          {level.level === "function" && (
+            <FormNote>
+              A function can be run by every role until EXECUTE is taken from PUBLIC, so granting it
+              here changes nothing for a role while PUBLIC holds it. The functions an extension
+              installed are not listed.
+            </FormNote>
+          )}
+
+          {loading ? (
+            <div className="space-y-2.5 py-1" aria-hidden>
+              {[52, 40, 64].map((width) => (
+                <Skeleton key={width} className="h-6" style={{ width: `${width}%` }} />
+              ))}
+            </div>
+          ) : failed ? (
+            <FormNote tone="danger" role="alert">
+              The {LEVEL_WORD[level.level].tab.toLowerCase()} could not be listed:{" "}
+              {errorMessage(failed)}
+            </FormNote>
+          ) : objects.length === 0 ? (
+            <FormNote>
+              There is no {LEVEL_WORD[level.level].one}
+              {level.level === "column"
+                ? ` to list: ${chosenTable ? `${chosenTable} has none` : `${currentScope} has no table`}`
+                : scoped
+                  ? ` in ${currentScope}`
+                  : ""}
+              .
+            </FormNote>
+          ) : (
+            <ul className="divide-y divide-hairline" aria-label={LEVEL_WORD[level.level].tab}>
+              {editable && level.allObjects && objects.length > 1 && (
+                <li className="flex min-w-0 flex-col gap-1.5 py-2 sm:flex-row sm:items-start sm:gap-3">
+                  <span className="w-40 shrink-0 pt-1 text-xs font-medium">
+                    {LEVEL_WORD[level.level].every}
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-wrap gap-1.5 sm:gap-1">
+                    {/* The rows under it open with ALL: this one keeps that
+                      column empty, so a privilege stands over itself. */}
+                    {hasAll && (
+                      <span
+                        aria-hidden
+                        className={cn("invisible inline-flex shrink-0 border", PRIVILEGE_CHIP)}
+                      >
+                        ALL
+                      </span>
+                    )}
+                    {domain.map((privilege) => {
+                      const everywhere = objects.every(({ cell }) => {
+                        return (
+                          wanted[cellKey(cell)]?.privileges ?? holds(cell).privileges
+                        ).includes(privilege)
+                      })
+                      return (
+                        <FilterChip
+                          key={privilege}
+                          selected={everywhere}
+                          className={PRIVILEGE_CHIP}
+                          aria-label={`${privilege} on every ${LEVEL_WORD[level.level].one} in ${currentScope}`}
+                          onClick={() => pressEvery(privilege)}
+                        >
+                          {privilege}
+                        </FilterChip>
+                      )
+                    })}
+                  </span>
+                </li>
+              )}
+              {objects.map(({ key: name, label, aria, cell }) => {
+                const held = holds(cell)
+                const want = wanted[cellKey(cell)]?.privileges
+                const now = want ?? held.privileges
+                if (!editable && held.privileges.length === 0 && held.other.length === 0)
+                  return null
+                const full = domain.every((one) => now.includes(one))
+                return (
+                  <li
+                    key={name}
+                    data-object={name}
+                    className="flex min-w-0 flex-col gap-1.5 py-2 sm:flex-row sm:items-start sm:gap-3"
+                  >
+                    <span className="w-40 shrink-0 truncate pt-1 font-mono text-xs" title={label}>
+                      {label}
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 sm:gap-1">
+                      {editable ? (
+                        <>
+                          {hasAll && (
+                            <FilterChip
+                              selected={full}
+                              className={PRIVILEGE_CHIP}
+                              aria-label={`ALL on ${aria}`}
+                              onClick={() => pressAll(cell)}
+                            >
+                              ALL
+                            </FilterChip>
+                          )}
+                          {domain.map((privilege) => {
+                            const was = held.privileges.includes(privilege)
+                            const is = now.includes(privilege)
+                            const owned = held.owned.includes(privilege)
+                            return (
+                              <FilterChip
+                                key={privilege}
+                                selected={is}
+                                disabled={owned}
+                                aria-label={`${privilege} on ${aria}`}
+                                className={cn(
+                                  PRIVILEGE_CHIP,
+                                  was && !is && "line-through",
+                                  owned && "opacity-60",
+                                )}
+                                style={
+                                  was !== is
+                                    ? { color: `var(--git-${is ? "added" : "deleted"})` }
+                                    : undefined
+                                }
+                                onClick={() => press(cell, privilege)}
+                              >
+                                {privilege}
+                              </FilterChip>
+                            )
+                          })}
+                        </>
+                      ) : (
+                        held.privileges.map((privilege) => (
+                          <Tag key={privilege} mono>
+                            {privilege}
+                          </Tag>
+                        ))
+                      )}
+                      {held.other.map((privilege) => (
+                        <Tag
+                          key={privilege}
+                          mono
+                          title="Listed by the server; changed in the console"
+                        >
+                          {privilege}
+                        </Tag>
+                      ))}
+                      {held.owned.length > 0 && <Tag>owner</Tag>}
+                      {held.grantable && <Tag>may grant it on</Tag>}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+          {!editable &&
+            !loading &&
+            !failed &&
+            objects.length > 0 &&
+            objects.every(({ cell }) => {
+              const held = holds(cell)
+              return held.privileges.length === 0 && held.other.length === 0
+            }) && (
+              <FormNote>
+                It holds nothing on a {LEVEL_WORD[level.level].one}
+                {scoped ? ` in ${currentScope}` : ""}.
+              </FormNote>
+            )}
+          {later.length > 0 && (
+            <FormNote>
+              On {LEVEL_WORD[level.level].tab.toLowerCase()} created later in{" "}
+              <span className="font-mono">{currentScope}</span> it gets{" "}
+              <span className="font-mono">{later.join(", ")}</span>.
+            </FormNote>
+          )}
+          {detail.grantsTruncated && (
+            <FormNote tone="warning">
+              The server listed the first thousand of its grants; an object further down may hold
+              more than is shown.
+            </FormNote>
+          )}
+        </PanelBody>
+      </Panel>
 
       {pending > 0 && (
-        <div
-          role="status"
-          data-slot="grants-pending"
-          className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-end gap-2 border-t border-hairline bg-popover px-4 py-3"
-        >
-          <span className="mr-auto text-body font-medium">{pendingWords(wanted, members)}</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setWanted({})
-              setMembers([])
-            }}
+        // The page's one floating thing while grants are staged, drawn as the
+        // settings' save bar is: it holds to the foot of the view, over the
+        // rows, so the command is where the eye is after a press far down.
+        <div className="pointer-events-none sticky bottom-4 z-10 flex justify-center">
+          <div
+            role="status"
+            data-slot="grants-pending"
+            className="pointer-events-auto flex w-full max-w-xl animate-rise items-center gap-3 rounded-xl border border-border-strong bg-popover py-2.5 pr-2.5 pl-4 text-popover-foreground shadow-lg"
           >
-            Discard
-          </Button>
-          <Button size="sm" onClick={() => setReviewing(true)}>
-            Review…
-          </Button>
+            <p className="flex min-w-0 flex-1 items-center gap-2 text-body leading-snug font-medium">
+              <StatusDot tone="warning" />
+              <span className="numeric min-w-0 truncate">{pendingWords(wanted, members)}</span>
+            </p>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="max-sm:h-10"
+                onClick={() => {
+                  setWanted({})
+                  setMembers([])
+                }}
+              >
+                Discard
+              </Button>
+              <Button size="sm" className="max-sm:h-10" onClick={() => setReviewing(true)}>
+                Review…
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -734,6 +785,42 @@ export function GrantsMatrix({
             onApplied()
           }}
         />
+      )}
+    </div>
+  )
+}
+
+/**
+ * What an account holds on the server as a whole, over what it holds object
+ * by object: the privileges that name no database, and the one fact that
+ * makes the rest moot.
+ */
+export function ServerGrants({
+  privileges,
+  superuser,
+}: {
+  privileges: string[]
+  superuser: boolean
+}) {
+  if (privileges.length === 0 && !superuser) return null
+  return (
+    <div className="space-y-1.5" data-slot="server-grants">
+      {privileges.length > 0 && (
+        <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+          <span className="text-body font-medium">On the whole server</span>
+          <span className="flex flex-wrap gap-1.5">
+            {privileges.map((privilege) => (
+              <Tag key={privilege} mono>
+                {privilege}
+              </Tag>
+            ))}
+          </span>
+        </p>
+      )}
+      {superuser && (
+        <FormNote>
+          An administrator may do everything on every database, whatever is granted below.
+        </FormNote>
       )}
     </div>
   )

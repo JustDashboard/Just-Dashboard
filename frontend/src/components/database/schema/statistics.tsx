@@ -9,7 +9,6 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { FormFact, Statement } from "@/components/form"
-import { Metric } from "@/components/page"
 import { Well } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -35,7 +34,6 @@ import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { qualified } from "@/components/database/schema/changes"
-import { Facts } from "@/components/database/schema/facts"
 import { useFocusReturn } from "@/components/database/schema/focus"
 import {
   maintenanceKey,
@@ -50,6 +48,7 @@ import {
   type MaintenanceVariant,
 } from "@/components/database/schema/maintenance-variants"
 import { quietNotes } from "@/components/database/schema/stat-notes"
+import { statSentences } from "@/components/database/schema/stat-sentences"
 import type {
   DbIndexStat,
   DbIndexStats,
@@ -384,7 +383,6 @@ function Figures({ stat }: { stat: DbTableStat }) {
     { label: "Vacuumed", at: latest(stat.lastVacuum, stat.lastAutovacuum) },
     { label: "Analyzed", at: latest(stat.lastAnalyze, stat.lastAutoanalyze) },
   ].filter((entry) => entry.at !== undefined)
-  const writes = [stat.inserts, stat.updates, stat.deletes].every(kept)
   return (
     <div className="animate-rise space-y-5">
       <div className="grid gap-x-10 gap-y-5 lg:grid-cols-2">
@@ -442,29 +440,31 @@ function Figures({ stat }: { stat: DbTableStat }) {
           />
         )}
       </div>
-      <Facts>
-        <Metric label="Rows" value={kept(stat.rows) ? `~${grouped(stat.rows)}` : "not counted"} />
-        {kept(stat.deadRows) && <Metric label="Dead rows" value={grouped(stat.deadRows)} />}
-        {writes && (
-          <Metric
-            label="Inserted · updated · deleted"
-            value={`${grouped(stat.inserts)} · ${grouped(stat.updates)} · ${grouped(stat.deletes)}`}
-          />
-        )}
-        {!writes && kept(stat.updates) && <Metric label="Writes" value={grouped(stat.updates)} />}
-        {kept(stat.modsSinceAnalyze) && (
-          <Metric label="Changed since analyzed" value={grouped(stat.modsSinceAnalyze)} />
-        )}
-        {stat.engine && <Metric label="Engine" value={stat.engine} />}
-        {stat.parts !== undefined && <Metric label="Parts" value={grouped(stat.parts)} />}
-        {tended.map((entry) => (
-          <Metric
-            key={entry.label}
-            label={entry.label}
-            value={<span title={timestamp(entry.at)}>{relativeTime(entry.at)}</span>}
-          />
+      {/* What the engine has counted, said: the figures used to stand in a
+          grid of captions, each needing the one beside it to mean anything. */}
+      <ul data-slot="stat-sentences" className="space-y-1 text-body text-muted-foreground">
+        {statSentences(stat).map((sentence) => (
+          <li key={sentence.key}>
+            {sentence.words.map((word, index) =>
+              typeof word === "string" ? (
+                word
+              ) : (
+                <span key={index} className="numeric text-foreground">
+                  {word.figure}
+                </span>
+              ),
+            )}
+          </li>
         ))}
-      </Facts>
+        {tended.map((entry) => (
+          <li key={entry.label}>
+            {entry.label}{" "}
+            <span className="text-foreground" title={timestamp(entry.at)}>
+              {relativeTime(entry.at)}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

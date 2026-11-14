@@ -1,13 +1,23 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { Connection, NetworkDevice, Router, SecureConnection, Servers } from "@/components/icons"
+import {
+  ArrowLeftRight,
+  Connection,
+  GridSquare,
+  Layers,
+  NetworkDevice,
+  Router,
+  SecureConnection,
+  Servers,
+} from "@/components/icons"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { bytes, percent, rate } from "@/lib/format"
 import type { DirEntry, NetStats, SensorReading, Snapshot } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import type { Tone } from "@/components/tone"
+import { BarReading } from "@/components/bar-reading"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Meter, utilisationTone } from "@/components/meter"
 import { EmptyState } from "@/components/state"
@@ -59,7 +69,9 @@ const CORE_ROW = 16
  * and seven short — before a figure is read, which is the question this
  * answers. The columns take the processor's series colour, so the shape is
  * the CPU chart beside it seen core by core, and turn amber and red at the
- * same lines every utilisation figure does.
+ * same lines every utilisation figure does. The track under a column is a
+ * tint of the same colour: on a grey one an idle machine's cores read as four
+ * grey slabs, the one uncoloured block on the page.
  */
 export function PerCorePanel({ cores, color }: { cores: number[]; color: string }) {
   if (cores.length === 0) return null
@@ -106,9 +118,10 @@ export function PerCorePanel({ cores, color }: { cores: number[]; color: string 
                   aria-valuemin={0}
                   aria-valuemax={100}
                   className={cn(
-                    "relative w-full max-w-9 overflow-hidden rounded-sm bg-meter-track/60",
+                    "relative w-full max-w-9 overflow-hidden rounded-sm",
                     labelled ? "h-28" : "h-14",
                   )}
+                  style={{ background: `color-mix(in oklab, ${color} 16%, transparent)` }}
                 >
                   <span
                     className="absolute inset-x-0 bottom-0 transition-[height] duration-700 ease-out"
@@ -198,15 +211,20 @@ export function sensorTone(s: SensorReading): Tone {
 }
 
 /**
- * Where the memory is, as one bar: what programs hold, what the kernel is
- * caching and would give back, and what is untouched — then swap under it.
+ * Where the memory is, as one bar: what programs hold and what the kernel is
+ * caching and would give back, on a track that is the whole of it — then swap
+ * as a bar of its own under it.
  *
  * "56% used" says nothing a reader can act on, because on Linux the cache
  * grows into whatever is free and is handed back the moment a program asks.
  * Split, the bar says how much of the "used" is really taken, which is the
- * figure the Memory tile's *available* is made of. The segments take the
- * memory chart's colour, the cache at a lighter step of it, so the bar is the
- * newest point of the line beside it opened up.
+ * figure the Memory tile's *available* is made of, and the head says that
+ * figure. The spans take the memory chart's colour, the cache at a lighter
+ * step of it, so the bar is the newest point of the line beside it opened up.
+ *
+ * Both are `BarReading`s. They were a bar with three figures in a row under
+ * it and a meter under those: the shape the bands on every other page left,
+ * where what is under the bar is one line that reads the part pointed at.
  */
 export function MemoryPanel({
   memory,
@@ -221,13 +239,7 @@ export function MemoryPanel({
 }) {
   const total = Math.max(memory.total, 1)
   const cache = memory.cached + memory.buffers
-  const free = Math.max(memory.total - memory.used - cache, 0)
-  const cacheColor = `color-mix(in oklab, ${color} 42%, transparent)`
-  const parts = [
-    { key: "used", label: "Programs", value: memory.used, color },
-    { key: "cache", label: "Cache", value: cache, color: cacheColor },
-    { key: "free", label: "Free", value: free, color: "var(--meter-track)" },
-  ]
+  const share = (value: number) => percent((value / total) * 100, 0)
   const tone: Tone =
     memory.total > 0 && memory.available / memory.total <= 0.05
       ? "danger"
@@ -236,104 +248,91 @@ export function MemoryPanel({
         : "default"
 
   return (
-    <Panel plain>
-      <PanelHeader
+    <div className="flex min-w-0 flex-col gap-6">
+      <BarReading
         title="Allocation"
-        actions={
-          <span className="numeric text-hint text-muted-foreground">
+        label="Memory by what holds it"
+        list="What holds the memory"
+        fixed
+        capacity={memory.total}
+        free="Free"
+        format={(value) => `${bytes(value)}, ${share(value)}`}
+        figure={
+          <span className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground">
             <span
               className={cn("font-medium", tone === "default" ? "text-foreground" : toneText(tone))}
             >
               {bytes(memory.available)}
-            </span>{" "}
+            </span>
             available of {bytes(memory.total, 0)}
           </span>
         }
-      />
-      <PanelBody className="flex flex-col gap-6 pt-5">
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            {/* What the kernel would hand a program that asked now, drawn
-                over the bar as the span it is: the free end and most of the
-                cache. It is why "56% used" and "6.5 GB available" are both
-                true. */}
-            <div className="relative h-4" aria-hidden>
-              <span
-                className="absolute inset-y-0 right-0 flex items-start justify-center border-x border-t border-muted-foreground/40 transition-[left] duration-700 ease-out"
-                style={{ left: `${Math.max(0, 100 - (memory.available / total) * 100)}%` }}
-              >
-                <span className="-mt-2 bg-background px-1.5 text-micro text-muted-foreground">
-                  available
-                </span>
+        parts={[
+          {
+            key: "used",
+            value: memory.used,
+            color,
+            mark: (
+              <span className="flex" style={{ color }}>
+                <GridSquare aria-hidden className="size-3.5" />
               </span>
-            </div>
-            <div
-              role="img"
-              aria-label={parts.map((p) => `${p.label} ${bytes(p.value)}`).join(", ")}
-              className="flex h-4 w-full overflow-hidden rounded-md bg-meter-track"
-            >
-              {parts.slice(0, 2).map((part) => (
-                <span
-                  key={part.key}
-                  className="h-full transition-[width] duration-700 ease-out"
-                  style={{ width: `${(part.value / total) * 100}%`, background: part.color }}
-                />
-              ))}
-            </div>
-          </div>
-          <dl className="grid grid-cols-3 gap-4">
-            {parts.map((part) => (
-              <div key={part.key} className="min-w-0 space-y-0.5">
-                <dt className="eyebrow truncate">
-                  <SeriesKey color={part.color} />
-                  {part.label}
-                </dt>
-                <dd className="numeric text-title font-semibold tracking-tight">
-                  {bytes(part.value)}
-                </dd>
-                <dd className="numeric text-hint text-muted-foreground">
-                  {percent((part.value / total) * 100, 0)}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-
-        <div className="space-y-2 border-t border-hairline pt-4">
-          <div className="flex min-w-0 items-baseline justify-between gap-3">
-            <span className="eyebrow">
-              <SeriesKey color={swapColor} />
-              Swap
+            ),
+            name: "Programs",
+            detail: `${share(memory.used)} of memory, held by what is running`,
+            figure: bytes(memory.used),
+            label: `Programs ${bytes(memory.used)}`,
+          },
+          {
+            key: "cache",
+            value: cache,
+            color: `color-mix(in oklab, ${color} 42%, transparent)`,
+            mark: <Layers aria-hidden className="size-3.5 text-muted-foreground" />,
+            name: "Cache",
+            detail: `${share(cache)} of memory, given back when a program asks`,
+            figure: bytes(cache),
+            label: `Cache ${bytes(cache)}`,
+          },
+        ]}
+      />
+      <BarReading
+        title="Swap"
+        label="Swap in use"
+        list="Swap"
+        fixed
+        capacity={swap.total}
+        free="Free"
+        format={(value) => bytes(value)}
+        figure={
+          swap.total > 0 && (
+            <span className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground">
+              <span className="font-medium text-foreground">{bytes(swap.used)}</span>
+              of {bytes(swap.total, 0)}
             </span>
-            <span className="numeric text-hint text-muted-foreground">
-              {swap.total > 0 ? (
-                <>
-                  <span className="font-medium text-foreground">{bytes(swap.used)}</span> of{" "}
-                  {bytes(swap.total, 0)}
-                </>
-              ) : (
-                "none configured"
-              )}
-            </span>
-          </div>
-          {swap.total > 0 && (
-            <div
-              role="meter"
-              aria-label="Swap used"
-              aria-valuenow={Math.round(swap.usedPercent)}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              className="h-1.5 w-full overflow-hidden rounded-full bg-meter-track"
-            >
-              <span
-                className="block h-full rounded-full transition-[width] duration-700 ease-out"
-                style={{ width: `${Math.min(swap.usedPercent, 100)}%`, background: swapColor }}
-              />
-            </div>
-          )}
-        </div>
-      </PanelBody>
-    </Panel>
+          )
+        }
+        message={swap.total > 0 ? undefined : "No swap is configured on this server."}
+        parts={
+          swap.total > 0
+            ? [
+                {
+                  key: "swap",
+                  value: swap.used,
+                  color: swapColor,
+                  mark: (
+                    <span className="flex" style={{ color: swapColor }}>
+                      <ArrowLeftRight aria-hidden className="size-3.5" />
+                    </span>
+                  ),
+                  name: "In use",
+                  detail: `${percent(swap.usedPercent, 0)} of swap, pages moved out of memory`,
+                  figure: bytes(swap.used),
+                  label: `Swap in use ${bytes(swap.used)}`,
+                },
+              ]
+            : []
+        }
+      />
+    </div>
   )
 }
 

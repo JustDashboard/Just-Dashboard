@@ -2,9 +2,8 @@
 
 import { MenuItemText } from "@/components/ui/menu-item-text"
 
-import { ChevronDown, FloppyDisk, Play, Route, StopCircle, TextFormat } from "@/components/icons"
+import { ChevronDown, Play, Route, StopCircle } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { Segments } from "@/components/deploy/settings/segments"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,6 +11,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -60,7 +60,9 @@ export const RUNS_ON = {
 /**
  * The editor's commands, between the statement and what it returns.
  *
- * Run is the one brand-faced command of the page. While a statement is out it
+ * Run is the one brand-faced command of the page, and Explain the one verb
+ * beside it: how many rows come back is chosen in Run's own menu, and Format
+ * and Save are words in the frame head's menu (and keys in the editor). While a statement is out it
  * gives its place to Cancel and a clock, so the control under the reader's
  * hand is always the one that applies. Beside it the strip says what Run
  * would send and what the server makes of it — and, for a statement the role
@@ -68,7 +70,6 @@ export const RUNS_ON = {
  * after it.
  */
 export function CommandStrip({
-  compact,
   standing,
   advice,
   verdict,
@@ -78,9 +79,6 @@ export function CommandStrip({
   canAnalyze,
   canCancel,
   canTransact,
-  canSave,
-  saved,
-  changed,
   transaction,
   onTransaction,
   limit,
@@ -88,12 +86,8 @@ export function CommandStrip({
   onRun,
   onCancel,
   onExplain,
-  onFormat,
-  onSave,
   empty,
 }: {
-  /** The strip is too narrow for words on every control. */
-  compact: boolean
   standing: Standing
   /** The server's reading of what Run would send, when it is of exactly that text. */
   advice: Risk | undefined
@@ -106,10 +100,6 @@ export function CommandStrip({
   canAnalyze: boolean
   canCancel: boolean
   canTransact: boolean
-  canSave: boolean
-  /** The tab is the draft of a saved query. */
-  saved: boolean
-  changed: boolean
   transaction: boolean
   onTransaction: (on: boolean) => void
   limit: number
@@ -117,8 +107,6 @@ export function CommandStrip({
   onRun: (all: boolean) => void
   onCancel: () => void
   onExplain: (analyze: boolean) => void
-  onFormat: () => void
-  onSave: () => void
   /** The editor holds nothing to run. */
   empty: boolean
 }) {
@@ -181,24 +169,21 @@ export function CommandStrip({
                     </DropdownMenuCheckboxItem>
                   </>
                 )}
-                {compact && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <p className="px-2 pt-1.5 pb-1 text-hint text-muted-foreground">
-                      Rows per statement
-                    </p>
-                    <DropdownMenuRadioGroup
-                      value={String(limit)}
-                      onValueChange={(value) => onLimit(Number(value))}
-                    >
-                      {LIMITS.map((option) => (
-                        <DropdownMenuRadioItem key={option.value} value={option.value}>
-                          {option.label}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
-                  </>
-                )}
+                {/* How many rows a statement brings back is a way of running
+                    it, so it is chosen here, not on a row of its own beside
+                    the command. */}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Rows per statement</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={String(limit)}
+                  onValueChange={(value) => onLimit(Number(value))}
+                >
+                  {LIMITS.map((option) => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
+                      {option.label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -248,43 +233,6 @@ export function CommandStrip({
           </DropdownMenu>
         )}
       </div>
-
-      {canRun && !compact && (
-        <Segments
-          label="Rows per statement"
-          value={String(limit)}
-          options={LIMITS}
-          onChange={(value) => onLimit(Number(value))}
-          className="shrink-0"
-        />
-      )}
-
-      <Button
-        size="xs"
-        variant="ghost"
-        aria-label="Format"
-        className="h-7 shrink-0 max-sm:h-8"
-        title={keys.format}
-        disabled={empty}
-        onClick={onFormat}
-      >
-        <TextFormat />
-        {!compact && "Format"}
-      </Button>
-      {canSave && (
-        <Button
-          size="xs"
-          variant="ghost"
-          aria-label={saved ? "Save" : "Save as"}
-          className="h-7 shrink-0 max-sm:h-8"
-          title={keys.save}
-          disabled={empty || (saved && !changed)}
-          onClick={onSave}
-        >
-          <FloppyDisk />
-          {!compact && (saved ? "Save" : "Save as…")}
-        </Button>
-      )}
 
       <div
         aria-live="polite"
