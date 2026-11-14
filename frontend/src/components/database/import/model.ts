@@ -187,6 +187,66 @@ export function tableLine(table: { schema: string; name: string }): string {
   return table.schema === "public" ? table.name : `${table.schema}.${table.name}`
 }
 
+/**
+ * A replication as its picture draws it: whether the subscription exists and
+ * applies, whether anything is still on its way, what is written on the line
+ * and beside each end.
+ */
+export function replicationPath(live: Pick<DbImportLive, "subscription" | "lag">): {
+  /** The subscription is on this server. */
+  subscribed: boolean
+  /** Its worker applies what it receives. */
+  applying: boolean
+  /** Rows or changes are still coming: the lines move. */
+  arriving: boolean
+  /** Every table is in and nothing waits on the source. */
+  settled: boolean
+  lag: { words: string; tone: "default" | "warning" }
+  errors: { words?: string; tone: "default" | "danger"; title?: string }
+  /** How many tables are in, beside the database they fill. */
+  copied: string
+} {
+  const { subscription, lag } = live
+  const subscribed = Boolean(subscription?.exists)
+  const total = subscription?.tables.length ?? 0
+  const ready = subscription?.ready ?? 0
+  const behind = (lag?.bytes ?? 0) > 0
+  // A slot nobody reads is a source piling up changes for a target that is not taking them.
+  const idle = Boolean(lag && lag.exists && !lag.active)
+  const errors = subscription?.errors ?? -1
+  return {
+    subscribed,
+    applying: Boolean(subscription?.applying),
+    arriving: subscribed && !idle && (ready < total || behind),
+    settled: subscribed && !idle && total > 0 && ready === total && !behind,
+    lag: {
+      words: idle ? `${lagWords(lag)}, the slot is not in use` : lagWords(lag),
+      tone: idle ? "warning" : "default",
+    },
+    errors:
+      errors > 0
+        ? { words: plural(errors, "error"), tone: "danger" }
+        : errors === 0
+          ? { words: "no errors", tone: "default" }
+          : { tone: "default", title: "Errors are counted from PostgreSQL 15" },
+    copied: subscribed ? `${ready} of ${plural(total, "table")} copied` : "nothing copied yet",
+  }
+}
+
+/**
+ * What a source holds, as the plan says it in a line: "84 tables, about
+ * 1,204,000 rows, 3.1 GB, 12 sequences". The rows are the planner's estimate,
+ * and "at least" where some table was never counted.
+ */
+export function sourceWords(totals: ReturnType<typeof sourceTotals>, sequences: number): string {
+  return [
+    plural(totals.tables, "table"),
+    `${totals.uncounted ? "at least" : "about"} ${plural(totals.rows, "row")}`,
+    bytes(totals.size),
+    plural(sequences, "sequence"),
+  ].join(", ")
+}
+
 /** How much a source holds, from the tables a replication report lists. */
 export function sourceTotals(tables: { estimatedRows: number; size: number }[]): {
   tables: number

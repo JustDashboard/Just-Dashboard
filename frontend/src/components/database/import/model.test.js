@@ -10,9 +10,11 @@ import {
   isLive,
   lagWords,
   progressWords,
+  replicationPath,
   EMPTY_SOURCE,
   sourceDsn,
   sourceTotals,
+  sourceWords,
   statusWords,
   suggestedDatabase,
   tableLine,
@@ -210,6 +212,75 @@ describe("what a source holds", () => {
     ])
     expect(totals).toEqual({ tables: 2, rows: 100, size: 15, uncounted: true })
     expect(sourceTotals([]).uncounted).toBe(false)
+  })
+  test("is said in one line, with the rows as the estimate they are", () => {
+    const counted = { tables: 84, rows: 1_204_000, size: 3 * 1024 ** 3, uncounted: false }
+    expect(sourceWords(counted, 12)).toBe("84 tables, about 1,204,000 rows, 3.0 GB, 12 sequences")
+    expect(sourceWords({ tables: 1, rows: 1, size: 0, uncounted: true }, 1)).toBe(
+      "1 table, at least 1 row, 0 B, 1 sequence",
+    )
+  })
+})
+
+describe("the picture of a replication", () => {
+  const tables = (states) =>
+    states.map((state, at) => ({ schema: "public", name: `t${at}`, state }))
+  const subscription = (patch = {}) => ({
+    exists: true,
+    enabled: true,
+    tables: tables(["ready", "copying"]),
+    ready: 1,
+    applying: true,
+    errors: 0,
+    ...patch,
+  })
+  test("moves while tables or changes are still on their way, and says how far behind", () => {
+    const path = replicationPath({
+      subscription: subscription(),
+      lag: { exists: true, active: true, bytes: 2_516_582 },
+    })
+    expect(path).toMatchObject({
+      subscribed: true,
+      applying: true,
+      arriving: true,
+      settled: false,
+      lag: { words: "2.4 MB behind", tone: "default" },
+      errors: { words: "no errors", tone: "default" },
+      copied: "1 of 2 tables copied",
+    })
+  })
+  test("is still once every table is in and the target has caught up", () => {
+    const path = replicationPath({
+      subscription: subscription({ tables: tables(["ready", "ready"]), ready: 2 }),
+      lag: { exists: true, active: true, bytes: 0 },
+    })
+    expect(path).toMatchObject({ arriving: false, settled: true, lag: { words: "caught up" } })
+  })
+  test("a slot nobody reads is a warning on the line, and nothing moves", () => {
+    const path = replicationPath({
+      subscription: subscription({ applying: false, errors: 3 }),
+      lag: { exists: true, active: false, bytes: 1024 },
+    })
+    expect(path).toMatchObject({
+      applying: false,
+      arriving: false,
+      settled: false,
+      lag: { words: "1.0 KB behind, the slot is not in use", tone: "warning" },
+      errors: { words: "3 errors", tone: "danger" },
+    })
+  })
+  test("before there is a subscription nothing is copied, and errors are not guessed", () => {
+    expect(replicationPath({})).toMatchObject({
+      subscribed: false,
+      arriving: false,
+      settled: false,
+      lag: { words: "—" },
+      copied: "nothing copied yet",
+    })
+    // A server older than PostgreSQL 15 does not count them.
+    const old = replicationPath({ subscription: subscription({ errors: -1 }) })
+    expect(old.errors.words).toBeUndefined()
+    expect(old.errors.title).toMatch(/PostgreSQL 15/)
   })
 })
 

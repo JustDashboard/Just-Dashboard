@@ -353,12 +353,13 @@ test("the plan leads with what the source holds, then the one choice and the nam
   await expect(question(page, "How should it come over?")).toBeVisible()
   await expect(plan(page)).toContainText("shop on db.example.com:5432")
   await expect(plan(page)).toContainText("PostgreSQL 16.4")
-  const tiles = plan(page).locator("[data-slot=stat-tile]")
-  await expect(tiles).toHaveCount(4)
-  await expect(tiles.nth(0)).toContainText("Tables")
-  await expect(tiles.nth(0)).toContainText("3")
+  // What it holds is one line beside the source's own logo, not four tiles.
+  await expect(plan(page).locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await expect(plan(page).locator("img[src='/logos/postgresql.svg']")).toBeVisible()
   // One table was never counted, so the rows are a floor and not a total.
-  await expect(tiles.nth(1)).toContainText("≥ 2,580,000")
+  await expect(plan(page).locator("[data-slot=import-source]")).toHaveText(
+    /as reader · 3 tables, at least 2,580,000 rows, [\d.]+ MB, 3 sequences$/,
+  )
   await expect(plan(page).getByRole("button", { name: "Keep it current" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -393,7 +394,8 @@ test("copying once is a choice, and sends no replication name", async ({ page })
     "aria-pressed",
     "true",
   )
-  await expect(plan(page).locator("[data-slot=stat-tile]")).toHaveCount(0)
+  // A dump read once is not sized by the planner: the line says the source and no more.
+  await expect(plan(page).locator("[data-slot=import-source]")).not.toContainText("tables")
   await plan(page).getByRole("button", { name: "Start the import" }).click()
   await expect
     .poll(() => sent.some((one) => one.request === "POST /databases/1/imports"))
@@ -466,10 +468,16 @@ test("a replication shows each table, how far behind it is, and no cutover until
   await expect(question(page, "Ready to cut over?")).toBeVisible()
   const run = page.getByRole("region", { name: /shop on db.example.com:5432 → shop_copy/ })
   await expect(run).toContainText("replicating")
-  const tiles = run.locator("[data-slot=stat-tile]")
-  await expect(tiles.nth(0)).toContainText("2 of 5")
-  await expect(tiles.nth(1)).toContainText("2.4 MB behind")
-  await expect(tiles.nth(2)).toContainText("Yes")
+  // The replication is drawn: the source, the subscription and this server,
+  // with how far behind it is written on the line that is moving.
+  await expect(run.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  const picture = run.getByRole("list", { name: "How shop_copy follows its source" })
+  await expect(picture).toContainText("db.example.com:5432")
+  await expect(picture).toContainText("jd_import_shop")
+  await expect(picture).toContainText("applying changes · no errors")
+  await expect(picture).toContainText("2 of 5 tables copied")
+  await expect(run.locator("p", { hasText: "2.4 MB behind" })).toBeVisible()
+  await expect(run.locator("[data-slot=beam-pulse]")).toHaveCount(2)
   const tables = run.getByRole("list", { name: "Tables" }).getByRole("listitem")
   await expect(tables).toHaveCount(5)
   await expect(tables.filter({ hasText: "orders" }).first()).toContainText("1,204,000 rows")
@@ -500,7 +508,10 @@ test("the cutover is offered once every table is in, and asks that the writes ha
   })
   await visit(page, "/databases/1/import")
   const run = page.getByRole("region", { name: /→ shop_copy/ })
-  await expect(run.locator("[data-slot=stat-tile]").nth(1)).toContainText("caught up")
+  await expect(run.locator("p", { hasText: "caught up" })).toBeVisible()
+  await expect(run).toContainText("5 of 5 tables copied")
+  // Every table is in and nothing waits on the source: the lines are still.
+  await expect(run.locator("[data-slot=beam-pulse]")).toHaveCount(0)
   await expect(
     page.getByRole("list", { name: "Progress" }).locator("[aria-current=step]"),
   ).toHaveText("Cutover")
@@ -677,7 +688,7 @@ test("a role that may only read sees an import and can change none of it", async
   await mockImports(page, { viewer: true, imports: [record()], live: { 7: caughtUp() } })
   await visit(page, "/databases/1/import")
   const run = page.getByRole("region", { name: /→ shop_copy/ })
-  await expect(run.locator("[data-slot=stat-tile]").nth(1)).toContainText("caught up")
+  await expect(run.locator("p", { hasText: "caught up" })).toBeVisible()
   await expect(run.getByRole("button", { name: "Cut over…" })).toBeDisabled()
   await expect(run.getByRole("button", { name: "Stop replicating" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "New import" })).toHaveCount(0)
