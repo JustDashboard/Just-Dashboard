@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { drainBoardSaves } from "@/lib/board-save"
 import { createEditorDraftStore } from "@/lib/editor-drafts"
-import { useRouter } from "next/navigation"
 import {
   CaptureUpdateAction,
   convertToExcalidrawElements,
@@ -31,6 +32,7 @@ import "@excalidraw/excalidraw/index.css"
 import {
   ArrowLeft,
   CloudUpload,
+  Cross,
   Database,
   FloppyDisk,
   Plus,
@@ -39,11 +41,16 @@ import {
   Trash,
 } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ErrorState, LoadingPanel } from "@/components/state"
-import { Status } from "@/components/status-dot"
+import { IconAction } from "@/components/icon-action"
+import { Page } from "@/components/page"
+import { PaneHeader } from "@/components/panel"
+import { ProductLogo } from "@/components/product-logo"
+import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { Status, type DotTone } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Modal } from "@/components/modal"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import { sectionHref } from "@/components/database/engine"
 import { ApiError, del, get, put } from "@/lib/api"
 import { dashboardResource, embeddable } from "@/lib/board-embeds"
@@ -52,6 +59,7 @@ import { BOARD_FILE_TYPES, shownFileIds } from "@/lib/board-files"
 import type { Board, BoardSaved, BoardScene } from "@/lib/boards"
 import type { DbFleet, DeployProject } from "@/lib/types"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { BoardMenus } from "@/components/boards/board-menus"
 import { listOf } from "@/components/boards/drawing-list"
@@ -62,6 +70,17 @@ import { useBoardLive } from "@/components/boards/use-board-live"
 import { ProjectFavicon } from "@/components/deploy/project-mark"
 
 type SaveState = "saved" | "pending" | "saving" | "error" | "unnamed" | "conflict" | "missing"
+
+/** The save state as the head bar says it: a dot in the state's colour and its words. */
+const SAVE_WORDS: Record<SaveState, { tone: DotTone; label: string }> = {
+  saved: { tone: "running", label: "Saved on this server" },
+  pending: { tone: "notice", label: "Unsaved changes" },
+  saving: { tone: "notice", label: "Saving…" },
+  error: { tone: "danger", label: "Save failed" },
+  unnamed: { tone: "warning", label: "Name the drawing to save it" },
+  conflict: { tone: "warning", label: "Changed in another tab" },
+  missing: { tone: "danger", label: "This drawing was deleted — changes can’t be saved" },
+}
 
 type Snapshot = {
   elements: readonly OrderedExcalidrawElement[]
@@ -120,12 +139,25 @@ declare global {
 
 if (typeof window !== "undefined") window.EXCALIDRAW_ASSET_PATH = EXCALIDRAW_ASSETS
 
+/**
+ * One drawing, in the workbench frame the terminal, Files and Git share: one
+ * frame held to the window, a head bar, and the canvas under it. The head
+ * reads left to right as back, the drawing's name and whether it is saved,
+ * then the one verb (Add server item) and a menu for the rest. From `lg` the
+ * frame is rounded and stands in the page's gutter; below it the frame is
+ * the screen.
+ *
+ * A drawing that is not there is not a failure: it is said as an empty state
+ * with the product's mark and the way back to the drawings.
+ */
 export default function BoardWorkspace({ id }: { id: number }) {
   const [board, setBoard] = useState<Board | null>(null)
   const [error, setError] = useState<Error | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const valid = Number.isSafeInteger(id) && id >= 1
 
   useEffect(() => {
-    if (!Number.isSafeInteger(id) || id < 1) return
+    if (!valid) return
     let cancelled = false
     drawingDrafts
       .settled(String(id))
@@ -153,25 +185,58 @@ export default function BoardWorkspace({ id }: { id: number }) {
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, valid, attempt])
 
-  if (!Number.isSafeInteger(id) || id < 1)
+  // An address that names no drawing, whether because the number is no
+  // drawing's or because it is no number.
+  const absent =
+    !valid ||
+    (error instanceof ApiError && (error.code === "board_not_found" || error.status === 404))
+  if (absent)
     return (
-      <div className="p-6">
-        <ErrorState error={new Error("Invalid drawing address")} />
-      </div>
+      <Page className="animate-rise">
+        <h1 className="sr-only">Drawing</h1>
+        <EmptyState
+          mark={<ProductLogo id="excalidraw" size="lg" />}
+          title="This drawing is not here"
+          description="It may have been deleted, or the address is not a drawing's. The drawings that are still there are on the Excalidraw page."
+          action={
+            <Button size="sm" asChild>
+              <Link href="/excalidraw">
+                <ArrowLeft />
+                Back to drawings
+              </Link>
+            </Button>
+          }
+        />
+      </Page>
     )
   if (error)
     return (
-      <div className="p-6">
-        <ErrorState error={error} />
-      </div>
+      <Page className="animate-rise">
+        <h1 className="sr-only">Drawing</h1>
+        <ErrorState
+          error={error}
+          onRetry={() => {
+            setError(null)
+            setAttempt((held) => held + 1)
+          }}
+        />
+        <Link
+          href="/excalidraw"
+          className="inline-flex items-center gap-1.5 self-start rounded-sm text-body font-medium focus-ring hover:underline"
+        >
+          <ArrowLeft className="size-3.5" />
+          Back to drawings
+        </Link>
+      </Page>
     )
   if (!board)
     return (
-      <div className="p-6">
+      <Page fill className="max-w-none p-2 lg:p-3">
+        <h1 className="sr-only">Drawing</h1>
         <LoadingPanel />
-      </div>
+      </Page>
     )
   return <LoadedBoard key={board.id} board={board} />
 }
@@ -545,201 +610,230 @@ function LoadedBoard({ board }: { board: Board }) {
     })
   }
 
+  const stopped = saveState === "conflict" || saveState === "missing"
+  const toggleInsert = () => {
+    if (!insertOpen) void loadCatalog()
+    setInsertOpen((open) => !open)
+  }
+  // Everything but the one verb. Saving is in here because the drawing saves
+  // itself a moment after every change and on Ctrl+S; the item is for the
+  // reader who wants to see it happen.
+  const verbs: Verb[] = [
+    ...(canWrite
+      ? [
+          {
+            key: "save",
+            label: "Save now",
+            icon: FloppyDisk,
+            disabled: stopped,
+            run: () => void flush(),
+          },
+        ]
+      : []),
+    { key: "reload", label: "Reload", icon: RefreshClockwise, run: () => window.location.reload() },
+    ...(can("destructive")
+      ? [{ key: "delete", label: "Delete drawing", icon: Trash, danger: true, run: remove }]
+      : []),
+  ]
+  const said = SAVE_WORDS[saveState]
+
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <div className="flex min-h-16 flex-wrap items-center gap-2 border-b border-hairline bg-background px-4 py-2 md:px-6">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Back to Excalidraw"
-          onClick={() => void go("/excalidraw")}
-        >
-          <ArrowLeft />
-        </Button>
-        <Input
-          aria-label="Drawing name"
-          value={name}
-          maxLength={100}
-          readOnly={!canWrite}
-          onChange={(event) => {
-            setName(event.target.value)
-            nameRef.current = event.target.value
-            changed()
-          }}
-          onBlur={restoreName}
-          className="max-w-sm min-w-32 flex-1 border-transparent bg-transparent text-base font-semibold"
-        />
-        <span role="status" className="mr-auto text-xs text-muted-foreground">
-          {saveState === "saved" && "Saved on this server"}
-          {saveState === "pending" && "Unsaved changes"}
-          {saveState === "saving" && "Saving…"}
-          {saveState === "error" && "Save failed — try again"}
-          {saveState === "unnamed" && "Name the drawing to save it"}
-          {saveState === "conflict" && "Changed in another tab — reload to review"}
-          {saveState === "missing" && "This drawing was deleted — changes can’t be saved"}
-        </span>
-        {live.peers.length > 0 && (
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Status
-              tone="running"
-              live
-              label={`Live with ${listOf(live.peers.map((p) => p.name || p.user))}`}
+    <Page fill className="max-w-none gap-0 p-0 lg:px-3 lg:py-3">
+      {/* A workbench draws no page header, so its name is said, not drawn. */}
+      <h1 className="sr-only">Drawing: {name.trim() || board.name}</h1>
+      <div
+        data-slot="drawing-workspace"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border"
+      >
+        {/* Two rows on a phone, on purpose: back, the name and the verbs, then
+            the save state under the name. Wrapped wherever the next control
+            ran out of room, the status landed between the buttons. */}
+        <PaneHeader className="grid min-h-12 grid-cols-[auto_minmax(0,1fr)_auto] gap-x-1.5 gap-y-0 px-2 py-1.5 sm:flex">
+          <IconAction label="Back to Excalidraw" onClick={() => void go("/excalidraw")}>
+            <ArrowLeft />
+          </IconAction>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <ProductLogo id="excalidraw" size="sm" className="max-sm:hidden" />
+            <Input
+              aria-label="Drawing name"
+              value={name}
+              maxLength={100}
+              readOnly={!canWrite}
+              onChange={(event) => {
+                setName(event.target.value)
+                nameRef.current = event.target.value
+                changed()
+              }}
+              onBlur={restoreName}
+              // As wide as the name, so the save state stands beside it
+              // rather than a field's width away.
+              className={cn(
+                "[field-sizing:content] h-8 w-auto max-w-full min-w-24 border-transparent bg-transparent px-2 text-body font-semibold shadow-none sm:max-w-80",
+                // A name that cannot be edited is a name, not a field.
+                canWrite ? "hover:border-input" : "dark:bg-transparent",
+              )}
             />
           </span>
-        )}
-        {canWrite && (
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={saveState === "conflict" || saveState === "missing"}
-              onClick={() => void flush()}
-            >
-              <FloppyDisk /> Save
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (!insertOpen) void loadCatalog()
-                setInsertOpen((open) => !open)
-              }}
-            >
-              <Plus /> Add server item
-            </Button>
-          </>
-        )}
-        {saveState === "conflict" && (
-          <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
-            <RefreshClockwise /> Reload
-          </Button>
-        )}
-        {can("destructive") && (
-          <Button variant="ghost" size="icon" aria-label="Delete drawing" onClick={remove}>
-            <Trash />
-          </Button>
-        )}
-      </div>
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        <div className="min-h-0 min-w-0 flex-1" aria-label={`${name} drawing canvas`}>
-          <LiveCardProvider open={(href) => void go(href)}>
-            <Excalidraw
-              initialData={
-                (retained?.scene
-                  ? JSON.parse(
-                      serializeAsJSON(
-                        retained.scene.elements,
-                        retained.scene.appState,
-                        retained.scene.files,
-                        "local",
-                      ),
-                    )
-                  : board.scene) as ExcalidrawInitialDataState
-              }
-              excalidrawAPI={(next) => {
-                apiRef.current = next
-                setApi(next)
-              }}
-              onChange={onChange}
-              onLinkOpen={onLinkOpen}
-              onLibraryChange={onLibraryChange}
-              onPointerUpdate={live.onPointerUpdate}
-              isCollaborating={live.peers.length > 0}
-              validateEmbeddable={embeddable}
-              renderEmbeddable={renderEmbeddable}
-              name={name}
-              theme="dark"
-              UIOptions={{ canvasActions: { saveToActiveFile: false } }}
-              viewModeEnabled={!canWrite}
-            >
-              <BoardMenus
-                canWrite={canWrite}
-                onSave={() => void flush()}
-                onAddServerItem={() => {
-                  void loadCatalog()
-                  setInsertOpen(true)
-                }}
-                onDescribe={() =>
-                  apiRef.current?.updateScene({
-                    appState: { openDialog: { name: "ttd", tab: "text-to-diagram" } },
-                  })
-                }
-              />
-            </Excalidraw>
-          </LiveCardProvider>
-        </div>
-        {insertOpen && canWrite && (
-          <aside
-            className="absolute inset-y-0 right-0 z-10 w-full max-w-80 overflow-y-auto border-l border-hairline bg-card p-4 shadow-lg sm:relative sm:shadow-none"
-            aria-label="Server items"
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-semibold">Add from this server</h2>
-              <Button variant="ghost" size="sm" onClick={() => setInsertOpen(false)}>
-                Close
+          <span className="flex min-w-0 items-center gap-x-3 gap-y-1 max-sm:order-last max-sm:col-span-3 max-sm:pb-0.5 max-sm:pl-10 sm:mr-auto sm:pl-1">
+            <span role="status" className="flex min-w-0">
+              <Status tone={said.tone} label={said.label} className="min-w-0 font-normal" />
+            </span>
+            {saveState === "error" && canWrite && (
+              <Button variant="outline" size="xs" onClick={() => void flush()}>
+                Try again
               </Button>
-            </div>
-            <p className="mb-4 text-sm text-muted-foreground">
-              Add a linked card to the canvas. Open its link to visit the live resource.
-            </p>
-            {catalogError && (
-              <p className="mb-3 text-sm text-warning">
-                Some resources are unavailable.{" "}
-                <button className="underline" onClick={() => void loadCatalog()}>
-                  Retry
-                </button>
-              </p>
             )}
-            <div className="space-y-5">
-              <section>
-                <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                  Host
-                </h3>
-                <ResourceButton
-                  icon={Servers}
-                  title="This server"
-                  detail="Dashboard overview"
-                  onClick={() => insertCard("server", "/")}
+            {live.peers.length > 0 && (
+              <Status
+                tone="running"
+                live
+                label={`Live with ${listOf(live.peers.map((p) => p.name || p.user))}`}
+                className="min-w-0 font-normal text-muted-foreground"
+              />
+            )}
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5">
+            {/* Nothing added to a drawing another tab changed could be saved,
+                so until it is read again the one verb is to read it again. */}
+            {saveState === "conflict" ? (
+              <Button size="sm" onClick={() => window.location.reload()}>
+                <RefreshClockwise />
+                Reload
+              </Button>
+            ) : (
+              canWrite && (
+                <Button
+                  size="sm"
+                  aria-label="Add server item"
+                  aria-expanded={insertOpen}
+                  onClick={toggleInsert}
+                >
+                  <Plus />
+                  <span className="max-sm:hidden">Add server item</span>
+                  <span className="sm:hidden">Add</span>
+                </Button>
+              )
+            )}
+            <VerbMenu label="Drawing actions" verbs={verbs} />
+          </span>
+        </PaneHeader>
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
+          <div className="min-h-0 min-w-0 flex-1" aria-label={`${name} drawing canvas`}>
+            <LiveCardProvider open={(href) => void go(href)}>
+              <Excalidraw
+                initialData={
+                  (retained?.scene
+                    ? JSON.parse(
+                        serializeAsJSON(
+                          retained.scene.elements,
+                          retained.scene.appState,
+                          retained.scene.files,
+                          "local",
+                        ),
+                      )
+                    : board.scene) as ExcalidrawInitialDataState
+                }
+                excalidrawAPI={(next) => {
+                  apiRef.current = next
+                  setApi(next)
+                }}
+                onChange={onChange}
+                onLinkOpen={onLinkOpen}
+                onLibraryChange={onLibraryChange}
+                onPointerUpdate={live.onPointerUpdate}
+                isCollaborating={live.peers.length > 0}
+                validateEmbeddable={embeddable}
+                renderEmbeddable={renderEmbeddable}
+                name={name}
+                theme="dark"
+                UIOptions={{ canvasActions: { saveToActiveFile: false } }}
+                viewModeEnabled={!canWrite}
+              >
+                <BoardMenus
+                  canWrite={canWrite}
+                  onSave={() => void flush()}
+                  onAddServerItem={() => {
+                    void loadCatalog()
+                    setInsertOpen(true)
+                  }}
+                  onDescribe={() =>
+                    apiRef.current?.updateScene({
+                      appState: { openDialog: { name: "ttd", tab: "text-to-diagram" } },
+                    })
+                  }
                 />
-              </section>
-              <section>
-                <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                  Deployments
-                </h3>
-                {projects.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No projects yet.</p>
+              </Excalidraw>
+            </LiveCardProvider>
+          </div>
+          {insertOpen && canWrite && (
+            // A column beside the canvas from `sm`; on a phone it takes the
+            // canvas's place, since a 320px panel left a strip of canvas no
+            // finger could draw on.
+            <aside
+              className="absolute inset-0 z-10 flex min-h-0 flex-col border-hairline bg-card sm:relative sm:inset-auto sm:w-80 sm:shrink-0 sm:border-l"
+              aria-label="Server items"
+            >
+              <PaneHeader className="h-10 py-0 pl-3">
+                <h2 className="min-w-0 flex-1 truncate text-body font-medium">
+                  Add from this server
+                </h2>
+                <IconAction label="Close" onClick={() => setInsertOpen(false)}>
+                  <Cross />
+                </IconAction>
+              </PaneHeader>
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-2">
+                {catalogError && (
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 pt-1 text-hint text-warning">
+                    Some of this server could not be read.
+                    <Button variant="outline" size="xs" onClick={() => void loadCatalog()}>
+                      Try again
+                    </Button>
+                  </p>
                 )}
-                {projects.map((project) => (
+                <section>
+                  <h3 className="eyebrow px-2 pt-1 pb-1.5">Host</h3>
                   <ResourceButton
-                    key={project.id}
-                    icon={CloudUpload}
-                    projectId={project.id}
-                    title={project.name}
-                    detail={project.enabled ? "Active project" : "Paused project"}
-                    onClick={() => insertCard("project", `/deploy/${project.id}`, project.id)}
+                    icon={Servers}
+                    title="This server"
+                    detail="Dashboard overview"
+                    onClick={() => insertCard("server", "/")}
                   />
-                ))}
-              </section>
-              <section>
-                <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                  Databases
-                </h3>
-                {databases.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No saved connections yet.</p>
-                )}
-                {databases.map((database) => (
-                  <ResourceButton
-                    key={database.id}
-                    icon={Database}
-                    title={database.name}
-                    detail={`${database.driver} · ${database.ok ? "reachable" : "unreachable"}`}
-                    onClick={() => insertCard("database", sectionHref(database.id), database.id)}
-                  />
-                ))}
-              </section>
-            </div>
-          </aside>
-        )}
+                </section>
+                <section>
+                  <h3 className="eyebrow px-2 pt-1 pb-1.5">Deployments</h3>
+                  {projects.length === 0 && (
+                    <p className="px-2 text-hint text-muted-foreground">No projects yet</p>
+                  )}
+                  {projects.map((project) => (
+                    <ResourceButton
+                      key={project.id}
+                      icon={CloudUpload}
+                      projectId={project.id}
+                      title={project.name}
+                      detail={project.enabled ? "Active project" : "Paused project"}
+                      onClick={() => insertCard("project", `/deploy/${project.id}`, project.id)}
+                    />
+                  ))}
+                </section>
+                <section>
+                  <h3 className="eyebrow px-2 pt-1 pb-1.5">Databases</h3>
+                  {databases.length === 0 && (
+                    <p className="px-2 text-hint text-muted-foreground">No saved connections yet</p>
+                  )}
+                  {databases.map((database) => (
+                    <ResourceButton
+                      key={database.id}
+                      icon={Database}
+                      title={database.name}
+                      detail={`${database.driver} · ${database.ok ? "reachable" : "unreachable"}`}
+                      onClick={() => insertCard("database", sectionHref(database.id), database.id)}
+                    />
+                  ))}
+                </section>
+              </div>
+            </aside>
+          )}
+        </div>
       </div>
       {dialog}
       <Modal
@@ -769,7 +863,7 @@ function LoadedBoard({ board }: { board: Board }) {
           Your latest changes to this drawing are not on the server. Leaving discards them.
         </p>
       </Modal>
-    </div>
+    </Page>
   )
 }
 
@@ -791,16 +885,16 @@ function ResourceButton({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-start gap-3 rounded-lg px-2 py-2.5 text-left focus-ring transition-colors hover:bg-control-hover"
+      className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left focus-ring-inset transition-colors hover:bg-row-hover"
     >
       <ProjectFavicon
         projectId={projectId}
-        className="mt-0.5 size-4"
-        fallback={<Icon className="mt-0.5 size-4 shrink-0 text-brand" />}
+        className="size-4"
+        fallback={<Icon className="size-4 shrink-0 text-muted-foreground" />}
       />
       <span className="min-w-0">
-        <span className="block truncate text-sm font-medium">{title}</span>
-        <span className="block text-xs text-muted-foreground">{detail}</span>
+        <span className="block truncate text-body font-medium">{title}</span>
+        <span className="block truncate text-hint text-muted-foreground">{detail}</span>
       </span>
     </button>
   )
