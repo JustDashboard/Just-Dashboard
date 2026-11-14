@@ -122,17 +122,26 @@ its data, a database that refuses writes or reads) a danger `Notice` says so fir
 with the free space or the store's own error; a background task that panicked in the last half hour
 is a warning `Notice` naming the worst one and counting the rest. For an administrator, until one
 answers, the [usage count](../backend/usage-ping.md)'s one question comes first, with the report
-printed in it. Then the machine's identity line (its distribution, processor and hypervisor drawn as
-their marks, kernel, uptime, processes); Shortcuts — the four things a visit starts, as lit cards
+printed in it. Then the machine's identity line, laid out as a project's header (its distribution,
+processor and hypervisor drawn as their marks, kernel, uptime, processes; *Online* while the socket
+is open, and *Restart needed* beside it while the packages owe one; **Open terminal** as its command
+for an account that has the terminal, and behind `⋯` *Update to …* (the sidebar notice's dialog,
+while there is a version an administrator can take), *Update N packages* and *Restart the dashboard*,
+which goes to Configuration where the restart is confirmed and followed: there is no route that
+restarts the machine); Shortcuts — the four things a visit starts, as lit cards
 two by two and four across once the content is 42rem wide, each counting what it adds to and ending
 in a glyph for whether it makes something or goes somewhere: New project, New terminal (in the
 account's home), New drawing (made in place and opened) and Browse files, every one gated on its
 section being in the sidebar and on the capability its destination needs, and those with a
-destination real links; a Resources section headed by the socket's Live state and an All metrics
-link, holding four live readings (CPU, memory, load and network, each keyed to and carrying its last
-hour as a sparkline, each figure gliding to every two-second frame, CPU with a bar per core; two to
-a row on a phone) over a Storage band (each real filesystem, up to four, as a capacity bar with its
-free space and total, beside a live Disk I/O reading with its last hour), the Deployments section
+destination real links; a Resources section headed by an All metrics link, holding five live
+readings as `ReadingLine`s, each a link to Metrics (CPU with a bar per core, memory, load, network
+and disk I/O: a glyph on the measurement's hue, which takes amber or red past its line, the reading
+as words, what it is made of under it, its last hour as a sparkline from `sm`, each figure gliding
+to every two-second frame; two to a row from `xl`) and then each real filesystem, up to four, as a
+capacity bar with its free space and total (one disk beside the disk I/O line, more two to a row
+under the lines). The page carries no `StatTile`. Until the socket's first frame the identity line
+and the readings are bones at their heights and every block under them is already reading, so
+nothing moves when it lands. Then the Deployments section
 (up to six of the fleet's own project cards, three below `lg`, worst first, with each project's
 product, address, traffic, run strip and a light round the edge while one deploys, a count of those
 left out, New project and All projects, or the first-project empty state); the shells open on the
@@ -141,22 +150,27 @@ it, its directory and windows, opening `/terminal?session=`) beside the drawings
 four, each its own preview; the databases (the control center's fleet read, worst first, engine and
 version, size and objects, environment and whether it answers, opening its home) beside every backup
 job (a failed last run first, then running, then by next run, with its destination's mark, next run,
-last run and Back up now for `service.control`); the top processes (the Metrics page's list, by CPU,
-memory or I/O, each drawn as its product) beside the last 24 hours of recorded events (shared audit
+last run and Back up now for `service.control`); the top processes (the Metrics page's `RankList`,
+by CPU, memory or I/O, each drawn as its product and opening `/processes/[pid]`) beside the last 24
+hours of recorded events (shared audit
 product marks, coloured source names, common action labels with literal targets, explicit outcomes,
-exact/elapsed times and an administrator-only link to the full audit log); and one destination tile
-per module, two to a row on a phone, each a count with its word after it — Docker (with the products
-its running containers are, and how many are stopped), proxy, security exposure, package updates and
-reboot state, System services (systemd's running services, or its failed units in red while there
-are any), Git (its checkouts, what is uncommitted or behind, and the forges they push to), Remote
-Desktop (its computers drawn as their systems and how many are open, for administrators) and the
-dashboard's own version. Each block, tile and shortcut — with the read behind it — is left out for a
+exact/elapsed times and an administrator-only link to the full audit log); and one `ChoiceRow` per
+module, two to a line from `lg`, each the product it is, one sentence and a state (unit-tested in
+`service-words.ts`: *9 containers running, 2 stopped*) — Docker (with the products its running
+containers are), proxy certificates (amber while one is late to renew, red once one expired),
+security exposure, package updates and reboot state, System services (a failed unit leads the
+sentence, in red), Git (its checkouts, what is uncommitted or behind, and the forges they push to),
+Remote Desktop (its computers drawn as their systems and how many are open, for administrators) and
+the dashboard's own version. A row is one height in every state: a bone while its read is out, *Not
+on this server* for a module that is absent, *Its reading did not arrive* for a read that failed.
+Each block, row and shortcut — with the read behind it — is left out for a
 section the account keeps out of its sidebar, and two blocks that share a row take the whole of it
 alone
 
 **Implementation:** dashboard root page plus `components/overview/` (`shortcuts.tsx`,
-`workspace.tsx`, `data.tsx`, `services.tsx`, `section-link.tsx`, the unit-tested orders in
-`order.ts`, `activity.tsx` and `activity-event.ts` (unit-tested), `readings.tsx` and `storage.tsx`,
+`workspace.tsx`, `data.tsx`, `resources.tsx`, `services.tsx` with `service-words.ts`,
+`section-link.tsx`, the unit-tested orders in `order.ts`, `activity.tsx` and `activity-event.ts`
+(unit-tested), `readings.tsx` and `storage.tsx`,
 `health-notice.tsx` with its unit-tested wording in `lib/dashboard-health.ts`),
 `components/metrics/` (`host-identity.tsx`, `top-processes.tsx`),
 `components/deploy/fleet-card.tsx`, `components/database/fleet/read.ts`,
@@ -615,11 +629,24 @@ the start.
 
 A chat about the whole server beside every chat the person has had, grouped by what each is about
 (the server, each deployment, each connection), and behind a second tab who the assistant asks, for
-every page: the providers with their real logos, the active model, what a conversation may do on its
-own and where it works ([the deployment assistant](../deployments/operator.md#providers)). `?about=`
+every page, as one settings column (`SettingSection`s on hairlines): Model (the provider, the model
+and who set it up as a line of facts, the picker at its end), Providers (a `ChoiceGrid` of cards
+with their real logos, the one in use lit), Default mode (three cards; written the moment one is
+pressed, one write at a time) and Where it works, then Ask about a deployment ([the deployment
+assistant](../deployments/operator.md#providers)). `?about=`
 and `?title=`, from **Ask** beside Search on any page (`assistant/ask-about.tsx`, `agent/about.ts`,
 unit-tested), begin a new chat told which page it came from, with a chip back to it;
-`tests/browser/assistant.spec.ts` and `tests/browser/database-assistant.spec.ts`.
+`tests/browser/assistant.spec.ts`, `tests/browser/assistant-settings.spec.ts` and
+`tests/browser/database-assistant.spec.ts`.
+
+### An address no page claims
+
+`app/(dashboard)/[...missing]` hands every unclaimed address to `(dashboard)/not-found`, inside the
+shell. It draws `components/missing-page.tsx`: the address asked for on a dashed ring, wired to this
+server by a line nothing travels, and beyond the server the pages that are there. The nearest of
+them is the page of the navigation whose own address the path starts with and the account's role
+reaches (`missing-page-model.ts`, unit-tested), and is the page's command; *Back to the Overview*
+is the second way, and the only one for an address under no page. `tests/browser/missing-page.spec.ts`.
 
 ### `/deploy`
 
@@ -761,11 +788,13 @@ that arrived together into incidents — each led by its heaviest signal (an eve
 spike) with the rest as keyed signals beside it, the window drawn above them as a timeline of marks
 — where pressing an incident pins its instant on every chart (pressing again releases it), hovering
 one previews it as the charts' crosshair, and a zoom glyph narrows the charts to it and keeps the
-pin, beside top processes by CPU, memory or I/O, each drawn as its product; then one section per
+pin, beside top processes by CPU, memory or I/O as a `RankList`, each drawn as its product and
+opening its own page; then one section per
 resource, each reading what it is now beside what it did: Processor (utilisation, total or broken
 down, beside every core as a column and the temperatures, a sensor carrying its vendor's mark),
-Memory (programs, cache and free as one bar with the available span over it, and swap, beside the
-memory chart), Network (throughput beside sockets, whose head carries TCP, TIME_WAIT and open file
+Memory (Allocation, a `BarReading` of what programs hold and what the cache holds on a track that is
+all of it, its head saying what is available, and Swap as a second one under it, beside the memory
+chart), Network (throughput beside sockets, whose head carries TCP, TIME_WAIT and open file
 handles; then how connections fared as three recorded charts — resent segments, whose head carries
 the current resent share and median RTT, connection RTT and failed connections — and the interfaces
 — the host's real devices by default with Docker's veth pairs and bridges behind an Everything
@@ -791,10 +820,16 @@ forecast](../deployments/right-sizing.md#capacity-forecast))
 The host's Alerts (administrators; under Monitoring beside Metrics, whose identity line links here
 with the firing count): the proxy Alerts page's layout over the machine's own readings — CPU,
 memory, filesystems, Docker's containers and backups wired through this server to the channels told
-— what fires or holds with its mute, the rules as rows that open their form in a sheet (each kind's
-line and minutes checked against the server's ranges before it is sent), a rule that cannot be
-judged saying why, and beside them what was told lately and a test per channel; a rule's menu also
-sends its own test
+— under an identity line laid out as a project's header: what the rules are doing now as its state
+(*N firing*, *N holding*, *Watching*, *No rules*), how many are on, how many channels they tell and
+when they were last checked as its facts, **Add rule** as its command and *Check now* behind `⋯`.
+Then what fires or holds with its mute, the rules as rows of one height that open their form in a
+sheet (each kind's line and minutes checked against the server's ranges before it is sent), a rule
+that cannot be judged saying why on its own line, and beside them what was told lately and a test
+per channel; a rule's menu also sends its own test. With no rule the kinds are offered as cards, a
+name and one fact each; with no channel the section shows the services a channel can be and the way
+to add one. The page has its shape while the rules are read. An account that is not an administrator
+is told the page is one's, and the server is not asked
 
 **Implementation:** `app/(dashboard)/metrics/alerts/`, `components/metrics/alerts-page.tsx` and
 `alerts-link.tsx`, `components/alerts/alert-parts.tsx` (shared with `/proxy/alerts`),

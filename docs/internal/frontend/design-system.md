@@ -76,10 +76,10 @@ taking a frame:
   inset, the first in a row included: the first column used to drop its left padding to line its
   name up with the title, and on a `StatLink` that put the hover wash flush against the name, one
   tile of the row drawn tighter than the rest. A tile left alone on the last row takes the whole row
-  rather than sit beside a hole — five two-up is two, two and one. The Overview's Services row is one
-  of these too:
+  rather than sit beside a hole — five two-up is two, two and one. The Overview's Services row was one
+  of these until 0.8.7:
   a module's headline figure is a reading, and eight framed cards under a page that had just stopped
-  drawing boxes were eight boxes. Each is a `StatLink`, so the arrow says it goes somewhere;
+  drawing boxes were eight boxes. They are rows you open now, a sentence each (§15, §16);
 - a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
   body, footer) and drops the border and ground, so a title and a hairline mark the block. Recent
   activity on the Overview, every chart, list and hardware reading on the
@@ -2724,7 +2724,11 @@ The passes, in order. Each one is a diff you can review on its own.
    (`/metrics/alerts`, 2026-10-25) is the same page over the machine's own readings — CPU, memory
    and filesystems as their glyphs, containers as Docker, backups as an archive — and draws its
    channels, all-clear, subject cards and history from the parts the two share
-   (`components/alerts/alert-parts.tsx`) rather than a second copy of them.
+   (`components/alerts/alert-parts.tsx`) rather than a second copy of them. Since 0.8.7 it opens on
+   an identity line in a project's layout: what the rules are doing as the state, *Add rule* as the
+   command and *Check now* behind the menu, where the two stood on two section lines; a rule's row
+   keeps one height by saying why it cannot be judged on its own line; and the page is drawn in its
+   shape, picture included, while the rules are read.
 
    Docker networks took the same exit on 2026-10-08, at the operator's request, because it was the
    still page of the section: a column of grey cards, each a name, a subnet and a count, with the
@@ -3210,17 +3214,30 @@ The passes, in order. Each one is a diff you can review on its own.
     line lower than its neighbours, a figure at the wrong size, are things the checks do not catch.
 
 **What the Overview looks like after these passes**, as a checklist for the page you are on: the
-machine's identity line first (`HostIdentity` — its distribution drawn as itself, the processor and
-hypervisor as bare marks among its facts); Shortcuts, a run of four `ShortcutCard`s; a Resources `Section`
-whose head carries the socket's `Status live` and the way on to Metrics, holding a four-tile
-`StatGrid` of the readings that move — each carrying its last hour in the tile's `trend` slot where a
-meter would be, keyed before its name by its line's colour, its figure gliding to every frame — over
-the Storage band, a capacity bar per filesystem; the Deployments section; three pairs of plain blocks
-— the shells beside the drawings and boards, the databases beside the backup jobs, the top processes
-beside the activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per
-module, each naming what it counts with the products themselves. No frame anywhere on the page — the
-shortcuts, project cards, shells, drawings, databases and jobs carry the lit edge of a thing you take,
-which is not one. Everything that arrived, rose.
+machine's identity line first (`HostIdentity` in a project's layout — its distribution drawn as
+itself, *Online* as its state, the processor and hypervisor as bare marks among its facts, *Open
+terminal* as its command and the rest behind `⋯`); Shortcuts, a run of four `ShortcutCard`s; a
+Resources `Section` whose head carries the way on to Metrics, holding the readings that move as
+`ReadingLine`s — each a glyph on its measurement's hue, the reading as words, its last hour at the
+line's end, its figure gliding to every frame — and then a capacity bar per filesystem; the
+Deployments section; three pairs of plain blocks — the shells beside the drawings and boards, the
+databases beside the backup jobs, the top processes (a `RankList`) beside the activity list; and a
+`Section` holding eight `ChoiceRow`s, one per module, each one sentence, a state and the products it
+counts. No frame anywhere on the page — the shortcuts, project cards, shells, drawings, databases,
+jobs and modules carry the lit edge of a thing you take, which is not one. Everything that arrived,
+rose.
+
+**Its figures became sentences in 0.8.7.** Until then the readings were a four-tile `StatGrid` with
+a fifth tile in a Storage band, and the modules a `StatGrid` of eight `StatLink` tiles: thirteen
+metric cards on the page the operator, having had them taken off a project's Overview (§16), wanted
+none on. A tile said "9 / running / 11 containers · 2 stopped" and left the reader to join it; the
+row says *9 containers running, 2 stopped*. The page is still this section's reference for
+everything but pass 2's tile: on a page being brought to the deploy pages' shape a figure is a
+`ReadingLine` or a row's sentence, and the tile stays where a run of figures is read as a table
+(Metrics' five, the Docker overview's). Its waiting state changed with it: the machine's line and
+its readings are bones at their heights (`components/bone.tsx` holds a line of words open) and every
+block under them is drawn and reading for itself before the socket's first frame, where the whole
+page had been four grey boxes.
 
 **It took a third pass in 0.8**, at the operator's request, because it did not include what the
 product does: Terminal, Excalidraw, Files and Remote Desktop were nowhere on it, Databases
@@ -3891,8 +3908,8 @@ reading page is revamped:
   the operator's request, and that is the other side of the same line: there the containers are read
   down their columns before any one is taken, so the overview's table keeps hairlines and a wash and
   its rows open by a press anywhere on them;
-- a **figure** is still a `StatTile` (§15 pass 2) in either register, with one page excepted: a
-  project's Overview, below.
+- a **figure** is still a `StatTile` (§15 pass 2) in either register, with two pages excepted: a
+  project's Overview, below, and since 0.8.7 the host's (§15).
 
 A page that is mostly readings with one run of choices in it takes the edge on that one run. That is
 the honest answer to "use it everywhere": everywhere something is picked.
@@ -3942,8 +3959,8 @@ a new block on this page takes it too:
   and strips keep one height and one place whether there is a reading or not
   (`deploy-rollback-watch.spec.ts` and `deploy-sleep.spec.ts` measure both at 1280 and 390).
 
-The Deployments tab's history and every other page keep `StatTile`: this is the Overview's register of
-speech, not a retirement of the figure.
+The Deployments tab's history and every other page but the host Overview keep `StatTile`: this is
+the two Overviews' register of speech, not a retirement of the figure.
 
 ### What register B does not get
 

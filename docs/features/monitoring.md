@@ -11,6 +11,7 @@ See what the server is doing right now, what it did this week, and what is about
 - A live overview of the machine: CPU, memory, load, network, storage and disk I/O
 - Shortcuts to a new project, a new terminal, a new drawing and the files, with the open shells, the drawings edited last, the databases and every backup job one press away
 - Notable moments, top processes and the day's activity at a glance
+- A row for each part of the server (Docker, the proxy's certificates, how the panel is reached, package updates, system services, Git) that says how it stands in one sentence and opens it
 
 ## A map of the server
 
