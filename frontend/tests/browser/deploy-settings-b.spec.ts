@@ -799,7 +799,7 @@ test.describe("Storage", () => {
     await expect(evidence.getByText("volume", { exact: true })).toBeVisible()
     await expect(evidence.getByRole("link", { name: "Open the volume" })).toHaveAttribute(
       "href",
-      "/docker/volumes?volume=api-data",
+      "/docker/volumes/api-data",
     )
   })
 

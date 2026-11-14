@@ -88,7 +88,7 @@ session's line when it closes) by client address and time, since nginx logs no c
 `$upstream_addr`, `denied` (403, the access list), `failed` (5xx, no backend took it) or `logged` with
 another status; earlier backends a retried session tried are listed. Without a measurement, after one
 that did not connect, or with nothing logged in time, no backend leg is claimed. Both items link to the
-stream (`/proxy/streams?stream=<name>`). The Streams page's **Trace in Network** verb (TCP streams,
+stream's page (`/proxy/streams/<name>`). The Streams page's **Trace in Network** verb (TCP streams,
 administrators) opens `/network/investigate?target=&port=&protocol=&family=&measure=` on the stream's
 own address (loopback for a wildcard), which lands on the tool with the same query, and the
 investigator takes only values its form could have produced (`pathDraftFromQuery`). `GET /proxy/streams/{name}/path` serves the same reading to any

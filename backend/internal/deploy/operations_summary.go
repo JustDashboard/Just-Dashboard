@@ -467,7 +467,8 @@ func observeDomainRoutes(
 			row.Route, row.ServedBy = "foreign", foreign
 		}
 		if row.ServedBy != "" {
-			row.DeepLink = "/proxy/sites?" + url.Values{"site": {row.ServedBy}}.Encode()
+			// The site's own page; `?site=` on the list opened the sheet it replaced.
+			row.DeepLink = "/proxy/sites/" + url.PathEscape(row.ServedBy)
 		}
 		switch {
 		case !domain.HTTPS:

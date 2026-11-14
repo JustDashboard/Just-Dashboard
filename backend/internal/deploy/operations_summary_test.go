@@ -215,7 +215,7 @@ func TestOperationsSummaryReadsEveryOwnerOnceAndDiagnosesNothing(t *testing.T) {
 	domain := operations.Domains.Domains[0]
 	if domain.Route != "served" || domain.Certificate != "valid" || domain.CertificateIssuer != "R10" ||
 		domain.ServedBy != deploymentRouteName(fixture.envID) ||
-		domain.DeepLink != "/proxy/sites?site="+deploymentRouteName(fixture.envID) {
+		domain.DeepLink != "/proxy/sites/"+deploymentRouteName(fixture.envID) {
 		t.Fatalf("domain route = %#v", domain)
 	}
 	if len(operations.Runtime.Services) != 1 || operations.Runtime.Services[0].Image != "example.test/app:v1" {

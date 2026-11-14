@@ -18,6 +18,7 @@ import {
   wayOut,
   type MemberReading,
 } from "@/components/docker/networks"
+import { deviceHref } from "@/components/network/interfaces/device-facts"
 
 /** A wire moving less than this is drawn still, as on every Network picture. */
 const MOVING = 1024
@@ -128,7 +129,7 @@ export function NetworkPicture({
       ) : (
         "the card's own network"
       ),
-      href: way.device ? `/network/interfaces?device=${encodeURIComponent(way.device)}` : undefined,
+      href: way.device ? deviceHref(way.device) : undefined,
       label: way.device ? `Open ${way.device} on Interfaces` : undefined,
       line: { state: "up" },
     })

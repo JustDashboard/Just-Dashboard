@@ -100,7 +100,7 @@ test("paths in use come from tracked flows and pointing at a node lights who it 
   await expect(page.getByText("57 tracked flows")).toBeVisible()
   await expect(paths.getByRole("link", { name: "The internet" }).first()).toHaveAttribute(
     "href",
-    "/network/interfaces?device=ens3",
+    "/network/interfaces/ens3",
   )
   await page.locator('li[data-node="internet"]').hover()
   await expect(page.locator('li[data-node="docker:93e5e9c9442b5f1a"]')).not.toHaveAttribute(
@@ -203,7 +203,7 @@ test("the throughput lines and the chart drill into the devices under them", asy
   const chart = page.locator("[data-slot=panel]").filter({ hasText: "Last 15 minutes" }).first()
   await expect(chart.getByRole("link", { name: "wg0" })).toHaveAttribute(
     "href",
-    "/network/interfaces?device=wg0",
+    "/network/interfaces/wg0",
   )
   const plot = chart.locator(".recharts-wrapper").first()
   await plot.scrollIntoViewIfNeeded()

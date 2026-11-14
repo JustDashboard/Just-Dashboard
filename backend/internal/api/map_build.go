@@ -985,7 +985,9 @@ func mapImage(img dockerx.Image) mapItem {
 	}
 	item := mapItem{
 		ID: "image:" + img.ID, Name: name, Product: imageProduct(name),
-		Href: "/docker/images?image=" + url.QueryEscape(img.ID), Detail: alertBytes(img.Size),
+		// The image's own page, which is addressed by its id without the
+		// `sha256:` (a path segment that needs no escaping).
+		Href: "/docker/images/" + url.PathEscape(strings.TrimPrefix(img.ID, "sha256:")), Detail: alertBytes(img.Size),
 		Tone: mapIdle, State: "unused",
 	}
 	if img.Containers > 0 {
@@ -1085,6 +1087,17 @@ func mapDomain(v proxysvc.VHost, name string) mapItem {
 	return item
 }
 
+// mapCertificateHref is a certificate's own page. It is addressed by its
+// name, and the file goes with it: certbot's lineage and a site's copy can
+// share a name, and a file the inventory could not name has none.
+func mapCertificateHref(c proxysvc.Certificate) string {
+	name := c.Name
+	if name == "" {
+		name = "certificate"
+	}
+	return "/proxy/certificates/" + url.PathEscape(name) + "?path=" + url.QueryEscape(c.Path)
+}
+
 func mapCertificate(c proxysvc.Certificate) mapItem {
 	name := c.Name
 	if name == "" && len(c.Domains) > 0 {
@@ -1092,7 +1105,7 @@ func mapCertificate(c proxysvc.Certificate) mapItem {
 	}
 	item := mapItem{
 		ID: "cert:" + c.Path, Name: name, Detail: c.Issuer,
-		Href: "/proxy/certificates?cert=" + url.QueryEscape(c.Path),
+		Href: mapCertificateHref(c),
 	}
 	if strings.Contains(strings.ToLower(c.Issuer), "let's encrypt") || strings.Contains(c.Issuer, "R1") {
 		item.Product = "lets-encrypt"
@@ -1122,7 +1135,7 @@ func mapCertificate(c proxysvc.Certificate) mapItem {
 func mapStream(s proxysvc.StreamEntry) mapItem {
 	item := mapItem{
 		ID: "stream:" + s.Name, Name: s.Name, Product: "nginx",
-		Href:   "/proxy/streams?stream=" + url.QueryEscape(s.Name),
+		Href:   "/proxy/streams/" + url.PathEscape(s.Name),
 		Detail: fmt.Sprintf(":%d → %s", s.Listen, s.Upstream),
 	}
 	switch {
@@ -1174,7 +1187,9 @@ func mapUnit(u procs.Unit) mapItem {
 func mapPM2(p procs.PM2Process) mapItem {
 	item := mapItem{
 		ID: mapPM2ID(p), Name: p.Name, Product: "pm2",
-		Href: "/processes/pm2?app=" + url.QueryEscape(fmt.Sprintf("%s:%d", p.DaemonID, p.ID)),
+		// The application's own page: its name, and the account that runs
+		// it, since two accounts may each run one of that name.
+		Href: "/processes/pm2/" + url.PathEscape(p.Name) + "?account=" + url.QueryEscape(p.DaemonID),
 	}
 	switch p.Status {
 	case "online":

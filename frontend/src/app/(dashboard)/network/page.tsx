@@ -48,6 +48,7 @@ import {
   useLiveTraffic,
   type LiveTraffic,
 } from "@/components/network/use-live-traffic"
+import { deviceHref } from "@/components/network/interfaces/device-facts"
 
 const IN = "var(--chart-5)"
 const OUT = "var(--chart-2)"
@@ -219,7 +220,7 @@ function flowNode(id: string, overview: NetworkOverview, links: NetworkLink[]): 
     const uplink = links.find((l) => l.uplink)
     return {
       label: "The internet",
-      href: uplink ? `/network/interfaces?device=${encodeURIComponent(uplink.name)}` : undefined,
+      href: uplink ? deviceHref(uplink.name) : undefined,
     }
   }
   if (id.startsWith("docker:")) {
@@ -229,7 +230,7 @@ function flowNode(id: string, overview: NetworkOverview, links: NetworkLink[]): 
   const name = id.replace(/^link:/, "")
   const link = links.find((l) => l.name === name)
   if (link?.owner === "tailscale") return { label: "The tailnet", href: "/network/vpn" }
-  return { label: name, href: `/network/interfaces?device=${encodeURIComponent(name)}` }
+  return { label: name, href: deviceHref(name) }
 }
 
 /** Each device with the live ring's newest reading, where the ring has one. */
@@ -485,9 +486,7 @@ function Readings({ links, live }: { links?: NetworkLink[]; live: LiveTraffic })
   const uplinkSeries = sumSeries(uplinks.map((l) => live.series[l.name] ?? []))
   const rx = uplinks.reduce((n, l) => n + l.rxRate, 0)
   const tx = uplinks.reduce((n, l) => n + l.txRate, 0)
-  const href = uplinks[0]
-    ? `/network/interfaces?device=${encodeURIComponent(uplinks[0].name)}`
-    : undefined
+  const href = uplinks[0] ? deviceHref(uplinks[0].name) : undefined
   const names = uplinks.map((l) => l.name).join(", ")
   const waiting = !links ? "Reading the uplink…" : "No uplink"
   return (
@@ -669,7 +668,7 @@ function TrafficChart({ links, live }: { links: NetworkLink[]; live: LiveTraffic
                 {breakdown.slice(0, 8).map((share) => (
                   <li key={share.name} className="flex items-center gap-3 text-body">
                     <Link
-                      href={`/network/interfaces?device=${encodeURIComponent(share.name)}`}
+                      href={deviceHref(share.name)}
                       className="font-mono underline-offset-2 focus-ring hover:underline"
                     >
                       {share.name}
@@ -692,7 +691,7 @@ function TrafficChart({ links, live }: { links: NetworkLink[]; live: LiveTraffic
                     <span key={l.name}>
                       {i > 0 && ", "}
                       <Link
-                        href={`/network/interfaces?device=${encodeURIComponent(l.name)}`}
+                        href={deviceHref(l.name)}
                         className="font-mono underline-offset-2 focus-ring hover:underline"
                       >
                         {l.name}

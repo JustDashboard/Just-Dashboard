@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { createRef, useMemo, useRef, useState, type RefObject } from "react"
 import {
   Box,
@@ -21,6 +22,7 @@ import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { looksLikeDatabase } from "@/components/docker/shared"
 import { portRows, reachWords, type Verdict } from "@/components/docker/container"
+import { volumeHref } from "@/components/docker/volumes"
 
 /** Below this a wire is still: a kilobyte a second is a health check, not traffic. */
 const CARRYING = 1024
@@ -435,7 +437,18 @@ function storesOf(detail: ContainerDetail, running: boolean): Node[] {
             <Mark glyph={Servers} />
           ),
         eyebrow: database ? "Volume · its data" : "Volume",
-        title: <span className="block truncate">{mount.name || mount.source}</span>,
+        // A named volume has a page of its own; one Docker made without a
+        // name is only the path it was given.
+        title: mount.name ? (
+          <Link
+            href={volumeHref(mount.name)}
+            className="block truncate rounded-sm focus-ring hover:underline"
+          >
+            {mount.name}
+          </Link>
+        ) : (
+          <span className="block truncate">{mount.source}</span>
+        ),
         hint: (
           <span className="font-mono">
             {where}

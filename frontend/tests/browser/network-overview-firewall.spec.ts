@@ -235,7 +235,7 @@ test("the overview's command, menu and readings are where the tiles' figures wen
   await expect(lines.nth(0)).toContainText("received")
   await expect(lines.nth(1)).toContainText("sent")
   expect(await height(lines.nth(0))).toBe(await height(lines.nth(1)))
-  await expect(lines.nth(1)).toHaveAttribute("href", "/network/interfaces?device=ens3")
+  await expect(lines.nth(1)).toHaveAttribute("href", "/network/interfaces/ens3")
 
   // The connections and what was refused are this server's, said on its node;
   // the VPN peers online stayed on the tunnels' own nodes.

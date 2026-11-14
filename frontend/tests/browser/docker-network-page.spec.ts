@@ -102,7 +102,7 @@ test("a network that reaches out goes through this server, and a macvlan straigh
   await expect(card.getByText("Straight onto")).toBeVisible()
   await expect(card.getByRole("link", { name: "Open enp3s0 on Interfaces" })).toHaveAttribute(
     "href",
-    "/network/interfaces?device=enp3s0",
+    "/network/interfaces/enp3s0",
   )
 
   await page.goto("/docker/networks/bridge")

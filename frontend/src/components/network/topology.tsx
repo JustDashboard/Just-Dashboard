@@ -10,6 +10,7 @@ import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
 import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
 import { LinkGlyph, carrying, pulseDuration } from "@/components/network/marks"
 import { flowNeighbours, nodeFlows } from "@/components/network/topology-reading"
+import { deviceHref } from "@/components/network/interfaces/device-facts"
 
 type Tone = "default" | "warning"
 
@@ -385,7 +386,7 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
       ),
       devices: [l],
       dashed: !l.adminUp,
-      href: `/network/interfaces?device=${encodeURIComponent(l.name)}`,
+      href: deviceHref(l.name),
     })
   }
   if (!links.some((l) => l.managed && l.role === "bridge")) {

@@ -886,7 +886,7 @@ const caddyRoute: DeploymentDomainRoute = {
   certificateName: "caddy-0da2f3126af1d760c968313b",
   certificateIssuer: "E6",
   certificateRenewedBy: "caddy",
-  deepLink: "/proxy/sites?site=just-dashboard-env-12.conf",
+  deepLink: "/proxy/sites/just-dashboard-env-12.conf",
 }
 const caddyOperations = {
   ...healthyOperations,

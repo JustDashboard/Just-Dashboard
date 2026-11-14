@@ -8,6 +8,7 @@ import {
   exitWords,
   type ContainerBucket,
 } from "@/components/docker/containers"
+import { networkHref } from "@/components/docker/networks"
 
 /**
  * What the Docker overview's picture draws, kept apart from React so it is
@@ -240,7 +241,7 @@ export function enginePicture({
         id: `network:${network.id}`,
         kind: "network",
         name: network.name,
-        href: `/docker/networks?network=${encodeURIComponent(network.id)}`,
+        href: networkHref(network.name),
         state: networkState(network, running),
         words: networkWords(network),
         images: [],

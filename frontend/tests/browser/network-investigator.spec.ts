@@ -308,7 +308,7 @@ test("a stream's link opens the tuple, and the report joins the stream and the b
             "live",
             "nginx forwards TCP on port 6432/tcp to 10.0.0.5:5432.",
           ),
-          ownerPath: "/proxy/streams?stream=pg",
+          ownerPath: "/proxy/streams/pg",
           facts: [
             { label: "Access", value: "allow 10.0.0.0/8, deny everyone else" },
             { label: "Client sessions now", value: "3" },
@@ -369,7 +369,7 @@ test("a stream's link opens the tuple, and the report joins the stream and the b
   )
   await expect(stream.getByRole("link", { name: "Open owner" })).toHaveAttribute(
     "href",
-    "/proxy/streams?stream=pg",
+    "/proxy/streams/pg",
   )
   const leg = result.locator("#evidence-stream_traversal")
   await expect(leg).toContainText("Measured · forwarded")

@@ -423,7 +423,7 @@ test("a block asks why and until when, opens an incident, and is listed with its
   await expect(listed).toContainText("Ended on schedule")
   await expect(listed.getByRole("link", { name: "incident" })).toHaveAttribute(
     "href",
-    `/network/runs?run=${blocks[0].incidentRunId}`,
+    `/network/runs/${blocks[0].incidentRunId}`,
   )
   // Already blocked: no second block is offered.
   await page.getByRole("button", { name: "Actions for 203.0.113.77" }).click()
