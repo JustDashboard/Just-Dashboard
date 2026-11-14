@@ -888,8 +888,8 @@
   since 4.0, and Caddy's — and never more than 30 days out. `summarise` (`certs.go`) sets `expiring`
   by it, so the certificate inventory, the watch list and the report agree; a 6-day certificate is no
   longer expiring for its whole life. Not everything reads it yet: certbot's lineage cards and an import's warning still count 30 days (`certbot-panel.tsx`,
-  `import.go`), and the Certificates page's expiring reading counts by the window under a 30-day label
-  (`certs-panel.tsx`). The report notes a certificate inside that window (`tls.renewal-due`) and grades B once
+  `import.go`), and the Certificates page's identity line counts what is expiring by the window, with
+  the days the soonest has left (`certs-panel.tsx`). The report notes a certificate inside that window (`tls.renewal-due`) and grades B once
   half of it has passed with the certificate still served (`tls.expiring`); `lifetimeHours` and
   `renewalWindowHours` are in hours because a short-lived term is 160 of them. **HSTS preload** is
   measured for a name on 443 that answered HTTP (`preload`, `tlsscan_preload.go`) against
@@ -1864,7 +1864,7 @@
     `GET /proxy/streams/{name}/traffic?window=1h|24h|7d` reads at most 8 MiB from the end of the log and its
     `.1` rotation (a `.2.gz` left unread makes `complete` false): sessions by bucket (by the time they
     ended), status mix, bytes each way, session-length percentiles and the 12 busiest clients.
-    `GET /proxy/streams/traffic` is the last hour of every logging stream for the cards (1 MiB each), and
+    `GET /proxy/streams/traffic` is the last hour of every logging stream for the list (1 MiB each), and
     `GET /proxy/streams/{name}/sessions` lists the ESTABLISHED TCP sockets on the stream's port whose owner
     is nginx or unknown (gopsutil; a UDP-only stream has no per-client socket and says so). All three are
     readable by every account, like the nginx access logs in the log viewer; a Deny or Allow on a client

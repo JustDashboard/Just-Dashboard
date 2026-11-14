@@ -1,19 +1,44 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useConfirm } from "@/components/confirm-dialog"
+import { WireMark } from "@/components/deploy/wire"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { Detail, DetailList, PageContext } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import {
+  Crosshair,
+  Download,
+  File,
+  FileText,
+  Filter,
+  MoreHorizontal,
+  NetworkDevice,
+  Plus,
+  RefreshClockwise,
+  StopCircle,
+  Trash,
+  Wrench,
+  type Icon,
+} from "@/components/icons"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { PageContext, SearchInput } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { del, downloadUrl, get, post } from "@/lib/api"
+import { bytes, plural, timestamp } from "@/lib/format"
 import {
   captureFinished,
   captureReading,
@@ -21,10 +46,47 @@ import {
   type CaptureList,
   type CaptureRun,
 } from "@/lib/network-captures"
+import {
+  captureLine,
+  captureMatches,
+  captureStateWord,
+  captureTotals,
+} from "@/lib/network-runs-view"
+import type { NetworkLink } from "@/lib/types"
+import { useSessionState } from "@/lib/view-state"
 import { CaptureCreate } from "./capture-create"
+import { PhoneState, StateTile, interfaceMark } from "./diagnostic-marks"
 import { NetworkReadWarning } from "./read-warning"
 
-/** Reading register: retained observations and private artifacts, with explicit capture setup. */
+/** The list's search, shared with the rail on a capture's page. */
+export const CAPTURE_QUERY_KEY = "network.captures.query"
+
+export const captureHref = (id: string, tab?: string) =>
+  `/network/captures/${encodeURIComponent(id)}${tab && tab !== "overview" ? `?tab=${tab}` : ""}`
+
+/**
+ * The server's devices, read for their marks: a capture is drawn as the
+ * interface it listens on. Slow, because a device's kind does not change.
+ */
+export function useCaptureLinks(enabled: boolean) {
+  return usePoll<NetworkLink[]>(
+    (signal) => get("/network/links", undefined, signal),
+    60_000,
+    [enabled],
+    { enabled },
+  ).data
+}
+
+/**
+ * Reading register: the captures this server keeps, and the one way to start
+ * another.
+ *
+ * Four grey tiles opened it — capturing, retained, packet data, retention —
+ * over the list beside a pane of seventeen facts. The figures are the
+ * identity line's now (the packet data in bytes: rounded to KiB it read
+ * "0 KiB" for a 412-byte capture), and a capture is a page of its own
+ * (`capture-page.tsx`), so the list is one card per capture.
+ */
 export function Captures() {
   const { can } = useAuth()
   const admin = can("system.admin")
@@ -34,406 +96,400 @@ export function Captures() {
   // A hand-off from the quick snapshot opens setup with its settings; nothing
   // is captured until the operator starts it.
   const [open, setOpen] = useState(() => Boolean(seed))
+  const [query, setQuery] = useSessionState(CAPTURE_QUERY_KEY, "")
+  const links = useCaptureLinks(admin)
+  // The address that selected a capture beside the list opens its page.
+  const legacy = params.get("capture")
+  useEffect(() => {
+    if (legacy) router.replace(captureHref(legacy))
+  }, [legacy, router])
   const poll = usePoll(
     (signal) => get<CaptureList>("/network/captures/", undefined, signal),
     2500,
     [admin],
-    { enabled: admin },
+    { enabled: admin && !legacy },
   )
-  const selected = params.get("capture") ?? poll.data?.runs[0]?.id
-  const select = (id: string) =>
-    router.replace(id ? `/network/captures?capture=${encodeURIComponent(id)}` : "/network/captures")
+
+  if (!admin)
+    return (
+      <>
+        <PageContext title="Packet captures" />
+        <EmptyState
+          icon={Crosshair}
+          title="Packet captures require the admin capability"
+          description="Original packet bytes and private filter tuples are available only to server administrators."
+        />
+      </>
+    )
+
+  const list = poll.data
+  const runs = list?.runs ?? []
+  const shown = runs.filter((run) => captureMatches(run, query))
+  const failed = !list && Boolean(poll.error)
   return (
     <>
-      <PageContext eyebrow="Network" title="Packet captures" />
-      {!admin ? (
-        <Notice title="Packet captures require the admin capability">
-          Original packet bytes and private filter tuples are available only to server
-          administrators.
-        </Notice>
-      ) : (
-        <>
-          {poll.data ? (
-            <>
-              <NetworkReadWarning
-                error={poll.error}
-                refresh={poll.refresh}
-                lastSuccess={poll.lastSuccess}
-                reading="packet captures"
-              />
-              <StatGrid columns={4}>
-                <StatTile
-                  label="Capturing"
-                  value={poll.data.runs.filter((run) => !captureFinished(run)).length}
-                  hint={`up to ${poll.data.maxRunning} at once`}
-                />
-                <StatTile
-                  label="Retained"
-                  value={poll.data.runs.length}
-                  hint={`up to ${poll.data.maxRetained} records`}
-                />
-                <StatTile
-                  label="Packet data"
-                  value={`${Math.round(poll.data.runs.reduce((sum, run) => sum + (run.result?.bytes ?? 0), 0) / 1024)} KiB`}
-                  hint="bounded original snapshots"
-                />
-                <StatTile
-                  label="Retention"
-                  value={`${poll.data.retentionHours} h`}
-                  hint="expired artifacts are removed"
-                />
-              </StatGrid>
-              <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-                <Panel plain>
-                  <PanelHeader
-                    title="Captures"
-                    actions={
-                      <div className="flex flex-wrap gap-2">
-                        <Button size="sm" variant="outline" onClick={poll.refresh}>
-                          Refresh captures
-                        </Button>
-                        <Button size="sm" onClick={() => setOpen(true)}>
-                          New capture
-                        </Button>
-                      </div>
-                    }
-                  />
-                  <PanelBody>
-                    {poll.data.runs.length ? (
-                      <ChoiceList>
-                        {poll.data.runs.map((run) => {
-                          const reading = captureReading(run)
-                          return (
-                            <ChoiceRow
-                              key={run.id}
-                              title={run.name}
-                              verb={`Open ${run.name}`}
-                              href={`/network/captures?capture=${encodeURIComponent(run.id)}`}
-                              description={
-                                <span className="break-all">
-                                  {run.request.interface} ·{" "}
-                                  {run.request.family === "inet6" ? "IPv6" : "IPv4"} ·{" "}
-                                  {run.request.protocol} ·{" "}
-                                  {new Date(run.createdAt).toLocaleString()}
-                                </span>
-                              }
-                              trailing={<Status {...reading} />}
-                              className={run.id === selected ? "bg-accent" : undefined}
-                            />
-                          )
-                        })}
-                      </ChoiceList>
-                    ) : (
-                      <EmptyNote>No captures have been requested.</EmptyNote>
-                    )}
-                  </PanelBody>
-                </Panel>
-                {selected ? (
-                  <CaptureInspector
-                    key={selected}
-                    id={selected}
-                    onChanged={poll.refresh}
-                    onDeleted={() => {
-                      select("")
-                      poll.refresh()
-                    }}
-                  />
-                ) : (
-                  <Panel plain>
-                    <PanelBody>
-                      <Notice title="Capture only the evidence you need">
-                        Select one native interface, address family and bounded filter. Quick tools
-                        still offer the short packet summary without retaining a PCAP.
-                      </Notice>
-                      <Button asChild variant="outline" className="mt-3">
-                        <Link href="/network/tools?tool=capture">Quick packet summary</Link>
-                      </Button>
-                    </PanelBody>
-                  </Panel>
-                )}
-              </div>
-            </>
-          ) : poll.error ? (
-            <ErrorState error={poll.error} onRetry={poll.refresh} />
-          ) : (
-            <LoadingPanel plain />
-          )}
-          <CaptureCreate
-            seed={seed}
-            open={open}
-            onOpenChange={setOpen}
-            onCreated={(id) => {
-              select(id)
-              poll.refresh()
-            }}
-          />
-        </>
-      )}
-    </>
-  )
-}
-
-function CaptureInspector({
-  id,
-  onChanged,
-  onDeleted,
-}: {
-  id: string
-  onChanged: () => void
-  onDeleted: () => void
-}) {
-  const poll = usePoll(
-    (signal) => get<CaptureRun>(`/network/captures/${encodeURIComponent(id)}`, undefined, signal),
-    1500,
-    [id],
-  )
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<Error>()
-  const { confirm, dialog } = useConfirm()
-  if (!poll.data)
-    return poll.error ? (
-      <ErrorState error={poll.error} onRetry={poll.refresh} />
-    ) : (
-      <LoadingPanel plain />
-    )
-  const run = poll.data
-  const finished = captureFinished(run)
-  const result = run.result
-  const reading = captureReading(run)
-  const cancel = async () => {
-    if (busy) return
-    setBusy(true)
-    setError(undefined)
-    try {
-      await post(`/network/captures/${encodeURIComponent(id)}/cancel`, {})
-      poll.refresh()
-      onChanged()
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)))
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <Panel plain aria-label="Selected packet capture">
-      <PanelHeader title={run.name} actions={<Status {...reading} />} />
-      <PanelBody className="space-y-4">
+      <PageContext title="Packet captures" />
+      <CapturesIdentity
+        list={list}
+        failed={failed}
+        onNew={() => setOpen(true)}
+        onRefresh={poll.refresh}
+        onSummary={() => router.push("/network/tools?tool=capture")}
+      />
+      {list && (
         <NetworkReadWarning
           error={poll.error}
           refresh={poll.refresh}
           lastSuccess={poll.lastSuccess}
-          reading="capture evidence"
+          reading="packet captures"
         />
-        <div className="flex flex-wrap gap-2">
-          {!finished && (
-            <Button
-              variant="outline"
-              disabled={busy || run.status === "cancelling"}
-              pending={busy}
-              onClick={() => void cancel()}
-            >
-              {run.status === "cancelling" ? "Stopping…" : "Stop capture"}
-            </Button>
-          )}
-          {finished && result?.artifactAvailable && (
-            <Button asChild variant="outline">
-              <a href={downloadUrl(`/network/captures/${id}/pcap`)}>Download original PCAP</a>
-            </Button>
-          )}
-          <Button asChild variant="outline">
-            <a href={downloadUrl(`/network/captures/${id}/support`)}>Export redacted support</a>
-          </Button>
-          {finished && (
-            <Button
-              variant="ghost"
-              onClick={() =>
-                confirm({
-                  title: "Delete packet capture",
-                  description: `Delete the retained packet bytes and metadata for ${run.name}.`,
-                  confirmLabel: "Delete capture",
-                  action: async () => {
-                    await del(`/network/captures/${encodeURIComponent(id)}`)
-                  },
-                  onDone: onDeleted,
-                })
-              }
-            >
-              Delete
-            </Button>
-          )}
-        </div>
-        {error && <ErrorState error={error} />}
-        {run.error && (
-          <Notice tone="warning" title="Capture incomplete">
-            {run.error}
-          </Notice>
-        )}
-        {run.status === "interrupted" && (
-          <Notice tone="warning" title="Final cleanup is unverified">
-            This capture was not restarted. A predecessor process is bounded by its independent host
-            timeout; this record does not prove when that process stopped.
-          </Notice>
-        )}
-        {run.status === "cancelling" && (
-          <Notice tone="warning" title="Waiting for native cleanup">
-            The record becomes cancelled after its runner returns from process-group cleanup.
-          </Notice>
-        )}
-        {result && (
-          <StatGrid columns={3}>
-            <StatTile
-              label="Observed packets"
-              value={result.packets}
-              hint={finished ? "complete retained records" : "provisional until capture ends"}
-            />
-            <StatTile
-              label="PCAP bytes"
-              value={result.bytes}
-              hint={`${run.request.maxBytes} byte limit`}
-            />
-            <StatTile
-              label="Kernel drops"
-              value={result.kernelDropped ?? "Unknown"}
-              tone={
-                result.kernelDropped === undefined || result.kernelDropped > 0
-                  ? "warning"
-                  : "default"
-              }
-              hint="only when the native tool reports it"
-            />
-          </StatGrid>
-        )}
-        <DetailList>
-          <Detail label="Interface">{run.request.interface}</Detail>
-          <Detail label="Family">{run.request.family === "inet6" ? "IPv6" : "IPv4"}</Detail>
-          <Detail label="Protocol">{run.request.protocol}</Detail>
-          <Detail label="Source filter">{run.request.source || "Any in this family"}</Detail>
-          <Detail label="Destination filter">
-            {run.request.destination || "Any in this family"}
-          </Detail>
-          <Detail label="Port filter">{run.request.port || "Any"}</Detail>
-          <Detail label="Limits">
-            {run.request.packets} packets · {run.request.seconds} s · {run.request.maxBytes} bytes
-          </Detail>
-          <Detail label="Snapshot">First {run.request.snapshotLength} bytes of each packet</Detail>
-          <Detail label="Requested">
-            {new Date(run.createdAt).toLocaleString()} · {run.createdBy}
-          </Detail>
-          <Detail label="Started">
-            {run.startedAt ? new Date(run.startedAt).toLocaleString() : "Not started"}
-          </Detail>
-          <Detail label="Ended">
-            {run.endedAt ? new Date(run.endedAt).toLocaleString() : "Not ended"}
-          </Detail>
-          {result && (
-            <>
-              <Detail label="Last progress">
-                {result.checkedAt ? new Date(result.checkedAt).toLocaleString() : "Not recorded"}
-              </Detail>
-              <Detail label="Stop reason">{result.stopReason.replaceAll("_", " ")}</Detail>
-              <Detail label="Interface readback">
-                {!finished
-                  ? "Awaiting final readback"
-                  : result.identityVerified
-                    ? "Native index and attributes matched before and after"
-                    : "Unknown or changed"}
-              </Detail>
-              {finished && (
-                <Detail label="Native process cleanup">
-                  Exit {result.cleanup.exitCode} · TERM{" "}
-                  {result.cleanup.termSent ? "sent" : "not sent"} · KILL{" "}
-                  {result.cleanup.killSent ? "sent" : "not sent"}
-                </Detail>
-              )}
-              <Detail label="Partial trailing packet">
-                {result.partialPacket ? "Omitted from the artifact" : "None recorded"}
-              </Detail>
-              {result.sha256 && (
-                <Detail label="Artifact SHA-256">
-                  <span className="font-mono break-all">{result.sha256}</span>
-                </Detail>
-              )}
-            </>
-          )}
-        </DetailList>
-        {run.request.incidentRunId && (
-          <IncidentReference id={run.request.incidentRunId} capture={run} />
-        )}
-        <details className="text-body">
-          <summary className="cursor-pointer focus-ring">Scope and limitations</summary>
-          <ul className="mt-3 list-disc space-y-2 pl-5 text-muted-foreground">
-            {run.limitations.map((limit) => (
-              <li key={limit}>{limit}</li>
-            ))}
-          </ul>
-        </details>
-        {result?.nativeSummary && (
-          <details className="text-body">
-            <summary className="cursor-pointer focus-ring">Native capture summary</summary>
-            <Well className="mt-3 max-h-64 break-all whitespace-pre-wrap">
-              {result.nativeSummary}
-            </Well>
-          </details>
-        )}
-        {dialog}
-      </PanelBody>
-    </Panel>
+      )}
+      {!list && poll.error ? (
+        <ErrorState error={poll.error} onRetry={poll.refresh} retryable />
+      ) : list && runs.length === 0 ? (
+        <EmptyState
+          // What a capture is, before there is one: an interface, a filter, a file.
+          mark={
+            <span aria-hidden className="flex items-center gap-1.5">
+              <WireMark tone="logo" size="sm">
+                <NetworkDevice />
+              </WireMark>
+              <span className="w-5 border-t border-dashed" />
+              <WireMark tone="logo" size="sm">
+                <Filter />
+              </WireMark>
+              <span className="w-5 border-t border-dashed" />
+              <WireMark tone="logo" size="sm">
+                <File />
+              </WireMark>
+            </span>
+          }
+          title="No packet captures"
+          description="A capture keeps what one interface sees, bounded and private, for 24 hours."
+          action={
+            <span className="flex flex-wrap justify-center gap-2">
+              <Button size="sm" onClick={() => setOpen(true)}>
+                <Plus className="size-3.5" />
+                New capture
+              </Button>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/network/tools?tool=capture">Quick packet summary</Link>
+              </Button>
+            </span>
+          }
+        />
+      ) : (
+        <Panel plain aria-label="Captures">
+          <PanelHeader
+            title="Captures"
+            actions={
+              <span className="flex min-w-0 flex-wrap items-center gap-3">
+                <SearchInput
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Name, interface or address"
+                  aria-label="Search the captures"
+                />
+                <span className="numeric text-hint text-muted-foreground">
+                  {list ? plural(runs.length, "capture") : " "}
+                </span>
+              </span>
+            }
+          />
+          <PanelBody>
+            {!list ? (
+              <LoadingRows rows={3} className="[&>*]:h-14 [&>*]:rounded-xl" />
+            ) : shown.length === 0 ? (
+              <EmptyNote>
+                No capture matches.{" "}
+                <button
+                  type="button"
+                  className="rounded-sm font-medium text-foreground focus-ring hover:underline"
+                  onClick={() => setQuery("")}
+                >
+                  Clear the search
+                </button>
+              </EmptyNote>
+            ) : (
+              <ChoiceList aria-label="Packet captures">
+                {shown.map((run) => (
+                  <CaptureRow key={run.id} run={run} links={links} onChanged={poll.refresh} />
+                ))}
+              </ChoiceList>
+            )}
+          </PanelBody>
+        </Panel>
+      )}
+      <CaptureCreate
+        seed={seed}
+        open={open}
+        onOpenChange={setOpen}
+        onCreated={(id) => router.push(captureHref(id))}
+      />
+    </>
   )
 }
 
-function IncidentReference({ id, capture }: { id: string; capture: CaptureRun }) {
-  const poll = usePoll(
-    (signal) =>
-      get<{ id: string; name: string; startedAt?: string; endedAt?: string }>(
-        `/network/diagnostics/${encodeURIComponent(id)}`,
-        undefined,
-        signal,
-      ),
-    30000,
-    [id],
-  )
+/**
+ * The page's opening line: what is kept and what is running, the retention
+ * the server holds them to, and New capture as the one command.
+ */
+function CapturesIdentity({
+  list,
+  failed,
+  onNew,
+  onRefresh,
+  onSummary,
+}: {
+  list?: CaptureList
+  failed: boolean
+  onNew: () => void
+  onRefresh: () => void
+  onSummary: () => void
+}) {
+  const totals = list ? captureTotals(list) : undefined
   return (
-    <Panel plain>
-      <PanelHeader
-        title="Related diagnostic"
-        actions={
-          <Button asChild size="sm" variant="outline">
-            <Link href={`/network/runs?run=${encodeURIComponent(id)}`}>Open saved run</Link>
-          </Button>
-        }
-      />
-      <PanelBody>
-        {poll.data ? (
-          <>
-            <NetworkReadWarning
-              error={poll.error}
-              refresh={poll.refresh}
-              lastSuccess={poll.lastSuccess}
-              reading="related diagnostic"
-            />
-            <DetailList>
-              <Detail label="Name">{poll.data.name}</Detail>
-              <Detail label="Diagnostic started">
-                {poll.data.startedAt
-                  ? new Date(poll.data.startedAt).toLocaleString()
-                  : "Not recorded"}
-              </Detail>
-              <Detail label="Capture started">
-                {capture.startedAt ? new Date(capture.startedAt).toLocaleString() : "Not recorded"}
-              </Detail>
-            </DetailList>
-            <p className="mt-3 text-hint text-muted-foreground">
-              The explicit reference and timestamps connect the evidence. They do not establish the
-              same flow or the cause of an incident.
-            </p>
-          </>
-        ) : poll.error ? (
-          <ErrorState error={poll.error} onRetry={poll.refresh} />
+    <HostIdentity
+      label="About packet captures"
+      fallback={Crosshair}
+      title="Packet captures"
+      state={
+        totals ? (
+          totals.capturing > 0 ? (
+            <Status tone="running" label={`${totals.capturing} capturing`} />
+          ) : (
+            <Status tone="stopped" label="Nothing capturing" />
+          )
+        ) : failed ? (
+          <Status tone="unknown" label="Not read" />
         ) : (
-          <LoadingPanel plain />
+          <TextShimmer className="text-xs">Reading…</TextShimmer>
+        )
+      }
+      facts={
+        list && totals ? (
+          <>
+            <span className="numeric">
+              {totals.retained} of {list.maxRetained} kept
+            </span>
+            <FactDot />
+            <span className="numeric">{bytes(totals.bytes)} of packet data</span>
+            <FactDot />
+            <span className="numeric">kept {list.retentionHours} hours</span>
+            <FactDot />
+            <span className="numeric">up to {list.maxRunning} at once</span>
+          </>
+        ) : (
+          <span>&nbsp;</span>
+        )
+      }
+      command={
+        <Button size="sm" onClick={onNew}>
+          <Plus className="size-3.5" />
+          New capture
+        </Button>
+      }
+      menu={
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon-sm" variant="ghost" aria-label="Capture actions">
+              <MoreHorizontal className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-44">
+            <DropdownMenuItem onSelect={onRefresh}>
+              <RefreshClockwise className="size-3.5" />
+              Refresh
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onSummary}>
+              <Wrench className="size-3.5" />
+              Quick packet summary
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      }
+    />
+  )
+}
+
+function CaptureRow({
+  run,
+  links,
+  onChanged,
+}: {
+  run: CaptureRun
+  links?: NetworkLink[]
+  onChanged: () => void
+}) {
+  const reading = captureReading(run)
+  const word = captureStateWord(reading.label)
+  const actions = useCaptureActions(run, { onChanged, onDeleted: onChanged })
+  return (
+    <ChoiceRow
+      workspaceItem={{ id: run.id, name: run.name }}
+      leading={<StateTile {...interfaceMark(run.request.interface, links)} tone={reading.tone} />}
+      title={run.name}
+      verb={`Open ${run.name}`}
+      href={captureHref(run.id)}
+      busy={!captureFinished(run)}
+      description={
+        <span className="font-mono">
+          <PhoneState tone={reading.tone}>{word}</PhoneState>
+          {captureLine(run)}
+        </span>
+      }
+      trailing={
+        <span className="flex items-center gap-4">
+          <span className="numeric w-32 truncate text-right text-hint text-muted-foreground max-md:hidden">
+            {run.result
+              ? `${plural(run.result.packets, "packet")} · ${bytes(run.result.bytes)}`
+              : "—"}
+          </span>
+          <time
+            dateTime={run.createdAt}
+            className="numeric w-36 truncate text-right text-hint text-muted-foreground max-lg:hidden"
+          >
+            {timestamp(run.createdAt)}
+          </time>
+          <span className="flex w-28 justify-end max-sm:hidden">
+            <Status tone={reading.tone} label={word} />
+          </span>
+        </span>
+      }
+      actions={
+        <>
+          <CaptureMenu run={run} actions={actions} />
+          {actions.dialog}
+        </>
+      }
+    />
+  )
+}
+
+type CaptureActions = ReturnType<typeof useCaptureActions>
+
+/**
+ * What can be done to a capture, decided once for its row and its page: stop
+ * it while it runs, download the original bytes once it has kept them, take
+ * the redacted support export at any time, delete it once it has ended — the
+ * last only for an account the server lets delete.
+ */
+export function useCaptureActions(
+  run: CaptureRun,
+  { onChanged, onDeleted }: { onChanged: () => void; onDeleted: () => void },
+) {
+  const { can } = useAuth()
+  const { confirm, dialog } = useConfirm()
+  const [stopping, setStopping] = useState(false)
+  const [error, setError] = useState<Error>()
+  const finished = captureFinished(run)
+  const id = encodeURIComponent(run.id)
+  const stop = async () => {
+    if (stopping) return
+    setStopping(true)
+    setError(undefined)
+    try {
+      await post(`/network/captures/${id}/cancel`, {})
+      onChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      setStopping(false)
+    }
+  }
+  return {
+    dialog,
+    error,
+    stopping: stopping || run.status === "cancelling",
+    pcap:
+      finished && run.result?.artifactAvailable
+        ? downloadUrl(`/network/captures/${run.id}/pcap`)
+        : undefined,
+    support: downloadUrl(`/network/captures/${run.id}/support`),
+    stop: finished ? undefined : () => void stop(),
+    remove:
+      finished && can("destructive")
+        ? () =>
+            confirm({
+              title: "Delete packet capture",
+              subject: {
+                mark: <StateTile glyph={NetworkDevice} tone={captureReading(run).tone} size="sm" />,
+                name: run.name,
+                facts: <span className="font-mono">{captureLine(run)}</span>,
+              },
+              description: `Delete the retained packet bytes and metadata for ${run.name}.`,
+              confirmLabel: "Delete capture",
+              action: async () => {
+                await del(`/network/captures/${id}`)
+              },
+              onDone: onDeleted,
+            })
+        : undefined,
+  }
+}
+
+/** The capture's verbs as words, downloads as links so the browser saves them. */
+export function CaptureMenu({
+  run,
+  actions,
+  omit = [],
+  label,
+}: {
+  run: CaptureRun
+  actions: CaptureActions
+  /** Verbs the surface already draws as its command. */
+  omit?: ("pcap" | "stop")[]
+  label?: string
+}) {
+  const item = (icon: Icon, words: string) => {
+    const Glyph = icon
+    return (
+      <>
+        <Glyph className="size-3.5" />
+        {words}
+      </>
+    )
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={label ?? `Actions for ${run.name}`}
+          className="[&_svg:not([class*='size-'])]:size-3.5"
+        >
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-48">
+        {actions.pcap && !omit.includes("pcap") && (
+          <DropdownMenuItem asChild>
+            <a href={actions.pcap} download>
+              {item(Download, "Download original PCAP")}
+            </a>
+          </DropdownMenuItem>
         )}
-      </PanelBody>
-    </Panel>
+        <DropdownMenuItem asChild>
+          <a href={actions.support} download>
+            {item(FileText, "Export redacted support")}
+          </a>
+        </DropdownMenuItem>
+        {actions.stop && !omit.includes("stop") && (
+          <DropdownMenuItem disabled={actions.stopping} onSelect={actions.stop}>
+            {item(StopCircle, actions.stopping ? "Stopping…" : "Stop capture")}
+          </DropdownMenuItem>
+        )}
+        {actions.remove && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onSelect={actions.remove}>
+              {item(Trash, "Delete")}
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

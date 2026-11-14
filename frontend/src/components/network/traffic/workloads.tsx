@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { BarReading } from "@/components/bar-reading"
 import { Cpu } from "@/components/icons"
@@ -8,7 +9,7 @@ import { get } from "@/lib/api"
 import { bytes, plural, rate } from "@/lib/format"
 import type { ContainerTraffic, ProcessTraffic } from "@/lib/types"
 import { NetworkReadWarning } from "@/components/network/read-warning"
-import { usePoll } from "@/hooks/use-poll"
+import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { HUE, LiveBytes } from "@/components/overview/readings"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -16,15 +17,10 @@ import { ProductGlyph, imageProduct, processProduct } from "@/components/product
 import { Row, RowList } from "@/components/row-list"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { RX, TX } from "@/components/network/rate-pair"
-import {
-  coveringWindow,
-  isRange,
-  type TrafficSpan,
-  type TrafficWindow,
-} from "@/components/network/traffic/interface-charts"
-import { ContainerTrafficSheet } from "@/components/network/traffic/container-detail"
-import { useNow } from "@/components/deploy/vocabulary"
+import { latencyWords } from "@/lib/latency-words"
 import { millis } from "@/lib/network-traffic"
+import { containerHref } from "./address"
+import { WINDOW_WORDS, isRange, type RecordedWindow, type TrafficSpan } from "./span"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -35,13 +31,6 @@ import {
 
 /** How many programs and containers each bar names; the rest of what moved is one muted span. */
 const SHOWN = 5
-
-const WINDOW_WORDS: Record<Exclude<TrafficWindow, "live">, string> = {
-  "1h": "the last hour",
-  "6h": "the last 6 hours",
-  "24h": "the last day",
-  "7d": "the last 7 days",
-}
 
 const sum = <T,>(list: T[], value: (item: T) => number) =>
   list.reduce((total, item) => total + value(item), 0)
@@ -64,30 +53,32 @@ const sum = <T,>(list: T[], value: (item: T) => number) =>
  * window, with the live window mapped to the last hour because a container has
  * no two-second ring of its own, and a typed range to the named window that
  * covers it; every container can be listed from the strip's end, and pressing
- * one opens its own chart, service and the peers its socket history attributes
- * to it.
+ * one opens its own page: its chart, its service and the peers its socket
+ * history attributes to it. The containers are read by the page, which says
+ * from the same answer whether any history is kept at all.
  *
  * Both are polled, so neither is marked live; a program's trail is its rate. A
  * failed read of data already on screen says so under the blocks rather than in
  * them, because it is several lines and a block keeps one height.
  */
-export function TrafficWorkloads({ span }: { span: TrafficSpan }) {
+export function TrafficWorkloads({
+  span,
+  range,
+  containers,
+}: {
+  span: TrafficSpan
+  /** The named window the containers were read over. */
+  range: RecordedWindow
+  containers: PollState<ContainerTraffic>
+}) {
   const [open, setOpen] = useState<string>()
-  const [opened, setOpened] = useState<string>()
   const { can } = useAuth()
   const admin = can("system.admin")
-  const now = useNow(60_000)
-  const range = coveringWindow(span, Math.floor(now / 1000))
   const programs = usePoll<ProcessTraffic>(
     (signal) => get("/network/traffic/processes", undefined, signal),
     3000,
     [],
     { enabled: admin },
-  )
-  const containers = usePoll<ContainerTraffic>(
-    (signal) => get("/network/traffic/containers", { window: range }, signal),
-    30_000,
-    [range],
   )
   const peers = programs.data?.programs.find((p) => p.name === open)
 
@@ -107,7 +98,7 @@ export function TrafficWorkloads({ span }: { span: TrafficSpan }) {
           error={containers.error}
           refresh={containers.refresh}
           words={`in ${WINDOW_WORDS[range]}${isRange(span) ? " (covers the range)" : ""}`}
-          onOpen={setOpened}
+          range={range}
         />
       </div>
       <NetworkReadWarning
@@ -135,7 +126,8 @@ export function TrafficWorkloads({ span }: { span: TrafficSpan }) {
               <span className="numeric text-hint text-muted-foreground">
                 {plural(peers.connections, "connection")} ·{" "}
                 {plural(peers.pids.length, "process", "processes")}
-                {peers.medianRttMs !== undefined && ` · median RTT ${millis(peers.medianRttMs)}`}
+                {peers.medianRttMs !== undefined &&
+                  ` · round trips ${latencyWords("p50", millis(peers.medianRttMs))}`}
                 {(peers.segmentsOut ?? 0) > 0 &&
                   ` · resent ${peers.retransmitted ?? 0} of ${peers.segmentsOut} segments`}
                 {(peers.udpConnected ?? 0) + (peers.udpUnconnected ?? 0) > 0 &&
@@ -176,9 +168,6 @@ export function TrafficWorkloads({ span }: { span: TrafficSpan }) {
             )}
           </PanelBody>
         </Panel>
-      )}
-      {opened && (
-        <ContainerTrafficSheet name={opened} window={range} onClose={() => setOpened(undefined)} />
       )}
     </div>
   )
@@ -320,15 +309,16 @@ function ContainerReading({
   error,
   refresh,
   words,
-  onOpen,
+  range,
 }: {
   data?: ContainerTraffic
   error?: Error
   refresh: () => void
   /** The window the total covers, as the head says it. */
   words: string
-  onOpen: (name: string) => void
+  range: RecordedWindow
 }) {
+  const router = useRouter()
   const all = data?.containers ?? []
   const ranked = [...all].sort((a, b) => b.rxBytes + b.txBytes - (a.rxBytes + a.txBytes))
   const moved = ranked.filter((c) => c.rxBytes + c.txBytes > 0)
@@ -347,7 +337,7 @@ function ContainerReading({
           <DropdownMenuItem
             key={c.name}
             aria-label={`Open ${c.name}'s traffic`}
-            onSelect={() => onOpen(c.name)}
+            onSelect={() => router.push(containerHref(c.name, range))}
           >
             <ProductGlyph id={imageProduct(c.name)} className="size-3.5" />
             <span className="min-w-0 truncate">{c.name}</span>
@@ -398,7 +388,7 @@ function ContainerReading({
         detail: `↓ ${rate(c.rxRate)} ↑ ${rate(c.txRate)}`,
         figure: bytes(c.rxBytes + c.txBytes),
         label: `${c.name} ${bytes(c.rxBytes + c.txBytes)}`,
-        press: { label: `Open ${c.name}'s traffic`, opens: true, onPress: () => onOpen(c.name) },
+        href: { label: `Open ${c.name}'s traffic`, to: containerHref(c.name, range) },
       }))}
     />
   )

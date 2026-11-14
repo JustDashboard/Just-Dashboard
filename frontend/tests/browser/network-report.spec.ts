@@ -54,18 +54,27 @@ test("an IPv6-only browser sees IPv6 decisions and asks the kernel with read acc
   await page.goto("/network/routing")
   await expect(page.getByText("32766 · your replies (inferred)")).toBeVisible()
   await expect(page.getByText("table 254 · answers you (inferred)")).toBeVisible()
-  await expect(page.getByText(/Browser path \(IPv6\)/)).toContainText("2001:db8::9")
-  await expect(page.getByText(/Highlights infer/)).toBeVisible()
-  await page.getByRole("textbox", { name: "Target address", exact: true }).fill("2001:db8::9")
-  await page.getByRole("textbox", { name: "Source address (optional)" }).fill("2001:db8::1")
-  await page.getByRole("textbox", { name: "Packet mark (optional)" }).fill("0x80000")
-  await page.getByRole("button", { name: "Look up route" }).click()
-  await expect(
-    page.getByRole("region", { name: "Kernel route lookup" }).getByText("254", { exact: true }),
-  ).toBeVisible()
-  expect(lookups[0].searchParams.get("target")).toBe("2001:db8::9")
-  expect(lookups[0].searchParams.get("source")).toBe("2001:db8::1")
-  expect(lookups[0].searchParams.get("mark")).toBe("0x80000")
+  const answer = page.locator('[data-slot="route-answer"]')
+  await expect(answer).toContainText(
+    "Your replies to 2001:db8::9 leave on ens3 from 2001:db8::1 via fe80::1",
+  )
+  await page.getByRole("button", { name: "How the highlight was decided" }).focus()
+  await expect(page.getByRole("tooltip")).toContainText(/Highlights infer/)
+  await page.keyboard.press("Escape")
+  // The picture's question is the kernel's to answer, for a read account too.
+  await page.getByRole("textbox", { name: "Target", exact: true }).fill("2001:db8::9")
+  await page.getByRole("button", { name: "Source and mark" }).click()
+  await page.getByRole("textbox", { name: "Source address" }).fill("2001:db8::1")
+  await page.getByRole("textbox", { name: "Packet mark" }).fill("0x80000")
+  await expect.poll(() => lookups.at(-1)?.searchParams.get("mark")).toBe("0x80000")
+  expect(lookups.at(-1)?.searchParams.get("target")).toBe("2001:db8::9")
+  expect(lookups.at(-1)?.searchParams.get("source")).toBe("2001:db8::1")
+  await page.keyboard.press("Escape")
+  await expect(page.getByText("table 254 · answers 2001:db8::9 (kernel)")).toBeVisible()
+  await expect(answer).toContainText("2001:db8::9 leaves on ens3 from 2001:db8::1 via fe80::1")
+  await expect(answer).toContainText("table main")
+  await page.getByRole("button", { name: "Clear the target" }).click()
+  await expect(page.getByText("32766 · your replies (inferred)")).toBeVisible()
   await page.getByRole("button", { name: "IPv4", exact: true }).first().click()
   await expect(page.getByText("32766 · your replies (inferred)")).toHaveCount(0)
 })
@@ -165,7 +174,10 @@ for (const reading of [
       )
     })
     await page.clock.install()
-    await page.goto("/network/traffic")
+    // The programs are a view of their own; the rest are read by the first.
+    await page.goto(
+      reading.name === "eBPF inventory" ? "/network/traffic?tab=ebpf" : "/network/traffic",
+    )
     await loaded(page)
     await expect.poll(() => reads).toBe(1)
     await page.clock.fastForward(reading.name === "program traffic" ? 3100 : 30100)
@@ -174,11 +186,7 @@ for (const reading of [
       .filter({ hasText: `Showing the last known ${reading.name}` })
     await expect(warning).toBeVisible()
     if (reading.name === "link inventory") {
-      const bandwidth = page
-        .getByRole("heading", { name: "Bandwidth by device" })
-        .locator("..")
-        .locator("..")
-        .locator("..")
+      const bandwidth = page.getByRole("region", { name: "Bandwidth by device" })
       await expect(bandwidth.getByText("Live", { exact: true }).first()).toBeVisible()
     }
     await expect(warning.getByText(/Last successful read:/)).toBeVisible()
