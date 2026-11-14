@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 import { json, mockProxy, user } from "./proxy-fixtures"
 import { risen } from "./risen"
 import { carrying, mockCarrying } from "./fixtures/proxy/stream-traffic"
@@ -67,6 +67,13 @@ async function openSettings(page: Page, name: string) {
 
 /** The settings column's one floating Save. */
 const saveBar = (page: Page) => page.getByRole("region", { name: "Save changes" })
+
+/** The ⓘ beside the UDP sessions label, which holds what the chosen mode means. */
+const udpHelp = (form: Locator) =>
+  form
+    .getByText("UDP sessions", { exact: true })
+    .locator("xpath=..")
+    .getByRole("button", { name: "What this setting does" })
 
 async function fillNew(page: Page) {
   const sheet = page.getByRole("dialog")
@@ -453,7 +460,11 @@ test("UDP asks how a session ends, and the preview warns in full", async ({ page
   await sheet.getByRole("radio", { name: "UDP", exact: true }).click()
   await expect(sheet.getByText("UDP sessions")).toBeVisible()
   await sheet.getByRole("radio", { name: "One reply" }).click()
-  await expect(sheet.getByText(/Each reply ends the session/)).toBeVisible()
+  // What the choice means is behind the field's label, not a line under it.
+  await expect(sheet.getByText(/Each reply ends the session/)).toHaveCount(0)
+  await udpHelp(sheet).hover()
+  await expect(page.getByRole("tooltip")).toContainText("Each reply ends the session")
+  await page.keyboard.press("Escape")
 
   // Every warning, not only the first.
   await expect(sheet.getByText(/no authentication of any kind — anything that can/)).toBeVisible()
@@ -734,11 +745,11 @@ test("TCP+UDP is one choice, and asks how its UDP sessions end", async ({ page }
   await sheet.getByRole("radio", { name: "TCP+UDP" }).click()
   await expect(sheet.getByText("UDP sessions")).toBeVisible()
   await sheet.getByRole("radio", { name: "One reply" }).click()
-  await expect(
-    sheet.getByText(
-      "Each reply ends the session: one question, one answer, as DNS works. TCP connections are not affected.",
-    ),
-  ).toBeVisible()
+  await udpHelp(sheet).hover()
+  await expect(page.getByRole("tooltip")).toHaveText(
+    "Each reply ends the session: one question, one answer, as DNS works. TCP connections are not affected.",
+  )
+  await page.keyboard.press("Escape")
   await sheet.getByRole("button", { name: "Save and reload" }).click()
 
   await expect(page.getByText("replica saved and reloaded")).toBeVisible()
