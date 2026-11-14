@@ -280,7 +280,8 @@ lands. On a phone it does one of the two things the pictures did: `stack`, the c
 headings with every word and no lines, for a picture that is the only place its nodes are named (the
 Network overview, the gateway); or `marks`, the hub's words over a row of marks, the hub, and a row of
 marks with the lines running down, for a picture a list under it names again (Notifications, Backups,
-the proxy's alerts). The Network overview and the gateway draw through it since 0.8.7; a new picture of
+the proxy's alerts). The Network overview, the gateway and the firewall's inbound path draw through it
+since 0.8.7; a new picture of
 this shape uses it, and lays its nodes by hand only when it is not this shape (the routing decision's
 two columns, a project's Runtime lanes).
 
@@ -1907,10 +1908,18 @@ the same facts one at a time. Firewall's policy controls sit beside its bounded 
 sets its directives in one centred column of `SettingSection`s behind the product's save bar, and
 Intrusion's jail choices carry their watched service's mark, state and comparable readings (both
 are described in the next paragraph). SSH, Firewall and
+
+the same facts one at a time. Firewall's defaults are a settings section under its rule table,
+saved by the page's save bar (0.8.7, below); SSH
+lays its directive groups out two to a row from `xl`, as Configuration does, each head over its
+fields with *Edited* in `--git-modified` while it holds a staged change, and its apply bar follows
+the reader and names what changed. Intrusion's jail choices carry their watched service's mark,
+state and comparable readings. SSH, Firewall and
 Intrusion each end on their own log — the auth log, the firewall's log, fail2ban's Activity — read
 through its lens in one `Pane` under a title across the page, since a log needs the width a rail or a
 half row does not have; the last day's counts join the page's one `StatGrid` rather than drawing a
-second, and an attacker's address is blocked from the line it is on. Repeat offenders therefore take
+second (Firewall's are on its picture's nodes since 0.8.7), and an attacker's address is blocked
+from the line it is on. Repeat offenders therefore take
 Intrusion's row alone. Logins and Network combine related facts into fewer,
 richer columns: an account and its terminal, an
 interface and its kind. Their action columns are always drawn. Connections lists each address as a
@@ -4095,11 +4104,67 @@ what took their place (`components/network/drift/`):
   reader knows it (a route by its destination, an address by its prefix and device), its kind in
   its lane hue, and its evidence read in place — expected beside observed, a digest as seven
   characters, amber where they disagree. A row whose state changes rises.
-- **The boot unit's activation as its run** (`drift-boot.tsx`): each `ExecStart` as the tool it is
-  over a rule in the colour of its exit, the finish said as how long ago where systemd's zone can be
-  read without guessing. **Each blocklist** is its publisher with its cache, render and kernel set
-  as a chain, a link amber where the later one has fallen behind. **The repair plan** is cards you
-  pick, lit (§16), and the review shows each change as a diff of its before and after.
+- **The boot unit as one line** (`drift-boot.tsx`, 0.8.7): systemd's mark, the unit over its four
+  facts, its last activation and how long ago, and its state with the reason under it; the caveat
+  about reboot attribution is the `ⓘ` beside the state, where a framed notice stood. Its activation
+  as its run (each `ExecStart` as the tool it is over a rule in the colour of its exit) and the
+  evidence open from the line as a popover. **Each blocklist** is its publisher with its cache,
+  render and kernel set as a chain, a link amber where the later one has fallen behind. **The
+  repair plan** (`drift-repairs.tsx`, 0.8.7) is one sentence over one-line rows with a checkbox
+  column: the resource over why it is proposed, what the repair does and how much changes, and
+  *Can apply* or *Review only* with the reason behind an `ⓘ`; the excluded resources open from the
+  title line. It was a framed notice over half-width cards of four lines each. The review shows
+  each change as a diff of its before and after. The identity line is laid out as a project's
+  header since 0.8.7, the verdict beside the name and *Inspect again* its command, and stands
+  before the first inspection lands.
+
+**The Network overview, Firewall and Gateway lost their tile rows in 0.8.7** (2026-11-14), in the
+same run. Each was built in the current language and kept a row of tiles under its picture; each
+figure went where it is said better, and each page opens on `HostIdentity` laid out as a project's
+header.
+
+- **The overview** (`app/(dashboard)/network/page.tsx`): whether the uplink is up is the line's
+  state, *Run a check* its command (to Tools), and the refresh and an administrator's two other
+  diagnostics its menu. *In* and *Out* are two `ReadingLine`s with their last fifteen minutes; the
+  VPN and Refused tiles went, the topology's own nodes carrying them, and the connections went onto
+  this server's node (`topology.tsx`). *Ways out* (`egress-identity.tsx`) is a line a family, a
+  mark and a sentence ("Leaves ens3 via … from …, public") over what it establishes and whether
+  the family is forwarded, the explanation behind an `ⓘ`; it was a framed table of two rows with a
+  paragraph in a cell. The page is drawn before its read with the picture grey at the rows it drew
+  last time and the line of facts at the height it took (`useViewState("network.overview.shape")`).
+- **Firewall** (`network/firewall-panel.tsx`): the backend is drawn as the product it is in the
+  identity tile and the picture's centre node (`firewall-words.ts`: ufw, firewalld, iptables and
+  nftables each as netfilter, the filter it drives; firewalld's own icon is GPL artwork and is not
+  carried). *Active* is the
+  line's state; the switch and *Add rule* are at its end, *Reset* and *Refresh* in the menu. The
+  seven tiles went: the rule count is the line's allow and deny, and what the log says the rules
+  did is on the picture's nodes (`firewall-picture.tsx`, a `WireFlow`): what was refused and from
+  how many addresses under *Everything else*, what a rate limit turned away under the one port it
+  limits (with two limited ports, or none, it joins the default's line, since the log cannot say
+  which port), each a press that narrows the log. **Defaults** are one `SettingSection` under the
+  rules, a row a default with `Segments`, staged and saved by the page's one save bar; each
+  default sends the request it always sent, and an inbound default that turns traffic away is
+  still confirmed first with the server's preflight, the bar's Save waiting on the answer. A
+  reader is shown the defaults in words. The table's footers are `ⓘ` notes on its titles; a
+  recorded change is one line whose request opens in a popover, and a rule's history is a popover
+  on its row where it was a sheet (`firewall-changes.tsx`). Controls on the server's destructive
+  routes (the switch, a default, a removal, a plan, Reset) are drawn only for an account holding
+  that capability. With no firewall on the host, ufw is installed from the page where the package
+  manager carries it (`InstallHandoff`); it goes in switched off.
+- **Gateway** (`app/(dashboard)/network/gateway/page.tsx`): the line's mark is the firewall the
+  gateway writes into, its state whether the entries are in force, its facts the families the
+  kernel forwards, the forwards and NAT entries in force, and firewall admission as a dot and a
+  word; *Forward a port* is its command. The block of sentences headed *Policy evidence* that
+  opened the page is behind that word as a popover (`PolicyEvidence`), with *Repair owned rules*;
+  each forward and NAT row carries its own part as a state word in a column of its own
+  (`gateway/evidence.ts`, unit-tested: the worst thing known, what is installed before what is
+  modelled before what was measured), with that entry's evidence behind a press (`EntryEvidence`).
+  The four tiles went to the line's facts and each section's own total at its head, and the
+  paragraph about counters is the `ⓘ` beside those totals. An account that cannot make or move an
+  entry is drawn no command and no switch.
+
+Checked by `tests/browser/network-overview-firewall.spec.ts` at 1280 and 390, with the pages' older
+specs; the pure readings are `firewall-words.test.js` and `gateway/evidence.test.js`.
 
 **Egress groups became a list and a page in 0.8.7** (2026-11-13), in the run that brought the older
 pages to the deploy pages' look. The page had never had a design pass: four grey tiles (groups,
