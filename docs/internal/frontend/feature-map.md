@@ -296,8 +296,9 @@ it by name either way, and the hub's Connect button opens it as `/dashboard/hub?
 Connect's page pointed at the hub, in the same reading register: an identity line (the hub's address
 as a link, as text while the link is idle, its name said as the hub's, *Just Hub (<name>)*, the
 scope, how many servers it holds once the hub has answered a report, when and by whom it was
-connected — or this server's fingerprint while it is not — and at its far end the link's state, said
-there and nowhere else on the line, with, once connected, **Sync now** and **Disconnect**);
+connected — or this server's fingerprint while it is not — the link's state beside the name, said
+there and nowhere else on the line, and at its far end, once connected, **Sync now** and
+**Disconnect**);
 Connect's picture with the hub at its end (`hub-picture.tsx` over `LinkPicture`, "Reports every 15s"
 in the hub's own interval, the status's `heartbeatSeconds`); then one section at a time. Not
 connected: **Connect this server to Just Hub at <host>** — the address field filled from `?connect=`
@@ -309,9 +310,11 @@ nothing), a notice that the address came from a link, under the field whose mach
 while the check refuses the address — a look-alike name off this tailnet — Connect stays disabled
 and the terminal's command is not offered), the three scope cards with `maintain` chosen when the
 address is typed and none chosen after a `?connect=` link (Connect stays disabled until one is, and
-**What this server will send** appears once it is), a line saying no scope gives the hub a shell,
-files or accounts, **Connect** and `sudo ./scripts/manage.sh hub connect <url>` beside it; nothing
-is sent to the hub until Connect is pressed. Connect's own refusal is *Could not connect* with the
+**What this server will send** appears once it is), **Connect** and `sudo ./scripts/manage.sh hub
+connect <url>` beside it, and one line on turning key expiry off with its link to the Tailscale
+admin console; nothing is sent to the hub until Connect is pressed. No sentence stands under the
+field or the cards: what the address has to be, that no scope gives the hub a shell, files or
+accounts, and why key expiry matters are each behind the ⓘ beside what they explain. Connect's own refusal is *Could not connect* with the
 backend's reason as a sentence; a hub that gave it no answer (`502 hub_unreachable`) is said as the
 Activity section says a failed exchange, *Could not reach <host>: the connection was refused.*, with
 Go's words behind *What this server said* (`exchangeFailure`). Waiting: the code inside a
