@@ -2071,13 +2071,14 @@ function movingHour() {
 
 test("the home, state by state, for the pull request @shots", async ({ page }) => {
   test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to save the screenshots")
-  test.setTimeout(300_000)
+  test.setTimeout(600_000)
   const dir = process.env.JD_SHOTS
   const widths = (process.env.JD_SHOTS_WIDTHS ?? "1280,390").split(",").map(Number)
   // The shell scrolls its pages in a region of its own: the view is grown to
   // the region's content for the picture, and put back.
   const shot = async (name: string, width: number) => {
-    await page.waitForLoadState("networkidle").catch(() => undefined)
+    // Bounded: a state whose reads are held never goes idle.
+    await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined)
     await page.waitForTimeout(600)
     const view = page.viewportSize()!
     const more = await page.evaluate(() => {
