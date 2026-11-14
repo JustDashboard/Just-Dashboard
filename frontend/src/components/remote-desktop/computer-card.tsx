@@ -2,11 +2,8 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Pencil, Play, Trash } from "@/components/icons"
-import { relativeTime } from "@/lib/format"
+import { Pencil, Play, Trash } from "@/components/icons"
 import {
-  isoOf,
-  latency,
   osLabel,
   protocolLabel,
   reachability,
@@ -14,29 +11,37 @@ import {
   type RdComputerView,
 } from "@/lib/remote-desktop"
 import { cn } from "@/lib/utils"
-import { CONTROL } from "@/components/flow"
-import { Metric } from "@/components/page"
+import { ChoiceRow } from "@/components/flow"
 import { Status } from "@/components/status-dot"
-import { BlurFade } from "@/components/ui/blur-fade"
-import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
-import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { VerbMenu } from "@/components/verbs"
 import { ComputerMark, reachTone } from "@/components/remote-desktop/marks"
+import {
+  readingLine,
+  signInAddress,
+  signInGap,
+  stateWord,
+} from "@/components/remote-desktop/computer-reading"
 
 /**
- * One computer on the Remote Desktop page: a card you open, drawn as its
- * system.
+ * One computer on the Remote Desktop page: a one-line row you open, drawn as
+ * its system.
  *
- * Top to bottom it answers what the reader asks before connecting: which
- * machine and whether it can be reached now; how far it is, by which path,
- * and when it was last used; and the quiet facts — its address and how the
- * dashboard signs in to it — with Connect at the foot, and Stream beside it
- * once the computer is paired with Sunshine. A press anywhere on
- * the card opens the session, except on a control of its own. A computer in
- * a session runs a light round its edge.
+ * Left to right it answers what the reader asks before connecting: which
+ * machine (its system's mark, its name over the server on it and where the
+ * dashboard signs in), whether it can be reached now (a dot and a word), how
+ * far it is and when it was last used (one line), then Connect, Stream beside
+ * it once the computer is paired with Sunshine, and the menu. It was a 200px
+ * card with three figure cells under a picture that already draws every
+ * computer; a row is one height whatever the computer's state, and its
+ * columns line up down the list.
+ *
+ * A press anywhere on the row opens the session, except on a control of its
+ * own. A computer in a session runs a light round its edge. On a phone the
+ * row is the mark, the name over its state and reading, and the menu: the
+ * press that opens it is the row itself.
  */
-export function ComputerCard({
+export function ComputerRow({
   computer,
   index,
   onEdit,
@@ -50,125 +55,99 @@ export function ComputerCard({
   const router = useRouter()
   const href = sessionHref(computer.id)
   const reach = reachability(computer)
+  const state = stateWord(reach)
+  const reading = readingLine(computer, reach)
+  const gap = signInGap(computer)
   const off = reach.kind === "offline"
-  const server = protocolLabel(computer.protocol, computer.os)
-  const path = computer.peer
-    ? computer.peer.direct
-      ? "Direct"
-      : computer.peer.relay
-        ? `Relay ${computer.peer.relay}`
-        : "Tailnet"
-    : "Network"
+  const status = (
+    <Status
+      tone={reachTone(reach)}
+      live={reach.kind === "live"}
+      label={state}
+      className="min-w-0"
+    />
+  )
   return (
-    <li className="min-w-0" data-slot="choice-row" data-card="computer" data-state={reach.kind}>
-      <BlurFade delay={Math.min(index, 11) * 0.04} className="h-full">
-        <SpotlightBorder className="h-full">
-          {reach.kind === "live" && (
-            <span aria-hidden className="pointer-events-none absolute -inset-px rounded-xl">
-              <BorderBeam size={80} duration={4} />
+    <ChoiceRow
+      index={index}
+      href={href}
+      verb={`Open the screen of ${computer.name}`}
+      busy={reach.kind === "live"}
+      leading={
+        <span role="img" aria-label={osLabel(computer.os)} title={osLabel(computer.os)}>
+          <ComputerMark os={computer.os} size="sm" className={cn(off && "opacity-60")} />
+        </span>
+      }
+      title={computer.name}
+      description={
+        <>
+          <span className="block truncate max-sm:hidden">
+            {protocolLabel(computer.protocol, computer.os)} ·{" "}
+            <span className="font-mono">{signInAddress(computer)}</span>
+            {gap && <span className="text-warning"> · {gap}</span>}
+          </span>
+          {/* A phone has no room for the columns: the state and the reading
+              are the second line, and what is not saved takes the reading's
+              place because it is what the session will stop to ask for. */}
+          <span className="flex min-w-0 items-center gap-1.5 sm:hidden" title={reach.label}>
+            {status}
+            <span className={cn("min-w-0 truncate", gap && "text-warning")}>
+              · {gap ?? reading}
             </span>
-          )}
-          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the card's name is the link or button a keyboard opens it by */}
-          <div
-            onClick={(event) => {
-              const target = event.target as HTMLElement
-              if (!event.currentTarget.contains(target) || target.closest(CONTROL)) return
-              router.push(href)
-            }}
-            className="group group/choice flex h-full min-w-0 cursor-pointer flex-col gap-3.5 rounded-xl p-4"
+          </span>
+        </>
+      }
+      trailing={
+        <>
+          <span
+            data-slot="computer-state"
+            data-state={reach.kind}
+            className="flex w-52 min-w-0 shrink-0 flex-col gap-0.5 max-sm:hidden xl:w-auto xl:flex-row xl:items-center xl:gap-4"
           >
-            <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
-              <ComputerMark os={computer.os} className={cn("row-span-2", off && "opacity-60")} />
-              <Link
-                href={href}
-                className="block max-w-full min-w-0 truncate rounded-sm text-title leading-tight font-semibold tracking-tight focus-ring"
-              >
-                {computer.name}
+            <span className="flex min-w-0 xl:w-28" title={reach.label}>
+              {status}
+            </span>
+            <span className="numeric min-w-0 truncate text-hint text-muted-foreground xl:w-52">
+              {reading}
+            </span>
+          </span>
+          {/* One width whether or not Stream is offered, so Connect stands on
+              one edge down the list. */}
+          <span className="flex w-36 shrink-0 items-center justify-end gap-1.5 max-sm:hidden">
+            {computer.streamHostId > 0 && (
+              <Button size="xs" variant="ghost" asChild>
+                <Link
+                  href={`${href}?mode=stream`}
+                  aria-label={`Stream ${computer.name} with Sunshine`}
+                >
+                  Stream
+                </Link>
+              </Button>
+            )}
+            <Button size="xs" variant="outline" asChild>
+              <Link href={href} aria-label={`Connect to ${computer.name}`}>
+                <Play className="size-3" />
+                Connect
               </Link>
-              <span className="-my-1 -mr-1.5 flex items-center gap-1">
-                <ArrowRight
-                  aria-hidden
-                  className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
-                />
-                <VerbMenu
-                  label={`Actions for ${computer.name}`}
-                  verbs={[
-                    {
-                      key: "stream",
-                      label: "Stream with Sunshine",
-                      icon: Play,
-                      run: () => router.push(`${href}?mode=stream`),
-                    },
-                    { key: "edit", label: "Edit", icon: Pencil, run: onEdit },
-                    { key: "remove", label: "Remove", icon: Trash, run: onRemove, danger: true },
-                  ]}
-                />
-              </span>
-              <div className="col-span-2 col-start-2 flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
-                <Status tone={reachTone(reach)} live={reach.kind === "live"} label={reach.label} />
-                <span className="min-w-0 flex-1 truncate pr-0.5">
-                  {osLabel(computer.os)} · {server}
-                </span>
-              </div>
-            </div>
-
-            <div
-              className={cn(
-                "grid min-h-10 grid-cols-3 gap-x-2.5 [&>*+*]:border-l [&>*+*]:border-hairline [&>*+*]:pl-2.5",
-                off && "opacity-60",
-              )}
-            >
-              <Metric label="Round trip" value={latency(computer.reach.latencyMs) ?? "—"} />
-              <Metric label="Path" value={reach.kind === "offline" ? "—" : path} />
-              <Metric
-                label="Last used"
-                value={
-                  computer.lastSessionAt ? relativeTime(isoOf(computer.lastSessionAt)) : "never"
-                }
-              />
-            </div>
-
-            <div className="mt-auto flex min-w-0 flex-col gap-2 border-t border-hairline pt-3 text-hint text-muted-foreground">
-              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                {computer.username ? (
-                  <span className="min-w-0 truncate">signs in as {computer.username}</span>
-                ) : (
-                  computer.protocol === "rdp" && (
-                    <span className="text-warning">no account saved</span>
-                  )
-                )}
-                {!computer.hasPassword && <span className="text-warning">no password saved</span>}
-                {computer.live > 0 && (
-                  <span className="font-medium text-success">in a session now</span>
-                )}
-              </div>
-              <div className="flex min-w-0 items-center justify-between gap-3">
-                <span className="min-w-0 truncate pr-0.5 font-mono" title={computer.host}>
-                  {computer.host}:{computer.port}
-                </span>
-                <span className="-my-1 flex shrink-0 items-center gap-1.5">
-                  {computer.streamHostId > 0 && (
-                    <Button size="xs" variant="ghost" className="text-foreground" asChild>
-                      <Link
-                        href={`${href}?mode=stream`}
-                        aria-label={`Stream ${computer.name} with Sunshine`}
-                      >
-                        Stream
-                      </Link>
-                    </Button>
-                  )}
-                  <Button size="xs" variant="outline" className="text-foreground" asChild>
-                    <Link href={href} aria-label={`Connect to ${computer.name}`}>
-                      <Play className="size-3" />
-                      Connect
-                    </Link>
-                  </Button>
-                </span>
-              </div>
-            </div>
-          </div>
-        </SpotlightBorder>
-      </BlurFade>
-    </li>
+            </Button>
+          </span>
+        </>
+      }
+      actions={
+        <VerbMenu
+          label={`Actions for ${computer.name}`}
+          verbs={[
+            {
+              key: "stream",
+              label: "Stream with Sunshine",
+              icon: Play,
+              run: () => router.push(`${href}?mode=stream`),
+            },
+            { key: "edit", label: "Edit", icon: Pencil, run: onEdit },
+            { key: "remove", label: "Remove", icon: Trash, run: onRemove, danger: true },
+          ]}
+        />
+      }
+    />
   )
 }
