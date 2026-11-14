@@ -174,7 +174,8 @@ export function AlertRow({
       className="min-w-0 animate-rise [&>span:last-child]:truncate"
     />
   )
-  const behind = Boolean(said || checked || follows || channels)
+  const every = rule.connectionId === null
+  const behind = Boolean(said || checked || follows || channels || every)
   const status = behind ? (
     <Popover>
       <PopoverTrigger
@@ -192,6 +193,8 @@ export function AlertRow({
         {follows && (
           <p className="min-w-0 break-words">follows {subjects.map((s) => s.label).join(", ")}</p>
         )}
+        {/* Said on the card too, where a phone may cut it off the end of a long condition. */}
+        {every && <p>watches every database</p>}
         {channels && <ChannelNames ids={rule.channels} channels={channels} />}
         {checked && <p className="whitespace-nowrap">checked {relativeTime(checked)}</p>}
       </PopoverContent>
@@ -214,7 +217,7 @@ export function AlertRow({
       description={
         <>
           <span className="font-mono">{words.describe(rule)}</span>
-          {rule.connectionId === null && " · every database"}
+          {every && " · every database"}
         </>
       }
       onSelect={onEdit}

@@ -293,6 +293,8 @@ test.describe("database alerts", () => {
     await expect(missed).toContainText("no successful run 1 h after one is due · every database")
     await missed.getByRole("button", { name: /^Quiet/ }).click()
     await expect(reading(page, "Backup missed")).toContainText("follows nightly-db")
+    // Its scope is said here too: a phone may cut it off the end of a long condition.
+    await expect(reading(page, "Backup missed")).toContainText("watches every database")
     await expect(reading(page, "Backup missed")).toContainText("The next run of nightly-db is due")
     await page.keyboard.press("Escape")
     // Firing first: the rule telling somebody is the one a reader came for.
