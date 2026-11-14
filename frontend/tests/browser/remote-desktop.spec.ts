@@ -59,8 +59,10 @@ test("the overview draws the computers as the picture and one-line rows, without
   await expect(office.getByRole("img", { name: "Windows" })).toBeVisible()
   await expect(office).toContainText("Remote Desktop · wayy@office-pc:3389")
   await expect(office.locator("[data-slot=computer-state]")).toHaveAttribute("data-state", "live")
+  // The fixture's clock is read when its worker starts, so "ten minutes ago"
+  // is older by however long the worker has run.
   await expect(office.locator("[data-slot=computer-state]")).toHaveText(
-    "In a session43 ms direct · used 10m ago",
+    /^In a session43 ms direct · used \d+[mh] ago$/,
   )
   const mac = rows.filter({ hasText: "studio-mac" })
   await expect(mac.getByRole("img", { name: "macOS" })).toBeVisible()
@@ -155,7 +157,7 @@ for (const width of [1280, 390]) {
       // the press that opens the screen.
       await expect(rows.first().getByRole("link", { name: "Connect to office-pc" })).toBeHidden()
       await expect(rows.first().locator("[data-slot=computer-line]")).toHaveText(
-        "In a session· 43 ms direct · used 10m ago",
+        /^In a session· 43 ms direct · used \d+[mh] ago$/,
       )
       await expect(rows.first().locator("[data-slot=computer-line]")).toBeVisible()
       await expect(unsaved.locator("[data-slot=computer-line]")).toHaveText(

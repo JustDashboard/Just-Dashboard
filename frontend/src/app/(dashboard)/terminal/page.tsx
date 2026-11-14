@@ -183,11 +183,14 @@ export default function TerminalPage() {
   // toggle to stop it; a wide screen has the toggle, and its column is drawn
   // while it is shown.
   const [toolsSeen, setToolsSeen] = useState(false)
-  // The emulator is put away, not covered, while another pane is up: covered
-  // it was still laid out, so a phone's keyboard rising for the session
-  // filter fitted it to five rows and told the shell so. Out of sight it
-  // keeps its grid and its socket (`XtermPane`'s `visible`), and is fitted
-  // and says its size again when it is shown.
+  // The emulator is put away, not covered, while another pane is up, so
+  // nothing in it takes the keyboard or is read out from behind the pane that
+  // is shown. Out of sight it has no box to fit, so it is told it is not
+  // visible (`XtermPane`'s `visible`): it keeps its grid and its socket, and
+  // is fitted and says its size again when it is shown. Covered, it also
+  // followed the window while nobody could see it: where a phone's keyboard
+  // shrinks the window, typing in the session filter fitted the shell to a
+  // few rows and told it so.
   const terminalShown = !phone || pane === "terminal"
   const focusOnShow = useRef(false)
   const [immersive, setImmersive] = useState(false)

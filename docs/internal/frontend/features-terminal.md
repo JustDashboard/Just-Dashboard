@@ -418,8 +418,9 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   is, and shows **one pane at a time** over the shared bar at its foot (`phone-panes.tsx`): Sessions,
   Terminal, Files and Git, the last two being the tools column's halves, with the count of changed
   files on Git. The page opens on the emulator. The rail and the column used to cover the emulator
-  there, each with a hide button of its own; covered, the emulator was still laid out, so a phone's
-  keyboard rising for the session filter fitted it to a few rows and told the shell so. Now a pane
+  there, each with a hide button of its own; covered, the emulator was still laid out and followed
+  the window, so where a phone's keyboard shrinks the window, typing in the session filter fitted the
+  shell to a few rows and told it so. Now a pane
   that is not shown is `display: none` and the emulators are handed `visible={false}`
   (`XtermPane`'s own state for a window that is not on screen): they keep their sockets and their
   grids, the page's measure of the pane grid ignores a size of nothing, and showing the pane again

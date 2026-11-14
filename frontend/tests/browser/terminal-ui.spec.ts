@@ -410,9 +410,9 @@ test("fits the pane again when the WebGL context is lost", async ({ page }) => {
 
 // One pane at a time on a phone (`components/phone-panes.tsx`). The rail and
 // the Files and Git column used to cover the emulator below `lg`, each with a
-// hide button of its own; covered, the emulator was still laid out, so a
-// phone's keyboard rising for the session filter fitted it to a few rows and
-// told the shell so.
+// hide button of its own; covered, the emulator was still laid out and
+// followed the window, so where a phone's keyboard shrinks the window, typing
+// in the session filter fitted the shell to a few rows and told it so.
 test("on a phone the page is one pane at a time, and a shell put away keeps its socket and its size", async ({
   page,
 }) => {
@@ -445,8 +445,9 @@ test("on a phone the page is one pane at a time, and a shell put away keeps its 
   const rail = page.getByLabel("Terminal sessions")
   await expect(rail).toBeVisible()
   await expect(page.locator(".xterm-screen:visible")).toHaveCount(0)
-  // A keyboard takes half the screen while the list is up. The shell is not
-  // told: out of sight it keeps the grid it had.
+  // The window loses half its height while the list is up, as it does under
+  // some phones' keyboards. The shell is not told: out of sight it keeps the
+  // grid it had.
   await page.setViewportSize({ width: 390, height: 420 })
   await page.evaluate(() => window.dispatchEvent(new Event("focus")))
   await page.waitForTimeout(600)
