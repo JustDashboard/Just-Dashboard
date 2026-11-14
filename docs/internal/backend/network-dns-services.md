@@ -177,7 +177,7 @@ configured membership nor reported counts prove loaded/compiled rule content or 
 filtering decision. All reads remain `system.admin`, private/no-store; administrator API tokens have
 the same existing capability contract as sessions.
 
-The engine detail sheet mounts this inventory before its reviewed change controls, including on
+The engine's page (`/network/dns/services/<id>`, its Filters view) mounts this inventory, including on
 dashboard read-only connections. The separate `Read native filters` command and thirty-second
 foreground poll retain their own observation time. Network errors and native unavailable responses
 keep the last same-owner entries with a retry warning; changed connection identity or generation
@@ -251,7 +251,7 @@ The contracts are the pinned [AdGuard set-rules API](https://github.com/AdguardT
 its [replacement handler](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/filtering/http.go),
 [AdGuard DNS filter syntax](https://adguard-dns.io/kb/general/dns-filtering-syntax/) and
 [FTL 6.7.1 exact-domain API](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/domains.yaml).
-The detail sheet builds those closed engine-specific intents and shows selected native metadata
+The engine's page (its Changes view) builds those closed engine-specific intents and shows selected native metadata
 before/readback. Unknown Pi-hole group inventory holds additions. A configured missing selected ID
 stays in the draft until explicitly removed; unknown inventory does not establish disappearance.
 Ambiguous or other-target readback is labeled with owner/exact counts instead of claimed absence.
@@ -276,7 +276,7 @@ remain valid; collection/element null, wrong numeric types, duplicate or out-of-
 refused before selection. Native client/group reads apply the same presence-aware contract:
 unreadable memberships or null/duplicate/invalid group identities and enable fields stay unknown,
 with no partial configured inventory or replacement baseline.
-The detail sheet withholds client/group counts while their native inventory evidence is unknown.
+The engine's page withholds client/group counts while their native inventory evidence is unknown.
 
 | Action | Engine and reviewed scope |
 | --- | --- |
@@ -301,13 +301,13 @@ scope is a bad request and changed generation/ownership is a conflict. Valid exp
 reviews remain inspectable without becoming applicable again. The single-use apply claim and expiry
 checks remain authoritative.
 
-The administrator engine sheet mounts these bounded record/client forms. Technitium records require
+The engine's page mounts these bounded record/client forms in its Changes view. Technitium records require
 an explicit fresh zone inventory; unsupported native RR types remain visible and read-only. The
 form can copy one eligible native A/AAAA row with its exact TTL for review. Local overrides have
 neither a zone selector nor a caller-selected TTL. Pi-hole group assignment selects an existing
 literal client and native group IDs; selecting none explicitly removes its memberships. Field
 refusals keep the draft, focus a linked error summary and associate each error with its control.
-The retained sheet shows the exact owner/type/value/zone/TTL or client/group request and selected
+The retained review (part of the Changes view, `?change=<id>`) shows the exact owner/type/value/zone/TTL or client/group request and selected
 native before/readback policy. Its freshness poll uses `/changes/{id}/current`, including for earlier
 policy actions; a failed read, replaced owner, changed selection or changed retained intent holds
 apply even while confirmation is open. Attempt IDs and single-use server claims continue to prevent
@@ -391,9 +391,11 @@ removes both owned data volumes; ordinary connection deletion cannot bypass it.
 
 ## Acceptance status
 
-The first retained UI mounts administrator-only native connection/inventory, reviewed changes and
+The first retained UI mounted administrator-only native connection/inventory, reviewed changes and
 owned setup/removal sheets on the existing DNS reading page, independent of host resolver read
-availability. It preserves the backend's closed action scope and native provenance. Fresh matching
+availability; since 0.8.7 a connection's inventory and its reviewed changes are a page of their own
+(`/network/dns/services/<id>`, `components/network/dns/engine-page.tsx`), and the connection form, the
+owned-setup form and an owned setup's review are the sheets that remain. It preserves the backend's closed action scope and native provenance. Fresh matching
 policy and immutable review checks hold stale confirmations; account-scoped attempt IDs prevent
 the UI from replaying an uncertain apply after navigation or reload. The matching production build,
 3,232 fast logic tests, 13 mounted service interaction cases and phone/desktop inspection pass;
