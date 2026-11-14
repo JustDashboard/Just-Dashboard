@@ -4,21 +4,22 @@ import { useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Check, Copy, CrossCircle, PaperAirplane } from "@/components/icons"
-import { get, post } from "@/lib/api"
+import { post } from "@/lib/api"
 import { bytes, timestamp } from "@/lib/format"
 import type { RequestHeader, RequestHop, RequestResult, RequestTest, VHost } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useCopy } from "@/hooks/use-copy"
 import { Detail, DetailList, Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { ErrorState, Notice, Spinner } from "@/components/state"
 import { Status, type Verdict } from "@/components/status-dot"
-import type { Tone } from "@/components/tone"
 import { tabClasses } from "@/components/tabs"
+import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
+import { useProxy, useProxyRead } from "@/components/proxy/proxy-context"
+import { sitePath } from "@/components/proxy/site-verbs"
 import { TLSServedBy } from "@/components/proxy/tls-served-by"
 import { Segments } from "@/components/deploy/settings/segments"
 import { Field, FieldRow } from "@/components/form"
@@ -116,6 +117,7 @@ export function RequestTester() {
   const router = useRouter()
   const params = useSearchParams()
   const linked = params.get("url")
+  const { status, hasNginx } = useProxy()
 
   // ?url= fills the address fields; the method and headers typed are kept
   // when it changes, since the address bar does not carry them.
@@ -127,10 +129,8 @@ export function RequestTester() {
   }
   const edit = (next: Partial<Fields>) => setFields((current) => ({ ...current, ...next }))
 
-  const [offering, setOffering] = useState(false)
-  const sites = usePoll((signal) => get<VHost[]>("/proxy/vhosts", undefined, signal), 0, [], {
-    enabled: admin && offering,
-  })
+  // The section's own read of the sites, which the layout polls for every page.
+  const sites = useProxyRead("vhosts")
   const names = siteNames(sites.data)
 
   const url = composeURL(fields)
@@ -167,185 +167,226 @@ export function RequestTester() {
 
   const { copy, copied } = useCopy()
   const hop = result?.hops[selected]
+  // The tester reaches nginx on this machine and nothing else, so a host
+  // without it gets the section's own screen for that rather than a form
+  // whose every send fails with a dial error.
+  const missing = status !== undefined && !hasNginx
 
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Proxy" title="Request tester" />
+      <HostIdentity
+        mark="nginx"
+        fallback={PaperAirplane}
+        title={
+          <span
+            role="heading"
+            aria-level={2}
+            className={cn("break-all", (hop || url) && "font-mono text-[0.92em]")}
+          >
+            {hop?.url ?? (url || "Request tester")}
+          </span>
+        }
+        facts={
+          <TesterFacts
+            hop={hop}
+            busy={busy}
+            failed={error !== undefined}
+            connectTo={result?.connectTo ?? fields.connectTo}
+            admin={admin}
+            missing={missing}
+          />
+        }
+      />
       <TLSTools current="request" />
 
-      {!admin && (
-        <Notice title="Sending requests needs an administrator">
-          The tester sends requests from this server with a method of your choosing, so it is held
-          to the same account level as the network probes.
-        </Notice>
+      {missing ? (
+        <OverviewEmpty
+          mark={<EmptyMark product="nginx" corner={PaperAirplane} />}
+          title="nginx is not installed here"
+          action={
+            admin ? (
+              <Button variant="outline" size="xs" asChild>
+                <Link href="/proxy">Install</Link>
+              </Button>
+            ) : undefined
+          }
+        >
+          The tester sends a request to nginx on this machine.
+        </OverviewEmpty>
+      ) : (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (admin && !busy) void send()
+          }}
+          className="flex min-w-0 flex-col gap-4"
+        >
+          <FieldRow columns={3}>
+            <Field label="Method" htmlFor="request-method">
+              <Select value={fields.method} onValueChange={(method) => edit({ method })}>
+                <SelectTrigger id="request-method" className="w-full font-mono">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {METHODS.map((method) => (
+                    <SelectItem key={method} value={method} className="font-mono">
+                      {method}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Scheme">
+              <Segments
+                label="Scheme"
+                value={fields.scheme}
+                onChange={(scheme) => edit({ scheme })}
+                options={[
+                  { value: "https", label: "https", mono: true },
+                  { value: "http", label: "http", mono: true },
+                ]}
+                fill
+              />
+            </Field>
+            <Field label="Connect to" info="nginx on this machine; DNS is not asked.">
+              <Segments
+                label="Connect to"
+                value={fields.connectTo}
+                onChange={(connectTo) => edit({ connectTo })}
+                options={[
+                  { value: "127.0.0.1", label: "127.0.0.1", mono: true },
+                  { value: "::1", label: "::1", mono: true },
+                ]}
+                fill
+              />
+            </Field>
+          </FieldRow>
+          <FieldRow columns={3}>
+            <Field
+              label="Domain"
+              htmlFor="request-domain"
+              info="A name one of this server's nginx sites serves."
+            >
+              <Input
+                id="request-domain"
+                list={admin ? "request-domains" : undefined}
+                value={fields.domain}
+                onChange={(event) => edit({ domain: event.target.value })}
+                placeholder="app.example.com"
+                className="font-mono"
+                autoComplete="off"
+                spellCheck={false}
+                autoCapitalize="none"
+                autoCorrect="off"
+                inputMode="url"
+              />
+            </Field>
+            <Field label="Port" htmlFor="request-port" info="Blank for the scheme's own.">
+              <Input
+                id="request-port"
+                value={fields.port}
+                onChange={(event) => edit({ port: event.target.value })}
+                placeholder={fields.scheme === "https" ? "443" : "80"}
+                className="font-mono"
+                autoComplete="off"
+                inputMode="numeric"
+              />
+            </Field>
+            <Field label="Path" htmlFor="request-path">
+              <Input
+                id="request-path"
+                value={fields.path}
+                onChange={(event) => edit({ path: event.target.value })}
+                placeholder="/"
+                className="font-mono"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </Field>
+          </FieldRow>
+          <Field
+            label="Headers"
+            htmlFor="request-headers"
+            info="One per line, Name: value. Host comes from the domain."
+            error={headers.error}
+          >
+            <Textarea
+              id="request-headers"
+              value={fields.headers}
+              onChange={(event) => edit({ headers: event.target.value })}
+              placeholder={"Accept: text/html\nCookie: session=…"}
+              rows={3}
+              className="font-mono text-xs"
+              spellCheck={false}
+              aria-invalid={headers.error ? true : undefined}
+            />
+          </Field>
+          {admin && (
+            <datalist id="request-domains">
+              {names.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          )}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button type="submit" size="sm" disabled={!admin || !request || busy} pending={busy}>
+              <PaperAirplane />
+              Send
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!request}
+              onClick={() => request && void copy(curlCommand(request), "curl command")}
+            >
+              {copied ? <Check /> : <Copy />}
+              Copy as curl
+            </Button>
+          </div>
+        </form>
       )}
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (admin && !busy) void send()
-        }}
-        className="flex min-w-0 flex-col gap-4"
-      >
-        <FieldRow columns={3}>
-          <Field label="Method" htmlFor="request-method">
-            <Select value={fields.method} onValueChange={(method) => edit({ method })}>
-              <SelectTrigger id="request-method" className="w-full font-mono">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {METHODS.map((method) => (
-                  <SelectItem key={method} value={method} className="font-mono">
-                    {method}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Scheme">
-            <Segments
-              label="Scheme"
-              value={fields.scheme}
-              onChange={(scheme) => edit({ scheme })}
-              options={[
-                { value: "https", label: "https", mono: true },
-                { value: "http", label: "http", mono: true },
-              ]}
-              fill
-            />
-          </Field>
-          <Field label="Connect to" hint="nginx on this machine; DNS is not asked">
-            <Segments
-              label="Connect to"
-              value={fields.connectTo}
-              onChange={(connectTo) => edit({ connectTo })}
-              options={[
-                { value: "127.0.0.1", label: "127.0.0.1", mono: true },
-                { value: "::1", label: "::1", mono: true },
-              ]}
-              fill
-            />
-          </Field>
-        </FieldRow>
-        <FieldRow columns={3}>
-          <Field
-            label="Domain"
-            htmlFor="request-domain"
-            hint="A name one of this server's nginx sites serves"
-          >
-            <Input
-              id="request-domain"
-              list={admin ? "request-domains" : undefined}
-              value={fields.domain}
-              onChange={(event) => edit({ domain: event.target.value })}
-              onFocus={() => setOffering(true)}
-              placeholder="app.example.com"
-              className="font-mono"
-              autoComplete="off"
-              spellCheck={false}
-              autoCapitalize="none"
-              autoCorrect="off"
-              inputMode="url"
-            />
-          </Field>
-          <Field label="Port" htmlFor="request-port" hint="Blank for the scheme's own">
-            <Input
-              id="request-port"
-              value={fields.port}
-              onChange={(event) => edit({ port: event.target.value })}
-              placeholder={fields.scheme === "https" ? "443" : "80"}
-              className="font-mono"
-              autoComplete="off"
-              inputMode="numeric"
-            />
-          </Field>
-          <Field label="Path" htmlFor="request-path">
-            <Input
-              id="request-path"
-              value={fields.path}
-              onChange={(event) => edit({ path: event.target.value })}
-              placeholder="/"
-              className="font-mono"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </Field>
-        </FieldRow>
-        <Field
-          label="Headers"
-          htmlFor="request-headers"
-          hint="One per line, Name: value. Host comes from the domain."
-          error={headers.error}
-        >
-          <Textarea
-            id="request-headers"
-            value={fields.headers}
-            onChange={(event) => edit({ headers: event.target.value })}
-            placeholder={"Accept: text/html\nCookie: session=…"}
-            rows={3}
-            className="font-mono text-xs"
-            spellCheck={false}
-            aria-invalid={headers.error ? true : undefined}
-          />
-        </Field>
-        {admin && (
-          <datalist id="request-domains">
-            {names.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-        )}
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Button type="submit" size="sm" disabled={!admin || !request || busy} pending={busy}>
-            <PaperAirplane />
-            Send
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={!request}
-            onClick={() => request && void copy(curlCommand(request), "curl command")}
-          >
-            {copied ? <Check /> : <Copy />}
-            Copy as curl
-          </Button>
-          {url && (
-            <span className="min-w-0 font-mono text-hint wrap-anywhere text-muted-foreground">
-              {url}
-            </span>
-          )}
-        </div>
-      </form>
-
       {error && !busy && <ErrorState error={error} />}
-      {admin && !result && !error && !busy && (
-        <EmptyState
-          icon={PaperAirplane}
-          title="Nothing sent yet"
-          description="Name one of this server's sites and send. The request goes to nginx here, with the name in SNI and Host, and shows what came back."
-        />
+      {admin && !missing && !result && !error && !busy && (
+        <p className="text-body text-muted-foreground">
+          <span className="font-medium text-foreground">Nothing sent yet.</span> Name one of this
+          server&rsquo;s sites and send.
+        </p>
       )}
 
       {result && hop && (
         <div className="flex min-w-0 animate-rise flex-col gap-6 md:gap-8">
-          <HopFigures hop={hop} />
           {result.hops.length > 1 || result.stopped ? (
             <Panel plain>
-              <PanelHeader title="Redirect chain" />
-              <PanelBody flush>
-                <RowList>
+              <PanelHeader
+                title="Redirect chain"
+                actions={
+                  <span className="numeric text-hint text-muted-foreground">
+                    {result.hops.length} {result.hops.length === 1 ? "request" : "requests"}
+                  </span>
+                }
+              />
+              <PanelBody>
+                <ChoiceList aria-label="Redirect chain">
                   {result.hops.map((entry, index) => (
-                    <Row
+                    <ChoiceRow
                       key={index}
-                      onClick={() => setSelected(index)}
-                      className={cn(index === selected && "bg-accent")}
-                      title={<span className="font-mono">{entry.url}</span>}
-                      subtitle={`${entry.method} · site ${entry.site}`}
+                      verb={`Show ${entry.method} ${entry.url}`}
+                      onSelect={() => setSelected(index)}
+                      className={cn(index === selected && "ring-2 ring-ring")}
+                      leading={
+                        <span className="numeric flex size-8 items-center justify-center text-hint text-muted-foreground">
+                          {index + 1}
+                        </span>
+                      }
+                      title={<span className="font-mono text-[0.92em]">{entry.url}</span>}
+                      description={`${entry.method} · site ${entry.site}`}
                       trailing={<Status verdict={hopVerdict(entry)} label={hopLabel(entry)} />}
                     />
                   ))}
-                </RowList>
+                </ChoiceList>
                 {result.stopped && (
                   <p className="pt-3 text-body break-words text-muted-foreground">
                     {stoppedText(result)}
@@ -357,6 +398,7 @@ export function RequestTester() {
           <HopDetail
             hop={hop}
             connectTo={result.connectTo}
+            admin={admin}
             // Reloading nginx sends the request again only when doing so is
             // harmless; a POST is sent when the operator says so.
             onReloaded={fields.method === "GET" || fields.method === "HEAD" ? send : () => {}}
@@ -367,43 +409,90 @@ export function RequestTester() {
   )
 }
 
-function HopFigures({ hop }: { hop: RequestHop }) {
-  return (
-    <StatGrid columns={4} dense>
-      <StatTile
-        label="Status"
-        value={hop.status ?? "failed"}
-        tone={verdictTone(hopVerdict(hop))}
-        hint={hop.location ? `to ${hop.location}` : hop.error}
-      />
-      <StatTile
-        label="Protocol"
-        value={hop.proto ?? "—"}
-        hint={
-          hop.tls ? `${hop.tls.version}${hop.tls.alpn ? ` · ALPN ${hop.tls.alpn}` : ""}` : "plain"
-        }
-      />
-      <StatTile
-        label="First byte"
-        value={hop.timings.firstByte ? millis(hop.timings.firstByte) : "—"}
-        hint={`connect ${millis(hop.timings.connect)}${hop.timings.tls ? ` · TLS ${millis(hop.timings.tls)}` : ""}`}
-      />
-      <StatTile
-        label="Total"
-        value={millis(hop.timings.total)}
-        hint={hop.status ? `${bytes(hop.bodyBytes)} read` : undefined}
-      />
-    </StatGrid>
+/**
+ * The answer on the identity line: its status in its colour, the protocol it
+ * came over, how long it took and how much was read. Before a send it says
+ * where the request will go.
+ */
+function TesterFacts({
+  hop,
+  busy,
+  failed,
+  connectTo,
+  admin,
+  missing,
+}: {
+  hop?: RequestHop
+  busy: boolean
+  failed: boolean
+  connectTo: string
+  admin: boolean
+  missing: boolean
+}) {
+  const facts: React.ReactNode[] = []
+  if (busy) {
+    facts.push(
+      <span key="busy" className="inline-flex items-center gap-1.5">
+        <Spinner className="size-3" /> sending
+      </span>,
+    )
+  } else if (hop) {
+    facts.push(
+      <Status
+        key="status"
+        verdict={hopVerdict(hop)}
+        label={hop.status === undefined ? "failed" : `answered ${hop.status}`}
+        className="font-medium"
+      />,
+    )
+    if (hop.proto) facts.push(<span key="proto">{hop.proto}</span>)
+    if (hop.tls)
+      facts.push(
+        <span key="tls">
+          {hop.tls.version}
+          {hop.tls.alpn ? ` · ALPN ${hop.tls.alpn}` : ""}
+        </span>,
+      )
+    if (hop.timings.firstByte)
+      facts.push(<span key="first">first byte {millis(hop.timings.firstByte)}</span>)
+    facts.push(<span key="total">total {millis(hop.timings.total)}</span>)
+    if (hop.status !== undefined) facts.push(<span key="read">{bytes(hop.bodyBytes)} read</span>)
+  } else if (missing) {
+    facts.push(<span key="missing">no nginx on this host</span>)
+  } else {
+    facts.push(
+      <HostFact key="to" product="nginx">
+        nginx on <span className="font-mono">{connectTo}</span>
+      </HostFact>,
+      <span key="dns">DNS not asked</span>,
+    )
+    if (failed)
+      facts.push(
+        <span key="failed" className="text-destructive">
+          not answered
+        </span>,
+      )
+  }
+  if (!admin)
+    facts.push(
+      <span key="admin" className="font-medium text-warning">
+        sending requests needs an administrator
+      </span>,
+    )
+  return facts.flatMap((fact, index) =>
+    index === 0 ? [fact] : [<FactDot key={`dot-${index}`} />, fact],
   )
 }
 
 function HopDetail({
   hop,
   connectTo,
+  admin,
   onReloaded,
 }: {
   hop: RequestHop
   connectTo: string
+  admin: boolean
   onReloaded: () => void
 }) {
   const port = new URL(hop.url).port || (hop.url.startsWith("https:") ? "443" : "80")
@@ -418,7 +507,14 @@ function HopDetail({
         )}
         {hop.status !== undefined && (
           <Panel plain>
-            <PanelHeader title="Response headers" />
+            <PanelHeader
+              title="Response headers"
+              actions={
+                <span className="numeric text-hint text-muted-foreground">
+                  {hop.headers.length}
+                </span>
+              }
+            />
             <PanelBody>
               <Well className="max-h-96 wrap-anywhere whitespace-pre-wrap">
                 {hop.headers.length
@@ -433,9 +529,9 @@ function HopDetail({
             <PanelHeader
               title="Body"
               actions={
-                hop.truncated ? (
-                  <span className="text-hint text-muted-foreground">first 64 KiB</span>
-                ) : undefined
+                <span className="text-hint text-muted-foreground">
+                  {hop.truncated ? "first 64 KiB" : bytes(hop.bodyBytes)}
+                </span>
               }
             />
             <PanelBody>
@@ -459,7 +555,7 @@ function HopDetail({
             <DetailList>
               <Detail label="Site">
                 <Link
-                  href={`/proxy/sites?site=${encodeURIComponent(hop.site)}`}
+                  href={sitePath(hop.site)}
                   className="font-mono wrap-anywhere underline-offset-4 hover:underline"
                 >
                   {hop.site}
@@ -470,6 +566,19 @@ function HopDetail({
                   {connectTo.includes(":") ? `[${connectTo}]` : connectTo}:{port}
                 </span>
               </Detail>
+              <Detail label="Timings">
+                <span className="numeric">
+                  connect {millis(hop.timings.connect)}
+                  {hop.timings.tls ? ` · TLS ${millis(hop.timings.tls)}` : ""}
+                  {hop.timings.firstByte ? ` · first byte ${millis(hop.timings.firstByte)}` : ""}
+                  {` · total ${millis(hop.timings.total)}`}
+                </span>
+              </Detail>
+              {hop.location && (
+                <Detail label="Redirects to">
+                  <span className="font-mono wrap-anywhere">{hop.location}</span>
+                </Detail>
+              )}
               {hop.tls && (
                 <Detail label="Cipher">
                   <span className="font-mono wrap-anywhere">{hop.tls.cipherSuite}</span>
@@ -498,7 +607,9 @@ function HopDetail({
             </DetailList>
           </PanelBody>
         </Panel>
-        {hop.tls?.origin && <TLSServedBy origin={hop.tls.origin} onRescan={onReloaded} />}
+        {hop.tls?.origin && (
+          <TLSServedBy origin={hop.tls.origin} onRescan={onReloaded} admin={admin} />
+        )}
       </div>
     </div>
   )
@@ -584,19 +695,6 @@ function hopVerdict(hop: RequestHop): Verdict {
 function hopLabel(hop: RequestHop) {
   if (hop.status === undefined) return "failed"
   return hop.proto ? `${hop.status} · ${hop.proto}` : String(hop.status)
-}
-
-function verdictTone(verdict: Verdict): Tone {
-  switch (verdict) {
-    case "ok":
-      return "success"
-    case "warning":
-      return "warning"
-    case "critical":
-      return "danger"
-    default:
-      return "default"
-  }
 }
 
 function stoppedText(result: RequestResult) {
