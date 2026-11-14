@@ -97,3 +97,59 @@ export function sentence(text: string) {
   const raised = trimmed[0].toUpperCase() + trimmed.slice(1)
   return /[.!?]$/.test(raised) ? raised : `${raised}.`
 }
+
+/** How a line of the tunnel's picture is drawn: moving only where both ends are up. */
+export type TunnelLine = { live: boolean; tone: "default" | "warning" | "danger"; dashed: boolean }
+
+/**
+ * The picture's three kinds of line: a hostname to Cloudflare's edge (its
+ * route and record), the edge to the connector (the connections cloudflared
+ * holds), and the connector to this server's proxy (the container running).
+ * Before anything is connected every line is dashed: a link not there yet.
+ */
+export function tunnelLines(status: TunnelStatus | undefined): {
+  edge: TunnelLine
+  origin: TunnelLine
+  hostname: (hostname: TunnelHostname) => TunnelLine
+} {
+  if (!status?.connected) {
+    const none: TunnelLine = { live: false, tone: "default", dashed: true }
+    return { edge: none, origin: none, hostname: () => none }
+  }
+  const running = status.connector.state === "running" && !status.connector.foreign
+  const ready = running && status.ready
+  return {
+    edge: ready
+      ? { live: true, tone: "default", dashed: false }
+      : { live: false, tone: "danger", dashed: true },
+    origin: running
+      ? { live: ready, tone: "default", dashed: false }
+      : { live: false, tone: "danger", dashed: true },
+    hostname: (hostname) => {
+      if (hostname.dns === "error") return { live: false, tone: "danger", dashed: true }
+      if (!hostname.routed || hostname.dns === "manual")
+        return { live: false, tone: "warning", dashed: hostname.dns === "manual" }
+      return { live: ready, tone: "default", dashed: false }
+    },
+  }
+}
+
+/** The connector's state in words: running, or what it did instead. */
+export function connectorWords(connector: TunnelStatus["connector"]): string {
+  if (connector.foreign) return "a container this dashboard did not make"
+  switch (connector.state) {
+    case "running":
+      return "running"
+    case "missing":
+      return "no container"
+    case "exited":
+      return connector.exitCode !== undefined ? `exited with code ${connector.exitCode}` : "exited"
+    default:
+      return connector.state
+  }
+}
+
+/** The way to connect a tunnel the page offers first: the API where credentials are saved. */
+export function defaultSetup(status: TunnelStatus | undefined): "token" | "api" {
+  return status?.api.available ? "api" : "token"
+}

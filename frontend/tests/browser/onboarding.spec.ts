@@ -93,12 +93,13 @@ test("a new account is asked what the server is for, and the answer shapes the s
   // goes with its rows, and Administration is in every answer.
   await expect(rail(page).getByText("Workspace", { exact: true })).toHaveCount(0)
   await expect(rail(page).getByText("Administration")).toBeVisible()
-  // The Overview keeps the tiles and blocks of what was chosen — Packages
+  // The Overview keeps the rows and blocks of what was chosen — Packages
   // among them, because every answer keeps it — and Databases is a block.
-  const tile = (name: RegExp) => page.locator("[data-slot=stat-tile]", { hasText: name })
-  for (const name of [/^Docker/, /^Security/, /^Packages/]) {
-    await expect(tile(name)).toBeVisible()
+  const services = page.getByRole("list", { name: "Services" })
+  for (const name of ["Docker", "Security", "Packages"]) {
+    await expect(services.getByRole("link", { name: `Open ${name}`, exact: true })).toBeVisible()
   }
+  await expect(services.getByRole("link", { name: "Open Git", exact: true })).toHaveCount(0)
   await expect(page.getByRole("heading", { name: "Databases", exact: true })).toBeVisible()
 
   // Answered once, never asked again.
@@ -224,4 +225,83 @@ test("Workspace asks the question again as cards and switches, and saves them", 
   await expect(bar).toContainText("Saved")
   await expect(toggle("Excalidraw")).toHaveAttribute("aria-checked", "false")
   await expect(page.getByRole("link", { name: "Ask me again" })).toHaveAttribute("href", "/welcome")
+})
+
+test("Workspace is one line that says where the answer stands, over one column of settings", async ({
+  page,
+}) => {
+  await mockOnboarding(page, { needsOnboarding: false, hiddenSections: ["network"] })
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/account/workspace")
+    const line = page.locator("[data-slot=host-identity]")
+    await expect(line).toHaveAttribute("data-layout", "project")
+    const editor = page.getByRole("group", { name: "Sidebar sections" })
+    const shown = await editor.getByRole("switch", { checked: true }).count()
+    const total = await editor.getByRole("switch").count()
+    expect(total - shown).toBe(1)
+    await expect(line).toContainText(`${shown} of ${total} shown`)
+    await expect(line).toContainText("5 of 6 purposes")
+    await expect(line.getByRole("link", { name: "Ask me again" })).toBeVisible()
+    await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+
+    // Both sections on the column's edges, the purposes over the sidebar.
+    const column = page.locator("[data-slot=settings-column]")
+    const sections = await column.locator("[data-slot=setting]").evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const box = node.getBoundingClientRect()
+        return { x: Math.round(box.x), y: box.y, bottom: box.bottom, width: Math.round(box.width) }
+      }),
+    )
+    expect(sections).toHaveLength(2)
+    expect(sections[1].x).toBe(sections[0].x)
+    expect(sections[1].width).toBe(sections[0].width)
+    expect(sections[1].y).toBeGreaterThanOrEqual(sections[0].bottom)
+    expect(sections[0].width).toBeLessThanOrEqual(768)
+
+    // The purposes are a grid of cards of one height, and the rail's entries are full-width
+    // rows of one height on hairlines, in no frame: one that is off is as tall as one that is on.
+    const cards = await page
+      .getByRole("group", { name: "Purposes" })
+      .getByRole("button")
+      .evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().height)))
+    expect(new Set(cards).size).toBe(1)
+    await expect(editor).not.toHaveClass(/border/)
+    const rows = await editor.locator("[data-slot=switch-row]").evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const box = node.getBoundingClientRect()
+        return { height: Math.round(box.height), right: Math.round(box.right) }
+      }),
+    )
+    expect(new Set(rows.map((row) => row.height)).size).toBe(1)
+    expect(new Set(rows.map((row) => row.right)).size).toBe(1)
+    expect(rows[0].right).toBe(sections[0].x + sections[0].width)
+
+    // Throwing a switch moves nothing under it, and the line counts it at once.
+    // Measured against the list's own top: the press may scroll the page.
+    const lastRow = () =>
+      editor.evaluate((list) => {
+        const rows = list.querySelectorAll("[data-slot=switch-row]")
+        return Math.round(
+          rows[rows.length - 1].getBoundingClientRect().top - list.getBoundingClientRect().top,
+        )
+      })
+    const placed = await lastRow()
+    await editor.getByRole("switch", { name: "Docker", exact: true }).click()
+    await expect(line).toContainText(`${shown - 1} of ${total} shown`)
+    await expect(column.getByText("Edited", { exact: true })).toBeVisible()
+    expect(await lastRow()).toBe(placed)
+    await page
+      .getByRole("region", { name: "Save changes" })
+      .getByRole("button", { name: "Discard" })
+      .click()
+    await expect(line).toContainText(`${shown} of ${total} shown`)
+
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      ),
+    ).toBe(false)
+    await page.screenshot({ path: `test-results/account-workspace-${width}.png`, fullPage: true })
+  }
 })

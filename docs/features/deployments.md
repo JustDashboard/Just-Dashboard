@@ -43,7 +43,7 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 <tr>
 <td width="50%" valign="top">
 <a href="../readme/deployment-releases.png"><img src="../readme/deployment-releases.png" alt="Delivery figures, releases per day and the list of deployments"></a>
-<p align="center"><b>Delivery</b><br><sub>Success rate, release time and why releases failed</sub></p>
+<p align="center"><b>Delivery</b><br><sub>How releases went, release time and why releases failed</sub></p>
 </td>
 <td width="50%" valign="top">
 <a href="../readme/deployment-runtime.png"><img src="../readme/deployment-runtime.png" alt="A project drawn from its domains through its services to its data, with live usage"></a>

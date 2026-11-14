@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import type { FileEntry, GitStatus, StackDetail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
+import { LG_BESIDE_RAIL } from "@/components/docker/beside-rail"
 import { useNow } from "@/components/deploy/vocabulary"
 import { FileEditorSheet } from "@/components/files/file-editor"
 import { FileIcon } from "@/components/files/file-icon"
@@ -69,7 +70,7 @@ export function StackFiles({
   productOf: (service: string) => string | undefined
   onOpenCompose: () => void
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useMediaQuery(LG_BESIDE_RAIL)
   const now = useNow(60_000)
   const root = stack.workingDir.replace(/\/+$/, "")
   const [goTo, setGoTo] = useState<{ path: string; key: number }>()

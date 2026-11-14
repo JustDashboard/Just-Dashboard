@@ -2,22 +2,112 @@
 
 import { useState } from "react"
 import { post } from "@/lib/api"
-import { relativeTime, shortSha } from "@/lib/format"
+import { calendarDate, relativeTime, shortSha } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type {
   BlocklistPreview,
   ProtectionBlocklist,
+  ProtectionView,
   SessionPreview,
   SessionResult,
 } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field } from "@/components/form"
+import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { impactTone } from "@/components/network/gateway/reading"
-import { coverageWord, diffWord } from "@/components/network/protection/reading"
+import { impactTone, totalWord } from "@/components/network/gateway/reading"
+import {
+  coverageWord,
+  diffWord,
+  listFacts,
+  listState,
+} from "@/components/network/protection/reading"
 import { useAuth } from "@/hooks/use-auth"
+
+const KIND_WORD: Record<ProtectionBlocklist["kind"], string> = {
+  country: "Countries list",
+  feed: "Feed list",
+  manual: "Typed addresses list",
+}
+
+/**
+ * How a list stands, at the head of its editor: its state, the last fetch's
+ * error in the server's own words, everything its one-line row has no room
+ * for (what it holds, its coverage, when it was fetched and when it next is,
+ * what the last change did, its signature), what it has dropped, and the
+ * enforcement evidence.
+ *
+ * All of it hung under the list's row before, which is why no two rows were
+ * one height.
+ */
+export function ListStanding({
+  list,
+  presets,
+}: {
+  list: ProtectionBlocklist
+  presets: ProtectionView["presets"]
+}) {
+  const state = listState(list)
+  const total = totalWord(list.total, calendarDate)
+  return (
+    <section aria-label={`About ${list.name}`} className="min-w-0 space-y-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <Status tone={state.tone} label={state.label} />
+        <span className="text-hint text-muted-foreground">
+          {KIND_WORD[list.kind]} · the kind cannot change
+        </span>
+      </div>
+      {list.error && (
+        <p role="alert" className="text-hint text-destructive">
+          {list.error}
+        </p>
+      )}
+      <p className="text-hint leading-relaxed text-muted-foreground">
+        {listFacts(list, presets, relativeTime).join(" · ")}
+      </p>
+      <p className="numeric text-hint text-muted-foreground">
+        {list.packets.toLocaleString()} packets dropped since the table was loaded
+        {total ? ` · ${total}` : ""}
+      </p>
+      {list.cache && <Enforcement list={list} />}
+    </section>
+  )
+}
+
+/**
+ * What is cached, what was rendered and what the kernel holds, said apart: a
+ * failed refresh does not itself prove that the protection loaded before it
+ * went away.
+ */
+function Enforcement({ list }: { list: ProtectionBlocklist }) {
+  if (!list.cache) return null
+  return (
+    <div
+      className="space-y-1 text-hint text-muted-foreground"
+      aria-label={`${list.name} enforcement evidence`}
+    >
+      <p>
+        Cache {list.cache.status}: {list.cache.count.toLocaleString()} networks
+        {list.savedCount !== undefined && list.savedCount !== list.cache.count
+          ? ` · last fetched count ${list.savedCount.toLocaleString()}`
+          : ""}
+        {list.runtime
+          ? ` · kernel ${list.runtime.status}: ${list.runtime.count === null ? "unknown" : list.runtime.count.toLocaleString()} networks`
+          : " · kernel unknown"}
+      </p>
+      {list.cache.error && <p role="alert">{list.cache.error}</p>}
+      {list.runtime?.error && <p role="alert">{list.runtime.error}</p>}
+      <details>
+        <summary className="cursor-pointer focus-ring">Policy generations</summary>
+        <p className="break-all">Cache: {list.cache.generation || "unavailable"}</p>
+        <p className="break-all">Render: {list.renderedGeneration || "unavailable"}</p>
+        <p className="break-all">Kernel: {list.runtime?.generation || "unavailable"}</p>
+      </details>
+    </div>
+  )
+}
 
 /**
  * What saving a list would block, before it is saved: how much address space

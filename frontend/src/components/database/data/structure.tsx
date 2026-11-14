@@ -4,7 +4,6 @@ import Link from "next/link"
 import { ArrowRight, Fingerprint, Key, Linked } from "@/components/icons"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { Metric } from "@/components/page"
 import { EmptyNote } from "@/components/state"
 import { Tag } from "@/components/tag"
 import {
@@ -19,8 +18,8 @@ import { CodeView } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { KindGlyph, rowObjectKind } from "@/components/database/data/kinds"
 import type { DbTableDetail } from "@/components/database/data/types"
-import { grouped } from "@/components/database/data/view"
-import { Facts } from "@/components/database/schema/facts"
+import { FactsLine } from "@/components/database/workbench/facts-line"
+import { tableFacts } from "@/components/database/workbench/table-facts"
 
 /**
  * What a table is made of, to read: its columns, its indexes, its keys and
@@ -49,25 +48,9 @@ export function TableStructure({ detail }: { detail: DbTableDetail }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="space-y-6 p-4">
-        {/* Parted by space, as the Schema page draws the same figures: a run
-            the engine can lengthen wraps there without a rule left dividing
-            a line's first figure from nothing. */}
-        <Facts>
-          <Metric
-            label="Rows"
-            value={detail.estimatedRows >= 0 ? `~${grouped(detail.estimatedRows)}` : "not counted"}
-          />
-          {detail.size !== undefined && <Metric label="Size" value={bytes(detail.size)} />}
-          {detail.dataSize !== undefined && <Metric label="Data" value={bytes(detail.dataSize)} />}
-          {detail.indexSize !== undefined && (
-            <Metric label="Indexes" value={bytes(detail.indexSize)} />
-          )}
-          <Metric label="Columns" value={detail.columns.length} />
-          {detail.owner && <Metric label="Owner" value={detail.owner} />}
-          {detail.facts.map((fact) => (
-            <Metric key={fact.name} label={fact.name} value={fact.value} />
-          ))}
-        </Facts>
+        {/* What the table amounts to, as one line of words: it was a strip
+            of six captioned figures over the columns they were about. */}
+        <FactsLine facts={tableFacts(detail, detail.columns.length)} />
         {detail.comment && (
           <p className="max-w-3xl text-body text-muted-foreground">{detail.comment}</p>
         )}

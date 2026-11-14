@@ -9,6 +9,7 @@ import {
   passingTest,
 } from "./fixtures/proxy/engine"
 import { modules as streamModules } from "./fixtures/proxy/streams"
+import { risen } from "./risen"
 
 /**
  * The overview and the engine it drives, for the ways they told an operator
@@ -41,6 +42,28 @@ const fileGone = failWith(404, {
 
 async function mockStatus(page: Page, status: Record<string, unknown>) {
   await page.route("**/api/v1/proxy/status", (route) => json(route, status))
+}
+
+/**
+ * A verb behind the `⋯` at the end of the engine's line, the menu left open
+ * on it. The line has one command, as a project's header does; the config
+ * test, the refresh and the service's other verbs are here.
+ */
+async function inMenu(page: Page, name: string | RegExp) {
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More (nginx |Caddy )?actions$/ })
+    .click()
+  return page.getByRole("menuitem", { name })
+}
+
+/** Reads every source again. The verb's name carries the page's age after it. */
+async function refreshAll(page: Page) {
+  await (await inMenu(page, /^Refresh/)).click()
+}
+
+async function testConfig(page: Page) {
+  await (await inMenu(page, "Test config")).click()
 }
 
 test("a source the overview cannot read is reported, never cleared", async ({ page }) => {
@@ -81,7 +104,7 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
   await expect(page.getByText("No certificates were found on this host.")).toHaveCount(0)
 
   sitesFail = false
-  await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Refresh" }).click()
+  await refreshAll(page)
   await expect(
     page.getByRole("list", { name: "Sites" }).locator("[data-slot='choice-row']"),
   ).toHaveCount(3)
@@ -282,7 +305,7 @@ test("restart is refused with nginx's own reason when its configuration fails", 
   await expect(editor.getByRole("button", { name: "Save and reload" })).toBeVisible()
 })
 
-test("a stopped nginx leads with Start, and Reload says why it cannot run", async ({ page }) => {
+test("a stopped nginx leads with Start, and Reload waits in the menu", async ({ page }) => {
   await mockProxy(page, { included: true })
   await mockUnit(page, stopped)
   const systemd = await watchSystemd(page)
@@ -301,12 +324,11 @@ test("a stopped nginx leads with Start, and Reload says why it cannot run", asyn
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("not running", { exact: true })).toBeVisible()
   await expect(identity.getByText("inactive (dead)")).toHaveCount(0)
-  const reload = identity.getByRole("button", { name: "Reload" })
-  await expect(reload).toBeDisabled()
-  await reload.hover({ force: true })
-  await expect(page.getByRole("tooltip")).toHaveText("nginx is not running")
+  // Start has the line's one place; Reload waits in the menu and cannot be
+  // pressed, the state beside the name saying why.
+  await expect(identity.getByRole("button", { name: "Reload" })).toHaveCount(0)
+  await expect(await inMenu(page, "Reload nginx")).toBeDisabled()
   // Stopped, it has nothing to restart or stop.
-  await identity.getByRole("button", { name: "More nginx actions" }).click()
   await expect(page.getByRole("menuitem", { name: /Restart|Stop/ })).toHaveCount(0)
   await expect(page.getByRole("menuitem", { name: "Service details" })).toBeVisible()
   await page.keyboard.press("Escape")
@@ -319,7 +341,10 @@ test("a stopped nginx leads with Start, and Reload says why it cannot run", asyn
   release()
   await expect(page.getByText("nginx started")).toBeVisible()
   await expect(identity.getByText("running", { exact: true })).toBeVisible()
-  await expect(identity.getByRole("button", { name: "Reload" })).toBeEnabled()
+  // Running, Reload is the line's command again.
+  const reload = identity.getByRole("button", { name: "Reload nginx" })
+  await expect(reload).toBeEnabled()
+  await expect(reload).toHaveAttribute("data-variant", "default")
   await expect(identity.getByRole("button", { name: "Start nginx" })).toHaveCount(0)
   expect(started).toEqual(["POST"])
   expect(systemd).toEqual([])
@@ -578,7 +603,10 @@ test("a failed engine says why, with its journal and a way to clear it", async (
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("failed", { exact: true })).toBeVisible()
   await expect(identity.getByRole("button", { name: "Start nginx" })).toBeVisible()
-  await expect(identity.getByRole("button", { name: "Reload" })).toBeDisabled()
+  // Start has the line's one place; Reload waits in the menu, greyed.
+  await expect(identity.getByRole("button", { name: "Reload" })).toHaveCount(0)
+  await expect(await inMenu(page, "Reload nginx")).toBeDisabled()
+  await page.keyboard.press("Escape")
 
   await expect(page.getByText("nginx exited with an error")).toBeVisible()
   await expect(page.getByText("result exit-code · restarted 3 times by systemd")).toBeVisible()
@@ -676,10 +704,12 @@ test("a reader sees a failed engine's reason and journal, and none of its contro
 
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("won't start at boot")).toBeVisible()
-  // The bar holds the page's own Refresh, which a reader may press; none of
-  // the engine's commands.
+  // The line holds the menu and no command; in it the page's own Refresh,
+  // which a reader may press, and none of the engine's verbs.
   await expect(identity.getByRole("button")).toHaveCount(1)
-  await expect(identity.getByRole("button", { name: "Refresh" })).toBeVisible()
+  await expect(await inMenu(page, /^Refresh/)).toBeVisible()
+  await expect(page.getByRole("menuitem")).toHaveCount(1)
+  await page.keyboard.press("Escape")
   await expect(page.getByText("nginx exited with an error")).toBeVisible()
   await expect(page.getByRole("button", { name: "Clear failed state" })).toHaveCount(0)
   await page.getByRole("button", { name: "Last 30 journal lines" }).click()
@@ -769,7 +799,7 @@ test("a running Docker Caddy ingress is tested and reloaded inside its container
   // The host's Caddyfile path is not the ingress's.
   await expect(identity.getByText("/etc/caddy/Caddyfile")).toHaveCount(0)
 
-  await identity.getByRole("button", { name: "Test config" }).click()
+  await testConfig(page)
   const panel = page.getByRole("dialog", { name: "Caddy config test" })
   await expect(panel.getByText("Valid with 1 warning")).toBeVisible()
   // The file it names is the container's, which the editor would open on the host.
@@ -807,8 +837,10 @@ test("an ingress the first deployment would start is not offered controls", asyn
   await expect(identity.getByText("nothing found on this host")).toBeVisible()
   await expect(identity.getByText("a Caddy ingress starts with the first deployment")).toBeVisible()
   await expect(identity.getByText("ingress", { exact: true })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Test config" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Reload" })).toHaveCount(0)
+  await expect(await inMenu(page, "Test config")).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: /^Refresh/ })).toBeVisible()
+  await page.keyboard.press("Escape")
   const overflow = await page
     .locator("[data-slot='page']")
     .evaluate((element) => element.scrollWidth > element.clientWidth + 1)
@@ -981,8 +1013,10 @@ test("the config editor offers nothing to save over a file it could not read", a
     gone ? fileGone(route) : json(route, { content: "server {\n    # served-from-disk\n}\n" }),
   )
   await page.goto("/proxy/sites")
+  // A site's file is a word in its row's menu.
   const card = page.locator("[data-slot='choice-row']").filter({ hasText: "app.example.com" })
-  await card.getByRole("button", { name: "Raw config" }).click()
+  await card.getByRole("button", { name: "More actions for app.example.com" }).click()
+  await page.getByRole("menuitem", { name: "Raw config" }).click()
 
   const sheet = page.getByRole("dialog")
   await expect(sheet.getByRole("alert")).toContainText("That file is not on disk.")
@@ -1031,10 +1065,14 @@ test("the header says how old the page is, and Refresh reads every source again"
 
   hold = new Promise((resolve) => (release = resolve))
   asked.length = 0
-  const refresh = header.getByRole("button", { name: "Refresh" })
+  // The menu says the age beside the verb, where the button's tooltip did.
+  const refresh = await inMenu(page, /^Refresh/)
+  await expect(refresh).toContainText(/updated [2-5]\ds ago/)
   await refresh.click()
   await expect(header.getByText("Refreshing…")).toBeVisible()
-  await expect(refresh).toHaveAttribute("aria-busy", "true")
+  // In flight, it cannot be pressed again.
+  await expect(await inMenu(page, /^Refresh/)).toBeDisabled()
+  await page.keyboard.press("Escape")
   // Every source the page shows is asked again, not only the fast ones.
   await expect
     .poll(() => asked, { timeout: 15_000 })
@@ -1053,7 +1091,7 @@ test("the header says how old the page is, and Refresh reads every source again"
   await expect(header.getByText("Refreshing…")).toBeVisible()
   release()
   await expect(fresh).toBeVisible()
-  await expect(refresh).not.toHaveAttribute("aria-busy", "true")
+  await expect(await inMenu(page, /^Refresh/)).toBeEnabled()
 })
 
 test("the age is the oldest reading's, which is the five-minute certificate list", async ({
@@ -1117,14 +1155,12 @@ test("a source that never answers a refresh is named, and Refresh asks it again"
   })
   await page.goto("/proxy")
   const header = page.locator("[data-slot='host-identity']")
-  const refresh = header.getByRole("button", { name: "Refresh" })
   await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
 
   hang = true
   const before = siteReads
-  await refresh.click()
+  await refreshAll(page)
   await expect(header.getByText("Refreshing…")).toBeVisible()
-  await expect(refresh).toHaveAttribute("aria-busy", "true")
   await expect.poll(() => siteReads).toBe(before + 1)
 
   // Neither the client nor the server gives up on a read, so this one would
@@ -1133,12 +1169,12 @@ test("a source that never answers a refresh is named, and Refresh asks it again"
   const late = header.getByText("No answer from sites", { exact: true })
   await expect(late).toBeVisible()
   await expect(header.getByText("Refreshing…")).toHaveCount(0)
-  await expect(refresh).toBeEnabled()
-  await expect(refresh).not.toHaveAttribute("aria-busy", "true")
 
   // Pressing it again abandons the read that never came back and asks afresh.
   hang = false
-  await refresh.click()
+  const again = await inMenu(page, /^Refresh/)
+  await expect(again).toBeEnabled()
+  await again.click()
   await expect.poll(() => siteReads).toBe(before + 2)
   await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
   await expect(late).toHaveCount(0)
@@ -1174,7 +1210,7 @@ test("a status that fails after answering is reported rather than drawn as curre
   await page.clock.fastForward(20_000)
 
   statusFails = true
-  await header.getByRole("button", { name: "Refresh" }).click()
+  await refreshAll(page)
   // The engine line stays — it is the last answer — and the list says so.
   await expect(page.getByText("The proxy status could not be read")).toBeVisible()
   await expect(identity.getByText("1.26.3", { exact: true })).toBeVisible()
@@ -1186,7 +1222,7 @@ test("a status that fails after answering is reported rather than drawn as curre
   await expect(header.getByText("Updated just now")).toHaveCount(0)
 
   statusFails = false
-  await header.getByRole("button", { name: "Refresh" }).click()
+  await refreshAll(page)
   await expect(page.getByText("The proxy status could not be read")).toHaveCount(0)
 })
 
@@ -1203,7 +1239,7 @@ test("a service state that cannot be read is not drawn from its last answer", as
   await expect(identity.getByText(/^up \d/)).toBeVisible()
 
   unitFails = true
-  await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Refresh" }).click()
+  await refreshAll(page)
   const unread = identity.getByText("couldn't read nginx.service")
   await expect(unread).toBeVisible()
   await expect(unread).toHaveAttribute("title", "systemd did not answer")
@@ -1268,10 +1304,7 @@ test("Test config opens on its verdict, and a warning nginx places nowhere opens
   const reads = await watchConfigReads(page)
   await page.goto("/proxy")
 
-  await page
-    .locator("[data-slot='host-identity']")
-    .getByRole("button", { name: "Test config" })
-    .click()
+  await testConfig(page)
   const panel = page.getByRole("dialog", { name: "nginx config test" })
   // It was a toast that said "valid" and dropped the warning.
   await expect(panel.getByText("Valid with 1 warning")).toBeVisible()
@@ -1339,7 +1372,7 @@ test("a test that fails offers the file at the line nginx names, and Test again 
   const reads = await watchConfigReads(page)
   await page.goto("/proxy")
 
-  await page.getByRole("button", { name: "Test config" }).click()
+  await testConfig(page)
   const panel = page.getByRole("dialog", { name: "nginx config test" })
   await expect(panel.getByText("Fails", { exact: true })).toBeVisible()
   await expect(
@@ -1399,7 +1432,7 @@ test("a test that does not finish says so rather than Fails, and Try again runs 
   })
   await page.goto("/proxy")
 
-  await page.getByRole("button", { name: "Test config" }).click()
+  await testConfig(page)
   const panel = page.getByRole("dialog", { name: "nginx config test" })
   const alert = panel.getByRole("alert")
   await expect(alert.getByText("nginx -t took longer than 30s and was stopped")).toBeVisible()
@@ -1450,7 +1483,8 @@ test("a reader is not asked about the config test and has no way to run one", as
   await expect(
     page.getByRole("list", { name: "Sites" }).locator("[data-slot='choice-row']"),
   ).toHaveCount(3)
-  await expect(page.getByRole("button", { name: "Test config" })).toHaveCount(0)
+  await expect(await inMenu(page, "Test config")).toHaveCount(0)
+  await page.keyboard.press("Escape")
   await expect(page.getByText(/config test/)).toHaveCount(0)
   expect(asked).toEqual([])
 })
@@ -1554,7 +1588,7 @@ test("sites sharing a server_name snippet are each placed at their own server bl
   const reads = await watchConfigReads(page)
   await page.goto("/proxy")
 
-  await page.getByRole("button", { name: "Test config" }).click()
+  await testConfig(page)
   const panel = page.getByRole("dialog", { name: "nginx config test" })
   const claims = panel.getByRole("list", { name: "Sites that claim this name" })
   const [served, ignored] = [
@@ -1592,7 +1626,7 @@ test("a file saved from the test's editor is tested again when it closes", async
   })
   await page.goto("/proxy")
 
-  await page.getByRole("button", { name: "Test config" }).click()
+  await testConfig(page)
   const panel = page.getByRole("dialog", { name: "nginx config test" })
   await panel.getByRole("button", { name: "Open at line 3" }).click()
   const editor = page.getByRole("dialog", { name: "app" })
@@ -1634,7 +1668,7 @@ test("the config test and the sites claiming a name fit a phone", async ({ page 
   ])
   await page.goto("/proxy")
 
-  await page.getByRole("button", { name: "Test config" }).click()
+  await testConfig(page)
   const panel = page.getByRole("dialog", { name: "nginx config test" })
   await expect(panel.getByText("/etc/nginx/sites-available/app-copy:3")).toBeVisible()
   await expect(panel.getByText("/etc/nginx/sites-available/app:3")).toBeVisible()
@@ -1681,16 +1715,18 @@ test("the configuration page lists nginx's files by folder, each saying whether 
   const reads = await watchConfigFiles(page)
   await page.goto("/proxy/config")
 
-  const tile = (label: string) =>
-    page.locator("[data-slot='stat-tile']").filter({ has: page.getByText(label, { exact: true }) })
-  await expect(tile("Files")).toContainText("13")
-  await expect(tile("Files")).toContainText("in 8 folders")
+  // The page opens on nginx's directory with what it holds as facts, not tiles.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("/etc/nginx")
+  await expect(identity).toContainText("13 files in 8 folders")
   // A link and its file are one file read once; the module outside counts.
-  await expect(tile("Read by nginx")).toContainText("7")
-  await expect(tile("Read by nginx")).toContainText("3 not read")
-  await expect(tile("Managed")).toContainText("2")
-  await expect(tile("Managed")).toContainText("7 written by hand")
-  await expect(tile("Last test")).toContainText("none since the dashboard started")
+  await expect(identity).toContainText("7 read, 3 not")
+  // Who wrote them is the chips over the list, not counted on the line as well.
+  await expect(identity).not.toContainText("by the dashboard")
+  await expect(page.getByRole("button", { name: /^Managed 2$/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^By hand 7$/ })).toBeVisible()
+  await expect(identity).toContainText("no test since the dashboard started")
+  await expect(page.locator("[data-slot='stat-grid'], [data-slot='stat-tile']")).toHaveCount(0)
 
   const enabled = page.getByRole("list", { name: "Files in sites-enabled/" })
   const link = enabled.locator("[data-slot='choice-row']").filter({ hasText: "app.example.com" })
@@ -1755,11 +1791,15 @@ test("a reader sees the files read-only, with no test and nothing of what nginx 
   await watchConfigFiles(page)
   await page.goto("/proxy/config")
 
-  await expect(
-    page.locator("[data-slot='stat-tile']").filter({ hasText: "Last test" }),
-  ).toContainText("administrators only")
+  // A reader is told nothing of the test they may not run, and gets no views but Files.
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("13 files")
+  await expect(page.locator("[data-slot='host-identity']")).not.toContainText("test")
   await expect(page.getByRole("button", { name: "Test config" })).toHaveCount(0)
-  await expect(page.getByRole("navigation", { name: "Configuration views" })).toHaveCount(0)
+  await expect(page.getByRole("tablist", { name: "Configuration views" })).toHaveCount(0)
+  // A view named in the address is an administrator's; a reader stays on the files.
+  await page.goto("/proxy/config?tab=settings")
+  await expect(page.getByRole("list", { name: "What nginx reads" })).toBeVisible()
+  await expect(page.getByRole("form", { name: "nginx settings" })).toHaveCount(0)
   await page.getByRole("button", { name: "View nginx.conf" }).click()
   const editor = page.getByRole("dialog", { name: "nginx.conf" })
   await expect(editor.locator(".monaco-editor .view-lines")).toContainText("server_name", {
@@ -1778,9 +1818,11 @@ test("what nginx loads is listed in its order and searched by text, pattern and 
   const reads = await watchConfigFiles(page)
   await page.goto("/proxy/config")
   await page
-    .getByRole("navigation", { name: "Configuration views" })
-    .getByRole("button", { name: "What nginx loads" })
+    .getByRole("tablist", { name: "Configuration views" })
+    .getByRole("tab", { name: "What nginx loads" })
     .click()
+  // The view is in the address, so a link and a reload open on it.
+  await expect(page).toHaveURL(/[?&]tab=effective/)
 
   const order = page.getByRole("list", { name: "Files nginx loads" })
   await expect(order.locator("[data-slot='choice-row']")).toHaveCount(4)
@@ -1845,8 +1887,7 @@ test("a configuration nginx refuses shows its test in place of what it loads", a
         })
       : route.fallback(),
   )
-  await page.goto("/proxy/config")
-  await page.getByRole("button", { name: "What nginx loads" }).click()
+  await page.goto("/proxy/config?tab=effective")
 
   await expect(page.getByText("nginx refuses its configuration", { exact: true })).toBeVisible()
   await expect(page.getByText('unknown directive "frobnicate"', { exact: true })).toBeVisible()
@@ -1964,9 +2005,9 @@ test("a file the directory's includes cannot follow is said, and the files past 
   await expect(page.locator("[data-slot='page']")).toContainText(
     'sites-available/legacy.example.com:5: unexpected "}".',
   )
-  await expect(
-    page.locator("[data-slot='stat-tile']").filter({ hasText: "Read by nginx" }),
-  ).toContainText("not every include followed")
+  await expect(page.locator("[data-slot='host-identity']")).toContainText(
+    "not every include followed",
+  )
   await expect(
     page
       .getByRole("list", { name: "Files in snippets/" })
@@ -2344,10 +2385,7 @@ test("a clean config test is a toast, and Show output opens the panel on it", as
   const runs = await mockTests(page, [passingTest])
   await page.goto("/proxy")
 
-  await page
-    .locator("[data-slot='host-identity']")
-    .getByRole("button", { name: "Test config" })
-    .click()
+  await testConfig(page)
   // A window-high panel holding one green line was all ground and no answer.
   const toast = page.locator("[data-sonner-toast]").filter({ hasText: "nginx config is valid" })
   await expect(toast).toContainText("A reload would succeed.")
@@ -2387,4 +2425,138 @@ test("the modules sit beside the version, and one a package provides installs fr
   await list.getByRole("button", { name: "Install stream (libnginx-mod-stream)" }).click()
   await expect.poll(() => installs).toEqual([{ packages: ["libnginx-mod-stream"] }])
   await expect(list).toHaveCount(0)
+})
+
+/** What GET /proxy/upstreams answers for the two nginx sites: one up, one refusing. */
+const upstreamCheck = {
+  checkedAt: new Date().toISOString(),
+  targets: [
+    {
+      site: "app.example.com",
+      kind: "http",
+      directive: "proxy_pass",
+      address: "127.0.0.1:3000",
+      file: "/etc/nginx/sites-available/app.example.com",
+      line: 12,
+      state: "up",
+      ms: 2,
+      owner: "node",
+    },
+    {
+      site: "legacy.example.com",
+      kind: "http",
+      directive: "proxy_pass",
+      address: "127.0.0.1:8080",
+      file: "/etc/nginx/sites-available/legacy.example.com",
+      line: 12,
+      state: "refused",
+    },
+  ],
+}
+
+for (const width of [1280, 390]) {
+  test(`the overview opens as a project's header, at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockProxy(page, { included: true })
+    await page.goto("/proxy")
+
+    const identity = page.locator("[data-slot='host-identity']")
+    await expect(identity.getByText(/^up \d/)).toBeVisible()
+    // On the page's own ground with a rule under it, not a framed bar.
+    await expect(identity).toHaveAttribute("data-layout", "project")
+    await expect(identity).not.toHaveAttribute("data-bar")
+    expect(await identity.evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe("0px")
+    // One command, the brand's, and the menu after it: it held five controls.
+    const reload = identity.getByRole("button", { name: "Reload nginx" })
+    await expect(reload).toHaveAttribute("data-variant", "default")
+    await expect(identity.getByRole("button")).toHaveCount(2)
+    await expect(identity.getByRole("link", { name: "Alerts" })).toHaveCount(0)
+    // The command stands on the name's row, at a phone's width too.
+    await risen(page)
+    const name = await identity.getByText("nginx", { exact: true }).boundingBox()
+    const command = await reload.boundingBox()
+    expect(Math.abs(command!.y + command!.height / 2 - (name!.y + name!.height / 2))).toBeLessThan(
+      12,
+    )
+    // The picture is the first block under it; the tiles that carry the
+    // hour's trends come after.
+    const picture = await page.locator("[data-slot='route-picture']").boundingBox()
+    expect(picture!.y).toBeGreaterThan(command!.y)
+    const overflow = await page
+      .locator("[data-slot='page']")
+      .evaluate((element) => element.scrollWidth > element.clientWidth + 1)
+    expect(overflow).toBe(false)
+  })
+
+  test(`a route is one height whatever is known of its upstream, and the list holds still, at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockProxy(page, { included: true })
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await page.route("**/api/v1/proxy/upstreams", async (route) => {
+      await held
+      return json(route, upstreamCheck)
+    })
+    await page.goto("/proxy")
+
+    const rows = page.getByRole("list", { name: "Sites" }).locator("[data-slot='choice-row']")
+    await expect(rows).toHaveCount(3)
+    await risen(page)
+    const before = await Promise.all((await rows.all()).map((row) => row.boundingBox()))
+    // One height: a route nginx forwards, and the ingress's, which names no upstream to check.
+    expect(new Set(before.map((box) => box!.height)).size).toBe(1)
+
+    release()
+    const legacy = rows.filter({ hasText: "legacy.example.com" })
+    // The reading is on the route's own line, in words at every width when it is wrong.
+    await expect(legacy.getByText("refused", { exact: true })).toBeVisible()
+    await expect(page.getByRole("list", { name: "Upstreams" })).toHaveCount(0)
+    await risen(page)
+    const after = await Promise.all((await rows.all()).map((row) => row.boundingBox()))
+    // Nothing hangs under a row, so no row grew and none under it moved.
+    expect(after.map((box) => [box!.y, box!.height])).toEqual(
+      before.map((box) => [box!.y, box!.height]),
+    )
+    if (width >= 640) {
+      await expect(rows.filter({ hasText: "app.example.com" }).getByText("up 2 ms")).toBeVisible()
+    }
+  })
+}
+
+test("the engine's line and the picture keep their place while the sites are read", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/proxy/vhosts", async (route) => {
+    await held
+    return json(route, vhosts)
+  })
+  await page.goto("/proxy")
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText(/^up \d/)).toBeVisible()
+  await risen(page)
+  const loading = await identity.boundingBox()
+
+  release()
+  await expect(page.locator("[data-slot='route-picture']")).toBeVisible()
+  await expect(identity.getByRole("link", { name: "3 sites, 2 on TLS" })).toBeVisible()
+  await risen(page)
+  const loaded = await identity.boundingBox()
+  expect(loaded?.y).toBe(loading?.y)
+  expect(loaded?.height).toBe(loading?.height)
+})
+
+test("the engine log takes the height every service's log takes", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy")
+  const log = page.getByRole("region", { name: "Engine log" })
+  await expect(log.getByRole("combobox", { name: "Engine log" })).toBeVisible()
+  // It was nine tenths of the window and forty rem at the least: on a log
+  // that is not streaming, the lower half of the page was an empty pane.
+  const box = await log.boundingBox()
+  expect(box!.height).toBeLessThanOrEqual(900 * 0.75 + 80)
 })

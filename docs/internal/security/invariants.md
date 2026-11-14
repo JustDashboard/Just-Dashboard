@@ -734,7 +734,8 @@ not keep it from a role, and must not be described as if they did.
 
 **Where the operator is told.** The Roles section of `SECURITY.md`, and the sentences shown wherever a
 role is handed out or read: the new-user and new-key forms, the picker on each account's card and the
-role ladder on the profile (`frontend/src/components/account/capabilities.ts`: `ROLE_SUMMARY` and the
+role ladder on the profile, where since 0.8.7 each is the tooltip of the rung's or the power's name
+rather than a line under it (`frontend/src/components/account/capabilities.ts`: `ROLE_SUMMARY` and the
 `read` and `file.write` descriptions, held by `capabilities.test.js`). A change to what a role reaches
 changes both in the same commit.
 

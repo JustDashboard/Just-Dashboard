@@ -2,14 +2,16 @@
 
 import { useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { AddressSection, ConnectionForm } from "@/components/database/ops/settings-connection"
+import { AddressSection } from "@/components/database/ops/settings-address"
+import { ConnectionForm } from "@/components/database/ops/settings-connection"
 import { SettingsFrame } from "@/components/database/ops/settings-frame"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { formerSettingsPage, settingsPageHref } from "@/components/database/shell/settings-pages"
 
 /**
- * General: the address the dashboard dials, drawn as the way it goes, then
- * what it calls the connection and whether it may change what is in it.
+ * General: the address the dashboard dials, drawn as the way it goes and
+ * changed in its fields, then what it calls the connection and whether it may
+ * change what is in it.
  *
  * It is also where an address from the one-page Settings lands: `#danger`,
  * `#reachability` or a parameter search (`?q=`) is sent on, in place, to the

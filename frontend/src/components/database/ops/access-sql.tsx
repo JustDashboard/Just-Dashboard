@@ -9,7 +9,8 @@ import {
 } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag, SectionFrame } from "@/components/database/kit"
-import { AccountPanel, dropAccountRequest } from "@/components/database/ops/access-account"
+import { dropAccountRequest } from "@/components/database/ops/access-drop"
+import { useAccessFilterFrom } from "@/components/database/ops/access-filter"
 import {
   accountCounts,
   accountKey,
@@ -21,15 +22,17 @@ import {
   signsIn,
   type AccountShow,
 } from "@/components/database/ops/access-model"
-import { ChangePassword, NewAccount } from "@/components/database/ops/access-new"
-import { useOpenAccount } from "@/components/database/ops/access-panel"
+import { NewAccount } from "@/components/database/ops/access-new"
+import { ChangePassword } from "@/components/database/ops/access-password"
 import { AccountMark, AccountName, SignInPicture } from "@/components/database/ops/access-parts"
+import { QuietWord, TAGS_BESIDE_FROM, TagsUnder } from "@/components/database/ops/access-row"
 import type {
   DbGrants,
   DbPrivileges,
   DbRole,
   DbRoles,
 } from "@/components/database/ops/access-types"
+import { accountHref } from "@/components/database/ops/account-address"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
@@ -49,17 +52,15 @@ import { usePoll } from "@/hooks/use-poll"
 import { plural } from "@/lib/format"
 import { useMemo, useState } from "react"
 
-/** The width of the list from which an account's tags stand beside its name rather than under it. */
-const BESIDE_FROM = 640
-
 /**
  * A SQL server's accounts: who can sign in, what each is, and what each was
  * given.
  *
  * List filters select every account, the administrators, the ones with a session open now, the ones
  * that cannot sign in. An account is a card — its initials in its name's own
- * hue, what its grants add up to, what it is as tags — and opening one puts
- * its attributes and its grants in a panel beside the list (`?account=`).
+ * hue, what its grants add up to, what it is as tags — and an account opens
+ * on a page of its own (`access-account.tsx`), with this list beside it as a
+ * rail in the filter it was left in.
  *
  * The account this connection signs in with is marked wherever it is drawn,
  * and the controls that would lock the dashboard out of the server are not
@@ -70,18 +71,17 @@ export function SqlAccess() {
   const { id, conn, engine, readOnly, status, param, select } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const account = useOpenAccount()
-  // The panel and every dialog here are opened by state: this hands the
-  // keyboard back to the row or the button that opened one.
+  // Every dialog here is opened by state: this hands the keyboard back to
+  // the row or the button that opened one.
   useFocusReturn()
   const down = isDown(status.state)
-  const [search, setSearch] = useState("")
   const [creating, setCreating] = useState(false)
   const [password, setPassword] = useState<DbRole>()
   const [frame, width] = useColumnWidth<HTMLDivElement>()
   const show = (param("show") || "") as AccountShow
-  const opened = param("account")
-  const openedHost = param("host")
+  // The chip is the address's to say; the typing is kept for the tab, and
+  // both are what the rail beside an account's page lists by.
+  const { search, setSearch } = useAccessFilterFrom(id, show)
 
   const roles = usePoll(
     (signal) =>
@@ -179,7 +179,7 @@ export function SqlAccess() {
   }
 
   const data = roles.data
-  const beside = width >= BESIDE_FROM
+  const beside = width >= TAGS_BESIDE_FROM
   const counts = accountCounts(list)
 
   return (
@@ -289,36 +289,35 @@ export function SqlAccess() {
                 {shown.map((role) => {
                   const own = isOwnAccount(role, conn)
                   const key = accountKey(role)
-                  const tags = (
-                    <>
-                      {accountTags(role, own).map((tag) => (
-                        <Tag key={tag.word} tone={tag.tone}>
-                          {tag.word}
-                        </Tag>
-                      ))}
-                      {role.connections > 0 && (
-                        <span className="numeric text-hint text-muted-foreground">
-                          {plural(role.connections, "session")}
-                        </span>
-                      )}
-                    </>
-                  )
+                  const words = accountTags(role, own).map((tag) => (
+                    <Tag key={tag.word} tone={tag.tone}>
+                      {tag.word}
+                    </Tag>
+                  ))
                   const verbs = verbsFor(role)
                   return (
                     <ChoiceRow
                       key={key}
-                      onSelect={() => account.open(role.name, role.host)}
+                      href={accountHref(id, role)}
                       verb={`Open ${key}`}
                       leading={<AccountMark name={role.name} />}
                       title={<AccountName name={role.name} host={role.host} />}
                       description={
                         matrix && !grants.data && !grants.error
-                          ? undefined
+                          ? // The line is held while the grants are read, so the name does not move when they land.
+                            "\u00a0"
                           : grantSummary(role, held.get(key) ?? held.get(role.name) ?? [])
                       }
                       trailing={
                         beside ? (
-                          <span className="flex items-center gap-2.5">{tags}</span>
+                          <span className="flex items-center gap-2.5">
+                            {words}
+                            {role.connections > 0 && (
+                              <span className="numeric text-hint text-muted-foreground">
+                                {plural(role.connections, "session")}
+                              </span>
+                            )}
+                          </span>
                         ) : undefined
                       }
                       actions={
@@ -328,9 +327,16 @@ export function SqlAccess() {
                       }
                     >
                       {!beside && (
-                        <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 pl-12">
-                          {tags}
-                        </span>
+                        <TagsUnder>
+                          {words}
+                          <QuietWord>
+                            <span className="numeric">
+                              {role.connections > 0
+                                ? plural(role.connections, "session")
+                                : "no session"}
+                            </span>
+                          </QuietWord>
+                        </TagsUnder>
                       )}
                     </ChoiceRow>
                   )
@@ -341,18 +347,6 @@ export function SqlAccess() {
         </PanelBody>
       </Panel>
 
-      {opened && data?.supported && (
-        <AccountPanel
-          key={`${opened}@${openedHost}`}
-          name={opened}
-          host={openedHost || undefined}
-          roles={list}
-          privileges={privileges.data}
-          confirm={confirm}
-          onChanged={refresh}
-          onClose={account.close}
-        />
-      )}
       {creating && (
         <NewAccount
           roles={list}

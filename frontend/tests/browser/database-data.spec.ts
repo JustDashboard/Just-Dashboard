@@ -1,6 +1,8 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
 import { heldResponse, recordProgress } from "./progress-recording"
 import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
+import { head, headMenu, paneBar, showPane } from "./database-workbench"
+import { risen } from "./risen"
 
 /**
  * The SQL table editor (`/databases/<id>/data`): a rail of what holds rows,
@@ -449,6 +451,20 @@ const where = (page: Page) => page.evaluate(() => location.pathname + location.s
 const applied = (sent: { changes: Record<string, unknown>[] }) =>
   sent.changes.filter((body) => !body.dryRun)
 
+/** A row as a phone reads it: one card, the full row a tap away. */
+const card = (page: Page, row: number) => page.locator("[data-slot=row-card]").nth(row)
+/** The rows, as a grid or as a phone's cards. */
+const rows = (page: Page) => page.locator("[data-slot=data-grid], [data-slot=row-cards]")
+
+/** Stages one value of a row from its card: open the row, write the field, back to the rows. */
+async function editCard(page: Page, row: number, name: string, text: string) {
+  await card(page, row).click()
+  const box = field(page, name).getByRole("textbox")
+  await box.fill(text)
+  await box.press("Enter")
+  await showPane(page, "Rows")
+}
+
 async function edit(page: Page, row: number, col: number, text: string) {
   await cell(page, row, col).dblclick()
   await page.keyboard.press("ControlOrMeta+a")
@@ -752,7 +768,7 @@ test("a new row sends only what was set, and a 64-bit integer keeps every digit"
   await page.goto(ITEMS)
   await expect(cell(page, 0, 1)).toHaveText("Item 1")
   await page.getByRole("button", { name: "Insert row" }).click()
-  await page.getByRole("button", { name: "Show the row" }).click()
+  await headMenu(page, "Show the row")
   await expect(page.getByRole("complementary", { name: "Row" })).toContainText("New row")
 
   await field(page, "id").getByRole("textbox").fill("9007199254740993")
@@ -883,7 +899,7 @@ test("a role that may change rows and not destroy is offered no delete", async (
   ).toHaveCount(0)
   // Nor the rail's verbs that destroy. (At this width the rail stood aside
   // for the row; asking for it back puts the row away.)
-  await page.getByRole("button", { name: "Show the tables" }).click()
+  await headMenu(page, "Show the tables")
   await page.getByRole("button", { name: "Actions for items" }).click()
   await expect(page.getByRole("menuitem", { name: "Empty…" })).toHaveCount(0)
   await expect(page.getByRole("menuitem", { name: "Drop…" })).toHaveCount(0)
@@ -1192,7 +1208,7 @@ test("on a phone, choosing a table in the rail keeps the page, and staged edits 
   await page.setViewportSize({ width: 390, height: 844 })
   await mockEditor(page)
   await page.goto(ITEMS)
-  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+  await expect(card(page, 0)).toContainText("Item 1")
   const reads = documentReads(page)
   await page.evaluate(() => Object.assign(window, { __kept: true }))
   const rail = page.getByRole("navigation", { name: "tables of this schema" })
@@ -1200,7 +1216,7 @@ test("on a phone, choosing a table in the rail keeps the page, and staged edits 
   // The rail lies over the table and is put away by choosing one — by the
   // router, in this document. It used to be taken off the page before its
   // link had acted, and the browser followed the link itself.
-  await page.getByRole("button", { name: "Show the tables" }).click()
+  await showPane(page, "Tables")
   await rail.getByRole("link", { name: /^other/ }).click()
   await expect(title(page)).toContainText("other")
   await expect(rail).toHaveCount(0)
@@ -1209,9 +1225,9 @@ test("on a phone, choosing a table in the rail keeps the page, and staged edits 
 
   // With an edit staged the same press is asked about by the page, not by
   // the browser's own "leave site?".
-  await edit(page, 0, 1, "Staged")
+  await editCard(page, 0, "name", "Staged")
   await expect(bar(page)).toContainText("1 change")
-  await page.getByRole("button", { name: "Show the tables" }).click()
+  await showPane(page, "Tables")
   await rail.getByRole("link", { name: /^items/ }).click()
   const guard = page.getByRole("dialog", { name: "Unapplied changes" })
   await expect(guard).toContainText("Opening items")
@@ -1223,7 +1239,7 @@ test("on a phone, choosing a table in the rail keeps the page, and staged edits 
 
   // Another schema is a place with no table open in it yet: the rail stays
   // up to choose one from, and the page is still this page.
-  await page.getByRole("button", { name: "Show the tables" }).click()
+  await showPane(page, "Tables")
   await rail.getByRole("button", { name: "schema: public" }).click()
   await page.getByRole("menuitem", { name: /^sales/ }).click()
   await expect.poll(() => where(page)).toBe("/databases/1/data?schema=sales")
@@ -1253,7 +1269,7 @@ test("a row opened in a frame too narrow for three columns takes the rail's plac
   await expect(rail).toHaveCount(0)
   expect(await widthOf(grid(page))).toBeGreaterThanOrEqual(640)
   // Asking for the tables puts the row away: there is room for one of them.
-  await page.getByRole("button", { name: "Show the tables" }).click()
+  await headMenu(page, "Show the tables")
   await expect(rail).toBeVisible()
   await expect(panel).toHaveCount(0)
   await cell(page, 1, 1).click()
@@ -1814,10 +1830,11 @@ for (const [label, viewport] of [
     await expect(page.getByText("Pick a table")).toBeVisible()
     await keepsTheRules(page, "no table open")
 
+    const phone = viewport.width < 640
     await page.goto(
       `${ITEMS}&filters=${encodeURIComponent(filters)}&sort=${encodeURIComponent(sort)}`,
     )
-    await expect(cell(page, 0, 1)).toHaveText("Item 1")
+    await expect(phone ? card(page, 0) : cell(page, 0, 1)).toContainText("Item 1")
     await keepsTheRules(page, "rows, filtered and sorted")
 
     await page.getByRole("button", { name: "Add filter" }).click()
@@ -1825,8 +1842,12 @@ for (const [label, viewport] of [
     await keepsTheRules(page, "the filter form")
     await page.keyboard.press("Escape")
 
-    await cell(page, 0, 1).click()
-    await page.getByRole("button", { name: "Show the row" }).click()
+    // A phone opens a row by its card; beside the grid it is a column to show.
+    if (phone) await card(page, 0).click()
+    else {
+      await cell(page, 0, 1).click()
+      await headMenu(page, "Show the row")
+    }
     await expect(page.getByRole("complementary", { name: "Row" })).toContainText("Row 1")
     await keepsTheRules(page, "the row inspector")
     await field(page, "qty").getByRole("button", { name: "Choose" }).click()
@@ -1838,7 +1859,8 @@ for (const [label, viewport] of [
       .getByRole("button", { name: "Hide the row" })
       .click()
 
-    await edit(page, 0, 1, "Staged")
+    if (phone) await editCard(page, 0, "name", "Staged")
+    else await edit(page, 0, 1, "Staged")
     await expect(bar(page)).toBeVisible()
     await keepsTheRules(page, "the change bar")
     await bar(page).getByRole("button", { name: "Review", exact: true }).click()
@@ -1858,7 +1880,7 @@ for (const [label, viewport] of [
     await keepsTheRules(page, "the definition")
 
     await page.goto(`${DATA}?schema=public&table=item_names`)
-    await expect(grid(page)).toContainText("A view is read through its query")
+    await expect(rows(page)).toContainText("A view is read through its query")
     await keepsTheRules(page, "a read-only view")
 
     await page.goto(ITEMS)
@@ -1868,7 +1890,7 @@ for (const [label, viewport] of [
     await page.keyboard.press("Escape")
 
     // A file as a table of its own, with the columns it would be made of.
-    if (viewport.width < 640) await page.getByRole("button", { name: "Show the tables" }).click()
+    if (phone) await showPane(page, "Tables")
     await page.getByRole("button", { name: "Import a file as a new table" }).click()
     const made = page.getByRole("dialog", { name: "Import a file as a new table" })
     await made.locator("input[type=file]").setInputFiles({
@@ -1882,8 +1904,11 @@ for (const [label, viewport] of [
 
     // A document in the row panel, with the row a new key is typed in.
     await page.goto(`${DATA}?schema=public&table=docs`)
-    await cell(page, 0, 1).click()
-    await page.getByRole("button", { name: "Show the row" }).click()
+    if (phone) await card(page, 0).click()
+    else {
+      await cell(page, 0, 1).click()
+      await headMenu(page, "Show the row")
+    }
     const tree = field(page, "meta").locator("[data-slot=json-doc-tree]")
     await expect(tree).toContainText("9007199254740993")
     await keepsTheRules(page, "a document as a tree")
@@ -1957,4 +1982,267 @@ test("an expired streamed export rechecks once and returns to sign-in", async ({
   await expect(page).toHaveURL(/\/login\?reason=session$/)
   await expect(page.getByText("Your session ended. Sign in again to continue.")).toBeVisible()
   expect(rechecks).toBe(1)
+})
+
+/* ------------------------------------------- the frame's head, and a phone */
+
+test("the frame's one head says which database, carries the table's verbs and holds the rest in one menu", async ({
+  page,
+}) => {
+  const rows = hold()
+  await mockEditor(page, { browseHeld: { table: "items", until: rows.until } })
+  await page.goto(ITEMS)
+
+  // The strip is the frame's own head: one of it, inside the frame, and the
+  // same place while the rows are still on their way as once they have come.
+  await expect(head(page)).toBeVisible()
+  await expect(page.locator("[data-slot=database-strip]")).toHaveCount(1)
+  await expect(page.locator("[data-slot=table-editor] [data-slot=database-strip]")).toHaveCount(1)
+  await risen(page)
+  const waiting = await head(page).boundingBox()
+  rows.release()
+  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+  await risen(page)
+  expect(await head(page).boundingBox()).toEqual(waiting)
+
+  // Who: the way back, the engine, the name as the switcher, what it is, whether it answers.
+  await expect(head(page).getByRole("link", { name: "Back to shop's Home" })).toHaveAttribute(
+    "href",
+    "/databases/1",
+  )
+  await expect(head(page).getByRole("button", { name: /^Database: shop/ })).toBeVisible()
+  await expect(head(page)).toContainText("PostgreSQL")
+  await expect(head(page).locator("[data-slot=database-status]")).toHaveText("connected")
+
+  // The table's verbs are words in the head, and the strip under it is the
+  // table's name and its three views, with no control among them.
+  await expect(head(page).locator("[data-slot=workbench-verbs]").getByRole("button")).toHaveText([
+    "Insert row",
+    "Import",
+    "Export",
+  ])
+  const strip = title(page).locator("xpath=ancestor::div[contains(@class,'@container')][1]")
+  await expect(strip.getByRole("tab")).toHaveText(["Data", "Structure", "Definition"])
+  await expect(strip.getByRole("button")).toHaveCount(0)
+
+  // One menu: what was a row of glyphs, as words under the page's name, then the database's own.
+  await head(page)
+    .getByRole("button", { name: /^Actions for / })
+    .click()
+  await expect(page.getByRole("menuitem")).toHaveText([
+    "Open as query",
+    "Read the rows again",
+    "Show the row",
+    "Hide the tables",
+    "Check connection",
+    "Restart",
+    "Stop",
+    "Protect",
+    "Back up now",
+    "Settings",
+    "Forget this connection",
+  ])
+  const rail = page.getByRole("navigation", { name: "tables of this schema" })
+  await page.getByRole("menuitem", { name: "Hide the tables" }).click()
+  await expect(rail).toHaveCount(0)
+  await headMenu(page, "Show the tables")
+  await expect(rail).toBeVisible()
+
+  // And no row of figures opens the page.
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+})
+
+test("a role that only reads finds no verb in the head it cannot use", async ({ page }) => {
+  await mockEditor(page, { viewer: true })
+  await page.goto(ITEMS)
+  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+  await expect(head(page).locator("[data-slot=workbench-verbs]").getByRole("button")).toHaveText([
+    "Export",
+  ])
+  await head(page)
+    .getByRole("button", { name: /^Actions for / })
+    .click()
+  await expect(page.getByRole("menuitem", { name: "Read the rows again" })).toBeVisible()
+  for (const name of ["Open as query", "Restart", "Stop", "Protect", "Forget this connection"]) {
+    await expect(page.getByRole("menuitem", { name })).toHaveCount(0)
+  }
+})
+
+test("what a schema and a table amount to is one line of words, not a strip of figures", async ({
+  page,
+}) => {
+  await mockEditor(page, {
+    details: { items: { size: 3355443, dataSize: 2411725, indexSize: 1015808, owner: "app" } },
+  })
+  await page.goto(`${DATA}?schema=public`)
+  await expect(page.getByText("Pick a table")).toBeVisible()
+  const line = page.locator("[data-slot=facts-line]")
+  await expect(line).toContainText("2 tables")
+  await expect(line).toContainText("1 view")
+  await expect(line).toContainText("~1.2M rows")
+
+  await page.goto(`${ITEMS}&view=structure`)
+  await expect(line).toHaveText(
+    "~250 rows·3.2 MB·2.3 MB data·992.0 KB indexes·4 columns·owned by app",
+  )
+})
+
+test("on a phone the table editor is one pane with a bar at its foot, and a row is a card", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockEditor(page)
+  await page.goto(ITEMS)
+  await expect(card(page, 0)).toContainText("Item 1")
+
+  // One pane, the height the head leaves, and the bar at the very foot.
+  await expect(paneBar(page).getByRole("tab")).toHaveText(["Tables", "Rows", "Details"])
+  await expect(paneBar(page).getByRole("tab", { name: "Rows" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+  const foot = (await paneBar(page).boundingBox())!
+  expect(Math.round(foot.y + foot.height)).toBe(844)
+  await expect(grid(page)).toHaveCount(0)
+  const sideways = await page.evaluate(() =>
+    [document.documentElement, ...document.querySelectorAll("[data-slot=table-editor] *")].some(
+      (el) => el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== "hidden",
+    ),
+  )
+  expect(sideways, "something scrolls sideways").toBe(false)
+
+  // A card is one height whatever its row holds (a NULL, an empty string),
+  // and the next one starts where it ends.
+  const boxes = []
+  for (const index of [0, 1, 2, 3]) boxes.push((await card(page, index).boundingBox())!)
+  for (const [index, box] of boxes.entries()) {
+    expect(box.height, `card ${index}`).toBe(52)
+    if (index > 0) expect(box.y).toBe(boxes[index - 1].y + 52)
+  }
+
+  // The full row is a tap away, and what is written there is the card's.
+  await card(page, 1).click()
+  await expect(paneBar(page).getByRole("tab", { name: "Details" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+  const panel = page.getByRole("complementary", { name: "Row" })
+  await expect(panel).toContainText("Row 2")
+  const name = field(page, "name").getByRole("textbox")
+  await name.fill("Renamed")
+  await name.press("Enter")
+  await showPane(page, "Rows")
+  await expect(card(page, 1)).toContainText("Renamed")
+  await expect(card(page, 1)).toContainText("edited")
+  expect((await card(page, 1).boundingBox())!.height).toBe(52)
+  expect((await card(page, 2).boundingBox())!.y).toBe(boxes[2].y)
+  await expect(bar(page)).toContainText("1 change")
+  await bar(page).getByRole("button", { name: "Discard", exact: true }).click()
+
+  // A new row is written where a card's row is: in the panel.
+  await head(page).getByRole("button", { name: "Insert row" }).click()
+  await expect(panel).toContainText("New row")
+  await showPane(page, "Rows")
+  await expect(page.locator("[data-slot=row-card][data-state=inserted]")).toHaveCount(1)
+  await bar(page).getByRole("button", { name: "Discard", exact: true }).click()
+
+  // The tables are the bar's first stop, and choosing one goes to its rows:
+  // not to the row panel the table before it was left on.
+  await card(page, 0).click()
+  await expect(panel).toContainText("Row 1")
+  await showPane(page, "Tables")
+  const rail = page.getByRole("navigation", { name: "tables of this schema" })
+  await rail.getByRole("link", { name: /^other/ }).click()
+  await expect(title(page)).toContainText("other")
+  await expect(paneBar(page).getByRole("tab", { name: "Rows" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+})
+
+test("the table editor, state by state @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to save the screenshots")
+  test.setTimeout(240_000)
+  const shots = process.env.JD_SHOTS!
+  for (const width of [1280, 390]) {
+    const phone = width === 390
+    await page.setViewportSize({ width, height: phone ? 844 : 800 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockEditor(page, {
+      details: { items: { size: 3355443, dataSize: 2411725, indexSize: 1015808, owner: "app" } },
+    })
+    const shot = async (name: string) => {
+      await risen(page)
+      await page.waitForTimeout(300)
+      await page.screenshot({ path: `${shots}/after-data-${name}-${width}.png` })
+    }
+    await page.goto(`${DATA}?schema=public`)
+    await expect(page.getByText("Pick a table")).toBeVisible()
+    if (phone) {
+      await shot("tables")
+      await showPane(page, "Rows")
+    }
+    await shot("landing")
+    await page.goto(ITEMS)
+    await expect(phone ? card(page, 0) : cell(page, 0, 1)).toContainText("Item 1")
+    await shot("full")
+    if (phone) await card(page, 1).click()
+    else {
+      await cell(page, 1, 1).click()
+      await page.keyboard.press("Space")
+    }
+    await expect(page.getByRole("complementary", { name: "Row" })).toContainText("Row 2")
+    await shot("row")
+    await head(page)
+      .getByRole("button", { name: /^Actions for / })
+      .click()
+    await shot("menu")
+    await page.keyboard.press("Escape")
+    await page.goto(`${ITEMS}&view=structure`)
+    await expect(page.getByRole("region", { name: "Columns" })).toBeVisible()
+    await shot("structure")
+
+    // Empty, loading, failed and read-only, with the row put away: beside the
+    // grid the panel is a column the tab remembers.
+    if (!phone) {
+      await page.goto(ITEMS)
+      await page
+        .getByRole("complementary", { name: "Row" })
+        .getByRole("button", { name: "Hide the row" })
+        .click()
+    }
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockEditor(page, { held: [] })
+    await page.goto(ITEMS)
+    await expect(page.getByText("items has no rows")).toBeVisible()
+    await shot("empty")
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    const never = hold()
+    await mockEditor(page, { browseHeld: { table: "items", until: never.until } })
+    await page.goto(ITEMS)
+    await expect(head(page)).toBeVisible()
+    await page.waitForTimeout(800)
+    await shot("loading")
+    never.release()
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockEditor(page)
+    await page.route("**/api/v1/databases/1/browse**", (route) =>
+      json(
+        route,
+        { error: { code: "unavailable", message: "the server closed the connection" } },
+        503,
+      ),
+    )
+    await page.goto(ITEMS)
+    await expect(page.getByText(/closed the connection/).first()).toBeVisible()
+    await shot("failed")
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockEditor(page, {
+      viewer: true,
+      rows: { 1: { environment: "production", readOnly: true } },
+    })
+    await page.goto(ITEMS)
+    await expect(phone ? card(page, 0) : cell(page, 0, 1)).toContainText("Item 1")
+    await shot("readonly")
+  }
 })

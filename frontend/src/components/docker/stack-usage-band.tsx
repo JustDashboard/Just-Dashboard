@@ -93,7 +93,7 @@ export function StackUsageBand({
   return (
     <div
       data-slot="stack-usage"
-      className="grid min-w-0 gap-x-10 gap-y-8 lg:grid-cols-2 xl:grid-cols-3"
+      className="grid min-w-0 gap-x-10 gap-y-8 min-[1600px]:grid-cols-3 lg:grid-cols-2"
     >
       <BarReading
         title="Processor"
@@ -198,7 +198,7 @@ export function StackUsageBand({
         title="Recent"
         label="Recent changes"
         list="Latest changes"
-        className="lg:col-span-2 xl:col-span-1"
+        className="min-[1600px]:col-span-1 lg:col-span-2"
         ticks
         figure={
           changes.length > 0 && (

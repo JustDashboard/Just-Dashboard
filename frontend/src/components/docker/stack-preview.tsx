@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils"
 import type { DeployPreview, ServiceChange } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
+import { WIDE_BESIDE_RAIL } from "@/components/docker/beside-rail"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -119,7 +120,7 @@ export function StackPreview({
   busy: boolean
   onEdit: () => void
 }) {
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useMediaQuery(WIDE_BESIDE_RAIL)
   const { data, error, loading, refresh } = usePoll<DeployPreview>(
     (signal) =>
       get<DeployPreview>(`/docker/stacks/${encodeURIComponent(stack)}/preview`, undefined, signal),
@@ -264,7 +265,7 @@ export function StackPreview({
         </PanelFooter>
       </Panel>
 
-      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="grid min-w-0 gap-6 min-[1600px]:grid-cols-[minmax(0,1fr)_20rem]">
         <Panel plain aria-label="Compose file changes">
           <PanelHeader
             title="Compose file changes"

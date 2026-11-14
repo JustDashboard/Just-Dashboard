@@ -1,543 +1,220 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { useSearchParams } from "next/navigation"
-import { CheckCircle, CloudUpload, RefreshClockwise, ShieldOff } from "@/components/icons"
-import { ApiError, del, errorMessage, get, post } from "@/lib/api"
-import {
-  afterReload,
-  certbotRunning,
-  renewalReading,
-  runningCertbotJob,
-  sameNames,
-  stillServingTest,
-  testCertificateReplaced,
-  testRunPassed,
-} from "@/lib/certificates"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Tabs as TabsPrimitive } from "radix-ui"
+import { CloudUpload, FileText, RefreshClockwise, ShieldCheck, ShieldOff } from "@/components/icons"
+import { get, post } from "@/lib/api"
+import { renewalReading } from "@/lib/certificates"
+import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type {
-  CertbotState,
-  CertificateCoverage,
-  DNSProvider,
-  Job,
-  LocalCA,
-  ServedCertificate,
-  SigningRequest,
-} from "@/lib/types"
+import { cn } from "@/lib/utils"
+import type { Certificate, CertificateCoverage, Job } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { useAuth } from "@/hooks/use-auth"
-import { useConfirm } from "@/components/confirm-dialog"
-import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
-import { JobIssuanceProblems } from "@/components/proxy/issuance-problems"
+import { RecentJobs } from "@/components/job-console"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyState, ErrorState, Hold, LoadingPanel, LoadingRows, Notice } from "@/components/state"
-import { useProxy, useProxyRead } from "@/components/proxy/proxy-context"
+import { ProductLogos } from "@/components/product-logo"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { Status, StatusDot } from "@/components/status-dot"
+import { ChipCount, tabClasses } from "@/components/tabs"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { TextShimmer } from "@/components/ui/text-shimmer"
+import { VerbMenu, type Verb } from "@/components/verbs"
+import { useProxy } from "@/components/proxy/proxy-context"
 import {
   ALL_CERTS,
+  AcmeAccountsPanel,
   CertbotLineages,
   CertbotMissing,
   CertbotRuntimeLine,
-  AcmeAccountsPanel,
   DnsProvidersPanel,
-  forceRenewal,
-  IssueDialog,
   RenewalNotice,
-  useRenew,
 } from "@/components/proxy/certbot-panel"
 import { CertTransparency } from "@/components/proxy/cert-transparency"
 import { CaddyEvidencePrune } from "@/components/proxy/caddy-evidence"
 import { ExpiredCleanup } from "@/components/proxy/certificate-cleanup"
 import { CertificateCoveragePanel } from "@/components/proxy/certificate-coverage"
-import { CertificateInventory } from "@/components/proxy/certificate-inventory"
-import { CsrDialog } from "@/components/proxy/csr-dialog"
-import { ImportDialog } from "@/components/proxy/import-dialog"
+import {
+  CertificateInventory,
+  useCertificateFilters,
+} from "@/components/proxy/certificate-inventory"
+import {
+  certificatesHref,
+  pageTab,
+  sheetRedirect,
+  type PageTab,
+} from "@/components/proxy/certificate-paths"
+import { CertificateRun, useCertificateWork } from "@/components/proxy/certificate-work"
 import { RenewalLog } from "@/components/proxy/renewal-log"
 import { LocalCAPanel } from "@/components/proxy/local-ca-panel"
-import {
-  IssueCommand,
-  PrivateCertificateDialog,
-  type PrivateKind,
-} from "@/components/proxy/private-cert-dialog"
-import { ReloadHookOption, RenewalLogPanel, RenewalRecord } from "@/components/proxy/renewal-health"
+import { certificateProduct } from "@/components/proxy/marks"
+import { EngineSetup } from "@/components/proxy/engine-setup"
+import { IssueCommand } from "@/components/proxy/private-cert-dialog"
+import { ReloadHookOption, RenewalRecord, RenewalRuns } from "@/components/proxy/renewal-health"
 import { SigningRequests } from "@/components/proxy/signing-requests"
 import { WatchedDomains } from "@/components/proxy/watched-domains"
-import { Button } from "@/components/ui/button"
 
 /**
- * Inventory and lifecycle controls sit beside each other: the certificate you
- * inspect stays separate from the certbot lineage you renew. Every renewal
- * certbot ran follows them across the page's width, which a log needs. Watched
- * domains stay distinct because a live handshake can disagree with the file on
- * disk.
+ * The width of a view that manages rather than lists: these were drawn for a
+ * 22rem side column, and across a laptop's whole width a lineage's meter was
+ * a thousand pixels of bar.
+ */
+const COLUMN = "max-w-3xl"
+
+/** The section the Renewal view's "Show log" brings into view. */
+const RUNS_ID = "renewal-runs"
+
+/**
+ * The certificates on this host, and what issues and renews them.
+ *
+ * It opened on four figures — how many, how many expiring, how many refused,
+ * whether renewal is on — over a two-column page that did seven jobs on one
+ * scroll: the certificates, signing requests, renewal, DNS providers, ACME
+ * accounts and the local CA down a narrow side column, then the renewal log,
+ * coverage, watched domains and transparency logs under both. It moved as each
+ * of its six reads landed.
+ *
+ * Now it opens on what it is about, the line every proxy page opens on: the
+ * authorities that signed what is here, certbot, the count, what is expiring
+ * or refused and whether anything renews them, with Issue certificate at the
+ * far end. Under it the jobs are views in the address (`?tab=`): the
+ * certificates themselves first, then what issues and renews them, then the
+ * names watched elsewhere. A certificate opens on a page of its own
+ * (`/proxy/certificates/<name>`), where its sheet's contents went; the sheet's
+ * old address, `?cert=<file>`, lands there.
+ *
+ * Every view holds its shape while it loads: the line, the strip and the
+ * list's toolbar are drawn at once, and rows of the list's own height stand
+ * where the certificates will.
  */
 export function CertificatesPage() {
-  const { can } = useAuth()
-  const { status } = useProxy()
+  const router = useRouter()
   const params = useSearchParams()
-  const { confirm, dialog } = useConfirm()
-  const admin = can("system.admin")
-  const hasNginx = status?.nginx ?? false
+  const work = useCertificateWork()
+  const { status, refresh: refreshStatus } = useProxy()
+  const { admin, hasNginx, certs, certbot, certbotGone } = work
 
-  // ?issue=app.example.com opens the issuance form on those names: the site
-  // form links here when it names a certificate that does not exist yet.
-  const [issue, setIssue] = useState<{
-    open: boolean
-    domains?: string
-    staging: boolean
-    /** A lineage whose names the form changes. */
-    target?: string
-  }>(() => ({
-    open: Boolean(params.get("issue")),
-    domains: params.get("issue") ?? undefined,
-    staging: true,
-  }))
-  const [importing, setImporting] = useState<{ open: boolean; name?: string }>({ open: false })
-  const [watchedAdded, setWatchedAdded] = useState(0)
-  // The kind is kept while the dialog closes, so its body does not switch
-  // to the other form on the way out.
-  const [privateDialog, setPrivateDialog] = useState<{ open: boolean; kind: PrivateKind }>({
-    open: false,
-    kind: "local-ca",
-  })
-  const [csrOpen, setCsrOpen] = useState(false)
+  // The sheet's address, from the overview, the TLS report, the server map:
+  // the certificate is a page now.
+  const sheet = params.get("cert")
+  const redirect = sheetRedirect(certs.data, sheet)
+  useEffect(() => {
+    if (redirect) router.replace(redirect)
+  }, [redirect, router])
 
-  const certs = useProxyRead("certs")
-  const certbot = usePoll<CertbotState>(
-    (signal) => get("/certificates/certbot", undefined, signal),
-    300_000,
-  )
-  // Certificates this server makes itself: signing requests waiting for an
-  // authority's answer, and the local CA with what it issued.
-  const requests = usePoll<SigningRequest[]>(
-    (signal) => get("/certificates/csr", undefined, signal),
-    300_000,
-  )
-  const localCA = usePoll<LocalCA>(
-    (signal) => get("/certificates/local-ca", undefined, signal),
-    300_000,
-  )
+  const asked = params.get("tab")
+  const [chosen, setChosen] = useState<string | null>(asked)
+  // Back and Forward, and a link to another view, change the address under
+  // the page; the view follows it.
+  const [seen, setSeen] = useState(asked)
+  if (asked !== seen) {
+    setSeen(asked)
+    setChosen(asked)
+  }
+  const tab = pageTab(chosen)
+  const setTab = useCallback((next: string) => {
+    setChosen(next)
+    // Replaced rather than pushed: a view is not a place Back steps through.
+    const url = new URL(window.location.href)
+    if (next === "certificates") url.searchParams.delete("tab")
+    else url.searchParams.set("tab", next)
+    window.history.replaceState(null, "", `${url.pathname}${url.search}`)
+  }, [])
+
   const coverage = usePoll<CertificateCoverage>(
     (signal) => get("/certificates/coverage", undefined, signal),
     300_000,
     [],
     { enabled: hasNginx },
   )
-  const providers = usePoll<DNSProvider[]>(
-    (signal) => get("/certificates/dns-providers", undefined, signal),
-    0,
-    [],
-    { enabled: admin },
-  )
-  // The list is only right once certbot has finished writing, so it is
-  // refreshed when a job ends rather than when it starts — however it ended:
-  // a renewal run that failed changes the renewal record as much as one
-  // that passed.
-  const console_ = useJobConsole()
-  const ended =
-    console_.job && console_.job.status !== "running"
-      ? `${console_.job.id}:${console_.job.status}`
-      : ""
-  const { refresh: refreshCerts } = certs
-  const { refresh: refreshCertbot } = certbot
   const { refresh: refreshCoverage } = coverage
-  // An install or a test changes which plugins and credentials are there.
-  const { refresh: refreshProviders } = providers
   useEffect(() => {
-    if (!ended) return
-    refreshCerts()
-    refreshCertbot()
-    if (hasNginx) {
-      refreshCoverage()
-    }
-    if (admin) refreshProviders()
-  }, [ended, admin, hasNginx, refreshCerts, refreshCertbot, refreshCoverage, refreshProviders])
-  const { busy, renew } = useRenew(console_.attach)
-  // certbot's lock is the host's, not this tab's: a run started from another
-  // tab, or before this page loaded, holds it just the same.
-  const jobs = usePoll<Job[]>((signal) => get("/jobs/", undefined, signal), 5_000, [], {
-    enabled: admin,
-    key: "/jobs",
-  })
-  const elsewhere = runningCertbotJob(jobs.data)
-  const certbotJob = certbotRunning(console_.job) ? console_.job : elsewhere
-  // A run this console never showed ends unseen by the refresh above.
-  const elsewhereId = elsewhere?.id ?? ""
-  const seenElsewhere = useRef("")
-  useEffect(() => {
-    if (seenElsewhere.current && !elsewhereId) {
-      refreshCerts()
-      refreshCertbot()
-    }
-    seenElsewhere.current = elsewhereId
-  }, [elsewhereId, refreshCerts, refreshCertbot])
-  const certbotBusy = certbotJob !== null
-  const openCertbotJob = certbotJob ? () => void console_.open(certbotJob.id) : undefined
-  const watch = async (domain: string) => {
-    try {
-      await post("/certificates/watched", { domain, port: 443 })
-      notify.success(`Watching ${domain}`)
-      setWatchedAdded((n) => n + 1)
-    } catch (err) {
-      notify.error("Could not watch domain", err)
-    }
+    if (work.ended && hasNginx) refreshCoverage()
+  }, [work.ended, hasNginx, refreshCoverage])
+
+  const filters = useCertificateFilters()
+
+  // The views an account has are known from the account alone, so the strip
+  // is the same while the reads are out as after.
+  const views: { key: PageTab; label: string; count?: number }[] = [
+    { key: "certificates", label: "Certificates", count: certs.data?.length },
+    { key: "renewal", label: "Renewal" },
+    ...(admin ? [{ key: "dns" as const, label: "DNS challenge" }] : []),
+    ...(admin ? [{ key: "accounts" as const, label: "ACME accounts" }] : []),
+    { key: "authority", label: "Local CA" },
+    { key: "requests", label: "Signing requests", count: work.requests.data?.length },
+    { key: "watched", label: "Watched domains" },
+  ]
+  const shown = views.some((view) => view.key === tab) ? tab : "certificates"
+  const showRuns = () => {
+    setTab("renewal")
+    requestAnimationFrame(() =>
+      document.getElementById(RUNS_ID)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    )
   }
-  const [logOpen, setLogOpen] = useState(false)
-  const [starting, setStarting] = useState(false)
-  // The timer's own service, started now: systemd records the run, so the
-  // renewal reading changes with it.
-  const runRenewal = async () => {
-    setStarting(true)
-    try {
-      console_.attach(await post<Job>("/certificates/renewal/run"))
-    } catch (err) {
-      notify.error("The renewal did not start", err)
-    } finally {
-      setStarting(false)
-    }
-  }
-  const certbotGone =
-    certbot.error instanceof ApiError && certbot.error.code === "certbot_unavailable"
-
-  const counts = useMemo(() => {
-    const all = certs.data ?? []
-    // A test certificate is refused like an expired one, and counted there
-    // rather than as expiring: its days say nothing about when it stops working.
-    const readable = all.filter((c) => !c.error)
-    return {
-      all: all.length,
-      certbot: all.filter((c) => c.source === "certbot").length,
-      imported: all.filter((c) => c.source === "imported").length,
-      caddy: all.filter((c) => c.source === "caddy").length,
-      expiring: readable.filter((c) => c.expiring && !c.expired && !c.staging).length,
-      unreadable: all.length - readable.length,
-      expired: readable.filter((c) => c.expired && !c.staging).length,
-      test: readable.filter((c) => c.staging).length,
-    }
-  }, [certs.data])
-  const refused = counts.unreadable + counts.expired + counts.test
-
-  const revoke = (name: string) =>
-    confirm({
-      title: `Revoke ${name}`,
-      confirmLabel: "Revoke and delete",
-      description: (
-        <p className="text-destructive">
-          The authority publishes that this certificate is no longer to be trusted and the files are
-          deleted. There is no undo, and every client holding it starts refusing the site.
-        </p>
-      ),
-      action: async (c) => {
-        const job = await post<Job>("/certificates/revoke", { name }, { confirm: c })
-        console_.attach(job)
-      },
-    })
-
-  // Deleting revokes nothing. A certificate a site names is deleted only once
-  // the dialog has named those sites, and only then is force sent: nginx keeps
-  // serving it until its next reload, which fails for an enabled one.
-  const remove = (source: string, name: string) => {
-    const usedBy = certs.data?.find((c) => c.source === source && c.name === name)?.usedBy ?? []
-    const force = usedBy.length > 0
-    confirm({
-      title: `Delete ${name}`,
-      confirmLabel: force ? "Delete anyway" : "Delete",
-      description: (
-        <div className="space-y-3">
-          <p>
-            {source === "certbot"
-              ? "certbot deletes the certificate, its key and its renewal configuration, so the renewal schedule stops renewing it. Nothing is revoked: a copy elsewhere stays valid until it expires."
-              : "The certificate, its key and the copies kept when it was replaced are deleted. Import the pair again to bring it back."}
-          </p>
-          {force && (
-            <>
-              <p className="text-destructive">
-                {usedBy.length === 1 ? "This site names" : "These sites name"} it. nginx keeps
-                serving it until its next reload, which fails for an enabled site until it names
-                another certificate.
-              </p>
-              <ul className="space-y-1 font-mono text-hint break-all">
-                {usedBy.map((site) => (
-                  <li key={site}>{site}</li>
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
-      ),
-      action: async () => {
-        if (source === "certbot") {
-          console_.attach(await post<Job>("/certificates/delete", { names: [name], force }))
-          return
-        }
-        await del(`/certificates/imported/${encodeURIComponent(name)}`, {
-          query: { force: force ? 1 : undefined },
-        })
-        notify.success(`Deleted ${name}`)
-        certs.refresh()
-      },
-    })
-  }
-
-  // ?issue= is a one-shot hand-off from the site form. Left in the address,
-  // a reload opened the form again after it had been closed or used.
-  const setIssueOpen = (open: boolean) => {
-    setIssue((s) => ({ ...s, open }))
-    if (!open && params.get("issue") !== null) {
-      const url = new URL(window.location.href)
-      url.searchParams.delete("issue")
-      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
-    }
-  }
-
-  // A test run that passed is the moment to issue the real one, with the
-  // same names and nothing to retype.
-  const job = console_.job
-  const testPassed = testRunPassed(job)
-
-  // A test certificate replaced on disk reaches browsers once nginx reads it
-  // again. certonly reloads nothing itself, but a certbot deploy hook may
-  // have, and the job on screen may be a day old: the sites that name it are
-  // asked what they serve, and the reload is offered only while one still
-  // answers with the test certificate.
-  const replacedNames = testCertificateReplaced(job)
-  const replaced = replacedNames
-    ? certs.data?.find((c) => c.source === "certbot" && sameNames(c.domains, replacedNames))
-    : undefined
-  const askServed = Boolean(admin && hasNginx && replaced && replaced.usedBy.length > 0)
-  const served = usePoll<ServedCertificate[]>(
-    (signal) => get("/certificates/served", { path: replaced?.path ?? "" }, signal),
-    0,
-    [replaced?.path, job?.id],
-    { enabled: askServed },
-  )
-  const staleSites = askServed ? stillServingTest(served.data) : []
-  const [reloading, setReloading] = useState(false)
-  const reload = async (path: string, sites: string[]) => {
-    setReloading(true)
-    try {
-      await post("/proxy/reload", { kind: "nginx" })
-    } catch (err) {
-      notify.error("nginx did not reload", err)
-      setReloading(false)
-      return
-    }
-    try {
-      // nginx swaps its workers a moment after the signal; settle asks
-      // again until they answer, for a few seconds at most.
-      const after = await get<ServedCertificate[]>("/certificates/served", { path, settle: "1" })
-      const outcome = afterReload(sites, after)
-      if (outcome.ok) notify.success("nginx reloaded", { description: outcome.description })
-      else notify.warning("nginx reloaded", { description: outcome.description })
-    } catch (err) {
-      notify.warning("nginx reloaded", {
-        description: `What the sites serve could not be checked: ${errorMessage(err)}`,
-      })
-    } finally {
-      served.refresh()
-      setReloading(false)
-    }
-  }
-  // A configured staging directory signs test certificates: nothing issued
-  // from here replaces one with a certificate browsers accept.
-  const testAuthority = certbot.data?.testAuthority ?? false
-
-  const renewal = renewalReading(certbot.data, certbotGone)
-  // A read that is switched off is not loading.
-  const arrived = !(
-    certs.loading ||
-    certbot.loading ||
-    requests.loading ||
-    localCA.loading ||
-    coverage.loading ||
-    providers.loading
-  )
-  // Names no certificate covers go to the Issue dialog as a test run first,
-  // as the dialog's own button starts one.
-  const issueFor =
-    admin && !certbotGone
-      ? (names: string[]) => setIssue({ open: true, domains: names.join(" "), staging: true })
-      : undefined
 
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Proxy" title="Certificates" />
+      <CertificatesIdentity />
+      <CertificateRun />
 
-      <StatGrid columns={4} dense>
-        <StatTile
-          label="Certificates"
-          value={certs.data ? counts.all : "—"}
-          hint={
-            certs.data
-              ? [
-                  counts.certbot > 0 && `${counts.certbot} certbot`,
-                  counts.imported > 0 && `${counts.imported} imported`,
-                  counts.caddy > 0 && `${counts.caddy} renewed by Caddy`,
-                  counts.all - counts.certbot - counts.imported - counts.caddy > 0 &&
-                    `${counts.all - counts.certbot - counts.imported - counts.caddy} referenced by a site`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || "none on this host"
-              : undefined
-          }
-        />
-        <StatTile
-          label="Expiring soon"
-          value={certs.data ? counts.expiring : "—"}
-          tone={counts.expiring > 0 ? "warning" : "default"}
-          hint={counts.expiring > 0 ? "inside the 30-day renewal window" : "none within 30 days"}
-        />
-        <StatTile
-          label="Refused"
-          value={certs.data ? refused : "—"}
-          tone={refused > 0 ? "danger" : "default"}
-          hint={
-            refused > 0
-              ? [
-                  counts.expired > 0 && `${counts.expired} expired`,
-                  counts.test > 0 &&
-                    `${counts.test} test certificate${counts.test === 1 ? "" : "s"}`,
-                  counts.unreadable > 0 && `${counts.unreadable} unreadable`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")
-              : "nothing refused"
-          }
-        />
-        <StatTile label="Renewal" value={renewal.value} hint={renewal.hint} tone={renewal.tone} />
-      </StatGrid>
-
-      <JobConsole
-        job={console_.job}
-        lines={console_.lines}
-        onDismiss={console_.dismiss}
-        onCancel={console_.cancel}
-      />
-      {admin && <JobIssuanceProblems job={console_.job} />}
-
-      {testPassed && admin && (
-        <Notice tone="success" icon={CheckCircle} title={`The test run for ${testPassed} passed`}>
-          <div className="flex flex-wrap items-center gap-2">
-            <span>
-              {testAuthority
-                ? "The authority went through the whole exchange and nothing was saved. What it issues is a test certificate: JD_ACME_DIRECTORY names a staging authority."
-                : "The authority went through the whole exchange and nothing was saved, so the real issuance should pass too."}
-            </span>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => setIssue({ open: true, domains: testPassed, staging: false })}
-            >
-              {testAuthority ? "Issue the certificate" : "Issue the real certificate"}
-            </Button>
-          </div>
-        </Notice>
-      )}
-
-      {replacedNames && replaced && staleSites.length > 0 && (
-        <Notice
-          tone="warning"
-          icon={RefreshClockwise}
-          title="nginx is still serving the test certificate"
+      <Tabs value={shown} onValueChange={setTab} className="gap-0">
+        <TabsPrimitive.List
+          aria-label="Views of the certificates"
+          className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
         >
-          <div className="flex flex-wrap items-center gap-2">
-            <span>
-              The real certificate for {replacedNames.join(", ")} is on disk.{" "}
-              {staleSites.join(", ")} {staleSites.length === 1 ? "keeps" : "keep"} serving the test
-              one until nginx reloads.
-            </span>
-            <Button
-              size="xs"
-              variant="outline"
-              pending={reloading}
-              onClick={() => reload(replaced.path, staleSites)}
+          {views.map((view) => (
+            <TabsPrimitive.Trigger
+              key={view.key}
+              value={view.key}
+              className={tabClasses(shown === view.key, "h-10")}
             >
-              Reload nginx
-            </Button>
-          </div>
-        </Notice>
-      )}
+              {view.label}
+              {view.count !== undefined && view.count > 0 && <ChipCount>{view.count}</ChipCount>}
+            </TabsPrimitive.Trigger>
+          ))}
+        </TabsPrimitive.List>
 
-      {/* Every block under here is as tall as what its read says, and each
-          stands over another: the page waits for the reads it makes itself
-          and then draws them together, rather than moving as each lands. */}
-      <Hold until={arrived}>
-        <LoadingPanel plain rows={3} />
-      </Hold>
-
-      <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] [&>*]:min-w-0">
-        <Panel plain>
-          <PanelHeader
-            title="Installed on this host"
-            actions={
-              admin && (
-                <>
-                  <Button size="sm" variant="outline" onClick={() => setImporting({ open: true })}>
-                    <CloudUpload className="size-3.5" />
-                    Import
-                  </Button>
-                  <IssueCommand
-                    onLetsEncrypt={
-                      certbotGone
-                        ? undefined
-                        : () => setIssue({ open: true, domains: undefined, staging: true })
-                    }
-                    onPrivate={(kind) => setPrivateDialog({ open: true, kind })}
-                    onRequest={() => setCsrOpen(true)}
-                  />
-                </>
-              )
-            }
-          />
-          <PanelBody flush>
-            {certs.loading ? (
-              <LoadingRows rows={3} />
-            ) : certs.error ? (
-              <ErrorState error={certs.error} />
+        <TabsContent value="certificates" className="space-y-8 pt-6">
+          <Panel plain aria-label="Installed certificates">
+            {certs.loading && !certs.data ? (
+              <InventoryLoading />
+            ) : certs.error && !certs.data ? (
+              <ErrorState error={certs.error} onRetry={certs.refresh} />
             ) : certs.data && certs.data.length > 0 ? (
               <CertificateInventory
                 certs={certs.data}
-                canScan={admin}
-                canReadHistory={admin}
-                job={certbotJob ?? job}
-                lineages={certbot.data?.certs}
-                onOpenJob={openCertbotJob}
-                onReplace={
-                  admin && !certbotGone && !testAuthority
-                    ? (domains) => setIssue({ open: true, domains, staging: false })
-                    : undefined
-                }
-                onDelete={admin ? (cert) => remove(cert.source, cert.name) : undefined}
-                onRenew={admin && !certbotGone ? (name, dryRun) => renew(name, dryRun) : undefined}
-                onRenewNow={
-                  admin && !certbotGone
-                    ? (name) => confirm(forceRenewal(name, () => renew(name, false, true)))
-                    : undefined
-                }
-                onChangeNames={
-                  admin && !certbotGone
-                    ? (target, domains) =>
-                        setIssue({ open: true, domains: domains.join(" "), staging: true, target })
-                    : undefined
-                }
-                onRevoke={admin && !certbotGone ? revoke : undefined}
-                onReplaceImport={admin ? (name) => setImporting({ open: true, name }) : undefined}
-                onWatch={admin ? (domain) => void watch(domain) : undefined}
+                filters={filters}
+                verbsFor={work.verbsFor}
+                replacing={work.replacing}
               />
             ) : (
               <EmptyState
                 icon={ShieldOff}
-                title="No certificates found"
-                description="certbot's live directory, imported certificates, every certificate a site names and what the Docker ingress's Caddy serves are all listed here once one exists."
-                className="mt-2"
+                title="No certificates on this server"
+                description="Issue one, import a pair, or point a site at one, and it is listed here."
+                action={
+                  admin && (
+                    <IssueCommand
+                      onLetsEncrypt={work.issue ? () => work.issue?.() : undefined}
+                      onPrivate={(kind) => work.issuePrivate?.(kind)}
+                      onRequest={() => work.requestSigning?.()}
+                    />
+                  )
+                }
               />
             )}
             {admin && certs.data && (
               <ExpiredCleanup
                 certs={certs.data}
-                certbotBusy={certbotBusy}
-                onJob={console_.attach}
+                certbotBusy={work.certbotBusy}
+                onJob={work.attach}
                 onDeleted={certs.refresh}
               />
             )}
@@ -546,185 +223,475 @@ export function CertificatesPage() {
                 <CaddyEvidencePrune onPruned={certs.refresh} />
               </div>
             )}
-          </PanelBody>
-        </Panel>
-
-        <div className="space-y-8">
-          <SigningRequests
-            requests={requests.data}
-            error={requests.error}
-            admin={admin}
-            onRetry={requests.refresh}
-            onChanged={() => {
-              requests.refresh()
-              certs.refresh()
-            }}
-          />
-          <Panel plain>
-            <PanelHeader
-              title="Automatic renewal"
-              actions={
-                admin &&
-                certbot.data &&
-                certbot.data.certs.length > 0 && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy !== "" || certbotBusy}
-                    pending={
-                      busy === ALL_CERTS ||
-                      (certbotJob?.kind === "certbot.renew" &&
-                        certbotJob.target === "every certificate due")
-                    }
-                    onClick={() => renew(ALL_CERTS, false)}
-                  >
-                    <RefreshClockwise className="size-3.5" />
-                    Renew all due
-                  </Button>
-                )
-              }
-            />
-            <PanelBody flush>
-              {/* In the body, not the header: the column is narrow beside the
-                  inventory, and a row of runs there pushed the header's
-                  button out of it. Here they wrap. */}
-              {admin && <RecentJobs kinds={["certbot."]} onOpen={console_.open} className="pt-3" />}
-              {certbot.data && (
-                <RenewalNotice state={certbot.data} admin={admin} onChanged={certbot.refresh} />
-              )}
-              {certbotGone ? (
-                <CertbotMissing onInstall={admin ? console_.attach : undefined} />
-              ) : certbot.loading ? (
-                <LoadingRows rows={3} />
-              ) : certbot.error ? (
-                <ErrorState error={certbot.error} />
-              ) : certbot.data ? (
-                <>
-                  <CertbotRuntimeLine state={certbot.data} />
-                  <RenewalRecord
-                    state={certbot.data}
-                    admin={admin}
-                    certbotBusy={certbotBusy || starting || busy !== ""}
-                    running={certbotJob?.kind === "certbot.renewal"}
-                    onRun={runRenewal}
-                    onShowLog={() => setLogOpen(true)}
-                  />
-                  {admin && hasNginx && (
-                    <ReloadHookOption state={certbot.data} onChanged={certbot.refresh} />
-                  )}
-                  <CertbotLineages
-                    state={certbot.data}
-                    admin={admin}
-                    busy={busy}
-                    job={certbotJob ?? job}
-                    onOpenJob={openCertbotJob}
-                    onRenew={renew}
-                    onReplace={
-                      testAuthority
-                        ? undefined
-                        : (domains) => setIssue({ open: true, domains, staging: false })
-                    }
-                    onRevoke={revoke}
-                    onDelete={(name) => remove("certbot", name)}
-                    onShowLog={() => setLogOpen(true)}
-                  />
-                </>
-              ) : null}
-            </PanelBody>
           </Panel>
 
-          {admin && providers.data && (
-            <DnsProvidersPanel
-              providers={providers.data}
-              admin={admin}
-              certs={certbot.data?.certs ?? []}
-              installs={certbot.data?.installs}
-              certbotBusy={certbotBusy}
-              onJob={console_.attach}
-              onChanged={providers.refresh}
+          {/* Under the list, so it waits for the list: drawn first, it was
+              pushed down when the certificates landed above it. */}
+          {!certs.data ? null : hasNginx ? (
+            <CertificateCoveragePanel
+              coverage={coverage}
+              onIssue={
+                work.issue
+                  ? (names) => work.issue?.({ domains: names.join(" "), staging: true })
+                  : undefined
+              }
             />
+          ) : (
+            // Which names a certificate covers is read from nginx's sites, so
+            // a server with no engine at all is offered the section's own
+            // install screen where Coverage would be; the certificates above
+            // stand without it, certbot's standalone ones among them.
+            status &&
+            !status.caddy && (
+              <EngineSetup
+                status={status}
+                admin={admin}
+                onInstalled={() => {
+                  refreshStatus()
+                  certs.refresh()
+                }}
+              />
+            )
           )}
-          {admin && certbot.data?.available && (
-            <AcmeAccountsPanel certbotBusy={certbotBusy} onJob={console_.attach} />
+        </TabsContent>
+
+        <TabsContent value="renewal" className="space-y-8 pt-6">
+          {shown === "renewal" && <RenewalView onShowLog={showRuns} />}
+        </TabsContent>
+
+        <TabsContent value="dns" className={`${COLUMN} pt-6`}>
+          {shown === "dns" && admin && (
+            <>
+              {work.providers.loading && !work.providers.data ? (
+                <LoadingRows rows={4} />
+              ) : work.providers.error ? (
+                <Panel plain>
+                  <PanelHeader title="DNS challenge providers" />
+                  <PanelBody flush>
+                    <ErrorState error={work.providers.error} onRetry={work.providers.refresh} />
+                  </PanelBody>
+                </Panel>
+              ) : work.providers.data ? (
+                <DnsProvidersPanel
+                  providers={work.providers.data}
+                  admin={admin}
+                  certs={certbot.data?.certs ?? []}
+                  installs={certbot.data?.installs}
+                  certbotBusy={work.certbotBusy}
+                  onJob={work.attach}
+                  onChanged={work.providers.refresh}
+                />
+              ) : null}
+            </>
           )}
-          {admin && providers.error && (
-            <Panel plain>
-              <PanelHeader title="DNS challenge providers" />
-              <PanelBody flush>
-                <ErrorState error={providers.error} onRetry={providers.refresh} />
-              </PanelBody>
-            </Panel>
+        </TabsContent>
+
+        <TabsContent value="accounts" className={`${COLUMN} pt-6`}>
+          {shown === "accounts" &&
+            admin &&
+            (certbotGone ? (
+              <CertbotMissing onInstall={work.attach} />
+            ) : certbot.loading && !certbot.data ? (
+              <LoadingRows rows={3} />
+            ) : certbot.error && !certbot.data ? (
+              <ErrorState error={certbot.error} onRetry={certbot.refresh} />
+            ) : certbot.data?.available ? (
+              <AcmeAccountsPanel certbotBusy={work.certbotBusy} onJob={work.attach} />
+            ) : (
+              <CertbotMissing onInstall={work.attach} />
+            ))}
+        </TabsContent>
+
+        <TabsContent value="authority" className={`${COLUMN} pt-6`}>
+          {shown === "authority" && <AuthorityView />}
+        </TabsContent>
+
+        <TabsContent value="requests" className={`${COLUMN} pt-6`}>
+          {shown === "requests" && <RequestsView />}
+        </TabsContent>
+
+        <TabsContent value="watched" className={`${COLUMN} space-y-8 pt-6`}>
+          {shown === "watched" && (
+            <>
+              <WatchedDomains admin={admin} added={work.watchedAdded} />
+              {admin && <CertTransparency />}
+            </>
           )}
-          <LocalCAPanel
-            ca={localCA.data}
-            error={localCA.error}
-            loading={localCA.loading}
-            admin={admin}
-            onRetry={localCA.refresh}
-            onIssue={() => setPrivateDialog({ open: true, kind: "local-ca" })}
-            onChanged={localCA.refresh}
+        </TabsContent>
+      </Tabs>
+    </Page>
+  )
+}
+
+/**
+ * What the page is about, as one line: the authorities that signed the
+ * certificates here, certbot, how many there are, what is expiring or refused
+ * and whether anything renews them, and at the far end the verdict and the
+ * commands. It holds its height while the reads are out, so nothing under it
+ * moves when they land.
+ */
+function CertificatesIdentity() {
+  const work = useCertificateWork()
+  const { admin, certs, certbot, certbotGone } = work
+  const list = certs.data
+  const counts = useMemo(() => countCertificates(list ?? []), [list])
+  const renewal = renewalReading(certbot.data, certbotGone)
+  const marks = useMemo(() => {
+    const seen = new Set<string>()
+    for (const cert of list ?? []) {
+      const product = certificateProduct(cert)
+      if (product) seen.add(product)
+    }
+    return [...seen].slice(0, 3)
+  }, [list])
+
+  const more: Verb[] = [
+    ...(work.importPair
+      ? [{ key: "import", label: "Import", icon: CloudUpload, run: () => work.importPair?.() }]
+      : []),
+    { key: "decode", label: "Paste a certificate", icon: FileText, run: work.decode },
+  ]
+
+  // Always a state, so the line is one height on a phone, where the state
+  // has a row of its own, while the list is read and once it lands.
+  const verdict = !list ? (
+    certs.error ? (
+      <Status tone="danger" label="Not read" />
+    ) : (
+      <Status tone="unknown" label="Reading" />
+    )
+  ) : counts.refused > 0 ? (
+    // The worst of the counts stands beside the name, and is not said again
+    // among the facts under it.
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap">
+      <StatusDot tone="danger" />
+      <span className="numeric text-destructive" title={counts.refusedWhy}>
+        {counts.refused} refused
+      </span>
+    </span>
+  ) : counts.expiring > 0 ? (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap">
+      <StatusDot tone="warning" />
+      <ExpiringWords counts={counts} />
+    </span>
+  ) : counts.all > 0 ? (
+    <Status verdict="ok" label="all valid" />
+  ) : (
+    <Status tone="stopped" label="None yet" />
+  )
+
+  return (
+    <HostIdentity
+      className="animate-rise border-b-0 pb-0"
+      logo={
+        marks.length > 0 ? (
+          <span className="flex h-10 shrink-0 items-center">
+            <ProductLogos ids={marks} size="md" />
+          </span>
+        ) : undefined
+      }
+      fallback={ShieldCheck}
+      title="Certificates"
+      facts={
+        !list && certs.loading ? (
+          <TextShimmer>Reading the certificates…</TextShimmer>
+        ) : !list && certs.error ? (
+          // A list that was not read has no count: the line said "0
+          // certificates" over the failure.
+          <span className="font-medium text-warning">couldn&apos;t read the certificates</span>
+        ) : (
+          <>
+            {/* On a phone the line keeps to what fits on one, so it is the
+                height it was while it loaded: which certbot is the Renewal
+                view's, and how soon is the list's first row. */}
+            <span className="contents max-sm:hidden">
+              {certbot.data ? (
+                <HostFact product="lets-encrypt">
+                  certbot
+                  {certbot.data.version
+                    ? ` ${certbot.data.version.replace(/^certbot\s*/i, "")}`
+                    : ""}
+                </HostFact>
+              ) : certbotGone ? (
+                <span>no certbot</span>
+              ) : null}
+              {(certbot.data || certbotGone) && <FactDot />}
+            </span>
+            <span className="numeric">{plural(counts.all, "certificate")}</span>
+            {counts.expiring > 0 && counts.refused > 0 && (
+              <>
+                <FactDot />
+                <ExpiringWords counts={counts} />
+              </>
+            )}
+            {certbot.data && !certbotGone && (
+              <>
+                <FactDot />
+                {/* Its reading in a word, with what the record says behind it
+                    on the Renewal view, where the run and its reason are. */}
+                <Link
+                  href={certificatesHref("renewal")}
+                  title={renewal.hint}
+                  data-slot="renewal-fact"
+                  className={cn(
+                    "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
+                    renewal.tone === "danger" && "font-medium text-destructive",
+                    renewal.tone === "warning" && "font-medium text-warning",
+                  )}
+                >
+                  renewal {renewal.value.toLowerCase()}
+                </Link>
+              </>
+            )}
+          </>
+        )
+      }
+      state={verdict}
+      command={
+        admin && (
+          <IssueCommand
+            onLetsEncrypt={work.issue ? () => work.issue?.() : undefined}
+            onPrivate={(kind) => work.issuePrivate?.(kind)}
+            onRequest={() => work.requestSigning?.()}
           />
-        </div>
+        )
+      }
+      menu={<VerbMenu verbs={more} label="More certificate actions" />}
+    />
+  )
+}
+
+/** How many are running out and how soon the first does; on a phone, how many. */
+function ExpiringWords({ counts }: { counts: ReturnType<typeof countCertificates> }) {
+  return (
+    <span className="numeric font-medium text-warning">
+      {counts.expiring} expiring
+      <span className="max-sm:hidden"> in {plural(counts.soonest, "day")}</span>
+    </span>
+  )
+}
+
+/** The line's figures, read over every certificate rather than what a filter leaves. */
+function countCertificates(all: Certificate[]) {
+  // A test certificate is refused like an expired one, and counted there
+  // rather than as expiring: its days say nothing about when it stops working.
+  const readable = all.filter((c) => !c.error)
+  const expiring = readable.filter((c) => c.expiring && !c.expired && !c.staging)
+  const expired = readable.filter((c) => c.expired && !c.staging).length
+  const test = readable.filter((c) => c.staging).length
+  const unreadable = all.length - readable.length
+  return {
+    all: all.length,
+    expiring: expiring.length,
+    soonest: Math.min(...expiring.map((c) => c.daysLeft)),
+    refused: expired + test + unreadable,
+    refusedWhy: [
+      expired > 0 && `${expired} expired`,
+      test > 0 && plural(test, "test certificate"),
+      unreadable > 0 && `${unreadable} unreadable`,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  }
+}
+
+/**
+ * The list's shape before it has been read: the toolbar, the chips and rows
+ * of a certificate row's own height, so the list lands where these stand.
+ */
+function InventoryLoading() {
+  return (
+    <div className="min-w-0 space-y-4" aria-busy="true" data-slot="cert-list-loading">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Skeleton className="h-8 w-full sm:w-72" />
+        <Skeleton className="h-8 w-[10.5rem]" />
       </div>
+      <Skeleton className="h-7 w-24" />
+      <ul className="min-w-0 space-y-2">
+        {[0, 1, 2].map((i) => (
+          <li key={i}>
+            <Skeleton className="h-16 w-full rounded-xl" />
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/**
+ * What renews the certificates: certbot's schedule and what it did, the
+ * deploy hook, every certbot lineage with its verbs, each run as certbot
+ * printed it and the renewal service's journal.
+ */
+function RenewalView({ onShowLog }: { onShowLog: () => void }) {
+  const work = useCertificateWork()
+  const { admin, hasNginx, certbot, certbotGone, certbotBusy, lockJob } = work
+  const [starting, setStarting] = useState(false)
+  // The timer's own service, started now: systemd records the run, so the
+  // renewal reading changes with it.
+  const runRenewal = async () => {
+    setStarting(true)
+    try {
+      work.attach(await post<Job>("/certificates/renewal/run"))
+    } catch (err) {
+      notify.error("The renewal did not start", err)
+    } finally {
+      setStarting(false)
+    }
+  }
+  const lineages = certbot.data?.certs ?? []
+  return (
+    <>
+      <Panel plain aria-label="Renewal schedule" className={COLUMN}>
+        <PanelHeader
+          title="Schedule"
+          actions={
+            admin &&
+            lineages.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={work.renewing !== "" || certbotBusy}
+                pending={
+                  work.renewing === ALL_CERTS ||
+                  (lockJob?.kind === "certbot.renew" && lockJob.target === "every certificate due")
+                }
+                onClick={() => work.renew(ALL_CERTS, false)}
+              >
+                <RefreshClockwise className="size-3.5" />
+                Renew all due
+              </Button>
+            )
+          }
+        />
+        <PanelBody flush>
+          {admin && <RecentJobs kinds={["certbot."]} onOpen={work.openJob} className="pt-3" />}
+          {certbot.data && (
+            <RenewalNotice state={certbot.data} admin={admin} onChanged={certbot.refresh} />
+          )}
+          {certbotGone ? (
+            <CertbotMissing onInstall={admin ? work.attach : undefined} />
+          ) : certbot.loading && !certbot.data ? (
+            <LoadingRows rows={3} />
+          ) : certbot.error && !certbot.data ? (
+            <ErrorState error={certbot.error} onRetry={certbot.refresh} />
+          ) : certbot.data ? (
+            <>
+              <CertbotRuntimeLine state={certbot.data} />
+              <RenewalRecord
+                state={certbot.data}
+                admin={admin}
+                certbotBusy={certbotBusy || starting || work.renewing !== ""}
+                running={lockJob?.kind === "certbot.renewal"}
+                onRun={runRenewal}
+                onShowLog={onShowLog}
+              />
+              {admin && hasNginx && (
+                <ReloadHookOption state={certbot.data} onChanged={certbot.refresh} />
+              )}
+            </>
+          ) : null}
+        </PanelBody>
+      </Panel>
+
+      {certbot.data && !certbotGone && (
+        <Panel plain aria-label="certbot's certificates" className={COLUMN}>
+          <PanelHeader
+            title="certbot's certificates"
+            actions={
+              lineages.length > 0 && (
+                <span className="numeric text-hint text-muted-foreground">{lineages.length}</span>
+              )
+            }
+          />
+          <PanelBody flush>
+            <CertbotLineages
+              state={certbot.data}
+              admin={admin}
+              busy={work.renewing}
+              job={lockJob}
+              onOpenJob={work.openCertbotJob}
+              onRenew={work.renew}
+              onReplace={
+                work.testAuthority
+                  ? undefined
+                  : (domains) => work.issue?.({ domains, staging: false })
+              }
+              onRevoke={(name) => work.revoke(name)}
+              onDelete={(name) => work.remove("certbot", name)}
+              onShowLog={onShowLog}
+            />
+          </PanelBody>
+        </Panel>
+      )}
+
+      {admin && !certbotGone && <RenewalRuns id={RUNS_ID} />}
 
       {/* Every renewal certbot ran, not only the ones started from this
           page: the timer's runs are the ones nobody was watching. */}
       {!certbotGone && <RenewalLog certbot={certbot.data} />}
+    </>
+  )
+}
 
-      {hasNginx && (
-        <div>
-          <CertificateCoveragePanel coverage={coverage} onIssue={admin ? issueFor : undefined} />
-        </div>
+/** The local CA, or for a reader on a server with none, that there is none. */
+function AuthorityView() {
+  const work = useCertificateWork()
+  const { admin, localCA } = work
+  if (!admin && !localCA.loading && !localCA.error && !localCA.data?.exists) {
+    return (
+      <EmptyState
+        icon={ShieldCheck}
+        title="This server has no local CA"
+        description="An administrator can make one to sign certificates for internal names."
+      />
+    )
+  }
+  return (
+    <LocalCAPanel
+      ca={localCA.data}
+      error={localCA.error}
+      loading={localCA.loading}
+      admin={admin}
+      onRetry={localCA.refresh}
+      onIssue={() => work.issuePrivate?.("local-ca")}
+      onChanged={localCA.refresh}
+    />
+  )
+}
+
+/** Requests waiting for an outside authority's answer, or the way to make one. */
+function RequestsView() {
+  const work = useCertificateWork()
+  const { admin, requests, certs } = work
+  const none = requests.data && requests.data.length === 0
+  return (
+    <>
+      {requests.loading && !requests.data && <LoadingRows rows={3} />}
+      <SigningRequests
+        requests={requests.data}
+        error={requests.error}
+        admin={admin}
+        onRetry={requests.refresh}
+        onChanged={() => {
+          requests.refresh()
+          certs.refresh()
+        }}
+      />
+      {none && (
+        <EmptyState
+          icon={FileText}
+          title="No signing request is waiting"
+          description="A request carries this server's key to an outside authority; its certificate is added here when it comes back."
+          action={
+            work.requestSigning && (
+              <Button size="sm" variant="outline" onClick={work.requestSigning}>
+                New signing request
+              </Button>
+            )
+          }
+        />
       )}
-
-      <WatchedDomains admin={admin} added={watchedAdded} />
-      {admin && <CertTransparency />}
-
-      {admin && (
-        <>
-          <IssueDialog
-            open={issue.open}
-            onOpenChange={setIssueOpen}
-            initialDomains={issue.domains}
-            initialStaging={issue.staging}
-            initialTarget={issue.target}
-            hasNginx={hasNginx}
-            plugins={
-              certbot.data && !certbot.data.runtime.pluginsError
-                ? certbot.data.runtime.plugins
-                : undefined
-            }
-            providers={providers.data ?? []}
-            directory={certbot.data?.directory}
-            testAuthority={testAuthority}
-            certs={certbot.data?.certs}
-            certbotBusy={certbotBusy}
-            onStarted={(job) => {
-              console_.attach(job)
-              providers.refresh()
-            }}
-          />
-          <ImportDialog
-            open={importing.open}
-            onOpenChange={(open) => setImporting((s) => ({ ...s, open }))}
-            initialName={importing.name}
-            onDone={certs.refresh}
-          />
-          <PrivateCertificateDialog
-            open={privateDialog.open}
-            kind={privateDialog.kind}
-            caExists={localCA.data?.exists ?? false}
-            onOpenChange={(open) => setPrivateDialog((d) => ({ ...d, open }))}
-            onDone={() => {
-              certs.refresh()
-              localCA.refresh()
-            }}
-          />
-          <CsrDialog open={csrOpen} onOpenChange={setCsrOpen} onDone={requests.refresh} />
-          <RenewalLogPanel open={logOpen} onOpenChange={setLogOpen} />
-        </>
-      )}
-      {dialog}
-    </Page>
+    </>
   )
 }

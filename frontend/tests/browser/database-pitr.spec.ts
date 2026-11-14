@@ -273,8 +273,19 @@ test("a server that does not archive offers it, and the setup shows what the ser
     }),
   })
   await visit(page)
-  await expect(panel(page)).toContainText("The log of shop-db is not archived")
-  await panel(page).getByRole("button", { name: "Set up point-in-time recovery" }).first().click()
+  // What is missing is drawn: the server, the log it writes, and where that
+  // log could be kept, under one sentence and the one command there is.
+  const path = panel(page).getByRole("list", { name: "Where the log of shop-db would be archived" })
+  await expect(path).toContainText("Write-ahead log")
+  for (const place of ["A directory", "S3", "Backblaze B2"]) {
+    await expect(path).toContainText(place)
+  }
+  await expect(panel(page)).toContainText(
+    "The log of shop-db is not archived: shop can be recovered only as it was at a dump.",
+  )
+  const setup = panel(page).getByRole("button", { name: "Set up point-in-time recovery" })
+  await expect(setup).toHaveCount(1)
+  await setup.click()
 
   await expect(dialog(page)).toContainText("shop-db restarts once")
   await dialog(page).getByRole("radio", { name: "S3" }).click()
@@ -595,9 +606,22 @@ test("a server this dashboard cannot archive says why, and offers nothing", asyn
   })
   await visit(page)
   await expect(panel(page)).toContainText("belongs to the compose project shop")
+  // The same picture of what is missing, under the server's reason.
+  await expect(
+    panel(page).getByRole("list", { name: "Where the log of shop-db would be archived" }),
+  ).toBeVisible()
   await expect(
     panel(page).getByRole("button", { name: "Set up point-in-time recovery" }),
   ).toHaveCount(0)
+})
+
+test("a viewer reads that the log is not archived and is offered no way to set it up", async ({
+  page,
+}) => {
+  await mockPitr(page, {}, { viewer: true })
+  await visit(page)
+  await expect(panel(page)).toContainText("The log of shop-db is not archived")
+  await expect(panel(page).getByRole("button")).toHaveCount(0)
 })
 
 test("a reading that fails is said, and tried again on request", async ({ page }) => {

@@ -477,6 +477,7 @@ export default function MetricsPage() {
             <ChartPanel
               plain
               title="Memory and swap"
+              actions={<MemoryReading snapshot={snapshot} />}
               rows={rows}
               series={memSeries}
               unit="%"
@@ -937,6 +938,31 @@ function Readings({
         }
       />
     </StatGrid>
+  )
+}
+
+/**
+ * Memory and swap in use now, at the height of the Allocation bar's head
+ * beside it, so the two hairlines meet.
+ */
+function MemoryReading({ snapshot }: { snapshot: Snapshot }) {
+  const used = snapshot.memory.usedPercent
+  return (
+    <span className="flex h-7 items-center">
+      <HeadReading
+        items={[
+          {
+            label: "used",
+            value: percent(used, 0),
+            color: HUE.mem,
+            tone: utilisationTone(used),
+          },
+          ...(snapshot.swap.total > 0
+            ? [{ label: "swap", value: percent(snapshot.swap.usedPercent, 0), color: HUE.disk }]
+            : []),
+        ]}
+      />
+    </span>
   )
 }
 

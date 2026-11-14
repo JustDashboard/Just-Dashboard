@@ -185,6 +185,50 @@ export function sortContainers(
   })
 }
 
+/** Where the Containers page keeps its search, its chips and its order, which a container's rail reads too. */
+export const CONTAINER_FILTER_KEYS = {
+  query: "docker.containers.query",
+  state: "docker.containers.state.075",
+  stack: "docker.containers.stack",
+  sort: "docker.containers.sort",
+} as const
+
+export const DEFAULT_CONTAINER_SORT: ContainerSort = { key: "state", dir: "asc" }
+
+/** The stack chip for the containers no compose project owns; brackets are not a project name. */
+export const STANDALONE = "(standalone)"
+
+/** The table's words for its order, which the rail's caption says too. */
+export const SORT_WORDS: Record<SortKey, string> = {
+  state: "failing first, then by name",
+  name: "by name",
+  cpu: "by processor",
+  memory: "by memory",
+}
+
+/**
+ * The containers a search, a state chip and a stack chip leave, unordered:
+ * the Containers table's own filter, which the rail beside a container's page
+ * applies to the same remembered values.
+ */
+export function matchingContainers(
+  containers: Container[],
+  { query, state, stack }: { query: string; state: ContainerBucket | ""; stack: string },
+  bucketOf: (container: Container) => ContainerBucket,
+): Container[] {
+  const needle = query.trim().toLowerCase()
+  return containers.filter((c) => {
+    if (state && bucketOf(c) !== state) return false
+    if (stack && (c.composeStack || STANDALONE) !== stack) return false
+    if (!needle) return true
+    return (
+      c.name.toLowerCase().includes(needle) ||
+      c.image.toLowerCase().includes(needle) ||
+      c.composeStack?.toLowerCase().includes(needle) === true
+    )
+  })
+}
+
 export type NetRate = { rx: number; tx: number }
 
 /**

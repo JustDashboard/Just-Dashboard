@@ -7,38 +7,32 @@ import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { useSessionState } from "@/lib/view-state"
-import type {
-  ComposeStack,
-  Container,
-  ContainerSparkline,
-  ContainerStats,
-  DockerEventFeed,
-} from "@/lib/types"
+import type { ComposeStack, Container, ContainerStats, DockerEventFeed } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { useConfirm } from "@/components/confirm-dialog"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { ChoiceList } from "@/components/flow"
+import { FactDot } from "@/components/metrics/host-identity"
 import { StreamState } from "@/components/overview/readings"
 import { Page, PageContext, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { Workspace } from "@/components/workspace/workspace"
 import { cn } from "@/lib/utils"
+import { DockerIdentity } from "@/components/docker/docker-identity"
 import { ExplainIcon, Field, Term } from "@/components/docker/explain"
-import { useContainerControl } from "@/components/docker/container-actions"
 import { StackBand } from "@/components/docker/stack-band"
-import { StackRows } from "@/components/docker/stack-table"
+import { StackChoiceRow } from "@/components/docker/stack-row"
 import {
+  STACK_FILTER_KEYS,
   stackChanges,
   stackLines,
+  visibleStacks,
   type StackBucket,
-  type StackLine,
 } from "@/components/docker/stack-readings"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
@@ -72,28 +66,28 @@ const BUCKETS = new Set<string>(STATES.map((s) => s.value))
  * "is the database up" was a dot and "which application is using the
  * memory" had no answer at all. It now reads as Services does (§15):
  *
- * The server first, as the identity line Services and Live open on — the
- * Compose mark, Docker's version, how many stacks are deployed and how many
- * of their services run and how many ports they publish.
+ * Docker first, as the line every Docker page opens on (`DockerIdentity`):
+ * its version, how many stacks run beside its name, how many are deployed,
+ * how many of their services run and how many ports they publish, and Create
+ * stack as the one command.
  *
  * Then `StackBand`: the stacks using the most processor and memory as spans
  * of one bar the size of the machine, summed over each one's containers from
  * the containers socket, and the last things Docker did to them — a start, an
  * exit and its code, a kill for memory, a failed check.
  *
- * Then the table, which is the stacks with their containers under them
- * (`stack-table.tsx`): each stack a row with its state and its sums, each
- * container a row of the containers page's own readings. The state chips in
- * its head count and narrow by native running, stopped and undeployed states. A container's state moves the moment Docker's does,
- * because it is read off the socket, and the stack list is read again when
- * one does so a stack's own state follows within the second.
+ * Then the stacks, each a card you open (`StackChoiceRow`): one line, one
+ * height, its state and its sums in columns that line up down the list. It
+ * was a table whose every stack was a group row with its containers under
+ * it, expanding in place; the containers are the stack's own page. The state
+ * chips count and narrow by running, stopped and never deployed. A stack's
+ * state moves the moment Docker's does: the containers are read off the
+ * socket, and the stack list is read again when one changes.
  */
 export function StacksTab() {
   const { can } = useAuth()
   const router = useRouter()
-  const { confirm, dialog } = useConfirm()
   const { host, snapshot } = useMetrics()
-  const wide = useMediaQuery("(min-width: 1280px)")
 
   /*
     `?stack=` opened a sheet on this page until 2026-09-21, and a container
@@ -106,13 +100,12 @@ export function StacksTab() {
   }, [legacy, router])
 
   const [creating, setCreating] = useState(false)
-  const [query, setQuery] = useSessionState("docker.stacks.query", "")
-  const [remembered, setState] = useSessionState("docker.stacks.state.075", "")
+  const [query, setQuery] = useSessionState(STACK_FILTER_KEYS.query, "")
+  const [remembered, setState] = useSessionState(STACK_FILTER_KEYS.state, "")
   // The chips were All / Running / Not running / Needs attention until the
   // overhaul; a remembered "all" or "stopped" is no filter now.
   const state = (BUCKETS.has(remembered) ? remembered : "") as StackBucket | ""
   const [focus, setFocus] = useState("")
-  const [collapsed, setCollapsed] = useSessionState<string[]>("docker.stacks.collapsed", [])
   const [deploying, setDeploying] = useState<Record<string, string>>({})
 
   const list = usePoll(
@@ -128,23 +121,6 @@ export function StacksTab() {
     (signal) => get<DockerEventFeed>("/docker/events", { limit: 200 }, signal),
     15_000,
   )
-  // The hour behind each container's figure. A host with the recorder off
-  // answers 503, and the rows simply draw no line.
-  const trends = usePoll<ContainerSparkline[]>(
-    (signal) =>
-      get<ContainerSparkline[]>(
-        "/docker/containers/stats/history",
-        { range: "1h", points: 40 },
-        signal,
-      ),
-    120_000,
-    [],
-  )
-  const trendByName = useMemo(
-    () => new Map((trends.data ?? []).map((line) => [line.name, line])),
-    [trends.data],
-  )
-
   const [containers, setContainers] = useState<Container[]>([])
   const [stats, setStats] = useState<Record<string, ContainerStats>>({})
   const refreshStacks = list.refresh
@@ -167,7 +143,6 @@ export function StacksTab() {
     [refreshStacks],
   )
   const socket = useSocket("/docker/containers/stream", { onMessage })
-  const { pending, act } = useContainerControl(list.refresh)
 
   const stacks = useMemo(() => list.data ?? [], [list.data])
   const lines = useMemo(() => stackLines(stacks, containers, stats), [stacks, containers, stats])
@@ -183,32 +158,13 @@ export function StacksTab() {
     return bucket
   }, [lines])
 
-  const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    return lines.flatMap((line): StackLine[] => {
-      if (state && line.bucket !== state) return []
-      if (focus && line.stack.name !== focus) return []
-      if (!needle || line.stack.name.toLowerCase().includes(needle)) return [line]
-      // A service's name or image narrows the stack to that service.
-      const matching = line.lines.filter(
-        (s) =>
-          s.service.name.toLowerCase().includes(needle) ||
-          s.service.image.toLowerCase().includes(needle),
-      )
-      return matching.length > 0 ? [{ ...line, lines: matching }] : []
-    })
-  }, [lines, query, state, focus])
+  const visible = useMemo(
+    () => visibleStacks(lines, { query, state, focus }),
+    [lines, query, state, focus],
+  )
 
   const toggleState = (next: StackBucket) => setState(state === next ? "" : next)
-  const toggleCollapsed = (stack: string) =>
-    setCollapsed(
-      collapsed.includes(stack) ? collapsed.filter((s) => s !== stack) : [...collapsed, stack],
-    )
   const openStack = (stack: string) => router.push(`/docker/stacks/${encodeURIComponent(stack)}`)
-  const openContainer = (id: string, tab?: string) =>
-    router.push(
-      `/docker/containers/${encodeURIComponent(id)}${tab ? `?tab=${encodeURIComponent(tab)}` : ""}`,
-    )
 
   // An application that is down and should not be is the one thing worth
   // doing from the list; the rest needs the stack's page, where the output
@@ -276,7 +232,6 @@ export function StacksTab() {
       ),
     0,
   )
-  const shown = visible.reduce((n, l) => n + l.lines.length, 0)
   const filtered = query.trim().length > 0 || state !== "" || focus !== ""
 
   return (
@@ -302,52 +257,42 @@ export function StacksTab() {
       <Page className="animate-rise">
         {header}
 
-        <HostIdentity
-          mark="docker-compose"
-          fallback={Layers}
-          title={host?.hostname ?? "Stacks"}
+        <DockerIdentity
+          version={engine.data?.serverVersion}
+          host={host ?? undefined}
+          state={
+            stacks.length > 0 ? (
+              <Status
+                tone={counts.running > 0 ? "running" : "stopped"}
+                label={`${plural(counts.running, "stack")} running`}
+              />
+            ) : undefined
+          }
           facts={
-            <>
-              {engine.data?.serverVersion && (
-                <>
-                  <HostFact product="docker">Docker {engine.data.serverVersion}</HostFact>
-                  <FactDot />
-                </>
-              )}
-              {!list.data ? (
-                <TextShimmer>Reading the stacks…</TextShimmer>
-              ) : stacks.length === 0 ? (
-                <span>No stacks deployed</span>
-              ) : (
-                <>
-                  <span className="numeric">
-                    {deployed} of {plural(stacks.length, "stack")} deployed
+            !list.data ? (
+              <TextShimmer>Reading the stacks…</TextShimmer>
+            ) : stacks.length === 0 ? (
+              <span>No stacks deployed</span>
+            ) : (
+              <>
+                <span className="numeric">
+                  {deployed} of {plural(stacks.length, "stack")} deployed
+                </span>
+                <FactDot />
+                <span className="numeric">
+                  {running} of {plural(services, "service")} running
+                </span>
+                {published > 0 && (
+                  <span className="contents max-sm:hidden">
+                    <FactDot />
+                    <span className="numeric">{plural(published, "port")} published</span>
                   </span>
-                  <FactDot />
-                  <span className="numeric">
-                    {running} of {plural(services, "service")} running
-                  </span>
-                  {published > 0 && (
-                    <>
-                      <FactDot />
-                      <span className="numeric">{plural(published, "port")} published</span>
-                    </>
-                  )}
-                </>
-              )}
-            </>
+                )}
+              </>
+            )
           }
-          aside={
-            <div className="flex flex-wrap items-center gap-3">
-              {stacks.length > 0 && (
-                <Status
-                  tone={counts.running > 0 ? "running" : "stopped"}
-                  label={`${plural(counts.running, "stack")} running`}
-                />
-              )}
-              <WorkspaceHelp compact />
-            </div>
-          }
+          // On a server with none, the empty state under the band offers it.
+          command={list.data && stacks.length === 0 ? undefined : createButton}
         />
 
         <StackBand
@@ -362,10 +307,10 @@ export function StacksTab() {
           onOpen={openStack}
         />
 
-        {/* Framed, because it is a table: the grid owns a scroll region and
-            the edge is what says so (§2). Everything above it stays plain. The
-            line and the band stay up while the list is read, and on a server
-            with no stacks, so nothing above this moves when the answer lands. */}
+        {/* Plain: the stacks are cards you open, not a table read down its
+            columns, so the section is a title and a hairline (§2). The line
+            and the band stay up while the list is read, and on a server with
+            no stacks, so nothing above this moves when the answer lands. */}
         {!list.data ? (
           <LoadingPanel />
         ) : stacks.length === 0 ? (
@@ -382,23 +327,18 @@ export function StacksTab() {
             action={createButton}
           />
         ) : (
-          <Panel>
+          <Panel plain aria-label="Stacks">
             <PanelHeader
               title={
                 <span className="inline-flex items-center gap-1.5">
                   Stacks
                   <span className="numeric ml-0.5 text-body font-normal text-muted-foreground">
-                    {stacks.length}
+                    {filtered ? `${visible.length} of ${stacks.length}` : stacks.length}
                   </span>
                   <ExplainIcon name="stack" />
                 </span>
               }
-              actions={
-                <>
-                  <StreamState connection={socket.state} />
-                  {createButton}
-                </>
-              }
+              actions={<StreamState connection={socket.state} />}
             >
               <ChipStrip aria-label="State" className="mr-auto">
                 {STATES.map(({ value, label, dot, title }) => {
@@ -470,36 +410,23 @@ export function StacksTab() {
                   }
                 />
               ) : (
-                <StackRows
-                  lines={visible}
-                  wide={wide}
-                  pending={pending}
-                  confirm={confirm}
-                  act={act}
-                  trends={trendByName}
-                  deploying={deploying}
-                  collapsed={collapsed}
-                  onToggle={toggleCollapsed}
-                  onOpenStack={openStack}
-                  onOpenContainer={openContainer}
-                  onDeploy={(name) => void deploy(name)}
-                />
+                <ChoiceList aria-label="Stacks" className="pt-3">
+                  {visible.map(({ line, matched }) => (
+                    <StackChoiceRow
+                      key={line.stack.name}
+                      line={line}
+                      matched={matched}
+                      deploying={deploying[line.stack.name]}
+                      onDeploy={(name) => void deploy(name)}
+                    />
+                  ))}
+                </ChoiceList>
               )}
             </PanelBody>
-            <PanelFooter className="text-hint text-muted-foreground">
-              <span className="numeric">
-                {filtered
-                  ? `${plural(visible.length, "stack")} of ${stacks.length} · ${plural(shown, "container")}`
-                  : `${plural(stacks.length, "stack")} · ${plural(services, "container")}`}
-              </span>
-              <span className="text-muted-foreground/40">·</span>
-              <span>running first, then by name</span>
-            </PanelFooter>
           </Panel>
         )}
 
         {newStackDialog}
-        {dialog}
       </Page>
     </Workspace>
   )

@@ -1,7 +1,15 @@
-import { expect, test, type Page, type Route, type WebSocketRoute } from "@playwright/test"
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Route,
+  type WebSocketRoute,
+} from "@playwright/test"
 import { createHash } from "node:crypto"
 import { snapshot as hostSnapshot } from "./host-fixture"
 import { heldResponse, recordProgress } from "./progress-recording"
+import { risen } from "./risen"
 
 test.use({
   video:
@@ -267,6 +275,31 @@ async function mockFiles(
 async function openFiles(page: Page) {
   await page.goto("/files")
   await page.locator("tr[data-entry-path]").first().waitFor()
+}
+
+/**
+ * Presses a word in an open menu the way a hand does: by moving to it.
+ *
+ * On a phone's width a submenu opens to the left of its parent. The menu
+ * keeps a submenu open while the pointer travels towards it, and reads the
+ * direction of travel from the moves it sees; a pointer that jumps there in
+ * one move has no direction, so the submenu closes under it. With motion the
+ * click still lands on the closing menu; with reduced motion it is gone.
+ */
+async function pressMenuItem(page: Page, name: string) {
+  const item = page.getByRole("menuitem", { name, exact: true })
+  await expect(item).toBeVisible()
+  const at = (await item.boundingBox())!
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2, { steps: 6 })
+  await item.click()
+}
+
+/** A phone's strip has no view toggle: the view is in its More menu. */
+async function phoneTiles(page: Page) {
+  await page.getByRole("button", { name: "More", exact: true }).click()
+  await pressMenuItem(page, "View")
+  await pressMenuItem(page, "Tiles")
+  await expect(page.locator("[data-file-grid]")).toBeVisible()
 }
 
 test.describe("native Files interactions", () => {
@@ -569,8 +602,10 @@ test.describe("native Files interactions", () => {
     await page.keyboard.press("Escape")
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ reducedMotion: "reduce" })
-    await expect(page.getByRole("button", { name: "Forward to next folder" })).toBeVisible()
-    await page.getByRole("button", { name: "Forward to next folder" }).click()
+    // A phone's strip keeps the way back; the way forward is a word in More.
+    await expect(page.getByRole("button", { name: "Forward to next folder" })).toBeHidden()
+    await page.getByRole("button", { name: "More", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Forward", exact: true }).click()
     await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
     await pause()
     await page.getByRole("button", { name: "Back to previous folder" }).click()
@@ -589,7 +624,10 @@ test.describe("native Files interactions", () => {
       { width: 844, height: 390 },
     ]) {
       await page.setViewportSize(size)
-      await expect(page.getByRole("button", { name: "Go to parent folder" })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Back to previous folder" })).toBeVisible()
+      await page.getByRole("button", { name: "More", exact: true }).click()
+      await expect(page.getByRole("menuitem", { name: "Parent folder", exact: true })).toBeVisible()
+      await page.keyboard.press("Escape")
       await page.getByRole("button", { name: "Files shortcuts" }).click()
       const dialog = page.getByRole("dialog", { name: "Files shortcuts" })
       await expect(dialog).toBeVisible()
@@ -858,11 +896,18 @@ test.describe("fixed search palette", () => {
           },
         )
         await openFiles(page)
-        const trigger = page.getByRole("button", {
-          name: mode === "names" ? "Find" : "Search inside files",
-          exact: true,
-        })
-        await trigger.click()
+        if (mode === "content" && viewport.width < 1024) {
+          // Below `lg` the strip keeps Find; searching inside files is in More.
+          await page.getByRole("button", { name: "More", exact: true }).click()
+          await page.getByRole("menuitem", { name: "Search inside files", exact: true }).click()
+        } else {
+          await page
+            .getByRole("button", {
+              name: mode === "names" ? "Find" : "Search inside files",
+              exact: true,
+            })
+            .click()
+        }
         const dialog = page.getByRole("dialog", { name: "Find files" })
         const input = dialog.getByRole("combobox")
         const results = dialog.getByRole("listbox", { name: "Search results" })
@@ -1214,7 +1259,10 @@ test("full editors and the search palette fit desktop and phone widths", async (
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(375)
   await page.screenshot({ path: "test-results/files-editor-phone.png" })
   await expect(page.getByRole("complementary", { name: "File explorer" })).toBeHidden()
-  await page.getByRole("button", { name: "Show file tree", exact: true }).click()
+  await page
+    .getByRole("navigation", { name: "File editor" })
+    .getByRole("tab", { name: "Files" })
+    .click()
   const tree = page.getByRole("complementary", { name: "File explorer" })
   await expect(tree).toBeVisible()
   await tree.getByRole("button", { name: /logo.png/ }).click()
@@ -1746,7 +1794,7 @@ test("selection actions fit a phone and respect reduced motion", async ({ page }
   await page.emulateMedia({ reducedMotion: "reduce" })
   await mockFiles(page)
   await openFiles(page)
-  await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+  await phoneTiles(page)
   const listing = page.locator("[data-file-listing]")
   const first = listing.locator("[data-entry-path]").first()
   const before = await first.boundingBox()
@@ -1769,7 +1817,7 @@ test("touch long-press opens the entry's verbs and allows ordinary selection", a
   await page.setViewportSize({ width: 390, height: 844 })
   await mockFiles(page)
   await openFiles(page)
-  await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+  await phoneTiles(page)
   const listing = page.locator("[data-file-listing]")
   const photos = listing.locator(`[data-entry-path="${home}/photos"]`)
   const box = (await photos.boundingBox())!
@@ -2379,4 +2427,731 @@ test("a large folder draws the rows a click is about, and none for a reading of 
   await expect(page.getByText("2 items selected").first()).toBeVisible()
   await expect(row(9)).toHaveAttribute("data-state", "selected")
   await expect(row(11)).toHaveAttribute("data-state", "selected")
+})
+
+/**
+ * One pane at a time below `lg` (`components/phone-panes.tsx`).
+ *
+ * Files wrapped its strip to three rows of glyphs on a phone and had nowhere
+ * to show the places or the details at all; the editor wrapped its commands
+ * to three more and kept its tree in a drawer. Each is one full-height pane
+ * now with a bar at the foot, as the Git workspace is, under a strip of one
+ * row. What the strip no longer draws is a word in a menu, so nothing a desk
+ * can do is out of a finger's reach.
+ */
+const PHONE = { width: 390, height: 844 }
+
+const boxOf = async (locator: Locator) => {
+  const found = await locator.boundingBox()
+  expect(found).not.toBeNull()
+  return found!
+}
+
+/** Nothing scrolls but what is inside the pane: not the window, not the page, not sideways. */
+async function expectHeldToTheWindow(page: Page) {
+  const overflow = await page.evaluate(() => {
+    const html = document.documentElement
+    const held = document.querySelector("[data-slot=page]")!
+    return {
+      sideways: html.scrollWidth - html.clientWidth,
+      down: html.scrollHeight - html.clientHeight,
+      page: held.scrollHeight - held.clientHeight,
+    }
+  })
+  expect(overflow.sideways).toBeLessThanOrEqual(0)
+  expect(overflow.down).toBeLessThanOrEqual(0)
+  expect(overflow.page).toBeLessThanOrEqual(1)
+}
+
+/** The bar is at the foot of the screen, edge to edge, 56px of stops. */
+async function expectBarAtTheFoot(bar: Locator) {
+  const at = await boxOf(bar)
+  expect(Math.round(at.x)).toBe(0)
+  expect(Math.round(at.width)).toBe(PHONE.width)
+  expect(Math.round(at.y + at.height)).toBe(PHONE.height)
+  expect(Math.round(at.height)).toBeGreaterThanOrEqual(56)
+  expect(Math.round(at.height)).toBeLessThanOrEqual(58)
+}
+
+/** A pane is the whole width, and runs from under the strip down to the bar. */
+async function expectFullPane(pane: Locator, bar: Locator) {
+  const at = await boxOf(pane)
+  expect(Math.round(at.x)).toBe(0)
+  expect(Math.round(at.width)).toBe(PHONE.width)
+  expect(Math.round(at.y + at.height)).toBeLessThanOrEqual(Math.round((await boxOf(bar)).y))
+  expect(at.height).toBeGreaterThan(PHONE.height / 2)
+}
+
+const editorAddress = (name: string) =>
+  `/files/editor?path=${encodeURIComponent(`${home}/${name}`)}&root=${encodeURIComponent(home)}`
+
+test.describe("Files on a phone", () => {
+  test.use({ viewport: PHONE, hasTouch: true })
+
+  const bar = (page: Page) => page.getByRole("navigation", { name: "Files", exact: true })
+  const stop = (page: Page, name: string) => bar(page).getByRole("tab", { name, exact: true })
+  const strip = (page: Page) => page.locator("[data-slot='pane-header']").first()
+  const listing = (page: Page) => page.getByRole("region", { name: "Folder contents" })
+  const places = (page: Page) => page.getByRole("navigation", { name: "Places" })
+  const inspector = (page: Page) => page.locator("[data-files-inspector]")
+  const pick = async (page: Page, ...names: string[]) => {
+    await page.getByRole("button", { name: "More", exact: true }).click()
+    for (const name of names) await pressMenuItem(page, name)
+  }
+
+  test("the folder is the whole height under one row of strip, in the same place before it has loaded", async ({
+    page,
+  }, testInfo) => {
+    await mockFiles(page)
+    // The listing is held, so the strip and the bar are measured while it loads.
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    await page.route("**/api/v1/files/list**", async (route) => {
+      await gate
+      await route.fallback()
+    })
+    await page.goto("/files")
+    await expect(strip(page).getByRole("button", { name: "Find", exact: true })).toBeVisible()
+    await risen(page)
+    const loading = { strip: await boxOf(strip(page)), bar: await boxOf(bar(page)) }
+    release()
+    await page.locator("tr[data-entry-path]").first().waitFor()
+    await risen(page)
+    expect(await boxOf(strip(page))).toEqual(loading.strip)
+    expect(await boxOf(bar(page))).toEqual(loading.bar)
+
+    // One row: the way back, where you are, find, New and the rest.
+    expect(loading.strip.height).toBeLessThanOrEqual(46)
+    for (const name of ["Back to previous folder", "Find", "New", "More"]) {
+      await expect(strip(page).getByRole("button", { name, exact: true })).toBeVisible()
+    }
+    for (const name of [
+      "Forward to next folder",
+      "Go to parent folder",
+      "Refresh",
+      "Search inside files",
+      "Upload",
+      "Arrange",
+      "Star this folder",
+      "Colour all folders",
+      "Places",
+      "Hide the sidebar",
+      "Hide the details",
+    ]) {
+      await expect(strip(page).getByRole("button", { name, exact: true })).toBeHidden()
+    }
+    await expect(strip(page).getByRole("radiogroup", { name: "View" })).toBeHidden()
+    // The path shows its end: the folder that is open, not the root above it.
+    await expect(
+      strip(page).getByRole("button", { name: "operator", exact: true }),
+    ).toBeInViewport()
+
+    await expectBarAtTheFoot(bar(page))
+    await expect(stop(page, "Folder")).toHaveAttribute("aria-selected", "true")
+    await expectFullPane(listing(page), bar(page))
+    await expect(places(page)).toBeHidden()
+    await expect(inspector(page)).toBeHidden()
+    await expectHeldToTheWindow(page)
+    await page.screenshot({ path: testInfo.outputPath("files-phone-folder.png") })
+  })
+
+  test("places are a pane, and picking one is asking to see it", async ({ page }, testInfo) => {
+    await mockFiles(page)
+    await openFiles(page)
+    await stop(page, "Places").click()
+    await expect(places(page)).toBeVisible()
+    await expect(listing(page)).toBeHidden()
+    await expectFullPane(places(page), bar(page))
+    await expectHeldToTheWindow(page)
+    await page.screenshot({ path: testInfo.outputPath("files-phone-places.png") })
+
+    await places(page).locator("button[title='/etc']").click()
+    await expect(page.getByRole("button", { name: "Folders in /etc" })).toBeVisible()
+    await expect(stop(page, "Folder")).toHaveAttribute("aria-selected", "true")
+    await expect(listing(page)).toBeVisible()
+    await expect(places(page)).toBeHidden()
+
+    // The place that is already open changes no address, and still shows it.
+    await stop(page, "Places").click()
+    await places(page).locator("button[title='/etc']").click()
+    await expect(listing(page)).toBeVisible()
+    await expect(places(page)).toBeHidden()
+
+    // Leaving by the strip's Back is arriving somewhere too.
+    await stop(page, "Places").click()
+    await strip(page).getByRole("button", { name: "Back to previous folder" }).click()
+    await expect(page.locator(`tr[data-entry-path='${home}/photos']`)).toBeVisible()
+    await expect(stop(page, "Folder")).toHaveAttribute("aria-selected", "true")
+  })
+
+  test("the sidebar and details put away at a desk are still on a phone's bar", async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await page.addInitScript(() => {
+      localStorage.setItem("jd.view.state.entry.files.sidebar", "false")
+      localStorage.setItem("jd.view.state.entry.files.inspector", "false")
+    })
+    await openFiles(page)
+    await stop(page, "Places").click()
+    await expect(places(page).locator("button[title='/etc']")).toBeVisible()
+    await stop(page, "Details").click()
+    await expect(inspector(page).getByRole("heading", { name: "operator" })).toBeVisible()
+  })
+
+  test("details are a pane: what the folder holds as a sentence, and a file's own verbs", async ({
+    page,
+  }, testInfo) => {
+    await mockFiles(page)
+    await page.route("**/api/v1/files/preview**", async (route) => {
+      const target = new URL(route.request().url()).searchParams.get("path")
+      if (target !== home) return route.fallback()
+      await json(route, {
+        path: home,
+        name: "operator",
+        modified: now,
+        modeOctal: "0755",
+        owner: "operator",
+        group: "operator",
+        kind: "dir",
+        size: 0,
+        editable: false,
+        childCount: 5,
+        dirCount: 2,
+        fileCount: 3,
+      })
+    })
+    await page.route("**/api/v1/files/usage**", (route) =>
+      json(route, {
+        path: home,
+        bytes: 1.2 * 1024 ** 3,
+        files: 340,
+        dirs: 28,
+        truncated: false,
+        largest: [],
+      }),
+    )
+    await openFiles(page)
+    await stop(page, "Details").click()
+    await expect(inspector(page)).toBeVisible()
+    await expect(listing(page)).toBeHidden()
+    await expectFullPane(inspector(page), bar(page))
+    // A sentence, not two boxed figures; the size joins it once it is measured.
+    const counts = inspector(page).locator("[data-slot=folder-counts]")
+    await expect(counts).toHaveText("2 folders, 3 files")
+    await inspector(page).getByRole("button", { name: "Measure size" }).click()
+    await expect(counts).toHaveText("2 folders, 3 files, 1.2 GB")
+    await expect(inspector(page)).toContainText("340 files and 28 folders all the way down")
+    await expectHeldToTheWindow(page)
+    await page.screenshot({ path: testInfo.outputPath("files-phone-details.png") })
+
+    // A file's details are the same pane, with the file's own verbs in it.
+    await stop(page, "Folder").click()
+    await page.locator(`tr[data-entry-path='${home}/notes.md'] [data-file-name]`).click()
+    await stop(page, "Details").click()
+    await expect(inspector(page).getByRole("heading", { name: "notes.md" })).toBeVisible()
+    await expect(inspector(page).getByRole("link", { name: "Download" })).toBeVisible()
+    await inspector(page).getByRole("button", { name: "Edit", exact: true }).click()
+    await expect(page.getByRole("dialog", { name: "notes.md", exact: true })).toBeVisible()
+  })
+
+  test("how the wide strip moves and draws the folder is a word in More", async ({ page }) => {
+    test.setTimeout(60_000)
+    await mockFiles(page)
+    const lists: URL[] = []
+    page.on("request", (request) => {
+      if (request.url().includes("/files/list?")) lists.push(new URL(request.url()))
+    })
+    await openFiles(page)
+    const rows = () =>
+      page
+        .locator("tr[data-entry-path]")
+        .evaluateAll((els) => els.map((el) => el.getAttribute("data-entry-path")!.split("/").pop()))
+
+    const before = lists.length
+    await pick(page, "Refresh")
+    await expect.poll(() => lists.length).toBeGreaterThan(before)
+
+    await pick(page, "Sort by", "Size")
+    await expect.poll(rows).toEqual(["photos", "site", "notes.md", "logo.png", "clip.mp4"])
+    await pick(page, "View", "Hidden files")
+    await expect
+      .poll(() => lists.some((url) => url.searchParams.get("hidden") === "true"))
+      .toBe(true)
+    await pick(page, "View", "Tiles")
+    await expect(page.locator("[data-file-grid]")).toBeVisible()
+    await pick(page, "View", "Large tiles")
+    await pick(page, "View", "List")
+    await expect(page.locator("tr[data-entry-path]").first()).toBeVisible()
+  })
+
+  test("and so is what the strip does to the folder itself", async ({ page }) => {
+    test.setTimeout(60_000)
+    await mockFiles(page)
+    const sent: { path: string; body: unknown }[] = []
+    page.on("request", (request) => {
+      if (request.method() !== "PUT") return
+      sent.push({ path: new URL(request.url()).pathname, body: request.postDataJSON() })
+    })
+    await openFiles(page)
+
+    await pick(page, "Select all")
+    await expect(page.getByRole("toolbar", { name: "Selection actions" })).toContainText(
+      "5 items selected",
+    )
+    await page.getByRole("button", { name: "Clear the selection" }).click()
+
+    await pick(page, "Star this folder")
+    await expect
+      .poll(() => sent.find((call) => call.path.endsWith("/files/bookmarks"))?.body)
+      .toEqual({
+        bookmarks: [
+          { path: `${home}/photos`, name: "photos" },
+          { path: home, name: "operator" },
+        ],
+      })
+    await pick(page, "Colour all folders", "Green")
+    await expect
+      .poll(() => sent.find((call) => call.path.endsWith("/files/colours/default"))?.body)
+      .toEqual({ colour: "green" })
+
+    const chooser = page.waitForEvent("filechooser")
+    await pick(page, "Upload", "Files…")
+    expect((await chooser).isMultiple()).toBe(true)
+
+    await pick(page, "Search inside files")
+    const finder = page.getByRole("dialog", { name: "Find files" })
+    await expect(finder.getByRole("combobox")).toBeFocused()
+    await page.keyboard.press("Escape")
+    await expect(finder).toBeHidden()
+
+    await pick(page, "Parent folder")
+    await expect.poll(() => new URL(page.url()).searchParams.get("path")).toBe("/home")
+  })
+
+  test("what was cut on a phone is pasted from More, and a long press still opens the folder's verbs", async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    const moved: { from: string; to: string }[] = []
+    await page.route("**/api/v1/files/move", async (route) => {
+      moved.push(route.request().postDataJSON())
+      await json(route, { ok: true })
+    })
+    await openFiles(page)
+    await page.locator(`tr[data-entry-path='${home}/notes.md']`).getByRole("checkbox").click()
+    await page
+      .getByRole("toolbar", { name: "Selection actions" })
+      .getByRole("button", { name: "Cut", exact: true })
+      .click()
+    await page.locator(`tr[data-entry-path='${home}/photos'] [data-file-name]`).dblclick()
+    await expect(page.getByRole("button", { name: `Folders in ${home}/photos` })).toBeVisible()
+    await pick(page, "Paste 1 item")
+    await expect
+      .poll(() => moved)
+      .toEqual([{ from: `${home}/notes.md`, to: `${home}/photos/notes.md`, overwrite: false }])
+
+    // The space between rows, pressed and held.
+    const space = await boxOf(listing(page))
+    await listing(page).dispatchEvent("pointerdown", {
+      pointerType: "touch",
+      pointerId: 1,
+      clientX: space.x + space.width / 2,
+      clientY: space.y + space.height - 80,
+      button: 0,
+      bubbles: true,
+    })
+    await expect(page.getByRole("menuitem", { name: "New folder", exact: true })).toBeVisible()
+    await expect(page.getByRole("menuitem", { name: "Upload files…", exact: true })).toBeVisible()
+  })
+
+  test("a read-only account is offered nothing it cannot do", async ({ page }) => {
+    await mockFiles(page)
+    await page.route("**/api/v1/auth/session", (route) =>
+      json(route, { ...user, capabilities: ["read"] }),
+    )
+    const writes: string[] = []
+    page.on("request", (request) => {
+      if (request.method() !== "GET" && request.url().includes("/files/"))
+        writes.push(request.url())
+    })
+    await openFiles(page)
+    await expect(strip(page).getByRole("button", { name: "New", exact: true })).toHaveCount(0)
+    await page.getByRole("button", { name: "More", exact: true }).click()
+    await expect(page.getByRole("menuitem", { name: "Refresh", exact: true })).toBeVisible()
+    for (const name of ["Upload", "Star this folder", "Colour all folders"]) {
+      await expect(page.getByRole("menuitem", { name, exact: true })).toHaveCount(0)
+    }
+    await page.keyboard.press("Escape")
+    // The details pane has no swatches to recolour the folder with.
+    await stop(page, "Details").click()
+    await expect(inspector(page).getByRole("heading", { name: "operator" })).toBeVisible()
+    await expect(inspector(page).getByRole("radiogroup", { name: "Folder colour" })).toHaveCount(0)
+    expect(writes).toEqual([])
+  })
+
+  test("the editor opened from the listing has one row of commands too", async ({ page }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    await page.locator(`tr[data-entry-path='${home}/notes.md'] [data-file-name]`).dblclick()
+    const sheet = page.getByRole("dialog", { name: "notes.md", exact: true })
+    await expect(sheet.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+    const toolbar = sheet.locator("[data-slot=editor-toolbar]")
+    expect((await boxOf(toolbar)).height).toBe(32)
+    await expect(toolbar.getByRole("button", { name: "Open full editor" })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      PHONE.width,
+    )
+  })
+})
+
+test.describe("the file editor on a phone", () => {
+  test.use({ viewport: PHONE, hasTouch: true })
+
+  const bar = (page: Page) => page.getByRole("navigation", { name: "File editor", exact: true })
+  const stop = (page: Page, name: string) => bar(page).getByRole("tab", { name, exact: true })
+  const editor = (page: Page) => page.getByRole("region", { name: "File editor" })
+  const tree = (page: Page) => page.getByRole("complementary", { name: "File explorer" })
+  const menu = (page: Page) => page.getByRole("button", { name: "More editor commands" })
+
+  async function openEditor(page: Page) {
+    await mockFiles(page)
+    await page.goto(editorAddress("notes.md"))
+    await expect(editor(page).locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+    await expect(editor(page).locator(".monaco-editor")).toContainText("hello")
+  }
+
+  test("one pane and a bar, one row of commands, and a draft that outlives a look at the tree", async ({
+    page,
+  }, testInfo) => {
+    await openEditor(page)
+    await risen(page)
+    await expectBarAtTheFoot(bar(page))
+    await expect(stop(page, "Editor")).toHaveAttribute("aria-selected", "true")
+    await expect(tree(page)).toBeHidden()
+    await expect(page.getByRole("button", { name: /file tree/ })).toBeHidden()
+    await expectFullPane(editor(page), bar(page))
+
+    // One row: the language, find, undo and redo, and the menu.
+    const toolbar = editor(page).locator("[data-slot=editor-toolbar]")
+    expect((await boxOf(toolbar)).height).toBe(32)
+    await expect(toolbar.getByRole("combobox", { name: "File language" })).toBeVisible()
+    for (const name of ["Find", "Undo", "Redo", "More editor commands"]) {
+      await expect(toolbar.getByRole("button", { name, exact: true })).toBeVisible()
+    }
+    for (const name of [
+      "Replace",
+      "Wrap long lines",
+      "Minimap",
+      "Format this document",
+      "Review the changes before saving",
+      "Discard changes and reload from disk",
+    ]) {
+      await expect(toolbar.getByRole("button", { name, exact: true })).toBeHidden()
+    }
+    // The footer is one row as well: the caret's place is said in the line above the code.
+    const save = await boxOf(page.getByRole("button", { name: "Save", exact: true }))
+    const saveAs = await boxOf(page.getByRole("button", { name: "Save as", exact: true }))
+    expect(Math.round(save.y)).toBe(Math.round(saveAs.y))
+    await expect(editor(page).getByText(/^Ln 1, Col 1 · 14 B · $/)).toBeVisible()
+    await expectHeldToTheWindow(page)
+    await page.screenshot({ path: testInfo.outputPath("editor-phone.png") })
+
+    await editor(page).locator(".monaco-editor").click()
+    await page.keyboard.press("Control+End")
+    await page.keyboard.insertText("phone draft")
+    await expect(editor(page)).toContainText("Unsaved changes")
+
+    // The tree is the other pane, the same height.
+    await stop(page, "Files").click()
+    await expect(tree(page)).toBeVisible()
+    await expect(editor(page)).toBeHidden()
+    await expectFullPane(tree(page), bar(page))
+    await expectHeldToTheWindow(page)
+    await page.screenshot({ path: testInfo.outputPath("editor-phone-tree.png") })
+
+    // Back at the editor the draft is as it was left.
+    await stop(page, "Editor").click()
+    await expect(editor(page).locator(".monaco-editor")).toContainText("phone draft")
+    await expect(editor(page)).toContainText("Unsaved changes")
+
+    // Choosing the file that is open is asking to see it, and asks nothing.
+    await stop(page, "Files").click()
+    await tree(page)
+      .getByRole("button", { name: /notes\.md/ })
+      .click()
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    await expect(editor(page).locator(".monaco-editor")).toContainText("phone draft")
+
+    // Another file is asked about first, and staying keeps the draft.
+    await stop(page, "Files").click()
+    await tree(page)
+      .getByRole("button", { name: /logo\.png/ })
+      .click()
+    await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
+    await page.getByRole("button", { name: "Cancel", exact: true }).click()
+    await expect(editor(page).locator(".monaco-editor")).toContainText("phone draft")
+    await expect(page).toHaveURL(/notes\.md/)
+  })
+
+  test("the commands the row has no room for are words in its menu", async ({ page }) => {
+    await openEditor(page)
+    await menu(page).click()
+    for (const name of ["Replace", "Format this document", "Smaller text", "Larger text"]) {
+      await expect(page.getByRole("menuitem", { name: new RegExp(`^${name}`) })).toBeVisible()
+    }
+    // Nothing to review or discard yet: drawn, and not offered.
+    await expect(page.getByRole("menuitemcheckbox", { name: "Review the changes" })).toBeDisabled()
+    await expect(page.getByRole("menuitem", { name: "Discard changes" })).toBeDisabled()
+
+    await page.getByRole("menuitemcheckbox", { name: "Wrap long lines" }).click()
+    await menu(page).click()
+    await expect(page.getByRole("menuitemcheckbox", { name: "Wrap long lines" })).toBeChecked()
+
+    // The size is pressed more than once, so the menu stays open for it.
+    await page.getByRole("menuitem", { name: /^Larger text/ }).click()
+    await page.getByRole("menuitem", { name: /^Larger text/ }).click()
+    await expect(page.getByRole("menuitem", { name: /^Smaller text/ })).toContainText("15px")
+    // (By class: while the menu is open the region behind it is hidden from roles.)
+    await expect
+      .poll(() =>
+        page.locator(".monaco-editor .view-lines").evaluate((el) => getComputedStyle(el).fontSize),
+      )
+      .toBe("15px")
+
+    await page.getByRole("menuitem", { name: /^Indentation/ }).click()
+    await page.getByRole("menuitemradio", { name: "4 spaces" }).click()
+    await menu(page).click()
+    await expect(page.getByRole("menuitem", { name: /^Indentation/ })).toContainText("4 spaces")
+
+    // The palette opens and keeps the keyboard: the menu closing does not shut it.
+    await page.getByRole("menuitem", { name: "Commands", exact: true }).click()
+    await expect(page.locator(".quick-input-widget")).toBeVisible()
+    await page.keyboard.press("Escape")
+
+    await menu(page).click()
+    await page.getByRole("menuitem", { name: "Replace", exact: true }).click()
+    await expect(editor(page).getByRole("textbox", { name: "Replace" })).toBeVisible()
+
+    // A draft makes the two that were waiting pressable.
+    await page.keyboard.press("Escape")
+    await editor(page).locator(".monaco-editor .view-lines").click()
+    await page.keyboard.press("Control+End")
+    await page.keyboard.insertText("changed")
+    await menu(page).click()
+    await page.getByRole("menuitemcheckbox", { name: "Review the changes" }).click()
+    await expect(editor(page).locator(".monaco-editor")).toBeHidden()
+    await expect(editor(page)).toContainText("changed")
+  })
+
+  test("a picture's editor keeps its save in reach above the bar", async ({ page }) => {
+    await mockFiles(page)
+    await mockPicture(page, 320, 180)
+    await page.goto(editorAddress("logo.png"))
+    await expect(page.getByLabel("Image editing canvas")).toBeVisible()
+    await expectBarAtTheFoot(bar(page))
+    await expect(
+      page.getByRole("button", { name: "Save over original", exact: true }),
+    ).toBeInViewport()
+    await expectHeldToTheWindow(page)
+  })
+})
+
+test.describe("the file editor at a desk", () => {
+  test.use({ viewport: { width: 1280, height: 900 } })
+
+  test("its commands are grouped, hold still when the draft turns dirty, and a save ends the review", async ({
+    page,
+  }, testInfo) => {
+    await mockFiles(page)
+    await page.goto(editorAddress("notes.md"))
+    const editor = page.getByRole("region", { name: "File editor" })
+    await expect(editor.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+    await expect(editor.locator(".monaco-editor")).toContainText("hello")
+    await risen(page)
+
+    // No bar, the tree beside the code.
+    await expect(page.getByRole("navigation", { name: "File editor", exact: true })).toBeHidden()
+    const tree = await boxOf(page.getByRole("complementary", { name: "File explorer" }))
+    expect((await boxOf(editor)).x).toBeGreaterThanOrEqual(tree.x + tree.width)
+
+    // One row of faces of one height, each idea inside one edge.
+    const toolbar = editor.locator("[data-slot=editor-toolbar]")
+    expect((await boxOf(toolbar)).height).toBe(32)
+    const faces = [
+      toolbar.getByRole("combobox", { name: "File language" }),
+      ...["Find in this file", "History", "How the text is drawn", "Your changes"].map((name) =>
+        toolbar.getByRole("group", { name, exact: true }),
+      ),
+      toolbar.getByRole("button", { name: "More editor commands" }),
+    ]
+    const heights = await Promise.all(faces.map(async (face) => (await boxOf(face)).height))
+    expect(new Set(heights)).toEqual(new Set([32]))
+    // What is set once and left is in the menu, not in the row.
+    for (const name of ["Smaller text", "Larger text", "Commands"]) {
+      await expect(toolbar.getByRole("button", { name, exact: true })).toHaveCount(0)
+    }
+    await expect(toolbar.getByRole("combobox", { name: "Indentation" })).toHaveCount(0)
+    await toolbar.getByRole("button", { name: "More editor commands" }).click()
+    for (const name of [/^Smaller text/, /^Larger text/, /^Indentation/, /^Commands$/]) {
+      await expect(page.getByRole("menuitem", { name })).toBeVisible()
+    }
+    // What the row draws is not said twice.
+    await expect(page.getByRole("menuitem", { name: "Replace", exact: true })).toBeHidden()
+    await page.keyboard.press("Escape")
+    await page.screenshot({ path: testInfo.outputPath("editor-desk.png") })
+
+    // Review and Discard are in the row before there is anything to review,
+    // so the first keystroke moves nothing.
+    const review = toolbar.getByRole("button", { name: "Review the changes before saving" })
+    const discard = toolbar.getByRole("button", { name: "Discard changes and reload from disk" })
+    await expect(review).toBeDisabled()
+    await expect(discard).toBeDisabled()
+    const before = await Promise.all(faces.map((face) => boxOf(face)))
+    await editor.locator(".monaco-editor").click()
+    await page.keyboard.press("Control+End")
+    await page.keyboard.insertText("desk draft")
+    await expect(review).toBeEnabled()
+    await expect(discard).toBeEnabled()
+    expect(await Promise.all(faces.map((face) => boxOf(face)))).toEqual(before)
+
+    // The review is the last look before Save; saving ends it.
+    await review.click()
+    await expect(toolbar.getByRole("button", { name: "Back to editing" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await expect(editor.locator(".monaco-editor")).toBeHidden()
+    await page.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(editor.locator(".monaco-editor")).toBeVisible()
+    await expect(editor.locator(".monaco-editor")).toContainText("desk draft")
+    await expect(editor).toContainText("Saved to disk")
+    await expect(review).toBeDisabled()
+  })
+})
+
+test("the editor's commands are drawn before the file is read, and stay put when it lands", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockFiles(page)
+  let release = () => {}
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/files/read**", async (route) => {
+    await gate
+    await route.fallback()
+  })
+  await page.goto(editorAddress("notes.md"))
+  const editor = page.getByRole("region", { name: "File editor" })
+  const toolbar = editor.locator("[data-slot=editor-toolbar]")
+  const menu = toolbar.getByRole("button", { name: "More editor commands" })
+  await expect(toolbar).toBeVisible()
+  await risen(page)
+  const waiting = { toolbar: await boxOf(toolbar), menu: await boxOf(menu) }
+  // What needs the file waits for it, and nothing is called saved yet.
+  await expect(toolbar.getByRole("button", { name: "Find", exact: true })).toBeDisabled()
+  await expect(toolbar.getByRole("combobox", { name: "File language" })).toBeDisabled()
+  await expect(editor).not.toContainText("Saved to disk")
+
+  release()
+  await expect(editor.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await expect(editor).toContainText("Saved to disk")
+  await expect(toolbar.getByRole("button", { name: "Find", exact: true })).toBeEnabled()
+  await risen(page)
+  expect(await boxOf(toolbar)).toEqual(waiting.toolbar)
+  expect(await boxOf(menu)).toEqual(waiting.menu)
+})
+
+test("a reader's editor is not shown the commands that change a file", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockFiles(page)
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"] }),
+  )
+  await page.goto(editorAddress("notes.md"))
+  const editor = page.getByRole("region", { name: "File editor" })
+  await expect(editor.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await expect(editor).toContainText("Read only")
+  const toolbar = editor.locator("[data-slot=editor-toolbar]")
+  await expect(toolbar.getByRole("button", { name: "Find", exact: true })).toBeVisible()
+  await expect(toolbar.getByRole("button", { name: "Wrap long lines" })).toBeVisible()
+  for (const name of ["Replace", "Undo", "Redo", "Format this document"]) {
+    await expect(toolbar.getByRole("button", { name, exact: true })).toHaveCount(0)
+  }
+  await expect(toolbar.getByRole("group", { name: "Your changes" })).toHaveCount(0)
+  for (const name of ["Save", "Save as", "Apply"]) {
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0)
+  }
+  await toolbar.getByRole("button", { name: "More editor commands" }).click()
+  await expect(page.getByRole("menuitem", { name: /^Larger text/ })).toBeVisible()
+  for (const name of ["Replace", "Format this document", "Discard changes"]) {
+    await expect(page.getByRole("menuitem", { name, exact: true })).toHaveCount(0)
+  }
+})
+
+test.describe("Files at a desk", () => {
+  test.use({ viewport: { width: 1280, height: 900 } })
+
+  test("has its columns and no bar, and the inspector says what the folder holds", async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await page.route("**/api/v1/files/preview**", async (route) => {
+      const target = new URL(route.request().url()).searchParams.get("path")
+      if (target !== home) return route.fallback()
+      await json(route, {
+        path: home,
+        name: "operator",
+        modified: now,
+        modeOctal: "0755",
+        owner: "operator",
+        group: "operator",
+        kind: "dir",
+        size: 0,
+        editable: false,
+        childCount: 1,
+        dirCount: 0,
+        fileCount: 1,
+      })
+    })
+    await openFiles(page)
+    await risen(page)
+    await expect(page.getByRole("navigation", { name: "Files", exact: true })).toBeHidden()
+    await expect(page.getByRole("button", { name: "More", exact: true })).toBeHidden()
+    const places = await boxOf(page.getByRole("navigation", { name: "Places" }))
+    const listing = await boxOf(page.getByRole("region", { name: "Folder contents" }))
+    const inspector = page.locator("[data-files-inspector]")
+    const details = await boxOf(inspector)
+    expect(listing.x).toBeGreaterThanOrEqual(places.x + places.width)
+    expect(details.x).toBeGreaterThanOrEqual(listing.x + listing.width)
+    // A kind there is none of is left out rather than counted as zero.
+    await expect(inspector.locator("[data-slot=folder-counts]")).toHaveText("1 file")
+    await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+  })
+
+  test("between a phone and a desk the bar is drawn, and the strip is still one row", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 800, height: 900 })
+    await mockFiles(page)
+    await openFiles(page)
+    await risen(page)
+    const strip = page.locator("[data-slot='pane-header']").first()
+    expect((await boxOf(strip)).height).toBeLessThanOrEqual(46)
+    const bar = page.getByRole("navigation", { name: "Files", exact: true })
+    await expect(bar).toBeVisible()
+    // The frame has no margin to float in: it runs from the app's rail to
+    // the window's edges, and the bar is its foot.
+    const foot = await boxOf(bar)
+    const frame = await boxOf(page.locator("[data-slot=page]"))
+    expect(Math.round(foot.x)).toBe(Math.round(frame.x))
+    expect(Math.round(foot.x + foot.width)).toBe(800)
+    expect(Math.round(foot.y + foot.height)).toBe(900)
+    expect(Math.round((await boxOf(strip)).y)).toBe(Math.round(frame.y))
+    await page
+      .getByRole("navigation", { name: "Files", exact: true })
+      .getByRole("tab", { name: "Details" })
+      .click()
+    await expect(page.locator("[data-files-inspector]")).toBeVisible()
+  })
 })

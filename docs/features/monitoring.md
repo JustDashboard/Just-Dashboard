@@ -11,6 +11,7 @@ See what the server is doing right now, what it did this week, and what is about
 - A live overview of the machine: CPU, memory, load, network, storage and disk I/O
 - Shortcuts to a new project, a new terminal, a new drawing and the files, with the open shells, the drawings edited last, the databases and every backup job one press away
 - Notable moments, top processes and the day's activity at a glance
+- A row for each part of the server (Docker, the proxy's certificates, how the panel is reached, package updates, system services, Git) that says how it stands in one sentence and opens it
 
 ## A map of the server
 
@@ -34,6 +35,7 @@ See what the server is doing right now, what it did this week, and what is about
 - Signals that say what they will do to that process before they are sent, sent to its children too when asked, plus its priority, its out-of-memory bias and its supervisor's restart and stop
 - Every systemd service has a page of its own too: what starts it and what it needs, its processes and ports, its journal and runs, its unit file and drop-ins, its environment and how exposed it is, with the services table beside it
 - Every verb on a service says what it does first: start, stop, restart, reload, freeze, enable, mask, signals sent through systemd, and its memory, processor and task limits
+- Every PM2 application has a page of its own as well: the daemon and boot hook that keep it running, its workers, port and log as one picture, what it is using now, its logs and environment, and verbs that reach every worker of a cluster
 - One log viewer for files, containers, stacks, PM2 and the journal, with insights
 - A server with no systemd, Docker or PM2 says so in one sentence with the next step, on Services, Scheduled, the logs and the map
 - On a phone the log has the whole screen, and the sources are one tap away on a bar at the foot

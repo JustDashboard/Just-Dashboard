@@ -1,17 +1,23 @@
 "use client"
 
+import { useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
-import { Pencil, Trash } from "@/components/icons"
+import { useMediaQuery } from "@/hooks/use-mobile"
+import { Pencil, Plus, Trash } from "@/components/icons"
 import { del } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { NetworkRoute, NetworkRouting, NetworkRule } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { EmptyNote } from "@/components/state"
 import { Tag } from "@/components/tag"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   stickyTableHeader,
   Table,
@@ -22,7 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Cidr } from "@/components/network/address"
-import { routeVia, ruleSelectors, ruleThen } from "./route-reading"
+import { routeRows, routeVia, ruleSelectors, ruleThen, type RouteRow } from "./route-reading"
 
 const OWNER_PRODUCT: Partial<Record<NetworkRoute["owner"], string>> = {
   tailscale: "tailscale",
@@ -40,31 +46,64 @@ const OWNER_WORD: Record<NetworkRoute["owner"], string> = {
   system: "system",
 }
 
+// From here the seven columns fit beside the rail; narrower, a route is two lines.
+const WIDE = "(min-width: 1100px)"
+const RULES_WIDE = "(min-width: 768px)"
+
+export type RouteTarget = {
+  /** What was typed, trimmed. */
+  text: string
+  /** Per table: the routes covering it and the one that table selects. */
+  matches: Map<number, { covering: NetworkRoute[]; selected?: NetworkRoute }>
+  /** The table the kernel named for it, once it has been asked. */
+  answered?: number
+}
+
 /**
- * One routing table, framed because it is a table (§2): each route's
- * destination with its prefix in the port hue, the hop it takes, the device,
- * where it came from and its metric. A route the dashboard made can be
- * removed from its row; the rest say whose they are, and a guarded one says
- * why it stays in its title.
+ * Every route in one table, framed because it is a table (§2): where to, by
+ * which hop, out of which device and from which source, the table it is in,
+ * whose it is and its metric, a line each. There was a framed table per
+ * routing table, each with its own header row, and a device cell that went to
+ * two lines when a route had a source; the table is a column and a chip now,
+ * and the device and its source share one mono line.
+ *
+ * A route the dashboard made can be edited and removed from its row; a
+ * guarded one says why it stays behind the ⓘ where those would be. With a
+ * target, the table holds the routes covering it, each table's own choice is
+ * marked, and the row the kernel's answer came from is washed.
  */
-export function RouteTable({
-  table,
+export function RoutesTable({
+  tables,
+  hiddenLocal,
+  target,
   onChanged,
-  actions,
-  match,
   onEdit,
 }: {
-  table: NetworkRouting["tables"][number]
+  tables: NetworkRouting["tables"]
+  hiddenLocal: number
+  target?: RouteTarget
   onChanged: () => void
-  actions?: React.ReactNode
-  /** With a target filter: the routes covering it, and the one this table selects. */
-  match?: { target: string; covering: NetworkRoute[]; selected?: NetworkRoute }
-  onEdit?: (route: NetworkRoute) => void
+  onEdit: (route: NetworkRoute, tableId: number) => void
 }) {
   const { can } = useAuth()
-  const removable = can("system.admin") && can("destructive")
-  const routes = match ? match.covering : table.routes
+  const wide = useMediaQuery(WIDE)
+  const changeable = can("system.admin") && can("destructive")
+  const [chosen, setChosen] = useState<number>()
+  const scope = tables.some((table) => table.id === chosen) ? chosen : undefined
   const { confirm, dialog } = useConfirm()
+
+  const all = routeRows(tables)
+  // A set, so a table of a few thousand routes is narrowed in one pass.
+  const covered = target && new Set([...target.matches.values()].flatMap((m) => m.covering))
+  const covering = covered ? all.filter((row) => covered.has(row.route)) : all
+  const rows = scope === undefined ? covering : covering.filter((row) => row.table.id === scope)
+  const counts = new Map<number, number>()
+  for (const row of covering) counts.set(row.table.id, (counts.get(row.table.id) ?? 0) + 1)
+  const selected = (row: RouteRow) => target?.matches.get(row.table.id)?.selected === row.route
+  // The kernel's table, where it was asked; before that every table's choice counts alike.
+  const answers = (row: RouteRow) =>
+    selected(row) && (target?.answered === undefined || target.answered === row.table.id)
+
   const remove = (route: NetworkRoute) =>
     confirm({
       title: `Remove the route to ${route.destination}`,
@@ -79,155 +118,294 @@ export function RouteTable({
         await del(`/network/routing/routes/${route.id}`)
         notify.success("Route removed")
         onChanged()
+        return "reported"
       },
     })
+
+  const verbs = (row: RouteRow) => (
+    <RowVerbs
+      guard={row.route.guard}
+      why={`Why the route to ${row.route.destination} stays`}
+      edit={
+        changeable && row.route.managed && !row.route.guard
+          ? {
+              label: `Edit the route to ${row.route.destination}`,
+              run: () => onEdit(row.route, row.table.id),
+            }
+          : undefined
+      }
+      remove={
+        changeable && row.route.managed && !row.route.guard
+          ? {
+              label: `Remove the route to ${row.route.destination}`,
+              run: () => remove(row.route),
+            }
+          : undefined
+      }
+    />
+  )
+
   return (
-    <Panel>
+    <Panel aria-label="Routes" data-routing="routes">
       <PanelHeader
         title={
-          <span className="inline-flex items-center gap-2">
-            {table.id === 52 && <ProductGlyph id="tailscale" />}
-            {table.name}
-            <span className="numeric text-hint font-normal text-muted-foreground">
-              table {table.id}
+          <>
+            Routes
+            <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+              {target ? `${covering.length} of ${all.length} cover ${target.text}` : all.length}
             </span>
-          </span>
+          </>
         }
         actions={
-          <span className="flex items-center gap-3">
-            <span className="numeric text-hint text-muted-foreground">
-              {match
-                ? `${routes.length} of ${table.routes.length} cover ${match.target}`
-                : `${table.routes.length} route${table.routes.length === 1 ? "" : "s"}`}
-            </span>
-            {actions}
-          </span>
+          hiddenLocal > 0 && (
+            <InfoTip label="What is not listed">
+              The local table&rsquo;s {hiddenLocal} entries, the kernel&rsquo;s own record of which
+              addresses are this machine&rsquo;s, are not listed.
+            </InfoTip>
+          )
         }
-      />
+      >
+        <ChipStrip aria-label="Routing table" className="mr-auto">
+          <FilterChip selected={scope === undefined} onClick={() => setChosen(undefined)}>
+            All <ChipCount>{covering.length}</ChipCount>
+          </FilterChip>
+          {tables.map((table) => (
+            <FilterChip
+              key={table.id}
+              selected={scope === table.id}
+              title={`table ${table.id}`}
+              onClick={() => setChosen(scope === table.id ? undefined : table.id)}
+            >
+              {table.id === 52 && <ProductGlyph id="tailscale" className="size-3.5" />}
+              {table.name}
+              <ChipCount>{counts.get(table.id) ?? 0}</ChipCount>
+            </FilterChip>
+          ))}
+        </ChipStrip>
+      </PanelHeader>
       <PanelBody flush>
-        <Table containerClassName="max-h-[28rem]">
-          <TableHeader className={stickyTableHeader}>
-            <TableRow>
-              <TableHead>Destination</TableHead>
-              <TableHead>Via</TableHead>
-              <TableHead>Device</TableHead>
-              <TableHead>From</TableHead>
-              <TableHead className="text-right">Metric</TableHead>
-              <TableHead className="w-px">
-                <span className="sr-only">Actions</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {routes.map((route, index) => (
-              <TableRow
-                key={`${route.family}:${route.destination}:${route.device}:${index}`}
-                data-selected={match?.selected === route ? "" : undefined}
-                className={cn(match?.selected === route && "bg-wash-brand")}
-              >
-                <TableCell title={route.guard}>
-                  <span className="inline-flex flex-wrap items-center gap-2">
-                    {route.destination === "default" ? (
-                      <span className="font-mono font-medium">default</span>
-                    ) : (
-                      <Cidr cidr={route.destination} />
-                    )}
-                    {route.type !== "unicast" && <Tag tone="danger">{route.type}</Tag>}
-                    {route.family === "inet6" && <Tag>IPv6</Tag>}
-                    {route.nexthops.length > 0 && <Tag>multipath</Tag>}
-                    {match?.selected === route && (
-                      <Tag className="text-brand">selected for {match.target}</Tag>
-                    )}
-                  </span>
-                  {route.comment && (
-                    <span className="mt-1 block text-hint text-muted-foreground">
-                      {route.comment}
-                    </span>
-                  )}
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {routeVia(route) ?? <span className="text-muted-foreground">on-link</span>}
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {route.device ?? "—"}
-                  {route.source && (
-                    <div className="mt-1 text-hint text-muted-foreground">
-                      source {route.source}
-                    </div>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <span className="inline-flex items-center gap-1.5 text-xs">
-                    {OWNER_PRODUCT[route.owner] && (
-                      <ProductGlyph id={OWNER_PRODUCT[route.owner]!} />
-                    )}
-                    {route.owner === "just-dashboard" && (
-                      <LogoGlyph small className="h-3.5 w-auto shrink-0 text-brand" />
-                    )}
-                    <span className={cn(route.managed ? "text-brand" : "text-muted-foreground")}>
-                      {OWNER_WORD[route.owner]}
-                    </span>
-                    <span className="text-muted-foreground/60">· {route.protocol}</span>
-                  </span>
-                </TableCell>
-                <TableCell className="numeric text-right font-mono text-xs">
-                  {route.metric || "—"}
-                </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  {removable && route.managed && !route.guard && onEdit && (
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label={`Edit the route to ${route.destination}`}
-                      onClick={() => onEdit(route)}
-                    >
-                      <Pencil aria-hidden />
-                    </Button>
-                  )}
-                  {removable && route.managed && !route.guard && (
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label={`Remove the route to ${route.destination}`}
-                      onClick={() => remove(route)}
-                    >
-                      <Trash aria-hidden />
-                    </Button>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-            {routes.length === 0 && (
+        {rows.length === 0 ? (
+          <EmptyNote>
+            {target
+              ? scope === undefined
+                ? `No route covers ${target.text}.`
+                : `No route in this table covers ${target.text}.`
+              : scope === undefined
+                ? "No routes."
+                : "This table holds no routes; a rule sending here falls through to the next."}
+          </EmptyNote>
+        ) : wide ? (
+          <Table className="table-fixed" containerClassName="max-h-[calc(100svh-12rem)]">
+            <TableHeader className={stickyTableHeader}>
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground">
-                  {match
-                    ? `No route in this table covers ${match.target}.`
-                    : "This table holds no routes; a rule sending here falls through to the next."}
-                </TableCell>
+                <TableHead className="w-[22%]">Destination</TableHead>
+                <TableHead className="w-[13%]">Via</TableHead>
+                <TableHead>Device</TableHead>
+                <TableHead className="w-[10%]">Table</TableHead>
+                <TableHead className="w-[16%]">From</TableHead>
+                <TableHead className="w-16 text-right">Metric</TableHead>
+                <TableHead className="w-[4.5rem]">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => (
+                <TableRow
+                  key={row.key}
+                  data-routing-row="route"
+                  data-selected={answers(row) ? "" : undefined}
+                  className={cn("h-11", answers(row) && "bg-wash-brand")}
+                >
+                  <TableCell className="py-0">
+                    <Destination row={row} selected={selected(row)} lit={answers(row)} />
+                  </TableCell>
+                  <TableCell className="py-0">
+                    <Via route={row.route} />
+                  </TableCell>
+                  <TableCell className="py-0">
+                    <Device route={row.route} />
+                  </TableCell>
+                  <TableCell className="py-0">
+                    <TableName table={row.table} />
+                  </TableCell>
+                  <TableCell className="py-0">
+                    <Owner route={row.route} />
+                  </TableCell>
+                  <TableCell className="numeric py-0 text-right font-mono">
+                    {row.route.metric || "—"}
+                  </TableCell>
+                  <TableCell className="py-0">{verbs(row)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <ul aria-label="Routes" className="divide-y divide-hairline">
+            {rows.map((row) => (
+              <li
+                key={row.key}
+                data-routing-row="route"
+                data-selected={answers(row) ? "" : undefined}
+                className={cn(
+                  "grid h-14 min-w-0 grid-cols-[minmax(0,1fr)_auto_3.25rem] items-center gap-x-3 px-4 text-xs",
+                  answers(row) && "bg-wash-brand",
+                )}
+              >
+                <div className="min-w-0 space-y-1">
+                  <Destination row={row} selected={selected(row)} lit={answers(row)} />
+                  <p className="flex min-w-0 items-center gap-x-2 font-mono">
+                    {/* A phone's line has room for the hop or for "on-link", not both
+                        beside a device and its source; the hop is the reading. */}
+                    {routeVia(row.route) && (
+                      <span className="max-w-[45%] shrink-0 truncate">{routeVia(row.route)}</span>
+                    )}
+                    <Device route={row.route} />
+                  </p>
+                </div>
+                <div className="flex min-w-0 flex-col items-end gap-1">
+                  <TableName table={row.table} />
+                  <Owner route={row.route} short />
+                </div>
+                {verbs(row)}
+              </li>
+            ))}
+          </ul>
+        )}
       </PanelBody>
       {dialog}
     </Panel>
   )
 }
 
+function Destination({ row, selected, lit }: { row: RouteRow; selected: boolean; lit: boolean }) {
+  const route = row.route
+  return (
+    <span className="flex min-w-0 items-center gap-2 whitespace-nowrap">
+      {route.destination === "default" ? (
+        <span className="font-mono font-medium">default</span>
+      ) : (
+        <Cidr cidr={route.destination} />
+      )}
+      {route.type !== "unicast" && <Tag tone="danger">{route.type}</Tag>}
+      {route.family === "inet6" && <Tag>IPv6</Tag>}
+      {route.nexthops.length > 0 && <Tag>multipath</Tag>}
+      {selected && <Tag className={lit ? "text-brand" : undefined}>selected</Tag>}
+      {route.comment && (
+        <span className="min-w-0 truncate text-hint text-muted-foreground" title={route.comment}>
+          {route.comment}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function Via({ route }: { route: NetworkRoute }) {
+  const via = routeVia(route)
+  return (
+    <span className="block min-w-0 truncate font-mono" title={via}>
+      {via ?? <span className="text-muted-foreground">on-link</span>}
+    </span>
+  )
+}
+
+/** The device and the source a packet leaves it with, on one mono line. */
+function Device({ route }: { route: NetworkRoute }) {
+  return (
+    <span
+      className="flex min-w-0 items-baseline gap-x-2 font-mono whitespace-nowrap"
+      title={[route.device, route.source && `source ${route.source}`].filter(Boolean).join(" · ")}
+    >
+      <span className="max-w-full shrink-0 truncate">{route.device ?? "—"}</span>
+      {route.source && (
+        <span className="min-w-0 truncate text-muted-foreground">source {route.source}</span>
+      )}
+    </span>
+  )
+}
+
+function TableName({ table }: { table: { id: number; name: string } }) {
+  return (
+    <span
+      className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-muted-foreground"
+      title={`table ${table.id}`}
+    >
+      {table.id === 52 && <ProductGlyph id="tailscale" className="size-3.5" />}
+      <span className="truncate">{table.name}</span>
+    </span>
+  )
+}
+
+function Owner({ route, short }: { route: NetworkRoute; short?: boolean }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+      {OWNER_PRODUCT[route.owner] && <ProductGlyph id={OWNER_PRODUCT[route.owner]!} />}
+      {route.owner === "just-dashboard" && (
+        <LogoGlyph small className="h-3.5 w-auto shrink-0 text-brand" />
+      )}
+      <span className={cn("truncate", route.managed ? "text-brand" : "text-muted-foreground")}>
+        {OWNER_WORD[route.owner]}
+      </span>
+      {!short && <span className="text-muted-foreground/60">· {route.protocol}</span>}
+    </span>
+  )
+}
+
 /**
- * The policy rules, framed as a table, in the order the kernel asks them.
+ * The end of a row: Edit and Remove where the row is the dashboard's and the
+ * account may change it, or why the row stays, behind an ⓘ a keyboard and a
+ * phone can reach (it was a `title` on the cell). One box in every state, so
+ * a row with verbs and a row with none are the same row.
+ */
+function RowVerbs({
+  guard,
+  why,
+  edit,
+  remove,
+}: {
+  guard?: string
+  why: string
+  edit?: { label: string; run: () => void }
+  remove?: { label: string; run: () => void }
+}) {
+  return (
+    <span className="flex h-6 items-center justify-end gap-0.5">
+      {edit && (
+        <Button size="icon-xs" variant="ghost" aria-label={edit.label} onClick={edit.run}>
+          <Pencil aria-hidden />
+        </Button>
+      )}
+      {remove && (
+        <Button size="icon-xs" variant="ghost" aria-label={remove.label} onClick={remove.run}>
+          <Trash aria-hidden />
+        </Button>
+      )}
+      {guard && !edit && !remove && (
+        <span className="flex size-6 items-center justify-center">
+          <InfoTip label={why}>{guard}</InfoTip>
+        </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * The policy rules, framed as a table, in the order the kernel asks them:
+ * both families and the kernel's own rule 0, which the picture leaves out.
  * Only the dashboard's own (priorities 10000–19999) can be removed.
  */
-export function RuleTable({
+export function RulesTable({
   rules,
   onChanged,
-  actions,
+  onAdd,
 }: {
   rules: NetworkRule[]
   onChanged: () => void
-  actions?: React.ReactNode
+  /** Absent for an account that cannot add one. */
+  onAdd?: () => void
 }) {
   const { can } = useAuth()
+  const wide = useMediaQuery(RULES_WIDE)
   const removable = can("system.admin") && can("destructive")
   const { confirm, dialog } = useConfirm()
   const remove = (rule: NetworkRule) =>
@@ -239,88 +417,183 @@ export function RuleTable({
         await del(`/network/routing/rules/${rule.id}`)
         notify.success("Rule removed")
         onChanged()
+        return "reported"
       },
     })
+  const verbs = (rule: NetworkRule) => (
+    <RowVerbs
+      guard={rule.guard}
+      why={`Why rule ${rule.priority} stays`}
+      remove={
+        removable && rule.managed && !rule.guard
+          ? { label: `Remove rule ${rule.priority}`, run: () => remove(rule) }
+          : undefined
+      }
+    />
+  )
   return (
-    <Panel>
+    <Panel aria-label="Policy rules" data-routing="rules">
       <PanelHeader
-        title="Policy rules"
+        title={
+          <>
+            Policy rules
+            <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+              {rules.length}
+            </span>
+          </>
+        }
         actions={
-          <span className="flex items-center gap-3">
-            <span className="numeric text-hint text-muted-foreground">{rules.length}</span>
-            {actions}
-          </span>
+          onAdd && (
+            <Button size="xs" variant="outline" onClick={onAdd}>
+              <Plus aria-hidden />
+              Add rule
+            </Button>
+          )
         }
       />
       <PanelBody flush>
-        <Table>
-          <TableHeader className={stickyTableHeader}>
-            <TableRow>
-              <TableHead className="text-right">Priority</TableHead>
-              <TableHead>Matches</TableHead>
-              <TableHead>Then</TableHead>
-              <TableHead>Whose</TableHead>
-              <TableHead className="w-px">
-                <span className="sr-only">Actions</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rules.map((rule) => (
-              <TableRow
-                key={`${rule.family}:${rule.priority}:${rule.id}:${rule.from}:${rule.fwmark}`}
-              >
-                <TableCell className="numeric text-right font-mono text-xs">
-                  {rule.priority}
-                </TableCell>
-                <TableCell className="font-mono text-xs" title={rule.guard}>
-                  {ruleSelectors(rule).join(" ") || (
-                    <span className="text-muted-foreground">everything</span>
-                  )}
-                  {rule.family === "inet6" && <Tag className="ml-2">IPv6</Tag>}
-                </TableCell>
-                <TableCell className="text-xs">
-                  <span
-                    className={cn(
-                      rule.action !== "lookup" &&
-                        rule.action !== "goto" &&
-                        rule.action !== "nop" &&
-                        "text-destructive",
-                      rule.unresolved && "text-warning",
-                    )}
-                  >
-                    {ruleThen(rule)}
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <span className="inline-flex items-center gap-1.5 text-xs">
-                    {rule.owner === "tailscale" && <ProductGlyph id="tailscale" />}
-                    {rule.owner === "just-dashboard" && (
-                      <LogoGlyph small className="h-3.5 w-auto shrink-0 text-brand" />
-                    )}
-                    <span className={cn(rule.managed ? "text-brand" : "text-muted-foreground")}>
-                      {rule.owner === "just-dashboard" ? "made here" : rule.owner}
-                    </span>
-                  </span>
-                </TableCell>
-                <TableCell>
-                  {removable && rule.managed && !rule.guard && (
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label={`Remove rule ${rule.priority}`}
-                      onClick={() => remove(rule)}
-                    >
-                      <Trash aria-hidden />
-                    </Button>
-                  )}
-                </TableCell>
+        {wide ? (
+          <Table className="table-fixed">
+            <TableHeader className={stickyTableHeader}>
+              <TableRow>
+                <TableHead className="w-24 text-right">Priority</TableHead>
+                <TableHead>Matches</TableHead>
+                <TableHead className="w-[30%]">Then</TableHead>
+                <TableHead className="w-[16%]">Whose</TableHead>
+                <TableHead className="w-[4.5rem]">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rules.map((rule) => (
+                <TableRow key={ruleKey(rule)} data-routing-row="rule" className="h-11">
+                  <TableCell className="numeric py-0 text-right font-mono">
+                    {rule.priority}
+                  </TableCell>
+                  <TableCell className="py-0">
+                    <Matches rule={rule} />
+                  </TableCell>
+                  <TableCell className="py-0">
+                    <Then rule={rule} />
+                  </TableCell>
+                  <TableCell className="py-0">
+                    <Whose rule={rule} />
+                  </TableCell>
+                  <TableCell className="py-0">{verbs(rule)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <ul aria-label="Policy rules" className="divide-y divide-hairline">
+            {rules.map((rule) => (
+              <li
+                key={ruleKey(rule)}
+                data-routing-row="rule"
+                className="grid h-14 min-w-0 grid-cols-[2.75rem_minmax(0,1fr)_auto_1.5rem] items-center gap-x-3 px-4 text-xs"
+              >
+                <span className="numeric text-right font-mono">{rule.priority}</span>
+                <div className="min-w-0 space-y-1">
+                  <Matches rule={rule} />
+                  <Then rule={rule} />
+                </div>
+                <Whose rule={rule} />
+                {verbs(rule)}
+              </li>
             ))}
-          </TableBody>
-        </Table>
+          </ul>
+        )}
       </PanelBody>
       {dialog}
+    </Panel>
+  )
+}
+
+const ruleKey = (rule: NetworkRule) =>
+  `${rule.family}:${rule.priority}:${rule.id}:${rule.from}:${rule.fwmark}`
+
+function Matches({ rule }: { rule: NetworkRule }) {
+  const selectors = ruleSelectors(rule).join(" ")
+  return (
+    <span className="flex min-w-0 items-center gap-2 whitespace-nowrap">
+      <span className="min-w-0 truncate font-mono" title={selectors || undefined}>
+        {selectors || <span className="text-muted-foreground">everything</span>}
+      </span>
+      {rule.family === "inet6" && <Tag>IPv6</Tag>}
+    </span>
+  )
+}
+
+function Then({ rule }: { rule: NetworkRule }) {
+  const then = ruleThen(rule)
+  return (
+    <span
+      title={then}
+      className={cn(
+        "block min-w-0 truncate",
+        rule.action !== "lookup" &&
+          rule.action !== "goto" &&
+          rule.action !== "nop" &&
+          "text-destructive",
+        rule.unresolved && "text-warning",
+      )}
+    >
+      {then}
+    </span>
+  )
+}
+
+function Whose({ rule }: { rule: NetworkRule }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+      {rule.owner === "tailscale" && <ProductGlyph id="tailscale" />}
+      {rule.owner === "just-dashboard" && (
+        <LogoGlyph small className="h-3.5 w-auto shrink-0 text-brand" />
+      )}
+      <span className={cn("truncate", rule.managed ? "text-brand" : "text-muted-foreground")}>
+        {rule.owner === "just-dashboard" ? "made here" : rule.owner}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * A table before the first read, at the height it had last time: its frame,
+ * its title line and that many rows, in the layout the width will give it.
+ */
+export function TableWaiting({
+  title,
+  rows,
+  wideFrom,
+  chips,
+}: {
+  title: string
+  rows: number
+  /** The width from which the table is a table rather than two-line rows. */
+  wideFrom: string
+  /** The title line holds a strip of chips, which takes a line of its own on a phone. */
+  chips?: boolean
+}) {
+  const wide = useMediaQuery(`(min-width: ${wideFrom})`)
+  return (
+    <Panel aria-label={title} aria-busy>
+      <PanelHeader title={title}>
+        {/* The line's own height: the chips or the verb that will stand on it. */}
+        <span aria-hidden className={cn("h-7", chips && "max-sm:basis-full")} />
+      </PanelHeader>
+      <PanelBody flush>
+        {wide && <div className="h-10 border-b" />}
+        <ul className="divide-y divide-hairline">
+          {Array.from({ length: rows }, (_, i) => (
+            <li key={i} className={cn("flex items-center gap-4 px-4", wide ? "h-11" : "h-14")}>
+              <Skeleton className="h-3 w-40 max-w-[40%]" />
+              <Skeleton className="h-3 w-24 max-sm:hidden" />
+              <Skeleton className="ml-auto h-3 w-20" />
+            </li>
+          ))}
+        </ul>
+      </PanelBody>
     </Panel>
   )
 }

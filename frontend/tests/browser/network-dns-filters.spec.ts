@@ -1,11 +1,17 @@
 import { expect, test, type Page } from "@playwright/test"
 import { dnsFilters, mockDNSServicePage } from "./network-dns-services-fixture"
 
-const sheet = (page: Page) => page.locator("[data-slot=sheet-content]")
+// An engine's inventory is a page of its own (`/network/dns/services/<id>`).
+const shown = (page: Page) => page.locator("[data-slot=dns-engine]")
+/** One of the engine page's views, by the word on its tab. */
+const view = (page: Page, name: string) =>
+  page.getByRole("tab", { name: new RegExp(`^${name}`) }).click()
 const filters = (page: Page) =>
-  sheet(page).getByRole("region", { name: "Native DNS filter inventory", exact: true })
+  shown(page).getByRole("region", { name: "Native DNS filter inventory", exact: true })
 const open = async (page: Page) => {
-  await page.getByRole("button", { name: "Inspect Fixture DNS", exact: true }).click()
+  await page.getByRole("link", { name: "Inspect Fixture DNS", exact: true }).click()
+  await view(page, "Filters")
+  await expect(page).toHaveURL(/\/network\/dns\/services\/dns-fixture\?tab=filters$/)
   await expect(
     filters(page).getByRole("heading", { name: "Filter subscriptions", exact: true }),
   ).toBeVisible()
@@ -138,7 +144,7 @@ test("a refreshed connection generation clears old filters and refuses a mismatc
   await open(page)
   control.filterPayload = dnsFilters({ ...control.view.connection })
   control.view.connection = { ...control.view.connection, generation: 2 }
-  await sheet(page).getByRole("button", { name: "Read native engine", exact: true }).click()
+  await page.getByRole("button", { name: "Refresh native reading", exact: true }).click()
   await expect(filters(page).getByText(/Native DNS filter connection changed/)).toBeVisible()
   await expect(
     filters(page).getByText(`Entry fingerprint: ${"a".repeat(64)}`, { exact: true }),
@@ -159,7 +165,8 @@ test("malformed private filter origins fail without displaying returned secrets"
   next.inventory!.sources.entries[0].origin =
     "https://user:fixture-filter-secret@filters.example.test/private?secret=1"
   control.filterPayload = next
-  await page.getByRole("button", { name: "Inspect Fixture DNS", exact: true }).click()
+  await page.getByRole("link", { name: "Inspect Fixture DNS", exact: true }).click()
+  await view(page, "Filters")
   await expect(filters(page).getByText(/outside its bounded contract/)).toBeVisible()
   await expect(page.getByText(/fixture-filter-secret/)).toHaveCount(0)
   await expect(
@@ -170,7 +177,9 @@ test("malformed private filter origins fail without displaying returned secrets"
 
 test("reader accounts never request native filter metadata", async ({ page }) => {
   const control = await mockDNSServicePage(page, { reader: true })
-  await expect(page.getByRole("heading", { name: "Resolver chain", exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "About the resolver" })).toContainText(
+    "systemd-resolved",
+  )
   expect(control.reads).toEqual([])
   expect(control.mutations).toEqual([])
 })
@@ -193,11 +202,12 @@ test("unreadable native clients and groups keep unknown evidence without a zero-
     summary: "Native group identities are unreadable.",
   }
   await open(page)
+  await view(page, "Clients")
   for (const [title, label] of [
     ["Native client settings", "Client evidence · unknown"],
     ["Native filtering groups", "App client evidence · unknown"],
   ]) {
-    const region = sheet(page).getByRole("region", { name: title, exact: true })
+    const region = shown(page).getByRole("region", { name: title, exact: true })
     await expect(region.getByText(label, { exact: true })).toBeVisible()
     await expect(region.getByLabel(`0 ${title.toLowerCase()}`, { exact: true })).toHaveCount(0)
   }
@@ -213,15 +223,15 @@ for (const width of [390, 1280, 1720]) {
       await filters(page).evaluate((node) => node.scrollIntoView({ block: "start" }))
       await expect
         .poll(async () => {
-          const bounds = await sheet(page).boundingBox()
+          const bounds = await shown(page).boundingBox()
           return bounds !== null && bounds.x >= 0 && bounds.x + bounds.width <= width + 1
         })
         .toBe(true)
-      const bounds = await sheet(page).boundingBox()
+      const bounds = await shown(page).boundingBox()
       expect(bounds).not.toBeNull()
       expect(bounds!.x).toBeGreaterThanOrEqual(0)
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1)
-      const overflow = await sheet(page).evaluate((node) => node.scrollWidth - node.clientWidth)
+      const overflow = await shown(page).evaluate((node) => node.scrollWidth - node.clientWidth)
       expect(overflow).toBeLessThanOrEqual(1)
       await page.screenshot({ path: testInfo.outputPath(`native-filters-${engine}-${width}.png`) })
       if (width === 390) {
