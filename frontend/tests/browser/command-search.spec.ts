@@ -158,6 +158,19 @@ test("a section's landing page is found by the name the rail gives it inside the
   }
 })
 
+test("a workbench's tool is found by its own name and opens on that tool", async ({ page }) => {
+  await mockCommandSearch(page)
+  await page.goto("/account")
+  await open(page)
+  // Not a page of the rail, so it is not in the list before anything is typed.
+  await expect(palette(page).getByRole("option", { name: /Connection path/ })).toHaveCount(0)
+  await input(page).fill("connection path")
+  await expect(selected(page)).toContainText("Connection path")
+  await expect(selected(page)).toContainText("Tools")
+  await page.keyboard.press("Enter")
+  await expect(page).toHaveURL(/\/network\/tools\?tool=path$/)
+})
+
 test("a failed source reports incomplete search and can recover without reopening", async ({
   page,
 }) => {

@@ -1,36 +1,24 @@
 "use client"
 
-import { Fragment, Suspense, useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
   AcronymCsv,
   AcronymJson,
-  Box,
-  ChartActivity,
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  Clipboard,
-  Copy,
-  Download,
-  GridMasonry,
-  ListOrdered,
   Pause,
   Play,
   RefreshClockwise,
   Router,
-  Servers,
-  Shield,
-  Slash,
-  Stop,
-  StopCircle,
   Warning,
 } from "@/components/icons"
-import { errorMessage, get, post } from "@/lib/api"
-import { copyText } from "@/lib/clipboard"
+import { errorMessage, get } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { downloadText } from "@/lib/metrics-export"
-import type { Listener, PortsFirewall, PortsMeta, SeenListener } from "@/lib/types"
+import type { PortsFirewall, PortsMeta, SeenListener } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useMediaQuery } from "@/hooks/use-mobile"
@@ -39,49 +27,34 @@ import { usePoll } from "@/hooks/use-poll"
 import { useNow } from "@/components/deploy/vocabulary"
 import { useConfirm } from "@/components/confirm-dialog"
 import { InfoTip } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
+import { Status, StatusDot } from "@/components/status-dot"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import { ProductLogo } from "@/components/product-logo"
-import { DashboardMark } from "@/components/backups/marks"
-import { useProjectFavicon } from "@/components/deploy/project-mark"
-import { ROW_BLEED } from "@/components/row-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { Status } from "@/components/status-dot"
+import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
-import { VerbActions, VerbMenu, type Verb } from "@/components/verbs"
+import { TextShimmer } from "@/components/ui/text-shimmer"
+import { VerbActions, VerbMenu } from "@/components/verbs"
 import {
   dangerousPorts,
-  dangerousService,
-  findSocket,
   foldDualStack,
   internetHint,
-  listenerProduct,
-  networkWords,
+  keyHref,
   onUplink,
   ownerLabel,
-  ownerActions,
-  ownerLinks,
   ownerTitle,
-  pastFirewallWords,
+  parseSocketParam,
+  PORTS_VIEW_KEYS,
+  portHref,
   privateHint,
-  reachVerdict,
-  reachWords,
-  socketAddresses,
   socketClients,
-  socketParam,
   socketPids,
   tallyReach,
-  UPLINK_CAVEAT,
-  type OwnerAction,
-  type OwnerLink,
   type Socket,
 } from "@/components/proxy/ports"
-import { FirewallVerdict, firewallHandoffs, OrphanRules } from "@/components/proxy/ports-firewall"
-import { FreePortFinder, ProxyLine, proxyVerbs } from "@/components/proxy/ports-proxy"
-import { PortSheet } from "@/components/proxy/port-sheet"
+import { firewallWords, noFirewallWords, OrphanRules } from "@/components/proxy/ports-firewall"
+import { FreePortFinder, proxyWords } from "@/components/proxy/ports-proxy"
 import {
   DEFAULT_SORT,
   facetCounts,
@@ -112,6 +85,11 @@ import {
 } from "@/components/proxy/ports-list"
 import { isNew } from "@/components/proxy/ports-history"
 import { NewMark, PortChanges } from "@/components/proxy/port-changes"
+import { addressLine, NAT_WORDS, ProcessMark, ReachWord } from "@/components/proxy/port-marks"
+import { socketMenuLabel, useSocketVerbs } from "@/components/proxy/port-verbs"
+import { PortsPicture } from "@/components/proxy/ports-picture"
+import { useProxy } from "@/components/proxy/proxy-context"
+import type { Reading } from "@/components/proxy/freshness"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -129,8 +107,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { processHref } from "@/components/procs/process-facts"
 
+/** The firewall's verdicts are read at the list's own cadence. */
 const POLL_MS = 15_000
 
 const REACH_LABEL: Record<ReachFilter, string> = {
@@ -157,45 +135,76 @@ type Entry =
   | { kind: "socket"; socket: Socket; member: boolean }
   | { kind: "group"; group: SocketGroup; open: boolean }
 
-const header = <PageContext eyebrow="Proxy" title="Listening ports" />
+const header = <PageContext title="Listening ports" />
 
 /**
- * Every listening socket on the host, and whether it faces off the machine.
+ * Every listening socket on the host, and who can reach it.
  *
- * "What is listening on 8080 and who started it" is the first question during
- * an incident, and the answer to the second half is one click away: a row's
- * process opens under Processes with its connections and parent chain. The
- * view — search, reach, protocol and sort — is in the address bar, so the
- * overview's attention list and the Connections page can link into it
- * already narrowed.
+ * It opens on what it is about — the line of what listens and what faces the
+ * internet — then the picture of who reaches what: each network a socket
+ * answers on, wired to the programs listening there, a database the
+ * internet reaches in red. Under it the list, read down its columns (who
+ * owns each socket, who can reach it, what the firewall does, who is
+ * connected), one line per socket with the port as the way to its page
+ * (`port-page.tsx`), which holds the rest: the reach in full, the owner, the
+ * clients, and its history. Under the list, what opened and closed.
+ *
+ * It opened on four tiles — listening, internet-facing, private networks,
+ * dangerous services exposed — that the reach chips repeated one row down.
+ * Their figures are the identity line's facts now, and the chips keep theirs.
+ *
+ * The view — search, reach, protocol and sort — is in the address bar, so the
+ * overview, Connections and the TLS report link into it already narrowed. The
+ * side sheet's old address, `?socket=tcp:0.0.0.0:443`, opens the port's page.
  */
 export function PortsPage() {
   // The view is read from the address bar, which the server does not have.
   return (
-    <Suspense
-      fallback={
-        <Page>
-          {header}
-          <LoadingPanel />
-        </Page>
-      }
-    >
+    <Suspense fallback={<PortsLoading />}>
       <PortsView />
     </Suspense>
+  )
+}
+
+/** The page's shape while the list is read: the identity line where it will stand. */
+function PortsLoading() {
+  return (
+    <Page>
+      {header}
+      <Identity
+        state={<Status tone="unknown" label="Reading" />}
+        facts={<TextShimmer>Reading the sockets…</TextShimmer>}
+      />
+      <LoadingRows rows={7} />
+    </Page>
   )
 }
 
 function PortsView() {
   const router = useRouter()
   const params = useSearchParams()
+  // The side sheet's address, from before a port had a page of its own.
+  const legacy = params.get("socket")
+  useEffect(() => {
+    if (legacy === null) return
+    const key = parseSocketParam(legacy)
+    if (key) router.replace(keyHref(key))
+  }, [legacy, router])
+
   const arrival = viewFromParams(params)
-  // The open socket's detail is in the address bar too, so a link can open on it.
-  const [sheetParam, setSheetParam] = useState(() => params.get("socket"))
-  const [query, setQuery] = useSessionState("proxy.ports.query", "", arrival?.q)
-  const [reachValue, setReach] = useSessionState<string>("proxy.ports.reach", "all", arrival?.reach)
-  const [protoValue, setProto] = useSessionState<string>("proxy.ports.proto", "all", arrival?.proto)
+  const [query, setQuery] = useSessionState(PORTS_VIEW_KEYS.query, "", arrival?.q)
+  const [reachValue, setReach] = useSessionState<string>(
+    PORTS_VIEW_KEYS.reach,
+    "all",
+    arrival?.reach,
+  )
+  const [protoValue, setProto] = useSessionState<string>(
+    PORTS_VIEW_KEYS.proto,
+    "all",
+    arrival?.proto,
+  )
   const [sortValue, setSort] = useSessionState(
-    "proxy.ports.sort",
+    PORTS_VIEW_KEYS.sort,
     sortParam(DEFAULT_SORT),
     arrival ? sortParam(arrival.sort) : null,
   )
@@ -204,26 +213,25 @@ function PortsView() {
   const proto = parseProtoFilter(protoValue) ?? "all"
   const sort = useMemo(() => parseSort(sortValue) ?? DEFAULT_SORT, [sortValue])
   const [grouped, setGrouped] = useViewState("proxy.ports.grouped", false)
-  const [hideEphemeral, setHideEphemeral] = useViewState("proxy.ports.hideEphemeral", false)
-  const [onlyNew, setOnlyNew] = useSessionState("proxy.ports.new", false)
+  const [hideEphemeral, setHideEphemeral] = useViewState(PORTS_VIEW_KEYS.hideEphemeral, false)
+  const [onlyNew, setOnlyNew] = useSessionState(PORTS_VIEW_KEYS.onlyNew, false)
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
-  const [paused, setPaused] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
   const wide = useMediaQuery("(min-width: 1024px)")
 
-  const { data, error, loading, refresh } = usePoll(
-    async (signal) => {
-      try {
-        return { listeners: await get<SeenListener[]>("/ports", undefined, signal), at: Date.now() }
-      } finally {
-        // A refresh that aborted a poll in flight is still refreshing.
-        if (!signal.aborted) setRefreshing(false)
-      }
-    },
-    POLL_MS,
-    [],
-    { enabled: !paused },
-  )
+  // The section's own read of the list, which the overview and the rail
+  // answer from too: the page asking again on a timer of its own was a
+  // second read of the same list every fifteen seconds. Paused, the rows on
+  // screen are the reading the pause was pressed on.
+  const shared = useProxy().reads.ports
+  const live = shared.data as Reading<SeenListener[]> | undefined
+  const [paused, setPaused] = useState(false)
+  const [held, setHeld] = useState<Reading<SeenListener[]>>()
+  // A refresh is under way until a new reading or a new failure answers it.
+  const [asked, setAsked] = useState<{ at?: number; error?: Error } | null>(null)
+  const refreshing =
+    asked !== null && asked.at === live?.at && asked.error === shared.error && !paused
+  const data = paused ? (held ?? live) : live
+  const error = paused ? undefined : shared.error
   const meta = usePoll((signal) => get<PortsMeta>("/ports/meta", undefined, signal), 0)
   const firewall = usePoll(
     (signal) => get<PortsFirewall>("/ports/firewall", undefined, signal),
@@ -237,38 +245,36 @@ function PortsView() {
   const range = meta.data?.ephemeralRange ?? null
 
   useEffect(() => {
-    // Written a moment after the last keystroke: Safari refuses a page more
-    // than a hundred history writes in thirty seconds.
-    const timer = setTimeout(() => {
+    if (legacy !== null) return
+    const write = () => {
       const url = new URL(window.location.href)
       const next = withView(url.search, { q: query, reach, proto, sort })
       if (next !== url.search) {
         window.history.replaceState(null, "", `${url.pathname}${next}${url.hash}`)
       }
-    }, 250)
-    return () => clearTimeout(timer)
-  }, [query, reach, proto, sort])
+    }
+    // Written a moment after the last keystroke: Safari refuses a page more
+    // than a hundred history writes in thirty seconds.
+    const timer = setTimeout(write, 250)
+    // A press writes it first. The router takes a history write for a
+    // navigation of its own and drops the one it had under way, so a port
+    // pressed inside that moment, on a server slow to answer, was written
+    // over and never opened; ahead of the press, the write is the entry Back
+    // returns to.
+    const early = () => {
+      clearTimeout(timer)
+      write()
+    }
+    window.addEventListener("click", early, { capture: true, once: true })
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener("click", early, { capture: true })
+    }
+  }, [query, reach, proto, sort, legacy])
 
-  const listeners = useMemo(() => data?.listeners ?? [], [data])
+  const listeners = useMemo(() => data?.value ?? [], [data])
   // A service on 0.0.0.0 and :: is one row and one count.
   const all = useMemo(() => foldDualStack(listeners), [listeners])
-  const sheetSocket = useMemo(
-    () => (sheetParam ? findSocket(all, sheetParam) : undefined),
-    [all, sheetParam],
-  )
-  const showSocket = (socket: Socket | null) => {
-    const param = socket ? socketParam(socket) : null
-    setSheetParam(param)
-    const url = new URL(window.location.href)
-    if (param) url.searchParams.set("socket", param)
-    else url.searchParams.delete("socket")
-    window.history.replaceState(null, "", url)
-  }
-  // A click anywhere on a row opens it, except on a control of its own.
-  const rowClick = (socket: Socket) => (event: React.MouseEvent) => {
-    if ((event.target as HTMLElement).closest("button, a, [role=menuitem]")) return
-    showSocket(socket)
-  }
   const counts = useMemo(() => tallyReach(all), [all])
   const onTheUplink = useMemo(() => all.filter(onUplink).length, [all])
   const dangerous = useMemo(() => dangerousPorts(listeners), [listeners])
@@ -328,111 +334,50 @@ function PortsView() {
       ),
     )
   const refreshNow = () => {
-    setRefreshing(true)
-    if (paused) setPaused(false)
-    else refresh()
+    setAsked({ at: live?.at, error: shared.error })
+    setPaused(false)
+    shared.refresh()
+    firewall.refresh()
+  }
+  const pause = () => {
+    setHeld(live)
+    setAsked(null)
+    setPaused(true)
   }
   const exportRows = (format: "csv" | "json") => {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")
     if (format === "csv") downloadText(`listening-sockets-${stamp}.csv`, toCsv(visible))
     else downloadText(`listening-sockets-${stamp}.json`, toJson(visible), "application/json")
   }
-
-  const verbsFor = (l: Socket): Verb[] => {
-    const endpoint = formatEndpoint(l.address, l.port)
-    // The owner's own page first: the container, the deployment it runs
-    // for, the PM2 app or the unit, where its remedy usually is.
-    const verbs: Verb[] = ownerLinks(l).map((link, i) => ({
-      key: link.key,
-      label: link.label,
-      icon: OWNER_ICON[link.key],
-      inline: i === 0,
-      run: () => router.push(link.href),
-    }))
-    // Init holding a socket unit's socket is systemd listening, whose page
-    // is the unit's; docker-proxy is a container's plumbing, kept in the menu.
-    if (l.pid > 1 || (l.pid === 1 && !l.socketUnit)) {
-      verbs.push({
-        key: "process",
-        label: "Process",
-        icon: ListOrdered,
-        inline: !l.container,
-        run: () => router.push(processHref(l.pid)),
-      })
-    }
-    verbs.push({
-      key: "endpoint",
-      label: "Copy endpoint",
-      icon: Copy,
-      run: () => void copyText(endpoint, `Copied ${endpoint}`),
-    })
-    if (l.cmdline) {
-      const cmdline = l.cmdline
-      verbs.push({
-        key: "command",
-        label: "Copy command",
-        icon: Clipboard,
-        run: () => void copyText(cmdline, "Copied the command"),
-      })
-    }
-    if (l.exposed) {
-      verbs.push({
-        key: "firewall",
-        label: "Firewall",
-        icon: Shield,
-        run: () => router.push("/network/firewall"),
-      })
-    }
-    if (admin) verbs.push(...firewallHandoffs(l, firewall.data, (href) => router.push(href)))
-    if (admin) verbs.push(...proxyVerbs(l, (href) => router.push(href)))
-    for (const action of ownerActions(l, can)) {
-      verbs.push({
-        key: `owner-${action.key}`,
-        label: action.label,
-        icon: OWNER_ACTION_ICON[action.key],
-        danger: action.danger,
-        run: () =>
-          confirm({
-            title: action.title,
-            confirmLabel: action.label,
-            description: (
-              <>
-                {action.description.map((line) => (
-                  <p key={line}>{line}</p>
-                ))}
-              </>
-            ),
-            action: async (phrase) => {
-              await post(action.path, action.body, { confirm: phrase })
-            },
-            onDone: refreshNow,
-          }),
-      })
-    }
-    return verbs
+  const verbsFor = useSocketVerbs({ firewall: firewall.data, confirm, onDone: refreshNow })
+  const open_ = (socket: Socket) => router.push(portHref(socket, all))
+  // A click anywhere on a row opens it, except on a control of its own.
+  const rowClick = (socket: Socket) => (event: React.MouseEvent) => {
+    if ((event.target as HTMLElement).closest("button, a, [role=menuitem]")) return
+    open_(socket)
   }
-  // A row's menu is named by the endpoint it acts on; two programs can share
-  // a port on two addresses, never an address and a port.
-  const menuLabel = (l: Socket) => `Actions for ${l.protocol} ${formatEndpoint(l.address, l.port)}`
-  const detailLabel = (l: Socket) =>
-    `Details for ${l.protocol} ${formatEndpoint(l.address, l.port)}`
 
-  if (loading && !data) {
+  if (legacy !== null || (!data && (shared.loading || !shared.error))) return <PortsLoading />
+  if (!data) {
     return (
       <Page>
         {header}
-        <LoadingPanel />
+        <Identity
+          state={<Status tone="danger" label="Not read" />}
+          facts={<span>couldn&apos;t read the sockets</span>}
+        />
+        <ErrorState
+          error={shared.error ?? new Error("The sockets could not be read.")}
+          onRetry={refreshNow}
+        />
       </Page>
     )
   }
-  if (error && !data) {
-    return (
-      <Page>
-        {header}
-        <ErrorState error={error} onRetry={refresh} />
-      </Page>
-    )
-  }
+
+  const internetTone =
+    counts.internet > 0 ? "text-warning" : onTheUplink > 0 ? undefined : "text-success"
+  const critical = dangerous.some((d) => d.level === "critical")
+  const dangerTone = critical ? "font-medium text-destructive" : "font-medium text-warning"
 
   const empty = (() => {
     if (all.length === 0) {
@@ -487,184 +432,217 @@ function PortsView() {
     <Page className="animate-rise">
       {header}
 
-      <StatGrid columns={4} dense>
-        <StatTile
-          label="Listening"
-          value={counts.all}
-          hint={`${counts.tcp} TCP · ${counts.udp} UDP`}
+      <Identity
+        facts={
+          <>
+            {/* How many, and how many of them the internet reaches: the page's
+                reading. The protocols and the private networks were here too,
+                each the figure on its chip over the list, said twice. */}
+            <span className="numeric text-foreground">{counts.all} listening</span>
+            <FactDot />
+            <span className={cn("numeric", internetTone)} title={internetHint(all)}>
+              {counts.internet > 0
+                ? `${counts.internet} internet-facing`
+                : onTheUplink > 0
+                  ? `${onTheUplink} internet-facing if the uplink is mapped`
+                  : "nothing the internet can reach"}
+            </span>
+            <FactDot />
+            <Freshness
+              at={data.at}
+              paused={paused}
+              refreshing={refreshing}
+              stale={Boolean(shared.error)}
+            />
+          </>
+        }
+        state={
+          dangerous.length > 0 ? (
+            <span className="inline-flex items-center gap-1.5 text-xs whitespace-nowrap">
+              <StatusDot tone={critical ? "danger" : "warning"} />
+              <span className={cn("numeric", dangerTone)} title="Counted once per port">
+                {plural(dangerous.length, "dangerous service")} exposed
+              </span>
+            </span>
+          ) : (
+            <Status tone="running" label="Nothing dangerous exposed" />
+          )
+        }
+        command={admin && <FreePortFinder />}
+        menu={
+          <VerbMenu
+            label="More actions for the list"
+            verbs={[
+              ...(paused
+                ? []
+                : [
+                    {
+                      key: "refresh",
+                      label: refreshing ? "Refreshing…" : "Refresh now",
+                      icon: RefreshClockwise,
+                      disabled: refreshing,
+                      run: refreshNow,
+                    },
+                  ]),
+              {
+                key: "pause",
+                label: paused ? "Resume refreshing" : "Pause refreshing",
+                icon: paused ? Play : Pause,
+                run: paused ? refreshNow : pause,
+              },
+              {
+                key: "csv",
+                label: "Export as CSV",
+                icon: AcronymCsv,
+                group: "Export",
+                disabled: visible.length === 0,
+                run: () => exportRows("csv"),
+              },
+              {
+                key: "json",
+                label: "Export as JSON",
+                icon: AcronymJson,
+                group: "Export",
+                disabled: visible.length === 0,
+                run: () => exportRows("json"),
+              },
+            ]}
+          />
+        }
+      />
+
+      {error && (
+        // The rows below are the last list that arrived; saying nothing
+        // would let an incident be read off a list minutes old.
+        <Notice
+          tone="warning"
+          icon={Warning}
+          title="Refreshing failed, so this is the last list that arrived"
+        >
+          <p>
+            {errorMessage(error)} The page tries again every {POLL_MS / 1000} seconds.
+          </p>
+          <Button variant="outline" size="xs" className="mt-2" onClick={refreshNow}>
+            Try again
+          </Button>
+        </Notice>
+      )}
+
+      {all.length > 0 && (
+        <PortsPicture
+          sockets={all}
+          all={all}
+          reach={reach}
+          onReach={(next) => {
+            setReach(next)
+            setOnlyNew(false)
+          }}
         />
-        <StatTile
-          label="Internet-facing"
-          value={counts.internet}
-          // Nothing is sure to face the internet while a socket is on the
-          // private uplink, but nothing is sure not to either.
-          tone={counts.internet > 0 ? "warning" : onTheUplink > 0 ? "default" : "success"}
-          hint={internetHint(all)}
-        />
-        <StatTile label="Private networks" value={counts.private} hint={privateHint(all)} />
-        <StatTile
-          label="Dangerous services exposed"
-          value={dangerous.length}
-          tone={
-            dangerous.some((d) => d.level === "critical")
-              ? "danger"
-              : dangerous.length > 0
-                ? "warning"
-                : "default"
-          }
-          hint={dangerous.length > 0 ? "counted once per port" : "none off the machine"}
-        />
-      </StatGrid>
+      )}
 
       <Panel plain>
         <PanelHeader
           title="Listening sockets"
           actions={
-            <>
-              {data && (
-                <Freshness
-                  at={data.at}
-                  paused={paused}
-                  refreshing={refreshing}
-                  stale={Boolean(error)}
-                />
-              )}
-              {!paused && (
-                <IconAction label="Refresh now" pending={refreshing} onClick={refreshNow}>
-                  <RefreshClockwise />
-                </IconAction>
-              )}
-              <IconAction
-                label={paused ? "Resume refreshing" : "Pause refreshing"}
-                aria-pressed={paused}
-                onClick={() => {
-                  if (paused) return refreshNow()
-                  setRefreshing(false)
-                  setPaused(true)
-                }}
-              >
-                {paused ? <Play /> : <Pause />}
-              </IconAction>
-              <VerbMenu
-                label="Export"
-                verbs={[
-                  { key: "csv", label: "CSV", icon: AcronymCsv, run: () => exportRows("csv") },
-                  { key: "json", label: "JSON", icon: AcronymJson, run: () => exportRows("json") },
-                ]}
-                trigger={
-                  <Button variant="outline" size="xs" disabled={visible.length === 0}>
-                    <Download />
-                    Export
-                  </Button>
-                }
-              />
-            </>
+            <span className="numeric text-hint text-muted-foreground">
+              {visible.length === all.length ? all.length : `${visible.length} of ${all.length}`}
+            </span>
           }
         />
-        {error && data && (
-          // The rows below are the last list that arrived; saying nothing
-          // would let an incident be read off a list minutes old.
-          <Notice
-            tone="warning"
-            icon={Warning}
-            title="Refreshing failed, so this is the last list that arrived"
-            className="my-3"
-          >
-            <p>
-              {errorMessage(error)}
-              {paused
-                ? " Refreshing is paused."
-                : ` The page tries again every ${POLL_MS / 1000} seconds.`}
-            </p>
-            <Button variant="outline" size="xs" className="mt-2" onClick={refreshNow}>
-              {paused ? "Resume" : "Try again"}
-            </Button>
-          </Notice>
+        {/* With nothing listening there is nothing to search or narrow. */}
+        {all.length > 0 && (
+          <>
+            <Toolbar className="justify-between gap-x-4">
+              <SearchInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Port, process, user or address"
+                aria-label="Search sockets"
+                className="pr-8"
+                trailing={
+                  <span className="flex size-7 items-center justify-center">
+                    <InfoTip label="Search syntax">
+                      Words match the port, process, command, user, address and reach. Narrow by
+                      field with <code>:443</code>, <code>[::]:22</code>, <code>0.0.0.0:80</code>,{" "}
+                      <code>port:8000-8100</code>, <code>port:5432,6379</code>,{" "}
+                      <code>proto:udp</code>, <code>user:postgres</code> or <code>pid:812</code>.
+                    </InfoTip>
+                  </span>
+                }
+              />
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                <ChipStrip role="group" aria-label="Reach">
+                  {(Object.keys(REACH_LABEL) as ReachFilter[])
+                    .filter((key) => key === "all" || key === reach || facets.reach[key] > 0)
+                    .map((key) => (
+                      <FilterChip
+                        key={key}
+                        selected={reach === key}
+                        onClick={() => setReach(key)}
+                        // Which networks, where the count alone does not say.
+                        title={key === "private" ? privateHint(all) : undefined}
+                      >
+                        {REACH_LABEL[key]} <ChipCount>{facets.reach[key]}</ChipCount>
+                      </FilterChip>
+                    ))}
+                </ChipStrip>
+                <ChipStrip role="group" aria-label="Protocol">
+                  {(Object.keys(PROTO_LABEL) as Exclude<ProtoFilter, "all">[])
+                    .filter((key) => key === proto || facets.proto[key] > 0)
+                    .map((key) => (
+                      // A second press on the chosen protocol lists both again.
+                      <FilterChip
+                        key={key}
+                        selected={proto === key}
+                        onClick={() => setProto(proto === key ? "all" : key)}
+                      >
+                        {PROTO_LABEL[key]} <ChipCount>{facets.proto[key]}</ChipCount>
+                      </FilterChip>
+                    ))}
+                </ChipStrip>
+              </div>
+            </Toolbar>
+            <Toolbar className="mt-2 gap-x-3">
+              <FilterChip selected={grouped} onClick={() => setGrouped(!grouped)}>
+                Group by application
+              </FilterChip>
+              {(fresh.length > 0 || onlyNew) && (
+                <FilterChip
+                  selected={onlyNew}
+                  onClick={() => setOnlyNew(!onlyNew)}
+                  title="Sockets the ports history first saw listening in the last 24 hours"
+                >
+                  New in 24 hours <ChipCount>{newCount}</ChipCount>
+                </FilterChip>
+              )}
+              {range && ephemeralOnHost > 0 && (
+                <FilterChip
+                  selected={hideEphemeral}
+                  onClick={() => setHideEphemeral(!hideEphemeral)}
+                  title={`Loopback sockets on ports ${range.low}–${range.high}, which the kernel hands to a program that asks for any port`}
+                >
+                  Hide loopback ephemeral ports <ChipCount>{facets.ephemeral}</ChipCount>
+                </FilterChip>
+              )}
+              {!wide && (
+                <div className="ml-auto">
+                  <Select value={sortParam(sort)} onValueChange={setSort}>
+                    <SelectTrigger size="sm" className="w-48" aria-label="Sort">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SORT_CHOICES.map((choice) => (
+                        <SelectItem key={choice.value} value={choice.value}>
+                          {choice.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </Toolbar>
+          </>
         )}
-        <Toolbar className="justify-between gap-x-4">
-          <SearchInput
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Port, process, user or address"
-            aria-label="Search sockets"
-            className="pr-8"
-            trailing={
-              <span className="flex size-7 items-center justify-center">
-                <InfoTip label="Search syntax">
-                  Words match the port, process, command, user, address and reach. Narrow by field
-                  with <code>:443</code>, <code>[::]:22</code>, <code>0.0.0.0:80</code>,{" "}
-                  <code>port:8000-8100</code>, <code>port:5432,6379</code>, <code>proto:udp</code>,{" "}
-                  <code>user:postgres</code> or <code>pid:812</code>.
-                </InfoTip>
-              </span>
-            }
-          />
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-            <ChipStrip role="group" aria-label="Reach">
-              {(Object.keys(REACH_LABEL) as ReachFilter[])
-                .filter((key) => key === "all" || key === reach || facets.reach[key] > 0)
-                .map((key) => (
-                  <FilterChip key={key} selected={reach === key} onClick={() => setReach(key)}>
-                    {REACH_LABEL[key]} <ChipCount>{facets.reach[key]}</ChipCount>
-                  </FilterChip>
-                ))}
-            </ChipStrip>
-            <ChipStrip role="group" aria-label="Protocol">
-              {(Object.keys(PROTO_LABEL) as Exclude<ProtoFilter, "all">[])
-                .filter((key) => key === proto || facets.proto[key] > 0)
-                .map((key) => (
-                  // A second press on the chosen protocol lists both again.
-                  <FilterChip
-                    key={key}
-                    selected={proto === key}
-                    onClick={() => setProto(proto === key ? "all" : key)}
-                  >
-                    {PROTO_LABEL[key]} <ChipCount>{facets.proto[key]}</ChipCount>
-                  </FilterChip>
-                ))}
-            </ChipStrip>
-          </div>
-        </Toolbar>
-        <Toolbar className="mt-2 gap-x-3">
-          <FilterChip selected={grouped} onClick={() => setGrouped(!grouped)}>
-            Group by application
-          </FilterChip>
-          {(fresh.length > 0 || onlyNew) && (
-            <FilterChip
-              selected={onlyNew}
-              onClick={() => setOnlyNew(!onlyNew)}
-              title="Sockets the ports history first saw listening in the last 24 hours"
-            >
-              New in 24 hours <ChipCount>{newCount}</ChipCount>
-            </FilterChip>
-          )}
-          {range && ephemeralOnHost > 0 && (
-            <FilterChip
-              selected={hideEphemeral}
-              onClick={() => setHideEphemeral(!hideEphemeral)}
-              title={`Loopback sockets on ports ${range.low}–${range.high}, which the kernel hands to a program that asks for any port`}
-            >
-              Hide loopback ephemeral ports <ChipCount>{facets.ephemeral}</ChipCount>
-            </FilterChip>
-          )}
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            {admin && <FreePortFinder />}
-            {!wide && (
-              <Select value={sortParam(sort)} onValueChange={setSort}>
-                <SelectTrigger size="sm" className="w-48" aria-label="Sort">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SORT_CHOICES.map((choice) => (
-                    <SelectItem key={choice.value} value={choice.value}>
-                      {choice.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-        </Toolbar>
         <PanelBody flush>
           {visible.length === 0 ? (
             empty
@@ -672,7 +650,7 @@ function PortsView() {
             // The grid scrolls independently, so its border marks that boundary.
             <Table
               className="table-fixed"
-              containerClassName="max-h-[calc(100svh-24rem)] rounded-xl border bg-card"
+              containerClassName="max-h-[calc(100svh-12rem)] rounded-xl border bg-card"
             >
               <TableHeader className={stickyTableHeader}>
                 <TableRow>
@@ -681,7 +659,7 @@ function PortsView() {
                     column="port"
                     sort={sort}
                     onSort={chooseSort}
-                    className="w-[20%]"
+                    className="w-[24%]"
                   />
                   <SortHead label="Application" column="process" sort={sort} onSort={chooseSort} />
                   <SortHead
@@ -689,11 +667,11 @@ function PortsView() {
                     column="reach"
                     sort={sort}
                     onSort={chooseSort}
-                    className="w-56"
+                    className="w-[22%]"
                   />
-                  <TableHead className="w-60">Firewall</TableHead>
-                  <TableHead className="w-24">Clients</TableHead>
-                  <TableHead className="w-28">
+                  <TableHead className="w-[17%]">Firewall</TableHead>
+                  <TableHead className="w-16 text-right">Clients</TableHead>
+                  <TableHead className="w-24">
                     <span className="sr-only">Actions</span>
                   </TableHead>
                 </TableRow>
@@ -703,20 +681,23 @@ function PortsView() {
                   entry.kind === "group" ? (
                     <TableRow
                       key={`group:${entry.group.key}`}
+                      data-slot="port-row"
                       // The row is the pointer's target; the keyboard's is the
                       // one button in it, so the row is not a second tab stop.
-                      className="group cursor-pointer"
+                      className="group h-12 cursor-pointer"
                       onClick={(event) => {
                         if ((event.target as HTMLElement).closest("button")) return
                         toggleGroup(entry.group.key)
                       }}
                     >
-                      <TableCell className="py-4">
-                        <p className="text-body font-medium">
-                          {plural(entry.group.sockets.length, "socket")}
-                        </p>
-                        <p className="mt-1 font-mono text-hint wrap-anywhere text-muted-foreground">
-                          {groupPorts(entry.group)}
+                      <TableCell>
+                        <p className="flex min-w-0 items-baseline gap-2">
+                          <span className="shrink-0 text-body font-medium">
+                            {plural(entry.group.sockets.length, "socket")}
+                          </span>
+                          <span className="truncate font-mono text-hint text-muted-foreground">
+                            {groupPorts(entry.group)}
+                          </span>
                         </p>
                       </TableCell>
                       <TableCell>
@@ -736,39 +717,41 @@ function PortsView() {
                   ) : (
                     <TableRow
                       key={socketKey(entry.socket)}
-                      className="group cursor-pointer"
+                      data-slot="port-row"
+                      className="group h-12 cursor-pointer"
                       onClick={rowClick(entry.socket)}
                     >
-                      <TableCell className="py-4">
-                        {/* A group's sockets stand behind a rule under its
-                            line, as an option's revealed fields do. */}
-                        <div className={cn(entry.member && "border-l border-hairline pl-4")}>
-                          <div className="flex items-baseline gap-2">
-                            <DetailButton
-                              socket={entry.socket}
-                              label={detailLabel(entry.socket)}
-                              onOpen={showSocket}
-                            />
-                            <span className="text-hint text-muted-foreground uppercase">
-                              {entry.socket.protocol}
-                            </span>
-                            <NewMark socket={entry.socket} now={listedAt} />
-                          </div>
-                          <p className="mt-1 font-mono text-hint wrap-anywhere text-muted-foreground">
-                            <Addresses socket={entry.socket} />
-                          </p>
+                      <TableCell>
+                        {/* A group's sockets stand behind a rule under its line. */}
+                        <div
+                          className={cn(
+                            "flex min-w-0 items-baseline gap-2",
+                            entry.member && "border-l border-hairline pl-4",
+                          )}
+                        >
+                          <PortLink socket={entry.socket} all={all} />
+                          <span className="shrink-0 text-hint text-muted-foreground uppercase">
+                            {entry.socket.protocol}
+                          </span>
+                          <NewMark socket={entry.socket} now={listedAt} />
+                          <span
+                            className="min-w-0 truncate font-mono text-hint text-muted-foreground"
+                            title={addressLine(entry.socket)}
+                          >
+                            {addressLine(entry.socket)}
+                          </span>
                         </div>
                       </TableCell>
                       <TableCell>
                         <Owner socket={entry.socket} />
                       </TableCell>
                       <TableCell>
-                        <ReachStatus socket={entry.socket} />
+                        <ReachWord socket={entry.socket} className="max-w-full" />
                       </TableCell>
                       <TableCell>
-                        <FirewallVerdict socket={entry.socket} />
+                        <FirewallWord socket={entry.socket} />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="text-right">
                         <ClientsCell socket={entry.socket} />
                       </TableCell>
                       <TableCell>
@@ -776,7 +759,7 @@ function PortsView() {
                           dim
                           className="justify-end"
                           verbs={verbsFor(entry.socket)}
-                          menuLabel={menuLabel(entry.socket)}
+                          menuLabel={socketMenuLabel(entry.socket)}
                         />
                       </TableCell>
                     </TableRow>
@@ -790,96 +773,55 @@ function PortsView() {
                 entry.kind === "group" ? (
                   <li
                     key={`group:${entry.group.key}`}
-                    className={cn("flex min-w-0 items-start gap-3 py-3", ROW_BLEED)}
+                    data-slot="port-row"
+                    className="flex h-16 min-w-0 items-center gap-3"
                   >
-                    <div className="w-14 shrink-0">
-                      <p className="numeric font-mono text-title font-semibold">
-                        {entry.group.sockets.length}
-                      </p>
-                      <p className="text-hint text-muted-foreground">sockets</p>
-                    </div>
                     <div className="min-w-0 flex-1">
                       <GroupTitle
                         group={entry.group}
                         open={entry.open}
                         onToggle={() => toggleGroup(entry.group.key)}
                       />
-                      <p className="mt-1 font-mono text-hint wrap-anywhere text-muted-foreground">
-                        {groupPorts(entry.group)}
+                      <p className="mt-1 truncate font-mono text-hint text-muted-foreground">
+                        {plural(entry.group.sockets.length, "socket")} · {groupPorts(entry.group)}
                       </p>
-                      <div className="mt-1.5">
-                        <GroupReach group={entry.group} />
-                      </div>
                     </div>
                   </li>
                 ) : (
-                  // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- the pointer's larger target: the row's name is the link or button a keyboard opens it by
+                  // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- the pointer's larger target: the port is the link a keyboard opens it by
                   <li
                     key={socketKey(entry.socket)}
+                    data-slot="port-row"
                     className={cn(
-                      "group flex min-w-0 cursor-pointer items-start gap-3 py-3 transition-colors hover:bg-row-hover",
-                      ROW_BLEED,
+                      "group flex h-16 min-w-0 cursor-pointer items-center gap-3 transition-colors hover:bg-row-hover",
+                      entry.member && "border-l border-hairline pl-3",
                     )}
                     onClick={rowClick(entry.socket)}
                   >
-                    {entry.member && (
-                      <span
-                        aria-hidden
-                        className="w-2 shrink-0 self-stretch border-l border-hairline"
-                      />
-                    )}
-                    {/* The protocol under the port, as the table pairs them:
-                        a line of its own that nothing can push off the row. */}
-                    <div className="w-14 shrink-0">
-                      <p>
-                        <DetailButton
-                          socket={entry.socket}
-                          label={detailLabel(entry.socket)}
-                          onOpen={showSocket}
-                        />
-                      </p>
-                      <p className="text-hint text-muted-foreground uppercase">
-                        {entry.socket.protocol}
-                      </p>
-                      <NewMark socket={entry.socket} now={listedAt} />
-                    </div>
+                    <ProcessMark listener={entry.socket} />
                     <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 items-center gap-2 text-body">
-                        <ProcessMark listener={entry.socket} />
-                        <span className="truncate">{ownerTitle(entry.socket)}</span>
-                        {entry.socket.user && (
-                          <span className="max-w-[45%] shrink-0 truncate text-hint text-muted-foreground">
-                            · {entry.socket.user}
-                          </span>
-                        )}
-                      </div>
-                      {/* The tag waits a line, so the owner's name keeps the
-                          width a phone has for it. */}
-                      <OwnerLine socket={entry.socket} tagged />
-                      <ProxyLine socket={entry.socket} />
-                      {entry.socket.source === "docker-nat" && (
-                        <p className="text-hint text-muted-foreground">{NAT_WORDS}</p>
-                      )}
-                      {/* Which address a port is bound to is the whole reason
-                          this page exists — it must not be the line that gets
-                          cut on a narrow screen. */}
-                      <p className="font-mono text-hint wrap-anywhere text-muted-foreground">
-                        <Addresses socket={entry.socket} />
+                      <p className="flex min-w-0 items-baseline gap-2">
+                        <PortLink socket={entry.socket} all={all} />
+                        <span className="shrink-0 text-hint text-muted-foreground uppercase">
+                          {entry.socket.protocol}
+                        </span>
+                        <NewMark socket={entry.socket} now={listedAt} />
+                        <span className="min-w-0 truncate text-body">
+                          {ownerTitle(entry.socket)}
+                        </span>
+                        {entry.socket.self && <Tag>This dashboard</Tag>}
                       </p>
-                      <div className="mt-1.5 flex">
-                        <ReachStatus socket={entry.socket} />
-                      </div>
-                      {entry.socket.firewall && (
-                        <div className="mt-1.5">
-                          <FirewallVerdict socket={entry.socket} />
-                        </div>
-                      )}
-                      <ClientsLine socket={entry.socket} />
+                      <p className="mt-1 flex min-w-0 items-center gap-2">
+                        <ReachWord socket={entry.socket} className="shrink-0" />
+                        <span className="min-w-0 truncate font-mono text-hint text-muted-foreground">
+                          {addressLine(entry.socket)}
+                        </span>
+                      </p>
                     </div>
                     <VerbActions
                       className="shrink-0"
-                      verbs={verbsFor(entry.socket)}
-                      menuLabel={menuLabel(entry.socket)}
+                      verbs={verbsFor(entry.socket).map((verb) => ({ ...verb, inline: false }))}
+                      menuLabel={socketMenuLabel(entry.socket)}
                     />
                   </li>
                 ),
@@ -906,75 +848,120 @@ function PortsView() {
 
       <OrphanRules firewall={firewall.data} admin={admin} onChange={firewall.refresh} />
       <PortChanges query={query} onClearQuery={() => setQuery("")} />
-      <PortSheet
-        param={sheetParam}
-        socket={sheetSocket}
-        reach={sheetSocket && <ReachStatus socket={sheetSocket} />}
-        actions={
-          sheetSocket && (
-            <VerbActions verbs={verbsFor(sheetSocket)} menuLabel={menuLabel(sheetSocket)} />
-          )
-        }
-        admin={admin}
-        onClose={() => showSocket(null)}
-      />
       {dialog}
     </Page>
   )
 }
 
-/** The port, as the keyboard's way into a row's detail; the pointer's is the whole row. */
-function DetailButton({
-  socket,
-  label,
-  onOpen,
+/**
+ * The line the page opens on, laid out as a project's header: what it is
+ * about and how much, what is dangerous beside the name, one command at the
+ * end and the rest behind `⋯`. The state is always given, so the line has the
+ * one layout while the list is read, when it fails and when it lands.
+ */
+function Identity({
+  facts,
+  state,
+  command,
+  menu,
 }: {
-  socket: Socket
-  label: string
-  onOpen: (socket: Socket) => void
+  facts: React.ReactNode
+  state?: React.ReactNode
+  command?: React.ReactNode
+  menu?: React.ReactNode
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={() => onOpen(socket)}
-      className="numeric rounded-sm font-mono text-title font-semibold focus-ring hover:underline"
-    >
-      {socket.port}
-    </button>
+    <HostIdentity
+      fallback={Router}
+      title="Listening ports"
+      state={state ?? null}
+      facts={facts}
+      command={command}
+      menu={menu}
+    />
   )
 }
 
-/** How many are connected to a TCP socket, and the busiest of them. */
-function ClientsCell({ socket }: { socket: Socket }) {
-  const clients = socketClients(socket)
-  if (!clients) return <span className="text-xs text-muted-foreground">—</span>
+/** The port, as the keyboard's way to its page; the pointer's is the whole row. */
+function PortLink({ socket, all }: { socket: Socket; all: Socket[] }) {
   return (
-    <div className="min-w-0">
-      <p className={cn("numeric text-body", clients.count === 0 && "text-muted-foreground")}>
-        {clients.count}
-      </p>
-      {clients.peers[0] && (
-        <p
-          className="truncate font-mono text-hint text-muted-foreground"
-          title={clients.peers[0].address}
-        >
-          {clients.peers[0].address}
-        </p>
-      )}
+    <Link
+      href={portHref(socket, all)}
+      aria-label={`Open ${socket.protocol} ${formatEndpoint(socket.address, socket.port)}`}
+      className="numeric shrink-0 rounded-sm font-mono text-body font-semibold focus-ring hover:underline"
+    >
+      {socket.port}
+    </Link>
+  )
+}
+
+/**
+ * Who a socket answers for, on one line: the owner as its product, its name,
+ * and after it how it runs or the command — the rest is the port's page.
+ */
+function Owner({ socket }: { socket: Socket }) {
+  const nat = socket.source === "docker-nat"
+  const label = ownerLabel(socket)
+  const proxy = proxyWords(socket)
+  const pids = socketPids(socket)
+  // How it runs says more than the command where something supervises it:
+  // "ssh.socket → ssh.service" over "/lib/systemd/systemd".
+  const command = nat ? NAT_WORDS : socket.cmdline || "No command reported"
+  const detail = label ?? command
+  const who = [socket.user || "unknown user", pids.length > 0 && `PID ${pids.join(", ")}`]
+    .filter(Boolean)
+    .join(" · ")
+  return (
+    <div
+      className="flex min-w-0 items-center gap-2.5"
+      title={[label, proxy, command, nat ? undefined : who].filter(Boolean).join("\n")}
+    >
+      <ProcessMark listener={socket} className="size-7 rounded-md [&_img]:size-4" />
+      <span className="max-w-[70%] shrink-0 truncate text-body font-medium">
+        {ownerTitle(socket)}
+      </span>
+      {socket.self && <Tag>This dashboard</Tag>}
+      <span
+        className={cn("min-w-0 truncate text-hint text-muted-foreground", !label && "font-mono")}
+      >
+        {detail}
+      </span>
     </div>
   )
 }
 
-/** The phone's clients line, only where someone is connected. */
-function ClientsLine({ socket }: { socket: Socket }) {
-  const clients = socketClients(socket)
-  if (!clients || clients.count === 0) return null
+/** What the firewall does with a socket, as one coloured line; why is its tooltip and the port's page. */
+function FirewallWord({ socket }: { socket: Socket }) {
+  const fw = socket.firewall
+  if (!fw) return <span className="text-xs text-muted-foreground">{noFirewallWords(socket)}</span>
+  const words = firewallWords(fw)
+  const tone =
+    words.verdict === "warning"
+      ? "text-warning"
+      : words.verdict === "ok"
+        ? "text-success"
+        : "text-muted-foreground"
   return (
-    <p className="mt-1.5 text-hint text-muted-foreground">
-      <span className="numeric">{plural(clients.count, "client connection")}</span>
-      {clients.peers[0] && <span className="font-mono"> · {clients.peers[0].address}</span>}
-    </p>
+    <span
+      className={cn("block truncate text-xs font-medium", tone)}
+      title={`${words.label}. ${words.conclusion}`}
+    >
+      {words.label}
+    </span>
+  )
+}
+
+/** How many are connected to a TCP socket; the busiest of them is its tooltip. */
+function ClientsCell({ socket }: { socket: Socket }) {
+  const clients = socketClients(socket)
+  if (!clients) return <span className="text-xs text-muted-foreground">—</span>
+  return (
+    <span
+      className={cn("numeric text-body", clients.count === 0 && "text-muted-foreground")}
+      title={clients.peers[0] ? `Busiest: ${clients.peers[0].address}` : undefined}
+    >
+      {clients.count}
+    </span>
   )
 }
 
@@ -1001,7 +988,7 @@ function Freshness({
   const now = useNow(1000)
   const ago = sinceWords(now - at)
   return (
-    <span className="text-hint whitespace-nowrap text-muted-foreground tabular-nums">
+    <span className="whitespace-nowrap tabular-nums">
       {refreshing
         ? "Refreshing…"
         : paused
@@ -1050,8 +1037,8 @@ function SortHead({
 }
 
 /**
- * An application's folded sockets, named as the process and account, with the
- * control that unfolds them.
+ * An application's folded sockets on one line: the control that unfolds
+ * them, the owner as its product, and its account and processes.
  */
 function GroupTitle({
   group,
@@ -1065,197 +1052,36 @@ function GroupTitle({
   const Chevron = open ? ChevronDown : ChevronRight
   const pids = groupPids(group)
   return (
-    <div className="flex min-w-0 items-center gap-3">
-      <ProcessMark listener={group.sockets[0]} />
-      <div className="min-w-0">
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-label={`${group.process}, ${plural(group.sockets.length, "socket")}`}
-          onClick={(event) => {
-            event.stopPropagation()
-            onToggle()
-          }}
-          className="flex max-w-full min-w-0 items-center gap-1 rounded-sm text-left text-body font-medium focus-ring"
-        >
-          <Chevron aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">{group.process}</span>
-        </button>
-        <p className="mt-1 text-hint text-muted-foreground">
-          {group.user || "unknown user"}
-          {pids.length === 1 && ` · PID ${pids[0]}`}
-          {pids.length > 1 && ` · ${pids.length} PIDs`}
-        </p>
-      </div>
+    <div className="flex min-w-0 items-center gap-2.5">
+      <ProcessMark listener={group.sockets[0]} className="size-7 rounded-md [&_img]:size-4" />
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={`${group.process}, ${plural(group.sockets.length, "socket")}`}
+        onClick={(event) => {
+          event.stopPropagation()
+          onToggle()
+        }}
+        className="flex min-w-0 shrink-0 items-center gap-1 rounded-sm text-left text-body font-medium focus-ring"
+      >
+        <Chevron aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate">{group.process}</span>
+      </button>
+      <span className="min-w-0 truncate text-hint text-muted-foreground">
+        {group.user || "unknown user"}
+        {pids.length === 1 && ` · PID ${pids[0]}`}
+        {pids.length > 1 && ` · ${pids.length} PIDs`}
+      </span>
     </div>
   )
 }
 
-/** A group's reach is its worst socket's, with how many networks it spans. */
+/** A group's reach is its worst socket's; how many networks it spans is the tooltip. */
 function GroupReach({ group }: { group: SocketGroup }) {
-  const networks = new Set(group.sockets.map((socket) => reachWords(socket))).size
+  const networks = new Set(group.sockets.map((socket) => socket.network)).size
   return (
-    <div className="min-w-0">
-      <ReachStatus socket={worstSocket(group)} />
-      {networks > 1 && (
-        <p className="mt-0.5 pl-5 text-hint text-muted-foreground">worst of {networks} networks</p>
-      )}
-    </div>
-  )
-}
-
-const OWNER_ACTION_ICON: Record<OwnerAction["key"], Verb["icon"]> = {
-  restart: RefreshClockwise,
-  reload: RefreshClockwise,
-  stop: StopCircle,
-  disable: Slash,
-  terminate: StopCircle,
-  kill: Stop,
-}
-
-const OWNER_ICON: Record<OwnerLink["key"], Verb["icon"]> = {
-  container: Box,
-  deployment: GridMasonry,
-  unit: Servers,
-  app: ChartActivity,
-}
-
-/** Said of a port Docker publishes through its NAT rules, where the command would be. */
-const NAT_WORDS = "Forwarded by Docker's NAT rules; no process listens"
-
-/**
- * Who a socket answers for — a container, a PM2 app, the program — with the
- * dashboard's own marked, how the owner runs, the command, and the account
- * and process holding the socket.
- */
-function Owner({ socket }: { socket: Socket }) {
-  const nat = socket.source === "docker-nat"
-  return (
-    <div className="flex min-w-0 items-center gap-3">
-      <ProcessMark listener={socket} />
-      <div className="min-w-0">
-        <p className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-body font-medium">{ownerTitle(socket)}</span>
-          {socket.self && <Tag>This dashboard</Tag>}
-        </p>
-        <OwnerLine socket={socket} />
-        <ProxyLine socket={socket} />
-        {nat ? (
-          <p className="text-hint text-muted-foreground">{NAT_WORDS}</p>
-        ) : (
-          <>
-            <p
-              className="truncate font-mono text-hint text-muted-foreground"
-              title={socket.cmdline}
-            >
-              {socket.cmdline || "No command reported"}
-            </p>
-            <p className="mt-1 text-hint text-muted-foreground">
-              {socket.user || "unknown user"}
-              <Pids socket={socket} />
-            </p>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/**
- * How the owner runs: its container's image and stack or deployment, the
- * socket unit and the service it starts, the unit, the PM2 app's program —
- * after the "This dashboard" tag where the title's line has no room for it.
- */
-function OwnerLine({ socket, tagged }: { socket: Socket; tagged?: boolean }) {
-  const label = ownerLabel(socket)
-  const tag = tagged && socket.self
-  if (!label && !tag) return null
-  return (
-    <p className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
-      {tag && <Tag>This dashboard</Tag>}
-      {label && (
-        <span className="truncate" title={label}>
-          {label}
-        </span>
-      )}
-    </p>
-  )
-}
-
-/**
- * The owner as the product it is, on the tile the identity line draws a host's
- * facts with — a deployment's release by its project's website icon first.
- */
-function ProcessMark({ listener }: { listener: Listener }) {
-  const favicon = useProjectFavicon(listener.container?.deployment?.projectId)
-  if (listener.self) return <DashboardMark />
-  return (
-    <ProductLogo id={listenerProduct(listener)} favicon={favicon} size="sm" fallback={Router} />
-  )
-}
-
-/**
- * A socket's addresses one to a line, for its parent to wrap rather than cut:
- * the address is what says where the port answers. The comma between them
- * stays for a screen reader and a search of the page.
- */
-function Addresses({ socket }: { socket: Socket }) {
-  return socketAddresses(socket).map((address, i) => (
-    <Fragment key={address}>
-      {i > 0 && (
-        <>
-          <span className="sr-only">, </span>
-          <br />
-        </>
-      )}
-      {address}
-    </Fragment>
-  ))
-}
-
-/** The process behind a row, or both when Docker holds each family in its own proxy. */
-function Pids({ socket }: { socket: Socket }) {
-  const pids = socketPids(socket)
-  if (pids.length === 0) return null
-  return <>{` · ${pids.length > 1 ? "PIDs" : "PID"} ${pids.join(", ")}`}</>
-}
-
-/**
- * Where the socket answers, coloured by who can connect as the posture levels
- * the same socket, with the interface the address is on beneath it. The
- * label wraps rather than running into the next column: "Docker API ·
- * Private uplink" is wider than the column. A database the firewall's
- * inbound default holds to a warning says so, as the posture's finding does,
- * and so does one that gets past the default.
- */
-function ReachStatus({ socket }: { socket: Socket }) {
-  const verdict = reachVerdict(socket)
-  const words = networkWords(socket)
-  if (!verdict) return <span className="text-xs text-muted-foreground">{words}</span>
-  const service = dangerousService(socket)
-  const past = pastFirewallWords(socket)
-  return (
-    <div className="min-w-0" title={onUplink(socket) ? UPLINK_CAVEAT : undefined}>
-      <Status
-        verdict={verdict}
-        label={service ? `${service} · ${words}` : words}
-        icon={Router}
-        className="max-w-full whitespace-normal"
-      />
-      {socket.interface && (
-        <p
-          className="mt-0.5 truncate pl-5 font-mono text-hint text-muted-foreground"
-          title={socket.interface}
-        >
-          {socket.interface}
-        </p>
-      )}
-      {service && socket.inboundDefault && (
-        <p className="mt-0.5 pl-5 text-hint text-muted-foreground">
-          Firewall&apos;s inbound default: {socket.inboundDefault}
-        </p>
-      )}
-      {service && past && <p className="mt-0.5 pl-5 text-hint text-muted-foreground">{past}</p>}
-    </div>
+    <span title={networks > 1 ? `Worst of ${networks} networks` : undefined} className="flex">
+      <ReachWord socket={worstSocket(group)} className="max-w-full" />
+    </span>
   )
 }

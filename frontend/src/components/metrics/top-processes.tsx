@@ -9,10 +9,8 @@ import type { ProcessRow } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
-import { LoadingRows } from "@/components/state"
-import { Tag } from "@/components/tag"
-import { ProductLogo, processProduct } from "@/components/product-logo"
+import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
+import { ProductGlyph, hasProductLogo, processProduct } from "@/components/product-logo"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 type Sort = "cpu" | "memory" | "io"
@@ -30,6 +28,12 @@ const SHOWN = 8
  *
  * Polled on its own cadence rather than read from the live socket: the
  * process table is a walk of /proc, which is not work to do twice a second.
+ *
+ * A `RankList`: one line a process, its name the way to its own page, the
+ * figure the list is ordered by in the last column and the other resource in
+ * the column before it. They were two-line rows that opened nothing. The
+ * block is eight rows tall waiting, empty and failed alike, so what is under
+ * it does not move when the walk answers.
  */
 export function TopProcesses({ className }: { className?: string }) {
   // Persisted: somebody chasing a memory leak wants the memory order every
@@ -76,36 +80,20 @@ export function TopProcesses({ className }: { className?: string }) {
           </div>
         }
       />
-      <PanelBody flush className={rows.length === 0 ? "py-4" : "-mx-3 px-3 py-1"}>
+      <PanelBody flush className="min-h-66">
         {loading && !data ? (
-          <LoadingRows rows={6} />
+          <RankSkeleton rows={SHOWN} />
         ) : error && !data ? (
-          <p className="text-body text-muted-foreground">The process table could not be read.</p>
-        ) : rows.length === 0 ? (
-          <p className="text-body text-muted-foreground">No processes reported.</p>
+          <p className="py-3 text-hint text-muted-foreground">
+            The process table could not be read.
+          </p>
         ) : (
-          <RowList key={sort} className="animate-rise">
-            {rows.map((p) => (
-              <Row
-                key={p.pid}
-                // The process as the product it is, where it is one: a list of
-                // names is read, a list of Postgres, Caddy and Docker is seen.
-                leading={<ProductLogo id={processProduct(p.name)} size="sm" fallback={Cpu} />}
-                title={
-                  <span className="flex min-w-0 items-baseline gap-2">
-                    <span className="truncate">{p.name}</span>
-                    {p.manager !== "unmanaged" && p.manager !== "kernel" && (
-                      <Tag>{p.managerName ?? p.manager}</Tag>
-                    )}
-                  </span>
-                }
-                subtitle={`${p.pid} · ${p.username}${p.cmdline ? ` · ${p.cmdline}` : ""}`}
-                mono
-                trailing={<Figures process={p} sort={sort} />}
-                className="py-2"
-              />
-            ))}
-          </RowList>
+          <RankList
+            key={sort}
+            className="animate-rise"
+            emptyLabel="No processes reported."
+            items={rows.map((p) => item(p, sort))}
+          />
         )}
       </PanelBody>
     </Panel>
@@ -113,19 +101,37 @@ export function TopProcesses({ className }: { className?: string }) {
 }
 
 /**
- * Two figures per row: the one the list is ordered by, drawn at full weight,
- * and the other resource beside it so a process high on both is findable.
+ * One process as a rank row: the product it is where it is one, its name, and
+ * after it what manages it, its pid, its account and its command line, which
+ * give way before the name does. The figure the list is ordered by is the
+ * value; the other resource stands in the column before it, so a process high
+ * on both is findable.
  */
-function Figures({ process: p, sort }: { process: ProcessRow; sort: Sort }) {
+function item(p: ProcessRow, sort: Sort): RankItem {
+  const product = processProduct(p.name)
   const cpu = percent(p.cpuPercent, 1)
   const mem = bytes(p.rss, 0)
   const io = rate((p.ioReadRate ?? 0) + (p.ioWriteRate ?? 0))
-  const primary = sort === "cpu" ? cpu : sort === "memory" ? mem : io
-  const secondary = sort === "cpu" ? mem : cpu
-  return (
-    <>
-      <span className="numeric w-16 text-right text-hint text-muted-foreground">{secondary}</span>
-      <span className="numeric w-16 text-right text-body font-medium">{primary}</span>
-    </>
-  )
+  const managed = p.manager !== "unmanaged" && p.manager !== "kernel"
+  const facts = [managed && (p.managerName ?? p.manager), p.pid, p.username, p.cmdline]
+    .filter(Boolean)
+    .join(" · ")
+  return {
+    key: String(p.pid),
+    href: `/processes/${p.pid}`,
+    title: `Open ${p.name}, process ${p.pid}`,
+    mark: hasProductLogo(product) ? (
+      <ProductGlyph id={product} />
+    ) : (
+      <Cpu className="size-3.5 text-muted-foreground" />
+    ),
+    label: p.name,
+    hint: <span title={facts}>{facts}</span>,
+    trailing: (
+      <span className="numeric w-16 text-right text-hint text-muted-foreground">
+        {sort === "cpu" ? mem : cpu}
+      </span>
+    ),
+    value: sort === "cpu" ? cpu : sort === "memory" ? mem : io,
+  }
 }

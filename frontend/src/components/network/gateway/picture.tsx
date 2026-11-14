@@ -29,6 +29,12 @@ const NAT_DRAWN = 3
 
 type Node = WireFlowNode & { side: "in" | "out" }
 
+/**
+ * Room over and under this server's mark for the lines that hang under it:
+ * with nothing made the picture is two rows, and they ran into the list below.
+ */
+const HUB_ROOM = "lg:py-20"
+
 /** The firewall's own name, for the middle node's title. */
 const FIREWALL: Record<GatewayView["capability"]["firewall"], string> = {
   ufw: "ufw",
@@ -129,6 +135,7 @@ export function GatewayPicture({
       start={{ title: "Arrives", nodes: arrive }}
       end={{ title: "Goes to", nodes: leave }}
       hub={{
+        className: HUB_ROOM,
         mark: <WireHost />,
         eyebrow: "This server",
         title: FIREWALL[capability.firewall],
@@ -146,6 +153,18 @@ export function GatewayPicture({
           </>
         ),
       }}
+    />
+  )
+}
+
+/** The picture before the gateway has answered: this server and grey rows where its entries will be. */
+export function GatewayPictureLoading({ rows = 4 }: { rows?: number }) {
+  return (
+    <WireFlow
+      loading
+      start={{ title: "Arrives", nodes: [], loadingRows: rows }}
+      end={{ title: "Goes to", nodes: [], loadingRows: rows }}
+      hub={{ className: HUB_ROOM, mark: <WireHost />, eyebrow: "This server" }}
     />
   )
 }

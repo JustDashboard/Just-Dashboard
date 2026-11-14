@@ -144,7 +144,7 @@ export function EngineLog({ status }: { status: ProxyStatus }) {
   }
   if (sources.length === 0) return null
   return (
-    <Panel plain>
+    <Panel plain aria-label="Engine log">
       <PanelHeader title="Engine log" />
       <PanelBody flush className="pt-3">
         <ServiceLogs
@@ -152,7 +152,10 @@ export function EngineLog({ status }: { status: ProxyStatus }) {
           views={kindViews}
           storageKey="proxy.engine"
           pickerLabel="Engine log"
-          paneClassName="h-[min(90vh,64rem)] min-h-[40rem]"
+          // The height every service's log takes. It was held to nine tenths
+          // of the window, forty rem at the least, so a log that is not
+          // streaming was the lower half of the page, empty.
+          paneClassName="h-[min(75vh,40rem)] min-h-80"
         />
       </PanelBody>
     </Panel>

@@ -696,3 +696,241 @@ export function ownerActions(
     },
   ]
 }
+
+/**
+ * A listening port's own page, `/proxy/ports/tcp-443`: the protocol and the
+ * port, which name one row on nearly every host. Where two rows share both —
+ * systemd-resolved on 127.0.0.53 and 127.0.0.54, a program on loopback and a
+ * container on the tailnet on one port — the key carries the address too,
+ * `udp-53-127.0.0.53`, so it is still one row. Either of a folded pair's
+ * addresses names it.
+ */
+export type PortKey = { protocol: string; port: number; address?: string }
+
+const PORT_KEY = /^(tcp|udp)-(\d{1,5})(?:-(.+))?$/
+
+export function parsePortKey(key: string): PortKey | undefined {
+  const match = PORT_KEY.exec(key)
+  if (!match) return undefined
+  const port = Number(match[2])
+  if (port > 65535) return undefined
+  return { protocol: match[1], port, address: match[3] || undefined }
+}
+
+/** The key for a socket: the address only where another row shares its protocol and port. */
+export function portKey(socket: Socket, sockets: Socket[] = []): string {
+  const shared = sockets.some(
+    (other) =>
+      other !== socket &&
+      other.protocol === socket.protocol &&
+      other.port === socket.port &&
+      other.address !== socket.address,
+  )
+  const base = `${socket.protocol}-${socket.port}`
+  return shared ? `${base}-${socket.address}` : base
+}
+
+/** The port's page, opened on a tab other than its first. */
+export function portHref(socket: Socket, sockets: Socket[] = [], tab?: string): string {
+  const path = `/proxy/ports/${encodeURIComponent(portKey(socket, sockets))}`
+  return tab && tab !== "reach" ? `${path}?tab=${tab}` : path
+}
+
+/**
+ * The row a key names. A key with an address that no longer matches — the
+ * other row on the port closed, or a link was written before it opened —
+ * still finds the port while only one row holds it; a bare key on a port two
+ * rows share finds the one the list puts first.
+ */
+export function findPort(sockets: Socket[], key: PortKey): Socket | undefined {
+  const onPort = sockets.filter((s) => s.protocol === key.protocol && s.port === key.port)
+  if (key.address) {
+    const exact = onPort.find((s) => s.address === key.address || s.twin?.address === key.address)
+    if (exact) return exact
+  }
+  return onPort.length === 1 || !key.address ? onPort[0] : undefined
+}
+
+/**
+ * The `?socket=` the side sheet opened at, before a port had a page: the
+ * page's own `tcp:0.0.0.0:443`, or the host diagnostic's
+ * `tcp-ipv4-0.0.0.0-443` (`backend/internal/netsec/diag_host.go`), which the
+ * sheet never read.
+ */
+export function parseSocketParam(param: string): PortKey | undefined {
+  const dashed = /^(tcp|udp)-ipv[46]-(.+)-(\d{1,5})$/.exec(param)
+  if (dashed) return { protocol: dashed[1], address: dashed[2], port: Number(dashed[3]) }
+  const first = param.indexOf(":")
+  const last = param.lastIndexOf(":")
+  if (first < 0 || last <= first) return undefined
+  const protocol = param.slice(0, first)
+  const port = Number(param.slice(last + 1))
+  if ((protocol !== "tcp" && protocol !== "udp") || !Number.isInteger(port) || port > 65535) {
+    return undefined
+  }
+  return { protocol, port, address: param.slice(first + 1, last) || undefined }
+}
+
+/** The page a parsed key opens. */
+export function keyHref(key: PortKey): string {
+  const base = `${key.protocol}-${key.port}`
+  return `/proxy/ports/${encodeURIComponent(key.address ? `${base}-${key.address}` : base)}`
+}
+
+/**
+ * Who can reach a socket, as the picture draws them: the internet, the
+ * tailnet, a VPN, a private network, Docker's bridges, or this server alone.
+ * A socket on every interface is the internet's: whoever else can reach it,
+ * the widest reach is the one that matters.
+ */
+export type ReachLane = "internet" | "tailnet" | "vpn" | "private" | "docker" | "local"
+
+export const LANE_ORDER: ReachLane[] = ["internet", "tailnet", "vpn", "private", "docker", "local"]
+
+export const LANE_WORDS: Record<ReachLane, string> = {
+  internet: "The internet",
+  tailnet: "The tailnet",
+  vpn: "A VPN",
+  private: "A private network",
+  docker: "Docker's networks",
+  local: "Only this server",
+}
+
+export function reachLane(listener: Pick<Listener, "reach" | "network">): ReachLane {
+  if (listener.reach === "loopback") return "local"
+  if (internetFacing(listener)) return "internet"
+  switch (listener.network) {
+    case "tailnet":
+      return "tailnet"
+    case "vpn":
+      return "vpn"
+    case "docker":
+    case "bridge":
+      return "docker"
+    default:
+      return "private"
+  }
+}
+
+/** The chip a lane is narrowed by. */
+export function laneFilter(lane: ReachLane): ReachGroup {
+  return lane === "internet" ? "internet" : lane === "local" ? "local" : "private"
+}
+
+type Severity = 0 | 1 | 2 | 3
+const SEVERITY: Record<"critical" | "warning" | "notice", Severity> = {
+  critical: 3,
+  warning: 2,
+  notice: 1,
+}
+
+function severity(socket: Socket): Severity {
+  const verdict = reachVerdict(socket)
+  return verdict ? SEVERITY[verdict] : 0
+}
+
+export type PictureTone = "default" | "warning" | "danger"
+
+function toneOf(level: Severity): PictureTone {
+  return level === 3 ? "danger" : level === 2 ? "warning" : "default"
+}
+
+export type PictureLane = { lane: ReachLane; sockets: number; tone: PictureTone }
+export type PictureOwner = {
+  key: string
+  title: string
+  sockets: Socket[]
+  lanes: ReachLane[]
+  tone: PictureTone
+}
+export type PictureWire = {
+  lane: ReachLane
+  owner: string
+  tone: PictureTone
+  /** Somebody is connected to a socket on this wire now. */
+  busy: boolean
+}
+
+export type ReachPictureModel = {
+  lanes: PictureLane[]
+  owners: PictureOwner[]
+  wires: PictureWire[]
+  /** Owners past the picture's room, which the list below holds. */
+  hidden: number
+}
+
+/**
+ * The page's picture: each network that reaches a socket, wired to the
+ * programs listening there, the worst first. A wire is as red as the worst
+ * socket on it; it moves where somebody is connected. Past `room` owners the
+ * rest are counted rather than drawn — the list under the picture has them.
+ */
+export function reachPicture(sockets: Socket[], room = 8): ReachPictureModel {
+  const lanes = new Map<ReachLane, { sockets: number; level: Severity }>()
+  const owners = new Map<string, { title: string; sockets: Socket[]; level: Severity }>()
+  const wires = new Map<string, PictureWire & { level: Severity }>()
+  for (const socket of sockets) {
+    const lane = reachLane(socket)
+    const level = severity(socket)
+    const into = lanes.get(lane) ?? { sockets: 0, level: 0 }
+    into.sockets++
+    into.level = Math.max(into.level, level) as Severity
+    lanes.set(lane, into)
+
+    const key = ownerKey(socket)
+    const owner = owners.get(key) ?? { title: ownerTitle(socket), sockets: [], level: 0 }
+    owner.sockets.push(socket)
+    owner.level = Math.max(owner.level, level) as Severity
+    owners.set(key, owner)
+
+    const id = `${lane}\u0000${key}`
+    const wire = wires.get(id) ?? { lane, owner: key, tone: "default", busy: false, level: 0 }
+    wire.level = Math.max(wire.level, level) as Severity
+    wire.busy ||= (socketClients(socket)?.count ?? 0) > 0
+    wires.set(id, wire)
+  }
+  const ranked = [...owners]
+    .map(([key, o]) => ({
+      key,
+      title: o.title,
+      sockets: [...o.sockets].sort((a, b) => a.port - b.port),
+      level: o.level,
+      lanes: LANE_ORDER.filter((lane) => o.sockets.some((s) => reachLane(s) === lane)),
+    }))
+    .sort(
+      (a, b) =>
+        b.level - a.level ||
+        LANE_ORDER.indexOf(a.lanes[0]) - LANE_ORDER.indexOf(b.lanes[0]) ||
+        a.title.localeCompare(b.title),
+    )
+  const shown = ranked.slice(0, room)
+  const drawn = new Set(shown.map((o) => o.key))
+  return {
+    lanes: LANE_ORDER.filter((lane) => lanes.has(lane)).map((lane) => ({
+      lane,
+      sockets: lanes.get(lane)!.sockets,
+      tone: toneOf(lanes.get(lane)!.level),
+    })),
+    owners: shown.map(({ level, ...o }) => ({ ...o, tone: toneOf(level) })),
+    wires: [...wires.values()]
+      .filter((w) => drawn.has(w.owner))
+      .map(({ level, ...w }) => ({ ...w, tone: toneOf(level) })),
+    hidden: ranked.length - shown.length,
+  }
+}
+
+/** One program, as the picture draws it: a container, an app, a unit or a process and its account. */
+function ownerKey(socket: Socket): string {
+  if (socket.container) return `container:${socket.container.id}`
+  return `owner:${ownerTitle(socket)}\u0000${socket.user ?? ""}`
+}
+
+/** The list keys its view and filters under, which the port page's rail reads too. */
+export const PORTS_VIEW_KEYS = {
+  query: "proxy.ports.query",
+  reach: "proxy.ports.reach",
+  proto: "proxy.ports.proto",
+  sort: "proxy.ports.sort",
+  hideEphemeral: "proxy.ports.hideEphemeral",
+  onlyNew: "proxy.ports.new",
+} as const

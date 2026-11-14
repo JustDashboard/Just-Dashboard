@@ -12,8 +12,9 @@ test.use({ video: recordWorkspace ? "on" : "off" })
  * added, not the chart library: every block on the page is plain, the
  * interfaces included, the five moving readings are tiles carrying their window
  * as a trend, each resource is a section that reads what it is now beside
- * what it did, the moments list groups what happened together and pins or
- * zooms it, a zoom is a link, the
+ * what it did, memory and swap are a bar and one line each, the top processes
+ * are a ranked list whose names open their pages, the moments list groups what
+ * happened together and pins or zooms it, a zoom is a link, the
  * window exports as a file, and the live feed can be paused.
  * The screenshots at 1280 and 1720 are the eyes the assertions do not have.
  */
@@ -64,8 +65,22 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
   // The failed deploy is a moment.
   await expect(page.getByText("api deploy failed")).toBeVisible()
 
-  // Top processes from the process table, ordered by CPU by default.
-  await expect(page.getByText("postgres", { exact: true })).toBeVisible()
+  // Top processes from the process table, ordered by CPU by default: a
+  // ranked list, each name the way to that process's own page.
+  const processes = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Top processes" }),
+  })
+  const ranked = processes.locator("[data-slot=rank-row]")
+  await expect(ranked.first()).toContainText("postgres")
+  await expect(ranked.first().locator("[data-slot=rank-value]")).toHaveText("12.4%")
+  await expect(
+    ranked.first().getByRole("link", { name: "Open postgres, process 1204" }),
+  ).toHaveAttribute("href", "/processes/1204")
+  // One line a process, every row the same height.
+  const heights = await ranked.evaluateAll((rows) =>
+    rows.map((row) => row.getBoundingClientRect().height),
+  )
+  expect(new Set(heights)).toEqual(new Set([32]))
 
   // One section per resource, in the order a reader asks about them.
   const sections = await page
@@ -87,17 +102,43 @@ test("each resource reads what it is now beside what it did", async ({ page }) =
   await expect(cores).toHaveCount(4)
   await expect(cores.first()).toHaveAttribute("aria-valuenow", "31")
   await expect(page.getByText("mean 23% · busiest cpu0 at 31%")).toBeVisible()
+  // A column and the track under it are the processor's own hue, never grey.
+  const hues = await cores.first().evaluate((column) => ({
+    track: getComputedStyle(column).backgroundColor,
+    fill: getComputedStyle(column.firstElementChild!).backgroundColor,
+    grey: getComputedStyle(document.documentElement).getPropertyValue("--meter-track"),
+  }))
+  expect(hues.fill).not.toBe("rgba(0, 0, 0, 0)")
+  expect(hues.track).not.toBe("rgba(0, 0, 0, 0)")
+  expect(hues.track).not.toBe(hues.grey)
 
-  // Memory is split into what programs hold, the cache and what is free.
-  const memory = page.locator("[data-slot=panel]", {
-    has: page.getByRole("heading", { name: "Allocation" }),
-  })
-  await expect(memory.getByRole("img", { name: /^Programs 9\.0 GB, Cache 4\.5 GB/ })).toBeVisible()
+  // Memory is one bar: what programs hold, then the cache, on a track that is
+  // all of it. What is under the bar is one line, the part being read.
+  const memory = page.getByRole("region", { name: "Memory by what holds it" })
+  await expect(
+    memory.getByRole("img", { name: "Allocation: Programs 9.0 GB, Cache 4.5 GB" }),
+  ).toBeVisible()
   await expect(memory.getByText("6.5 GB", { exact: true })).toBeVisible()
-  await expect(memory.getByRole("meter", { name: "Swap used" })).toHaveAttribute(
-    "aria-valuenow",
-    "5",
-  )
+  await expect(memory.locator("[data-slot=reading-span]")).toHaveCount(2)
+  const line = memory.locator("[data-slot=reading-line]")
+  await expect(line).toHaveCount(1)
+  await expect(line).toContainText("Programs")
+  await expect(line).toContainText("9.0 GB")
+  // Pointing at the other span reads it on the same line, and the block
+  // does not grow.
+  await risen(page)
+  const before = (await memory.boundingBox())!.height
+  await memory.getByRole("note", { name: "Cache 4.5 GB" }).focus()
+  await expect(line).toContainText("Cache")
+  await expect(line).toContainText("given back when a program asks")
+  await risen(page)
+  expect((await memory.boundingBox())!.height).toBe(before)
+  // No row of figures under the bar any more.
+  await expect(memory.locator("dl")).toHaveCount(0)
+  // Swap is a bar of its own under it.
+  const swap = page.getByRole("region", { name: "Swap in use" })
+  await expect(swap.getByRole("img", { name: "Swap: Swap in use 102.4 MB" })).toBeVisible()
+  await expect(swap).toContainText("of 2 GB")
 
   // The five tiles that stood under the readings went to the charts they
   // explain: the stalls to Pressure, the processes to Load, sockets and open

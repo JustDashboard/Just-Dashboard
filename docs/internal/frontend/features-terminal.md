@@ -35,7 +35,7 @@ tester run on the page and draw no working bar.
   each two-second frame, and **Recent**: Docker's event log over `/docker/events/stream?kinds=container`
   as ticks on the last day, a restart loop folded to one tick and an OOM kill said on the exit it
   caused (`foldRestarts`).
-  `container-table.tsx` is the table — sortable headings, a ticking uptime under each state, CPU and
+  `containers-table.tsx` is the table — sortable headings, a ticking uptime under each state, CPU and
   memory as figures beside short bars (memory against its limit, amber past 85%), the processor's
   hour and the network rate from `2xl`, the compose project in its `hueFor(…, LANES)` hue as a filter
   — drawn down the row below `xl`. `containers.ts` (unit-tested) holds what the rows say: the five
@@ -50,14 +50,22 @@ tester run on the page and draw no working bar.
 - `container-cells.tsx` holds the three cells that were saying something other than what they meant:
   memory against an explicit container limit, CPU with its denominator stated (Docker counts one core
   as 100%), and Docker's runtime state. The security finding underneath that state was removed.
-- `container-band.tsx`, `container-table.tsx` and `overview.ts` are the overview's. The band and the
-  table read the containers socket, so the overview's figures move with every frame where the four
-  tiles it replaced were a poll. `overview.ts` holds the words: a container is *failing* only when
-  its check fails, its restart policy is cycling, or it exited with anything but 0 or 143 — a host
-  of one-shot jobs is otherwise a page of red — and Recent reads Docker's events one line per
-  container, a stop's kill, die and stop as one stop and an OOM kill folded into the exit it caused.
-  The table's figures are plain text: a counting figure starts only once scrolled into view, and a
-  row below the fold read 0.0% until it was.
+- `docker-identity.tsx` is the line the overview, Containers, Events and Stacks open on: Docker's
+  mark, "Docker" and its version, the page's verdict beside the name, the server as the first fact
+  and the page's one command, in `HostIdentity`'s project layout.
+- `container-band.tsx`, `engine-picture.tsx`, `engine-picture-model.ts` and `overview.ts` are the
+  overview's. The band reads the containers socket, so its figures move with every frame.
+  `engine-picture.tsx` draws what the engine holds on `components/wire-flow.tsx`: compose projects and
+  the containers started by hand, Docker, and the networks and volumes it keeps, each node a link to
+  its page. `engine-picture-model.ts` (unit-tested) works the nodes out: the state each line is drawn
+  in, the order (what is failing first), which fold into a count, and which nodes light together. A
+  container is *failing* as `containers.ts` reads it for the Containers page, with the event log
+  telling a kill for memory from a stop, so the overview's verdict and the table it opens count the
+  same containers; until 0.8.7 `overview.ts` kept a second reading (any exit but 0 or 143) and the two
+  could disagree. `overview.ts` still holds Recent's words: Docker's events one line per container, a
+  stop's kill, die and stop as one stop and an OOM kill folded into the exit it caused. The overview
+  drew a table of every container (`container-table.tsx`) until 0.8.7; that table is
+  `/docker/containers` only.
 - `cleanup.tsx` and `stack-preview.tsx` are the two "before you press it" panels: what each category of
   removable object costs, and what a compose deploy is expected to change — including the sentence about
   volumes, stated whether or not any are affected. The preview opens on that decision as one sentence
@@ -83,31 +91,50 @@ eight headings. It started here and now holds product-wide — the prop is gone 
 `Modal`, `SidePanel` and `Section`, and the title sits at `text-title` instead
 (`docs/internal/frontend/design-system.md` §14). The `?` stays: it is the one mark on those headers
 that does something.
-- The Images page is `app/(dashboard)/docker/images/page.tsx` over `image-band.tsx`, `image-table.tsx`,
-  `image-sheet.tsx` and `image-pull.tsx`, with the pure parts — a reference split as a registry reads
-  it, one registry answer per image, the table's filters and order, a pull's stream folded by layer
-  and a history line read as its instruction — in `images.ts` (unit-tested). Each kind on its disk
+- The Images page is `app/(dashboard)/docker/images/page.tsx` over `image-band.tsx`, `image-table.tsx`
+  and `image-pull.tsx`, with the pure parts — a reference split as a registry reads
+  it, one registry answer per image, the table's filters and order, a pull's stream folded by layer,
+  a history line read as its instruction, and an image's address — in `images.ts` (unit-tested).
+  An image's own page is `app/(dashboard)/docker/images/[id]/page.tsx` over `image-page.tsx`
+  (the identity line, the tabs, the address), `image-rail.tsx` (the table's list beside it, and the
+  hook that reads it with the table's own filters), `image-picture.tsx` (registry, image, containers
+  on `wire-flow`) and `image-views.tsx` (Layers, Containers, History, Configuration). The verbs of an
+  image and the Pull and Tag dialogs they open are declared once in `image-actions.tsx` for the row
+  and the page, and `image-marks.tsx` holds the marks both draw an image with. The address names an
+  image by the hex of its id: unique, stable while the image exists, and in need of no escaping; a
+  reference escaped into one segment is resolved by the API and replaced. The list, the registry
+  answers and the containers are keyed polls (`/docker/images/`, `/docker/images/updates`,
+  `/docker/containers/`), so the rail is drawn from what the table last read. Each kind on its disk
   reading reclaims itself, from its line or its mark: unused images through `POST /docker/images/prune?all=true`, the build cache through
   `POST /docker/build-cache/prune` and stopped containers through `POST /docker/containers/prune`;
   only Reclaim in the block's head runs the sweep, and says it reaches stopped containers and networks.
   The pull socket is enabled only while a pull is in flight: the server closes it when the pull
   ends, and `useSocket` reconnects whatever is still enabled, so a finished pull used to open a new
   one about once a second until the page was left. Tag names the same image again, so the copy a
-  container runs can keep a name across the next pull of its tag.
+  container runs can keep a name across the next pull of its tag. Removing an image with more than
+  one name sends `force=true`, because Docker refuses an id two names point at; it is forced only
+  after the image is read again and nothing uses it, since a forced removal also takes an image a
+  stopped container was made from. A pull from an image's page follows the tag to the image it
+  points at afterwards.
 - `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2): the
   server's identity line (the Compose mark, Docker's version, stacks deployed, services running, ports
   published), then `stack-band.tsx`, bar readings
+
+  container runs can keep a name across the next pull of its tag.
+- `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2):
+  Docker's identity line (stacks running beside its name, stacks deployed, services running, ports
+  published, Create stack as its command), then `stack-band.tsx`, bar readings
   (the five stacks using the most processor and memory as spans of one bar the size of the machine,
-  summed over each stack's containers from the containers socket, a press narrowing the table to that
+  summed over each stack's containers from the containers socket, a press narrowing the list to that
   stack; and Recent, the daemon's last starts, exits with their codes, out-of-memory kills folded into
-  the exit they caused and failed checks, each a tick on the last day opening its stack), then
-  `stack-table.tsx`: the stacks as
-  one framed table of their containers. A stack is a row with its state, how many declared services are
-  up, its summed CPU and memory and the one action that belongs there — deploy when the application is
-  down — and a lane in its name's hue down its containers; each container is a row of the containers
-  page's readings (state with uptime, health or exit code, CPU with its last hour, memory against its
-  limit, published ports) and its verbs, opening the container. Stacks fold their containers away for
-  the session. Rows are worst first; below 1280px the same rows are drawn down rather than across.
+  the exit they caused and failed checks, each a tick on the last day opening its stack), then the
+  stacks as one-line cards (`stack-row.tsx`, a `ChoiceRow` each): logos, name and directory, a strip
+  of its services' states, its state with how many declared services are up, its summed CPU and
+  memory, its published ports, the one action that belongs there (deploy when the application is
+  down), an arrow and a menu, in columns that line up and at one height in every state. A stack's
+  containers are its page: until 0.8.7 they were rows under the stack's own in one table
+  (`stack-table.tsx`), folding away per session. A stack found by a service's name or image says
+  which matched. Stacks are running first, then stopped, then never deployed, each by name.
   The joins, buckets and change words are pure (`stack-readings.ts`, unit-tested). A stack's own page follows the same rule as a container's: the compose verbs that are pressed
   daily (deploy, restart) sit inline, and the rest are behind one overflow menu, one word to a line,
   drawn the same way as the container menu. Its services and the deploy preview's services are framed
@@ -124,7 +151,8 @@ that does something.
   memory against its limit, network rates from 1536 and its published ports, under state chips that
   count and narrow; each row opens its container and carries the compose verbs for that one service
   (`docker compose restart|stop|start|up --force-recreate|pull <service>`, each confirmed with its
-  command). Under it are the Services page's band for the stack (`stack-usage-band.tsx`: its share of
+  command). Over it, in a container page's order since 0.8.7 (the table came first before), are the
+  Services page's band for the stack (`stack-usage-band.tsx`: its share of
   the processor and memory, and Recent from `/docker/events?stack=`) and a picture of its published
   ports, services and networks whose wires pulse with each service's traffic (`stack-map.tsx`); the
   joins and words are `stack-service-readings.ts`, unit-tested. Every other view names a service the
@@ -169,7 +197,11 @@ that does something.
   readings off its stats socket with their last hour (`container-readings.tsx`), a picture of how it is reached and what it keeps (`container-picture.tsx`), the
   containers of its compose project — or of its own networks — as a live table
   (`container-company.tsx`), its recent events with loops folded (`container-recent.tsx`), how it
-  runs, and its ports and networks as tables (`container-tables.tsx`, which also draws the
+  runs, and its ports and networks as tables. From `xl` the Containers table stands beside the page
+  as a rail (`container-rail.tsx`: the table's search, chips and order from its session keys, Alt+↑
+  and Alt+↓ to walk it with the view carried), and a stack's page keeps the Stacks list the same
+  way (`stack-rail.tsx`); `beside-rail.ts` says where the two pages' blocks go side by side now that
+  the rail takes its width. The tables are `container-tables.tsx`, which also draws the
   Environment tab: each name's namespace in its lane hue, each value in its kind's code hue, and
   the kinds — credentials, addresses, paths, switches, numbers — as chips that count and narrow, beside
   a filter that never searches a hidden value). Each other view is the overhauled page it stands in
@@ -212,7 +244,7 @@ existing session instead (the Overview's shells link with it), remembered as if 
 and leaves the address once read. Audit's settled filters are history entries; Back restores the
 previous question. The audit link is how the Docker event feed hands off a correlated event.
 
-Packages use `?package=` for their inspector, and backup job pages use `?run=` for their selected run.
+A package is its own page (`/packages/[name]`; `?package=`, which opened its sheet, redirects), and backup job pages use `?run=` for their selected run.
 These, the Docker container inventory, Git and the Audit/Security lists participate in the shared
 keyboard/place controller; [`workspace-interactions.md`](workspace-interactions.md) describes their
 shortcuts, held arrivals and focus restoration.
@@ -320,23 +352,66 @@ service state. The pages that moved keep their behaviour:
   log (`ufw.log`, else `kern.log`, else the kernel ring, read as the firewall lens); while ufw or
   firewalld says logging is off, the section says so and its button brings the logging control
   beside the rules into view instead of drawing an empty pane.
-- **Connections** (`/network/connections`): opens on four live readings, each carrying every read
-  since the page opened as its trend, and a picture of who is connected (`connections-map.tsx`: the
-  callers by network, this server, the programs they reached), then the peers as before — address and
-  network in one column, process and ports in another, a socket count and a comparative meter — with
-  each peer's transports, far-end ports and socket states kept under its ports, and a footer saying
-  what the read could not see (time since the last read, closes noticed, unconnected UDP). An
-  administrator opens an address (`connections/peer-sheet.tsx`, `GET /connections/{address}`) into
-  its live tuples with how long each has been seen, TCP bytes and RTT, the tuples seen closing in the
-  last fifteen minutes, and the layers it crosses: the firewall rules naming it or its network (rules
-  for any source are counted, not listed) and its block, the kernel route that answers it, and the
-  socket history's last day, with the tools, investigator, captures and history as next steps. "A past
-  hour" reads the socket history for a chosen UTC hour in the same shape (`connections/recorded.tsx`).
+- **Connections** (`/network/connections`): opens on its identity line — the sockets, the remote
+  addresses and how many are from the internet — and a picture of who is connected
+  (`connections/picture.tsx`, on `WireFlow`: the callers by network, this server with what listens and
+  what never left the machine, the programs they reached). The three places are always drawn, a quiet
+  one with a still dashed wire; each node carries every read since the page opened as its trend; the
+  internet is the list's "From the internet" chip and a program narrows the list to its callers. Four
+  tiles stood over the picture until 0.8.7, every figure of theirs already on the page. Under it each
+  address is a one-line card of one height (`connections/rows.tsx`): its network's mark, the address
+  over the network, the program it reached as that product with its ports, sockets and active ones as
+  figures in columns of their own, and its verbs — the block among them — in the `⋯` menu. The footer
+  says what the read could not see (time since the last read, closes noticed, unconnected UDP). "Live"
+  and "A past hour" are the section's tab strip (`?when=recorded`, `?hour=`); the past hour reads the
+  socket history for a chosen UTC hour in the same cards (`connections/recorded.tsx`), and with the
+  history off it offers the page that turns it on.
+  **An address is a page of its own** (`/network/connections/[address]`, `connections/address-page.tsx`),
+  in place of the peer sheet, on the process page's shape: a way back, the identity line with the block
+  (or lifting it) as its one command and the lookups in the menu, "Live" and "A past hour" as an
+  underlined strip (`?tab=past`, `?hour=`), and from `xl` a rail of the live list with the list's own
+  search and chip (`connections/address-rail.tsx`; Alt+↑ and Alt+↓ walk it and carry the open view).
+  `?peer=<address>` on the list lands on it. The live view (`connections/address-views.tsx`) is a
+  picture of the address, this server's ports and the programs behind them — what the summary folded:
+  transports, far-end ports, socket states — then, for an administrator (`GET /connections/{address}`),
+  every live tuple as one line with how long it has been seen, TCP's round trip, its state and its
+  bytes, the tuples seen closing in the last fifteen minutes, and the layers it crosses as cards that
+  open the page that owns each: the firewall rules naming it or its network (rules for any source are
+  counted, not listed) and its block, the kernel route that answers it, and the socket history's last
+  day. A role without the detail's capability reads the picture alone. A long IPv6 address keeps both
+  of its ends in a phone's card and in the rail (`shortAddress`), and is whole on its page.
   "Block at the firewall" opens a dialog asking why, for how long (an hour to thirty days, or until
   lifted) and which incident — an existing saved run, or a new one that starts by recording who owns
   the address (`connections/block-dialog.tsx`); the blocks made here are listed under the table with
   their end, their incident and whether the rule is still in the firewall, and an administrator with
   the destructive capability lifts one after confirmation (`connections/blocks-panel.tsx`).
+- **Tools** (`/network/tools`): 26 probes, the connection path investigator and the browser-only
+  IPv4/IPv6 subnet calculator occupy one workbench held to the window (`<Page fill>`), drawn as the Git
+  workspace is: a strip across the top of the frame (the server's mark, "sent from this server", Saved
+  runs as a quiet link, Every tool), a searchable rail and the chosen tool's pane, each scrolling
+  inside the frame. Every diagnostic has a mark, its glyph on its group's hue (`tools/tool-marks.tsx`:
+  the glyphs the DNS, Certificates, SSH and Ports pages already wear). A tool with nothing run opens on
+  its mark, what it does in one sentence and an example target as a button, which fills the field and
+  sends nothing (`tools/tool-frame.tsx`); the sentence that stood under every tool's title is that
+  empty pane and the title's tip. Below `md` the rail and the pane are one full-height pane at a time
+  with a bar at the foot (`phone-panes.tsx`), opening on the tool. Other tools stay mounted while
+  hidden, preserving drafts, results and in-flight requests when switching, but only the tool in view
+  has its form fields in the page. A new query-string arrival reseeds only the requested tool. Arriving
+  with `?tool=asn&target=…` never runs it; sending traffic remains an explicit Run action.
+- **Connection path** is the rail's `path` tool (`tools/path-tool.tsx`), among the reachability tools
+  after Route lookup. It was a page of its own: `/network/investigate` now redirects to
+  `/network/tools?tool=path` with every parameter it carried (`target`, `port`, `protocol`, `family`,
+  `measure`, `container`; `tools/tool-links.ts`), and the Network rail no longer lists it. Its report
+  (`network/path-report.tsx`, also drawn by Saved runs and a published port's trace) is a chain of
+  wired hops, one per layer, each mark in the colour of what the layer rests on (a snapshot, the
+  model's prediction, a measurement; no colour for unknown, and none of them success's green), with
+  the wire dashed where either end is unknown. The four counts that were a tile row are the key to
+  those colours.
+  the address (`connections/block-dialog.tsx`); it is never offered for an address on the tailnet, a
+  local network or this machine. The blocks made here are listed under the list, two lines each, with
+  their end, their incident and whether the rule is still in the firewall; each opens its address, and
+  an administrator with the destructive capability lifts one after confirmation
+  (`connections/blocks-panel.tsx`).
 - **Tools** (`/network/tools`): 26 probes plus the browser-only IPv4/IPv6 subnet calculator occupy a two-pane
   workbench (the four counts that stood over it are gone; where probes are sent from is a fact in the
   result pane's head). The searchable chooser selects one labelled form and result area; below `md` they
@@ -366,8 +441,12 @@ review screenshots at those three widths, including scrolled content and rule/ja
 The changed-file gate also runs the design-system checks. `tests/browser/network-ui.spec.ts` (with
 `network-fixture.ts`) checks every Network page's structure — no unnamed control, no pill, no frame
 that is not a table, no sideways scroll on a phone — the redirects, the overview's picture and
-findings, the device sheet's guards, the create forms' bodies, the routing picture and a peer's QR
-code; `JD_NETWORK_SHOTS` writes review screenshots at 390 and 1440.
+findings, a device page's guards, the create forms' bodies, the routing picture and a peer's QR
+code; `JD_NETWORK_SHOTS` writes review screenshots at 390 and 1440. `network-device-page.spec.ts`
+holds the Interfaces list and a device's page to what their overhaul promised, at 1280 and 390: one
+height for every card and row, the opening line in one place loading and loaded, the old `?device=`
+address landing on the page, every verb's request, the rail, and nothing a read-only account cannot
+use.
 
 **Packages.** `install-panel.tsx` updates as you type, which is not decoration: the reason people open a
 terminal instead of a package page is that they do not know the name (`postgresql-client`, not `psql`;
@@ -390,13 +469,18 @@ package, security first, the first five named with their version changes and eac
 advisory coverage in its head and confirmed security/all-upgrade actions at the strip's end. Both are
 bar readings (design-system §10), drawn before the inventory lands. Missing sizes and advisory data are stated;
 a failed update read is an error, never an empty all-clear.
-`package-sheet.tsx` is one scroll: version changes and size, copyable commands coloured as shell words,
-registered services with links to their systemd inspector, configuration and documentation links into
-Files, the manual in a scrollable well, inspectable dependencies, and package metadata. Dependency
-navigation uses `?package=` and browser Back. A usage read that fails reports its reason with Retry,
-instead of leaving a loader. The sheet keeps package protection, install/update/remove/purge actions,
-ordinary confirmations, and the page's resumable jobs. The installed table uses compact columns below 1280 pixels and fixed columns above,
-a size bar per row and a 400-row cap with the count said plainly underneath. The fourth view, **Log**
+A package's detail is its own page, `/packages/[name]` (`package-page.tsx`), on the shape a service's
+page has: the identity line with its state, one command (Install or Update) and Remove and Remove and
+purge behind the menu and their ordinary confirmations, then views in the address. Overview is the
+picture of what it needs and what it gives (`WireFlow`) over About; Files holds the copyable commands
+coloured as shell words, registered services with links to their systemd page, and configuration and
+documentation links into Files; Manual the man page in a well; Depends every dependency one line each,
+opening that package on the same view; Log the manager's logs searched for the package's name. A usage
+read that fails reports its reason with Try again, instead of leaving a loader. The page keeps package
+protection and the resumable job: its console opens under the identity line, and the package is read
+again when the run ends. The installed list is a rail beside it from 1280 pixels, with the list's own
+filter. The installed table is one line a row from 1024 pixels, with the size as a figure in its
+column, and a card a package below; a 400-row cap has the count said plainly underneath. The fourth view, **Log**
 (`components/packages/log-view.tsx`), reads what the package manager did from its own logs — apt's
 history with each transaction's command and who asked, dpkg's record, the unattended runs, dnf's — in
 History and Insights only, opening on everything on disk, since a package log is written a few times
@@ -414,11 +498,21 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   boxes floating on the page; the screen is one working surface. The three columns' top strips are all
   40px (the rail's and the tools column's `PaneHeader` are pinned to `h-10`, the emulator's strip is
   `min-h-10`), so their hairlines meet as one rule across the frame. Immersive mode drops the wrapper's
-  frame along with the page. Below `lg` the rail and the tools column **cover the emulator** inside the
-  frame instead of sitting beside it — stacked over and under it they left a phone's terminal one line
-  tall — so only one of the two is up at a time (`useMediaQuery` in `page.tsx` decides), picking a
-  session puts the rail away, and each carries its own hide button while it is an overlay — and only
-  then: beside the emulator, the strip's two toggles are the one way to hide either panel.
+  frame along with the page. Below `lg` the frame is the screen, edge to edge as the Git workspace's
+  is, and shows **one pane at a time** over the shared bar at its foot (`phone-panes.tsx`): Sessions,
+  Terminal, Files and Git, the last two being the tools column's halves, with the count of changed
+  files on Git. The page opens on the emulator. The rail and the column used to cover the emulator
+  there, each with a hide button of its own; covered, the emulator was still laid out and followed
+  the window, so where a phone's keyboard shrinks the window, typing in the session filter fitted the
+  shell to a few rows and told it so. Now a pane
+  that is not shown is `display: none` and the emulators are handed `visible={false}`
+  (`XtermPane`'s own state for a window that is not on screen): they keep their sockets and their
+  grids, the page's measure of the pane grid ignores a size of nothing, and showing the pane again
+  fits each emulator and says its size once. Picking a session, or opening one, shows the emulator
+  and gives it the keyboard. The strip's two toggles are not drawn on a phone and their chords move
+  between the panes instead; beside the emulator they remain the one way to hide either panel.
+  Which half of the column is open is held by the page (`terminal.tools.tab`), since the bar picks it
+  as well as the column's own strip, which a phone does not draw.
 - `session-rail.tsx` is a plain column: a "Sessions" strip with the new-session button, then the
   list, newest first. A row is one line — the program mark, the session's label and, at the end, the
   activity mark (below), with the close button after it under the pointer (`rowReveal`). That is

@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Download, Eye, Inspect, Play } from "@/components/icons"
+import { Download, Eye, Globe, LockClosed, LockOpen, Play } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { csvCell, downloadText } from "@/lib/metrics-export"
 import { tlsReportHref, targetLabel } from "@/lib/scan-target"
+import { fleetFacts, fleetLife, fleetRank, gradeVerdict, type ChainTone } from "@/lib/tls-chain"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
@@ -15,33 +16,26 @@ import type { Job } from "@/lib/types"
 import type { FleetTarget, FleetView } from "@/lib/proxy/types-tls-fleet"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ROW_BLEED } from "@/components/row-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { ProductLogo } from "@/components/product-logo"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
+import { EmptyState, ErrorState, Spinner } from "@/components/state"
+import { Status, StatusDot, type DotTone } from "@/components/status-dot"
 import { JobConsole, useJobConsole } from "@/components/job-console"
+import { VerbMenu } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-  stickyTableHeader,
-} from "@/components/ui/table"
+import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
 import { TLSTools } from "@/components/proxy/request-tester"
-import { TLSReportPage, gradeTone } from "@/components/proxy/tls-report"
+import { TLSReportPage } from "@/components/proxy/tls-report"
 
 /**
- * The TLS page's two views, kept in the address as ?view=fleet so a link to
- * the table opens the table.
+ * The TLS page's views, kept in the address: ?view=fleet for every site and
+ * ?tool=request for the request tester, so a link to either opens it.
  */
 export function TLSPage() {
   const params = useSearchParams()
@@ -64,23 +58,43 @@ const FILTERS: Record<Filter, (t: FleetTarget) => boolean> = {
   unreachable: (t) => t.scan !== undefined && !t.scan.reachable,
 }
 
+const TONE_TEXT: Record<ChainTone, string> = {
+  success: "text-success",
+  warning: "text-warning",
+  danger: "text-destructive",
+  neutral: "text-muted-foreground",
+}
+
+const TONE_DOT: Record<ChainTone, DotTone> = {
+  success: "running",
+  warning: "warning",
+  danger: "danger",
+  neutral: "unknown",
+}
+
 /**
  * Every name this server serves over TLS, and every watched endpoint, with
  * its latest report. One report answers "is this site right"; after a config
  * change or a renewal run the question is "is any of them wrong", and asking
  * it one name at a time is how the one that is gets missed.
+ *
+ * It opens on what it is about, as every page of the section does: the names
+ * and how many of them are below A, expiring or unreachable, said once on the
+ * identity line with Scan all sites beside them. Those figures were four tiles
+ * that restated the filter chips under them. Each name is a one-line card
+ * that opens its report, its grade the last word on the line; it was a table
+ * whose rows were destinations, and a hand-made list on a phone.
  */
 function TLSFleetPage() {
   const { can } = useAuth()
   const admin = can("system.admin")
-  const wide = useMediaQuery("(min-width: 1024px)")
 
   const console_ = useJobConsole({ onSuccess: () => fleet.refresh() })
   // The scan in flight as the server last said, which also covers one another
   // administrator started.
   const [inFlight, setInFlight] = useState<Job>()
   const running = console_.running || inFlight !== undefined
-  // While a scan runs, each report is stored as it finishes, so the table
+  // While a scan runs, each report is stored as it finishes, so the list
   // fills in behind the console rather than all at once at the end.
   const fleet = usePoll(
     (signal) => get<FleetView>("/certificates/scans/latest", undefined, signal),
@@ -112,7 +126,6 @@ function TLSFleetPage() {
       ) as Record<Filter, number>,
     [all],
   )
-  const scanned = all.filter((t) => t.scan).length
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase()
     return all
@@ -123,10 +136,11 @@ function TLSFleetPage() {
           targetLabel(t).includes(needle) ||
           t.sites.some((site) => site.toLowerCase().includes(needle)),
       )
-      .sort((a, b) => gradeRank(a) - gradeRank(b) || targetLabel(a).localeCompare(targetLabel(b)))
+      .sort((a, b) => fleetRank(a) - fleetRank(b) || targetLabel(a).localeCompare(targetLabel(b)))
   }, [all, filter, search])
   const chosen = visible.filter((t) => selected.has(targetLabel(t)))
   const toWatch = chosen.filter((t) => !t.watched)
+  const allChosen = visible.length > 0 && chosen.length === visible.length
 
   const scanAll = async () => {
     setStarting(true)
@@ -203,56 +217,68 @@ function TLSFleetPage() {
       else next.add(key)
       return next
     })
-  const allChosen = visible.length > 0 && chosen.length === visible.length
 
-  const header = (
-    <>
-      <PageContext eyebrow="Proxy" title="TLS report" />
-      <TLSTools current="fleet" />
-    </>
-  )
-  if (fleet.loading && !fleet.data) {
-    return (
-      <Page>
-        {header}
-        <LoadingPanel />
-      </Page>
-    )
-  }
-  if (fleet.error && !fleet.data) {
-    return (
-      <Page>
-        {header}
-        <ErrorState error={fleet.error} onRetry={fleet.refresh} />
-      </Page>
-    )
-  }
+  const loading = fleet.loading && !fleet.data
 
   return (
     <Page className="animate-rise">
-      {header}
-
-      <StatGrid columns={4} dense>
-        <StatTile label="Targets" value={all.length} hint={`${scanned} with a stored report`} />
-        <StatTile
-          label="Below A"
-          value={counts["below-a"]}
-          tone={counts["below-a"] > 0 ? "warning" : scanned > 0 ? "success" : "default"}
-          hint="graded B or worse"
-        />
-        <StatTile
-          label="Expiring"
-          value={counts.expiring}
-          tone={counts.expiring > 0 ? "warning" : "default"}
-          hint="inside the renewal window or expired"
-        />
-        <StatTile
-          label="Unreachable"
-          value={counts.unreachable}
-          tone={counts.unreachable > 0 ? "danger" : "default"}
-          hint="no TLS handshake completed"
-        />
-      </StatGrid>
+      <PageContext eyebrow="Proxy" title="TLS report" />
+      <HostIdentity
+        // The view strip under the line draws the rule: the line's own under
+        // it made two.
+        className="border-b-0 pb-0"
+        fallback={LockClosed}
+        title={
+          <span role="heading" aria-level={2}>
+            Every site
+          </span>
+        }
+        facts={
+          loading ? (
+            <span className="inline-flex items-center gap-1.5">
+              <Spinner className="size-3" /> reading the stored reports
+            </span>
+          ) : fleet.error && !fleet.data ? (
+            <span className="text-destructive">the stored reports could not be read</span>
+          ) : (
+            <FleetFacts targets={all} />
+          )
+        }
+        // Laid out as a project's header: the worst of what the reports
+        // say beside the name, Scan all sites at the end, the rest in `⋯`.
+        state={
+          loading ? (
+            <Status tone="unknown" label="Reading" />
+          ) : fleet.error && !fleet.data ? (
+            <Status tone="danger" label="Not read" />
+          ) : (
+            <FleetState targets={all} />
+          )
+        }
+        command={
+          admin && (
+            <Button size="sm" pending={starting} disabled={running || loading} onClick={scanAll}>
+              <Play />
+              {running ? "Scanning…" : "Scan all sites"}
+            </Button>
+          )
+        }
+        menu={
+          <VerbMenu
+            label="More actions for every site"
+            verbs={[
+              {
+                key: "csv",
+                label: "Export CSV",
+                icon: Download,
+                run: exportCsv,
+                disabled: visible.length === 0,
+              },
+            ]}
+          />
+        }
+      />
+      <TLSTools current="fleet" />
 
       <JobConsole
         job={console_.job}
@@ -263,39 +289,42 @@ function TLSFleetPage() {
 
       <Panel plain>
         <PanelHeader
-          title="Every site"
+          title="Names"
           actions={
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-3">
               {admin && toWatch.length > 0 && (
                 <Button size="xs" variant="outline" pending={watching} onClick={watchSelected}>
                   <Eye className="size-3" />
                   Watch {toWatch.length}
                 </Button>
               )}
-              <Button
-                size="xs"
-                variant="outline"
-                disabled={visible.length === 0}
-                onClick={exportCsv}
-              >
-                <Download className="size-3" />
-                CSV
-              </Button>
-              {admin && (
-                <Button size="xs" pending={starting} disabled={running} onClick={scanAll}>
-                  <Play className="size-3" />
-                  {running ? "Scanning…" : "Scan all sites"}
-                </Button>
-              )}
+              <span className="numeric text-hint text-muted-foreground">
+                {visible.length === all.length
+                  ? plural(all.length, "name")
+                  : `${visible.length} of ${all.length}`}
+              </span>
             </div>
           }
         />
-        <Toolbar className="justify-between gap-x-4">
-          <SearchInput
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Domain, port or site"
-          />
+        <Toolbar className="justify-between gap-x-4 pt-3">
+          <div className="flex min-w-0 items-center gap-3">
+            {admin && (
+              <Checkbox
+                aria-label="Select every target shown"
+                checked={allChosen}
+                disabled={visible.length === 0}
+                onCheckedChange={(on) =>
+                  setSelected(on ? new Set(visible.map((t) => targetLabel(t))) : new Set())
+                }
+                className="ml-3"
+              />
+            )}
+            <SearchInput
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Domain, port or site"
+            />
+          </div>
           <ChipStrip>
             {(Object.keys(FILTER_LABEL) as Filter[])
               .filter((key) => key === "all" || counts[key] > 0)
@@ -306,115 +335,45 @@ function TLSFleetPage() {
               ))}
           </ChipStrip>
         </Toolbar>
-        <PanelBody flush>
-          {all.length === 0 ? (
-            <EmptyState
-              icon={Inspect}
-              title="No TLS site or watched endpoint"
-              description="An enabled site with a certificate, or a watched endpoint, is scanned here."
-              className="mt-4"
-            />
-          ) : visible.length === 0 ? (
-            <EmptyState icon={Inspect} title="No targets match" className="mt-4" />
-          ) : wide ? (
-            // A table of readings scrolls on its own, so its border marks that boundary.
-            <Table
-              className="table-fixed"
-              containerClassName="max-h-[calc(100svh-24rem)] rounded-xl border bg-card"
-            >
-              <TableHeader className={stickyTableHeader}>
-                <TableRow>
-                  {admin && (
-                    <TableHead className="w-10">
-                      <Checkbox
-                        aria-label="Select every target shown"
-                        checked={allChosen}
-                        onCheckedChange={(on) =>
-                          setSelected(on ? new Set(visible.map((t) => targetLabel(t))) : new Set())
-                        }
-                      />
-                    </TableHead>
-                  )}
-                  <TableHead>Domain</TableHead>
-                  <TableHead className="w-20">Grade</TableHead>
-                  <TableHead className="w-28">Days left</TableHead>
-                  <TableHead className="w-24">Protocol</TableHead>
-                  <TableHead className="w-20">Issues</TableHead>
-                  <TableHead className="w-[22%]">Served by</TableHead>
-                  <TableHead className="w-32">Checked</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visible.map((t) => (
-                  <TableRow key={targetLabel(t)}>
-                    {admin && (
-                      <TableCell>
-                        <Checkbox
-                          aria-label={`Select ${targetLabel(t)}`}
-                          checked={selected.has(targetLabel(t))}
-                          onCheckedChange={() => toggle(t)}
-                        />
-                      </TableCell>
-                    )}
-                    <TableCell className="min-w-0">
-                      <TargetLink target={t} />
-                    </TableCell>
-                    <TableCell>
-                      <GradeReading target={t} />
-                    </TableCell>
-                    <TableCell>
-                      <DaysLeft target={t} />
-                    </TableCell>
-                    <TableCell className="text-xs">{t.scan?.negotiated ?? "—"}</TableCell>
-                    <TableCell>
-                      <Issues target={t} />
-                    </TableCell>
-                    <TableCell>
-                      <ServedBy target={t} />
-                    </TableCell>
-                    <TableCell className="text-hint text-muted-foreground">
-                      {t.scan ? relativeTime(t.scan.checkedAt) : "never"}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <ul className="divide-y divide-hairline">
-              {visible.map((t) => (
-                <li
-                  key={targetLabel(t)}
-                  className={cn(
-                    "flex min-w-0 items-start gap-3 py-3 transition-colors hover:bg-row-hover",
-                    ROW_BLEED,
-                  )}
-                >
-                  {admin && (
-                    <Checkbox
-                      className="mt-1"
-                      aria-label={`Select ${targetLabel(t)}`}
-                      checked={selected.has(targetLabel(t))}
-                      onCheckedChange={() => toggle(t)}
-                    />
-                  )}
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <TargetLink target={t} />
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                      <DaysLeft target={t} />
-                      {t.scan?.negotiated && <span>{t.scan.negotiated}</span>}
-                      <Issues target={t} />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <ServedBy target={t} />
-                      <span className="text-hint text-muted-foreground">
-                        {t.scan ? relativeTime(t.scan.checkedAt) : "never scanned"}
-                      </span>
-                    </div>
-                  </div>
-                  <GradeReading target={t} />
+        <PanelBody className="pt-3">
+          {loading ? (
+            // The list's own rows, held while the reports are read.
+            <ChoiceList aria-busy>
+              {[0, 1, 2].map((index) => (
+                <li key={index}>
+                  <Skeleton className="h-14 w-full rounded-xl" />
                 </li>
               ))}
-            </ul>
+            </ChoiceList>
+          ) : fleet.error && !fleet.data ? (
+            <ErrorState error={fleet.error} onRetry={fleet.refresh} />
+          ) : all.length === 0 ? (
+            <OverviewEmpty
+              mark={<EmptyMark product="nginx" corner={LockOpen} />}
+              title="No name to scan yet"
+              action={
+                <Button variant="outline" size="xs" asChild>
+                  <Link href="/proxy/sites">Sites</Link>
+                </Button>
+              }
+            >
+              A site with a certificate, or a watched endpoint, is listed here.
+            </OverviewEmpty>
+          ) : visible.length === 0 ? (
+            <EmptyState icon={Globe} title="No targets match" />
+          ) : (
+            <ChoiceList aria-label="Every site">
+              {visible.map((t, index) => (
+                <FleetRow
+                  key={targetLabel(t)}
+                  target={t}
+                  index={index}
+                  selectable={admin}
+                  selected={selected.has(targetLabel(t))}
+                  onToggle={() => toggle(t)}
+                />
+              ))}
+            </ChoiceList>
           )}
         </PanelBody>
       </Panel>
@@ -422,67 +381,127 @@ function TLSFleetPage() {
   )
 }
 
-function TargetLink({ target }: { target: FleetTarget }) {
-  return (
-    <Link
-      href={tlsReportHref(target)}
-      title={target.scan?.summary}
-      className="block max-w-full min-w-0 truncate text-body font-medium focus-ring hover:underline"
-    >
-      {targetLabel(target)}
-    </Link>
+/** The fleet's figures in words: only what is not zero, the alarming ones in their colour. */
+/** The worst thing the stored reports say, which the line's state leads with. */
+function fleetWorst(facts: ReturnType<typeof fleetFacts>) {
+  return facts.unreachable > 0
+    ? "unreachable"
+    : facts.belowA > 0
+      ? "below"
+      : facts.expiring > 0
+        ? "expiring"
+        : undefined
+}
+
+/** The fleet's state: the worst of its reports, or that there is nothing against any of them. */
+function FleetState({ targets }: { targets: FleetTarget[] }) {
+  const facts = fleetFacts(targets)
+  switch (fleetWorst(facts)) {
+    case "unreachable":
+      return <Status tone="danger" label={`${facts.unreachable} unreachable`} />
+    case "below":
+      return <Status tone="warning" label={`${facts.belowA} below A`} />
+    case "expiring":
+      return <Status tone="warning" label={`${facts.expiring} expiring`} />
+  }
+  if (facts.total === 0) return <Status tone="stopped" label="No names" />
+  if (facts.scanned === 0) return <Status tone="stopped" label="Not scanned" />
+  return <Status tone="running" label="Nothing below A" />
+}
+
+function FleetFacts({ targets }: { targets: FleetTarget[] }) {
+  const facts = fleetFacts(targets)
+  // The state beside the name says the worst of the reports. How many are
+  // below A, expiring or unreachable are the chips over the list, where a
+  // press narrows to them; they were counted here as well.
+  const parts: React.ReactNode[] = [
+    <span key="total">{plural(facts.total, "name")}</span>,
+    <span key="scanned">
+      {facts.scanned === facts.total ? "all scanned" : `${facts.scanned} scanned`}
+    </span>,
+  ]
+  if (facts.newest) parts.push(<span key="newest">last report {relativeTime(facts.newest)}</span>)
+  return parts.flatMap((part, index) =>
+    index === 0 ? [part] : [<FactDot key={`dot-${index}`} />, part],
   )
 }
 
-function GradeReading({ target }: { target: FleetTarget }) {
-  if (!target.scan) return <span className="text-xs text-muted-foreground">—</span>
-  return (
-    <Tag tone={gradeTone(target.scan.grade)} className="numeric">
-      {target.scan.grade}
-    </Tag>
-  )
-}
-
-function DaysLeft({ target }: { target: FleetTarget }) {
+/**
+ * One name: drawn as what serves it — nginx for a site, a globe for an
+ * endpoint only watched — with its report's verdict in the corner; then its
+ * certificate, protocol, issues and age in aligned columns, its grade last.
+ * Every state is one line, a target never scanned included.
+ */
+function FleetRow({
+  target,
+  index,
+  selectable,
+  selected,
+  onToggle,
+}: {
+  target: FleetTarget
+  index: number
+  selectable: boolean
+  selected: boolean
+  onToggle: () => void
+}) {
+  const label = targetLabel(target)
   const scan = target.scan
-  if (!scan) return <span className="text-xs text-muted-foreground">not scanned</span>
-  if (!scan.reachable) return <Status verdict="critical" label="unreachable" />
-  if (scan.expired) return <Status verdict="critical" label="expired" />
-  if (scan.daysLeft === undefined) return <span className="text-xs text-muted-foreground">—</span>
+  const verdict = gradeVerdict(scan?.grade)
+  const life = fleetLife(target)
+  const servedBy = [
+    target.sites.length > 0 ? target.sites.join(", ") : undefined,
+    target.watched ? "watched" : undefined,
+  ].filter(Boolean)
   return (
-    <Status
-      verdict={scan.expiring ? "warning" : "ok"}
-      label={`${scan.daysLeft} ${scan.daysLeft === 1 ? "day" : "days"}`}
+    <ChoiceRow
+      verb={`Open the report for ${label}`}
+      href={tlsReportHref(target)}
+      index={index}
+      leading={
+        <span className="relative flex">
+          <ProductLogo
+            id={target.sites.length > 0 ? "nginx" : undefined}
+            fallback={Globe}
+            size="sm"
+          />
+          <span className="absolute -right-1 -bottom-1 flex size-3.5 items-center justify-center rounded-full bg-background">
+            <StatusDot tone={TONE_DOT[verdict]} />
+          </span>
+        </span>
+      }
+      title={<span className="font-mono text-[0.92em]">{label}</span>}
+      description={servedBy.join(" · ") || "not served by a site here"}
+      trailing={
+        <span className="flex items-center gap-4 text-hint" title={scan?.summary}>
+          <span className={cn("w-28 truncate", TONE_TEXT[life.tone])}>{life.words}</span>
+          <span className="hidden w-14 truncate text-muted-foreground md:block">
+            {scan?.negotiated ?? "—"}
+          </span>
+          <span
+            className={cn(
+              "numeric hidden w-16 truncate md:block",
+              scan && scan.issues > 0 ? "text-warning" : "text-muted-foreground",
+            )}
+          >
+            {scan ? (scan.issues === 0 ? "no issues" : plural(scan.issues, "issue")) : "—"}
+          </span>
+          <span className="hidden w-20 truncate text-muted-foreground sm:block">
+            {scan ? relativeTime(scan.checkedAt) : "never"}
+          </span>
+          <span
+            data-slot="grade"
+            className={cn("numeric w-6 text-right text-body font-semibold", TONE_TEXT[verdict])}
+          >
+            {scan?.grade || "—"}
+          </span>
+        </span>
+      }
+      actions={
+        selectable && (
+          <Checkbox aria-label={`Select ${label}`} checked={selected} onCheckedChange={onToggle} />
+        )
+      }
     />
   )
-}
-
-function Issues({ target }: { target: FleetTarget }) {
-  if (!target.scan) return null
-  const n = target.scan.issues
-  return (
-    <span className={cn("numeric text-xs", n > 0 ? "text-warning" : "text-muted-foreground")}>
-      {n === 0 ? "none" : `${n} ${n === 1 ? "issue" : "issues"}`}
-    </span>
-  )
-}
-
-function ServedBy({ target }: { target: FleetTarget }) {
-  return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-      {target.sites.map((site) => (
-        <Tag key={site} mono className="max-w-full truncate">
-          {site}
-        </Tag>
-      ))}
-      {target.watched && <Tag>watched</Tag>}
-    </span>
-  )
-}
-
-const GRADES = ["F", "E", "D", "C", "B", "A-", "A", "A+"]
-
-/** Worst first, and a target never scanned after every graded one. */
-function gradeRank(target: FleetTarget) {
-  return target.scan ? Math.max(0, GRADES.indexOf(target.scan.grade)) : GRADES.length
 }

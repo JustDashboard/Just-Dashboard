@@ -1,119 +1,262 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { relativeTime, timestamp } from "@/lib/format"
-import type { FirewallPlanReview, FirewallRule, FirewallRuleHistory } from "@/lib/types"
+import type {
+  FirewallPlanReview,
+  FirewallRule,
+  FirewallRuleEvent,
+  FirewallRuleHistory,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { InfoTip } from "@/components/form"
+import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { Trash, Warning } from "@/components/icons"
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ClockRewind, Trash, Warning } from "@/components/icons"
 import { accessLosses, planOperations, type StagedChange } from "./firewall-reading"
+import { ruleWords } from "./firewall-words"
 
-const OUTCOME_TONE = {
-  applied: "success",
+const OUTCOME_TONE: Record<FirewallRuleEvent["outcome"], DotTone> = {
+  applied: "running",
   refused: "warning",
   failed: "danger",
-  pending: "default",
+  pending: "notice",
   compensated: "warning",
-  skipped: "default",
-} as const
+  skipped: "stopped",
+}
 
-function HistoryList({ history }: { history: FirewallRuleHistory }) {
+/** What a change asked for, field by field, as the server recorded it. */
+function Request({ label, rule }: { label: string; rule: Record<string, unknown> }) {
   return (
-    <div className="space-y-3">
-      {history.events.length === 0 ? (
-        <EmptyNote>No change to this from the dashboard is recorded.</EmptyNote>
-      ) : (
-        <ol className="divide-y divide-hairline rounded-lg border border-hairline">
-          {history.events.map((event) => (
-            <li key={event.id} className="space-y-1 px-3 py-2.5">
-              <span className="flex flex-wrap items-center gap-2 text-xs">
-                <Tag tone={OUTCOME_TONE[event.outcome] ?? "default"}>{event.outcome}</Tag>
-                <span className="font-medium">{event.operation}</span>
-                <span className="text-muted-foreground">
-                  by {event.actor || "an API caller"} ·{" "}
-                  <time dateTime={event.at} title={timestamp(event.at)}>
-                    {relativeTime(event.at)}
-                  </time>
-                </span>
-                {event.changeId && <Tag mono>pending {event.changeId.slice(0, 8)}</Tag>}
-              </span>
-              {event.detail && (
-                <p className="text-hint break-words text-muted-foreground">{event.detail}</p>
-              )}
-              {event.rule && (
-                <code className="block font-mono text-hint break-all">
-                  {JSON.stringify(event.rule)}
-                </code>
-              )}
-            </li>
-          ))}
-        </ol>
-      )}
-      <ul className="space-y-1 text-hint text-muted-foreground">
-        {history.limits.map((limit) => (
-          <li key={limit}>{limit}</li>
+    <section aria-label={label} className="space-y-1.5">
+      <p className="text-xs font-medium">{label}</p>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-hint">
+        {Object.entries(rule).map(([key, value]) => (
+          <div key={key} className="contents">
+            <dt className="text-muted-foreground">{key}</dt>
+            <dd className="font-mono break-all">
+              {typeof value === "string" ? value : JSON.stringify(value)}
+            </dd>
+          </div>
         ))}
-      </ul>
-    </div>
+      </dl>
+    </section>
   )
 }
 
-/** One rule's recorded changes, followed back through its edits. */
-export function RuleHistorySheet({
-  rule,
-  onOpenChange,
-}: {
-  rule: FirewallRule
-  onOpenChange: (open: boolean) => void
-}) {
+/** Who made a change and when, as one run of words. */
+function ByWhom({ event }: { event: FirewallRuleEvent }) {
+  return (
+    <>
+      by {event.actor || "an API caller"} ·{" "}
+      <time dateTime={event.at} title={timestamp(event.at)}>
+        {relativeTime(event.at)}
+      </time>
+    </>
+  )
+}
+
+/** A change's request and what came of it: what the line's popover and a rule's history both hold. */
+function ChangeDetail({ event }: { event: FirewallRuleEvent }) {
+  return (
+    <>
+      {event.detail && (
+        <p className="text-hint break-words text-muted-foreground">{event.detail}</p>
+      )}
+      {event.rule && <Request label="Asked for" rule={event.rule} />}
+      {event.previous && <Request label="In place of" rule={event.previous} />}
+      {!event.detail && !event.rule && !event.previous && (
+        <p className="text-hint text-muted-foreground">Nothing more was recorded.</p>
+      )}
+    </>
+  )
+}
+
+/**
+ * One recorded change as one line, the same height whatever it carries: what
+ * came of it as a dot and a word, the operation and the rule in a few words,
+ * who and when. What it asked for and what the server answered is a glance,
+ * so it opens from the line's end as a popover rather than hanging under it
+ * as the raw JSON it was.
+ */
+function ChangeLine({ event }: { event: FirewallRuleEvent }) {
+  const words = ruleWords(event.rule)
+  return (
+    <li data-slot="firewall-change" className="flex h-11 min-w-0 items-center gap-3">
+      <Status
+        tone={OUTCOME_TONE[event.outcome] ?? "unknown"}
+        label={event.outcome}
+        className="w-24 shrink-0"
+      />
+      <p className="min-w-0 flex-1 truncate text-body">
+        <span className="font-medium">{event.operation}</span>
+        {words && <span className="ml-2 font-mono text-hint text-muted-foreground">{words}</span>}
+      </p>
+      {event.changeId && (
+        <Tag mono className="max-sm:hidden">
+          pending {event.changeId.slice(0, 8)}
+        </Tag>
+      )}
+      <p className="shrink-0 text-hint text-muted-foreground max-sm:hidden">
+        <ByWhom event={event} />
+      </p>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            size="xs"
+            variant="ghost"
+            className="shrink-0 text-muted-foreground"
+            aria-label={`What ${event.operation} asked for, ${relativeTime(event.at)}`}
+          >
+            Request
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-80 space-y-3">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <Status tone={OUTCOME_TONE[event.outcome] ?? "unknown"} label={event.outcome} />
+            <span className="font-medium">{event.operation}</span>
+            <span className="text-muted-foreground">
+              <ByWhom event={event} />
+            </span>
+          </p>
+          {event.changeId && <Tag mono>pending {event.changeId.slice(0, 8)}</Tag>}
+          <ChangeDetail event={event} />
+        </PopoverContent>
+      </Popover>
+    </li>
+  )
+}
+
+/**
+ * One rule's recorded changes, followed back through its edits, opened from
+ * the rule's own row. It was a sheet over the page; a rule's history is a
+ * handful of changes read at a glance, so it is a popover on the button that
+ * asks for it, and the rules stay in view behind it.
+ */
+export function RuleHistoryPopover({ rule }: { rule: FirewallRule }) {
+  const [open, setOpen] = useState(false)
+  const anchor = useRef<HTMLSpanElement>(null)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <span ref={anchor} className="inline-flex">
+          <IconAction label="Rule history" onClick={() => setOpen((held) => !held)}>
+            <ClockRewind />
+          </IconAction>
+        </span>
+      </PopoverAnchor>
+      <PopoverContent
+        align="end"
+        className="w-96 space-y-3"
+        aria-label={`History of rule ${rule.number ?? ""}`.trim()}
+        // The button is outside the popover: its own press closes it, and
+        // must not be read as a press outside that closes it first.
+        onInteractOutside={(event) => {
+          if (anchor.current?.contains(event.target as Node)) event.preventDefault()
+        }}
+      >
+        {open && <RuleHistory rule={rule} />}
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function RuleHistory({ rule }: { rule: FirewallRule }) {
   const history = usePoll<FirewallRuleHistory>(
     (signal) => get("/firewall/history", { rule: rule.id }, signal),
     0,
     [rule.id],
   )
   return (
-    <SidePanel
-      open
-      onOpenChange={onOpenChange}
-      title={`History of rule ${rule.number ?? ""}`.trim()}
-      description="Changes to this rule made from the dashboard"
-      width="md"
-      initialFocus="body"
-    >
-      <p className="mb-3 font-mono text-xs break-all text-muted-foreground">{rule.raw}</p>
+    <>
+      <div className="space-y-1">
+        <p className="text-sm font-medium">{`History of rule ${rule.number ?? ""}`.trim()}</p>
+        <p className="font-mono text-hint break-all text-muted-foreground">{rule.raw}</p>
+      </div>
       {history.error ? (
         <ErrorState error={history.error} onRetry={history.refresh} />
       ) : !history.data ? (
         <LoadingRows rows={3} />
+      ) : history.data.events.length === 0 ? (
+        <EmptyNote>No change to this from the dashboard is recorded.</EmptyNote>
       ) : (
-        <HistoryList history={history.data} />
+        <ol className="max-h-80 space-y-3 overflow-y-auto">
+          {history.data.events.map((event) => (
+            <li key={event.id} className="space-y-1.5">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                <Status tone={OUTCOME_TONE[event.outcome] ?? "unknown"} label={event.outcome} />
+                <span className="font-medium">{event.operation}</span>
+                <span className="text-muted-foreground">
+                  <ByWhom event={event} />
+                </span>
+                {event.changeId && <Tag mono>pending {event.changeId.slice(0, 8)}</Tag>}
+              </p>
+              <ChangeDetail event={event} />
+            </li>
+          ))}
+        </ol>
       )}
-    </SidePanel>
+      {history.data && history.data.limits.length > 0 && (
+        <ul className="space-y-1 border-t border-hairline pt-3 text-hint text-muted-foreground">
+          {history.data.limits.map((limit) => (
+            <li key={limit}>{limit}</li>
+          ))}
+        </ul>
+      )}
+    </>
   )
 }
 
-/** The firewall's recent changes from the dashboard, refused ones included. */
+/**
+ * The firewall's recent changes from the dashboard, refused ones included,
+ * a line each. What the record cannot see was a sentence under the list; it
+ * is the ⓘ on the title now.
+ */
 export function FirewallHistoryPanel() {
   const history = usePoll<FirewallRuleHistory>(
     (signal) => get("/firewall/history", { limit: 20 }, signal),
     30_000,
   )
+  const limits = history.data?.limits ?? []
   return (
     <Panel plain>
-      <PanelHeader title="Recent firewall changes" />
-      <PanelBody>
+      <PanelHeader
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            Recent firewall changes
+            {limits.length > 0 && (
+              <InfoTip label="What the record cannot see">{limits.join(" ")}</InfoTip>
+            )}
+          </span>
+        }
+        actions={
+          history.data && (
+            <span className="numeric text-hint text-muted-foreground">
+              {history.data.events.length}
+            </span>
+          )
+        }
+      />
+      <PanelBody flush={Boolean(history.data?.events.length)}>
         {history.error && !history.data ? (
           <ErrorState error={history.error} onRetry={history.refresh} />
         ) : !history.data ? (
           <LoadingRows rows={3} />
+        ) : history.data.events.length === 0 ? (
+          <EmptyNote>No change from the dashboard is recorded.</EmptyNote>
         ) : (
-          <HistoryList history={history.data} />
+          <ol className="divide-y divide-hairline">
+            {history.data.events.map((event) => (
+              <ChangeLine key={event.id} event={event} />
+            ))}
+          </ol>
         )}
       </PanelBody>
     </Panel>

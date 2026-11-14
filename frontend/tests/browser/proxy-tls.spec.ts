@@ -1,5 +1,16 @@
 import { expect, test, type Locator, type Page, type Request } from "@playwright/test"
-import { certs, json, mockProxy, mockShowcase, now, scan, user } from "./proxy-fixtures"
+import {
+  availability,
+  certs,
+  json,
+  mockProxy,
+  mockShowcase,
+  now,
+  scan,
+  user,
+} from "./proxy-fixtures"
+import { fleet, requestResult } from "./fixtures/proxy/tls-views"
+import { risen } from "./risen"
 
 /**
  * The TLS report and the watch list, checked for the things they once said
@@ -29,7 +40,7 @@ test("a watched endpoint's link scans the port it names", async ({ page }) => {
     domain: url.searchParams.get("domain"),
     port: Number(url.searchParams.get("port")),
   }))
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   await page
     .getByRole("list", { name: "Watched domains" })
     .getByRole("link", { name: "Inspect mail.example.com:993" })
@@ -360,7 +371,7 @@ test("a long name in the hint or the refusal wraps under the field", async ({ pa
   expect(seen).toHaveLength(0)
 
   await page.setViewportSize({ width: 390, height: 900 })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   await page.getByLabel("Domain to watch").fill(`https://${bad}/`)
   await page.getByRole("button", { name: "Watch", exact: true }).click()
   const refusal = page.getByRole("alert").filter({ hasText: "is not a domain name" })
@@ -504,7 +515,8 @@ test("a version the server refuses reads as refused, in the server's words", asy
   await expect(protocols.filter({ hasText: "TLS 1.3" })).toContainText(
     "The server did not answer in time.",
   )
-  await expect(page.getByText(/“refused” is the server saying no/)).toBeVisible()
+  // What "refused" and "unknown" mean is the title's tip, not a paragraph under the list.
+  await expect(page.getByRole("button", { name: "How each version is asked" })).toBeVisible()
 })
 
 test("a service that is not a website is not graded on HTTP headers", async ({ page }) => {
@@ -671,7 +683,7 @@ test("watching takes what is pasted and keeps each port", async ({ page }) => {
     }
     return json(route, [])
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const field = page.getByLabel("Domain to watch")
   const watch = page.getByRole("button", { name: "Watch", exact: true })
 
@@ -714,7 +726,7 @@ test("a read-only account reads the last check and cannot ask for another", asyn
       { id: 2, domain: "new.example.com", port: 443 },
     ])
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const watched = page.getByRole("list", { name: "Watched domains" })
   await expect(watched.getByText(/checked 3m( \d+s)? ago/)).toBeVisible()
   await expect(watched.getByText("waiting for its first check")).toBeVisible()
@@ -740,7 +752,7 @@ test("a network probe on the watch list reads its connection, not a certificate"
       },
     ]),
   )
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const watched = page.getByRole("list", { name: "Watched domains" })
   const row = watched.locator("[data-slot='choice-row']").filter({ hasText: "db.example.com" })
   await expect(row).toContainText("Network probe: connects over TCP to 10.0.0.5:5432")
@@ -863,7 +875,7 @@ test("re-checking the watch list says so until the new checks arrive", async ({ 
     await new Promise<void>((resolve) => (release = resolve))
     return json(route, [mailRow()])
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const recheck = page.getByRole("button", { name: "Re-check now" })
   await expect(recheck).toBeVisible()
   const loaded = lists.length
@@ -905,7 +917,7 @@ test("stopping a watch says what happened, and a failure keeps the row", async (
   })
   const errors: string[] = []
   page.on("pageerror", (error) => errors.push(error.message))
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const list = page.getByRole("list", { name: "Watched domains" })
   await expect(list.getByRole("listitem")).toHaveCount(3)
   const loaded = lists.length
@@ -956,7 +968,7 @@ test("on a phone every watched row keeps how old its check is in full", async ({
       certificate: { ...certs[0], issuer: "A Rather Long Issuing Authority Name R11" },
     },
   ])
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const age = page
     .getByRole("list", { name: "Watched domains" })
     .getByText(/^checked 3m( \d+s)? ago$/)
@@ -987,7 +999,7 @@ test("a new watch shows its row waiting for the server's first check", async ({ 
     lists++
     return json(route, rows)
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   await expect(page.getByText("Nothing watched yet.", { exact: false })).toBeVisible()
   const field = page.getByLabel("Domain to watch")
   const watch = page.getByRole("button", { name: "Watch", exact: true })
@@ -1075,12 +1087,22 @@ const refusedConnection = failedScan(
   "203.0.113.4:443 refused the connection.",
 )
 
-/** The four readings of a failed scan, as label → value. */
+/**
+ * A failed scan as it reads: the target's grade on its identity line, then
+ * each step of the picture after this server, as label → value.
+ */
 async function tiles(page: Page) {
   const out: Record<string, string> = {}
-  for (const tile of await page.locator("[data-slot='stat-tile']").all()) {
-    const label = (await tile.locator(".eyebrow").textContent()) ?? ""
-    out[label] = (await tile.locator(".numeric").first().textContent()) ?? ""
+  const identity = page.locator("[data-slot='host-identity']")
+  const heading = (await identity.getByRole("heading").textContent()) ?? ""
+  out[heading] = ((await identity.locator("[data-slot='grade']").textContent()) ?? "").replace(
+    /^grade /,
+    "",
+  )
+  for (const node of await page.locator("[data-slot='chain-node']").all()) {
+    const label = (await node.locator(".eyebrow").textContent()) ?? ""
+    if (label === "Visitor") continue
+    out[label] = (await node.locator("[data-slot='chain-title']").textContent()) ?? ""
   }
   return out
 }
@@ -1483,11 +1505,13 @@ test("the live certificate gives its term, where it came from and its pin", asyn
   await expect(detail("CRL")).toHaveText("http://r11.c.lencr.org/12.crl")
   await expect(detail("SPKI pin")).toHaveText("C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=")
   await expect(page.locator('dt:text-is("OCSP")')).toHaveCount(0)
+  // The certificate's days are on the picture's leaf, in its verdict's colour,
+  // with its term as a meter under them.
   const certificate = page
-    .locator("[data-slot='stat-tile']")
+    .locator("[data-slot='chain-node']")
     .filter({ has: page.locator(".eyebrow", { hasText: /^Certificate$/ }) })
-  await expect(certificate.locator(".numeric").first()).toHaveText("44d")
-  await expect(certificate.locator(".numeric").first()).not.toHaveClass(/text-warning/)
+  await expect(certificate).toContainText("44 days left")
+  await expect(certificate).toHaveAttribute("data-tone", "success")
   await expect(certificate.getByRole("meter")).toHaveCount(1)
 
   // A six-day certificate on its last day reads in hours, amber as the
@@ -1511,6 +1535,371 @@ test("the live certificate gives its term, where it came from and its pin", asyn
   await page.getByRole("button", { name: "Scan", exact: true }).click()
   await expect(detail("Lifetime")).toHaveText("160 hours, renewal due in the last 80 hours")
   await expect(page.locator('dt:text-is("OCSP") + dd')).toHaveText("http://ocsp.example.test")
-  await expect(certificate.locator(".numeric").first()).toHaveText(/^2[89]h$/)
-  await expect(certificate.locator(".numeric").first()).toHaveClass(/text-warning/)
+  await expect(certificate).toContainText(/2[89] hours left/)
+  await expect(certificate).toHaveAttribute("data-tone", "warning")
+})
+
+/*
+ * The page as the deployment pages read: each view opens on its identity
+ * line, the report draws the way the scan reached the name, and nothing opens
+ * on a row of tiles. Every site and the request tester had no spec until now.
+ */
+
+const stale = {
+  state: "stale",
+  site: "app.example.com",
+  match: "exact",
+  detail: "The file on disk was renewed after nginx last read it.",
+}
+
+test("the report opens on its target and the chain it was served, not on tiles", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await scans(page)
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/proxy/tls?domain=app.example.com")
+    const identity = page.locator("[data-slot='host-identity']")
+    await expect(identity.getByRole("heading", { name: "app.example.com" })).toBeVisible()
+    await expect(identity.locator("[data-slot='grade']")).toHaveText("grade B")
+    await expect(identity.locator("[data-slot='grade']")).toHaveClass(/text-warning/)
+    await expect(identity.getByText("A trusted certificate with headers to improve")).toBeVisible()
+    await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+    await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+    const steps = page.locator("[data-slot='chain-node'] .eyebrow")
+    await expect(steps).toHaveText([
+      "Visitor",
+      "Domain",
+      "Served by",
+      "Certificate",
+      "Intermediate",
+      "Root",
+    ])
+    const root = page.locator("[data-slot='chain-node']").last()
+    await expect(root).toContainText("ISRG Root X1")
+    await expect(root).toHaveAttribute("data-tone", "success")
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    )
+  }
+})
+
+test("the picture is in its place and at its height while the first scan runs", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  // Each width holds its own first answer until it has been measured.
+  let release = () => {}
+  let held = Promise.resolve()
+  await page.route("**/api/v1/certificates/scan**", async (route) => {
+    await held
+    await json(route, scan)
+  })
+  for (const width of [1280, 390]) {
+    held = new Promise<void>((resolve) => (release = resolve))
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/proxy/tls?domain=app.example.com")
+    await expect(page.getByText(/Handshaking, probing each TLS version/)).toBeVisible()
+    const picture = page.locator("[data-slot='tls-chain']")
+    await risen(page)
+    const before = await picture.boundingBox()
+    release()
+    await expect(page.locator("[data-slot='grade']")).toHaveText("grade B")
+    await risen(page)
+    const after = await picture.boundingBox()
+    expect(after?.y).toBe(before?.y)
+    expect(Math.abs((after?.height ?? 0) - (before?.height ?? 0))).toBeLessThanOrEqual(1)
+  }
+})
+
+test("the report's menu takes it elsewhere and asks again", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const seen = await scans(page, () => ({ ...scan, origin: { ...stale, state: "current" } }))
+  await page.goto("/proxy/tls?domain=app.example.com")
+  await expect(page.locator("[data-slot='grade']")).toBeVisible()
+  await page.getByRole("button", { name: "More actions for app.example.com" }).click()
+  const menu = page.getByRole("menu")
+  for (const verb of ["Scan again", "Copy as Markdown", "Download JSON", "Download chain.pem"])
+    await expect(menu.getByRole("menuitem", { name: verb })).toBeVisible()
+  const download = page.waitForEvent("download")
+  await menu.getByRole("menuitem", { name: "Download JSON" }).click()
+  expect((await download).suggestedFilename()).toMatch(/tls\.json$/)
+
+  await page.getByRole("button", { name: "More actions for app.example.com" }).click()
+  await page.getByRole("menuitem", { name: "Scan again" }).click()
+  await expect.poll(() => seen.length).toBe(2)
+
+  // What answered opens its site's own page.
+  const served = page.locator("[data-slot='chain-node']").filter({ hasText: "Served by" })
+  await expect(served.getByRole("link", { name: "app.example.com" })).toHaveAttribute(
+    "href",
+    "/proxy/sites/app.example.com",
+  )
+  await page.getByRole("button", { name: "More actions for app.example.com" }).click()
+  await page.getByRole("menuitem", { name: "Send a request here" }).click()
+  await expect(page).toHaveURL(/tool=request&url=https%3A%2F%2Fapp\.example\.com%2F$/)
+})
+
+test("before a scan the page offers this server's names", async ({ page }) => {
+  await mockShowcase(page)
+  await scans(page)
+  await page.goto("/proxy/tls")
+  await expect(page.getByRole("heading", { name: "Live TLS report" })).toBeVisible()
+  await expect(page.getByText("Nothing scanned yet")).toBeVisible()
+  await expect(page.locator("[data-slot='chain-node']")).toHaveCount(6)
+  await page.getByRole("link", { name: /^Scan app\.example\.com$/ }).click()
+  await expect(page).toHaveURL(/\/proxy\/tls\?domain=app\.example\.com$/)
+  await expect(page.locator("[data-slot='grade']")).toHaveText("grade B")
+})
+
+test("a stored report read by a read-only account offers no reload", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/auth/session", (route) => json(route, readOnly))
+  const seen = await scans(page)
+  await page.route(
+    (url) => url.pathname === "/api/v1/certificates/reports",
+    (route) => json(route, [{ id: 7, grade: "B", daysLeft: 44, reachable: true, checkedAt: now }]),
+  )
+  await page.route("**/api/v1/certificates/reports/7", (route) =>
+    json(route, { id: 7, report: { ...scan, origin: stale }, changes: [] }),
+  )
+  await page.goto("/proxy/tls?domain=app.example.com")
+  await expect(page.getByText("Stale, renewed on disk", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Reload nginx" })).toHaveCount(0)
+  await page.getByRole("button", { name: "More actions for app.example.com" }).click()
+  await expect(page.getByRole("menuitem", { name: "Scan again" })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Copy as Markdown" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  expect(seen).toHaveLength(0)
+})
+
+test("an administrator reloads a stale nginx from the report and it scans again", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const seen = await scans(page, () => ({ ...scan, origin: stale }))
+  const reloads: string[] = []
+  page.on("request", (request) => {
+    if (/\/api\/v1\/proxy\/(test|reload)$/.test(request.url())) reloads.push(request.url())
+  })
+  await page.goto("/proxy/tls?domain=app.example.com")
+  const proxy = page.locator("[data-slot='chain-node']").filter({ hasText: "Served by" })
+  await expect(proxy).toHaveAttribute("data-tone", "warning")
+  await expect(proxy).toContainText("stale, renewed on disk")
+  await page.getByRole("button", { name: "Reload nginx" }).click()
+  await expect.poll(() => seen.length).toBe(2)
+  expect(reloads.map((url) => url.split("/").pop())).toEqual(["test", "reload"])
+})
+
+async function mockFleet(page: Page, body: object = fleet) {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/certificates/scans/latest", (route) => json(route, body))
+}
+
+test("every site opens on its figures in words and lists one-line cards", async ({ page }) => {
+  await mockFleet(page)
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/proxy/tls?view=fleet")
+    const identity = page.locator("[data-slot='host-identity']")
+    await expect(identity.getByRole("heading", { name: "Every site" })).toBeVisible()
+    await expect(identity).toContainText("6 names")
+    // The worst of the reports is the line's state; the counts are the chips
+    // over the list, and are not said on the line as well.
+    await expect(identity).toContainText("1 unreachable")
+    await expect(identity).not.toContainText("below A")
+    await expect(page.getByRole("button", { name: /^Below A 3$/ })).toBeVisible()
+    await expect(page.getByRole("button", { name: /^Expiring 1$/ })).toBeVisible()
+    await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+    await expect(page.locator("table")).toHaveCount(0)
+
+    const rows = page.getByRole("list", { name: "Every site" }).locator("[data-slot='choice-row']")
+    await expect(rows).toHaveCount(6)
+    // Worst first, a name never scanned last.
+    await expect(rows.first()).toContainText("old.example.com")
+    await expect(rows.last()).toContainText("staging.example.com")
+    await risen(page)
+    const heights = await rows.evaluateAll((items) =>
+      items.map((item) => Math.round(item.getBoundingClientRect().height)),
+    )
+    expect(new Set(heights).size).toBe(1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    )
+  }
+})
+
+test("a fleet card opens its report, and the chips and search narrow the list", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  // The scan's route would answer the fleet's too, so the fleet's is set after it.
+  const seen = await scans(page)
+  await page.route("**/api/v1/certificates/scans/latest", (route) => json(route, fleet))
+  await page.goto("/proxy/tls?view=fleet")
+  const list = page.getByRole("list", { name: "Every site" })
+  await page.getByRole("button", { name: /^Expiring/ }).click()
+  await expect(list.locator("[data-slot='choice-row']")).toHaveCount(1)
+  await page.getByRole("button", { name: /^All/ }).click()
+  await page.getByPlaceholder("Domain, port or site").fill("993")
+  await expect(list.locator("[data-slot='choice-row']")).toHaveCount(1)
+  await page.getByRole("link", { name: "Open the report for mail.example.com:993" }).click()
+  await expect(page).toHaveURL(/\/proxy\/tls\?domain=mail\.example\.com%3A993$/)
+  await expect.poll(() => seen.length).toBe(1)
+  expect(seen[0].searchParams.get("domain")).toBe("mail.example.com")
+  expect(seen[0].searchParams.get("port")).toBe("993")
+})
+
+test("every site scans them all, watches the chosen and exports what is shown", async ({
+  page,
+}) => {
+  await mockFleet(page)
+  const started: string[] = []
+  const watched: unknown[] = []
+  await page.route("**/api/v1/certificates/scan-all", (route) => {
+    started.push(route.request().method())
+    return json(route, { id: "job-1", kind: "tls.scan-all", status: "running", lines: [] })
+  })
+  await page.route("**/api/v1/certificates/watched", (route) => {
+    if (route.request().method() === "POST") watched.push(route.request().postDataJSON())
+    return json(route, {})
+  })
+  await page.route("**/api/v1/jobs/**", (route) =>
+    json(route, {
+      job: { id: "job-1", kind: "tls.scan-all", status: "running" },
+      lines: [],
+    }),
+  )
+  await page.goto("/proxy/tls?view=fleet")
+  await page.getByRole("checkbox", { name: "Select legacy.example.com" }).click()
+  await page.getByRole("checkbox", { name: "Select shop.example.com" }).click()
+  // shop is watched already, so only legacy is asked for.
+  await page.getByRole("button", { name: "Watch 1" }).click()
+  await expect.poll(() => watched).toEqual([{ domain: "legacy.example.com", port: 443 }])
+
+  await page.getByRole("button", { name: "More actions for every site" }).click()
+  const download = page.waitForEvent("download")
+  await page.getByRole("menuitem", { name: "Export CSV" }).click()
+  expect((await download).suggestedFilename()).toBe("tls-fleet.csv")
+
+  await page.getByRole("button", { name: "Scan all sites" }).click()
+  await expect.poll(() => started).toEqual(["POST"])
+})
+
+test("every site holds its place while the reports are read", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/certificates/scans/latest", async (route) => {
+    await held
+    await json(route, fleet)
+  })
+  await page.goto("/proxy/tls?view=fleet")
+  await expect(page.getByText("reading the stored reports")).toBeVisible()
+  await risen(page)
+  const before = await page.getByRole("heading", { name: "Names" }).boundingBox()
+  release()
+  await expect(page.getByRole("list", { name: "Every site" })).toBeVisible()
+  await risen(page)
+  const after = await page.getByRole("heading", { name: "Names" }).boundingBox()
+  expect(after?.y).toBe(before?.y)
+})
+
+test("a read-only account reads every site and is offered nothing to run", async ({ page }) => {
+  await mockFleet(page)
+  await page.route("**/api/v1/auth/session", (route) => json(route, readOnly))
+  await page.goto("/proxy/tls?view=fleet")
+  await expect(page.getByRole("list", { name: "Every site" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Scan all sites" })).toHaveCount(0)
+  await expect(page.getByRole("checkbox")).toHaveCount(0)
+})
+
+test("a host with no name to scan says so, with the way to its sites", async ({ page }) => {
+  await mockFleet(page, { targets: [] })
+  await page.goto("/proxy/tls?view=fleet")
+  await expect(page.getByText("No name to scan yet")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Sites", exact: true }).last()).toHaveAttribute(
+    "href",
+    "/proxy/sites",
+  )
+})
+
+test("the request tester answers on its identity line and walks the redirect chain", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const sent: unknown[] = []
+  await page.route("**/api/v1/proxy/tools/request", (route) => {
+    sent.push(route.request().postDataJSON())
+    return json(route, requestResult)
+  })
+  for (const width of [1280, 390]) {
+    sent.length = 0
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/proxy/tls?tool=request")
+    await expect(
+      page.locator("[data-slot='host-identity']").getByRole("heading", { name: "Request tester" }),
+    ).toBeVisible()
+    await expect(page.getByText("Nothing sent yet.")).toBeVisible()
+    await page.getByRole("radio", { name: "http", exact: true }).click()
+    await page.getByLabel("Domain").fill("app.example.com")
+    await page.getByRole("button", { name: "Send" }).click()
+    await expect(page).toHaveURL(/tool=request&url=http%3A%2F%2Fapp\.example\.com%2F$/)
+    expect(sent).toEqual([
+      { url: "http://app.example.com/", method: "GET", headers: [], connectTo: "127.0.0.1" },
+    ])
+    const identity = page.locator("[data-slot='host-identity']")
+    await expect(identity.getByRole("heading")).toHaveText("https://app.example.com/")
+    await expect(identity).toContainText("answered 200")
+    await expect(identity).toContainText("first byte 12 ms")
+    await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+
+    const chain = page
+      .getByRole("list", { name: "Redirect chain" })
+      .locator("[data-slot='choice-row']")
+    await expect(chain).toHaveCount(2)
+    await risen(page)
+    const heights = await chain.evaluateAll((items) =>
+      items.map((item) => Math.round(item.getBoundingClientRect().height)),
+    )
+    expect(new Set(heights).size).toBe(1)
+    await page.getByRole("button", { name: "Show GET http://app.example.com/" }).click()
+    await expect(identity.getByRole("heading")).toHaveText("http://app.example.com/")
+    await expect(identity).toContainText("answered 301")
+    await expect(page.getByRole("link", { name: "app.example.com" }).first()).toHaveAttribute(
+      "href",
+      "/proxy/sites/app.example.com",
+    )
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    )
+  }
+})
+
+test("the request tester copies its request as curl", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"])
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/tls?tool=request&url=https%3A%2F%2Fapp.example.com%2Fhealth")
+  await page.getByRole("button", { name: "Copy as curl" }).click()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    "curl -sS -i --resolve app.example.com:443:127.0.0.1 'https://app.example.com/health'",
+  )
+})
+
+test("a read-only account cannot send, and a host without nginx is told so", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/auth/session", (route) => json(route, readOnly))
+  await page.goto("/proxy/tls?tool=request&url=https%3A%2F%2Fapp.example.com%2F")
+  await expect(page.getByText("sending requests needs an administrator")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled()
+
+  await page.unroute("**/api/v1/auth/session")
+  await page.route("**/api/v1/proxy/status", (route) =>
+    json(route, { ...availability, nginx: false, nginxVersion: "" }),
+  )
+  await page.goto("/proxy/tls?tool=request")
+  await expect(page.getByText("nginx is not installed here")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Install" })).toHaveAttribute("href", "/proxy")
+  await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0)
 })

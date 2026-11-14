@@ -7,7 +7,6 @@ import {
   Archive,
   ArrowRight,
   Bell,
-  Check,
   CodeBracket,
   Database,
   FirewallCheck,
@@ -26,7 +25,7 @@ import {
   type Icon,
 } from "@/components/icons"
 import { get, put } from "@/lib/api"
-import { calendarDate } from "@/lib/format"
+import { calendarDate, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -37,12 +36,16 @@ import { ExcalidrawGlyph } from "@/components/boards/glyphs"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { Page, PageContext } from "@/components/page"
 import { tabClasses } from "@/components/tabs"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { ErrorState, LoadingPanel } from "@/components/state"
-import { Tag } from "@/components/tag"
+import { Status } from "@/components/status-dot"
+import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { FormSections, InfoTip } from "@/components/form"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { FactDot, HostFact } from "@/components/metrics/host-identity"
 import { Button } from "@/components/ui/button"
-import { AssistantMark } from "@/components/assistant/mark"
+import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { ModelPicker } from "@/components/assistant/model-picker"
 import { AssistantSettingsSheet } from "@/components/assistant/settings-sheet"
 import {
@@ -376,7 +379,15 @@ function ServerChat({ settings }: { settings: ReturnType<typeof useAssistantSett
   )
 }
 
-/** Who answers, how much it may do, and where it works: the install's settings. */
+/**
+ * Who answers, how much it may do, and where it works: the install's settings,
+ * as one column of sections on hairlines, the shape a project's settings have.
+ * They were a bordered card over four framed panels, two of them side by side.
+ *
+ * Nothing here waits for a save bar: a provider is saved in its sheet and a
+ * mode is the install's the moment it is pressed, so each control says its
+ * own outcome.
+ */
 function AssistantSettingsView({
   settings,
 }: {
@@ -386,6 +397,8 @@ function AssistantSettingsView({
   const admin = can("system.admin")
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<{ preset?: string } | null>(null)
+  // The mode being written: a second press waits for the first.
+  const [choosing, setChoosing] = useState<AssistantMode>()
   const view = settings.data!
   const deployments = usePoll<DeploymentSummary[]>(
     (signal) => get<DeploymentSummary[]>("/deploy/", undefined, signal),
@@ -394,13 +407,18 @@ function AssistantSettingsView({
     { enabled: can("service.control") },
   )
 
+  const mode = view.defaultMode ?? "changes"
   const setMode = async (defaultMode: AssistantMode) => {
+    if (choosing || defaultMode === mode) return
+    setChoosing(defaultMode)
     try {
       await put("/assistant/preferences", { defaultMode })
       announceAssistantChange()
       notify.success(`Conversations now start on ${MODE_LABEL[defaultMode]}`)
     } catch (err) {
       notify.error("The default could not be changed", err instanceof Error ? err : undefined)
+    } finally {
+      setChoosing(undefined)
     }
   }
   const profiles = view.profiles ?? []
@@ -409,50 +427,70 @@ function AssistantSettingsView({
     profiles.find((entry) => entry.preset === preset.id)
   const saved = presets.filter(profileOf)
   const unsaved = presets.filter((preset) => !profileOf(preset))
+  const provider = presets.find((preset) => preset.id === view.preset)
+  const projects = deployments.data ?? []
 
   return (
     <>
-      <div className="animate-rise space-y-6">
-        <section
-          data-slot="assistant-now"
-          className="flex min-w-0 flex-wrap items-center gap-4 rounded-xl border border-hairline bg-card p-4"
-        >
-          <AssistantMark product={assistantProduct(view)} size="md" />
-          {/* A measure of its own rather than whatever the command leaves: with
-              none, the button kept its width on a phone and the head wrapped
-              to a word a line beside it. Now the command goes under the text. */}
-          <div className="min-w-0 flex-[1_1_14rem]">
-            <p className="text-lg font-semibold tracking-tight">
-              {view.configured ? (view.modelLabel ?? view.model) : "The assistant is off"}
-            </p>
-            <p className="text-body text-muted-foreground">
-              {view.configured
-                ? `Every place in the dashboard asks this model${view.updatedBy ? `, set up by ${view.updatedBy}` : ""}${view.updatedAt ? ` on ${calendarDate(view.updatedAt)}` : ""}.`
-                : "Choose who answers it and it works everywhere at once."}
-            </p>
-          </div>
-          {view.configured ? (
-            <ModelPicker
-              settings={view}
-              onChanged={agentModelChanged}
-              className="h-9 border border-hairline"
-            />
-          ) : (
-            admin && (
+      <div className="mx-auto w-full max-w-3xl min-w-0 animate-rise pt-6 md:pt-8">
+        <FormSections>
+          <SettingSection
+            id="assistant-model"
+            title="Model"
+            state={
+              view.configured ? (
+                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <HostFact product={assistantProduct(view)}>
+                    {provider?.label ?? view.provider}
+                  </HostFact>
+                  <FactDot />
+                  <span className="font-mono text-foreground">{view.model}</span>
+                  {view.updatedBy && (
+                    <>
+                      <FactDot />
+                      <span>
+                        set up by {view.updatedBy}
+                        {view.updatedAt && ` on ${calendarDate(view.updatedAt)}`}
+                      </span>
+                    </>
+                  )}
+                </span>
+              ) : (
+                <span className="font-medium text-foreground">The assistant is off</span>
+              )
+            }
+            actions={
+              view.configured && (
+                <ModelPicker
+                  settings={view}
+                  onChanged={agentModelChanged}
+                  className="h-8 border border-hairline"
+                />
+              )
+            }
+          >
+            {/* Off, the way to turn it on is the section's one command: under
+                the words on a phone and at their full width, where beside
+                them it squeezed the head into a column a word wide. */}
+            {!view.configured && admin && (
               <Button onClick={() => setEditing({})} className="max-sm:w-full">
                 <Sparkles />
                 Set up the assistant
               </Button>
-            )
-          )}
-        </section>
+            )}
+          </SettingSection>
 
-        <Panel>
-          <PanelHeader title="Providers" />
-          <PanelBody>
-            <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-              {saved.map((preset) => (
-                <ProviderRow
+          <SettingSection
+            title="Providers"
+            state={
+              saved.length > 0
+                ? `${saved.length} of ${presets.length} set up`
+                : `${presets.length} to choose from`
+            }
+          >
+            <ChoiceGrid columns={2} role="list" aria-label="Providers">
+              {[...saved, ...unsaved].map((preset) => (
+                <ProviderCard
                   key={preset.id}
                   preset={preset}
                   profile={profileOf(preset)}
@@ -460,115 +498,89 @@ function AssistantSettingsView({
                   onEdit={() => setEditing({ preset: preset.id })}
                 />
               ))}
-              {unsaved.map((preset) => (
-                <ProviderRow
-                  key={preset.id}
-                  preset={preset}
-                  admin={admin}
-                  onEdit={() => setEditing({ preset: preset.id })}
+            </ChoiceGrid>
+          </SettingSection>
+
+          <SettingSection
+            title="Default mode"
+            state={`Conversations start on ${MODE_LABEL[mode]}`}
+            status={<InfoTip label="What holds in every mode">{MODES_NOTE}</InfoTip>}
+          >
+            <ChoiceGrid role="group" aria-label="Default mode">
+              {MODES.map(({ mode: option, icon }, index) => (
+                <ChoiceCard
+                  key={option}
+                  index={index}
+                  verb={`${MODE_LABEL[option]}, for new conversations`}
+                  title={MODE_LABEL[option]}
+                  description={MODE_DETAIL[option]}
+                  mark={icon}
+                  selected={mode === option}
+                  // A role that may not choose reads the choice and is given
+                  // no control: the card it is on stays lit, the rest step
+                  // back. One write at a time, so a second press waits.
+                  disabled={!admin || (choosing !== undefined && choosing !== option)}
+                  onClick={() => void setMode(option)}
                 />
               ))}
+            </ChoiceGrid>
+          </SettingSection>
+
+          <SettingSection title="Where it works" state={`${PLACES.length} places`}>
+            <ul
+              aria-label="Where it works"
+              className="-mx-2 grid min-w-0 sm:grid-cols-2 sm:gap-x-6"
+            >
+              {PLACES.map((place) => (
+                <li key={place.title} className="min-w-0">
+                  <Link
+                    href={place.href}
+                    title={place.detail}
+                    className="group flex h-14 min-w-0 items-center gap-3 rounded-lg px-2 focus-ring transition-colors hover:bg-row-hover"
+                  >
+                    <place.icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-body font-medium">{place.title}</span>
+                      <span className="block truncate text-hint text-muted-foreground">
+                        {place.detail}
+                      </span>
+                    </span>
+                    <ArrowRight
+                      aria-hidden
+                      className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
+                    />
+                  </Link>
+                </li>
+              ))}
             </ul>
-          </PanelBody>
-        </Panel>
+          </SettingSection>
 
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Panel>
-            <PanelHeader title="What it may do on its own" />
-            <PanelBody>
-              <ul className="space-y-1.5">
-                {MODES.map(({ mode, icon: Mark }) => {
-                  const chosen = (view.defaultMode ?? "changes") === mode
-                  return (
-                    <li key={mode}>
-                      <button
-                        type="button"
-                        disabled={!admin}
-                        aria-pressed={chosen}
-                        onClick={() => void setMode(mode)}
-                        className={cn(
-                          "flex w-full min-w-0 items-start gap-3 rounded-lg border p-3 text-left focus-ring transition-colors",
-                          chosen
-                            ? "border-rule-brand bg-wash-brand"
-                            : "border-hairline enabled:hover:bg-row-hover",
-                        )}
-                      >
-                        <Mark
-                          aria-hidden
-                          className={cn(
-                            "mt-0.5 size-4 shrink-0",
-                            mode === "full" ? "text-warning" : "text-muted-foreground",
-                          )}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-body font-medium">{MODE_LABEL[mode]}</span>
-                          <span className="block text-hint leading-relaxed text-muted-foreground">
-                            {MODE_DETAIL[mode]}
-                          </span>
-                        </span>
-                        {chosen && <Check aria-hidden className="mt-0.5 size-4 shrink-0" />}
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-              <p className="mt-3 text-hint leading-relaxed text-muted-foreground">
-                This is what a conversation starts on; anyone asking can change it for theirs. In
-                every mode it acts as the person asking and within their role, every call it makes
-                is audited, and a person&rsquo;s own credentials &mdash; signing in, passkeys,
-                sessions and API keys &mdash; stay out of its reach.
-              </p>
-            </PanelBody>
-          </Panel>
-          <Panel>
-            <PanelHeader title="Where it works" />
-            <PanelBody flush>
-              <ul className="divide-y divide-hairline">
-                {PLACES.map((place) => (
-                  <li key={place.title}>
-                    <Link
-                      href={place.href}
-                      className="group flex min-w-0 items-center gap-3 px-4 py-3 focus-ring transition-colors hover:bg-row-hover"
-                    >
-                      <place.icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-body font-medium">{place.title}</span>
-                        <span className="block truncate text-hint text-muted-foreground">
-                          {place.detail}
-                        </span>
-                      </span>
-                      <ArrowRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-                    </Link>
-                  </li>
+          {view.configured && projects.length > 0 && (
+            <SettingSection
+              title="Ask about a deployment"
+              state={
+                projects.length > SHOWN_PROJECTS
+                  ? `${SHOWN_PROJECTS} of ${projects.length} projects`
+                  : plural(projects.length, "project")
+              }
+            >
+              <ChoiceList
+                aria-label="Deployments to ask about"
+                className="grid gap-2 space-y-0 sm:grid-cols-2"
+              >
+                {projects.slice(0, SHOWN_PROJECTS).map((deployment) => (
+                  <ChoiceRow
+                    key={deployment.id}
+                    href={`/deploy/${deployment.id}/assistant`}
+                    verb={`Ask about ${deployment.name}`}
+                    leading={<ProjectMark deployment={deployment} size="sm" />}
+                    title={deployment.name}
+                  />
                 ))}
-              </ul>
-            </PanelBody>
-          </Panel>
-        </div>
-
-        {view.configured && (deployments.data?.length ?? 0) > 0 && (
-          <Panel>
-            <PanelHeader title="Ask about a deployment" />
-            <PanelBody>
-              <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {deployments.data!.slice(0, 12).map((deployment) => (
-                  <li key={deployment.id}>
-                    <Link
-                      href={`/deploy/${deployment.id}/assistant`}
-                      className="flex min-w-0 items-center gap-3 rounded-lg border border-hairline p-2.5 focus-ring transition-colors hover:bg-row-hover"
-                    >
-                      <ProjectMark deployment={deployment} size="sm" />
-                      <span className="min-w-0 flex-1 truncate text-body font-medium">
-                        {deployment.name}
-                      </span>
-                      <ArrowRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </PanelBody>
-          </Panel>
-        )}
+              </ChoiceList>
+            </SettingSection>
+          )}
+        </FormSections>
       </div>
       {admin && (
         <AssistantSettingsSheet
@@ -585,7 +597,24 @@ function AssistantSettingsView({
   )
 }
 
-function ProviderRow({
+/** As many projects as the section offers; the rest are on Deployments. */
+const SHOWN_PROJECTS = 12
+
+/**
+ * What is true whichever mode is chosen, behind the head's mark rather than
+ * under the cards, where it was a paragraph of four lines. The head says the
+ * one thing the paragraph was for: which mode a conversation starts on.
+ */
+const MODES_NOTE =
+  "Anyone asking can change the mode for their own conversation. In every mode it acts as the person asking and within their role, every call it makes is audited, and a person's own credentials (signing in, passkeys, sessions and API keys) stay out of its reach."
+
+/**
+ * One provider as a card you pick: its own logo, its name, and the model it
+ * answers with once it is set up, or what it is until then. The one in use
+ * carries its state as a dot and a word; an administrator's press opens its
+ * setup. Every card is one height, set up or not.
+ */
+function ProviderCard({
   preset,
   profile,
   admin,
@@ -600,37 +629,53 @@ function ProviderRow({
     <>
       <ProductLogo id={preset.product || undefined} size="md" fallback={Sparkles} />
       <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-body font-medium">{preset.label}</span>
-          {profile?.active && <Tag tone="success">In use</Tag>}
-        </span>
-        <span className="block truncate text-hint text-muted-foreground">
+        <span className="block truncate text-body font-medium">{preset.label}</span>
+        <span
+          className={cn("block truncate text-hint text-muted-foreground", profile && "font-mono")}
+        >
           {profile ? (profile.modelLabel ?? profile.model) : preset.detail}
         </span>
       </span>
-      {admin && !profile && (
-        <span className="shrink-0 text-hint text-muted-foreground">Set up</span>
+      {profile?.active ? (
+        <Status tone="running" label="In use" />
+      ) : profile ? (
+        <Status tone="stopped" label="Saved" />
+      ) : (
+        admin && <span className="shrink-0 text-hint text-muted-foreground">Set up</span>
       )}
     </>
   )
-  const frame = cn(
-    "flex w-full min-w-0 items-center gap-3 rounded-lg border p-2.5 text-left",
-    profile?.active ? "border-rule-success bg-wash-success" : "border-hairline",
-  )
+  const shape = "flex h-16 w-full min-w-0 items-center gap-3 rounded-xl px-3 text-left"
   return (
-    <li data-slot="assistant-provider" data-preset={preset.id} data-saved={Boolean(profile)}>
+    <div
+      role="listitem"
+      data-slot="assistant-provider"
+      data-preset={preset.id}
+      data-saved={Boolean(profile)}
+      className="min-w-0"
+    >
       {admin ? (
-        <button
-          type="button"
-          onClick={onEdit}
-          aria-label={`${preset.label}: ${profile ? "edit" : "set up"}`}
-          className={cn(frame, "focus-ring transition-colors hover:bg-row-hover")}
+        <SpotlightBorder resting={profile?.active ? "brand" : "border"}>
+          <button
+            type="button"
+            onClick={onEdit}
+            aria-label={`${preset.label}: ${profile ? "edit" : "set up"}`}
+            className={cn(shape, "focus-ring", profile?.active && "bg-accent")}
+          >
+            {inner}
+          </button>
+        </SpotlightBorder>
+      ) : (
+        <div
+          className={cn(
+            shape,
+            "border bg-choice-surface",
+            profile?.active && "border-brand bg-accent",
+          )}
         >
           {inner}
-        </button>
-      ) : (
-        <div className={frame}>{inner}</div>
+        </div>
       )}
-    </li>
+    </div>
   )
 }

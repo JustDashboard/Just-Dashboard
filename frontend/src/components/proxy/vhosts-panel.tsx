@@ -3,10 +3,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { forgetSessionState, useSessionState, useViewState } from "@/lib/view-state"
-import { CloudUpload, Download, Globe, Plus, Warning } from "@/components/icons"
+import { forgetSessionState, useSessionState } from "@/lib/view-state"
+import { ArrowRight, CloudUpload, Download, Globe, Plus, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { bytes, plural, relativeTime } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import { downloadText } from "@/lib/metrics-export"
 import { ApiError, del, get, post } from "@/lib/api"
 import type {
@@ -34,16 +34,17 @@ import { useAuth } from "@/hooks/use-auth"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
 import { ConfirmDialog, useConfirm } from "@/components/confirm-dialog"
-import { ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Modal } from "@/components/modal"
-import { Well } from "@/components/panel"
-import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
-import { ProductGlyph, ProductLogos } from "@/components/product-logo"
+import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
+import { Page, PageContext, SearchInput } from "@/components/page"
+import { ProductLogos } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { VerbBar } from "@/components/verbs"
+import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { TextShimmer } from "@/components/ui/text-shimmer"
+import { VerbBar, VerbMenu, type Verb } from "@/components/verbs"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
@@ -52,22 +53,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  stickyTableHeader,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { AccessListsPanel } from "@/components/proxy/access-lists-panel"
 import { RouteResolver } from "@/components/proxy/route-resolver"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { useNewSiteLink } from "@/components/proxy/site-link"
 import { DefaultSitePanel } from "@/components/proxy/default-site"
-import { SiteBand, SiteMark } from "@/components/proxy/site-band"
+import { SiteBand } from "@/components/proxy/site-band"
 import {
   errorTone,
   siteApp,
@@ -82,22 +74,23 @@ import { SiteRenameDialog } from "@/components/proxy/site-rename"
 import { SiteImportDialog } from "@/components/proxy/site-import"
 import { SiteBackupsPanel } from "@/components/proxy/site-backups"
 import {
+  RouteMark,
   ServingStatus,
-  SiteFeatures,
-  SiteNotes,
   SiteTLS,
   UpstreamHealth,
   siteKind,
 } from "@/components/proxy/site-marks"
+import { siteDestination } from "@/components/proxy/site-rail"
+import { siteSettingsHref } from "@/components/proxy/site-tabs"
 import { ExpiryStatus } from "@/components/proxy/expiry-status"
 import {
   CHIP_LABEL,
   SORT_LABEL,
   exportBundle,
+  isDown,
   isRedirect,
   isStatic,
   matchesChip,
-  redirectTargets,
   siteCert,
   siteUpstreams,
   sortSites,
@@ -106,7 +99,7 @@ import {
   type SiteReadings,
   type SiteSort,
 } from "@/components/proxy/site-filters"
-import { activeOwner, matchesSearch, upstreamTargets } from "@/components/proxy/site-details"
+import { activeOwner, matchesSearch } from "@/components/proxy/site-details"
 import { reloadFailure, reloadOutput } from "@/components/proxy/site-outcome"
 import { sitesReadError, sitesReadFailure } from "@/components/proxy/sites-read-failure"
 import {
@@ -142,7 +135,6 @@ import {
   siteSwitchable,
   useSiteVerbs,
 } from "@/components/proxy/site-verbs"
-import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
 import { isDisabled, sharedNames } from "@/components/proxy/site-order"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -209,12 +201,19 @@ type ReloadCopy = { notRunning: string; notReloaded: string }
 type OpenFile = { vhost: VHost; served?: boolean; override?: boolean }
 
 /**
- * A route needs two readable ends and commands separate from its readings.
- * The cards retain the worst-first groups, and each opens the site's own
- * page — what it is, and its requests and errors read there — for every site
- * and every reader. Editing stays with its owner, as the card's verbs: nginx
- * opens the builder, file-backed Caddy opens its file, and Docker Caddy has
- * no editor because there is no host file to save.
+ * The host's sites, each one line: what it fronts over the engine serving
+ * it, its name over where its requests go, then in aligned columns its last
+ * hour, its ports, its TLS and certificate, and whether it is serving. The
+ * rows keep the worst-first groups, and each opens the site's own page —
+ * what it is, its requests and errors, and its Settings — for every site and
+ * every reader. Everything else a site can do is in its menu.
+ *
+ * A site was a card about 190px tall until 0.8.7, with its route, its notes
+ * and three buttons inside, and editing one opened a sheet over this list.
+ * The route is the row's second line now, the notes and the feature words
+ * are on the site's page, and editing is that page's Settings view: Edit
+ * goes there, and so does every `?site=` link that used to open the sheet.
+ * The sheet stays for the one thing that is not an edit, a new site.
  */
 export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const { can } = useAuth()
@@ -223,19 +222,18 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const admin = can("system.admin")
   const { status, loading: statusLoading } = useProxy()
   const [editing, setEditing] = useState<OpenFile | null>(null)
-  // The form's open state and its fields are kept for the tab: a site is a
-  // long form, and checking a port or a certificate half-way through it
-  // should not mean typing it again. Closing it is what forgets it.
+  // The new-site form's open state and its fields are kept for the tab: a
+  // site is a long form, and checking a port or a certificate half-way
+  // through it should not mean typing it again. Closing it is what forgets
+  // it. An existing site is edited on its own page.
   const [form, setForm] = useSessionState<{
     open: boolean
-    editing: string | null
     copyFrom: string | null
     session: number
-  }>("proxy.sites.form", { open: false, editing: null, copyFrom: null, session: 0 })
+  }>("proxy.sites.newform", { open: false, copyFrom: null, session: 0 })
   const [filter, setFilter] = useSessionState("proxy.sites.query", "")
   const [chip, setChip] = useSessionState<SiteChip>("proxy.sites.chip.075", "all")
   const [sortChoice, setSort] = useSessionState<SiteSort>("proxy.sites.sort", "urgency")
-  const [view, setView] = useViewState<"cards" | "table">("proxy.sites.view", "cards")
   // By name, as the bulk endpoint acts: a name two entries share is never
   // selectable, so a name picks out one site.
   const [selected, setSelected] = useState<string[]>([])
@@ -364,19 +362,21 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     run?.running === false &&
     (caddyEngine ? v.kind === "caddy" && Boolean(v.path) : v.kind === "nginx")
 
-  const openForm = (name: string | null, copyFrom: string | null = null) => {
+  const openNew = (copyFrom: string | null = null) => {
     setRequested(null)
-    setForm((f) => ({ open: true, editing: name, copyFrom, session: f.session + 1 }))
+    setForm((f) => ({ open: true, copyFrom, session: f.session + 1 }))
   }
-  useNewSiteLink(() => openForm(null))
+  useNewSiteLink(() => openNew())
+  const editSite = (name: string) => router.push(siteSettingsHref(name))
 
   // A ?site= link from elsewhere in the dashboard opens that site as soon as
-  // its row loads. The open panel is derived from the URL rather than copied
-  // into state, so the back button closes it and a reload reopens it. The
-  // form is for an administrator and a file it saves back where it found it;
-  // anyone else, and any other file, gets the config viewer — read-only
-  // unless they may write it. A deployment's route, which a deployment
-  // links to, opens read-only: its deployment is where it is changed.
+  // its row loads. For an administrator and a file the form saves back where
+  // it found it, that is the site's Settings, which the sheet this link
+  // opened became. Anyone else, and any other file, gets the config viewer —
+  // read-only unless they may write it — derived from the URL rather than
+  // copied into state, so the back button closes it and a reload reopens it.
+  // A deployment's route, which a deployment links to, opens read-only: its
+  // deployment is where it is changed.
   const linked = requested
     ? (data?.find((vhost) => vhost.name === requested && vhost.formEditable) ??
       data?.find((vhost) => vhost.name === requested))
@@ -390,15 +390,15 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // A link to nothing has no file to open: the overview's finding links it
   // here, and what there is to do with it is take it out.
   const linkedRemoval = admin && linked?.broken === "dangling" && !linked.path ? linked : undefined
-  const formIsOpen = form.open || Boolean(linkedForm)
-  const formEditing = form.open ? form.editing : (linkedForm?.name ?? null)
+  const linkedSettings = linkedForm?.name
+  useEffect(() => {
+    // Replaced, so Back from the site's Settings is not this address again.
+    if (linkedSettings) router.replace(siteSettingsHref(linkedSettings))
+  }, [linkedSettings, router])
 
   const closeForm = (open: boolean) => {
     setForm((f) => ({ ...f, open }))
-    if (!open) {
-      setRequested(null)
-      forgetSessionState("proxy.site.form.")
-    }
+    if (!open) forgetSessionState("proxy.site.form.")
   }
   const closeRaw = (open: boolean) => {
     if (open) return
@@ -890,7 +890,9 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         </p>
       ),
       action: async (): Promise<"reported"> => {
-        if (vhost.formEditable) openForm(vhost.name)
+        // Asked here, so the site's Settings open on the form rather than on
+        // the same question.
+        if (vhost.formEditable) router.push(`${siteSettingsHref(vhost.name)}&anyway=1`)
         else setEditing({ vhost, override: true })
         return "reported"
       },
@@ -933,10 +935,10 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
 
   const handlers = {
     admin,
-    onEdit: (v: VHost) => openForm(v.name),
+    onEdit: (v: VHost) => editSite(v.name),
     onRaw: (v: VHost) => setEditing({ vhost: v }),
     onServed: (v: VHost) => setEditing({ vhost: v, served: true }),
-    onDuplicate: (v: VHost) => openForm(null, v.name),
+    onDuplicate: (v: VHost) => openNew(v.name),
     onToggle: toggle,
     onMaintenance: maintenance,
     onPurgeCache: purgeCache,
@@ -1068,13 +1070,13 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return
       const target = e.target instanceof HTMLElement ? e.target : null
       if (target?.closest("input, textarea, select, [contenteditable='true']")) return
-      if (formIsOpen || rawSite || document.querySelector("[role='dialog'], [role='menu']")) return
+      if (form.open || rawSite || document.querySelector("[role='dialog'], [role='menu']")) return
       if (e.key === "/") {
         e.preventDefault()
         searchRef.current?.focus()
       } else if (e.key === "n" && admin && hasNginx) {
         e.preventDefault()
-        openForm(null)
+        openNew()
       } else if (e.key === "j" || e.key === "k") {
         e.preventDefault()
         setCursor(stepSelection(visible.map(siteKey), cursor, e.key === "j" ? 1 : -1))
@@ -1111,7 +1113,15 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     return (
       <Page>
         {header}
-        <LoadingPanel />
+        {/* The page's own silhouette: the line it opens on and the rows
+            under it, so nothing moves when the sites land. */}
+        <HostIdentity
+          fallback={Globe}
+          title={<TextShimmer>Reading the sites…</TextShimmer>}
+          facts={<span>&nbsp;</span>}
+          state={<span>&nbsp;</span>}
+        />
+        <LoadingRows rows={6} />
       </Page>
     )
   }
@@ -1128,26 +1138,25 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   }
 
   const newSite = admin && hasNginx && (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => downloadFrom("/proxy/sites-export")}
-        title="Every site's file in a tar.gz, with a manifest. Password files are never in it."
-      >
-        <Download className="size-4" />
-        Export all
-      </Button>
-      <Button size="sm" variant="outline" onClick={() => setImporting(true)}>
-        <CloudUpload className="size-4" />
-        Import
-      </Button>
-      <Button size="sm" onClick={() => openForm(null)}>
-        <Plus className="size-4" />
-        New site
-      </Button>
-    </div>
+    <Button size="sm" onClick={() => openNew()} aria-keyshortcuts="n" title="New site (N)">
+      <Plus className="size-4" />
+      New site
+    </Button>
   )
+  // Every site's file in a tar.gz with a manifest (password files are never
+  // in it), and the way to bring one in: the list's two other commands.
+  const listVerbs: Verb[] =
+    admin && hasNginx
+      ? [
+          { key: "import", label: "Import", icon: CloudUpload, run: () => setImporting(true) },
+          {
+            key: "export",
+            label: "Export all",
+            icon: Download,
+            run: () => downloadFrom("/proxy/sites-export"),
+          },
+        ]
+      : []
 
   // Grouped only where the grouping says something a chip has not: once a
   // filter is on, its name *is* the group.
@@ -1202,11 +1211,12 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       {header}
 
       {/* What the host serves, as one line: its sites as the applications
-          they front, the engines, how many serve and on TLS, the hour's
-          requests, and at its right end the verdict — a press of which
-          narrows the cards to exactly what it counts — beside the commands
-          that add to the list. Four tiles stood here, each one count with
-          no site named in it; site-band.tsx says where each went. */}
+          they front, beside the name the verdict — a press of which narrows
+          the rows to exactly what it counts — then the engines, how many
+          serve and on TLS and the hour's requests, and at its far end the
+          command that adds a site with the rest behind the menu. Four tiles
+          stood here, each one count with no site named in it; site-band.tsx
+          says where each went. */}
       <HostIdentity
         className="animate-rise"
         logo={
@@ -1253,16 +1263,16 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
             )}
           </>
         }
-        aside={
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-            <Verdict
-              verdict={verdict}
-              pressed={Boolean(verdict.chip) && chip === verdict.chip}
-              onPress={() => verdict.chip && setChip(chip === verdict.chip ? "all" : verdict.chip)}
-            />
-            {hosts.length > 0 && newSite}
-          </div>
+        state={
+          <Verdict
+            verdict={verdict}
+            pressed={Boolean(verdict.chip) && chip === verdict.chip}
+            onPress={() => verdict.chip && setChip(chip === verdict.chip ? "all" : verdict.chip)}
+          />
         }
+        // An empty list carries the command in its own empty state.
+        command={hosts.length > 0 && newSite}
+        menu={listVerbs.length > 0 && <VerbMenu verbs={listVerbs} label="More site actions" />}
       />
 
       {/* The rows stay on a failed read, and would pass for what nginx
@@ -1353,53 +1363,42 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           action={newSite}
         />
       ) : (
-        <div className="flex min-w-0 flex-col gap-4">
-          {/* The filters stand on the page rather than inside a panel
-              header: the list is the whole page, and the commands to add to
-              it are the identity line's. */}
-          <div className="flex min-w-0 items-baseline gap-2.5">
-            <h2 className="text-section font-semibold">Routing</h2>
-            <span className="numeric text-hint text-muted-foreground">
-              {visible.length === hosts.length
-                ? plural(hosts.length, "site")
-                : `${visible.length} of ${plural(hosts.length, "site")}`}
-            </span>
-          </div>
-          <Toolbar className="justify-between gap-x-4">
+        <Panel plain aria-label="Sites">
+          <PanelHeader
+            title="Sites"
+            actions={
+              <span className="numeric text-hint text-muted-foreground">
+                {visible.length === hosts.length
+                  ? plural(hosts.length, "site")
+                  : `${visible.length} of ${plural(hosts.length, "site")}`}
+              </span>
+            }
+          />
+          <PanelToolbar className="justify-between gap-x-4">
             <SearchInput
               ref={searchRef}
+              dense
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Name, domain, upstream, port, file or path"
               aria-label="Search sites"
               aria-keyshortcuts="/"
             />
-            <div className="flex flex-wrap items-center gap-2">
-              <Select value={sort} onValueChange={(value) => setSort(value as SiteSort)}>
-                <SelectTrigger size="sm" className="w-40" aria-label="Sort sites">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(SORT_LABEL) as SiteSort[])
-                    .filter((key) => key !== "traffic" || hasTraffic)
-                    .map((key) => (
-                      <SelectItem key={key} value={key}>
-                        {SORT_LABEL[key]}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-              {/* The table needs the width; below it the cards are drawn either way. */}
-              <ChipStrip aria-label="View" className="max-lg:hidden">
-                <FilterChip selected={view === "cards"} onClick={() => setView("cards")}>
-                  Cards
-                </FilterChip>
-                <FilterChip selected={view === "table"} onClick={() => setView("table")}>
-                  Table
-                </FilterChip>
-              </ChipStrip>
-            </div>
-            <ChipStrip className="basis-full">
+            <Select value={sort} onValueChange={(value) => setSort(value as SiteSort)}>
+              <SelectTrigger size="sm" className="w-40" aria-label="Sort sites">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(SORT_LABEL) as SiteSort[])
+                  .filter((key) => key !== "traffic" || hasTraffic)
+                  .map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {SORT_LABEL[key]}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <ChipStrip className="basis-full" aria-label="Filter sites">
               {(Object.keys(CHIP_LABEL) as SiteChip[])
                 .filter((key) => key === "all" || key === chip || chipCounts[key] > 0)
                 .map((key) => (
@@ -1409,162 +1408,98 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
                   </FilterChip>
                 ))}
             </ChipStrip>
-          </Toolbar>
-
-          {chosen.length > 0 && (
-            <div
-              role="region"
-              aria-label="Selected sites"
-              className="flex flex-wrap items-center gap-2 rounded-xl border bg-card px-3 py-2"
-            >
-              <span className="text-body font-medium">{chosen.length} selected</span>
-              {chosen.length < allChosen.length && (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => setSelected(allChosen.map((v) => v.name))}
-                >
-                  Select all {allChosen.length}
-                </Button>
-              )}
-              <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-                {toEnable.length > 0 && (
-                  <Button size="xs" variant="outline" onClick={() => bulk("enable", toEnable)}>
-                    Enable {toEnable.length}
-                  </Button>
-                )}
-                {toDisable.length > 0 && (
-                  <Button size="xs" variant="outline" onClick={() => bulk("disable", toDisable)}>
-                    Disable {toDisable.length}
-                  </Button>
-                )}
-                {toExport.length > 0 && (
+          </PanelToolbar>
+          <PanelBody flush className="flex min-w-0 flex-col gap-3 pt-3">
+            {chosen.length > 0 && (
+              <div
+                role="region"
+                aria-label="Selected sites"
+                className="flex flex-wrap items-center gap-2 rounded-xl border bg-card px-3 py-2"
+              >
+                <span className="text-body font-medium">{chosen.length} selected</span>
+                {chosen.length < allChosen.length && (
                   <Button
                     size="xs"
-                    variant="outline"
-                    pending={exporting}
-                    onClick={() => void exportSites(toExport)}
+                    variant="ghost"
+                    onClick={() => setSelected(allChosen.map((v) => v.name))}
                   >
-                    Export {toExport.length}
+                    Select all {allChosen.length}
                   </Button>
                 )}
-                {toDelete.length > 0 && (
-                  <Button size="xs" variant="outline" onClick={() => bulk("delete", toDelete)}>
-                    Delete {toDelete.length}
-                  </Button>
-                )}
-                <Button size="xs" variant="ghost" onClick={() => setSelected([])}>
-                  Clear
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {visible.length === 0 ? (
-            <EmptyState icon={Globe} title="No sites match" />
-          ) : (
-            <>
-              {view === "table" && (
-                <div className="hidden min-w-0 lg:block">
-                  <Table
-                    className="table-fixed"
-                    containerClassName="rounded-xl border bg-card"
-                    aria-label="Sites"
-                  >
-                    <TableHeader className={stickyTableHeader}>
-                      <TableRow>
-                        <TableHead className="w-10">
-                          <Checkbox
-                            aria-label="Select every site shown"
-                            disabled={allChosen.length === 0}
-                            checked={
-                              chosen.length > 0 && chosen.length === allChosen.length
-                                ? true
-                                : chosen.length > 0
-                                  ? "indeterminate"
-                                  : false
-                            }
-                            onCheckedChange={(on) =>
-                              setSelected(on === true ? allChosen.map((v) => v.name) : [])
-                            }
-                          />
-                        </TableHead>
-                        <TableHead className="w-[22%]">Site</TableHead>
-                        <TableHead>Route</TableHead>
-                        <TableHead className="w-44">TLS</TableHead>
-                        <TableHead className="w-44">State</TableHead>
-                        <TableHead className="w-28">Edited</TableHead>
-                        <TableHead className="w-40">
-                          <span className="sr-only">Actions</span>
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {visible.map((vhost) => (
-                        <SiteTableRow
-                          key={siteKey(vhost)}
-                          index={0}
-                          vhost={vhost}
-                          {...stateOf(vhost.name)}
-                          stopped={engineStopped(vhost)}
-                          unloaded={isUnloaded(vhost)}
-                          notLive={notLive(vhost)}
-                          ambiguous={shared.has(vhost.name)}
-                          cert={siteCert(vhost, certPoll.data)}
-                          health={siteUpstreams(vhost, upstreamPoll.data)}
-                          app={appOf(vhost)}
-                          hour={siteTraffic(vhost, trafficPoll.data)}
-                          busiest={busiest}
-                          arrived={arrived.has(siteKey(vhost))}
-                          selectable={allChosen.includes(vhost)}
-                          selected={selected.includes(vhost.name)}
-                          onSelectedChange={(on) => toggleSelected(vhost, on)}
-                          cursor={cursor === siteKey(vhost)}
-                          {...handlers}
-                        />
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-              <div className={cn("flex min-w-0 flex-col gap-4", view === "table" && "lg:hidden")}>
-                {groups.map((group) => (
-                  <div key={group.key} className="flex min-w-0 flex-col gap-2">
-                    {group.label && <GroupRule label={group.label} count={group.sites.length} />}
-                    <ProxyGrid
-                      aria-label={group.label || "Sites"}
-                      className={group.sites.length === 1 ? "xl:grid-cols-1" : undefined}
+                <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                  {toEnable.length > 0 && (
+                    <Button size="xs" variant="outline" onClick={() => bulk("enable", toEnable)}>
+                      Enable {toEnable.length}
+                    </Button>
+                  )}
+                  {toDisable.length > 0 && (
+                    <Button size="xs" variant="outline" onClick={() => bulk("disable", toDisable)}>
+                      Disable {toDisable.length}
+                    </Button>
+                  )}
+                  {toExport.length > 0 && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      pending={exporting}
+                      onClick={() => void exportSites(toExport)}
                     >
-                      {group.sites.map((vhost, index) => (
-                        <SiteCard
-                          key={siteKey(vhost)}
-                          index={index}
-                          vhost={vhost}
-                          {...stateOf(vhost.name)}
-                          stopped={engineStopped(vhost)}
-                          unloaded={isUnloaded(vhost)}
-                          notLive={notLive(vhost)}
-                          ambiguous={shared.has(vhost.name)}
-                          cert={siteCert(vhost, certPoll.data)}
-                          health={siteUpstreams(vhost, upstreamPoll.data)}
-                          app={appOf(vhost)}
-                          hour={siteTraffic(vhost, trafficPoll.data)}
-                          busiest={busiest}
-                          arrived={arrived.has(siteKey(vhost))}
-                          selectable={allChosen.includes(vhost)}
-                          selected={selected.includes(vhost.name)}
-                          onSelectedChange={(on) => toggleSelected(vhost, on)}
-                          cursor={cursor === siteKey(vhost)}
-                          {...handlers}
-                        />
-                      ))}
-                    </ProxyGrid>
-                  </div>
-                ))}
+                      Export {toExport.length}
+                    </Button>
+                  )}
+                  {toDelete.length > 0 && (
+                    <Button size="xs" variant="outline" onClick={() => bulk("delete", toDelete)}>
+                      Delete {toDelete.length}
+                    </Button>
+                  )}
+                  <Button size="xs" variant="ghost" onClick={() => setSelected([])}>
+                    Clear
+                  </Button>
+                </div>
               </div>
-            </>
-          )}
-        </div>
+            )}
+
+            {visible.length === 0 ? (
+              <EmptyNote className="py-6">
+                {filter.trim()
+                  ? `No site matches “${filter.trim()}”`
+                  : "No site is under this chip"}
+                {filter.trim() && chip !== "all" ? " under this chip." : "."}
+              </EmptyNote>
+            ) : (
+              groups.map((group) => (
+                <div key={group.key} className="flex min-w-0 flex-col gap-2">
+                  {group.label && <GroupRule label={group.label} count={group.sites.length} />}
+                  <ChoiceList aria-label={group.label || "Sites"}>
+                    {group.sites.map((vhost, index) => (
+                      <SiteRow
+                        key={siteKey(vhost)}
+                        index={index}
+                        vhost={vhost}
+                        {...stateOf(vhost.name)}
+                        stopped={engineStopped(vhost)}
+                        unloaded={isUnloaded(vhost)}
+                        notLive={notLive(vhost)}
+                        ambiguous={shared.has(vhost.name)}
+                        cert={siteCert(vhost, certPoll.data)}
+                        health={siteUpstreams(vhost, upstreamPoll.data)}
+                        app={appOf(vhost)}
+                        hour={siteTraffic(vhost, trafficPoll.data)}
+                        busiest={busiest}
+                        arrived={arrived.has(siteKey(vhost))}
+                        selectable={allChosen.includes(vhost)}
+                        selected={selected.includes(vhost.name)}
+                        onSelectedChange={(on) => toggleSelected(vhost, on)}
+                        cursor={cursor === siteKey(vhost)}
+                        {...handlers}
+                      />
+                    ))}
+                  </ChoiceList>
+                </div>
+              ))
+            )}
+          </PanelBody>
+        </Panel>
       )}
 
       {hasNginx && <DefaultSitePanel admin={admin} />}
@@ -1581,9 +1516,9 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       )}
 
       <SiteForm
-        open={formIsOpen}
-        editing={formEditing}
-        copyFrom={form.open ? form.copyFrom : null}
+        open={form.open}
+        editing={null}
+        copyFrom={form.copyFrom}
         session={form.session}
         onOpenChange={closeForm}
         onSaved={saved}
@@ -1611,7 +1546,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
               busy={busy}
               onEdit={(v) => {
                 setEditing(null)
-                openForm(v.name)
+                editSite(v.name)
               }}
             />
           )
@@ -1699,20 +1634,21 @@ type CardProps = {
 }
 
 /**
- * The route owns the body; service state and commands each have their own
- * line. Opening it is the site's page, for every site and every reader: a
- * Docker Caddy route with no file to edit still has requests to read, and a
- * link to nothing is explained there. Editing stays with its owner, as the
- * card's verbs: the form for an administrator and a file the form saves back,
- * the file itself for everything else with one, read-only unless the reader
- * may write it — and a deployment's route read-only for everyone.
+ * A site as one line, the same height whatever it holds: what it fronts with
+ * the engine serving it in the tile's corner, as the overview's Routes list
+ * draws it, its name over what it is and where its requests go,
+ * then in aligned columns its last hour, the ports it listens on, its TLS
+ * and how long its certificate has, and its state. Opening it is the site's
+ * page, for every site and every reader: a Docker Caddy route with no file
+ * to edit still has requests to read, and a link to nothing is explained
+ * there. Everything else it can do is in its menu, the same verbs the card
+ * drew as three buttons and a menu.
  *
- * The site is drawn as what it is made of — the application it fronts over
- * the engine serving it. Its hue is on its hour bar, the colour its span,
- * its certificate's dot and its application's key carry in the band above;
- * the card's edge carries none.
+ * The state is one word: an upstream that refuses is what its visitors meet,
+ * so it takes the place of "serving"; anything the switch or nginx says about
+ * the site itself is said first.
  */
-function SiteCard({
+function SiteRow({
   vhost,
   busy,
   unread,
@@ -1736,96 +1672,147 @@ function SiteCard({
   const verbs = useSiteVerbs({ vhost, busy, ambiguous, ...handlers })
   // A link to nothing has no domain or upstream to draw, only where it points.
   const linkOnly = vhost.broken === "dangling" && !vhost.path
-  const end = routeEnd(vhost, app)
+  const names = vhost.serverNames.join(", ")
+  const destination = siteDestination(vhost) || "served by configuration"
+  const kind = app?.name ? `${app.name} · ${siteKind(vhost)}` : siteKind(vhost)
+  const ports = listenPorts(vhost.listen)
+  // The words the switch and nginx have about the site come before its
+  // upstream's: a site that is off has no visitors for a dead upstream to fail.
+  const plainlyServing =
+    !busy && !unread && !vhost.broken && !stopped && !unloaded && !notLive && vhost.enabled
+  const down = plainlyServing && health.some(isDown)
   return (
     <ChoiceRow
-      actions={
-        selectable && (
-          <Checkbox
-            aria-label={`Select ${vhost.name}`}
-            checked={selected}
-            onCheckedChange={(on) => onSelectedChange(on === true)}
-          />
-        )
-      }
-      verb={`Open ${vhost.name}`}
       href={sitePath(vhost.name)}
+      verb={`Open ${vhost.name}`}
       index={index}
       busy={Boolean(busy)}
       className={cn(
-        "h-full gap-4 p-4",
         cursor && "ring-2 ring-ring",
         arrived && "animate-rise",
         !vhost.enabled && "opacity-80",
       )}
-      leading={<SiteMark vhost={vhost} app={app} />}
-      title={<span className="text-title font-semibold tracking-tight">{vhost.name}</span>}
-      description={app?.name ? `${app.name} · ${siteKind(vhost)}` : siteKind(vhost)}
-      trailing={
-        <ServingStatus
-          vhost={vhost}
-          busy={busy}
-          unread={unread}
-          stopped={stopped}
-          unloaded={unloaded}
-          notLive={notLive}
-        />
+      leading={
+        <>
+          {cursor && <ScrollHere />}
+          {/* One tile on every row, so the names stand on one edge: what
+              the site's visitors reach, the engine in its corner. */}
+          <RouteMark
+            vhost={vhost}
+            backend={{
+              kind: isRedirect(vhost)
+                ? "redirect"
+                : isStatic(vhost)
+                  ? "files"
+                  : vhost.upstreams.length > 0
+                    ? "app"
+                    : "config",
+              product: app?.product,
+              projectId: activeOwner(vhost)?.projectId,
+            }}
+          />
+        </>
       }
-    >
-      {cursor && <ScrollHere />}
-      {!linkOnly && (
-        <RoutePath
-          source={vhost.serverNames.join(", ") || "Default host"}
-          destinationLabel={end.label}
-          destination={end.node}
-        />
-      )}
-      <SiteNotes vhost={vhost} />
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-        {!linkOnly && (
-          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-hint text-muted-foreground">
-            <SiteTLS vhost={vhost} />
-            {cert && <ExpiryStatus cert={cert} />}
-            <UpstreamHealth targets={health} />
-            {hour && <HourMeter vhost={vhost} hour={hour} busiest={busiest} />}
-            <span className="font-mono">{vhost.listen.join(" · ") || "No listener reported"}</span>
-            <Edited vhost={vhost} />
-            <SiteFeatures vhost={vhost} />
-          </div>
-        )}
-        <VerbBar verbs={verbs} menuLabel={`More actions for ${vhost.name}`} className="ml-auto" />
-      </div>
-    </ChoiceRow>
+      title={vhost.name}
+      description={
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0 max-sm:hidden">{kind}</span>
+          {!linkOnly && (
+            <>
+              <span aria-hidden className="shrink-0 max-sm:hidden">
+                ·
+              </span>
+              <span
+                data-slot="site-route"
+                className="flex min-w-0 items-center gap-1.5 font-mono"
+                title={`${names || "Default host"} → ${destination}`}
+              >
+                {/* The names are said once: where they are the site's own
+                    name, the title already says them. */}
+                {names !== vhost.name && (
+                  <>
+                    <span className={cn("truncate", !names && "font-sans")}>
+                      {names || "Default host"}
+                    </span>
+                    <ArrowRight aria-hidden className="size-3 shrink-0" />
+                  </>
+                )}
+                <span className="truncate text-foreground">{destination}</span>
+              </span>
+            </>
+          )}
+        </span>
+      }
+      trailing={
+        <>
+          {/* The hour's column is there on a host whose traffic summary
+              answers, on every row or on none, so the columns after it stand
+              in one line down the list. */}
+          {handlers.traffic && (
+            <span className="flex w-28 justify-end max-xl:hidden">
+              {hour && !linkOnly && <HourMeter vhost={vhost} hour={hour} busiest={busiest} />}
+            </span>
+          )}
+          <span
+            className="w-16 truncate text-right font-mono text-hint text-muted-foreground max-lg:hidden"
+            title={vhost.listen.join(" · ")}
+          >
+            {linkOnly ? "" : ports.map((port) => `:${port}`).join(" ")}
+          </span>
+          <span className="flex w-24 text-hint max-md:hidden">
+            {!linkOnly && <SiteTLS vhost={vhost} />}
+          </span>
+          <span className="flex w-20 text-hint max-lg:hidden">
+            {cert && !linkOnly && <ExpiryStatus cert={cert} />}
+          </span>
+          <span className="flex justify-end sm:w-36">
+            {down ? (
+              <UpstreamHealth targets={health} />
+            ) : (
+              <ServingStatus
+                vhost={vhost}
+                busy={busy}
+                unread={unread}
+                stopped={stopped}
+                unloaded={unloaded}
+                notLive={notLive}
+              />
+            )}
+          </span>
+        </>
+      }
+      actions={
+        <>
+          {/* The box keeps its place on a row that cannot be chosen, so the
+              menus stand in one column. */}
+          <span className="flex size-5 items-center justify-center max-sm:hidden">
+            {selectable && (
+              <Checkbox
+                aria-label={`Select ${vhost.name}`}
+                checked={selected}
+                onCheckedChange={(on) => onSelectedChange(on === true)}
+              />
+            )}
+          </span>
+          {verbs.length > 0 ? (
+            <VerbMenu verbs={verbs} label={`More actions for ${vhost.name}`} />
+          ) : (
+            <span aria-hidden className="size-8" />
+          )}
+        </>
+      }
+    />
   )
 }
 
-/**
- * The far end of a route, as what it is: the application and where nginx
- * dials it; the directory a static site serves; where a redirect sends.
- * "Served by configuration" is left for a site whose file says none of these.
- */
-function routeEnd(
-  vhost: VHost,
-  app: SiteApp | undefined,
-): { label: string; node: React.ReactNode } {
-  if (isRedirect(vhost)) return { label: "Redirects to", node: redirectTargets(vhost).join(", ") }
-  if (isStatic(vhost)) return { label: "Files", node: (vhost.roots ?? []).join(", ") }
-  const targets = upstreamTargets(vhost).join(", ")
-  if (!targets) return { label: "Upstream", node: "Served by configuration" }
-  return {
-    label: "Upstream",
-    node: app?.name ? (
-      <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="flex min-w-0 items-center gap-1.5 font-sans font-medium">
-          {app.product && <ProductGlyph id={app.product} className="size-4" />}
-          <span className="truncate">{app.name}</span>
-        </span>
-        <span className="text-muted-foreground">{targets}</span>
-      </span>
-    ) : (
-      targets
-    ),
+/** The ports a site listens on, each once, in the order nginx was told them. */
+function listenPorts(listen: string[]): string[] {
+  const ports: string[] = []
+  for (const entry of listen) {
+    const port = entry.match(/(\d+)(?!.*\d)/)?.[1]
+    if (port && !ports.includes(port)) ports.push(port)
   }
+  return ports
 }
 
 /**
@@ -1845,10 +1832,10 @@ function HourMeter({
   const tone = errorTone(hour.errorRate)
   return (
     <span
-      className="inline-flex items-center gap-1.5"
-      title={`${hour.requests.toLocaleString()} requests in the last hour`}
+      className="inline-flex items-center gap-1.5 text-hint text-muted-foreground"
+      title={`${hour.requests.toLocaleString()} requests in the last hour${tone ? `, ${(hour.errorRate * 100).toFixed(1)}% answered 5xx` : ""}`}
     >
-      <span aria-hidden className="h-1 w-10 overflow-hidden rounded-full bg-meter-track">
+      <span aria-hidden className="h-1 w-8 overflow-hidden rounded-full bg-meter-track">
         <span
           className="block h-full rounded-full transition-[width] duration-700 ease-out"
           style={{
@@ -1857,13 +1844,19 @@ function HourMeter({
           }}
         />
       </span>
-      <span className="numeric text-foreground">{compact.format(hour.requests)}</span>
+      <span
+        className={cn(
+          "numeric",
+          tone === "danger"
+            ? "text-destructive"
+            : tone === "warning"
+              ? "text-warning"
+              : "text-foreground",
+        )}
+      >
+        {compact.format(hour.requests)}
+      </span>
       <span>req/h</span>
-      {tone && (
-        <span className={cn("numeric", tone === "danger" ? "text-destructive" : "text-warning")}>
-          {(hour.errorRate * 100).toFixed(1)}% 5xx
-        </span>
-      )}
     </span>
   )
 }
@@ -1907,119 +1900,9 @@ function Verdict({
 /** The site's verbs the file's sheet carries in its header. */
 const EDITOR_VERBS = ["open", "scan", "log", "errors", "edit", "deployment"]
 
-/** When the site's file last changed, where the listing could read it. */
-function Edited({ vhost }: { vhost: VHost }) {
-  // A link to nothing reports the link's own time, and a file that could not
-  // be read none: the server leaves the field out.
-  if (!vhost.path || !vhost.modified) return null
-  return <span title={vhost.modified}>edited {relativeTime(vhost.modified)}</span>
-}
-
 /** Brings the site j or k moved to into view as it becomes the one. */
 function ScrollHere() {
   return <span aria-hidden ref={(el) => el?.scrollIntoView({ block: "nearest" })} />
-}
-
-/** The table view's row: the card's readings in columns, and the same verbs. */
-function SiteTableRow({
-  vhost,
-  busy,
-  unread,
-  stopped,
-  unloaded,
-  notLive,
-  ambiguous,
-  cert,
-  health,
-  app,
-  hour,
-  busiest,
-  selectable,
-  selected,
-  onSelectedChange,
-  cursor,
-  ...handlers
-}: CardProps) {
-  const verbs = useSiteVerbs({ vhost, busy, ambiguous, ...handlers })
-  const linkOnly = vhost.broken === "dangling" && !vhost.path
-  return (
-    <TableRow data-state={selected ? "selected" : undefined} className="group">
-      <TableCell>
-        {selectable && (
-          <Checkbox
-            aria-label={`Select ${vhost.name}`}
-            checked={selected}
-            onCheckedChange={(on) => onSelectedChange(on === true)}
-          />
-        )}
-      </TableCell>
-      <TableCell className={cn(cursor && "outline-2 -outline-offset-2 outline-ring")}>
-        {cursor && <ScrollHere />}
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span
-            aria-hidden
-            className="h-6 w-0.75 shrink-0 rounded-full"
-            style={{ background: siteHue(vhost.name) }}
-          />
-          <SiteMark vhost={vhost} app={app} size="sm" />
-          <div className="min-w-0">
-            <Link
-              href={sitePath(vhost.name)}
-              aria-label={`Open ${vhost.name}`}
-              className="block max-w-full truncate rounded-sm text-body font-medium focus-ring"
-            >
-              {vhost.name}
-            </Link>
-            <span className="block truncate text-hint text-muted-foreground">
-              {app?.name ? `${app.name} · ${siteKind(vhost)}` : siteKind(vhost)}
-            </span>
-          </div>
-        </div>
-      </TableCell>
-      <TableCell>
-        {!linkOnly && (
-          <div className="min-w-0 text-hint">
-            <p className="truncate" title={vhost.serverNames.join(", ")}>
-              {vhost.serverNames.join(", ") || "Default host"}
-            </p>
-            <p className="truncate font-mono text-muted-foreground">
-              → {upstreamTargets(vhost).join(", ") || "Served by configuration"}
-            </p>
-          </div>
-        )}
-      </TableCell>
-      <TableCell>
-        <div className="flex flex-col items-start gap-1 text-hint">
-          <SiteTLS vhost={vhost} />
-          {cert && <ExpiryStatus cert={cert} />}
-        </div>
-      </TableCell>
-      <TableCell>
-        <div className="flex flex-col items-start gap-1 text-hint">
-          <ServingStatus
-            vhost={vhost}
-            busy={busy}
-            unread={unread}
-            stopped={stopped}
-            unloaded={unloaded}
-            notLive={notLive}
-          />
-          <UpstreamHealth targets={health} />
-        </div>
-      </TableCell>
-      <TableCell className="text-hint text-muted-foreground">
-        <Edited vhost={vhost} />
-        {hour && (
-          <p>
-            <HourMeter vhost={vhost} hour={hour} busiest={busiest} />
-          </p>
-        )}
-      </TableCell>
-      <TableCell>
-        <VerbBar verbs={verbs} menuLabel={`More actions for ${vhost.name}`} />
-      </TableCell>
-    </TableRow>
-  )
 }
 
 /**

@@ -9,6 +9,7 @@ import type { Container, ContainerStats } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMediaQuery } from "@/hooks/use-mobile"
+import { WIDE_BESIDE_RAIL } from "@/components/docker/beside-rail"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { Panel, PanelHeader } from "@/components/panel"
 import { ProductLogo, containerProduct } from "@/components/product-logo"
@@ -51,7 +52,7 @@ export function ContainerCompany({
 }) {
   const router = useRouter()
   // The ports take a column only where the four before it keep their width.
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useMediaQuery(WIDE_BESIDE_RAIL)
   const [inventory, setInventory] = useState<Container[]>()
   const [stats, setStats] = useState<Record<string, ContainerStats>>({})
   const onMessage = useCallback((envelope: Envelope) => {

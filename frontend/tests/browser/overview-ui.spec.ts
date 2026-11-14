@@ -1,15 +1,58 @@
-import { expect, test } from "@playwright/test"
-import { fleet, mockOverview } from "./overview-fixture"
-import { iso, json, now, user } from "./host-fixture"
+import { expect, test, type Page } from "@playwright/test"
+import { fleet, mockOverview, selfUpdate } from "./overview-fixture"
+import { host, iso, json, now, snapshot, user } from "./host-fixture"
+import { risen } from "./risen"
 
 /**
  * The host Overview, against a server with something in every place: the
- * machine drawn as itself, the shortcuts that start something, each moving
- * reading carrying its last hour, the projects as the fleet draws them, the
- * shells and drawings left open, the databases beside the backups, who is
- * spending the machine beside the day's activity, and a service tile per
- * module naming what it counts with the products.
+ * machine drawn as itself with its state and its verbs, the shortcuts that
+ * start something, each reading a sentence carrying its last hour, the
+ * projects as the fleet draws them, the shells and drawings left open, the
+ * databases beside the backups, who is spending the machine beside the day's
+ * activity, and a row per module saying what it counts in one sentence.
  */
+
+const viewer = { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }
+
+/**
+ * Holds the machine's first frame, by socket and by request, until the
+ * returned function is called: the page as it stands while it waits.
+ */
+async function holdFrame(page: Page, frame: unknown = snapshot) {
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.routeWebSocket("**/api/v1/system/stream**", async (socket) => {
+    await held
+    socket.send(JSON.stringify({ type: "host", data: host }))
+    socket.send(JSON.stringify({ type: "metrics", data: frame }))
+  })
+  for (const [path, body] of [
+    ["/system/host", host],
+    ["/system/metrics", frame],
+  ] as const)
+    await page.route(`**/api/v1${path}`, async (route) => {
+      await held
+      await json(route, body)
+    })
+  return release
+}
+
+/** One read answered only once the returned function is called. */
+async function holdRead(page: Page, pattern: string, body: unknown) {
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route(pattern, async (route) => {
+    await held
+    await json(route, body)
+  })
+  return release
+}
+
+const refusal = (code: string, message: string) => ({
+  status: 503,
+  contentType: "application/json",
+  body: JSON.stringify({ error: { code, message } }),
+})
 
 test.beforeEach(async ({ page }) => {
   await mockOverview(page)
@@ -21,7 +64,9 @@ test("the host is drawn as itself, and its facts are one line", async ({ page })
   await expect(
     page.locator('[data-slot="host-identity"]').getByText("atlas", { exact: true }),
   ).toBeVisible()
-  await expect(page.getByText(/^Ubuntu 24\.04 6\.8\.0-45-generic$/)).toBeVisible()
+  const identity = page.locator('[data-slot="host-identity"]')
+  await expect(identity.getByText("Ubuntu 24.04", { exact: true })).toBeVisible()
+  await expect(identity.getByText("6.8.0-45-generic", { exact: true })).toBeVisible()
   // The distribution, the processor and the hypervisor, each its own mark.
   for (const logo of ["ubuntu", "amd", "qemu"]) {
     await expect(page.locator(`img[src="/logos/${logo}.svg"]`).first()).toBeVisible()
@@ -137,38 +182,125 @@ test("a reading several components need is asked for once on load", async ({ pag
   expect(asked.filter((path) => path.endsWith("/deploy/traffic"))).toHaveLength(1)
 })
 
-test("each moving reading carries its last hour in its tile", async ({ page }) => {
+test("each reading is a sentence that carries its last hour", async ({ page }) => {
   await page.goto("/")
-  const cpu = page.locator("[data-slot=stat-tile]", { hasText: "CPU" }).first()
+  const cpu = page.locator("[data-slot=reading-line]", { hasText: "CPU" }).first()
   await expect(cpu.getByRole("img", { name: "CPU over the last hour" })).toBeVisible({
     timeout: 20_000,
   })
+  await expect(cpu).toContainText("23.4% busy")
+  await expect(cpu).toContainText("17% user · 5% sys · 1% wait")
   await expect(page.getByRole("img", { name: "Network over the last hour" })).toBeVisible()
-  // The panel of sparklines that repeated the tiles is gone.
+  // The panel of sparklines that repeated the readings is gone.
   await expect(page.getByRole("heading", { name: "Last hour" })).toHaveCount(0)
   // Every core from the same frame, beside the figure they add up to.
   await expect(cpu.getByRole("img", { name: "4 cores, the busiest at 31%" })).toBeVisible()
+
+  const lines = page.locator("[data-slot=resources] [data-slot=reading-line]")
+  await expect(lines).toHaveText([
+    /CPU.*23\.4% busy/,
+    /Memory.*6\.5 GB free.*56% used · 4\.0 GB cached/,
+    /Load.*0\.92, 0\.23 a core.*0\.71 · 0\.60 over 5 and 15 min/,
+    /Network.*2\.3 MB\/s in.*420\.0 KB\/s out · 312 TCP sockets/,
+    /Disk I\/O.*5\.1 MB\/s.*1\.2 MB\/s read · 3\.9 MB\/s write/,
+  ])
+  // Every line is one height, and each is a way to the page that records it.
+  await risen(page)
+  const boxes = await lines.evaluateAll((all) => all.map((line) => line.getBoundingClientRect()))
+  expect(new Set(boxes.map((box) => box.height)).size).toBe(1)
+  await expect(lines.first()).toHaveAttribute("href", "/metrics")
+  await expect(lines.first()).toHaveAccessibleName("CPU on Metrics")
 })
 
-test("the readings say they are live and lead on to Metrics", async ({ page }) => {
+test("no metric card is left on the page", async ({ page }) => {
+  await page.goto("/")
+  await expect(page.locator("[data-slot=resources] [data-slot=reading-line]")).toHaveCount(5)
+  await expect(page.getByRole("list", { name: "Services" }).locator(":scope > li")).toHaveCount(8)
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+})
+
+test("the machine's line says it is answering and carries its verbs", async ({ page }) => {
   await page.goto("/")
   const identity = page.locator('[data-slot="host-identity"]')
+  await expect(identity).toHaveAttribute("data-layout", "project")
   await expect(identity.getByText("atlas", { exact: true })).toBeVisible()
-  // The identity line describes the machine, with nothing to press.
-  await expect(identity.getByRole("link")).toHaveCount(0)
+  await expect(identity.getByText("Online", { exact: true })).toBeVisible()
+  // One command, a shell in the account's home, and the rest behind the menu.
+  await expect(identity.getByRole("link")).toHaveCount(1)
+  await expect(identity.getByRole("link", { name: "Open terminal" })).toHaveAttribute(
+    "href",
+    "/terminal?cwd=%2Fhome%2Foperator",
+  )
+  await identity.getByRole("button", { name: "Server actions" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText([
+    "Update 7 packages",
+    "Restart the dashboard",
+  ])
+  // Restart is confirmed and followed on the page that owns it.
+  await page.getByRole("menuitem", { name: "Restart the dashboard" }).click()
+  await expect(page).toHaveURL(/\/dashboard\/configuration$/)
+})
 
+test("a version to take is offered from the machine's menu, in the dialog that installs it", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/dashboard/update**", (route) =>
+    json(route, {
+      ...selfUpdate,
+      latest: "0.7.2",
+      available: true,
+      tagged: true,
+      releases: [{ version: "0.7.2", date: "2026-10-20", title: "A fix", changes: [] }],
+    }),
+  )
+  await page.goto("/")
+  await expect(
+    page
+      .getByRole("list", { name: "Services" })
+      .getByRole("listitem")
+      .filter({ hasText: "Settings" }),
+  ).toContainText("Version 0.7.1, 1 release behind")
+  const identity = page.locator('[data-slot="host-identity"]')
+  await identity.getByRole("button", { name: "Server actions" }).click()
+  await page.getByRole("menuitem", { name: "Update to 0.7.2" }).click()
+  await expect(page.getByRole("dialog", { name: "Update to 0.7.2" })).toBeVisible()
+})
+
+test("a restart the packages owe is said beside the machine's state", async ({ page }) => {
+  await page.route("**/api/v1/packages/updates", (route) =>
+    json(route, {
+      available: true,
+      manager: "apt",
+      packages: [],
+      securityCount: 0,
+      securityFiltering: true,
+      rebootRequired: true,
+      lastChecked: iso(now),
+    }),
+  )
+  await page.goto("/")
+  const identity = page.locator('[data-slot="host-identity"]')
+  await expect(identity.getByText("Restart needed", { exact: true })).toBeVisible()
+  await expect(
+    page
+      .getByRole("list", { name: "Services" })
+      .getByRole("listitem")
+      .filter({ hasText: "Packages" }),
+  ).toContainText("Nothing to update, restart needed")
+})
+
+test("the readings lead on to Metrics", async ({ page }) => {
+  await page.goto("/")
   const resources = page.locator("section", {
     has: page.getByRole("heading", { name: "Resources" }),
   })
-  await expect(resources.getByText("Live", { exact: true })).toBeVisible()
-  const readings = resources.locator("[data-slot=stat-grid] > [data-slot=stat-tile]")
-  await expect(readings).toHaveCount(4)
-  await expect(readings.filter({ hasText: "Storage" })).toHaveCount(0)
+  await expect(resources.locator("[data-slot=reading-line]")).toHaveCount(5)
   await resources.getByRole("link", { name: "All metrics" }).click()
   await expect(page).toHaveURL(/\/metrics$/)
 })
 
-test("every filesystem is a bar of its own under the readings", async ({ page }) => {
+test("every filesystem is a bar of its own after the readings", async ({ page }) => {
   await page.goto("/")
   const band = page.locator("[data-slot=storage-band]")
   const disks = band.getByRole("list", { name: "Filesystems" }).locator(":scope > li")
@@ -182,7 +314,7 @@ test("every filesystem is a bar of its own under the readings", async ({ page })
   // Past the warning line the free space takes the bar's tone.
   await expect(disks.first().getByText("10.4 GB", { exact: true })).toHaveClass(/text-warning/)
   // What the disks are doing is a reading of its own, with its hour.
-  const io = band.locator("[data-slot=stat-tile]", { hasText: "Disk I/O" })
+  const io = page.locator("[data-slot=reading-line]", { hasText: "Disk I/O" })
   await expect(io).toContainText("1.2 MB/s read · 3.9 MB/s write")
   await expect(io.getByRole("img", { name: "Disk I/O over the last hour" })).toBeVisible()
 
@@ -345,42 +477,174 @@ test("read-only accounts see activity without an administrator's audit-log link"
   await expect(activity.getByRole("link", { name: "Audit log" })).toHaveCount(0)
 })
 
-test("a service tile names what it counts with the products", async ({ page }) => {
+test("a service row says what it counts in a sentence, with the products", async ({ page }) => {
   await page.goto("/")
-  const main = page.locator("[data-slot=page]")
-  const docker = main.getByRole("link", { name: "Docker", exact: true })
-  await expect(docker).toContainText(/9\s*running/)
-  await expect(docker).toContainText("11 containers · 2 stopped")
-  // The running images, not the stopped ones.
+  const services = page.getByRole("list", { name: "Services" })
+  const row = (name: string) =>
+    services.locator(":scope > li", { has: page.getByRole("link", { name: `Open ${name}` }) })
+  const docker = row("Docker")
+  await expect(docker).toContainText("9 containers running, 2 stopped")
+  await expect(docker).toContainText("Running")
+  await expect(docker.getByRole("link", { name: "Open Docker" })).toHaveAttribute("href", "/docker")
+  // Drawn as itself, and the running images, not the stopped ones.
+  await expect(docker.locator('img[src="/logos/docker.svg"]')).toBeAttached()
   await expect(docker.locator('img[src="/logos/postgresql.svg"]')).toBeAttached()
   await expect(docker.locator('img[src="/logos/redis.svg"]')).toBeAttached()
   await expect(docker.locator('img[src="/logos/meilisearch.svg"]')).toHaveCount(0)
-  await expect(
-    main
-      .getByRole("link", { name: "Security", exact: true })
-      .locator('img[src="/logos/tailscale.svg"]'),
-  ).toBeAttached()
+  await expect(row("Security")).toContainText("Tailscale only, 1 allowed range on 1 interface")
+  await expect(row("Security").locator('img[src="/logos/tailscale.svg"]')).toBeAttached()
+  await expect(row("Proxy & TLS")).toContainText("3 certificates, the next renews in 12 days")
+  await expect(row("Proxy & TLS").getByText("Expiring", { exact: true })).toHaveClass(
+    /text-warning/,
+  )
+  await expect(row("Packages")).toContainText("7 updates waiting, 2 for security")
 
   // Deployments, Databases and Backups have blocks of their own, so their
-  // tiles went to what systemd runs and the remote computers.
+  // rows went to what systemd runs and the remote computers.
   for (const name of ["Deployments", "Databases", "Backups"]) {
-    await expect(
-      main.locator("[data-slot=stat-grid]").getByRole("link", { name, exact: true }),
-    ).toHaveCount(0)
+    await expect(services.getByRole("link", { name: `Open ${name}`, exact: true })).toHaveCount(0)
   }
-  const units = main.getByRole("link", { name: "System services", exact: true })
-  await expect(units).toContainText(/1\s*failed/)
-  await expect(units).toContainText("6 running")
-  await expect(units.locator("[data-slot=stat-tile] .text-destructive")).toHaveText("1")
-  const remote = main.getByRole("link", { name: "Remote Desktop", exact: true })
-  await expect(remote).toContainText(/2\s*computers/)
-  await expect(remote).toContainText("1 open now")
-  const git = main.getByRole("link", { name: "Git", exact: true })
-  await expect(git).toContainText(/4\s*repositories/)
-  await expect(git).toContainText("1 uncommitted · 1 behind")
+  const units = row("System services")
+  await expect(units).toContainText("1 failed, 6 services running")
+  await expect(units.getByText("Failed", { exact: true })).toHaveClass(/text-destructive/)
+  await expect(row("Remote Desktop")).toContainText("2 computers, 1 open now")
+  const git = row("Git")
+  await expect(git).toContainText("4 repositories, 1 uncommitted, 1 behind")
   for (const forge of ["gitlab", "codeberg", "github"]) {
     await expect(git.locator(`img[src="/logos/${forge}.svg"]`)).toBeAttached()
   }
+  await expect(row("Settings")).toContainText("Version 0.7.1, the newest")
+  // A press anywhere on a row opens its page.
+  await units.click({ position: { x: 300, y: 20 } })
+  await expect(page).toHaveURL(/\/processes\/services$/)
+})
+
+for (const width of [1280, 390]) {
+  test(`a service row is one height whatever its read says, at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    // Docker is not on this host, the certificates fail to read, and the
+    // units are still out: three other states beside the rows that answered.
+    await page.route("**/api/v1/docker/containers/**", (route) =>
+      route.fulfill(refusal("docker_unavailable", "docker is not reachable")),
+    )
+    await page.route("**/api/v1/certificates/", (route) =>
+      route.fulfill(refusal("unavailable", "the store could not be read")),
+    )
+    const answer = await holdRead(page, "**/api/v1/systemd/", {
+      available: true,
+      units: [{ name: "a.service", activeState: "active" }],
+    })
+    await page.goto("/")
+    const rows = page.getByRole("list", { name: "Services" }).locator(":scope > li")
+    await expect(rows).toHaveCount(8)
+    await expect(rows.filter({ hasText: "Docker" })).toContainText("Not on this server")
+    await expect(rows.filter({ hasText: "Docker" })).toContainText("Not installed")
+    await expect(rows.filter({ hasText: "Proxy & TLS" })).toContainText(
+      "Its reading did not arrive",
+    )
+    await expect(rows.filter({ hasText: "Proxy & TLS" })).toContainText("Unreachable")
+    await expect(rows.filter({ hasText: "Git" })).toContainText("4 repositories")
+    const waiting = rows.filter({ hasText: "System services" })
+    await expect(waiting.locator("[data-slot=skeleton]")).toBeVisible()
+    await risen(page)
+    const measure = () =>
+      rows.evaluateAll((all) =>
+        all.map((row) => {
+          const box = row.getBoundingClientRect()
+          return { y: Math.round(box.y), height: box.height }
+        }),
+      )
+    const before = await measure()
+    expect(new Set(before.map((box) => box.height)).size).toBe(1)
+    answer()
+    await expect(waiting).toContainText("1 service running, none failed")
+    await risen(page)
+    // The read landing moved no row.
+    expect(await measure()).toEqual(before)
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      ),
+    ).toBe(false)
+  })
+
+  test(`the page holds its shape until the machine's first frame, at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    // One disk, the common server: its bar sits beside the disks' reading.
+    const frame = { ...snapshot, mounts: snapshot.mounts.slice(0, 1) }
+    const release = await holdFrame(page, frame)
+    await page.goto("/")
+    const identity = page.locator('[data-slot="host-identity"]')
+    const blocks = [
+      identity,
+      page.locator("[data-slot=shortcuts]"),
+      page.locator("[data-slot=resources]"),
+      page.getByRole("heading", { name: "Deployments" }),
+      page.getByRole("heading", { name: "Databases", exact: true }),
+      page.getByRole("list", { name: "Services" }),
+    ]
+    // Everything under the machine's line is already there and reading.
+    await expect(page.getByRole("list", { name: "Deployment projects" })).toBeVisible()
+    await expect(page.getByRole("list", { name: "Databases" })).toBeVisible()
+    await expect(identity.locator("[data-slot=skeleton]").first()).toBeVisible()
+    await expect(page.locator("[data-slot=resources] [data-slot=reading-line]")).toHaveCount(6)
+    await risen(page)
+    const measure = () =>
+      Promise.all(
+        blocks.map(async (block) => {
+          const box = (await block.boundingBox())!
+          return { y: Math.round(box.y), height: Math.round(box.height) }
+        }),
+      )
+    const before = await measure()
+    release()
+    await expect(identity.getByText("atlas", { exact: true })).toBeVisible()
+    await expect(page.locator("[data-slot=storage-band]")).toContainText("10.4 GB free")
+    await risen(page)
+    expect(await measure()).toEqual(before)
+  })
+}
+
+test("a reader sees no command on the machine's line that would refuse them", async ({ page }) => {
+  await page.route("**/api/v1/auth/session", (route) => json(route, viewer))
+  await page.route("**/api/v1/packages/updates", (route) =>
+    json(route, {
+      available: true,
+      manager: "apt",
+      packages: [],
+      securityCount: 0,
+      securityFiltering: true,
+      rebootRequired: false,
+      lastChecked: iso(now),
+    }),
+  )
+  await page.goto("/")
+  const identity = page.locator('[data-slot="host-identity"]')
+  await expect(identity.getByText("Online", { exact: true })).toBeVisible()
+  await expect(identity.getByRole("link")).toHaveCount(0)
+  await expect(identity.getByRole("button")).toHaveCount(0)
+})
+
+test("a process in the top list opens its own page", async ({ page }) => {
+  await page.goto("/")
+  const processes = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Top processes" }),
+  })
+  const rows = processes.locator("[data-slot=rank-row]")
+  await expect(rows.first()).toContainText("postgres")
+  await expect(rows.first()).toContainText("12.4%")
+  await expect(rows.first()).toContainText("812 MB")
+  const link = rows.first().getByRole("link", { name: "Open postgres, process 1204" })
+  await expect(link).toHaveAttribute("href", "/processes/1204")
+  // By memory the columns change places, and the block keeps its height.
+  await risen(page)
+  const before = (await processes.boundingBox())!.height
+  await processes.getByRole("radio", { name: "Memory" }).click()
+  await expect(rows.first().locator("[data-slot=rank-value]")).toHaveText("2 GB")
+  await risen(page)
+  expect((await processes.boundingBox())!.height).toBe(before)
 })
 
 for (const width of [1280, 1720]) {
@@ -393,8 +657,8 @@ for (const width of [1280, 1720]) {
       timeout: 20_000,
     })
     await expect(
-      page.locator("[data-slot=page]").getByRole("link", { name: "Git", exact: true }),
-    ).toContainText(/4\s*repositories/)
+      page.getByRole("list", { name: "Services" }).getByRole("listitem").filter({ hasText: "Git" }),
+    ).toContainText("4 repositories")
     await expect(page.getByRole("list", { name: "Recent drawings" })).toBeVisible()
     expect(
       await page.evaluate(
@@ -550,7 +814,7 @@ test("a reader without write access sees no shortcut that would refuse them", as
   // No terminal: its listing needs the terminal, and is never asked for.
   await expect(page.getByRole("heading", { name: "Terminal", exact: true })).toHaveCount(0)
   await expect(page.getByRole("list", { name: "Recent drawings" })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Remote Desktop", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Open Remote Desktop", exact: true })).toHaveCount(0)
   expect(requested).not.toContain("/api/v1/terminal/")
   expect(requested).not.toContain("/api/v1/remote-desktop/")
 })
@@ -584,7 +848,7 @@ test("a section kept out of the sidebar is kept off the Overview, read and all",
   await expect(page.locator("[data-slot=shortcut]", { hasText: "New terminal" })).toHaveCount(0)
 })
 
-test("on a phone the tiles are two to a row and the fleet keeps its worst three", async ({
+test("on a phone the readings are one column and the fleet keeps its worst three", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 900 })
@@ -610,12 +874,24 @@ test("on a phone the tiles are two to a row and the fleet keeps its worst three"
   const resources = page.locator("section", {
     has: page.getByRole("heading", { name: "Resources" }),
   })
-  const [cpu, memory] = await Promise.all(
-    ["CPU", "Memory"].map((name) =>
-      resources.locator("[data-slot=stat-tile]", { hasText: name }).first().boundingBox(),
+  // One reading to a line, each the phone's width, none cut off.
+  const lines = resources.locator("[data-slot=reading-line]")
+  await expect(lines).toHaveCount(5)
+  const [cpu, memory] = await Promise.all([0, 1].map((n) => lines.nth(n).boundingBox()))
+  expect(memory!.y).toBeGreaterThan(cpu!.y)
+  expect(cpu!.width).toBe(memory!.width)
+  expect(
+    await lines.evaluateAll((all) =>
+      all.every((line) =>
+        [...line.querySelectorAll<HTMLElement>(".truncate")].every(
+          (text) => text.scrollWidth <= text.clientWidth,
+        ),
+      ),
     ),
-  )
-  expect(cpu?.y).toBe(memory?.y)
+  ).toBe(true)
+  // The machine's line keeps its command beside its name.
+  const identity = page.locator('[data-slot="host-identity"]')
+  await expect(identity.getByRole("link", { name: "Open terminal" })).toBeVisible()
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,

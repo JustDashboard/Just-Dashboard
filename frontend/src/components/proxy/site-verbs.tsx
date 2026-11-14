@@ -322,7 +322,7 @@ export function useSiteVerbs({
     key: "log",
     label: "Logs",
     icon: Logs,
-    run: () => router.push(sitePath(vhost.name)),
+    run: () => router.push(`${sitePath(vhost.name)}?tab=logs`),
   })
   // The files the site really writes to, as its file and nginx.conf name
   // them, for reading them whole on the host Logs page. The listing keeps

@@ -8,8 +8,8 @@ import { DNS_SERVICE_BASE } from "@/lib/network-dns-services"
 import { Cpu, External } from "@/components/icons"
 import type { DNSView } from "@/lib/types"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { RowList, Row } from "@/components/row-list"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
+import { useHubSession } from "@/components/network/hub-session"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { KIND_PRODUCT } from "@/components/network/dns/resolvers"
@@ -34,12 +34,17 @@ type Handoff = Omit<DNSServiceHandoff, "detected">
 export function Adblock({
   adblock,
   onRequest,
+  onUpstreams,
 }: {
   adblock: DNSView["adblock"]
   onRequest?: (request: DNSServiceAsk) => void
+  /** Opens the upstreams in the settings, where the filtering resolvers are picked. */
+  onUpstreams: () => void
 }) {
   const { can } = useAuth()
   const admin = can("system.admin") && Boolean(onRequest)
+  // Connecting stores a credential: not offered to a session opened through Just Hub.
+  const hub = useHubSession(admin)
   const handoffs = usePoll(
     async (signal) => readDNSHandoffs(await get(`${DNS_SERVICE_BASE}/handoffs`, undefined, signal)),
     30_000,
@@ -56,19 +61,36 @@ export function Adblock({
   if (adblock.length > 0) {
     return (
       <div className="flex min-w-0 flex-col gap-2">
-        <RowList>
+        <ChoiceList>
           {adblock.map((blocker) => {
             const handoff = admin ? handoffFor(blocker) : undefined
+            const connection = handoff?.connections[0]
             return (
-              <Row
+              <ChoiceRow
                 key={`${blocker.kind}:${blocker.container ?? blocker.name}`}
                 leading={<ProductLogo id={KIND_PRODUCT[blocker.kind]} size="sm" fallback={Cpu} />}
                 title={blocker.name}
-                subtitle={
-                  handoff?.connections[0] ? (
+                // A filter with a connection opens it; one without has nowhere
+                // to go but its Connect, so its card is a reading.
+                verb={
+                  connection ? `Inspect ${blocker.name} through ${connection.name}` : blocker.name
+                }
+                disabled={!connection}
+                onSelect={
+                  connection
+                    ? () =>
+                        onRequest?.({
+                          kind: "connection",
+                          id: connection.id,
+                          name: connection.name,
+                        })
+                    : undefined
+                }
+                description={
+                  connection ? (
                     <>
-                      connected as {handoff.connections[0].name} ·{" "}
-                      {handoff.connections[0].management ? "reviewed changes" : "read-only"}
+                      connected as {connection.name} ·{" "}
+                      {connection.management ? "reviewed changes" : "read-only"}
                     </>
                   ) : handoff && !handoff.endpoint && handoff.endpointProblem ? (
                     handoff.endpointProblem
@@ -78,7 +100,7 @@ export function Adblock({
                       {blocker.image && (
                         <>
                           {" · "}
-                          <span className="font-mono">{blocker.image}</span>
+                          <span className="align-top font-mono">{blocker.image}</span>
                         </>
                       )}
                     </>
@@ -87,67 +109,58 @@ export function Adblock({
                   )
                 }
                 trailing={
-                  <>
+                  <span className="w-48 max-md:hidden">
                     <Status
                       tone={blocker.answering ? "running" : "warning"}
                       label={
                         blocker.answering ? "Answering on port 53" : "Not answering on port 53"
                       }
                     />
-                    {blocker.webPort ? (
-                      <Button asChild size="xs" variant="outline">
-                        <a
-                          href={`http://${window.location.hostname}:${blocker.webPort}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label={`Open ${blocker.name}'s web page on port ${blocker.webPort}`}
+                  </span>
+                }
+                actions={
+                  blocker.webPort || (!connection && handoff?.endpoint) ? (
+                    <span className="flex items-center gap-1.5">
+                      {blocker.webPort ? (
+                        <Button asChild size="xs" variant="outline">
+                          <a
+                            href={`http://${window.location.hostname}:${blocker.webPort}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label={`Open ${blocker.name}'s web page on port ${blocker.webPort}`}
+                          >
+                            <span className="max-sm:hidden">Open </span>:{blocker.webPort}
+                            <External aria-hidden />
+                          </a>
+                        </Button>
+                      ) : null}
+                      {!connection && handoff?.endpoint && !hub ? (
+                        <Button
+                          size="xs"
+                          aria-label={`Connect ${blocker.name} at ${handoff.endpoint}`}
+                          onClick={() =>
+                            onRequest?.({
+                              kind: "connect",
+                              seed: {
+                                engine: handoff.engine,
+                                endpoint: handoff.endpoint ?? "",
+                                name: blocker.container
+                                  ? `${blocker.name} (${blocker.container})`
+                                  : blocker.name,
+                              },
+                            })
+                          }
                         >
-                          Open :{blocker.webPort}
-                          <External aria-hidden />
-                        </a>
-                      </Button>
-                    ) : null}
-                    {handoff?.connections[0] ? (
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        aria-label={`Inspect ${blocker.name} through ${handoff.connections[0].name}`}
-                        onClick={() =>
-                          onRequest?.({
-                            kind: "connection",
-                            id: handoff.connections[0].id,
-                            name: handoff.connections[0].name,
-                          })
-                        }
-                      >
-                        Inspect
-                      </Button>
-                    ) : handoff?.endpoint ? (
-                      <Button
-                        size="xs"
-                        aria-label={`Connect ${blocker.name} at ${handoff.endpoint}`}
-                        onClick={() =>
-                          onRequest?.({
-                            kind: "connect",
-                            seed: {
-                              engine: handoff.engine,
-                              endpoint: handoff.endpoint ?? "",
-                              name: blocker.container
-                                ? `${blocker.name} (${blocker.container})`
-                                : blocker.name,
-                            },
-                          })
-                        }
-                      >
-                        Connect
-                      </Button>
-                    ) : null}
-                  </>
+                          Connect
+                        </Button>
+                      ) : null}
+                    </span>
+                  ) : undefined
                 }
               />
             )
           })}
-        </RowList>
+        </ChoiceList>
         {admin && handoffs.error && (
           <p className="text-hint text-muted-foreground">
             The native connection handoff could not be read: {handoffs.error.message}
@@ -164,9 +177,7 @@ export function Adblock({
         title="Use an ad-blocking upstream"
         verb="Show the ad-blocking resolvers"
         description="AdGuard DNS and Mullvad drop ad and tracker lookups for every program on this server. Nothing runs here."
-        onSelect={() =>
-          document.getElementById("dns-upstreams")?.scrollIntoView({ behavior: "smooth" })
-        }
+        onSelect={onUpstreams}
       />
       <ChoiceRow
         index={1}

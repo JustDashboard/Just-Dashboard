@@ -73,7 +73,7 @@ test("a supported mutation opts in and requires a received response before expli
     return json(route, state.change)
   })
 
-  await page.goto("/network/traffic")
+  await page.goto("/network/traffic?tab=shaping")
   // The guard is on without being asked for, and its switch is not on the
   // page: with nothing pending the shell's notice draws nothing at all.
   await expect(
@@ -286,6 +286,7 @@ test("the guard turned off on the overview holds on the page that makes the chan
     .getByRole("link", { name: "Traffic" })
     .click()
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Traffic")
+  await page.getByRole("tab", { name: "Shaping" }).click()
   await page.getByRole("button", { name: "Edit the limits on ens3" }).click()
   const sheet = page.getByRole("dialog")
   await sheet.getByRole("button", { name: "Use cake" }).click()

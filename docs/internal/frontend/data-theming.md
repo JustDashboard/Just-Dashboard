@@ -71,12 +71,13 @@ ordinary managed-network preference (the Network overview's *Managed changes* ro
 or failed native cleanup remains a warning, including outside Network. Further journaled changes
 remain blocked; the applying owner can explicitly retry cleanup. The warning cannot be dismissed
 until cleanup succeeds. Read accounts do not request administrator-only native profiles.
-The route form exposes an optional preferred source and shows returned sources in the existing
+The route form exposes an optional preferred source and shows returned sources in the routes
 table. Policy rules include an outgoing-interface selector and validated note. The routing diagram selects
-IPv4 or IPv6 rules and family-specific table routes, starting with the browser path's family. Its
-highlighted policy rule is explicitly an inference. The target lookup asks the kernel through the
-read-only `/network/routing/lookup` endpoint with optional source and packet mark, without sending
-traffic or claiming end-to-end reachability. Tailscale subnet drafts clear only after a successful offer;
+IPv4 or IPv6 rules and family-specific table routes, starting with the browser path's family and
+following the family of an address asked about. Its highlighted policy rule is explicitly an inference.
+The diagram's target field asks the kernel through the read-only `/network/routing/lookup` endpoint
+with optional source and packet mark once the typing pauses on one literal address, and again every
+fifteen seconds, without sending traffic or claiming end-to-end reachability. Tailscale subnet drafts clear only after a successful offer;
 retry reads current preferences so an accepted offer with a lost response is not duplicated.
 Resolver fallback servers and cache modes are editable through the existing confirmed apply;
 managed values are preserved, and unset defaults stay unset until explicitly chosen. Endpoint validation retains

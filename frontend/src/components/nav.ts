@@ -334,13 +334,6 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
           { title: "Drift", href: "/network/drift", icon: Monitoring, group: "Activity" },
           { title: "Tools", href: "/network/tools", icon: Wrench, group: "Diagnostics" },
           {
-            title: "Connection path",
-            href: "/network/investigate",
-            icon: Inspect,
-            capability: "system.admin",
-            group: "Diagnostics",
-          },
-          {
             title: "Packet captures",
             href: "/network/captures",
             icon: Crosshair,

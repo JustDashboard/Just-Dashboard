@@ -1,12 +1,17 @@
 import { expect, test } from "@playwright/test"
 import { recordProgress } from "./progress-recording"
 import { risen } from "./risen"
-import { CONTAINERS, DETAIL, mockStackDetail, statsFrame } from "./stack-detail-fixture"
+import { CONTAINERS, DETAIL, statsFrame, user } from "./stack-detail-fixture"
+import { mockStackDetail } from "./stack-rail-fixture"
 
 /**
  * A stack's own page (`/docker/stacks/<name>`), over `shop`: six services,
  * one in a restart loop, one a step from its memory limit and one compose
  * never created, in a checkout with uncommitted changes.
+ *
+ * The Stacks list stands beside the page from 1280px, so the blocks that go
+ * side by side do so from 1600px: the tests that read the wide table ask for
+ * a window that wide.
  */
 
 test("opens on the stack's identity line and says what is failing", async ({ page }) => {
@@ -26,7 +31,7 @@ test("opens on the stack's identity line and says what is failing", async ({ pag
   const verdict = identity.getByRole("button", { name: "1 service failing" })
   await expect(verdict).toBeVisible()
   await verdict.click()
-  const rows = page.locator("[data-workspace-item]")
+  const rows = page.getByRole("region", { name: "Services" }).locator("[data-workspace-item]")
   await expect(rows).toHaveCount(1)
   await expect(rows.first()).toHaveAttribute("data-workspace-item", "worker")
   await expect(verdict).toHaveAttribute("aria-pressed", "true")
@@ -36,7 +41,7 @@ test("opens on the stack's identity line and says what is failing", async ({ pag
 
 test("the services are a table of live readings", async ({ page }) => {
   await mockStackDetail(page)
-  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.setViewportSize({ width: 1900, height: 1000 })
   await page.goto("/docker/stacks/shop")
 
   const row = (name: string) => page.locator(`tr[data-workspace-item='${name}']`)
@@ -71,7 +76,7 @@ test("the services are a table of live readings", async ({ page }) => {
 
 test("draws how the stack is reached and what happened to it", async ({ page }) => {
   await mockStackDetail(page)
-  await page.setViewportSize({ width: 1440, height: 1600 })
+  await page.setViewportSize({ width: 1680, height: 1600 })
   await page.goto("/docker/stacks/shop")
 
   const map = page.locator("[data-slot='stack-map']")
@@ -107,7 +112,7 @@ test("every block of the band is one height before its readings land and after",
     socket.send(JSON.stringify({ type: "containers", data: CONTAINERS }))
     socket.send(JSON.stringify({ type: "stats", data: statsFrame(0) }))
   })
-  await page.setViewportSize({ width: 1440, height: 1600 })
+  await page.setViewportSize({ width: 1680, height: 1600 })
   await page.goto("/docker/stacks/shop")
 
   const band = page.locator("[data-slot=stack-usage]")
@@ -128,7 +133,7 @@ test("every block of the band is one height before its readings land and after",
 
 test("a service's compose verbs run for that service", async ({ page }) => {
   const mocks = await mockStackDetail(page)
-  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.setViewportSize({ width: 1680, height: 1000 })
   await page.goto("/docker/stacks/shop")
 
   const api = page.locator("tr[data-workspace-item='api']")
@@ -156,7 +161,7 @@ test("a service's compose verbs run for that service", async ({ page }) => {
 
 test("a row opens its container", async ({ page }) => {
   await mockStackDetail(page)
-  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.setViewportSize({ width: 1680, height: 1000 })
   await page.goto("/docker/stacks/shop")
   await page
     .locator("tr[data-workspace-item='db']")
@@ -211,7 +216,7 @@ test("a stack nothing has been created for says so", async ({ page }) => {
 
 test("Deploy preview says what Deploy will do to each service, and deploys", async ({ page }) => {
   const mocks = await mockStackDetail(page)
-  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.setViewportSize({ width: 1680, height: 1000 })
   await page.goto("/docker/stacks/shop?tab=preview")
 
   await expect(
@@ -246,7 +251,7 @@ test("the compose file has an outline of its services and keeps an edit across v
   page,
 }) => {
   await mockStackDetail(page)
-  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.setViewportSize({ width: 1680, height: 1000 })
   await page.goto("/docker/stacks/shop?tab=compose")
 
   const outline = page.getByRole("navigation", { name: "Outline" })
@@ -280,7 +285,7 @@ test("History lays the deployments on time and reads one against the file now", 
   page,
 }) => {
   await mockStackDetail(page)
-  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.setViewportSize({ width: 1680, height: 1000 })
   await page.goto("/docker/stacks/shop?tab=history")
 
   await expect(page.getByText("6 deployments")).toBeVisible()
@@ -307,7 +312,7 @@ test("History lays the deployments on time and reads one against the file now", 
 
 test("Files says what compose reads from the stack's directory", async ({ page }) => {
   await mockStackDetail(page)
-  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.setViewportSize({ width: 1680, height: 1000 })
   await page.goto("/docker/stacks/shop?tab=files")
 
   const reads = page.getByRole("region", { name: "What compose reads here" })
@@ -324,7 +329,7 @@ test("Files says what compose reads from the stack's directory", async ({ page }
 
 test("Logs lists the services that write into it and narrows to one", async ({ page }) => {
   await mockStackDetail(page)
-  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.setViewportSize({ width: 1680, height: 1000 })
   await page.goto("/docker/stacks/shop?tab=logs")
 
   const strip = page.getByRole("navigation", { name: "Services in this log" })
@@ -399,7 +404,7 @@ test("progress: Compose output is visible inside the confirmation while the comm
       }),
     )
   })
-  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.setViewportSize({ width: 1680, height: 900 })
   await page.goto("/docker/stacks/shop")
   const api = page.locator("tr[data-workspace-item='api']")
   await api.hover()
@@ -438,4 +443,161 @@ test("progress: Compose output is visible inside the confirmation while the comm
       await expect(dialog).toHaveCount(0)
     },
   )
+})
+
+test("the view reads in a container page's order: readings, the picture, then the table", async ({
+  page,
+}) => {
+  await mockStackDetail(page)
+  await page.setViewportSize({ width: 1680, height: 1000 })
+  await page.goto("/docker/stacks/shop")
+
+  const band = page.locator("[data-slot=stack-usage]")
+  const map = page.locator("[data-slot='stack-map']")
+  const table = page.getByRole("region", { name: "Services" })
+  await expect(table.locator("tr[data-workspace-item]")).toHaveCount(6)
+  await risen(page)
+  const top = async (locator: typeof band) =>
+    locator.evaluate((el) => el.getBoundingClientRect().top)
+  expect(await top(band)).toBeLessThan(await top(map))
+  expect(await top(map)).toBeLessThan(await top(table))
+  // No row of tiles opens it.
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+
+  // The verdict narrows the table and brings it to the reader, now that it is the last block.
+  await page.getByRole("button", { name: "1 service failing" }).click()
+  await expect(table.locator("tr[data-workspace-item]")).toHaveCount(1)
+  await expect(table).toBeInViewport()
+})
+
+test("the stacks stand beside the page, and Alt+↓ walks them with the view carried", async ({
+  page,
+}) => {
+  await mockStackDetail(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker/stacks/shop?tab=history")
+
+  const rail = page.locator("[data-slot=stack-rail]")
+  await expect(rail).toBeVisible()
+  const names = rail.getByRole("list", { name: "Stacks to open" }).getByRole("button")
+  await expect(names).toHaveCount(5)
+  // The list's own order: running first by name, then stopped, then never deployed.
+  expect(
+    await names.evaluateAll((all) => all.map((each) => each.getAttribute("aria-label"))),
+  ).toEqual(["analytics", "monitoring", "shop", "mailserver", "wiki"])
+  const current = rail.getByRole("button", { name: "shop", exact: true })
+  await expect(current).toHaveAttribute("aria-current", "page")
+  await expect(current).toContainText("4/6 up")
+  await expect(rail.getByRole("button", { name: "wiki", exact: true })).toContainText("2 defined")
+  await expect(rail.getByText("5 stacks · running first")).toBeVisible()
+
+  // Every row is one height, whatever it has to say.
+  const heights = await names.evaluateAll((all) =>
+    all.map((each) => each.getBoundingClientRect().height),
+  )
+  expect(new Set(heights).size).toBe(1)
+
+  await expect(page.getByRole("button", { name: "Previous stack" })).toBeEnabled()
+  await page.keyboard.press("Alt+ArrowDown")
+  await expect(page).toHaveURL(/\/docker\/stacks\/mailserver\?tab=history$/, { timeout: 15_000 })
+  await page.goBack()
+  await expect(page).toHaveURL(/\/docker\/stacks\/shop\?tab=history$/)
+  await rail.getByRole("button", { name: "analytics", exact: true }).click()
+  await expect(page).toHaveURL(/\/docker\/stacks\/analytics\?tab=history$/, { timeout: 15_000 })
+})
+
+test("the rail keeps the list's search and state, and still names the stack on screen", async ({
+  page,
+}) => {
+  await mockStackDetail(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/docker/stacks/shop")
+
+  const rail = page.locator("[data-slot=stack-rail]")
+  const names = rail.getByRole("list", { name: "Stacks to open" }).getByRole("button")
+  await expect(names).toHaveCount(5)
+  await rail.getByPlaceholder("Stack, service or image").fill("grafana")
+  await expect(names).toHaveCount(2)
+  // The stack on screen stays, set apart from what the search found.
+  await expect(names.first()).toHaveAttribute("aria-label", "shop")
+  await expect(names.first()).toHaveAttribute("aria-current", "page")
+  await expect(names.nth(1)).toHaveAttribute("aria-label", "monitoring")
+  await expect(rail.getByText("1 of 5")).toBeVisible()
+
+  // The search is the Stacks page's own: it is still there on the way back.
+  await page.getByRole("link", { name: "Stacks" }).first().click()
+  await expect(page.getByPlaceholder("Stack, service or image")).toHaveValue("grafana", {
+    timeout: 15_000,
+  })
+})
+
+test("beside the rail at 1280 the services are drawn down the row, with nothing cut off", async ({
+  page,
+}) => {
+  await mockStackDetail(page)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/docker/stacks/shop")
+
+  await expect(page.locator("[data-slot=stack-rail]")).toBeVisible()
+  const db = page.locator("li[data-workspace-item='db']")
+  await expect(db.getByText("postgres:16-alpine")).toBeVisible()
+  await expect(page.locator("tr[data-workspace-item]")).toHaveCount(0)
+  const main = page.getByRole("region", { name: "Services" })
+  const box = await main.boundingBox()
+  for (const row of await main.locator("li[data-workspace-item]").all()) {
+    const each = await row.boundingBox()
+    expect(each!.x).toBeGreaterThanOrEqual(box!.x - 1)
+    expect(each!.x + each!.width).toBeLessThanOrEqual(box!.x + box!.width + 1)
+  }
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  )
+  expect(overflow).toBeLessThanOrEqual(1)
+})
+
+test("on a phone the page is one pane with no rail, and the picture comes before the services", async ({
+  page,
+}) => {
+  await mockStackDetail(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/docker/stacks/shop")
+
+  await expect(page.locator("li[data-workspace-item='db']")).toBeVisible()
+  await expect(page.locator("[data-slot=stack-rail]")).toBeHidden()
+  const order = await page.evaluate(() => {
+    const top = (selector: string) => document.querySelector(selector)!.getBoundingClientRect().top
+    return [
+      top("[data-slot=stack-usage]"),
+      top("[data-slot='stack-map']"),
+      top("section[aria-label='Services']"),
+    ]
+  })
+  expect(order[0]).toBeLessThan(order[1])
+  expect(order[1]).toBeLessThan(order[2])
+})
+
+test("a read-only account reads the stack and is offered no compose verb", async ({ page }) => {
+  await mockStackDetail(page)
+  await page.route("**/api/v1/auth/session", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...user,
+        capabilities: ["read"],
+        user: { ...user.user, role: "readonly" },
+      }),
+    }),
+  )
+  await page.setViewportSize({ width: 1680, height: 1000 })
+  await page.goto("/docker/stacks/shop")
+
+  await expect(page.locator("tr[data-workspace-item]")).toHaveCount(6)
+  await expect(page.getByRole("button", { name: "Deploy", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Restart", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Create it" })).toHaveCount(0)
+  await expect(page.getByText("Administrator access required")).toBeVisible()
+  // The rail and the walk are reading, and stay.
+  await expect(page.locator("[data-slot=stack-rail]")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Next stack" })).toBeEnabled()
 })

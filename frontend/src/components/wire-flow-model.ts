@@ -101,3 +101,30 @@ export function loadingRows(column: { loadingRows?: number; max?: number }) {
   if (column.max !== undefined) return column.max + 1
   return 3
 }
+
+/**
+ * The lines of detail a waiting node holds: a count, or a count for the wide
+ * picture and one for the narrow, where a node says a line more down a phone
+ * (a hub that names there what its marks no longer do).
+ */
+export type WaitingHint = number | { wide: number; narrow: number }
+
+/** Where one waiting line of detail is drawn. */
+export type WaitingLine = "both" | "wide" | "narrow"
+
+/**
+ * A waiting node's lines of detail, one entry a line: the lines both widths
+ * have first, then the ones only the longer of the two has. With no shape
+ * given a node waits on one line, as every picture did before a node could
+ * say how many it has.
+ */
+export function waitingLines(hint: WaitingHint | undefined): WaitingLine[] {
+  const { wide, narrow } = typeof hint === "object" ? hint : { wide: hint ?? 1, narrow: hint ?? 1 }
+  const count = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0)
+  const shared = Math.min(count(wide), count(narrow))
+  const only: WaitingLine = count(wide) > count(narrow) ? "wide" : "narrow"
+  return [
+    ...Array.from({ length: shared }, (): WaitingLine => "both"),
+    ...Array.from({ length: Math.abs(count(wide) - count(narrow)) }, () => only),
+  ]
+}
