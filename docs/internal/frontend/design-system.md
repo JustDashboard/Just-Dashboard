@@ -1539,7 +1539,8 @@ right edge — a table that arrives broken.
 networks lists are cards at every width (the stacks, containers, images and volumes lists were made tables of readings in 0.7.1 and after — §15 pass 2) — the argument
 `git/repo-card.tsx` made for checkouts, and §16's for anything you take: each row opens a page or a
 panel, so it carries the lit edge. The containers list was the first of them and went back to a
-table in 0.7.1 (§16 says where that leaves the line). `components/docker/container-table.tsx` keeps
+table in 0.7.1 (§16 says where that leaves the line). `components/docker/containers-table.tsx` (the
+Containers page's; the overview's own copy, `container-table.tsx`, went in 0.8.7 with the table it drew) keeps
 both halves of the paragraphs above: from `xl` a table of fixed columns, each heading naming and
 sorting its reading; below, the same readings beneath the name, nothing dropped. Which shape is drawn
 is chosen once (`useMediaQuery`) rather than by `hidden`/`xl:block` twins, because a reading that
@@ -2918,6 +2919,38 @@ The passes, in order. Each one is a diff you can review on its own.
    published ports and its verbs. Below `xl` the same row is drawn down. Project chips narrow it;
    a container that appears rises (`useArrivals`), and one that changes state changes in place.
 
+   The Docker section's first pages took the deploy pages' shape in 0.8.7, and three things in the
+   paragraphs here changed with it. **One line opens every Docker section page**
+   (`docker/docker-identity.tsx`): Docker's mark, "Docker" with its version after it in a fact's
+   weight, the page's verdict beside the name, the server as the first fact, the page's one command
+   at the far end. The overview said "Docker 29.2.0", Containers and Events "Docker Engine 29.2.0"
+   and Stacks the server's hostname, so one daemon had three names. **The overview's table of every
+   container went**: it was the table `/docker/containers` draws, and under the band it answered
+   the band's question a second time. In its place the engine is a picture (`engine-picture.tsx`,
+   on `WireFlow`): compose projects and the containers started by hand, Docker, the networks and
+   volumes it keeps, with the line as the state (red where a project has a failing container, amber
+   where one is partly up or a volume has nothing mounting it, dashed where a thing is stopped or
+   never deployed, moving only where the thing runs). The section's title still counts the
+   containers and links to their table, and the verdict opens that table narrowed to what is
+   failing. A picture cannot know its height before its data, so it remembers the rows each side
+   had (`docker.overview.picture.rows`) and waits at that size; the line, the band and the
+   projects' cards are drawn waiting too, where the page used to be a loading panel until its
+   first list. **The stacks are one-line cards** (`stack-row.tsx`): a stack's services no longer
+   unfold under its row, because a list whose rows grow by the number of services each has is not
+   read down its columns. The card keeps a strip of the services' states, the state and how much
+   of it is up, the two sums and the ports in fixed columns, Deploy in a box of one width so a
+   row with it and a row without end on one edge, then the arrow and the menu. On a phone the state
+   and the sums are the card's second line.
+
+   **A rail beside a page that was laid out without one** (`docker/beside-rail.ts`). A container's
+   and a stack's pages keep their list beside them from `xl`, as a process's does. Both were laid
+   out for the page's whole width, and a rail and its gap take 312px of it: at 1280px the stack's
+   services table, which fixes its columns, was left with no width for its first one. So inside
+   those two pages a block that went side by side at 1280px does so at 1600px, and one that waited
+   for 1536px waits for 1856px; between, the column is as wide as a tablet's and draws what a
+   tablet draws. A page built with its rail (a process, a service, a volume) sizes its blocks for
+   the column from the start and needs none of this.
+
    Scheduled took the same exit in 0.7.1 and for the same reason: five grey figures over three
    tables, and nothing on the page that showed *when* anything ran without reading row by row.
    Each figure went where it is said better. Next run is the countdown at the end of the
@@ -3180,9 +3213,12 @@ The passes, in order. Each one is a diff you can review on its own.
    socket, a press narrowing the table to that stack; and Recent, the daemon's last starts, exits with
    their codes, out-of-memory kills folded into the exit they caused and failed checks, each a tick on
    the last day with its time and its stack's name in that stack's lane hue on the line, opening the
-   stack. The stacks themselves are one framed table of their containers
-   (`stack-table.tsx`) — a stack is still a destination, but its containers are rows of readings, and
-   a stack's row is where they add up. A stack's row carries its products, state, how many declared
+   stack. The stacks themselves were one framed table of their containers
+   (`stack-table.tsx`) until 0.8.7 — a stack was a group row with its containers as rows of readings
+   under it, which grew by however many services it had; they are one-line cards now (`stack-row.tsx`,
+   the paragraph on the Docker section in 0.8.7 below), and the containers are the stack's page. What
+   follows describes that table as it was.
+   A stack's row is where they add up. A stack's row carries its products, state, how many declared
    services are up (a service its file dropped is counted as an orphan, not as a fourth of three), the
    summed CPU and memory as plain figures (a counting figure waits to be scrolled into view, and most
    rows of a capped table are not), and Deploy when it is down, brand-faced only for a stack never
@@ -4022,10 +4058,10 @@ the end of the field that read as the `/` shortcut and a letter "B". Now:
 was the greyest page in the section: one plain column of 13px sentences with a grey dot each, no
 figure anywhere, and a database in a restart loop as sixteen identical rows that pushed everything
 else off the screen. It is `components/docker/events-page.tsx` over three files beside it. It opens
-on the Containers page's identity line (Docker as its mark and version, the host, how long the
-dashboard has been listening and how much it has kept) with the verdict at its right end — a loop
+on the Docker section's identity line (Docker as its mark and version, the host, how long the
+dashboard has been listening and how much it has kept) with the verdict beside its name — a loop
 still going is named, then the containers that failed, then *Nothing failed* — beside the socket's
-`Status live` and a 1h / 6h / 24h / All window that every block below reads over. Pass 2 is kept,
+`Status live`, and at its end a 1h / 6h / 24h / All window that every block below reads over. Pass 2 is kept,
 the Logs page's way: four `StatButton` tiles (failures, restarts, created or removed, external),
 each counting up as it lands with its shape across the window as its `TileTrend`, keyed by its
 line's colour, and each narrowing the table and the feed to what it counts. The containers the
@@ -4038,7 +4074,9 @@ acted on it. A row narrows the feed; its name opens the container. The feed (`ev
 folds a restart loop into one row and a container's run of events moments apart (a restart's kill,
 exit, stop, start and restart) into another (`foldBursts`), each row its product mark, its subject in
 the project's lane hue and who did it with the audit log's account of how that is known; a row new
-since the page opened rises. An exit moments after a `kill` of the same container was asked for, and
+since the page opened rises. The feed is a plain section since 0.8.7 — a title, a hairline, a
+hairline between rows, scrolling with the page — where it was a framed panel with a scroll of its
+own: it is sentences, and the frame is the table's above it. An exit moments after a `kill` of the same container was asked for, and
 is read as the stop it was (`settleAskedExits`): a restart pressed here used to count as a crash
 because most programs answer SIGTERM with 143. The colours are the sanctioned ones: state hues on
 outcomes, `--tag-*` for kinds (created or removed in cyan, external in violet), lane hues for
@@ -4420,6 +4458,10 @@ strip's figures went, and what took their place (`docker/stack-detail.tsx`):
   service moves more than a kilobyte a second, at the Network section's `pulseDuration`; it is
   dashed and red where a port leads to a service that is not running, and amber where a database
   answers on every interface.
+- **The order and the rail (0.8.7).** The Services view reads as a container's Overview does: the
+  band, the picture, then the table, which came first until then and left the picture as the last
+  block. The Stacks list stands beside the page from `xl` (`docker/stack-rail.tsx`), and the page's
+  own side-by-side blocks wait for the width the rail leaves them (`docker/beside-rail.ts`).
 - **The other views took the same vocabulary**, borrowed from the pages that did each job first:
   every service anywhere on the page is its lane, its product and its name (`ServiceLabel` in
   `docker/stack-diff.tsx`), and every diff of the compose file is one view grouped by the service

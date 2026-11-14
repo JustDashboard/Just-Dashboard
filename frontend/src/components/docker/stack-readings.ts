@@ -124,6 +124,37 @@ export function stackLines(
     )
 }
 
+/** Where the Stacks page keeps its search and its state chip, which a stack's rail reads too. */
+export const STACK_FILTER_KEYS = {
+  query: "docker.stacks.query",
+  state: "docker.stacks.state.075",
+} as const
+
+/**
+ * The stacks a search, a state chip and a band's pick leave, in the list's
+ * order. A stack found by one of its services or their images says which
+ * (`matched`), since the row no longer lists them.
+ */
+export function visibleStacks(
+  lines: StackLine[],
+  { query, state, focus }: { query: string; state?: StackBucket | ""; focus?: string },
+): { line: StackLine; matched?: string[] }[] {
+  const needle = query.trim().toLowerCase()
+  return lines.flatMap((line) => {
+    if (state && line.bucket !== state) return []
+    if (focus && line.stack.name !== focus) return []
+    if (!needle || line.stack.name.toLowerCase().includes(needle)) return [{ line }]
+    const matched = line.lines
+      .filter(
+        (s) =>
+          s.service.name.toLowerCase().includes(needle) ||
+          s.service.image.toLowerCase().includes(needle),
+      )
+      .map((s) => s.service.name)
+    return matched.length > 0 ? [{ line, matched }] : []
+  })
+}
+
 /** The exit code Docker wrote into a stopped container's status, "Exited (137) 3 minutes ago". */
 export function exitCode(status: string): number | undefined {
   const match = status.match(/^Exited \((\d+)\)/i)

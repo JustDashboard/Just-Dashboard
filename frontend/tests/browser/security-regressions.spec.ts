@@ -52,12 +52,14 @@ for (const admin of [false, true]) {
       return route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
     })
     await page.goto("/docker/stacks")
-    await expect(page.getByRole("button", { name: "permission-test", exact: true })).toBeVisible()
+    await expect(
+      page.getByRole("link", { name: "Open permission-test", exact: true }),
+    ).toBeVisible()
     await expect(page.getByRole("button", { name: "Create stack", exact: true })).toHaveCount(
       admin ? 1 : 0,
     )
     // A stack is a page of its own, so its controls are checked there.
-    await page.getByRole("button", { name: "permission-test", exact: true }).click()
+    await page.getByRole("link", { name: "Open permission-test", exact: true }).click()
     await page.waitForURL(/\/docker\/stacks\/permission-test$/)
     const panel = page.getByRole("main")
     await expect(panel.locator("[data-workspace-item='worker']")).toBeVisible()

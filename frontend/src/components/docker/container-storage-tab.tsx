@@ -128,10 +128,12 @@ export function ContainerStorageTab({ detail }: { detail: ContainerDetail }) {
   return (
     <div className="flex h-full min-h-0 animate-rise flex-col gap-3">
       {databaseFiles && <DatabaseStorageWarning />}
-      <div className="flex min-h-[30rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card lg:flex-row">
+      <div className="flex min-h-[30rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card min-[1400px]:flex-row lg:max-xl:flex-row">
         <Pane
           flush
-          className="shrink-0 border-hairline max-lg:max-h-72 max-lg:border-b lg:w-80 lg:border-r"
+          // Beside the listing from `lg`, except where the page's own rail has
+          // just taken its width (`beside-rail.ts`): there it is over it.
+          className="shrink-0 border-hairline max-lg:max-h-72 max-lg:border-b min-[1400px]:w-80 min-[1400px]:border-r lg:max-xl:w-80 lg:max-xl:border-r xl:max-[1399px]:max-h-72 xl:max-[1399px]:border-b"
         >
           <PaneHeader className="justify-between px-3 py-2">
             <span className="eyebrow">Mounts</span>
