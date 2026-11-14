@@ -226,6 +226,12 @@ async function openBoard(page: Page) {
   await expect(page.locator("canvas").first()).toBeVisible()
 }
 
+/** The head bar's menu: everything a drawing can be asked but its one command. */
+async function drawingAction(page: Page, name: string) {
+  await page.getByRole("button", { name: "Drawing actions" }).click()
+  await page.getByRole("menuitem", { name }).click()
+}
+
 test("a board opens without saving, keeps its images, and saves inserted live server cards", async ({
   page,
 }) => {
@@ -302,6 +308,176 @@ test("a board opens without saving, keeps its images, and saves inserted live se
   expect(externalFonts).toEqual([])
 })
 
+// The editor is the workbench frame the terminal, Files and Git share: one
+// frame held to the window under a head bar that reads back, name, save state,
+// then one command and a menu. It had a bar of its own with four equal
+// controls and a bin.
+for (const width of [1280, 390]) {
+  test(`a drawing is one frame under a head bar with one command, at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 })
+    const board = await mockBoards(page)
+    await openBoard(page)
+
+    const frame = page.locator("[data-slot=drawing-workspace]")
+    const area = await page.locator("[data-workspace-shell-scroll]").boundingBox()
+    const box = await frame.boundingBox()
+    if (width === 1280) {
+      // In the page's gutter, rounded, and held to the window.
+      expect(box!.x).toBeGreaterThan(area!.x)
+      expect(box!.y + box!.height).toBeLessThan(area!.y + area!.height)
+      expect(await frame.evaluate((node) => getComputedStyle(node).borderRadius)).not.toBe("0px")
+    } else {
+      // On a phone the frame is the screen.
+      expect([box!.x, box!.width]).toEqual([area!.x, area!.width])
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    )
+    expect(
+      await page
+        .locator("[data-workspace-shell-scroll]")
+        .evaluate((node) => node.scrollHeight <= node.clientHeight),
+    ).toBe(true)
+
+    const head = frame.locator("[data-slot=pane-header]").first()
+    await expect(head.getByRole("button", { name: "Back to Excalidraw" })).toBeVisible()
+    await expect(head.getByLabel("Drawing name")).toHaveValue("Untitled board")
+    await expect(head.getByRole("status")).toHaveText("Saved on this server")
+    // One command; the rest is behind the menu, and nothing deletes in one press.
+    await expect(head.getByRole("button", { name: "Add server item" })).toBeVisible()
+    await expect(head.getByRole("button", { name: "Delete drawing" })).toHaveCount(0)
+    await expect(head.getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
+    await head.getByRole("button", { name: "Drawing actions" }).click()
+    await expect(page.getByRole("menuitem")).toHaveText(["Save now", "Reload", "Delete drawing"])
+    await page.keyboard.press("Escape")
+    // The canvas is the rest of the frame.
+    const canvas = await page.getByLabel("Untitled board drawing canvas").boundingBox()
+    const strip = await head.boundingBox()
+    expect(Math.round(canvas!.y)).toBe(Math.round(strip!.y + strip!.height))
+    expect(Math.round(canvas!.width)).toBe(Math.round(strip!.width))
+
+    // The same height whatever the save state says.
+    const height = strip!.height
+    await head.getByLabel("Drawing name").fill("")
+    await expect(head.getByRole("status")).toHaveText("Name the drawing to save it")
+    expect((await head.boundingBox())!.height).toBe(height)
+    board.refuse = { status: 500, code: "internal", message: "database is locked" }
+    await head.getByLabel("Drawing name").fill("Rack")
+    await expect(head.getByRole("status")).toHaveText("Save failed")
+    await expect(head.getByRole("button", { name: "Try again" })).toBeVisible()
+    expect((await head.boundingBox())!.height).toBe(height)
+
+    // Add server item opens beside the canvas, and in its place on a phone.
+    await head.getByRole("button", { name: "Add server item" }).click()
+    const items = page.getByRole("complementary", { name: "Server items" })
+    await expect(items.getByRole("button", { name: /This server/ })).toBeVisible()
+    const panel = await items.boundingBox()
+    if (width === 390) expect(Math.round(panel!.width)).toBe(390)
+    else expect(Math.round(panel!.width)).toBe(320)
+    await items.getByRole("button", { name: "Close" }).click()
+    await expect(items).toHaveCount(0)
+  })
+}
+
+test("a drawing another tab changed can only be read again, and that is the bar's one command", async ({
+  page,
+}) => {
+  const board = await mockBoards(page)
+  await openBoard(page)
+  board.refuse = { status: 409, code: "board_conflict", message: "board changed" }
+  await page.getByLabel("Drawing name").fill("Mine")
+  await expect(page.getByRole("status")).toHaveText("Changed in another tab")
+  await expect(page.getByRole("button", { name: "Add server item" })).toHaveCount(0)
+  // Nothing more is sent while it is stopped.
+  const attempts = board.puts.length
+  await page.getByRole("button", { name: "Drawing actions" }).click()
+  await expect(page.getByRole("menuitem", { name: "Save now" })).toBeDisabled()
+  await page.keyboard.press("Escape")
+  board.refuse = null
+  // The browser asks before it drops what was typed; the reader says yes.
+  page.on("dialog", (dialog) => void dialog.accept())
+  await page.getByRole("button", { name: "Reload", exact: true }).click()
+  await expect(page.getByLabel("Drawing name")).toHaveValue("Untitled board")
+  expect(board.puts).toHaveLength(attempts)
+})
+
+test("a drawing that is not there is said with Excalidraw's mark and the way back", async ({
+  page,
+}) => {
+  await mockBoards(page)
+  await page.route("**/api/v1/boards/1", (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "board_not_found", message: "board not found" } }),
+    }),
+  )
+  for (const address of ["/excalidraw/1", "/excalidraw/not-a-drawing"]) {
+    await page.goto(address)
+    const state = page.locator("[data-slot=empty-state]")
+    await expect(state).toContainText("This drawing is not here")
+    await expect(state.locator('img[src="/logos/excalidraw.svg"]')).toBeVisible()
+    await expect(state.getByRole("link", { name: "Back to drawings" })).toHaveAttribute(
+      "href",
+      "/excalidraw",
+    )
+    // Not a failure: nothing red, nothing to retry.
+    await expect(page.locator("[data-slot=error-state]")).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0)
+    await expect(page.getByText("board not found")).toHaveCount(0)
+  }
+})
+
+test("a drawing that could not be read can be read again or left", async ({ page }) => {
+  await mockBoards(page)
+  let fail = true
+  await page.route("**/api/v1/boards/1", (route) =>
+    fail
+      ? route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "internal", message: "database is locked" } }),
+        })
+      : route.fallback(),
+  )
+  await page.goto("/excalidraw/1")
+  await expect(page.getByRole("alert").filter({ hasText: "database is locked" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Back to drawings" })).toHaveAttribute(
+    "href",
+    "/excalidraw",
+  )
+  fail = false
+  await page.getByRole("button", { name: "Try again" }).click()
+  await expect(page.getByLabel("Drawing name")).toHaveValue("Untitled board")
+})
+
+test("an account that can only read sees the drawing and no control it cannot use", async ({
+  page,
+}) => {
+  await mockBoards(page)
+  await page.route("**/api/v1/auth/session", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        authenticated: true,
+        needsTotp: false,
+        needsEnrollment: false,
+        require2fa: false,
+        capabilities: ["read"],
+        user: { id: 2, username: "reader", role: "viewer", totpEnabled: true },
+      }),
+    }),
+  )
+  await openBoard(page)
+  await expect(page.getByLabel("Drawing name")).toHaveAttribute("readonly", "")
+  await expect(page.getByRole("button", { name: "Add server item" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Drawing actions" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText(["Reload"])
+})
+
 test("the name is saved trimmed, never blank, Ctrl+S saves now, and delete uses ordinary confirmation", async ({
   page,
 }) => {
@@ -338,7 +514,7 @@ test("the name is saved trimmed, never blank, Ctrl+S saves now, and delete uses 
   await russian
   await expect.poll(() => board.name).toBe("Ops map 2")
 
-  await page.getByRole("button", { name: "Delete drawing" }).click()
+  await drawingAction(page, "Delete drawing")
   const dialog = page.getByRole("dialog")
   await expect(dialog.getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await dialog.getByRole("button", { name: "Delete drawing" }).click()
@@ -365,10 +541,12 @@ test("a failed save lets the operator leave on purpose, and a board deleted else
   const failure = page.getByText("Drawing was not saved")
   await expect(failure).toBeVisible()
 
+  // A save that failed offers the way to try it again beside its words.
   board.refuse = null
-  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await page.getByRole("button", { name: "Try again" }).click()
   await expect(status).toContainText("Saved on this server")
   await expect(failure).toBeHidden()
+  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0)
   expect(
     await page.evaluate(() => {
       const event = new Event("beforeunload", { cancelable: true })
@@ -514,7 +692,7 @@ test("drawing drafts survive failed saves, sidebar and palette exits, and histor
   await page.goBack()
   await expect(page.getByLabel("Drawing name")).toHaveValue("Retained drawing draft")
   board.refuse = null
-  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await drawingAction(page, "Save now")
   await expect(page.getByRole("status")).toContainText("Saved on this server")
   expect(board.name).toBe("Retained drawing draft")
 })
@@ -553,7 +731,7 @@ test("returning to a drawing waits for departing saves and keeps the acknowledge
   })
   await openBoard(page)
   await page.getByLabel("Drawing name").fill("First snapshot")
-  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await drawingAction(page, "Save now")
   await expect.poll(() => writes).toBe(1)
   await page.getByLabel("Drawing name").fill("Newer retained snapshot")
   await page.locator('a[href="/files"]').first().click()
@@ -563,7 +741,7 @@ test("returning to a drawing waits for departing saves and keeps the acknowledge
   release()
   await expect(page.getByLabel("Drawing name")).toHaveValue("Newer retained snapshot")
   await expect(page.getByRole("status")).toContainText("Save failed")
-  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await page.getByRole("button", { name: "Try again" }).click()
   await expect(page.getByRole("status")).toContainText("Saved on this server")
   expect(board.name).toBe("Newer retained snapshot")
   expect(board.puts.at(-1)?.revision).toBe(2)
