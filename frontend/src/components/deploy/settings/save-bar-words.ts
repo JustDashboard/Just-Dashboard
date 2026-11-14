@@ -49,18 +49,19 @@ export function namesLine(names: string[]): string {
 /**
  * The bar's second line while there is something to save.
  *
- * A value that cannot be saved is said before anything else: the line used
- * to give a form's `note` first, so a page with one never said why its Save
- * was disabled. A `note` then stands in for the kinds, since a form writes
- * one only where its save does something the reader must know before
- * pressing.
+ * A form that gives a `note` speaks for itself, and for why it cannot be
+ * saved too: the account's password form says "The new passwords do not
+ * match yet" there, which is more use than the line every other form gets.
+ * So a note comes first. Without one, a value that cannot be saved is said
+ * in the bar's own words, and otherwise the line is when the saves apply.
  */
 export function pendingLine(
   entries: { name: string; applies: SettingApplies; note?: string }[],
   invalid: boolean,
 ): string {
-  if (invalid) return "A value is out of range — fix it to save"
   const note = entries.find((entry) => entry.note)?.note
   const names = namesLine(entries.map((entry) => entry.name))
-  return `${names} · ${note ?? appliesLine(entries.map((entry) => entry.applies))}`
+  if (note) return `${names} · ${note}`
+  if (invalid) return "A value is out of range — fix it to save"
+  return `${names} · ${appliesLine(entries.map((entry) => entry.applies))}`
 }

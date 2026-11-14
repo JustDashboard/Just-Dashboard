@@ -35,11 +35,18 @@ test("the parts are named once each", () => {
   expect(namesLine(["General", "Build", "General", "Runtime"])).toBe("General, Build and Runtime")
 })
 
-test("a value that cannot be saved is said before a form's own note", () => {
-  const entries = [{ name: "Listener", applies: "immediately", note: "Restarts the dashboard" }]
-  expect(pendingLine(entries, false)).toBe("Listener · Restarts the dashboard")
-  expect(pendingLine(entries, true)).toBe("A value is out of range — fix it to save")
-  expect(pendingLine([{ name: "Resolver", applies: "immediately" }], false)).toBe(
-    "Resolver · Applies immediately",
-  )
+test("a form's own note is its line, for why it cannot be saved too", () => {
+  const listener = [{ name: "Listener", applies: "immediately", note: "Restarts the dashboard" }]
+  expect(pendingLine(listener, false)).toBe("Listener · Restarts the dashboard")
+  // The account's password form says what is missing in its note.
+  const password = [
+    { name: "Password", applies: "immediately", note: "The new passwords do not match yet" },
+  ]
+  expect(pendingLine(password, true)).toBe("Password · The new passwords do not match yet")
+})
+
+test("without a note, a value that cannot be saved is said in the bar's words", () => {
+  const resolver = [{ name: "Resolver", applies: "immediately" }]
+  expect(pendingLine(resolver, true)).toBe("A value is out of range — fix it to save")
+  expect(pendingLine(resolver, false)).toBe("Resolver · Applies immediately")
 })

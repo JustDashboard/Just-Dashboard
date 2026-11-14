@@ -51,8 +51,10 @@ import {
  * soonest and what the rest wait for). A form whose save does something no
  * kind says gives the line in its own words (`note`: "Restarts the
  * dashboard") and may name the command (`verb`: "Apply and restart"); those
- * stand for the whole bar, so a page has one such form. A value that cannot
- * be saved is said before either.
+ * stand for the whole bar, so a page has one such form, and the note is
+ * where that form says why it cannot be saved (the password form's "The new
+ * passwords do not match yet"). A form without one gets the bar's own words
+ * for a value that cannot be saved.
  *
  * A proxy site's form keeps a bar of its own (`proxy/site-settings.tsx`): it
  * is one draft with two saves whose difference matters (reload or not), where
