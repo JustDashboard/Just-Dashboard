@@ -1336,6 +1336,25 @@ there). Tunnel (`/proxy/tunnel`) opens on the tunnel's identity line with Check 
 hostname → Cloudflare's edge → connector → this server, and the hostnames as one-line cards; not
 connected, the dashed picture, a choice of token or API and one form (administrators only).
 
+Sites (`/proxy/sites`, 0.8.7) lists every site as a one-line row (`SiteRow` in `vhosts-panel.tsx`):
+what it fronts with its engine in the tile's corner, its name over where its requests go, then its
+hour, ports, TLS, certificate and state in aligned columns, every verb in its menu. New site is the
+line's command, Import and Export all are behind its menu, and under the list Unknown hosts,
+Password files (`auth-files-panel.tsx`), Access lists (`access-lists-panel.tsx`), the URL resolver
+and Deleted & backups (`site-backups.tsx`) are titled sections of one-line rows; a password file's
+logins and an access list's addresses, sites and include line are in the sheet its row opens. A
+site's page (`/proxy/sites/<name>`, `site-page.tsx`, with the list as a rail from `xl`,
+`site-rail.tsx`) keeps its views in the address (`site-tabs.ts`, unit-tested): Overview, Logs
+(`?tab=logs`) and, for an administrator and a file the form saves back, Settings (`?tab=settings`).
+Settings is the site form (`SiteSettings` in `site-form.tsx`) as one column of sections split across
+parts (`&view=` general, https, access, hardening, headers, paths, file), with a strip naming the
+parts that hold unsaved changes (`site-sections.ts`, unit-tested) and one floating bar holding the
+form's saves (`site-settings.tsx`); leaving it with unsaved changes asks first. A new site, or a copy
+of one, is still made in a sheet over the list (`SiteForm`, the same fields). `?site=<name>` lands on
+the site's Settings for an administrator and a file the form owns, and opens the config viewer
+otherwise. Checked by `tests/browser/proxy-site-page.spec.ts`, `proxy-site-builder.spec.ts`,
+`proxy-sites-list.spec.ts` and `proxy-sites-tools.spec.ts`.
+
 **Implementation:** `app/(dashboard)/proxy/`, `components/proxy/`; backend in
 [`../backend/proxy.md`](../backend/proxy.md#proxy)
 
