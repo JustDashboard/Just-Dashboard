@@ -162,7 +162,15 @@ export function TransferProgress({
           onDismiss={running ? undefined : onDismiss}
         />
         {running && (
-          <span aria-hidden className="pointer-events-none absolute inset-0 rounded-xl">
+          // Clipped to the frame. The light is a square centred on the edge it
+          // lights, so half of it lies outside the frame; the mask hides that
+          // half but it still counts as content, and on a phone, where the
+          // console ends sixteen pixels from the window's edge, the page
+          // scrolled sideways each time the light passed down its right side.
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 overflow-hidden rounded-xl"
+          >
             <BorderBeam size={96} duration={4} />
           </span>
         )}

@@ -150,8 +150,8 @@ remain unknown and differences do not establish a cause.
 The investigator's **Run and save** opens the shared naming dialog with an immutable draft snapshot;
 the dialog displays source/family/protocol and whether measurement is requested. Opening it emits no
 network traffic. A rejected launch retains its name and scoped request; acceptance navigates to the
-Saved runs inspector. The inspector uses the same connection-path report renderer as the quick page,
-then offers save name, cancellation, rerun, export, watch and exact-scope comparison.
+saved run's page. Its Result view uses the same connection-path report renderer as the quick page,
+and the page offers rename, cancellation, rerun, export, watch and exact-scope comparison.
 
 ## Cancellation and restart
 
@@ -254,24 +254,42 @@ protocol; Header grade takes a response kind.
 Network tools keep their quick **Run** command and current drafts/results. **Run and save** snapshots
 that same tool request, asks for a bounded name, and launches only after an explicit press. A rejected
 launch retains its name and tool draft for retry. The command opens `/network/runs?run=<id>` after
-acceptance. The Tools/Saved runs links join the two surfaces; no page arrival or reload emits a probe.
+acceptance, which the list page replaces with the run's own page, `/network/runs/<id>`. The
+Tools/Saved runs links join the two surfaces; no page arrival or reload emits a probe.
 
-`components/network/saved-runs.tsx` renders `/network/runs` in the reporting register: counts on a
-`StatGrid`, retained history as `ChoiceRow` destinations, and one framed, independently scrolling
-history/inspector workbench. It shows scope, timestamps, lifecycle stages, typed outcome and its
-provenance. Structured records remain readable; raw tool/error text is behind **Bounded tool
-evidence**. Completed is kept distinct from a whole-path guarantee, and unsupported, permission,
-DNS, refusal, timeout, certificate, findings, interruption, and absent answers have separate labels.
+`components/network/saved-runs.tsx` renders `/network/runs` in the reporting register. It opens on
+an identity line (`HostIdentity`): what is running, how many runs are kept, the retention policy in
+words and how many failed, with **Run a tool** as its command and Refresh and **Retention policy**
+behind the menu. There is no `StatGrid`: the four tiles that counted run states are the list's
+filter chips (`runChips` in `lib/network-runs-view.ts`, which draws only the states that hold a
+run). Each run is one `ChoiceRow` at one height: the tool's glyph with the state's dot
+(`diagnostic-marks.tsx`), the name over the tool and its request in mono, when it was made, its
+typed outcome, and a menu with Rerun or Cancel run, Export JSON and Delete. On a phone the outcome
+leads the row's second line. Completed is kept distinct from a whole-path guarantee, and
+unsupported, permission, DNS, refusal, timeout, certificate, findings, interruption, and absent
+answers have separate labels.
 
-The inspector renders a retained result's structured evidence with the same component as the quick
-card, shows **History of this request** (one row per retained run with its outcome and every metric
-column) and lists measurement changes in a comparison. The inspector retains its selected ID in the
-URL and retrieves its saved result after navigation or reload. **Save name**, **Cancel run**, **Rerun**, **Export JSON**, and compatible-run **Compare** use the
-API lifecycle above. **Watch job** attaches the existing job console to its saved job ID without
-restarting work. Cancellation remains visibly stopping until the durable record settles. Name and
-retention drafts survive rejected writes. Deletion and retention changes use ordinary destructive
-confirmation, with no typed phrase. Readers see a capability notice and issue no diagnostic reads;
-their local subnet calculator remains accessible from Quick tools.
+A run is a page of its own, `/network/runs/[id]` (`run-page.tsx`, on the process page's shape): a
+way back, the run's identity line (tool, request, duration, age, its outcome as the state, **Rerun**
+or **Cancel run** as the command, Export JSON, Rename, Watch job and Delete behind the menu), and
+its views as tabs kept in `?tab=`. **Result** (`run-inspector.tsx`) is the lifecycle as a strip of
+stages, then the retained result drawn by the component that drew it live (`ProbeEvidence` for a
+tool, the connection-path report for an investigation), the structured records, and the tool's error
+where no answer was kept. **Compare** takes a compatible baseline and lists the outcome, duration,
+measurement and line differences. **History** is one row per retained run of the request with its
+outcome and every metric column, each row a link to that run. **Details** holds the scope, the
+timestamps, the outcome's provenance, the run's ID and what it is a rerun of, and the raw tool
+output. From `xl` the list stands beside the run as a rail (`item-rail.tsx`) with the list's own
+search and chips, the open run filled; Alt+↑ and Alt+↓ walk it and carry the open view. The old
+`?run=<id>` address is replaced with the run's page. A finished run is read again every fifteen
+seconds rather than every 2.5, and the page's refresh key reads it at once.
+
+**Watch job** attaches the existing job console to the saved job ID without restarting work.
+Cancellation remains visibly stopping until the durable record settles. A rejected rename keeps its
+draft in its dialog, and a rejected retention change keeps its draft in the **Retention policy**
+dialog. Deletion and retention changes use ordinary destructive confirmation, with no typed phrase;
+Delete is offered only to an account that holds `destructive`. Readers see a capability notice and
+issue no diagnostic reads; their local subnet calculator remains accessible from **Run a tool**.
 
 List, result, and retention reads retain successful data on a failed later poll and show a dated
 retry warning. Initial failures show an error with Retry, so an unavailable backend is never shown as

@@ -1296,7 +1296,7 @@ test("a search is asked once, drawn by table with the value marked, and each row
   expect(new URL(page.url()).searchParams.get("q")).toBe("pro")
 
   await expect(page.getByRole("status").filter({ hasText: "is in" })).toContainText(
-    "pro is in 2 tables: 3 rows are shown, at most 5 from each. 4 tables of public read",
+    "pro is in 2 tables: 3 rows are shown. 4 tables of public read",
   )
   // Every cell that holds the value is marked, not only the one the server named.
   const first = groups.first().locator("[data-slot=choice-row]").first()
@@ -1342,9 +1342,19 @@ test("a search is asked once, drawn by table with the value marked, and each row
     { column: "tier", op: "icontains", value: "pro" },
   ])
   expect(every.searchParams.get("match")).toBe("any")
-  // What the search could not say for sure is said.
-  await expect(page.getByText("There may be more than this")).toBeVisible()
-  await expect(page.getByText("secrets")).toBeVisible()
+  // What the search could not say for sure is the tail of the same sentence,
+  // not a notice over the results, and each table's way to all of its rows is a small verb.
+  await expect(page.getByText("There may be more than this")).toHaveCount(0)
+  await expect(page.locator("[data-slot=search-limit]")).toHaveText(
+    "It stops at 60 tables, 5 rows from each and 200 in all: open one for every match, or narrow it.",
+  )
+  await expect(page.getByRole("status").filter({ hasText: "is in" })).toContainText("1 not read")
+  await page.getByRole("button", { name: "The tables not read" }).hover()
+  await expect(page.getByRole("tooltip")).toContainText("secrets")
+  await page.mouse.move(0, 0)
+  await expect(groups.first().getByRole("link", { name: /^Every row of/ })).toHaveText(
+    "Every match",
+  )
 
   // Narrowing to one table reads nothing again.
   await page
@@ -1420,11 +1430,28 @@ test("every generator the server lists is reachable, and the request carries wha
     page.getByRole("region", { name: "Types & validation" }).getByRole("button"),
   ).toHaveCount(1)
   await expect(page.getByRole("region", { name: "Schema" }).getByRole("button")).toHaveCount(1)
-  // Nothing is asked of the server until the reader asks.
-  await expect(page.getByText("Nothing written yet")).toBeVisible()
+  // Each is drawn as the project it writes for, or as its language where that has no mark.
+  await expect(page.locator("[data-target=prisma] img")).toHaveAttribute("src", "/logos/prisma.svg")
+  await expect(page.locator("[data-target=typeorm] img")).toHaveAttribute(
+    "src",
+    "/logos/typeorm.svg",
+  )
+  await expect(page.locator("[data-target=zod] img")).toHaveAttribute("src", "/logos/zod.svg")
+  await expect(page.locator("[data-target=diesel] img")).toHaveAttribute(
+    "src",
+    "/logos/diesel.webp",
+  )
+  // Nothing is asked of the server until the reader asks: the generator's
+  // own mark, two words and the command, with what it writes behind an (i).
+  const empty = page.locator("[data-slot=empty-state]")
+  await expect(empty).toHaveText(/^Nothing written yetGenerate$/)
+  await expect(empty.locator("img")).toHaveAttribute("src", "/logos/prisma.svg")
+  await page.getByRole("button", { name: "What Prisma writes" }).hover()
+  await expect(page.getByRole("tooltip")).toContainText("nothing in the database is changed")
+  await page.mouse.move(0, 0)
   expect(sent.orm).toHaveLength(0)
 
-  await page.getByRole("button", { name: "Generate" }).click()
+  await empty.getByRole("button", { name: "Generate" }).click()
   const code = page.locator("[data-slot=code-view]")
   await expect(code).toContainText("schema.prisma")
   expect(sent.orm[0]).toEqual({ target: "prisma", schema: "public" })
@@ -1979,7 +2006,7 @@ test("a search of ticked tables reads those tables and no others, and says which
     "orders",
   ])
   await expect(page.getByRole("status").filter({ hasText: "is in" })).toContainText(
-    "pro is in 1 table: 2 rows are shown, at most 5 from each. 2 tables of public read",
+    "pro is in 1 table: 2 rows are shown. 2 tables of public read",
   )
   // The read said the table holds more than these two, and its key: no second read for it.
   await expect(groups.first()).toContainText("2+")
@@ -1992,8 +2019,11 @@ test("a search of ticked tables reads those tables and no others, and says which
       ) ?? "[]",
     ),
   ).toEqual([{ column: "id", op: "eq", value: "12" }])
-  // A table showing its first rows is not a warning.
-  await expect(page.getByText("There may be more than this")).toHaveCount(0)
+  // A table showing its first rows is not a warning: the limit is said, quietly.
+  await expect(page.locator("[data-slot=search-limit]")).toHaveText(
+    "At most 5 are shown from each: open one for every match.",
+  )
+  await expect(page.locator("[data-slot=search-limit]")).not.toHaveClass(/text-warning/)
 
   // Every schema has no one list of tables to tick.
   await page
@@ -2018,7 +2048,7 @@ test("a generator remembered from another engine does not open the page on a ref
   await page.goto("/databases/7/generate")
   await expect(page.locator("[data-target=prisma]")).toHaveAttribute("aria-pressed", "true")
   await expect(page.getByText(/is not written for/)).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Generate" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Generate" }).first()).toBeVisible()
   // Picked on this visit, the one it lacks says why, in the server's words.
   await page.getByRole("button", { name: "Zod schemas, not for SQLite" }).click()
   await expect(page.getByText("Zod schemas is not written for SQLite")).toBeVisible()

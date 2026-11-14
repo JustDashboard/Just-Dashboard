@@ -133,7 +133,10 @@ export function SiteRouteMap({
           />
         ))}
 
-        <ol className="grid min-w-0 gap-y-7 lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1.3fr)] lg:items-center lg:gap-x-6 lg:pb-16">
+        {/* From xl the Sites rail stands beside the page and the picture has
+            less width than at lg: the three marks draw closer so what
+            answers keeps the room its address needs. */}
+        <ol className="grid min-w-0 gap-y-7 lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1.3fr)] lg:items-center lg:gap-x-6 lg:pb-16 xl:grid-cols-[repeat(3,minmax(0,0.85fr))_minmax(0,1.75fr)] xl:gap-x-4 2xl:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1.3fr)] 2xl:gap-x-6">
           <li className="min-w-0">
             <WireNode
               nodeRef={visitorsNode}

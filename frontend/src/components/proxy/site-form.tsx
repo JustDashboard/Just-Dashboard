@@ -1,6 +1,16 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
+import { useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import {
@@ -67,10 +77,12 @@ import { CodeEditor } from "@/components/code-editor"
 import { DiffView } from "@/components/files/diff-view"
 import {
   Disclosure,
-  Field,
+  Field as FormField,
   FieldRow,
   FormNote,
   FormSection,
+  FormSections,
+  InfoTip,
   OptionList,
   OptionRow,
 } from "@/components/form"
@@ -79,7 +91,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Modal } from "@/components/modal"
 import { Group, Pane, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, Notice } from "@/components/state"
+import { EmptyNote, LoadingRows, Notice } from "@/components/state"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -124,6 +136,17 @@ import {
   type DraftBase,
 } from "@/components/proxy/site-draft"
 import { NEW_SITE_DRAFT } from "@/components/proxy/site-link"
+import { changedFields, changedViews } from "@/components/proxy/site-sections"
+import {
+  DiscardDialog,
+  SettingsParts,
+  SiteSaveBar,
+  UnsavedStrip,
+  useLeaveGuard,
+  type PartMark,
+} from "@/components/proxy/site-settings"
+import { siteSettingsHref, type SettingsView } from "@/components/proxy/site-tabs"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
 import {
   applyPreset,
   BLANK,
@@ -166,7 +189,117 @@ import {
  * control and one line; an `OptionRow` is a switch with its sentence. It had
  * its own Field, Toggle and Section before, which is how a form two clicks
  * from the databases' dialogs arrived at a different label size.
+ *
+ * It is drawn in two places. A new site, or a copy of one, is made in a
+ * sheet over the Sites list (`SiteForm`): a creation is one task read top to
+ * bottom with the file it will write beside it. An existing site is edited
+ * on its own page, as its Settings view (`SiteSettings`): the same parts in
+ * one centred column, split across the views a deployment's settings are
+ * split across, with one floating bar that holds the saves. Both are
+ * `SiteFormBody`, so a field, a check and the request a save sends are
+ * written once.
  */
+
+/**
+ * Whether the form is the Settings view of a site's page rather than the
+ * sheet. A part opens as a page's section there, and the line under a field
+ * that only explains it goes behind the ⓘ beside its label.
+ */
+const PageLayout = createContext(false)
+
+/**
+ * A field of the form. `tip` is what the field is for, in a sentence: the
+ * line under it in the sheet, where a first site is being made, and the ⓘ
+ * beside its label in Settings, where it is read once. `hint` stays under
+ * the field in both: it is what the field currently says — where the file is
+ * saved, that nothing listens behind an address.
+ */
+function Field({ tip, ...props }: React.ComponentProps<typeof FormField> & { tip?: string }) {
+  const page = useContext(PageLayout)
+  if (page) return <FormField {...props} info={props.info ?? tip} />
+  return <FormField {...props} hint={props.hint ?? tip} />
+}
+
+/** A titled part of the form: a section of the page in Settings, of the sheet otherwise. */
+function Part({
+  title,
+  hint,
+  children,
+}: {
+  title: string
+  /** What the part is for; behind an ⓘ in Settings, where no sentence stands under a title. */
+  hint?: string
+  children: React.ReactNode
+}) {
+  const page = useContext(PageLayout)
+  if (page) {
+    return (
+      <SettingSection
+        title={
+          hint ? (
+            <span className="inline-flex items-center gap-1.5">
+              {title}
+              <InfoTip label={`About ${title.toLowerCase()}`}>{hint}</InfoTip>
+            </span>
+          ) : (
+            title
+          )
+        }
+      >
+        {children}
+      </SettingSection>
+    )
+  }
+  return (
+    <FormSection title={title} hint={hint}>
+      {children}
+    </FormSection>
+  )
+}
+
+/**
+ * Asks before a site's unsaved Settings are left. The page that holds the
+ * form calls it with what leaving is — another view, another site — and that
+ * runs at once when nothing is unsaved, or once the reader lets the edits go.
+ */
+export type LeaveGuard = (proceed: () => void) => void
+
+/**
+ * An existing site's Settings, as a view of its page: the form's parts in
+ * one centred column, the part on screen named in the address, and the saves
+ * on one floating bar.
+ */
+export function SiteSettings({
+  name,
+  view,
+  guardRef,
+  onSaved,
+}: {
+  name: string
+  /** The part of the form on screen. */
+  view: SettingsView
+  /** Holds the form's question about unsaved changes while it is on screen. */
+  guardRef?: React.RefObject<LeaveGuard | null>
+  /** Told whether nginx was reloaded with the save. */
+  onSaved: (reloaded: boolean) => void
+}) {
+  return (
+    <SiteFormBody
+      key={name}
+      layout="page"
+      view={view}
+      guardRef={guardRef}
+      open
+      editing={name}
+      copyFrom={null}
+      onOpenChange={noop}
+      onSaved={onSaved}
+    />
+  )
+}
+
+const noop = () => {}
+
 export function SiteForm({
   open,
   editing,
@@ -248,7 +381,7 @@ function IndexFilesField({
     <Field
       label="Index files"
       htmlFor="site-index"
-      hint="Looked for in this order in each folder. Empty is the usual order."
+      tip="Looked for in this order in each folder. Empty is the usual order."
     >
       <Input
         id="site-index"
@@ -266,12 +399,20 @@ function IndexFilesField({
 }
 
 function SiteFormBody({
+  layout = "sheet",
+  view = "general",
+  guardRef,
   open,
   editing,
   copyFrom,
   onOpenChange,
   onSaved,
 }: {
+  /** The sheet a new site is made in, or the Settings view of a site's page. */
+  layout?: "sheet" | "page"
+  /** The part of Settings on screen; the sheet draws every part. */
+  view?: SettingsView
+  guardRef?: React.RefObject<LeaveGuard | null>
   open: boolean
   editing: string | null
   copyFrom: string | null
@@ -279,13 +420,22 @@ function SiteFormBody({
   /** Told whether nginx was reloaded with the save. */
   onSaved: (reloaded: boolean) => void
 }) {
+  const page = layout === "page"
+  const router = useRouter()
   const source = editing ?? copyFrom
   // Kept for the tab while the form is open (the panel forgets it on close):
   // a site is a long form, and a look at a port or a certificate half-way
   // through it should not mean typing it again. An existing site's draft
   // outlives a trip away only while its file is still the version the draft
   // started from; the server's copy used to replace it on every open.
-  const draft = source ? `proxy.site.form.${source}` : NEW_SITE_DRAFT
+  // A site's Settings keep theirs under a key of their own: the sheet forgets
+  // every sheet draft when it closes, and a copy of a site starts from that
+  // site's key, neither of which may take an edit under way on its page.
+  const draft = page
+    ? `proxy.site.settings.${editing}`
+    : source
+      ? `proxy.site.form.${source}`
+      : NEW_SITE_DRAFT
   const [spec, setSpec] = useSessionState<SiteSpec>(`${draft}.spec`, BLANK)
   const [domainText, setDomainText] = useSessionState(`${draft}.domains`, "")
   // The preset last picked, drawn as the chosen card; the fields it filled
@@ -343,6 +493,9 @@ function SiteFormBody({
   // even of a draft with no edits, since Save is what was pressed.
   const refused = useRef(false)
   const [discarding, setDiscarding] = useState(false)
+  // Where the reader was going when Settings held unsaved changes: asked
+  // about first, and gone to once they let the edits go.
+  const [leaving, setLeaving] = useState<{ go: () => void } | null>(null)
   const [rawOpen, setRawOpen] = useState(false)
   const customRef = useRef<HTMLTextAreaElement>(null)
 
@@ -609,6 +762,19 @@ function SiteFormBody({
     setUpstreamSet(true)
   }
 
+  // What follows a save: the sheet closes; Settings stay where they are and
+  // read the file again, so the fields are what is on disk now and nothing
+  // is counted unsaved against the version before.
+  const settle = () => {
+    if (!page) {
+      onOpenChange(false)
+      return
+    }
+    setBase(null)
+    setConflict(null)
+    setReads((n) => n + 1)
+  }
+
   const save = async (mode: SaveMode, allowConflict = false) => {
     setBusy(allowConflict ? "anyway" : mode)
     try {
@@ -625,7 +791,7 @@ function SiteFormBody({
       const outcome = saveOutcome(res, { existing })
       notify[outcome.tone](outcome.title, { description: outcome.description })
       onSaved(res.reloaded)
-      onOpenChange(false)
+      settle()
     } catch (err) {
       if (err instanceof ApiError && err.code === "name_conflict") {
         setConflict({ message: err.message, mode, spec })
@@ -674,6 +840,33 @@ function SiteFormBody({
     if (next || !dirty) onOpenChange(next)
     else setDiscarding(true)
   }
+  // The fields as the file has them again: what Discard means on a page,
+  // where there is no sheet to close.
+  const resetDraft = () => {
+    if (!base) return
+    setSpec(base.spec)
+    setDomainText(base.spec.domains.join(" "))
+    setFixed(fixedFor(base.spec, true))
+    setConflict(null)
+    setOverridden(null)
+  }
+  // Settings are left by a link, by another view of the site's page or by
+  // the next site in its rail. Each is asked about while there are unsaved
+  // changes, which is what closing the sheet asked. A trip the form itself
+  // sends the reader on keeps the draft for the tab, as it always did.
+  const askToLeave: LeaveGuard = (go) => {
+    if (busy) return
+    if (dirty) setLeaving({ go })
+    else go()
+  }
+  useLeaveGuard(page && dirty, (href) => askToLeave(() => router.push(href)))
+  useEffect(() => {
+    if (!guardRef || !page) return
+    guardRef.current = askToLeave
+    return () => {
+      guardRef.current = null
+    }
+  })
 
   // What the identity would be if nothing were typed by hand, for the
   // "Match the domain" actions.
@@ -706,9 +899,22 @@ function SiteFormBody({
     .map((c) => c.id)
     .join("\n")
   const held = blockingKey !== "" && overridden !== blockingKey
-  const heldNote = held
-    ? `${plural(failed, "check")} failed. Save waits until they pass, or until you allow it under Checks.`
-    : null
+  const heldNote = !held ? null : page && editing ? (
+    <>
+      {plural(failed, "check")} failed. Save waits until they pass, or until you{" "}
+      <Link
+        href={siteSettingsHref(editing, "file")}
+        replace
+        scroll={false}
+        className="underline underline-offset-2"
+      >
+        allow it under Checks
+      </Link>
+      .
+    </>
+  ) : (
+    `${plural(failed, "check")} failed. Save waits until they pass, or until you allow it under Checks.`
+  )
 
   // Not while the file changed under the draft: the save would be refused
   // until the operator says which of the two wins.
@@ -744,7 +950,12 @@ function SiteFormBody({
   const moveLines = () => {
     if (!dropped) return
     set("custom", withMovedLines(spec.custom, dropped))
-    // Where they went, in view, rather than a notice that shrinks.
+    // Where they went, in view, rather than a notice that shrinks: on a
+    // page that is the part the extra configuration is in.
+    if (page && editing && view !== "paths") {
+      router.replace(siteSettingsHref(editing, "paths"), { scroll: false })
+      return
+    }
     requestAnimationFrame(() => customRef.current?.scrollIntoView({ block: "nearest" }))
   }
   // What the save writes over the file as it is on disk.
@@ -756,10 +967,66 @@ function SiteFormBody({
   // site nginx does not read, save it as it is. The raw editor and the
   // discard question over the form are their own.
   const primary: SaveMode = servedCopy || disabled ? "keep" : "reload"
+  // The saves, and the line beside them that says what one does.
+  const saves: {
+    note: React.ReactNode
+    primary: { mode: SaveMode; label: string }
+    secondary?: { mode: SaveMode; label: string }
+  } = servedCopy
+    ? {
+        note: heldNote ?? (
+          <>
+            nginx serves <code className="font-mono">sites-enabled/{spec.name}</code>, a file of its
+            own, not this one. Saving here changes nothing it serves until that file is replaced by
+            a link to this one.
+          </>
+        ),
+        primary: { mode: "keep", label: "Save" },
+      }
+    : disabled
+      ? {
+          note:
+            heldNote ??
+            (file?.enabledElsewhere
+              ? `${file.enabledElsewhere}, so this site can be neither enabled nor tested under its name.`
+              : confd
+                ? "Disabled: nginx reads only the conf.d files ending in .conf. nginx tests it as if it did, and it stays off until it is renamed."
+                : "Disabled. nginx tests it as if enabled, and it stays off until you enable it."),
+          primary: { mode: "keep", label: "Save (stays disabled)" },
+          secondary:
+            !file?.enabledElsewhere && !confd
+              ? { mode: "enable", label: "Save and enable" }
+              : undefined,
+        }
+      : {
+          note:
+            heldNote ??
+            (droppedLines > 0
+              ? `Saving drops ${plural(droppedLines, "line")} of the file, listed ${page ? "under General" : "above"}.`
+              : "Validated with nginx\u2019s own parser before it takes effect, and rolled back if the test fails."),
+          primary: { mode: "reload", label: "Save and reload" },
+          secondary: { mode: "save", label: "Save only" },
+        }
+  // What Settings have to save: an edit, or a file the form would write
+  // differently from how it stands — one written by hand, which a save puts
+  // in the form's own layout. A site whose file is as the form writes it has
+  // nothing to save, and no bar.
+  const unsaved = start ? changedFields(spec, start).length : 0
+  // Neither is said before the preview has answered for this draft: until
+  // then there is no telling whether a save would change the file, and a bar
+  // that came up offering one command and then made room for a second moved
+  // its buttons under the pointer.
+  const measured = base !== null && file !== null
+  const rewrites = !dirty && measured && changed > 0
+  const saveable = dirty || rewrites
+  // A disabled site with nothing to save still has one thing a save can do,
+  // which is enable it: the bar stays for that, with that command alone.
+  const enableOnly = !saveable && measured && saves.secondary?.mode === "enable"
   const onSaveKey = useEffectEvent((event: KeyboardEvent) => {
     const key = event.key.toLowerCase() === "s" && (event.ctrlKey || event.metaKey)
-    if (!key || event.altKey || event.shiftKey || rawOpen || discarding) return
+    if (!key || event.altKey || event.shiftKey || rawOpen || discarding || leaving) return
     event.preventDefault()
+    if (page && !saveable) return
     if (ready && !held && busy === null) void save(primary)
   })
   useEffect(() => {
@@ -768,6 +1035,1075 @@ function SiteFormBody({
     window.addEventListener("keydown", listener)
     return () => window.removeEventListener("keydown", listener)
   }, [open])
+
+  // The form's parts, each drawn once and stood in either layout: the sheet a
+  // new site is made in, and the Settings view of an existing site's page.
+  const conflictNotice = (
+    <>
+      {conflictShown && (
+        <div ref={conflictRef} role="alert" tabIndex={-1} className="rounded-lg focus-ring">
+          <Notice tone="warning" icon={Warning} title="Already served elsewhere">
+            {conflictShown.message}
+            <div className="mt-2">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => save(conflictShown.mode, true)}
+                disabled={busy !== null}
+                pending={busy === "anyway"}
+              >
+                Save anyway
+              </Button>
+            </div>
+          </Notice>
+        </div>
+      )}
+    </>
+  )
+  const staleNotice = (
+    <>
+      {stale && (
+        <div ref={staleRef} role="alert" tabIndex={-1} className="rounded-lg focus-ring">
+          <Notice
+            tone="warning"
+            icon={Warning}
+            title={
+              stale === "gone"
+                ? `${fileName} is not on disk any more`
+                : `${fileName} changed on disk`
+            }
+          >
+            <p>
+              {stale === "gone"
+                ? "Somebody removed it after the form read it. Keeping your draft writes it again when you save."
+                : "Somebody saved it after the form read it \u2014 by hand, in the raw editor, or from another tab. Keeping your draft saves over their change; reloading takes theirs and drops the edits made here."}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {stale !== "gone" && (
+                <Button size="xs" variant="outline" onClick={() => take(stale)}>
+                  Reload from disk
+                </Button>
+              )}
+              <Button size="xs" variant="outline" onClick={keepDraft}>
+                Keep my draft
+              </Button>
+            </div>
+          </Notice>
+        </div>
+      )}
+    </>
+  )
+  const fileNotice = (
+    <>
+      {editing && (!managed || droppedLines > 0) && (
+        <Notice
+          tone="warning"
+          icon={Warning}
+          title={
+            droppedLines > 0
+              ? `Saving drops ${plural(droppedLines, "line")} of this ${managed ? "file" : "hand-written file"}`
+              : "This file was written by hand"
+          }
+        >
+          {dropped && droppedLines > 0 ? (
+            <>
+              <p>
+                {managed
+                  ? `Added by hand, with no field in the form, so a save leaves ${dropped.length === 1 ? "it" : "them"} out.`
+                  : `The form has no field for ${dropped.length === 1 ? "this" : "these"}, so a save leaves ${dropped.length === 1 ? "it" : "them"} out.`}
+                {!managed && (
+                  <>
+                    {" "}
+                    The current file is kept as <code className="font-mono">{fileName}.bak</code>.
+                  </>
+                )}
+              </p>
+              <Well className="mt-2 overflow-hidden p-0">
+                <DiffView body={droppedDiff(dropped)} singleFile lineNumbers className="max-h-56" />
+              </Well>
+              {movable.length < dropped.length && (
+                <p className="text-hint text-muted-foreground">
+                  Only lines directly in the server block can move as they are. The others stay only
+                  if the file is edited by hand.
+                </p>
+              )}
+              {dropped.some((d) => d.reason) && (
+                <ul className="text-hint text-muted-foreground">
+                  {dropped
+                    .filter((d) => d.reason)
+                    .map((d) => (
+                      <li key={`${d.line}:${d.text}`}>
+                        Line {d.line}: {d.reason}.
+                      </li>
+                    ))}
+                </ul>
+              )}
+              <div className="mt-2 flex flex-wrap gap-2">
+                {movable.length > 0 && (
+                  <Button size="xs" variant="outline" onClick={moveLines}>
+                    Move {plural(droppedCount(movable), "line")} into Extra configuration
+                  </Button>
+                )}
+                {filePath && (
+                  <Button size="xs" variant="outline" onClick={() => setRawOpen(true)}>
+                    Edit the raw file
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : dropped ? (
+            <p>
+              The form reads every directive in it. Saving rewrites it in the form&rsquo;s own
+              layout, without its comments, and keeps the current file as{" "}
+              <code className="font-mono">{fileName}.bak</code>.
+            </p>
+          ) : (
+            <p>
+              The form has read what it recognises. Saving replaces the file with what the form
+              produces, so anything it could not read is lost; the current file is kept as{" "}
+              <code className="font-mono">{fileName}.bak</code>.
+            </p>
+          )}
+        </Notice>
+      )}
+    </>
+  )
+  const identity = (
+    <>
+      <Field
+        label="Domains"
+        htmlFor="site-domains"
+        tip={
+          editing
+            ? "Space-separated."
+            : "Space-separated. The first names the file and the certificate."
+        }
+      >
+        <Input
+          id="site-domains"
+          value={domainText}
+          onChange={(e) => commitDomains(e.target.value)}
+          // The one field every new site needs, so the keyboard starts
+          // here rather than on the first preset card.
+          autoFocus={!editing}
+          placeholder="app.example.com www.app.example.com"
+          className="font-mono text-xs"
+        />
+      </Field>
+      <DomainChecks checks={dnsChecks.filter((c) => spec.domains.includes(c.domain ?? ""))} />
+
+      <Field
+        label="File name"
+        htmlFor="site-name"
+        error={nameError}
+        hint={
+          file?.path
+            ? `Saved as ${file.path}`
+            : editing
+              ? "The file this site is saved in."
+              : fixed.name
+                ? "Stays as typed, whatever the domains become."
+                : "Follows the first domain until you change it."
+        }
+        trailing={
+          !editing &&
+          fixed.name &&
+          derived.name !== "" &&
+          derived.name !== spec.name && (
+            <Button size="xs" variant="ghost" onClick={() => follow(["name"])}>
+              Match the domain
+            </Button>
+          )
+        }
+      >
+        <Input
+          id="site-name"
+          value={spec.name}
+          readOnly={editing !== null}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="app.example.com"
+          aria-invalid={nameError ? true : undefined}
+          className={cn("font-mono text-xs", editing && "text-muted-foreground")}
+        />
+      </Field>
+    </>
+  )
+  const startFrom = (
+    <>
+      {!source && (
+        <Part title="Start from">
+          <ChoiceGrid columns={2} className="grid-cols-2">
+            {PRESETS.map((p) => (
+              <ProductCard
+                key={p.id}
+                product={p.product}
+                fallback={KIND_MARK[p.spec.kind ?? "proxy"]}
+                label={p.label}
+                detail={p.detail}
+                selected={preset === p.id}
+                onClick={() => choosePreset(p.id)}
+              />
+            ))}
+          </ChoiceGrid>
+          {chosenPreset?.note && <FormNote ref={presetNote}>{chosenPreset.note}</FormNote>}
+        </Part>
+      )}
+    </>
+  )
+  const kindChoice = (
+    <ChoiceGrid columns={2} className="grid-cols-2 sm:grid-cols-4">
+      {(
+        [
+          { kind: "proxy", label: "An app" },
+          { kind: "static", label: "Files" },
+          { kind: "php", label: "PHP" },
+          { kind: "redirect", label: "A redirect" },
+        ] as const
+      ).map(({ kind, label }) => {
+        const Mark = KIND_MARK[kind]
+        return (
+          <ChoiceCard
+            key={kind}
+            selected={spec.kind === kind}
+            onClick={() => chooseKind(kind)}
+            className="min-h-20 justify-center"
+          >
+            <Mark aria-hidden className="size-4 text-muted-foreground" />
+            <span className="text-body font-medium">{label}</span>
+          </ChoiceCard>
+        )
+      })}
+    </ChoiceGrid>
+  )
+  const kindFields = (
+    <>
+      {spec.kind === "proxy" && (
+        <ToggleGroup
+          type="single"
+          aria-label="How many servers"
+          value={spec.pool ? "pool" : "one"}
+          onValueChange={(v) => {
+            if (v === "pool" && !spec.pool) set("pool", poolFrom(spec.upstream))
+            if (v === "one") set("pool", undefined)
+          }}
+          variant="outline"
+          size="sm"
+          className="w-full"
+        >
+          <ToggleGroupItem value="one" className="flex-1 text-hint">
+            One server
+          </ToggleGroupItem>
+          <ToggleGroupItem value="pool" className="flex-1 text-hint">
+            Several servers
+          </ToggleGroupItem>
+        </ToggleGroup>
+      )}
+      {spec.kind === "proxy" && spec.pool && (
+        <PoolField pool={spec.pool} onChange={(pool) => set("pool", pool)} />
+      )}
+      {spec.kind === "proxy" && !spec.pool && (
+        <Field
+          label="Send it to"
+          htmlFor="site-upstream"
+          hint={
+            idle ? (
+              <span className="text-warning">{idle}</span>
+            ) : (
+              "Where the application is listening. Usually loopback on this machine."
+            )
+          }
+        >
+          <UpstreamPicker
+            id="site-upstream"
+            value={spec.upstream ?? ""}
+            onChange={setUpstream}
+            options={picker.options}
+            loading={picker.loading}
+            failed={picker.failed}
+            onRetry={picker.onRetry}
+            placeholder="http://127.0.0.1:3000"
+          />
+        </Field>
+      )}
+      {spec.kind === "static" && (
+        <>
+          <Field label="Directory" htmlFor="site-root" tip="The folder holding index.html.">
+            <Input
+              id="site-root"
+              value={spec.root ?? ""}
+              onChange={(e) => set("root", e.target.value)}
+              placeholder="/var/www/site"
+              className="font-mono text-xs"
+            />
+          </Field>
+          <IndexFilesField spec={spec} onChange={(v) => set("indexFiles", v)} />
+          <OptionList>
+            <OptionRow
+              title="Single-page app"
+              hint="A path with no file of its own gets index.html, so the app's router answers deep links and reloads."
+              checked={!!spec.spa}
+              onCheckedChange={(v) => set("spa", v)}
+            />
+            <OptionRow
+              title="List folders"
+              hint="A folder without an index is answered with a list of its files, visible to anyone who can reach the site."
+              checked={!!spec.autoindex}
+              onCheckedChange={(v) => set("autoindex", v)}
+            />
+            <OptionRow
+              title="Serve precompressed files"
+              hint="A file.gz beside a file is sent in its place to browsers that accept gzip. Compress at build time."
+              checked={!!spec.gzipStatic}
+              onCheckedChange={(v) => set("gzipStatic", v)}
+            />
+          </OptionList>
+        </>
+      )}
+      {spec.kind === "php" && (
+        <>
+          <Field
+            label="Directory"
+            htmlFor="site-root"
+            tip="The folder holding index.php: a Laravel app's public folder."
+          >
+            <Input
+              id="site-root"
+              value={spec.root ?? ""}
+              onChange={(e) => set("root", e.target.value)}
+              placeholder="/var/www/site"
+              className="font-mono text-xs"
+            />
+          </Field>
+          <Field
+            label="PHP-FPM socket"
+            htmlFor="site-php-socket"
+            hint={
+              phpSockets.data?.length
+                ? `Found in /run/php: ${phpSockets.data.join(", ")}`
+                : phpSockets.data
+                  ? "No socket in /run/php. Install php-fpm, or give the socket its pool listens on."
+                  : "Where php-fpm listens."
+            }
+          >
+            {phpSockets.data?.length ? (
+              <Select value={spec.phpSocket ?? ""} onValueChange={(v) => set("phpSocket", v)}>
+                <SelectTrigger id="site-php-socket" className="w-full font-mono text-xs">
+                  <SelectValue placeholder="Choose a socket" />
+                </SelectTrigger>
+                <SelectContent>
+                  {[
+                    ...phpSockets.data,
+                    ...(spec.phpSocket && !phpSockets.data.includes(spec.phpSocket)
+                      ? [spec.phpSocket]
+                      : []),
+                  ].map((socket) => (
+                    <SelectItem key={socket} value={socket} className="font-mono text-xs">
+                      {socket}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                id="site-php-socket"
+                value={spec.phpSocket ?? ""}
+                onChange={(e) => set("phpSocket", e.target.value)}
+                placeholder="/run/php/php8.3-fpm.sock"
+                className="font-mono text-xs"
+              />
+            )}
+          </Field>
+          <IndexFilesField spec={spec} onChange={(v) => set("indexFiles", v)} />
+          <OptionList>
+            <OptionRow
+              title="Front controller"
+              hint="A path with no file of its own goes to index.php, which is how WordPress and Laravel route every page."
+              checked={!!spec.phpFrontController}
+              onCheckedChange={(v) => set("phpFrontController", v)}
+            />
+          </OptionList>
+        </>
+      )}
+      {spec.kind === "redirect" && (
+        <>
+          <Field
+            label="Redirect to"
+            htmlFor="site-redirect"
+            hint={
+              spec.redirectDropPath
+                ? "Every path lands on this address."
+                : "The path and query are carried across."
+            }
+          >
+            <Input
+              id="site-redirect"
+              value={spec.redirectTo ?? ""}
+              onChange={(e) => set("redirectTo", e.target.value)}
+              placeholder="https://new.example.com"
+              className="font-mono text-xs"
+            />
+          </Field>
+          <Field
+            label="Status"
+            hint={REDIRECT_CODES.find((c) => c.code === redirectCode(spec))?.hint}
+          >
+            <ToggleGroup
+              type="single"
+              aria-label="Redirect status"
+              value={String(redirectCode(spec))}
+              onValueChange={(v) => {
+                if (!v) return
+                const code = Number(v) as NonNullable<SiteSpec["redirectCode"]>
+                setSpec((s) => ({
+                  ...s,
+                  redirectCode: code,
+                  permanent: code === 301 || code === 308,
+                }))
+              }}
+              variant="outline"
+              size="sm"
+              className="w-full"
+            >
+              {REDIRECT_CODES.map(({ code }) => (
+                <ToggleGroupItem
+                  key={code}
+                  value={String(code)}
+                  className="flex-1 font-mono text-hint"
+                >
+                  {code}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </Field>
+          <OptionList>
+            <OptionRow
+              title="Keep the path and query"
+              hint="/docs?page=2 lands on the same path at the new address. Off, every path lands on the address itself."
+              checked={!spec.redirectDropPath}
+              onCheckedChange={(v) => set("redirectDropPath", !v)}
+            />
+          </OptionList>
+        </>
+      )}
+    </>
+  )
+  const canonical = (
+    <>
+      {spec.domains.some((d) => !d.startsWith("*.")) && (
+        <Field
+          label="Canonical name"
+          hint={
+            spec.canonical === "www"
+              ? "example.com is sent to www.example.com for each www. domain above."
+              : spec.canonical === "apex"
+                ? "www.example.com is sent to example.com for each domain above without www."
+                : "Only the domains above are answered."
+          }
+        >
+          <ToggleGroup
+            type="single"
+            aria-label="Canonical name"
+            value={spec.canonical || "none"}
+            onValueChange={(v) => {
+              if (v) set("canonical", v === "none" ? undefined : (v as "www" | "apex"))
+            }}
+            variant="outline"
+            size="sm"
+            className="w-full"
+          >
+            <ToggleGroupItem value="none" className="flex-1 text-hint">
+              As listed
+            </ToggleGroupItem>
+            <ToggleGroupItem value="apex" className="flex-1 text-hint">
+              Without www
+            </ToggleGroupItem>
+            <ToggleGroupItem value="www" className="flex-1 text-hint">
+              With www
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </Field>
+      )}
+    </>
+  )
+  const encryption = (
+    <>
+      <OptionList>
+        <OptionRow
+          title="Serve over HTTPS"
+          hint="Needs a certificate on disk: use an installed one below, or get one."
+          checked={spec.tls}
+          onCheckedChange={(v) => set("tls", v)}
+        >
+          <div className="space-y-3">
+            <FieldRow>
+              <Field label="Certificate" htmlFor="site-cert">
+                <Input
+                  id="site-cert"
+                  value={spec.certPath ?? ""}
+                  onChange={(e) => setCertificate("certPath", e.target.value)}
+                  className="font-mono text-hint"
+                />
+              </Field>
+              <Field label="Private key" htmlFor="site-key">
+                <Input
+                  id="site-key"
+                  value={spec.keyPath ?? ""}
+                  onChange={(e) => setCertificate("keyPath", e.target.value)}
+                  className="font-mono text-hint"
+                />
+              </Field>
+            </FieldRow>
+            {!certificateFollows && (
+              <Button
+                size="xs"
+                variant="ghost"
+                className="-ml-2"
+                onClick={() => follow(["certPath", "keyPath"])}
+              >
+                Use the domain&rsquo;s certificate
+              </Button>
+            )}
+            {!certKnown && (
+              <FormNote tone="warning">
+                No certificate is listed at this path. If it does not exist yet, nginx refuses the
+                site at reload —{" "}
+                <Link href={issueHref} className="underline underline-offset-2">
+                  issue one for {spec.domains[0] ?? "these domains"} first
+                </Link>
+                .
+              </FormNote>
+            )}
+          </div>
+        </OptionRow>
+        {spec.tls && (
+          <>
+            <OptionRow
+              title="Send HTTP visitors to HTTPS"
+              hint="The certificate protects nobody who arrives on the unencrypted port."
+              checked={spec.forceHttps}
+              onCheckedChange={(v) => set("forceHttps", v)}
+            />
+            <OptionRow
+              title="HSTS"
+              hint="Tells the browser never to use plain HTTP for this name again. Hard to undo — a mistake sticks for as long as the policy says."
+              checked={spec.hsts}
+              onCheckedChange={(v) => set("hsts", v)}
+            >
+              <HSTSOptions spec={spec} set={set} />
+            </OptionRow>
+            <OptionRow
+              title="HTTP/2"
+              hint="Faster for pages with many small assets."
+              checked={spec.http2}
+              onCheckedChange={(v) => set("http2", v)}
+            />
+          </>
+        )}
+      </OptionList>
+      {spec.tls && (
+        <Field
+          label="TLS versions"
+          htmlFor="site-tls-profile"
+          hint={
+            spec.tlsProfile === "modern"
+              ? "Clients without TLS 1.3 cannot connect: Android before 10, Java 8, older curl and OpenSSL, some monitoring and payment callbacks."
+              : "What every current browser and client speaks. 1.0 and 1.1 stay off."
+          }
+        >
+          <Select
+            value={spec.tlsProfile || "compatible"}
+            onValueChange={(v) => set("tlsProfile", v === "modern" ? "modern" : undefined)}
+          >
+            <SelectTrigger id="site-tls-profile" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="compatible">TLS 1.2 and 1.3</SelectItem>
+              <SelectItem value="modern">TLS 1.3 only (modern)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
+      {spec.domains.length > 0 && (
+        <SiteCertificate
+          spec={spec}
+          disk={editing ? disk : null}
+          existing={editing !== null}
+          baseDigest={base?.digest}
+          served={!disabled && !servedCopy}
+          onUse={pickCertificate}
+          onRebased={(r) => {
+            setDisk(r)
+            setBase({ digest: r.digest, spec: specFromServer(r.spec) })
+            // The certificate flow saves the plain-HTTP site with a reload.
+            onSaved(true)
+          }}
+          onDone={(res) => {
+            const outcome = saveOutcome(res, { existing: true })
+            notify[outcome.tone](outcome.title, { description: outcome.description })
+            onSaved(res.reloaded)
+            settle()
+          }}
+        />
+      )}
+    </>
+  )
+  const behaviour = (
+    <>
+      <OptionList>
+        <OptionRow
+          title="WebSockets"
+          hint="Needed by anything with live updates: a chat, a terminal, a dashboard."
+          checked={spec.webSockets}
+          onCheckedChange={(v) => set("webSockets", v)}
+        />
+      </OptionList>
+      <FieldRow>
+        <Field
+          label="Upload limit"
+          htmlFor="site-body"
+          tip="nginx refuses a larger request body with a 413."
+        >
+          <Input
+            id="site-body"
+            value={spec.clientMaxBody ?? ""}
+            onChange={(e) => set("clientMaxBody", e.target.value)}
+            placeholder="50m"
+            className="font-mono text-xs"
+          />
+        </Field>
+        <Field
+          label="Timeout"
+          htmlFor="site-timeout"
+          tip="Seconds nginx waits for the application to answer."
+        >
+          <Input
+            id="site-timeout"
+            value={String(spec.proxyTimeout ?? 60)}
+            inputMode="numeric"
+            onChange={(e) => set("proxyTimeout", Number(e.target.value) || 0)}
+            className="font-mono text-xs"
+          />
+        </Field>
+      </FieldRow>
+      <OptionList>
+        <OptionRow
+          title="Buffer responses"
+          hint="nginx holds the answer until it has it, freeing a slow application sooner. Off streams it as it is produced, which server-sent events and progress output need."
+          checked={spec.buffering ?? false}
+          onCheckedChange={(v) => set("buffering", v)}
+        />
+        <OptionRow
+          title="Stream uploads"
+          hint="The application gets a request body as it arrives, rather than after nginx has read all of it."
+          checked={spec.streamUploads ?? false}
+          onCheckedChange={(v) => set("streamUploads", v)}
+        />
+      </OptionList>
+      <UpstreamAdvanced spec={spec} set={set} />
+    </>
+  )
+  const hardening = (
+    <>
+      <OptionList>
+        <OptionRow
+          title="Security headers"
+          hint="nosniff, SAMEORIGIN and a referrer policy. Safe defaults for almost any site."
+          checked={spec.securityHeaders}
+          onCheckedChange={(v) => set("securityHeaders", v)}
+        />
+        <OptionRow
+          title="Block common probes"
+          hint="Refuses requests for dotfiles and backup extensions — the shapes scanners ask for all day."
+          checked={spec.blockExploits}
+          onCheckedChange={(v) => set("blockExploits", v)}
+        />
+        <OptionRow
+          title="Compress responses"
+          hint="gzip for text, JSON, scripts and SVG."
+          checked={spec.gzip}
+          onCheckedChange={(v) => set("gzip", v)}
+        />
+        <OptionRow
+          title="Access log"
+          hint="Off keeps the disk quiet; on is what you want when something goes wrong."
+          checked={spec.accessLog}
+          onCheckedChange={(v) => set("accessLog", v)}
+        />
+      </OptionList>
+      {spec.accessLog && (
+        <Field
+          label="Log format"
+          htmlFor="site-log-format"
+          tip="Timed is what the traffic pages read latency from."
+        >
+          <Select
+            value={spec.logFormat ?? "timed"}
+            onValueChange={(v) => set("logFormat", v as SiteSpec["logFormat"])}
+          >
+            <SelectTrigger id="site-log-format" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="timed">Timed (adds response time)</SelectItem>
+              <SelectItem value="combined">Standard</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
+    </>
+  )
+  const access = (
+    <>
+      <AccessSection spec={spec} set={set} open={open} authFiles={authFiles.data} />
+
+      <CrawlerSection spec={spec} set={set} />
+
+      <RealIPSection spec={spec} set={set} open={open} />
+    </>
+  )
+  const limits = (
+    <>
+      {spec.kind !== "redirect" && <LimitsSection spec={spec} set={set} />}
+
+      {spec.kind !== "redirect" && <CachingSection spec={spec} set={set} />}
+    </>
+  )
+  const headers = (
+    <>
+      <HeadersSection spec={spec} set={set} />
+
+      <PagesSection spec={spec} set={set} site={editing} />
+    </>
+  )
+  const paths = (
+    <>
+      {spec.kind === "proxy" && (
+        <Part
+          title="Paths that go somewhere else"
+          hint="Everything not matched by one of these goes to the site's main upstream."
+        >
+          <LocationsField
+            locations={spec.locations}
+            onChange={(v) => set("locations", v)}
+            picker={picker}
+            sso={spec.forwardAuth && (spec.forwardAuth.pathsOnly ? "paths" : "site")}
+          />
+          {spec.locations.length > 0 && <RoutesTable spec={spec} />}
+        </Part>
+      )}
+    </>
+  )
+  const anythingElse = (
+    <Part title="Anything else">
+      <Field
+        label="Extra configuration"
+        htmlFor="site-custom"
+        tip="Added verbatim inside the server block."
+      >
+        <Textarea
+          id="site-custom"
+          ref={customRef}
+          value={spec.custom ?? ""}
+          onChange={(e) => set("custom", e.target.value)}
+          rows={4}
+          className="font-mono text-hint"
+          placeholder="# valid nginx directives"
+        />
+      </Field>
+    </Part>
+  )
+  const review = (
+    <Tabs
+      // Settings send a reader here from "allow it under Checks".
+      defaultValue={page && held ? "checks" : "preview"}
+      className="flex min-h-0 flex-1 flex-col gap-3"
+    >
+      <TabsList>
+        <TabsTrigger value="preview">
+          <Code className="size-3.5" />
+          nginx config
+        </TabsTrigger>
+        {editing && (
+          <TabsTrigger value="changes">
+            Changes
+            {changed > 0 && (
+              <span className="numeric ml-1 text-hint font-medium text-muted-foreground">
+                {changed}
+              </span>
+            )}
+          </TabsTrigger>
+        )}
+        <TabsTrigger value="checks">
+          Checks
+          {failed + cautions > 0 && (
+            <span
+              className={cn(
+                "numeric ml-1 text-hint font-medium",
+                failed > 0 ? "text-destructive" : "text-warning",
+              )}
+            >
+              {failed || cautions}
+            </span>
+          )}
+        </TabsTrigger>
+        <TabsTrigger value="notes">
+          Notes
+          {warnings.length > 0 && (
+            <span className="numeric ml-1 text-hint font-medium text-warning">
+              {warnings.length}
+            </span>
+          )}
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="preview" className="min-h-0 flex-1">
+        <Pane className="h-full">
+          {previewError ? (
+            <EmptyNote className="my-auto text-destructive">{previewError}</EmptyNote>
+          ) : preview ? (
+            <CodeEditor className="h-full" language="ini" value={preview.content} readOnly />
+          ) : (
+            <EmptyNote className="my-auto">
+              Enter a domain and the config appears here, rendered by the server that will write it.
+            </EmptyNote>
+          )}
+        </Pane>
+      </TabsContent>
+      {editing && (
+        <TabsContent value="changes" className="min-h-0 flex-1">
+          <Pane className="h-full">
+            {changes === undefined ? (
+              <EmptyNote className={cn("my-auto", previewError && "text-destructive")}>
+                {previewError ||
+                  "What a save changes in the file appears here once the form has read it."}
+              </EmptyNote>
+            ) : changes === null ? (
+              <EmptyNote className="my-auto">
+                Too many changes to line up. The nginx config tab has the whole file a save writes.
+              </EmptyNote>
+            ) : changes === "" ? (
+              <EmptyNote className="my-auto">
+                Saving writes the file exactly as it is on disk.
+              </EmptyNote>
+            ) : (
+              <DiffView body={changes} singleFile lineNumbers className="h-full" />
+            )}
+          </Pane>
+        </TabsContent>
+      )}
+      <TabsContent value="checks" className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+        {held && (
+          <Notice tone="danger" icon={Warning} title="Save waits for these">
+            <p>
+              Each failed check below is a site that will not work as saved. Fix them, or save it as
+              it is.
+            </p>
+            <div className="mt-2">
+              <Button size="xs" variant="outline" onClick={() => setOverridden(blockingKey)}>
+                Allow saving anyway
+              </Button>
+            </div>
+          </Notice>
+        )}
+        {preflightError ? (
+          <EmptyNote className="my-auto text-destructive">{preflightError}</EmptyNote>
+        ) : !preflight ? (
+          <EmptyNote className="my-auto">
+            Enter a domain and what nginx -t cannot check appears here: the certificate and key,
+            password files, folders, upstreams and DNS.
+          </EmptyNote>
+        ) : (
+          <ul className="divide-y divide-hairline">
+            {checks.map((check) => (
+              <li key={check.id} className="flex items-start gap-2.5 py-2.5 text-body">
+                <StatusDot tone={CHECK_TONE[check.level]} className="mt-1.5" />
+                <span className="min-w-0 leading-relaxed">
+                  <span className="font-medium">
+                    {check.domain && <span className="font-mono">{check.domain}: </span>}
+                    {check.title}
+                  </span>
+                  {check.detail && (
+                    <span className="block text-muted-foreground">{check.detail}</span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </TabsContent>
+      <TabsContent value="notes" className="min-h-0 flex-1 overflow-y-auto">
+        {warnings.length === 0 ? (
+          <p className="flex items-center gap-2.5 py-2 text-body text-muted-foreground">
+            <StatusDot tone="running" />
+            Every setting here is one this dashboard would have chosen.
+          </p>
+        ) : (
+          <ul className="divide-y divide-hairline">
+            {warnings.map((warning) => (
+              <li key={warning} className="flex items-start gap-2.5 py-2.5 text-body">
+                <StatusDot tone="warning" className="mt-1.5" />
+                <span className="min-w-0 leading-relaxed">{warning}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </TabsContent>
+    </Tabs>
+  )
+  const rawEditor = (
+    <>
+      {editing && filePath && (
+        <ConfigEditor
+          open={rawOpen}
+          onOpenChange={setRawOpen}
+          path={filePath}
+          kind="nginx"
+          title={fileName}
+          initialLine={dropped?.[0]?.line}
+          siteDisabled={disabled}
+          onSaved={(reloaded) => {
+            setReads((n) => n + 1)
+            onSaved(reloaded)
+          }}
+        />
+      )}
+    </>
+  )
+
+  if (page) {
+    const name = editing ?? ""
+    // The File part carries what would hold or qualify a save: the checks
+    // that failed, or the ones that caution, or the preview's notes.
+    const fileMark: PartMark | undefined =
+      failed > 0
+        ? { count: failed, tone: "danger" }
+        : cautions + warnings.length > 0
+          ? { count: cautions + warnings.length, tone: "warning" }
+          : changed > 0
+            ? { count: changed, tone: "muted" }
+            : undefined
+    return (
+      <PageLayout.Provider value>
+        <div data-slot="site-settings" className="mx-auto w-full max-w-3xl min-w-0 space-y-6 pb-24">
+          <SettingsParts
+            name={name}
+            view={view}
+            unsaved={start ? changedViews(spec, start) : []}
+            marks={{ file: fileMark }}
+          />
+          {dirty && start && (
+            <UnsavedStrip
+              name={name}
+              view={view}
+              fields={Math.max(unsaved, 1)}
+              lines={changed}
+              parts={changedViews(spec, start)}
+            />
+          )}
+          {conflictNotice}
+          {staleNotice}
+          {(view === "general" || view === "file") && fileNotice}
+          {!loaded ? (
+            // The column's own silhouette while the file is read, so the
+            // fields do not arrive holding a new site's defaults.
+            <LoadingRows rows={6} />
+          ) : (
+            <FormSections>
+              {view === "general" && (
+                <>
+                  <Part title="Names">{identity}</Part>
+                  <Part title="What it serves">
+                    {kindChoice}
+                    {kindFields}
+                    {canonical}
+                  </Part>
+                  {spec.kind === "proxy" && <Part title="Behaviour">{behaviour}</Part>}
+                </>
+              )}
+              {view === "https" && <Part title="Encryption">{encryption}</Part>}
+              {view === "access" && access}
+              {view === "hardening" && (
+                <>
+                  <Part title="Hardening">{hardening}</Part>
+                  {limits}
+                </>
+              )}
+              {view === "headers" && headers}
+              {view === "paths" && (
+                <>
+                  {paths}
+                  {anythingElse}
+                </>
+              )}
+              {view === "file" && (
+                <SettingSection
+                  title="The file"
+                  state={filePath && <span className="font-mono">{filePath}</span>}
+                >
+                  {/* A pane's height of its own: beside the sheet's fields it
+                      took what the sheet had left, and a column has no such
+                      remainder to give it. */}
+                  <div className="flex h-[32rem] min-h-0 flex-col">{review}</div>
+                </SettingSection>
+              )}
+            </FormSections>
+          )}
+        </div>
+        {loaded && (saveable || enableOnly) && (
+          <SiteSaveBar
+            headline={
+              dirty
+                ? unsaved <= 1
+                  ? "1 unsaved change"
+                  : `${unsaved} unsaved changes`
+                : rewrites
+                  ? `Saving rewrites ${plural(changed, "line")} of the file`
+                  : "Disabled"
+            }
+            note={saves.note}
+            primary={
+              enableOnly && saves.secondary
+                ? {
+                    label: saves.secondary.label,
+                    run: () => void save(saves.secondary!.mode),
+                    pending: busy === saves.secondary.mode,
+                  }
+                : {
+                    label: saves.primary.label,
+                    run: () => void save(saves.primary.mode),
+                    pending: busy === saves.primary.mode,
+                  }
+            }
+            secondary={
+              !enableOnly && saves.secondary
+                ? {
+                    label: saves.secondary.label,
+                    run: () => void save(saves.secondary!.mode),
+                    pending: busy === saves.secondary.mode,
+                  }
+                : undefined
+            }
+            onDiscard={dirty ? resetDraft : undefined}
+            disabled={!ready || held}
+            saving={busy !== null}
+          />
+        )}
+        <DiscardDialog
+          open={leaving !== null}
+          onStay={() => setLeaving(null)}
+          onDiscard={() => {
+            const go = leaving?.go
+            setLeaving(null)
+            resetDraft()
+            go?.()
+          }}
+        >
+          What you changed in {name} is not saved. Discarding it leaves the file as it is.
+        </DiscardDialog>
+        {rawEditor}
+      </PageLayout.Provider>
+    )
+  }
 
   return (
     <SidePanel
@@ -788,972 +2124,53 @@ function SiteFormBody({
       }
       bodyClassName="flex min-h-0 flex-1 flex-col gap-0 p-0 lg:flex-row"
       footer={
-        servedCopy ? (
-          <>
-            <span className="mr-auto text-hint text-muted-foreground">
-              {heldNote ?? (
-                <>
-                  nginx serves <code className="font-mono">sites-enabled/{spec.name}</code>, a file
-                  of its own, not this one. Saving here changes nothing it serves until that file is
-                  replaced by a link to this one.
-                </>
-              )}
-            </span>
-            <Button
-              size="sm"
-              onClick={() => save("keep")}
-              disabled={!ready || held || busy !== null}
-              pending={busy === "keep"}
-              aria-keyshortcuts="Control+S Meta+S"
-            >
-              Save
-            </Button>
-          </>
-        ) : disabled ? (
-          <>
-            <span className="mr-auto text-hint text-muted-foreground">
-              {heldNote ??
-                (file?.enabledElsewhere
-                  ? `${file.enabledElsewhere}, so this site can be neither enabled nor tested under its name.`
-                  : confd
-                    ? "Disabled: nginx reads only the conf.d files ending in .conf. nginx tests it as if it did, and it stays off until it is renamed."
-                    : "Disabled. nginx tests it as if enabled, and it stays off until you enable it.")}
-            </span>
-            {!file?.enabledElsewhere && !confd && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => save("enable")}
-                disabled={!ready || held || busy !== null}
-                pending={busy === "enable"}
-              >
-                Save and enable
-              </Button>
-            )}
-            <Button
-              size="sm"
-              onClick={() => save("keep")}
-              disabled={!ready || held || busy !== null}
-              pending={busy === "keep"}
-              aria-keyshortcuts="Control+S Meta+S"
-            >
-              Save (stays disabled)
-            </Button>
-          </>
-        ) : (
-          <>
-            <span className="mr-auto text-hint text-muted-foreground">
-              {heldNote ??
-                (droppedLines > 0
-                  ? `Saving drops ${plural(droppedLines, "line")} of the file, listed above.`
-                  : "Validated with nginx\u2019s own parser before it takes effect, and rolled back if the test fails.")}
-            </span>
+        <>
+          <span className="mr-auto text-hint text-muted-foreground">{saves.note}</span>
+          {saves.secondary && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => save("save")}
+              onClick={() => save(saves.secondary!.mode)}
               disabled={!ready || held || busy !== null}
-              pending={busy === "save"}
+              pending={busy === saves.secondary.mode}
             >
-              Save only
+              {saves.secondary.label}
             </Button>
-            <Button
-              size="sm"
-              onClick={() => save("reload")}
-              disabled={!ready || held || busy !== null}
-              pending={busy === "reload"}
-              aria-keyshortcuts="Control+S Meta+S"
-            >
-              Save and reload
-            </Button>
-          </>
-        )
+          )}
+          <Button
+            size="sm"
+            onClick={() => save(saves.primary.mode)}
+            disabled={!ready || held || busy !== null}
+            pending={busy === saves.primary.mode}
+            aria-keyshortcuts="Control+S Meta+S"
+          >
+            {saves.primary.label}
+          </Button>
+        </>
       }
     >
       <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:w-[26rem] lg:shrink-0 lg:border-r lg:border-hairline">
         <div className="space-y-6">
-          {conflictShown && (
-            <div ref={conflictRef} role="alert" tabIndex={-1} className="rounded-lg focus-ring">
-              <Notice tone="warning" icon={Warning} title="Already served elsewhere">
-                {conflictShown.message}
-                <div className="mt-2">
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    onClick={() => save(conflictShown.mode, true)}
-                    disabled={busy !== null}
-                    pending={busy === "anyway"}
-                  >
-                    Save anyway
-                  </Button>
-                </div>
-              </Notice>
-            </div>
-          )}
-          {stale && (
-            <div ref={staleRef} role="alert" tabIndex={-1} className="rounded-lg focus-ring">
-              <Notice
-                tone="warning"
-                icon={Warning}
-                title={
-                  stale === "gone"
-                    ? `${fileName} is not on disk any more`
-                    : `${fileName} changed on disk`
-                }
-              >
-                <p>
-                  {stale === "gone"
-                    ? "Somebody removed it after the form read it. Keeping your draft writes it again when you save."
-                    : "Somebody saved it after the form read it \u2014 by hand, in the raw editor, or from another tab. Keeping your draft saves over their change; reloading takes theirs and drops the edits made here."}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {stale !== "gone" && (
-                    <Button size="xs" variant="outline" onClick={() => take(stale)}>
-                      Reload from disk
-                    </Button>
-                  )}
-                  <Button size="xs" variant="outline" onClick={keepDraft}>
-                    Keep my draft
-                  </Button>
-                </div>
-              </Notice>
-            </div>
-          )}
-          {editing && (!managed || droppedLines > 0) && (
-            <Notice
-              tone="warning"
-              icon={Warning}
-              title={
-                droppedLines > 0
-                  ? `Saving drops ${plural(droppedLines, "line")} of this ${managed ? "file" : "hand-written file"}`
-                  : "This file was written by hand"
-              }
-            >
-              {dropped && droppedLines > 0 ? (
-                <>
-                  <p>
-                    {managed
-                      ? `Added by hand, with no field in the form, so a save leaves ${dropped.length === 1 ? "it" : "them"} out.`
-                      : `The form has no field for ${dropped.length === 1 ? "this" : "these"}, so a save leaves ${dropped.length === 1 ? "it" : "them"} out.`}
-                    {!managed && (
-                      <>
-                        {" "}
-                        The current file is kept as{" "}
-                        <code className="font-mono">{fileName}.bak</code>.
-                      </>
-                    )}
-                  </p>
-                  <Well className="mt-2 overflow-hidden p-0">
-                    <DiffView
-                      body={droppedDiff(dropped)}
-                      singleFile
-                      lineNumbers
-                      className="max-h-56"
-                    />
-                  </Well>
-                  {movable.length < dropped.length && (
-                    <p className="text-hint text-muted-foreground">
-                      Only lines directly in the server block can move as they are. The others stay
-                      only if the file is edited by hand.
-                    </p>
-                  )}
-                  {dropped.some((d) => d.reason) && (
-                    <ul className="text-hint text-muted-foreground">
-                      {dropped
-                        .filter((d) => d.reason)
-                        .map((d) => (
-                          <li key={`${d.line}:${d.text}`}>
-                            Line {d.line}: {d.reason}.
-                          </li>
-                        ))}
-                    </ul>
-                  )}
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {movable.length > 0 && (
-                      <Button size="xs" variant="outline" onClick={moveLines}>
-                        Move {plural(droppedCount(movable), "line")} into Extra configuration
-                      </Button>
-                    )}
-                    {filePath && (
-                      <Button size="xs" variant="outline" onClick={() => setRawOpen(true)}>
-                        Edit the raw file
-                      </Button>
-                    )}
-                  </div>
-                </>
-              ) : dropped ? (
-                <p>
-                  The form reads every directive in it. Saving rewrites it in the form&rsquo;s own
-                  layout, without its comments, and keeps the current file as{" "}
-                  <code className="font-mono">{fileName}.bak</code>.
-                </p>
-              ) : (
-                <p>
-                  The form has read what it recognises. Saving replaces the file with what the form
-                  produces, so anything it could not read is lost; the current file is kept as{" "}
-                  <code className="font-mono">{fileName}.bak</code>.
-                </p>
-              )}
-            </Notice>
-          )}
-
-          <Field
-            label="Domains"
-            htmlFor="site-domains"
-            hint={
-              editing
-                ? "Space-separated."
-                : "Space-separated. The first names the file and the certificate."
-            }
-          >
-            <Input
-              id="site-domains"
-              value={domainText}
-              onChange={(e) => commitDomains(e.target.value)}
-              // The one field every new site needs, so the keyboard starts
-              // here rather than on the first preset card.
-              autoFocus={!editing}
-              placeholder="app.example.com www.app.example.com"
-              className="font-mono text-xs"
-            />
-          </Field>
-          <DomainChecks checks={dnsChecks.filter((c) => spec.domains.includes(c.domain ?? ""))} />
-
-          <Field
-            label="File name"
-            htmlFor="site-name"
-            error={nameError}
-            hint={
-              file?.path
-                ? `Saved as ${file.path}`
-                : editing
-                  ? "The file this site is saved in."
-                  : fixed.name
-                    ? "Stays as typed, whatever the domains become."
-                    : "Follows the first domain until you change it."
-            }
-            trailing={
-              !editing &&
-              fixed.name &&
-              derived.name !== "" &&
-              derived.name !== spec.name && (
-                <Button size="xs" variant="ghost" onClick={() => follow(["name"])}>
-                  Match the domain
-                </Button>
-              )
-            }
-          >
-            <Input
-              id="site-name"
-              value={spec.name}
-              readOnly={editing !== null}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="app.example.com"
-              aria-invalid={nameError ? true : undefined}
-              className={cn("font-mono text-xs", editing && "text-muted-foreground")}
-            />
-          </Field>
-
-          {!source && (
-            <FormSection title="Start from">
-              <ChoiceGrid columns={2} className="grid-cols-2">
-                {PRESETS.map((p) => (
-                  <ProductCard
-                    key={p.id}
-                    product={p.product}
-                    fallback={KIND_MARK[p.spec.kind ?? "proxy"]}
-                    label={p.label}
-                    detail={p.detail}
-                    selected={preset === p.id}
-                    onClick={() => choosePreset(p.id)}
-                  />
-                ))}
-              </ChoiceGrid>
-              {chosenPreset?.note && <FormNote ref={presetNote}>{chosenPreset.note}</FormNote>}
-            </FormSection>
-          )}
-
-          <FormSection title="What it serves">
-            <ChoiceGrid columns={2} className="grid-cols-2 sm:grid-cols-4">
-              {(
-                [
-                  { kind: "proxy", label: "An app" },
-                  { kind: "static", label: "Files" },
-                  { kind: "php", label: "PHP" },
-                  { kind: "redirect", label: "A redirect" },
-                ] as const
-              ).map(({ kind, label }) => {
-                const Mark = KIND_MARK[kind]
-                return (
-                  <ChoiceCard
-                    key={kind}
-                    selected={spec.kind === kind}
-                    onClick={() => chooseKind(kind)}
-                    className="min-h-20 justify-center"
-                  >
-                    <Mark aria-hidden className="size-4 text-muted-foreground" />
-                    <span className="text-body font-medium">{label}</span>
-                  </ChoiceCard>
-                )
-              })}
-            </ChoiceGrid>
-          </FormSection>
-
-          {spec.kind === "proxy" && (
-            <ToggleGroup
-              type="single"
-              aria-label="How many servers"
-              value={spec.pool ? "pool" : "one"}
-              onValueChange={(v) => {
-                if (v === "pool" && !spec.pool) set("pool", poolFrom(spec.upstream))
-                if (v === "one") set("pool", undefined)
-              }}
-              variant="outline"
-              size="sm"
-              className="w-full"
-            >
-              <ToggleGroupItem value="one" className="flex-1 text-hint">
-                One server
-              </ToggleGroupItem>
-              <ToggleGroupItem value="pool" className="flex-1 text-hint">
-                Several servers
-              </ToggleGroupItem>
-            </ToggleGroup>
-          )}
-          {spec.kind === "proxy" && spec.pool && (
-            <PoolField pool={spec.pool} onChange={(pool) => set("pool", pool)} />
-          )}
-          {spec.kind === "proxy" && !spec.pool && (
-            <Field
-              label="Send it to"
-              htmlFor="site-upstream"
-              hint={
-                idle ? (
-                  <span className="text-warning">{idle}</span>
-                ) : (
-                  "Where the application is listening. Usually loopback on this machine."
-                )
-              }
-            >
-              <UpstreamPicker
-                id="site-upstream"
-                value={spec.upstream ?? ""}
-                onChange={setUpstream}
-                options={picker.options}
-                loading={picker.loading}
-                failed={picker.failed}
-                onRetry={picker.onRetry}
-                placeholder="http://127.0.0.1:3000"
-              />
-            </Field>
-          )}
-          {spec.kind === "static" && (
-            <>
-              <Field label="Directory" htmlFor="site-root" hint="The folder holding index.html.">
-                <Input
-                  id="site-root"
-                  value={spec.root ?? ""}
-                  onChange={(e) => set("root", e.target.value)}
-                  placeholder="/var/www/site"
-                  className="font-mono text-xs"
-                />
-              </Field>
-              <IndexFilesField spec={spec} onChange={(v) => set("indexFiles", v)} />
-              <OptionList>
-                <OptionRow
-                  title="Single-page app"
-                  hint="A path with no file of its own gets index.html, so the app's router answers deep links and reloads."
-                  checked={!!spec.spa}
-                  onCheckedChange={(v) => set("spa", v)}
-                />
-                <OptionRow
-                  title="List folders"
-                  hint="A folder without an index is answered with a list of its files, visible to anyone who can reach the site."
-                  checked={!!spec.autoindex}
-                  onCheckedChange={(v) => set("autoindex", v)}
-                />
-                <OptionRow
-                  title="Serve precompressed files"
-                  hint="A file.gz beside a file is sent in its place to browsers that accept gzip. Compress at build time."
-                  checked={!!spec.gzipStatic}
-                  onCheckedChange={(v) => set("gzipStatic", v)}
-                />
-              </OptionList>
-            </>
-          )}
-          {spec.kind === "php" && (
-            <>
-              <Field
-                label="Directory"
-                htmlFor="site-root"
-                hint="The folder holding index.php: a Laravel app's public folder."
-              >
-                <Input
-                  id="site-root"
-                  value={spec.root ?? ""}
-                  onChange={(e) => set("root", e.target.value)}
-                  placeholder="/var/www/site"
-                  className="font-mono text-xs"
-                />
-              </Field>
-              <Field
-                label="PHP-FPM socket"
-                htmlFor="site-php-socket"
-                hint={
-                  phpSockets.data?.length
-                    ? `Found in /run/php: ${phpSockets.data.join(", ")}`
-                    : phpSockets.data
-                      ? "No socket in /run/php. Install php-fpm, or give the socket its pool listens on."
-                      : "Where php-fpm listens."
-                }
-              >
-                {phpSockets.data?.length ? (
-                  <Select value={spec.phpSocket ?? ""} onValueChange={(v) => set("phpSocket", v)}>
-                    <SelectTrigger id="site-php-socket" className="w-full font-mono text-xs">
-                      <SelectValue placeholder="Choose a socket" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[
-                        ...phpSockets.data,
-                        ...(spec.phpSocket && !phpSockets.data.includes(spec.phpSocket)
-                          ? [spec.phpSocket]
-                          : []),
-                      ].map((socket) => (
-                        <SelectItem key={socket} value={socket} className="font-mono text-xs">
-                          {socket}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input
-                    id="site-php-socket"
-                    value={spec.phpSocket ?? ""}
-                    onChange={(e) => set("phpSocket", e.target.value)}
-                    placeholder="/run/php/php8.3-fpm.sock"
-                    className="font-mono text-xs"
-                  />
-                )}
-              </Field>
-              <IndexFilesField spec={spec} onChange={(v) => set("indexFiles", v)} />
-              <OptionList>
-                <OptionRow
-                  title="Front controller"
-                  hint="A path with no file of its own goes to index.php, which is how WordPress and Laravel route every page."
-                  checked={!!spec.phpFrontController}
-                  onCheckedChange={(v) => set("phpFrontController", v)}
-                />
-              </OptionList>
-            </>
-          )}
-          {spec.kind === "redirect" && (
-            <>
-              <Field
-                label="Redirect to"
-                htmlFor="site-redirect"
-                hint={
-                  spec.redirectDropPath
-                    ? "Every path lands on this address."
-                    : "The path and query are carried across."
-                }
-              >
-                <Input
-                  id="site-redirect"
-                  value={spec.redirectTo ?? ""}
-                  onChange={(e) => set("redirectTo", e.target.value)}
-                  placeholder="https://new.example.com"
-                  className="font-mono text-xs"
-                />
-              </Field>
-              <Field
-                label="Status"
-                hint={REDIRECT_CODES.find((c) => c.code === redirectCode(spec))?.hint}
-              >
-                <ToggleGroup
-                  type="single"
-                  aria-label="Redirect status"
-                  value={String(redirectCode(spec))}
-                  onValueChange={(v) => {
-                    if (!v) return
-                    const code = Number(v) as NonNullable<SiteSpec["redirectCode"]>
-                    setSpec((s) => ({
-                      ...s,
-                      redirectCode: code,
-                      permanent: code === 301 || code === 308,
-                    }))
-                  }}
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                >
-                  {REDIRECT_CODES.map(({ code }) => (
-                    <ToggleGroupItem
-                      key={code}
-                      value={String(code)}
-                      className="flex-1 font-mono text-hint"
-                    >
-                      {code}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </Field>
-              <OptionList>
-                <OptionRow
-                  title="Keep the path and query"
-                  hint="/docs?page=2 lands on the same path at the new address. Off, every path lands on the address itself."
-                  checked={!spec.redirectDropPath}
-                  onCheckedChange={(v) => set("redirectDropPath", !v)}
-                />
-              </OptionList>
-            </>
-          )}
-
-          {spec.domains.some((d) => !d.startsWith("*.")) && (
-            <Field
-              label="Canonical name"
-              hint={
-                spec.canonical === "www"
-                  ? "example.com is sent to www.example.com for each www. domain above."
-                  : spec.canonical === "apex"
-                    ? "www.example.com is sent to example.com for each domain above without www."
-                    : "Only the domains above are answered."
-              }
-            >
-              <ToggleGroup
-                type="single"
-                aria-label="Canonical name"
-                value={spec.canonical || "none"}
-                onValueChange={(v) => {
-                  if (v) set("canonical", v === "none" ? undefined : (v as "www" | "apex"))
-                }}
-                variant="outline"
-                size="sm"
-                className="w-full"
-              >
-                <ToggleGroupItem value="none" className="flex-1 text-hint">
-                  As listed
-                </ToggleGroupItem>
-                <ToggleGroupItem value="apex" className="flex-1 text-hint">
-                  Without www
-                </ToggleGroupItem>
-                <ToggleGroupItem value="www" className="flex-1 text-hint">
-                  With www
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </Field>
-          )}
-
-          <FormSection title="Encryption">
-            <OptionList>
-              <OptionRow
-                title="Serve over HTTPS"
-                hint="Needs a certificate on disk: use an installed one below, or get one."
-                checked={spec.tls}
-                onCheckedChange={(v) => set("tls", v)}
-              >
-                <div className="space-y-3">
-                  <FieldRow>
-                    <Field label="Certificate" htmlFor="site-cert">
-                      <Input
-                        id="site-cert"
-                        value={spec.certPath ?? ""}
-                        onChange={(e) => setCertificate("certPath", e.target.value)}
-                        className="font-mono text-hint"
-                      />
-                    </Field>
-                    <Field label="Private key" htmlFor="site-key">
-                      <Input
-                        id="site-key"
-                        value={spec.keyPath ?? ""}
-                        onChange={(e) => setCertificate("keyPath", e.target.value)}
-                        className="font-mono text-hint"
-                      />
-                    </Field>
-                  </FieldRow>
-                  {!certificateFollows && (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      className="-ml-2"
-                      onClick={() => follow(["certPath", "keyPath"])}
-                    >
-                      Use the domain&rsquo;s certificate
-                    </Button>
-                  )}
-                  {!certKnown && (
-                    <FormNote tone="warning">
-                      No certificate is listed at this path. If it does not exist yet, nginx refuses
-                      the site at reload —{" "}
-                      <Link href={issueHref} className="underline underline-offset-2">
-                        issue one for {spec.domains[0] ?? "these domains"} first
-                      </Link>
-                      .
-                    </FormNote>
-                  )}
-                </div>
-              </OptionRow>
-              {spec.tls && (
-                <>
-                  <OptionRow
-                    title="Send HTTP visitors to HTTPS"
-                    hint="The certificate protects nobody who arrives on the unencrypted port."
-                    checked={spec.forceHttps}
-                    onCheckedChange={(v) => set("forceHttps", v)}
-                  />
-                  <OptionRow
-                    title="HSTS"
-                    hint="Tells the browser never to use plain HTTP for this name again. Hard to undo — a mistake sticks for as long as the policy says."
-                    checked={spec.hsts}
-                    onCheckedChange={(v) => set("hsts", v)}
-                  >
-                    <HSTSOptions spec={spec} set={set} />
-                  </OptionRow>
-                  <OptionRow
-                    title="HTTP/2"
-                    hint="Faster for pages with many small assets."
-                    checked={spec.http2}
-                    onCheckedChange={(v) => set("http2", v)}
-                  />
-                </>
-              )}
-            </OptionList>
-            {spec.tls && (
-              <Field
-                label="TLS versions"
-                htmlFor="site-tls-profile"
-                hint={
-                  spec.tlsProfile === "modern"
-                    ? "Clients without TLS 1.3 cannot connect: Android before 10, Java 8, older curl and OpenSSL, some monitoring and payment callbacks."
-                    : "What every current browser and client speaks. 1.0 and 1.1 stay off."
-                }
-              >
-                <Select
-                  value={spec.tlsProfile || "compatible"}
-                  onValueChange={(v) => set("tlsProfile", v === "modern" ? "modern" : undefined)}
-                >
-                  <SelectTrigger id="site-tls-profile" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="compatible">TLS 1.2 and 1.3</SelectItem>
-                    <SelectItem value="modern">TLS 1.3 only (modern)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
-            {spec.domains.length > 0 && (
-              <SiteCertificate
-                spec={spec}
-                disk={editing ? disk : null}
-                existing={editing !== null}
-                baseDigest={base?.digest}
-                served={!disabled && !servedCopy}
-                onUse={pickCertificate}
-                onRebased={(r) => {
-                  setDisk(r)
-                  setBase({ digest: r.digest, spec: specFromServer(r.spec) })
-                  // The certificate flow saves the plain-HTTP site with a reload.
-                  onSaved(true)
-                }}
-                onDone={(res) => {
-                  const outcome = saveOutcome(res, { existing: true })
-                  notify[outcome.tone](outcome.title, { description: outcome.description })
-                  onSaved(res.reloaded)
-                  onOpenChange(false)
-                }}
-              />
-            )}
-          </FormSection>
-
-          {spec.kind === "proxy" && (
-            <FormSection title="Behaviour">
-              <OptionList>
-                <OptionRow
-                  title="WebSockets"
-                  hint="Needed by anything with live updates: a chat, a terminal, a dashboard."
-                  checked={spec.webSockets}
-                  onCheckedChange={(v) => set("webSockets", v)}
-                />
-              </OptionList>
-              <FieldRow>
-                <Field
-                  label="Upload limit"
-                  htmlFor="site-body"
-                  hint="nginx refuses a larger request body with a 413."
-                >
-                  <Input
-                    id="site-body"
-                    value={spec.clientMaxBody ?? ""}
-                    onChange={(e) => set("clientMaxBody", e.target.value)}
-                    placeholder="50m"
-                    className="font-mono text-xs"
-                  />
-                </Field>
-                <Field
-                  label="Timeout"
-                  htmlFor="site-timeout"
-                  hint="Seconds nginx waits for the application to answer."
-                >
-                  <Input
-                    id="site-timeout"
-                    value={String(spec.proxyTimeout ?? 60)}
-                    inputMode="numeric"
-                    onChange={(e) => set("proxyTimeout", Number(e.target.value) || 0)}
-                    className="font-mono text-xs"
-                  />
-                </Field>
-              </FieldRow>
-              <OptionList>
-                <OptionRow
-                  title="Buffer responses"
-                  hint="nginx holds the answer until it has it, freeing a slow application sooner. Off streams it as it is produced, which server-sent events and progress output need."
-                  checked={spec.buffering ?? false}
-                  onCheckedChange={(v) => set("buffering", v)}
-                />
-                <OptionRow
-                  title="Stream uploads"
-                  hint="The application gets a request body as it arrives, rather than after nginx has read all of it."
-                  checked={spec.streamUploads ?? false}
-                  onCheckedChange={(v) => set("streamUploads", v)}
-                />
-              </OptionList>
-              <UpstreamAdvanced spec={spec} set={set} />
-            </FormSection>
-          )}
-
-          <FormSection title="Hardening">
-            <OptionList>
-              <OptionRow
-                title="Security headers"
-                hint="nosniff, SAMEORIGIN and a referrer policy. Safe defaults for almost any site."
-                checked={spec.securityHeaders}
-                onCheckedChange={(v) => set("securityHeaders", v)}
-              />
-              <OptionRow
-                title="Block common probes"
-                hint="Refuses requests for dotfiles and backup extensions — the shapes scanners ask for all day."
-                checked={spec.blockExploits}
-                onCheckedChange={(v) => set("blockExploits", v)}
-              />
-              <OptionRow
-                title="Compress responses"
-                hint="gzip for text, JSON, scripts and SVG."
-                checked={spec.gzip}
-                onCheckedChange={(v) => set("gzip", v)}
-              />
-              <OptionRow
-                title="Access log"
-                hint="Off keeps the disk quiet; on is what you want when something goes wrong."
-                checked={spec.accessLog}
-                onCheckedChange={(v) => set("accessLog", v)}
-              />
-            </OptionList>
-            {spec.accessLog && (
-              <Field
-                label="Log format"
-                htmlFor="site-log-format"
-                hint="Timed is what the traffic pages read latency from."
-              >
-                <Select
-                  value={spec.logFormat ?? "timed"}
-                  onValueChange={(v) => set("logFormat", v as SiteSpec["logFormat"])}
-                >
-                  <SelectTrigger id="site-log-format" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="timed">Timed (adds response time)</SelectItem>
-                    <SelectItem value="combined">Standard</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
-          </FormSection>
-
-          <AccessSection spec={spec} set={set} open={open} authFiles={authFiles.data} />
-
-          <CrawlerSection spec={spec} set={set} />
-
-          <RealIPSection spec={spec} set={set} open={open} />
-
-          {spec.kind !== "redirect" && <LimitsSection spec={spec} set={set} />}
-
-          {spec.kind !== "redirect" && <CachingSection spec={spec} set={set} />}
-
-          <HeadersSection spec={spec} set={set} />
-
-          <PagesSection spec={spec} set={set} site={editing} />
-
-          {spec.kind === "proxy" && (
-            <FormSection
-              title="Paths that go somewhere else"
-              hint="Everything not matched by one of these goes to the site's main upstream."
-            >
-              <LocationsField
-                locations={spec.locations}
-                onChange={(v) => set("locations", v)}
-                picker={picker}
-                sso={spec.forwardAuth && (spec.forwardAuth.pathsOnly ? "paths" : "site")}
-              />
-              {spec.locations.length > 0 && <RoutesTable spec={spec} />}
-            </FormSection>
-          )}
-
-          <FormSection title="Anything else">
-            <Field
-              label="Extra configuration"
-              htmlFor="site-custom"
-              hint="Added verbatim inside the server block."
-            >
-              <Textarea
-                id="site-custom"
-                ref={customRef}
-                value={spec.custom ?? ""}
-                onChange={(e) => set("custom", e.target.value)}
-                rows={4}
-                className="font-mono text-hint"
-                placeholder="# valid nginx directives"
-              />
-            </Field>
-          </FormSection>
+          {conflictNotice}
+          {staleNotice}
+          {fileNotice}
+          {identity}
+          {startFrom}
+          <Part title="What it serves">{kindChoice}</Part>
+          {kindFields}
+          {canonical}
+          <Part title="Encryption">{encryption}</Part>
+          {spec.kind === "proxy" && <Part title="Behaviour">{behaviour}</Part>}
+          <Part title="Hardening">{hardening}</Part>
+          {access}
+          {limits}
+          {headers}
+          {paths}
+          {anythingElse}
         </div>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 p-4">
-        <Tabs defaultValue="preview" className="flex min-h-0 flex-1 flex-col gap-3">
-          <TabsList>
-            <TabsTrigger value="preview">
-              <Code className="size-3.5" />
-              nginx config
-            </TabsTrigger>
-            {editing && (
-              <TabsTrigger value="changes">
-                Changes
-                {changed > 0 && (
-                  <span className="numeric ml-1 text-hint font-medium text-muted-foreground">
-                    {changed}
-                  </span>
-                )}
-              </TabsTrigger>
-            )}
-            <TabsTrigger value="checks">
-              Checks
-              {failed + cautions > 0 && (
-                <span
-                  className={cn(
-                    "numeric ml-1 text-hint font-medium",
-                    failed > 0 ? "text-destructive" : "text-warning",
-                  )}
-                >
-                  {failed || cautions}
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="notes">
-              Notes
-              {warnings.length > 0 && (
-                <span className="numeric ml-1 text-hint font-medium text-warning">
-                  {warnings.length}
-                </span>
-              )}
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="preview" className="min-h-0 flex-1">
-            <Pane className="h-full">
-              {previewError ? (
-                <EmptyNote className="my-auto text-destructive">{previewError}</EmptyNote>
-              ) : preview ? (
-                <CodeEditor className="h-full" language="ini" value={preview.content} readOnly />
-              ) : (
-                <EmptyNote className="my-auto">
-                  Enter a domain and the config appears here, rendered by the server that will write
-                  it.
-                </EmptyNote>
-              )}
-            </Pane>
-          </TabsContent>
-          {editing && (
-            <TabsContent value="changes" className="min-h-0 flex-1">
-              <Pane className="h-full">
-                {changes === undefined ? (
-                  <EmptyNote className={cn("my-auto", previewError && "text-destructive")}>
-                    {previewError ||
-                      "What a save changes in the file appears here once the form has read it."}
-                  </EmptyNote>
-                ) : changes === null ? (
-                  <EmptyNote className="my-auto">
-                    Too many changes to line up. The nginx config tab has the whole file a save
-                    writes.
-                  </EmptyNote>
-                ) : changes === "" ? (
-                  <EmptyNote className="my-auto">
-                    Saving writes the file exactly as it is on disk.
-                  </EmptyNote>
-                ) : (
-                  <DiffView body={changes} singleFile lineNumbers className="h-full" />
-                )}
-              </Pane>
-            </TabsContent>
-          )}
-          <TabsContent value="checks" className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-            {held && (
-              <Notice tone="danger" icon={Warning} title="Save waits for these">
-                <p>
-                  Each failed check below is a site that will not work as saved. Fix them, or save
-                  it as it is.
-                </p>
-                <div className="mt-2">
-                  <Button size="xs" variant="outline" onClick={() => setOverridden(blockingKey)}>
-                    Allow saving anyway
-                  </Button>
-                </div>
-              </Notice>
-            )}
-            {preflightError ? (
-              <EmptyNote className="my-auto text-destructive">{preflightError}</EmptyNote>
-            ) : !preflight ? (
-              <EmptyNote className="my-auto">
-                Enter a domain and what nginx -t cannot check appears here: the certificate and key,
-                password files, folders, upstreams and DNS.
-              </EmptyNote>
-            ) : (
-              <ul className="divide-y divide-hairline">
-                {checks.map((check) => (
-                  <li key={check.id} className="flex items-start gap-2.5 py-2.5 text-body">
-                    <StatusDot tone={CHECK_TONE[check.level]} className="mt-1.5" />
-                    <span className="min-w-0 leading-relaxed">
-                      <span className="font-medium">
-                        {check.domain && <span className="font-mono">{check.domain}: </span>}
-                        {check.title}
-                      </span>
-                      {check.detail && (
-                        <span className="block text-muted-foreground">{check.detail}</span>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </TabsContent>
-          <TabsContent value="notes" className="min-h-0 flex-1 overflow-y-auto">
-            {warnings.length === 0 ? (
-              <p className="flex items-center gap-2.5 py-2 text-body text-muted-foreground">
-                <StatusDot tone="running" />
-                Every setting here is one this dashboard would have chosen.
-              </p>
-            ) : (
-              <ul className="divide-y divide-hairline">
-                {warnings.map((warning) => (
-                  <li key={warning} className="flex items-start gap-2.5 py-2.5 text-body">
-                    <StatusDot tone="warning" className="mt-1.5" />
-                    <span className="min-w-0 leading-relaxed">{warning}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </TabsContent>
-        </Tabs>
-      </div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 p-4">{review}</div>
       {/* Inside the sheet, so each is layered over it: Escape and a click
           outside close it, not the form behind it. */}
       <Modal
@@ -1784,21 +2201,7 @@ function SiteFormBody({
             : "This new site is not saved. Discarding it throws away what was filled in."}
         </p>
       </Modal>
-      {editing && filePath && (
-        <ConfigEditor
-          open={rawOpen}
-          onOpenChange={setRawOpen}
-          path={filePath}
-          kind="nginx"
-          title={fileName}
-          initialLine={dropped?.[0]?.line}
-          siteDisabled={disabled}
-          onSaved={(reloaded) => {
-            setReads((n) => n + 1)
-            onSaved(reloaded)
-          }}
-        />
-      )}
+      {rawEditor}
     </SidePanel>
   )
 }
@@ -1866,7 +2269,7 @@ export function ListField({
     setDraft("")
   }
   return (
-    <Field label={label} htmlFor={id} hint={hint} error={error}>
+    <Field label={label} htmlFor={id} tip={hint} error={error}>
       <div className="space-y-2">
         {values.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
@@ -2167,7 +2570,7 @@ function LocationCard({
           {forwards && (
             <>
               <FieldRow>
-                <Field label="Upload limit" htmlFor={`${id}-body`} hint="Empty keeps the site's.">
+                <Field label="Upload limit" htmlFor={`${id}-body`} tip="Empty keeps the site's.">
                   <Input
                     id={`${id}-body`}
                     value={loc.bodyLimit ?? ""}
@@ -2179,7 +2582,7 @@ function LocationCard({
                 <Field
                   label="Timeout"
                   htmlFor={`${id}-timeout`}
-                  hint="Seconds; empty keeps the site's."
+                  tip="Seconds; empty keeps the site's."
                 >
                   <Input
                     id={`${id}-timeout`}
@@ -2227,7 +2630,7 @@ function LocationCard({
             <Field
               label="Password file"
               htmlFor={`${id}-auth`}
-              hint="In place of the site's on this path. Empty keeps the site's."
+              tip="In place of the site's on this path. Empty keeps the site's."
             >
               <Input
                 id={`${id}-auth`}
@@ -2319,7 +2722,7 @@ function HSTSOptions({
       <Field
         label="Remember for"
         htmlFor="site-hsts-max-age"
-        hint="Start short while checking every subdomain works over HTTPS, then raise it."
+        tip="Start short while checking every subdomain works over HTTPS, then raise it."
       >
         <Select value={String(maxAge)} onValueChange={(v) => setMaxAge(Number(v))}>
           <SelectTrigger id="site-hsts-max-age" className="w-full">
@@ -2460,7 +2863,7 @@ function UpstreamAdvanced({
         <Field
           label="Host header"
           htmlFor="site-host-header"
-          hint="What the application is told it was asked for. Most applications want the visitor's."
+          tip="What the application is told it was asked for. Most applications want the visitor's."
         >
           <ToggleGroup
             id="site-host-header"
@@ -2521,7 +2924,7 @@ function UpstreamAdvanced({
             <Field
               label="CA file"
               htmlFor="site-upstream-ca"
-              hint="Empty checks against the system's CAs."
+              tip="Empty checks against the system's CAs."
             >
               <Input
                 id="site-upstream-ca"
@@ -2751,7 +3154,7 @@ function PoolField({ pool, onChange }: { pool: SitePool; onChange: (pool: SitePo
       </FormNote>
       <Field
         label="Retry on the next server after"
-        hint="Nothing ticked never retries. nginx does not retry a POST, PUT or DELETE unless told to, since the first server may have acted on it."
+        tip="Nothing ticked never retries. nginx does not retry a POST, PUT or DELETE unless told to, since the first server may have acted on it."
       >
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           {RETRY_CONDITIONS.map((c) => (
@@ -2772,7 +3175,7 @@ function PoolField({ pool, onChange }: { pool: SitePool; onChange: (pool: SitePo
         <Field
           label="Tries"
           htmlFor="site-pool-tries"
-          hint="Servers one request may try, the first included. Empty is no cap."
+          tip="Servers one request may try, the first included. Empty is no cap."
         >
           <Input
             id="site-pool-tries"
@@ -2786,7 +3189,7 @@ function PoolField({ pool, onChange }: { pool: SitePool; onChange: (pool: SitePo
         <Field
           label="Kept-open connections"
           htmlFor="site-pool-keepalive"
-          hint="Idle connections each nginx worker keeps to the servers. Empty opens one per request."
+          tip="Idle connections each nginx worker keeps to the servers. Empty opens one per request."
         >
           <Input
             id="site-pool-keepalive"
@@ -2837,7 +3240,7 @@ function RequestLimitFields({
   return (
     <div className="space-y-2">
       <FieldRow>
-        <Field label="Requests" htmlFor={`${id}-rate`} hint="Per client, at a steady pace.">
+        <Field label="Requests" htmlFor={`${id}-rate`} tip="Per client, at a steady pace.">
           <div className="flex gap-2">
             <Input
               id={`${id}-rate`}
@@ -2860,7 +3263,7 @@ function RequestLimitFields({
         <Field
           label="Burst"
           htmlFor={`${id}-burst`}
-          hint="Requests past the rate that wait their turn instead of getting a 429."
+          tip="Requests past the rate that wait their turn instead of getting a 429."
         >
           <Input
             id={`${id}-burst`}
@@ -2950,7 +3353,7 @@ function RealIPSection({
   })()
 
   return (
-    <FormSection
+    <Part
       title="Visitor address"
       hint="Behind Cloudflare or a load balancer every request comes from the proxy. This puts the visitor's address back for the log, the address lists and the limits."
     >
@@ -3019,7 +3422,7 @@ function RealIPSection({
           <Field
             label="Address header"
             htmlFor="site-realip-header"
-            hint="With X-Forwarded-For the visitor is the last address that is not one of yours."
+            tip="With X-Forwarded-For the visitor is the last address that is not one of yours."
           >
             <Select value={header} onValueChange={(v) => set("realIp", { ...realIp, header: v })}>
               <SelectTrigger id="site-realip-header" className="w-full">
@@ -3036,7 +3439,7 @@ function RealIPSection({
           </Field>
         </>
       )}
-    </FormSection>
+    </Part>
   )
 }
 
@@ -3060,7 +3463,7 @@ function LimitsSection({
   const limited = Boolean(limits?.request) || (limits?.connPerIp ?? 0) > 0 || pathLimited
 
   return (
-    <FormSection
+    <Part
       title="Limits"
       hint="How much one client address may ask of the site. Past a limit it gets a 429."
     >
@@ -3117,7 +3520,7 @@ function LimitsSection({
           hint="A monitor, an office, another server of yours."
         />
       )}
-    </FormSection>
+    </Part>
   )
 }
 
@@ -3140,7 +3543,7 @@ function CachingSection({
     set("proxyCache", { maxSize: "1g", valid: "10m", ...proxy, ...patch })
 
   return (
-    <FormSection
+    <Part
       title="Caching"
       hint="Browsers keep static files, and nginx can keep the application's answers."
     >
@@ -3156,7 +3559,7 @@ function CachingSection({
               <Field
                 label="Kept for"
                 htmlFor="site-cache-age"
-                hint="A time in nginx's units: 12h, 30d, 1y."
+                tip="A time in nginx's units: 12h, 30d, 1y."
               >
                 <Input
                   id="site-cache-age"
@@ -3190,7 +3593,7 @@ function CachingSection({
             {proxy && (
               <div className="space-y-2">
                 <FieldRow>
-                  <Field label="Size on disk" htmlFor="site-cache-size" hint="512m, 2g.">
+                  <Field label="Size on disk" htmlFor="site-cache-size" tip="512m, 2g.">
                     <Input
                       id="site-cache-size"
                       value={proxy.maxSize}
@@ -3202,7 +3605,7 @@ function CachingSection({
                   <Field
                     label="Kept for"
                     htmlFor="site-cache-valid"
-                    hint="When the application's own Cache-Control does not say."
+                    tip="When the application's own Cache-Control does not say."
                   >
                     <Input
                       id="site-cache-valid"
@@ -3237,7 +3640,7 @@ function CachingSection({
           </OptionRow>
         )}
       </OptionList>
-    </FormSection>
+    </Part>
   )
 }
 
@@ -3341,7 +3744,7 @@ function HeadersSection({
   }
 
   return (
-    <FormSection
+    <Part
       title="Headers"
       hint="What every answer carries, what the application is sent, and the policies browsers follow."
     >
@@ -3493,7 +3896,7 @@ function HeadersSection({
       <Field
         label="X-Frame-Options"
         htmlFor="site-frame-options"
-        hint="Whether other sites may show this one in a frame. A CSP's frame-ancestors, where set, is what current browsers follow."
+        tip="Whether other sites may show this one in a frame. A CSP's frame-ancestors, where set, is what current browsers follow."
       >
         <Select
           value={h.frameOptions || "unset"}
@@ -3543,7 +3946,7 @@ function HeadersSection({
           />
         </>
       )}
-    </FormSection>
+    </Part>
   )
 }
 
@@ -3575,7 +3978,7 @@ export function HeaderListField({
     setValue("")
   }
   return (
-    <Field label={label} htmlFor={id} hint={hint} error={error}>
+    <Field label={label} htmlFor={id} tip={hint} error={error}>
       <div className="space-y-2">
         {values.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
@@ -3685,7 +4088,7 @@ function AccessSection({
     set("clientCert", { caPath: "", ...cert, ...patch })
 
   return (
-    <FormSection title="Who may reach it">
+    <Part title="Who may reach it">
       {spec.kind !== "redirect" && <SingleSignOn spec={spec} set={set} />}
       {spec.forwardAuth && spec.kind !== "redirect" ? (
         <ListField
@@ -3719,7 +4122,7 @@ function AccessSection({
                 <Field
                   label="CA certificate"
                   htmlFor="site-client-ca"
-                  hint="The PEM file of the CA, or CAs, a client certificate must be signed by."
+                  tip="The PEM file of the CA, or CAs, a client certificate must be signed by."
                 >
                   <Input
                     id="site-client-ca"
@@ -3774,7 +4177,7 @@ function AccessSection({
           </OptionRow>
         </OptionList>
       )}
-    </FormSection>
+    </Part>
   )
 }
 
@@ -3828,7 +4231,7 @@ function SingleSignOn({
             <Field
               label="Check address"
               htmlFor="site-sso-verify"
-              hint="Where nginx asks, with the visitor's headers and the address they asked for, without the body."
+              tip="Where nginx asks, with the visitor's headers and the address they asked for, without the body."
             >
               <Input
                 id="site-sso-verify"
@@ -3841,7 +4244,7 @@ function SingleSignOn({
             <Field
               label="Sign-in page"
               htmlFor="site-sso-signin"
-              hint="A 401 sends the visitor here, with rd= set to the address they asked for."
+              tip="A 401 sends the visitor here, with rd= set to the address they asked for."
             >
               <Input
                 id="site-sso-signin"
@@ -3984,7 +4387,7 @@ function AddressesAndPassword({
             <Field
               label="Login prompt"
               htmlFor="site-realm"
-              hint="The name the browser's password box shows. Empty is Restricted."
+              tip="The name the browser's password box shows. Empty is Restricted."
             >
               <Input
                 id="site-realm"
@@ -4025,7 +4428,7 @@ function CrawlerSection({
   const hotlink = spec.hotlink
 
   return (
-    <FormSection
+    <Part
       title="Crawlers & hotlinking"
       hint="Refused with 403 by what a request says about itself. Anything can claim to be a browser, so this stops the honest ones."
     >
@@ -4073,7 +4476,7 @@ function CrawlerSection({
           )}
         </>
       )}
-    </FormSection>
+    </Part>
   )
 }
 
@@ -4166,7 +4569,7 @@ function PagesSection({
   }
 
   return (
-    <FormSection title="Pages & files">
+    <Part title="Pages & files">
       <OptionList>
         <OptionRow
           title="Maintenance"
@@ -4181,7 +4584,7 @@ function PagesSection({
           <Field
             label="Retry after"
             htmlFor="site-retry-after"
-            hint="Seconds clients and crawlers are told to wait. 0 sends no Retry-After."
+            tip="Seconds clients and crawlers are told to wait. 0 sends no Retry-After."
           >
             <Input
               id="site-retry-after"
@@ -4275,6 +4678,6 @@ function PagesSection({
           page={page}
         />
       )}
-    </FormSection>
+    </Part>
   )
 }

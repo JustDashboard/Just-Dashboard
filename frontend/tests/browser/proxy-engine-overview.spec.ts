@@ -981,8 +981,10 @@ test("the config editor offers nothing to save over a file it could not read", a
     gone ? fileGone(route) : json(route, { content: "server {\n    # served-from-disk\n}\n" }),
   )
   await page.goto("/proxy/sites")
+  // A site's file is a word in its row's menu.
   const card = page.locator("[data-slot='choice-row']").filter({ hasText: "app.example.com" })
-  await card.getByRole("button", { name: "Raw config" }).click()
+  await card.getByRole("button", { name: "More actions for app.example.com" }).click()
+  await page.getByRole("menuitem", { name: "Raw config" }).click()
 
   const sheet = page.getByRole("dialog")
   await expect(sheet.getByRole("alert")).toContainText("That file is not on disk.")
@@ -1681,16 +1683,16 @@ test("the configuration page lists nginx's files by folder, each saying whether 
   const reads = await watchConfigFiles(page)
   await page.goto("/proxy/config")
 
-  const tile = (label: string) =>
-    page.locator("[data-slot='stat-tile']").filter({ has: page.getByText(label, { exact: true }) })
-  await expect(tile("Files")).toContainText("13")
-  await expect(tile("Files")).toContainText("in 8 folders")
+  // The page opens on nginx's directory with what it holds as facts, not tiles.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("/etc/nginx")
+  await expect(identity).toContainText("13 files in 8 folders")
   // A link and its file are one file read once; the module outside counts.
-  await expect(tile("Read by nginx")).toContainText("7")
-  await expect(tile("Read by nginx")).toContainText("3 not read")
-  await expect(tile("Managed")).toContainText("2")
-  await expect(tile("Managed")).toContainText("7 written by hand")
-  await expect(tile("Last test")).toContainText("none since the dashboard started")
+  await expect(identity).toContainText("7 read, 3 not")
+  await expect(identity).toContainText("2 by the dashboard")
+  await expect(identity.getByTitle("7 written by hand")).toBeVisible()
+  await expect(identity).toContainText("no test since the dashboard started")
+  await expect(page.locator("[data-slot='stat-grid'], [data-slot='stat-tile']")).toHaveCount(0)
 
   const enabled = page.getByRole("list", { name: "Files in sites-enabled/" })
   const link = enabled.locator("[data-slot='choice-row']").filter({ hasText: "app.example.com" })
@@ -1755,11 +1757,15 @@ test("a reader sees the files read-only, with no test and nothing of what nginx 
   await watchConfigFiles(page)
   await page.goto("/proxy/config")
 
-  await expect(
-    page.locator("[data-slot='stat-tile']").filter({ hasText: "Last test" }),
-  ).toContainText("administrators only")
+  // A reader is told nothing of the test they may not run, and gets no views but Files.
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("13 files")
+  await expect(page.locator("[data-slot='host-identity']")).not.toContainText("test")
   await expect(page.getByRole("button", { name: "Test config" })).toHaveCount(0)
-  await expect(page.getByRole("navigation", { name: "Configuration views" })).toHaveCount(0)
+  await expect(page.getByRole("tablist", { name: "Configuration views" })).toHaveCount(0)
+  // A view named in the address is an administrator's; a reader stays on the files.
+  await page.goto("/proxy/config?tab=settings")
+  await expect(page.getByRole("list", { name: "What nginx reads" })).toBeVisible()
+  await expect(page.getByRole("form", { name: "nginx settings" })).toHaveCount(0)
   await page.getByRole("button", { name: "View nginx.conf" }).click()
   const editor = page.getByRole("dialog", { name: "nginx.conf" })
   await expect(editor.locator(".monaco-editor .view-lines")).toContainText("server_name", {
@@ -1778,9 +1784,11 @@ test("what nginx loads is listed in its order and searched by text, pattern and 
   const reads = await watchConfigFiles(page)
   await page.goto("/proxy/config")
   await page
-    .getByRole("navigation", { name: "Configuration views" })
-    .getByRole("button", { name: "What nginx loads" })
+    .getByRole("tablist", { name: "Configuration views" })
+    .getByRole("tab", { name: "What nginx loads" })
     .click()
+  // The view is in the address, so a link and a reload open on it.
+  await expect(page).toHaveURL(/[?&]tab=effective/)
 
   const order = page.getByRole("list", { name: "Files nginx loads" })
   await expect(order.locator("[data-slot='choice-row']")).toHaveCount(4)
@@ -1845,8 +1853,7 @@ test("a configuration nginx refuses shows its test in place of what it loads", a
         })
       : route.fallback(),
   )
-  await page.goto("/proxy/config")
-  await page.getByRole("button", { name: "What nginx loads" }).click()
+  await page.goto("/proxy/config?tab=effective")
 
   await expect(page.getByText("nginx refuses its configuration", { exact: true })).toBeVisible()
   await expect(page.getByText('unknown directive "frobnicate"', { exact: true })).toBeVisible()
@@ -1964,9 +1971,9 @@ test("a file the directory's includes cannot follow is said, and the files past 
   await expect(page.locator("[data-slot='page']")).toContainText(
     'sites-available/legacy.example.com:5: unexpected "}".',
   )
-  await expect(
-    page.locator("[data-slot='stat-tile']").filter({ hasText: "Read by nginx" }),
-  ).toContainText("not every include followed")
+  await expect(page.locator("[data-slot='host-identity']")).toContainText(
+    "not every include followed",
+  )
   await expect(
     page
       .getByRole("list", { name: "Files in snippets/" })

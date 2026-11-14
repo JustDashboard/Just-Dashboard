@@ -1,19 +1,19 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { CodeBracket } from "@/components/icons"
+import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { percent, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { Segments } from "@/components/deploy/settings/segments"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { FormFact, FormNote } from "@/components/form"
-import { Metric, MetricStrip, SearchInput } from "@/components/page"
+import { FormFact, InfoTip } from "@/components/form"
+import { SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, LoadingPanel, Notice } from "@/components/state"
+import { EmptyNote, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -23,20 +23,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { statementVerb } from "@/components/database/home/kinds"
 import { compact } from "@/components/database/home/readings"
-import { CodeView, EngineMark } from "@/components/database/kit"
+import { EngineMark } from "@/components/database/kit"
 import { oneLine } from "@/components/database/ops/queries"
+import { statementHref } from "@/components/database/ops/performance-address"
 import {
   enableExtension,
   readStatements,
   resetStatements,
 } from "@/components/database/ops/performance-api"
 import {
-  hasPlaceholder,
   isStatementSort,
   millis,
-  rowsPerCall,
   shareWords,
   statementKeys,
   statementSorts,
@@ -51,14 +49,11 @@ import {
   useReturnFocus,
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
-import { StatementPlan } from "@/components/database/ops/performance-plan"
+import { statementsFilterKey } from "@/components/database/ops/performance-lists"
+import { Fig, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
 import { useStatementsSetup } from "@/components/database/ops/statements-setup"
 import { setupStart } from "@/components/database/ops/statements-setup-model"
-import type {
-  DbStatement,
-  DbStatementSort,
-  DbStatements,
-} from "@/components/database/ops/performance-types"
+import type { DbStatementSort, DbStatements } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /** How many statements the list asks for, and how many when the reader wants more. The server's cap is 200. */
@@ -71,28 +66,32 @@ const MORE = 200
  * A session list says what is running now; this says what has been running
  * all week, which is the other question — a statement that takes ten
  * milliseconds and runs ten thousand times an hour is never caught running
- * and is the top row here. Each row carries its share of everything the
- * server counted as a bar, so the few statements that are most of the work
- * are seen before a figure is read; the list is asked for in the order the
- * reader chooses, since "slowest on average" and "called most" are different
- * lists and the server ranks each over everything it tracked.
+ * and is the top row here. Each row says its share of everything the server
+ * counted as the first of its figures, in a column that lines up down the
+ * list: it was a bar under the statement until 0.8.7, a row twice the height
+ * for a length the figure beside it already said. The list is asked for in
+ * the order the reader chooses, since "slowest on average" and "called most"
+ * are different lists and the server ranks each over everything it tracked.
  *
  * The text is a shape — every value in it is replaced before it leaves the
  * server, by the engine or by the dashboard where the engine keeps a statement
- * as it was sent — so a row is something to recognise. It opens on the whole
- * statement and its figures, and on its plan: asked as it stands where it has
- * no placeholder, and with the values the reader puts in where it has.
+ * as it was sent — so a row is something to recognise. It opens the
+ * statement's own page (`performance-statement`): its figures, the whole of
+ * its text, its plan and its history.
  *
  * Where the statistics are off, the view says what turns them on, and offers
  * it where one press does.
  */
 export function StatementsView() {
   const { id, conn, engine, readOnly, param, select } = useDatabase()
+  const router = useRouter()
   const { can } = useAuth()
   const { confirm, dialog } = useAsk()
   const focus = useReturnFocus()
   const [frame, width] = useColumnWidth<HTMLDivElement>()
-  const [filter, setFilter] = useState("")
+  // Kept for the tab, under the key a statement's page reads: the rail beside
+  // a statement is this list as it was left.
+  const [filter, setFilter] = useSessionState(statementsFilterKey(id), "")
   const [limit, setLimit] = useState(TOP)
   const [enabling, setEnabling] = useState(false)
   const asked = param("sort")
@@ -111,23 +110,12 @@ export function StatementsView() {
     const keys = statementKeys(list)
     return list.map((statement, index) => ({ key: keys[index], statement }))
   }, [data])
-  const openKey = param("statement")
-  const open = openKey ? keyed.find((row) => row.key === openKey)?.statement : undefined
-  // Held as last seen: a statement that drops out of the top of the list
-  // while its panel is open is still the one being read.
-  const [kept, setKept] = useState<{ key: string; statement: DbStatement } | null>(null)
-  if (open && (kept?.statement !== open || kept.key !== openKey)) {
-    setKept({ key: openKey, statement: open })
-  }
-  const shown = openKey ? (open ?? (kept?.key === openKey ? kept.statement : undefined)) : undefined
-
   const rows = useMemo(() => {
     const needle = filter.trim().toLowerCase()
     return needle
       ? keyed.filter((row) => oneLine(row.statement.query).toLowerCase().includes(needle))
       : keyed
   }, [keyed, filter])
-  const longest = Math.max(...keyed.map((row) => row.statement.share), 0)
   // The columns the view has room for, by its own width: the figures a
   // reader ranks by stay, and the ones that qualify them go first.
   const slowest = width >= 620 && keyed.some((row) => row.statement.maxMs !== undefined)
@@ -207,6 +195,20 @@ export function StatementsView() {
           </>
         }
       >
+        {data?.supported && (
+          <TitleAside>
+            <TitleFact>
+              <Fig>{millis(data.totalMs)}</Fig> of statement time counted
+              {data.since && (
+                <span title={timestamp(data.since)}> from {relativeTime(data.since)}</span>
+              )}
+            </TitleFact>
+            <InfoTip label="What a statement's text is">
+              The text is a shape: every value in it is replaced before it leaves the server, and a
+              statement&apos;s plan is asked for with values put back in.
+            </InfoTip>
+          </TitleAside>
+        )}
         {narrow && filterBox}
       </PanelHeader>
       <ViewRead poll={statements} what="the statements" skeleton={<LoadingPanel plain rows={8} />}>
@@ -240,15 +242,16 @@ export function StatementsView() {
                   }))}
                   onChange={(next) => select({ sort: next === "total" ? null : next })}
                 />
-                <p className="min-w-48 flex-1 text-hint text-muted-foreground sm:text-right">
-                  <span className="numeric font-medium text-foreground">
-                    {millis(answer.totalMs)}
-                  </span>{" "}
-                  of statement time counted
-                  {answer.since && (
-                    <span title={timestamp(answer.since)}> from {relativeTime(answer.since)}</span>
-                  )}
-                </p>
+                {answer.statements.length >= limit && limit < MORE && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="ml-auto"
+                    onClick={() => setLimit(MORE)}
+                  >
+                    Show the top {MORE}
+                  </Button>
+                )}
               </div>
               <PanelBody flush className="group-data-[plain]/panel:-mx-4">
                 {answer.statements.length === 0 ? (
@@ -274,30 +277,15 @@ export function StatementsView() {
                       {rows.map(({ key, statement }) => (
                         <TableRow
                           key={key}
-                          data-state={key === openKey ? "selected" : undefined}
-                          onActivate={() => {
-                            focus.remember()
-                            select({ statement: key })
-                          }}
+                          onActivate={() =>
+                            router.push(
+                              statementHref(id, key, { sort: sort === "total" ? null : sort }),
+                            )
+                          }
                           aria-label={`Open the statement: ${oneLine(statement.query).slice(0, 80)}`}
                         >
                           <TableCell className="w-full max-w-0 py-2">
                             <StatementLine text={statement.query} />
-                            <span
-                              aria-hidden
-                              className="mt-1.5 block h-1 overflow-hidden rounded-full bg-meter-track"
-                            >
-                              <span
-                                className="block h-full rounded-full bg-primary"
-                                style={{
-                                  width: `${Math.max(longest > 0 ? (statement.share / longest) * 100 : 0, 1)}%`,
-                                  // In the hue of what the statement does, the
-                                  // home's ranking's: one heavy write among
-                                  // reads shows before it is read.
-                                  background: statementVerb(statement.query)?.color,
-                                }}
-                              />
-                            </span>
                           </TableCell>
                           <TableCell className="numeric px-2 py-2 text-right font-medium">
                             {shareWords(statement.share)}
@@ -344,36 +332,10 @@ export function StatementsView() {
                   </Table>
                 )}
               </PanelBody>
-              <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                <FormNote>
-                  The bar is a statement&apos;s share of all the time counted. The text is a shape:
-                  every value in it is replaced before it leaves the server, and a row&apos;s plan
-                  is asked for with values put back in.
-                </FormNote>
-                {answer.statements.length >= limit && limit < MORE && (
-                  <Button size="xs" variant="ghost" onClick={() => setLimit(MORE)}>
-                    Show the top {MORE}
-                  </Button>
-                )}
-              </div>
             </div>
           )
         }
       </ViewRead>
-
-      {shown && (
-        <StatementPanel
-          // A panel is one statement's: the values typed for one shape are
-          // not carried into the next.
-          key={openKey}
-          statement={shown}
-          gone={!open && Boolean(data)}
-          onClose={() => {
-            select({ statement: null })
-            focus.restore()
-          }}
-        />
-      )}
     </Panel>
   )
 }
@@ -436,88 +398,5 @@ function NotCounting({
         )
       }
     />
-  )
-}
-
-/**
- * One statement, opened: its figures, the whole of its text, and its plan
- * (`StatementPlan`).
- */
-function StatementPanel({
-  statement,
-  gone,
-  onClose,
-}: {
-  statement: DbStatement
-  /** It is no longer among the statements the list holds. */
-  gone: boolean
-  onClose: () => void
-}) {
-  const { engine, goto } = useDatabase()
-  const { can } = useAuth()
-  // Labelled by what the text holds, not by whether it plans: a CREATE ROLE
-  // with a ? where its password was is a shape too.
-  const shape = hasPlaceholder(statement.query)
-  const lines = statement.query.split("\n").length
-  const each = rowsPerCall(statement)
-  const mayQuery = engine.has("query") && can("service.control")
-  const toQuery = (sql: string) => goto("query", { sql })
-
-  return (
-    <SidePanel
-      open
-      onOpenChange={(open) => !open && onClose()}
-      width="lg"
-      initialFocus="body"
-      title="Statement"
-      description="A statement's figures, its text and its plan."
-    >
-      <div className="space-y-5">
-        {gone && (
-          <Notice title="No longer among the top statements">
-            <p>The list has moved on. These are its figures as they were last read.</p>
-          </Notice>
-        )}
-        <MetricStrip>
-          <Metric label="Of runtime" value={shareWords(statement.share)} />
-          <Metric label="Calls" value={statement.calls.toLocaleString()} />
-          <Metric label="Total" value={millis(statement.totalMs)} />
-          <Metric label="Mean" value={millis(statement.meanMs)} />
-          {statement.maxMs !== undefined && (
-            <Metric label="Slowest run" value={millis(statement.maxMs)} />
-          )}
-          <Metric
-            label="Rows"
-            value={statement.rows.toLocaleString()}
-            hint={
-              each === undefined
-                ? undefined
-                : `${each >= 10 ? compact(each) : each.toFixed(1)} a call`
-            }
-          />
-          {statement.hitRatio >= 0 && (
-            <Metric label="From cache" value={percent(statement.hitRatio * 100, 1)} />
-          )}
-        </MetricStrip>
-
-        <CodeView
-          code={statement.query}
-          language={engine.editor}
-          label={shape ? "The statement, as a shape" : "The statement"}
-          // As tall as the statement, up to what leaves the plan in sight.
-          className={lines <= 2 ? "h-28" : lines <= 5 ? "h-44" : lines <= 12 ? "h-72" : "h-96"}
-          actions={
-            mayQuery && (
-              <Button size="xs" variant="ghost" onClick={() => toQuery(statement.query)}>
-                <CodeBracket />
-                Open in Query
-              </Button>
-            )
-          }
-        />
-
-        <StatementPlan text={statement.query} onQuery={mayQuery ? toQuery : undefined} />
-      </div>
-    </SidePanel>
   )
 }

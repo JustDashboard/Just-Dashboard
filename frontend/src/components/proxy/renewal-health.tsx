@@ -17,8 +17,7 @@ import type { CertbotState, RenewalHealth, RenewalLog, RenewalRun } from "@/lib/
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { OptionList, OptionRow } from "@/components/form"
-import { Well } from "@/components/panel"
-import { SidePanel } from "@/components/side-panel"
+import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbBar, type Verb } from "@/components/verbs"
@@ -197,52 +196,51 @@ function recordReading(health: RenewalHealth): {
  * journal for the last fortnight, or certbot's log of its last renewal on a
  * host that renews from cron. systemd's lines about each run are quieter than
  * certbot's, and the ones that say why it failed are marked.
+ *
+ * It opened in a sheet over the page from "Show log"; it is a section of the
+ * Renewal view now, which "Show log" brings into view, because what certbot
+ * printed is read beside the record that says the run failed.
  */
-export function RenewalLogPanel({
-  open,
-  onOpenChange,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
+export function RenewalRuns({ id }: { id?: string }) {
   const log = usePoll<RenewalLog>(
     (signal) => get("/certificates/renewal/log", undefined, signal),
     0,
-    [open],
-    { enabled: open },
   )
   return (
-    <SidePanel
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Renewal log"
-      description="What certbot printed on each renewal run."
-      width="lg"
-      initialFocus="body"
-    >
-      {log.loading ? (
-        <LoadingRows rows={4} />
-      ) : log.error ? (
-        <ErrorState error={log.error} onRetry={log.refresh} />
-      ) : log.data && log.data.runs.length > 0 ? (
-        <div className="space-y-6">
-          <p className="text-hint text-muted-foreground">
-            <code className="font-mono">{log.data.source}</code>
-            {log.data.source.endsWith(".service") ? ", the last fourteen days." : "."}
-          </p>
-          {log.data.runs.map((run, i) => (
-            <RunLines key={`${i}:${run.start}`} run={run} />
-          ))}
-        </div>
-      ) : (
-        <EmptyState
-          icon={Logs}
-          title="No renewal run on record"
-          description="The journal keeps a fortnight of runs here, and certbot's log only the renewals it has made."
-          className="mt-2"
-        />
-      )}
-    </SidePanel>
+    <Panel plain id={id} aria-label="Renewal runs" className="scroll-mt-6">
+      <PanelHeader
+        title="Runs"
+        actions={
+          log.data &&
+          log.data.runs.length > 0 && (
+            <span className="text-hint text-muted-foreground">
+              <code className="font-mono">{log.data.source}</code>
+              {log.data.source.endsWith(".service") ? " · the last fourteen days" : ""}
+            </span>
+          )
+        }
+      />
+      <PanelBody flush>
+        {log.loading ? (
+          <LoadingRows rows={4} />
+        ) : log.error ? (
+          <ErrorState error={log.error} onRetry={log.refresh} />
+        ) : log.data && log.data.runs.length > 0 ? (
+          <div className="space-y-6 pt-2">
+            {log.data.runs.map((run, i) => (
+              <RunLines key={`${i}:${run.start}`} run={run} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            icon={Logs}
+            title="No renewal run on record"
+            description="The journal keeps a fortnight of runs here, and certbot's log only the renewals it has made."
+            className="mt-2"
+          />
+        )}
+      </PanelBody>
+    </Panel>
   )
 }
 

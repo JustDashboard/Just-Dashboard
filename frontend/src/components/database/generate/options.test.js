@@ -4,6 +4,7 @@ import {
   editorLanguage,
   firstProblem,
   groupTargets,
+  logoKeys,
   optionsLine,
   readResult,
   readTargets,
@@ -70,6 +71,14 @@ describe("the catalogue of targets", () => {
       unsupported: {},
       options: [],
     })
+  })
+  test("is drawn as its own project, then as its language", () => {
+    expect(logoKeys(gorm)).toEqual(["gorm", "go"])
+    // Eloquent is Laravel's, and a JSON Schema is JSON: their marks are kept under those names.
+    expect(logoKeys({ id: "eloquent", language: "php" })).toEqual(["laravel", "php"])
+    expect(logoKeys({ id: "jsonschema", language: "json" })).toEqual(["json", "json"])
+    // A name an object already has is not an alias.
+    expect(logoKeys({ id: "constructor", language: "" })).toEqual(["constructor"])
   })
   test("is listed by group, in the page's order, a group the server invents last", () => {
     const groups = groupTargets([sql, { ...zod, group: "Diagrams" }, prisma, zod, gorm])

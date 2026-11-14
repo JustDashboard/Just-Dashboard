@@ -161,7 +161,7 @@ segment under `/api/v1`.
 | Assistant | `assistant/` | `assistant/` | `/assistant` → `handlers_assistant*.go` | `assistant` | `assistant.spec.ts` | [`operator.md`](../deployments/operator.md) |
 | Metrics | `metrics/` | `metrics/` | `/system` → `handlers_system.go`, `handlers_capacity.go` | `metrics`, `sysinfo` | `metrics-ui.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
 | Alerts | `metrics/alerts/` | `metrics/`, `alerts/` | `/system/alerts` → `handlers_host_alerts.go`, `host_alert*.go` | `metrics` | `host-alerts.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
-| Processes | `processes/` | `procs/` | `/processes`, `/pm2`, `/systemd`, `/cron` → `handlers_procs*.go` | `procs` | `processes-ui.spec.ts`, `services-ui.spec.ts` | [`processes-terminal-github.md`](../backend/processes-terminal-github.md) |
+| Processes | `processes/` | `procs/` | `/processes`, `/pm2`, `/systemd`, `/cron` → `handlers_procs*.go` | `procs` | `processes-ui.spec.ts`, `pm2-application.spec.ts`, `services-ui.spec.ts` | [`processes-terminal-github.md`](../backend/processes-terminal-github.md) |
 | Logs | `logs/` | `logs/` | `/logs` → `handlers_logs*.go` | `logsx` | `logs-*.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
 | **Apps** | | | | | | |
 | Deployments | `deploy/` | `deploy/` | `/deploy` → `handlers_deploy*.go`, `deployment_*.go` | `deploy`, `blueprint`, and the ones below | `deploy-*.spec.ts` | [the deployment guides](../deployments/README.md), [`implementation.md`](../deployments/implementation.md) |
@@ -181,7 +181,7 @@ segment under `/api/v1`.
 | Security | `security/` | `security/` | `/security`, `/ssh`, `/ssh-sessions`, `/fail2ban`, `/logins` → `handlers_security*.go`, `handlers_netsec.go` | `netsec` | `security-*.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
 | Backups | `backups/` | `backups/` | `/backups` → `handlers_backups.go`, `backup_*.go` | `backups` | `backups-ui.spec.ts`, `backup-*.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md) |
 | **Advanced** | | | | | | |
-| Packages | `packages/` | `packages/` | `/packages` → `handlers_packages.go` | `updates` | `packages-ui.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
+| Packages | `packages/` | `packages/` | `/packages` → `handlers_packages.go` | `updates` | `packages-ui.spec.ts`, `package-page.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
 | System users | `system-users/` | `system-users/` | `/system-users`, `/system-accounts` → `handlers_linuxusers.go` | `linuxusers` | `system-users.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md) |
 | Audit log | `audit/` | `audit/` | `/audit` → mounted in `routes.go`, handled in `handlers_auth.go` | `audit` | `system-ui.spec.ts` | [`runtime-boundaries.md`](../architecture/runtime-boundaries.md) |
 | **System** | | | | | | |

@@ -81,9 +81,10 @@ decision.
 
 - **The question** (`components/overview/usage-ping-question.tsx`) is a `Notice` on the Overview for administrators.
   It prints the report, and its two buttons both store an answer, so it is asked once.
-- **The panel** (`components/config/usage-ping.tsx`) is under Settings → Configuration. It holds the switch, the
-  last report or the next one as exact bytes, any failure, and a link to the totals. It sits outside the Settings
-  panel because it applies immediately, with no Apply and no restart.
+- **The section** (`components/config/usage-ping.tsx`) is under Settings → Configuration. It holds the switch, the
+  last report or the next one as exact bytes, any failure, and a link to the totals. It is a section of the
+  settings column and not one of the column's edits to `.env`: it applies immediately, with no Apply and no
+  restart, and its head says so.
 
 ## The site's side
 

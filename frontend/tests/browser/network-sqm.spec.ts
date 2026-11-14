@@ -84,19 +84,25 @@ async function mockSQM(page: Page, reader = false) {
       "/network/changes/current": { available: false, owned: false, change: null },
     },
   })
-  await page.goto("/network/traffic")
-  await expect(page.getByText("Download SQM · CAKE on", { exact: false })).toBeVisible()
+  await page.goto("/network/traffic?tab=shaping")
+  // The card says the device has a download queue; its sheet has the evidence.
+  await expect(page.getByRole("list", { name: "Queues by device" })).toContainText("download SQM")
 }
 
 test("read users inspect SQM and its native evidence without mutation controls", async ({
   page,
 }) => {
   await mockSQM(page, true)
-  await expect(page.getByText(/IFB: 5,056 packets/)).toBeVisible()
-  await expect(page.getByText(/loaded boot command verified/)).toBeVisible()
   await expect(page.getByRole("button", { name: /Edit the limits/ })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: /Clear the limits/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /Queue on/ })).toHaveCount(0)
   await expect(page.getByRole("switch", { name: /BBR/ })).toBeDisabled()
+  await page.getByRole("button", { name: "Open the queue on ens3" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByText("Download SQM · CAKE on", { exact: false })).toBeVisible()
+  await expect(sheet.getByText(/IFB: 5,056 packets/)).toBeVisible()
+  await expect(sheet.getByText(/loaded boot command verified/)).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Apply", exact: true })).toHaveCount(0)
+  await expect(sheet.getByRole("textbox")).toHaveCount(0)
 })
 
 test("download SQM sends only the bounded operator profile and requires pending apply", async ({
@@ -157,9 +163,16 @@ test("a failed later queue poll retains evidence and blocks changes until retry 
   await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeDisabled()
   await expect(page.getByText(/IFB: 5,056 packets/)).toBeVisible()
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  // The card's menu refuses too, until a read succeeds.
+  await page.getByRole("button", { name: "Queue on ens3" }).click()
+  await expect(page.getByRole("menuitem", { name: "Edit limits" })).toBeDisabled()
+  await expect(page.getByRole("menuitem", { name: "Clear limits" })).toBeDisabled()
+  await page.keyboard.press("Escape")
   failed = false
   await page.getByRole("button", { name: "Refresh", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Edit the limits on ens3" })).toBeEnabled()
+  await expect(page.getByText(/tc ownership read failed/)).toHaveCount(0)
+  await page.getByRole("button", { name: "Edit the limits on ens3" }).click()
+  await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeEnabled()
 })
 
 test("SQM profile validation and the sheet fit a phone", async ({ page }) => {

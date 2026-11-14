@@ -1,29 +1,61 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Warning } from "@/components/icons"
+import { useEffect, useMemo, useState } from "react"
+import { RefreshClockwise, Warning } from "@/components/icons"
 import { ApiError, errorMessage, get, post, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { plural } from "@/lib/format"
 import type { ProxySetting, ProxySettingEdit, ProxySettings, ProxyValidation } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { Field } from "@/components/form"
-import { Modal } from "@/components/modal"
-import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { Field, OptionList, OptionRow } from "@/components/form"
+import { Well } from "@/components/panel"
 import { ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Segments } from "@/components/deploy/settings/segments"
+import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
+import {
+  SettingForm,
+  SettingSection,
+  settingStatus,
+} from "@/components/deploy/settings/setting-card"
 import { relativePath } from "@/components/proxy/config-tree"
 import { refusalOf } from "@/components/proxy/engine-lifecycle"
+import { RefusedConfig } from "@/components/proxy/config-search"
+
+/** The directives by what they decide, in the order the page reads them. */
+const SECTIONS: { title: string; names: string[] }[] = [
+  { title: "Responses", names: ["server_tokens", "gzip"] },
+  {
+    title: "Requests",
+    names: ["client_max_body_size", "keepalive_timeout", "server_names_hash_bucket_size"],
+  },
+  { title: "TLS", names: ["ssl_protocols"] },
+  { title: "Workers", names: ["worker_connections"] },
+]
+
+/** What a field starts at: the value nginx loads, or empty for a default no file sets. */
+function initialOf(setting: ProxySetting): string {
+  return setting.set || setting.choices ? setting.value : ""
+}
+
+function normal(value: string) {
+  return value.trim().replace(/\s+/g, " ")
+}
+
+type Preview = { value: string; edits?: ProxySettingEdit[]; error?: string }
 
 /**
- * nginx's server-wide directives as nginx loads them: each value, the file and
- * line that set it or that it is nginx's default, and what to make of it.
- * Change writes into the file that sets the directive — or the dashboard's own
- * conf.d file when none does — through the config editor's tested save, after
- * showing the line it writes.
+ * nginx's server-wide directives as one settings column, the shape a
+ * project's settings take: a section per thing they decide, each directive a
+ * field with the file and line that sets it at its right — a press opens the
+ * file there — and one save bar for the page. Every edited directive shows
+ * the line it writes and where as it is typed (the server's own preview), and
+ * Save writes them all through nginx's test, reloading after unless that is
+ * switched off. A value nginx refuses leaves every file as it was.
+ *
+ * It was a list with a Change button per row and a dialog per change.
  */
 export function ConfigSettingsView({
   root,
@@ -35,178 +67,126 @@ export function ConfigSettingsView({
   onChanged: () => void
 }) {
   const settings = usePoll((signal) => get<ProxySettings>("/proxy/settings", undefined, signal), 0)
-  const [editing, setEditing] = useState<{ setting: ProxySetting; value: string }>()
+  const refusal = refusalOf(settings.error)
+  const report = settings.error ? undefined : settings.data
 
-  if (settings.error) return <ErrorState error={settings.error} onRetry={settings.refresh} />
-  const report = settings.data
   return (
-    <Panel plain>
-      <PanelHeader
-        title="Server-wide settings"
-        actions={
-          <Button size="sm" variant="outline" onClick={settings.refresh} pending={settings.loading}>
-            Read again
-          </Button>
-        }
-      />
-      <PanelBody>
-        {!report ? (
+    <SaveBarProvider>
+      <div className="mx-auto w-full max-w-3xl min-w-0 space-y-8 pb-20">
+        {refusal ? (
+          <RefusedConfig
+            refusal={refusal}
+            root={root}
+            onOpen={onOpen}
+            what="With nothing it would load, its settings cannot be read."
+          />
+        ) : settings.error ? (
+          <ErrorState error={settings.error} onRetry={settings.refresh} />
+        ) : !report ? (
           <LoadingRows rows={7} />
         ) : (
-          <ul className="min-w-0 divide-y divide-hairline" aria-label="Server-wide settings">
-            {report.settings.map((setting) => (
-              <SettingRow
-                key={setting.name}
-                setting={setting}
-                report={report}
-                root={root}
-                onOpen={onOpen}
-                onChange={(value) => setEditing({ setting, value })}
-              />
-            ))}
-          </ul>
+          <SettingsForm
+            key={report.settings.map((s) => `${s.name}=${s.value}@${s.file}:${s.line}`).join("|")}
+            report={report}
+            root={root}
+            reading={settings.loading}
+            onReadAgain={settings.refresh}
+            onOpen={onOpen}
+            onSaved={() => {
+              settings.refresh()
+              onChanged()
+            }}
+          />
         )}
-      </PanelBody>
-      {editing && report && (
-        <SettingDialog
-          key={editing.setting.name}
-          setting={editing.setting}
-          initial={editing.value}
-          root={root}
-          onOpenChange={(open) => !open && setEditing(undefined)}
-          onApplied={() => {
-            setEditing(undefined)
-            settings.refresh()
-            onChanged()
-          }}
-        />
-      )}
-    </Panel>
+      </div>
+    </SaveBarProvider>
   )
 }
 
-function SettingRow({
-  setting,
+function SettingsForm({
   report,
   root,
+  reading,
+  onReadAgain,
   onOpen,
-  onChange,
+  onSaved,
 }: {
-  setting: ProxySetting
   report: ProxySettings
   root: string
+  reading: boolean
+  onReadAgain: () => void
   onOpen: (path: string, line?: number) => void
-  onChange: (value: string) => void
+  onSaved: () => void
 }) {
-  const file = setting.file
-  return (
-    <li className="flex min-w-0 flex-col gap-2 py-3 sm:flex-row sm:items-start sm:gap-4">
-      <div className="min-w-0 space-y-1 sm:w-56 sm:shrink-0">
-        <p className="truncate font-mono text-body font-medium">{setting.name}</p>
-      </div>
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="font-mono text-body break-all">{setting.value}</span>
-          {!setting.set && <Tag>nginx default</Tag>}
-          {file ? (
-            <button
-              type="button"
-              onClick={() => onOpen(file, setting.line)}
-              className="rounded-sm font-mono text-hint text-muted-foreground underline-offset-2 focus-ring hover:text-foreground hover:underline"
-            >
-              {relativePath(file, root)}:{setting.line}
-            </button>
-          ) : (
-            <span className="text-hint text-muted-foreground">
-              {setting.context === "http"
-                ? `set in no file; Change adds it to ${relativePath(report.target, root)}`
-                : "set in no file"}
-            </span>
-          )}
-        </p>
-        <p className="text-hint leading-relaxed text-muted-foreground">
-          {setting.name === "worker_connections" &&
-            report.openFiles > 0 &&
-            ` Open files per worker: ${report.openFiles}, from ${report.openFilesFrom}.`}
-          {setting.overrides > 0 &&
-            ` ${plural(setting.overrides, "block")} inside http ${setting.overrides === 1 ? "sets" : "set"} it again, where this value does not apply.`}
-        </p>
-      </div>
-      <div className="flex shrink-0 gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => onChange(setting.set ? setting.value : "")}
-        >
-          Change
-        </Button>
-      </div>
-    </li>
-  )
-}
-
-type Preview = { value?: string; edits?: ProxySettingEdit[]; error?: string }
-
-/**
- * One directive's new value, the line it writes and where, and Apply. The
- * preview is the server's own edit, so what is shown is what is written.
- */
-function SettingDialog({
-  setting,
-  initial,
-  root,
-  onOpenChange,
-  onApplied,
-}: {
-  setting: ProxySetting
-  initial: string
-  root: string
-  onOpenChange: (open: boolean) => void
-  onApplied: () => void
-}) {
-  const [value, setValue] = useState(initial)
-  const [preview, setPreview] = useState<Preview>({})
-  const [busy, setBusy] = useState<"only" | "reload">()
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [reload, setReload] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [refused, setRefused] = useState<ProxyValidation>()
-  const trimmed = value.trim().replace(/\s+/g, " ")
-  const unchanged = setting.set && trimmed === setting.value
+  const [previews, setPreviews] = useState<Record<string, Preview>>({})
 
+  const byName = useMemo(
+    () => new Map(report.settings.map((setting) => [setting.name, setting])),
+    [report.settings],
+  )
+  const changes = report.settings
+    .filter((setting) => {
+      const draft = drafts[setting.name]
+      return draft !== undefined && normal(draft) !== normal(initialOf(setting))
+    })
+    .map((setting) => ({ name: setting.name, value: normal(drafts[setting.name]) }))
+  const empty = changes.filter((change) => change.value === "").map((change) => change.name)
+  const refusedPreview = changes.some((change) => {
+    const preview = previews[change.name]
+    return preview?.value === change.value && preview.error
+  })
+  const changeKey = JSON.stringify(changes)
+
+  // Each changed directive's line, previewed on its own so a refusal lands
+  // under the field it is about. A preview answers the value it was asked
+  // for, never one typed since.
   useEffect(() => {
-    if (trimmed === "" || unchanged) return
+    const wanted: { name: string; value: string }[] = JSON.parse(changeKey)
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
-      post<{ edits: ProxySettingEdit[] }>(
-        "/proxy/settings/preview",
-        { changes: [{ name: setting.name, value: trimmed }] },
-        { signal: controller.signal },
-      )
-        .then((res) => setPreview({ value: trimmed, edits: res.edits }))
-        .catch((err: unknown) => {
-          if (!controller.signal.aborted) setPreview({ value: trimmed, error: errorMessage(err) })
-        })
+      for (const change of wanted) {
+        if (change.value === "") continue
+        post<{ edits: ProxySettingEdit[] }>(
+          "/proxy/settings/preview",
+          { changes: [change] },
+          { signal: controller.signal },
+        )
+          .then((res) =>
+            setPreviews((was) => ({
+              ...was,
+              [change.name]: { value: change.value, edits: res.edits },
+            })),
+          )
+          .catch((err: unknown) => {
+            if (controller.signal.aborted) return
+            setPreviews((was) => ({
+              ...was,
+              [change.name]: { value: change.value, error: errorMessage(err) },
+            }))
+          })
+      }
     }, 300)
     return () => {
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [setting.name, trimmed, unchanged])
+  }, [changeKey])
 
-  // A preview answers the value it was asked for, never the one typed since.
-  const shown: Preview = preview.value === trimmed && !unchanged ? preview : {}
-  const ready = Boolean(shown.edits?.length) && busy === undefined
-
-  const apply = async (reload: boolean) => {
-    setBusy(reload ? "reload" : "only")
+  const save = async () => {
+    if (changes.length === 0 || empty.length > 0) return false
+    setSaving(true)
     setRefused(undefined)
     try {
-      await put("/proxy/settings", {
-        changes: [{ name: setting.name, value: trimmed }],
-        reload,
-      })
-      notify.success(
-        reload ? `${setting.name} applied and reloaded` : `${setting.name} written, not reloaded`,
-      )
-      onApplied()
+      await put("/proxy/settings", { changes, reload })
+      const names = changes.map((change) => change.name).join(", ")
+      notify.success(reload ? `${names} applied and reloaded` : `${names} written, not reloaded`)
+      setDrafts({})
+      onSaved()
+      return true
     } catch (err) {
       const refusal = refusalOf(err)
       if (refusal) {
@@ -218,101 +198,213 @@ function SettingDialog({
             diagnostics: [],
           },
         )
-      } else if (err instanceof ApiError && err.code === "reload_failed") {
+        return false
+      }
+      if (err instanceof ApiError && err.code === "reload_failed") {
         // Written and tested before the reload was tried, so it is on disk
         // even though nginx is not serving it yet.
-        notify.warning(`${setting.name} written, not reloaded`, {
-          description: errorMessage(err),
-        })
-        onApplied()
-      } else {
-        notify.error(`${setting.name} not changed`, err)
+        notify.warning("Written, not reloaded", { description: errorMessage(err) })
+        onSaved()
+        return true
       }
+      notify.error("Not changed", err)
+      return false
     } finally {
-      setBusy(undefined)
+      setSaving(false)
     }
   }
 
+  const known = new Set(SECTIONS.flatMap((section) => section.names))
+  const others = report.settings.filter((setting) => !known.has(setting.name))
+  const sections = [
+    ...SECTIONS.map((section) => ({
+      title: section.title,
+      settings: section.names.flatMap((name) => byName.get(name) ?? []),
+    })),
+    ...(others.length > 0 ? [{ title: "Other", settings: others }] : []),
+  ].filter((section) => section.settings.length > 0)
+
+  const sectionState = (title: string) => {
+    if (title === "Workers" && report.openFiles > 0) {
+      return (
+        <span>
+          <span className="numeric">{report.openFiles.toLocaleString()}</span> open files per
+          worker, from {report.openFilesFrom}
+        </span>
+      )
+    }
+    return undefined
+  }
+
   return (
-    <Modal
-      open
-      onOpenChange={(next) => {
-        if (busy) return
-        onOpenChange(next)
+    <SettingForm
+      name="nginx settings"
+      canEdit
+      dirty={changes.length > 0}
+      changes={changes.length}
+      saving={saving}
+      invalid={empty.length > 0 || refusedPreview}
+      applies={reload ? "immediately" : "next-reload"}
+      onSave={save}
+      onDiscard={() => {
+        setDrafts({})
+        setRefused(undefined)
       }}
-      size="lg"
-      title={`Change ${setting.name}`}
-      description="Shows the line this writes, then writes it through nginx's own test."
-      footer={
-        <>
-          <span className="mr-auto text-hint text-muted-foreground">
-            nginx tests the file first; a file it refuses is left as it was.
-          </span>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={busy !== undefined}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => void apply(false)}
-            pending={busy === "only"}
-            disabled={!ready}
-          >
-            {busy === "only" ? "Writing…" : "Write only"}
-          </Button>
-          <Button onClick={() => void apply(true)} pending={busy === "reload"} disabled={!ready}>
-            {busy === "reload" ? "Applying…" : "Apply and reload"}
-          </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        <Field
-          label="Value"
-          htmlFor="setting-value"
-          hint={`nginx's default: ${setting.default}`}
-          error={shown.error}
-        >
-          {setting.choices ? (
-            <Segments
-              id="setting-value"
-              label={setting.name}
-              value={value}
-              options={setting.choices.map((c) => ({ value: c, label: c, mono: true }))}
-              onChange={setValue}
-            />
-          ) : (
-            <Input
-              id="setting-value"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              className="font-mono"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          )}
-        </Field>
-        {unchanged && (
-          <p className="text-hint text-muted-foreground">This is the value nginx loads now.</p>
-        )}
-        {shown.edits?.map((edit) => (
-          <EditPreview key={`${edit.file}:${edit.line}`} edit={edit} root={root} />
-        ))}
-        {refused && (
+      error={
+        refused && (
           <div className="space-y-2">
-            <Notice tone="danger" icon={Warning} title="Not written: the config test refuses it">
-              {refused.note && <p>{refused.note}</p>}
-            </Notice>
+            <p className="font-medium">Not written: nginx&apos;s test refuses it</p>
+            {refused.note && <p>{refused.note}</p>}
             {refused.output && (
               <Well className="max-h-40 break-words whitespace-pre-wrap">{refused.output}</Well>
             )}
           </div>
-        )}
+        )
+      }
+    >
+      <div className="flex min-w-0 items-center justify-between gap-3 pb-6 text-hint text-muted-foreground">
+        <span>As nginx loads them</span>
+        <Button size="xs" variant="ghost" onClick={onReadAgain} pending={reading}>
+          <RefreshClockwise />
+          {reading ? "Reading…" : "Read again"}
+        </Button>
       </div>
-    </Modal>
+      {sections.map((section) => {
+        const dirty = section.settings.some((setting) =>
+          changes.some((change) => change.name === setting.name),
+        )
+        return (
+          <SettingSection
+            key={section.title}
+            title={section.title}
+            state={sectionState(section.title)}
+            status={settingStatus({ dirty, refused: dirty && refused !== undefined })}
+          >
+            <div className="space-y-6">
+              {section.settings.map((setting) => {
+                const draft = drafts[setting.name] ?? initialOf(setting)
+                const value = normal(draft)
+                const changed = changes.some((change) => change.name === setting.name)
+                const preview = previews[setting.name]
+                const shown = changed && preview?.value === value ? preview : undefined
+                return (
+                  <SettingField
+                    key={setting.name}
+                    setting={setting}
+                    report={report}
+                    root={root}
+                    value={draft}
+                    error={
+                      changed && value === ""
+                        ? `Give it a value; nginx's default is ${setting.default}.`
+                        : shown?.error
+                    }
+                    edits={shown?.edits}
+                    onChange={(next) => setDrafts((was) => ({ ...was, [setting.name]: next }))}
+                    onOpen={onOpen}
+                  />
+                )
+              })}
+            </div>
+          </SettingSection>
+        )
+      })}
+      <SettingSection title="Applying">
+        <OptionList>
+          <OptionRow
+            title="Reload nginx after saving"
+            checked={reload}
+            onCheckedChange={setReload}
+          />
+        </OptionList>
+      </SettingSection>
+    </SettingForm>
+  )
+}
+
+function SettingField({
+  setting,
+  report,
+  root,
+  value,
+  error,
+  edits,
+  onChange,
+  onOpen,
+}: {
+  setting: ProxySetting
+  report: ProxySettings
+  root: string
+  value: string
+  error?: string
+  edits?: ProxySettingEdit[]
+  onChange: (value: string) => void
+  onOpen: (path: string, line?: number) => void
+}) {
+  const id = `setting-${setting.name}`
+  const file = setting.file
+  const where = file ? (
+    <button
+      type="button"
+      onClick={() => onOpen(file, setting.line)}
+      aria-label={`Open ${relativePath(file, root)} at line ${setting.line}`}
+      className="truncate rounded-sm font-mono text-hint text-muted-foreground underline-offset-2 focus-ring hover:text-foreground hover:underline"
+    >
+      {relativePath(file, root)}:{setting.line}
+    </button>
+  ) : (
+    <Tag>nginx default</Tag>
+  )
+  const info = [
+    `nginx's default: ${setting.default}.`,
+    !file &&
+      setting.context === "http" &&
+      `Set here, it is added to ${relativePath(report.target, root)}.`,
+  ]
+    .filter(Boolean)
+    .join(" ")
+  return (
+    <div className="min-w-0 space-y-3">
+      <Field
+        label={<span className="font-mono">{setting.name}</span>}
+        htmlFor={id}
+        info={info}
+        trailing={where}
+        error={error}
+        hint={
+          setting.overrides > 0
+            ? `${plural(setting.overrides, "block")} inside http ${setting.overrides === 1 ? "sets" : "set"} it again, where this value does not apply.`
+            : undefined
+        }
+      >
+        {setting.choices ? (
+          <Segments
+            id={id}
+            label={setting.name}
+            value={value}
+            options={setting.choices.map((choice) => ({
+              value: choice,
+              label: choice,
+              mono: true,
+            }))}
+            onChange={onChange}
+          />
+        ) : (
+          <Input
+            id={id}
+            value={value}
+            placeholder={setting.set ? undefined : setting.value}
+            onChange={(event) => onChange(event.target.value)}
+            className="font-mono"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        )}
+      </Field>
+      {edits?.map((edit) => (
+        <EditPreview key={`${edit.file}:${edit.line}`} edit={edit} root={root} />
+      ))}
+    </div>
   )
 }
 
@@ -320,10 +412,10 @@ function SettingDialog({
 function EditPreview({ edit, root }: { edit: ProxySettingEdit; root: string }) {
   const name = relativePath(edit.file, root)
   return (
-    <div className="space-y-2">
-      <p className="text-body">
+    <div className="min-w-0 animate-rise space-y-2">
+      <p className="text-hint text-muted-foreground">
         {edit.created ? "Creates " : edit.before ? "Changes " : "Adds to "}
-        <span className="font-mono">{name}</span>
+        <span className="font-mono text-foreground">{name}</span>
         {edit.created ? "" : `, line ${edit.line}`}
       </p>
       <Well className="font-mono text-xs break-all whitespace-pre-wrap">

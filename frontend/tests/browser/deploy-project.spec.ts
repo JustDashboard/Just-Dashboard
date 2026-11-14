@@ -12,6 +12,7 @@ import {
   projectPullRequests,
   pullRequest,
   run,
+  saveBar,
   saveSettings,
   user,
 } from "./deploy-fixture"
@@ -949,12 +950,20 @@ test("the game workspace sends commands, moderates players and edits only declar
   await field.focus()
   await page.keyboard.press("ArrowUp")
   await expect(field).toHaveValue("list")
-  await expect(page.getByText("Only plain game commands are accepted.")).toBeVisible()
+  // The footer is one line; what the console refuses is behind its mark.
+  await expect(page.getByText("Plain game commands only")).toBeVisible()
+  await expect(page.getByText(/Anything carrying a shell character/)).toHaveCount(0)
+  await page.getByRole("button", { name: "What the console accepts" }).hover()
+  await expect(page.getByRole("tooltip")).toContainText("Anything carrying a shell character")
   await expect(page.getByRole("button", { name: "Copy the transcript" })).toBeEnabled()
 
   await page.goto("/deploy/7/players")
   const list = page.getByRole("list", { name: "Online players" })
   await expect(list.getByText("Notch")).toBeVisible()
+  // A player is drawn as the game draws one, and the page says since when it
+  // has seen them on: found on at the first read, not seen to arrive.
+  await expect(list.locator('[data-slot="player-face"]')).toHaveCount(1)
+  await expect(list.getByText(/^on before \d\d:\d\d$/).last()).toBeVisible()
   // A ban is behind the menu and asks first; backing out sends nothing.
   await list.getByRole("button", { name: "Actions for Notch" }).click()
   await page.getByRole("menuitem", { name: /^Ban/ }).click()
@@ -967,6 +976,28 @@ test("the game workspace sends commands, moderates players and edits only declar
 
   await page.goto("/deploy/7/game-settings")
   await expect(page.getByLabel("Server list description")).toHaveValue("Old name")
+  // A settings page like the project's others: the strip of what is saved and
+  // not live, then the declared keys in sections by what they are about, each
+  // head saying what the section is.
+  await expect(page.getByRole("region", { name: "Changes not live yet" })).toBeVisible()
+  const sections = page.locator('[data-slot="setting"]')
+  await expect(sections.getByRole("heading", { level: 2 })).toHaveText([
+    "World",
+    "Players",
+    "Network",
+    "The file on disk",
+  ])
+  await expect(sections.nth(1)).toContainText("20 players")
+  await expect(sections.nth(2)).toContainText("Old name")
+  // A closed choice is one segmented control, not a list behind a press.
+  await expect(page.getByRole("radiogroup", { name: "Difficulty" }).getByRole("radio")).toHaveCount(
+    2,
+  )
+  // The file's own word for a setting is not shown until asked for: on the
+  // label's hover, and in the folded file view.
+  await expect(page.getByText("max-players", { exact: true })).toBeHidden()
+  await page.getByText("Maximum players", { exact: true }).hover()
+  await expect(page.getByRole("tooltip")).toHaveText("max-players")
   // The declared lines as the file writes them, and no control for anything
   // the blueprint does not declare.
   await page.getByText("View the file on disk", { exact: true }).click()
@@ -978,10 +1009,239 @@ test("the game workspace sends commands, moderates players and edits only declar
   await expect(page.getByText("Maximum players takes 1 to 1000")).toBeVisible()
   await expect(page.getByRole("button", { name: /^Save/ })).toBeDisabled()
   await page.getByLabel("Maximum players").fill("20")
-  await page.getByLabel("Server list description").fill("New name")
-  await expect(page.getByText("The server reads this file on start.")).toBeVisible()
+  // An edit says what the field was on the label's own line, so the fields
+  // under it stay where they are.
+  const description = page.getByLabel("Server list description")
+  const below = page.getByText("View the file on disk", { exact: true })
+  await risen(page)
+  const before = await below.boundingBox()
+  await description.fill("New name")
+  await expect(page.getByText("was “Old name”")).toBeVisible()
+  await risen(page)
+  expect((await below.boundingBox())?.y).toBe(before?.y)
+  await expect(sections.nth(2)).toContainText("Unsaved changes")
+  await expect(sections.nth(0)).not.toContainText("Unsaved changes")
+  // When the save applies is the bar's line to say.
+  await expect(saveBar(page)).toContainText("Server settings · Applies when the server restarts")
   await page.getByRole("button", { name: /^Save/ }).click()
   await expect.poll(() => written).toEqual({ motd: "New name" })
+})
+
+test("a game server's console and settings are where their outlines were once the game answers", async ({
+  page,
+}) => {
+  let release = () => {}
+  let gate = Promise.resolve()
+  const hold = () => {
+    gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+  }
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7", (route) =>
+    json(route, {
+      project,
+      running: false,
+      deployment: { ...deployment, profile: "game", buildMethod: "image", activeRun: undefined },
+    }),
+  )
+  await page.route("**/api/v1/deploy/7/game**", async (route) => {
+    await gate
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/deploy/7/game")
+      return json(route, {
+        status: "available",
+        blueprintId: "minecraft-java",
+        edition: "java",
+        containerId: "mc123",
+        address: "play.example.test:25565",
+        console: true,
+        players: {
+          supported: true,
+          status: "available",
+          online: 1,
+          maximum: 20,
+          names: ["Notch"],
+          observedAt: now,
+        },
+        files: [],
+      })
+    if (path === "/deploy/7/game/properties")
+      return json(route, {
+        status: "available",
+        path: "/data/server.properties",
+        values: { difficulty: "easy", "max-players": "20" },
+        restartRequired: true,
+        known: [
+          {
+            key: "difficulty",
+            kind: "choice",
+            label: "Difficulty",
+            choices: [
+              { value: "easy", label: "Easy" },
+              { value: "hard", label: "Hard" },
+            ],
+          },
+          { key: "max-players", kind: "number", label: "Maximum players" },
+        ],
+      })
+    return route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+  })
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+
+    hold()
+    await page.goto("/deploy/7/console")
+    await expect(page.locator('[data-slot="game-identity-skeleton"]')).toBeVisible()
+    await risen(page)
+    const outline = await page.locator('[data-slot="pane"]').boundingBox()
+    release()
+    await expect(page.getByRole("log", { name: "Console transcript" })).toBeVisible()
+    await risen(page)
+    const pane = await page.locator('[data-slot="pane"]').boundingBox()
+    expect(pane?.y, `the console moved at ${width}`).toBe(outline?.y)
+    expect(pane?.height).toBe(outline?.height)
+
+    hold()
+    await page.goto("/deploy/7/game-settings")
+    const skeleton = page.locator('[data-slot="setting-skeleton"]').first()
+    await expect(skeleton).toBeVisible()
+    await risen(page)
+    const before = await skeleton.boundingBox()
+    release()
+    const section = page.locator('[data-slot="setting"]').first()
+    await expect(section.getByRole("heading", { name: "World" })).toBeVisible()
+    await risen(page)
+    expect((await section.boundingBox())?.y, `the settings moved at ${width}`).toBe(before?.y)
+  }
+})
+
+test("a game server that is not running draws each page as what it waits for, not the daemon's words", async ({
+  page,
+}) => {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7", (route) =>
+    json(route, {
+      project,
+      running: false,
+      deployment: { ...deployment, profile: "game", buildMethod: "image", activeRun: undefined },
+    }),
+  )
+  const reason = "the live release has no running container"
+  await page.route("**/api/v1/deploy/7/game**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/deploy/7/game")
+      return json(route, { status: "unavailable", reason, console: true, files: [] })
+    if (path === "/deploy/7/game/players")
+      return json(route, {
+        supported: false,
+        status: "unavailable",
+        reason,
+        online: 0,
+        maximum: 0,
+        names: [],
+        observedAt: now,
+      })
+    if (path === "/deploy/7/game/properties")
+      return json(route, { status: "unavailable", reason, known: [] })
+    return route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+  })
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const [path, sentence, step] of [
+      ["console", "No running server to send commands to", "Runtime"],
+      ["players", "No running server to ask who is on", "Console"],
+      ["game-settings", "The settings file cannot be read right now", "Runtime"],
+    ]) {
+      await page.goto(`/deploy/7/${path}`)
+      const empty = page.locator('[data-slot="empty-state"]')
+      await expect(empty).toContainText(sentence)
+      // The backend's reason is under the sentence, never the headline.
+      await expect(empty).toContainText(reason)
+      await expect(empty.getByRole("link", { name: step })).toHaveAttribute(
+        "href",
+        `/deploy/7/${step.toLowerCase()}`,
+      )
+      // The project's own mark stands over it, and nothing is cut off.
+      await expect(empty.locator("img, svg").first()).toBeVisible()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        width,
+      )
+    }
+  }
+})
+
+test("a read-only account reads a game's settings and players and is offered no control it cannot use", async ({
+  page,
+}) => {
+  await mockProject(page)
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"] }),
+  )
+  await page.route("**/api/v1/deploy/7", (route) =>
+    json(route, {
+      project,
+      running: false,
+      deployment: { ...deployment, profile: "game", buildMethod: "image", activeRun: undefined },
+    }),
+  )
+  await page.route("**/api/v1/deploy/7/game**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    const players = {
+      supported: true,
+      status: "available",
+      online: 1,
+      maximum: 20,
+      names: ["Notch"],
+      observedAt: now,
+    }
+    if (path === "/deploy/7/game")
+      return json(route, {
+        status: "available",
+        blueprintId: "minecraft-java",
+        edition: "java",
+        containerId: "mc123",
+        address: "play.example.test:25565",
+        console: true,
+        players,
+        files: [],
+      })
+    if (path === "/deploy/7/game/players") return json(route, players)
+    if (path === "/deploy/7/game/properties")
+      return json(route, {
+        status: "available",
+        path: "/data/server.properties",
+        values: { pvp: "true", "max-players": "20" },
+        restartRequired: true,
+        known: [
+          { key: "pvp", kind: "boolean", label: "Player versus player" },
+          { key: "max-players", kind: "number", label: "Maximum players" },
+        ],
+      })
+    return route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+  })
+
+  await page.goto("/deploy/7/players")
+  const list = page.getByRole("list", { name: "Online players" })
+  await expect(list.getByText("Notch")).toBeVisible()
+  await expect(list.getByRole("button")).toHaveCount(0)
+
+  await page.goto("/deploy/7/game-settings")
+  await expect(page.getByRole("switch", { name: "Player versus player" })).toBeDisabled()
+  await expect(page.getByLabel("Maximum players")).toBeDisabled()
+  await expect(
+    page.getByText("Changing these needs the system administrator capability."),
+  ).toBeVisible()
+  await expect(saveBar(page)).toHaveCount(0)
+
+  await page.goto("/deploy/7/console")
+  await expect(page.getByRole("log", { name: "Console transcript" })).toBeVisible()
+  await expect(page.getByRole("textbox", { name: "Command" })).toHaveCount(0)
+  await expect(
+    page.getByText("Sending commands needs the service control capability."),
+  ).toBeVisible()
 })
 
 test("a game server says what stands between a player and it, and opens the firewall for its port", async ({

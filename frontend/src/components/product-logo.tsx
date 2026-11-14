@@ -145,6 +145,7 @@ const LOGOS: Record<string, string> = {
   dashy: "dashy.webp",
   debian: "debian.svg",
   deno: "deno.svg",
+  diesel: "diesel.webp",
   directus: "directus.svg",
   "directus-postgres": "directus.svg",
   discord: "discord.svg",
@@ -159,6 +160,7 @@ const LOGOS: Record<string, string> = {
   dotnet: "dotnet.svg",
   dozzle: "dozzle.svg",
   drawio: "drawio.svg",
+  drizzle: "drizzle.svg",
   duckdb: "duckdb.svg",
   duckduckgo: "duckduckgo.svg",
   duplicati: "duplicati.svg",
@@ -195,6 +197,7 @@ const LOGOS: Record<string, string> = {
   go: "go.svg",
   google: "google.svg",
   "google-cloud": "google-cloud.svg",
+  gorm: "gorm.webp",
   gotenberg: "gotenberg.webp",
   gotify: "gotify.svg",
   gradio: "gradio.svg",
@@ -288,6 +291,7 @@ const LOGOS: Record<string, string> = {
   opengist: "opengist.svg",
   opensearch: "opensearch.svg",
   opensuse: "opensuse.svg",
+  opentelemetry: "opentelemetry.svg",
   pairdrop: "pairdrop.webp",
   openvpn: "openvpn.svg",
   opera: "opera.svg",
@@ -311,6 +315,7 @@ const LOGOS: Record<string, string> = {
   posthog: "posthog.svg",
   postman: "postman.svg",
   powershell: "powershell.svg",
+  prisma: "prisma.svg",
   privatebin: "privatebin.svg",
   prometheus: "prometheus.svg",
   pushover: "pushover.svg",
@@ -339,6 +344,7 @@ const LOGOS: Record<string, string> = {
   seerr: "seerr.svg",
   sendgrid: "sendgrid.svg",
   sentry: "sentry.svg",
+  sequelize: "sequelize.svg",
   // The language, never a process: a shell at its prompt keeps its glyph
   // in the process table and the terminal, where a logo would be a guess.
   shellscript: "bash.svg",
@@ -352,6 +358,7 @@ const LOGOS: Record<string, string> = {
   solid: "solid.svg",
   spamhaus: "spamhaus.svg",
   "spring-boot": "spring-boot.svg",
+  sqlalchemy: "sqlalchemy.svg",
   sqlite: "sqlite.svg",
   sqlserver: "sqlserver.svg",
   "stirling-pdf": "stirling-pdf.svg",
@@ -376,6 +383,7 @@ const LOGOS: Record<string, string> = {
   timescaledb: "timescaledb.svg",
   traefik: "traefik.svg",
   trilium: "trilium.svg",
+  typeorm: "typeorm.svg",
   typescript: "typescript.svg",
   typesense: "typesense.svg",
   ubuntu: "ubuntu.svg",
@@ -405,6 +413,7 @@ const LOGOS: Record<string, string> = {
   yugabytedb: "yugabytedb.svg",
   zerotier: "zerotier.svg",
   zig: "zig.svg",
+  zod: "zod.svg",
 }
 
 /**
