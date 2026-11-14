@@ -31,7 +31,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { EmptyStep, ProjectEmpty } from "@/components/deploy/project-empty"
-import { GameIdentity, useGameOverview } from "@/components/deploy/game/identity"
+import {
+  GameIdentity,
+  GameIdentitySkeleton,
+  useGameOverview,
+} from "@/components/deploy/game/identity"
 
 /**
  * The console's height: the window below the project's header and this page's
@@ -147,7 +151,11 @@ export function GameConsole({ projectId }: { projectId: number }) {
   const data = overview.data
   return (
     <div className="space-y-6">
-      {data && <GameIdentity overview={data} projectId={projectId} onChanged={overview.refresh} />}
+      {data ? (
+        <GameIdentity overview={data} projectId={projectId} onChanged={overview.refresh} />
+      ) : (
+        !overview.error && <GameIdentitySkeleton />
+      )}
       {/* Only while there is nothing to show: a poll that fails once the
           console is up must not take the transcript off the page. */}
       {overview.error && !data ? (

@@ -29,7 +29,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import { EmptyStep, ProjectEmpty } from "@/components/deploy/project-empty"
-import { GameIdentity, useGameOverview } from "@/components/deploy/game/identity"
+import {
+  GameIdentity,
+  GameIdentitySkeleton,
+  useGameOverview,
+} from "@/components/deploy/game/identity"
 import { groupFacts, groupProperties } from "@/components/deploy/game/settings-model"
 import { HoverTip } from "@/components/deploy/settings/hover-tip"
 import { Segments } from "@/components/deploy/settings/segments"
@@ -65,8 +69,10 @@ export function GameSettings({ projectId }: { projectId: number }) {
   const state = useConfiguration(projectId, project.environmentId)
   return (
     <div className="space-y-6">
-      {overview.data && (
+      {overview.data ? (
         <GameIdentity overview={overview.data} projectId={projectId} onChanged={overview.refresh} />
+      ) : (
+        !overview.error && <GameIdentitySkeleton />
       )}
       <SettingsPage state={state}>
         {() => <PropertiesForm projectId={projectId} files={overview.data?.files} />}

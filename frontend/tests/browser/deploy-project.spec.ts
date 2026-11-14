@@ -1022,6 +1022,96 @@ test("the game workspace sends commands, moderates players and edits only declar
   await expect.poll(() => written).toEqual({ motd: "New name" })
 })
 
+test("a game server's console and settings are where their outlines were once the game answers", async ({
+  page,
+}) => {
+  let release = () => {}
+  let gate = Promise.resolve()
+  const hold = () => {
+    gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+  }
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7", (route) =>
+    json(route, {
+      project,
+      running: false,
+      deployment: { ...deployment, profile: "game", buildMethod: "image", activeRun: undefined },
+    }),
+  )
+  await page.route("**/api/v1/deploy/7/game**", async (route) => {
+    await gate
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/deploy/7/game")
+      return json(route, {
+        status: "available",
+        blueprintId: "minecraft-java",
+        edition: "java",
+        containerId: "mc123",
+        address: "play.example.test:25565",
+        console: true,
+        players: {
+          supported: true,
+          status: "available",
+          online: 1,
+          maximum: 20,
+          names: ["Notch"],
+          observedAt: now,
+        },
+        files: [],
+      })
+    if (path === "/deploy/7/game/properties")
+      return json(route, {
+        status: "available",
+        path: "/data/server.properties",
+        values: { difficulty: "easy", "max-players": "20" },
+        restartRequired: true,
+        known: [
+          {
+            key: "difficulty",
+            kind: "choice",
+            label: "Difficulty",
+            choices: [
+              { value: "easy", label: "Easy" },
+              { value: "hard", label: "Hard" },
+            ],
+          },
+          { key: "max-players", kind: "number", label: "Maximum players" },
+        ],
+      })
+    return route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+  })
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+
+    hold()
+    await page.goto("/deploy/7/console")
+    await expect(page.locator('[data-slot="game-identity-skeleton"]')).toBeVisible()
+    await risen(page)
+    const outline = await page.locator('[data-slot="pane"]').boundingBox()
+    release()
+    await expect(page.getByRole("log", { name: "Console transcript" })).toBeVisible()
+    await risen(page)
+    const pane = await page.locator('[data-slot="pane"]').boundingBox()
+    expect(pane?.y, `the console moved at ${width}`).toBe(outline?.y)
+    expect(pane?.height).toBe(outline?.height)
+
+    hold()
+    await page.goto("/deploy/7/game-settings")
+    const skeleton = page.locator('[data-slot="setting-skeleton"]').first()
+    await expect(skeleton).toBeVisible()
+    await risen(page)
+    const before = await skeleton.boundingBox()
+    release()
+    const section = page.locator('[data-slot="setting"]').first()
+    await expect(section.getByRole("heading", { name: "World" })).toBeVisible()
+    await risen(page)
+    expect((await section.boundingBox())?.y, `the settings moved at ${width}`).toBe(before?.y)
+  }
+})
+
 test("a game server that is not running draws each page as what it waits for, not the daemon's words", async ({
   page,
 }) => {

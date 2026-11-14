@@ -18,7 +18,11 @@ import { ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { EmptyStep, ProjectEmpty } from "@/components/deploy/project-empty"
-import { GameIdentity, useGameOverview } from "@/components/deploy/game/identity"
+import {
+  GameIdentity,
+  GameIdentitySkeleton,
+  useGameOverview,
+} from "@/components/deploy/game/identity"
 import { PlayerFace } from "@/components/deploy/game/player-face"
 import {
   observePlayers,
@@ -175,8 +179,10 @@ export function GamePlayers({ projectId }: { projectId: number }) {
 
   return (
     <div className="space-y-6">
-      {overview.data && (
+      {overview.data ? (
         <GameIdentity overview={overview.data} projectId={projectId} onChanged={overview.refresh} />
+      ) : (
+        !overview.error && <GameIdentitySkeleton />
       )}
       <Panel plain>
         <PanelHeader
