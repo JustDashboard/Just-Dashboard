@@ -254,8 +254,9 @@ are dated evidence, not proof of current attachment ownership.
   working-session counts are the recorded active count minus the recorded waiting count, while live
   session filters use the current session list. SQLite has no activity chart or recording poll.
   Performance's Statement history (`components/database/ops/performance-history.tsx`) reads
-  `GET /databases/{id}/statements/history` every minute over the same per-connection range, and an
-  open statement's `/statements/history/{statement}` on the same cadence; both are the backend's
+  `GET /databases/{id}/statements/history` every minute over the same per-connection range, and a
+  statement's page (`performance-statement.tsx`) its `/statements/history/{statement}` on the same
+  cadence, for its History view and the trends beside its figures; both are the backend's
   store, which the recorder writes every five minutes. A point no reading falls in is a gap in a
   statement's charts, and a reset is a mark on their time axis.
 - The hub link is read in two places, both through `usePoll` (`hooks/use-hub-link.tsx`).
