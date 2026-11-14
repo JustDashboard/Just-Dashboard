@@ -11,8 +11,12 @@ import {
 import { useLogFiles } from "@/components/security/log-section"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 
-/** Where the view's reading is kept for the tab. */
+/** Where the view's reading is kept for the tab: the list's, and a package's own. */
 const STORAGE_KEY = "packages.log"
+const ABOUT_STORAGE_KEY = "packages.page.log"
+
+/** The logs that record one line per package, read first when the view is about one. */
+const PER_PACKAGE = ["/var/log/dpkg.log", "/var/log/dnf.rpm.log"]
 
 /**
  * What the package manager did, read back from its own logs: apt's
@@ -24,13 +28,30 @@ const STORAGE_KEY = "packages.log"
  *
  * Named Log rather than History because the pane's own first tab is History,
  * and one strip over another both saying History is two places with one name.
+ *
+ * `about` narrows it to one package, on that package's page: the same logs
+ * searched for its name, dpkg's per-package record first. The narrowing is a
+ * chip the reader can press away, and is kept apart from the list's own Log
+ * view so reading one package's history does not leave the list's filtered.
  */
-export function PackageLogView({ product }: { product?: string }) {
+export function PackageLogView({
+  product,
+  about,
+  paneClassName = "h-[min(75vh,40rem)] min-h-80",
+}: {
+  product?: string
+  about?: string
+  paneClassName?: string
+}) {
   const files = useLogFiles(PACKAGE_LOGS)
-  const sources = useMemo(
-    () => (files.data ? packageLogSources(files.data, product) : undefined),
-    [files.data, product],
-  )
+  const sources = useMemo(() => {
+    if (!files.data) return undefined
+    const all = packageLogSources(files.data, product)
+    if (!about) return all
+    const first = (path?: string) => (path && PER_PACKAGE.includes(path) ? 0 : 1)
+    return [...all].sort((a, b) => first(a.path) - first(b.path))
+  }, [files.data, product, about])
+  const ask = useMemo(() => (about ? { key: about, q: about } : undefined), [about])
   if (files.error && !files.data) {
     return <ErrorState error={files.error} onRetry={files.refresh} />
   }
@@ -53,14 +74,15 @@ export function PackageLogView({ product }: { product?: string }) {
   return (
     <ServiceLogs
       sources={sources}
-      storageKey={STORAGE_KEY}
+      storageKey={about ? ABOUT_STORAGE_KEY : STORAGE_KEY}
+      ask={ask}
       modes={["search", "insights"]}
       // A package log a day long is usually empty: History opens on all the
       // live file holds, a month of apt's transactions, until the reader
       // picks another window.
       initialRange="all"
       pickerLabel="Package log"
-      paneClassName="h-[min(75vh,40rem)] min-h-80"
+      paneClassName={paneClassName}
     />
   )
 }

@@ -16,6 +16,7 @@ import { FactDot, HostFact } from "@/components/metrics/host-identity"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { NumberTicker } from "@/components/ui/number-ticker"
+import { Skeleton } from "@/components/ui/skeleton"
 
 /**
  * The game server as the game reports it — which game, where players join,
@@ -84,6 +85,32 @@ export function GameIdentity({
       {overview.reach && (
         <ReachNote reach={overview.reach} projectId={projectId} onChanged={onChanged} />
       )}
+    </div>
+  )
+}
+
+/**
+ * The identity line before the game has answered: the address and the meter
+ * as two bars in the line's own layout, so the page under it is where it will
+ * be once the answer lands — a console pane that dropped forty pixels as its
+ * address arrived was the one thing on these pages that moved.
+ */
+export function GameIdentitySkeleton() {
+  return (
+    <div
+      aria-hidden
+      data-slot="game-identity-skeleton"
+      className="flex min-w-0 flex-wrap items-center justify-between gap-x-6 gap-y-2"
+    >
+      <span className="flex h-6 items-center">
+        <Skeleton className="h-3 w-56" />
+      </span>
+      {/* The meter's line is as tall as its words, so this one holds a space
+          in their size beside its bar. */}
+      <span className="flex items-center text-hint whitespace-nowrap">
+        <Skeleton className="h-3 w-52" />
+        &nbsp;
+      </span>
     </div>
   )
 }

@@ -270,7 +270,7 @@ test("opening a section replaces the rail with that section's pages", async ({ p
   await expectNoStrip(page)
 })
 
-// Network's nineteen pages are read under three headings rather than as one
+// Network's eighteen pages are read under three headings rather than as one
 // flat list, with the overview above them, and every row of the panel is one
 // height at the rail's left edge whichever heading it is under.
 test("the Network panel groups its pages under headings", async ({ page }) => {
@@ -281,7 +281,7 @@ test("the Network panel groups its pages under headings", async ({ page }) => {
   await expect(nav.getByText("Activity", { exact: true })).toBeVisible()
   await expect(nav.getByText("Diagnostics", { exact: true })).toBeVisible()
   const links = nav.getByRole("link")
-  await expect(links).toHaveCount(19)
+  await expect(links).toHaveCount(18)
   await expect(links.first()).toHaveText("Overview")
   const order = await links.allTextContents()
   expect(order.indexOf("Interfaces")).toBeLessThan(order.indexOf("Traffic"))
