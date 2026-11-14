@@ -90,6 +90,14 @@ const row = (page: Page, name: string) =>
     .getByRole("listitem")
     .filter({ has: page.getByText(`${accessDir}/${name}.conf`, { exact: true }) })
 
+/** Opens a list's sheet, where what it holds is read and changed. */
+async function open(page: Page, name: string) {
+  await row(page, name)
+    .getByRole("button", { name: `Open ${name}` })
+    .click()
+  return page.getByRole("dialog", { name: `Edit ${name}` })
+}
+
 const toast = (page: Page, title: string) =>
   page.locator("[data-sonner-toast]").filter({ hasText: title })
 
@@ -160,11 +168,17 @@ test("a new list is saved as the form shows it and listed with its include line"
       },
     },
   ])
+  // The row says what the list is in a line; its sheet holds the rest.
   const office = row(page, "office")
-  await expect(office).toContainText(`include ${accessDir}/office.conf;`)
-  await expect(office).toContainText("or an allowed address")
-  await expect(office).toContainText("No site yet")
+  await expect(office).toContainText("2 allowed")
+  await expect(office.getByTitle("staging or an allowed address")).toBeVisible()
+  await expect(office).toContainText("unused")
   await expect(section(page)).toContainText("1 list")
+  const listed = await open(page, "office")
+  await expect(listed).toContainText(`include ${accessDir}/office.conf;`)
+  await expect(listed).toContainText("No site yet")
+  await page.keyboard.press("Escape")
+  await expect(listed).toBeHidden()
 
   // A second list may not take the first one's name.
   await section(page).getByRole("button", { name: "New list" }).click()
@@ -182,8 +196,7 @@ test("an edit reaches every site that includes the list, with what was typed but
   await page.route("**/api/v1/proxy/auth-files/", (route) => json(route, staging))
   await page.goto("/proxy/sites")
 
-  await row(page, "office").getByRole("button", { name: "Edit office" }).click()
-  const dialog = page.getByRole("dialog", { name: "Edit office" })
+  const dialog = await open(page, "office")
   await expect(dialog.getByLabel("Name", { exact: true })).toHaveCount(0)
   await expect(dialog.getByText("Saving reloads nginx for app.example.com.")).toBeVisible()
   await expect(dialog.getByLabel("Password file")).toContainText("staging")
@@ -210,8 +223,10 @@ test("an edit reaches every site that includes the list, with what was typed but
       },
     },
   ])
-  await expect(row(page, "office")).toContainText("172.16.0.0/12")
-  await expect(row(page, "office")).not.toContainText("2001:db8::/32")
+  await expect(row(page, "office")).toContainText("2 allowed · 1 denied")
+  const again = await open(page, "office")
+  await expect(again.getByRole("button", { name: "Remove 172.16.0.0/12" })).toBeVisible()
+  await expect(again.getByRole("button", { name: "Remove 2001:db8::/32" })).toHaveCount(0)
 })
 
 test("a save nginx refuses keeps the form open and shows nginx's reason and output", async ({
@@ -230,8 +245,7 @@ test("a save nginx refuses keeps the form open and shows nginx's reason and outp
   await page.route("**/api/v1/proxy/auth-files/", (route) => json(route, staging))
   await page.goto("/proxy/sites")
 
-  await row(page, "vpn").getByRole("button", { name: "Edit vpn" }).click()
-  const dialog = page.getByRole("dialog", { name: "Edit vpn" })
+  const dialog = await open(page, "vpn")
   await dialog.getByLabel("Password file").click()
   await page.getByRole("option", { name: "staging" }).click()
   await dialog.getByRole("button", { name: "Save" }).click()
@@ -274,8 +288,7 @@ test("a save whose reload failed says the sites keep the previous rules", async 
   }))
   await page.goto("/proxy/sites")
 
-  await row(page, "admins").getByRole("button", { name: "Edit admins" }).click()
-  const dialog = page.getByRole("dialog", { name: "Edit admins" })
+  const dialog = await open(page, "admins")
   await dialog.getByLabel("Deny", { exact: true }).fill("10.20.0.7")
   await dialog.getByRole("button", { name: "Save" }).click()
 
@@ -287,7 +300,7 @@ test("a save whose reload failed says the sites keep the previous rules", async 
   await expect(toast(page, "admins saved")).toHaveCount(1)
 })
 
-test("each list says what it allows, who includes it, and when it refuses the reader", async ({
+test("each list is one line, and its sheet says what it allows, who includes it and when it refuses the reader", async ({
   page,
   context,
 }) => {
@@ -295,35 +308,59 @@ test("each list says what it allows, who includes it, and when it refuses the re
   await mockShowcase(page)
   await page.goto("/proxy/sites")
 
-  await expect(section(page)).toContainText("3 lists, included by 2 sites")
+  await expect(section(page)).toContainText("3 lists")
+  // No sentence under the title, and every list the same height whatever it holds.
+  await expect(section(page).getByText(/included by/)).toHaveCount(0)
+  const heights = await section(page)
+    .getByRole("listitem")
+    .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height))
+  expect(heights).toHaveLength(3)
+  expect(new Set(heights).size).toBe(1)
+
   const office = row(page, "office")
-  await expect(office).toContainText("Allows10.0.0.0/82001:db8::/32")
-  await expect(office).toContainText("Denies10.0.0.9")
-  await expect(office).toContainText("Passwordstagingor an allowed address")
-  await expect(office.getByRole("link", { name: "app.example.com" })).toHaveAttribute(
-    "href",
-    "/proxy/sites?site=app.example.com",
-  )
-  await expect(office).toContainText("legacy.example.com · disabled")
+  await expect(office).toContainText("2 allowed · 1 denied")
+  await expect(office.getByTitle("staging or an allowed address")).toBeVisible()
+  await expect(office).toContainText("2 sites")
   // The office list lets a password in from anywhere, so it does not lock
   // the reader out; admins has no password and does not name them.
   await expect(office.getByText("Refuses you")).toHaveCount(0)
   const admins = row(page, "admins")
   await expect(admins.getByText("Refuses you")).toBeVisible()
-  await expect(admins).toContainText(`The dashboard sees you at ${clientAddress}.`)
   const vpn = row(page, "vpn")
-  await expect(vpn).toContainText("Denies198.51.100.0/24")
-  await expect(vpn).toContainText("No site yet")
+  await expect(vpn).toContainText("1 denied")
+  await expect(vpn).toContainText("unused")
   await expect(vpn.getByText("Refuses you")).toHaveCount(0)
 
-  await vpn.getByRole("button", { name: "Copy the include line for vpn" }).click()
+  await vpn.getByRole("button", { name: "More actions for vpn" }).click()
+  await page.getByRole("menuitem", { name: "Copy include line" }).click()
   await expect(toast(page, "Include line copied")).toBeVisible()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     `include ${accessDir}/vpn.conf;`,
   )
 
-  await office.getByRole("link", { name: "app.example.com" }).click()
-  await expect(page).toHaveURL(/\/proxy\/sites\?site=app\.example\.com$/)
+  // Why admins refuses the reader is in its sheet.
+  const refusing = await open(page, "admins")
+  await expect(refusing.getByText("This list refuses you")).toBeVisible()
+  await expect(refusing).toContainText(`The dashboard sees you at ${clientAddress}`)
+  await page.keyboard.press("Escape")
+  await expect(refusing).toBeHidden()
+
+  // What a list holds, and the sites that include it, each a way to that
+  // site's access settings.
+  const sheet = await open(page, "office")
+  await expect(sheet).toContainText(`include ${accessDir}/office.conf;`)
+  for (const entry of ["10.0.0.0/8", "2001:db8::/32", "10.0.0.9"]) {
+    await expect(sheet.getByRole("button", { name: `Remove ${entry}` })).toBeVisible()
+  }
+  const used = sheet.getByRole("list", { name: "Sites using office" })
+  await expect(used.getByRole("listitem").nth(1)).toContainText("legacy.example.comdisabled")
+  await sheet.getByRole("button", { name: "Copy the include line for office" }).click()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    `include ${accessDir}/office.conf;`,
+  )
+  await used.getByRole("link", { name: "app.example.com" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com\?tab=settings&view=access$/)
+  await expect(page.getByRole("heading", { name: "Who may reach it" })).toBeVisible()
 })
 
 test("a list a site includes is not deleted; one no site includes is, after asking", async ({
@@ -361,13 +398,12 @@ test("a list whose password file is gone, or that was written by hand, says so",
   await page.route("**/api/v1/proxy/auth-files/", (route) => json(route, []))
   await page.goto("/proxy/sites")
 
+  // The row carries the worst of the two; the sheet says both in full.
   const office = row(page, "office")
   await expect(office.getByText("Password file gone")).toBeVisible()
-  await expect(office).toContainText("Every login is refused until the list names another.")
-  await expect(office).toContainText(`Written by hand: ${reason}.`)
 
-  await office.getByRole("button", { name: "Edit office" }).click()
-  const dialog = page.getByRole("dialog", { name: "Edit office" })
+  const dialog = await open(page, "office")
+  await expect(dialog).toContainText("Every login is refused until the list names another.")
   await expect(dialog.getByText("Written by hand")).toBeVisible()
   await expect(dialog).toContainText("Its rules are written in an order")
   await expect(dialog.getByText("staging is gone. Choose another file, or none.")).toBeVisible()
@@ -391,7 +427,7 @@ test("a list that cannot be read is an error in its own section only", async ({ 
   await page.goto("/proxy/sites")
   await expect(section(page).getByText("the lists could not be read")).toBeVisible()
   await expect(page.getByRole("heading", { name: "Password files" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Routing" })).toBeVisible()
+  await expect(page.getByRole("list", { name: "Sites", exact: true })).toBeVisible()
 })
 
 test("a read-only account neither sees nor asks for the access lists", async ({ page }) => {
@@ -405,7 +441,7 @@ test("a read-only account neither sees nor asks for the access lists", async ({ 
     json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
   )
   await page.goto("/proxy/sites")
-  await expect(page.getByRole("heading", { name: "Routing" })).toBeVisible()
+  await expect(page.getByRole("list", { name: "Sites", exact: true })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Access lists" })).toHaveCount(0)
   expect(asked).toBe(0)
 })
@@ -421,8 +457,7 @@ test("the lists and their form fit a phone", async ({ page }) => {
     .evaluate((el) => el.scrollWidth - el.clientWidth)
   expect(overflow).toBeLessThanOrEqual(1)
 
-  await row(page, "office").getByRole("button", { name: "Edit office" }).click()
-  const dialog = page.getByRole("dialog", { name: "Edit office" })
+  const dialog = await open(page, "office")
   await expect(dialog).toBeInViewport({ ratio: 1 })
   const inner = await dialog.evaluate((el) => el.scrollWidth - el.clientWidth)
   expect(inner).toBeLessThanOrEqual(1)
@@ -540,4 +575,146 @@ test("the URL resolver says who may take the route from an address, layer by lay
   )
   expect(asked).toHaveLength(1)
   expect(asked[0].get("source")).toBe("10.9.0.4")
+})
+
+test("backups are one line each, and a press on one is its restore", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const backups = [
+    {
+      file: "old.example.com.bak",
+      layout: "sites-available",
+      path: "/etc/nginx/sites-available/old.example.com.bak",
+      size: 1840,
+      modified: now,
+      site: "old.example.com",
+      siteExists: false,
+      restorable: true,
+    },
+    {
+      file: "app.example.com.bak",
+      layout: "sites-available",
+      path: "/etc/nginx/sites-available/app.example.com.bak",
+      size: 2210,
+      modified: now,
+      site: "app.example.com",
+      siteExists: true,
+      restorable: true,
+    },
+    {
+      file: "notes.txt~",
+      layout: "conf.d",
+      path: "/etc/nginx/conf.d/notes.txt~",
+      size: 12,
+      modified: now,
+      siteExists: false,
+      restorable: false,
+      reason: "it holds no server block",
+    },
+  ]
+  let deleted = ""
+  await page.route(/\/api\/v1\/proxy\/site-backups/, (route) => {
+    if (route.request().method() === "DELETE") {
+      deleted = new URL(route.request().url()).pathname
+      return route.fulfill({ status: 204 })
+    }
+    return json(route, backups)
+  })
+  await page.goto("/proxy/sites")
+
+  const panel = page.getByRole("region", { name: "Deleted & backups" })
+  await expect(panel).toContainText("3 copies")
+  const rows = panel.getByRole("listitem")
+  await expect(rows).toHaveCount(3)
+  const heights = await rows.evaluateAll((items) =>
+    items.map((item) => item.getBoundingClientRect().height),
+  )
+  expect(new Set(heights).size).toBe(1)
+  await expect(rows.nth(0)).toContainText("restores as old.example.com")
+  await expect(rows.nth(1)).toContainText("app.example.com exists")
+  // One that cannot be restored has nothing to press but its menu.
+  await expect(rows.nth(2)).toContainText("cannot be restored")
+  await expect(
+    rows.nth(2).getByTitle("Cannot be restored: it holds no server block."),
+  ).toBeVisible()
+  await expect(rows.nth(2).getByRole("button", { name: "Restore notes.txt~" })).toHaveCount(0)
+
+  await rows.nth(0).getByRole("button", { name: "Restore old.example.com.bak" }).click()
+  const restore = page.getByRole("dialog", { name: "Restore old.example.com.bak" })
+  await expect(restore.getByLabel("Site name")).toHaveValue("old.example.com")
+  await page.keyboard.press("Escape")
+  await expect(restore).toBeHidden()
+
+  await panel.getByRole("button", { name: "More actions for notes.txt~" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText(["Delete for good"])
+  await page.getByRole("menuitem", { name: "Delete for good" }).click()
+  await page
+    .getByRole("dialog", { name: "Delete notes.txt~" })
+    .getByRole("button", { name: "Delete", exact: true })
+    .click()
+  await expect.poll(() => deleted).toBe("/api/v1/proxy/site-backups/conf.d/notes.txt~")
+})
+
+test("a password file is one line, and its logins are in the sheet it opens", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const files = [
+    {
+      name: "staging",
+      path: "/etc/nginx/jd-auth/staging",
+      users: ["operator", "reviewer"],
+      usedBy: ["app.example.com"],
+    },
+    { name: "empty", path: "/etc/nginx/jd-auth/empty", users: [], usedBy: [] },
+  ]
+  const removed: string[] = []
+  await page.route(/\/api\/v1\/proxy\/auth-files\//, (route) => {
+    if (route.request().method() === "DELETE") {
+      removed.push(new URL(route.request().url()).pathname)
+      return route.fulfill({ status: 204 })
+    }
+    return json(route, files)
+  })
+  await page.goto("/proxy/sites")
+
+  const panel = page.getByRole("region", { name: "Password files" })
+  await expect(panel).toContainText("2 files")
+  // No sentence under the title, and both files one height.
+  await expect(panel.getByText(/HTTP basic authentication/)).toHaveCount(0)
+  const rows = panel.getByRole("listitem")
+  const heights = await rows.evaluateAll((items) =>
+    items.map((item) => item.getBoundingClientRect().height),
+  )
+  expect(heights).toHaveLength(2)
+  expect(new Set(heights).size).toBe(1)
+  await expect(rows.nth(0)).toContainText("2 logins")
+  await expect(rows.nth(0)).toContainText("app.example.com")
+  await expect(rows.nth(1)).toContainText("no logins")
+  await expect(rows.nth(1)).toContainText("no site names it")
+
+  await rows.nth(0).getByRole("button", { name: "Open staging" }).click()
+  const sheet = page.getByRole("dialog", { name: "staging" })
+  await expect(sheet).toContainText("/etc/nginx/jd-auth/staging")
+  await expect(
+    sheet.getByRole("list", { name: "Logins in staging" }).getByRole("listitem"),
+  ).toHaveText(["operator", "reviewer"])
+  await expect(
+    sheet.getByRole("list", { name: "Sites using staging" }).getByRole("link"),
+  ).toHaveAttribute("href", "/proxy/sites/app.example.com?tab=settings&view=access")
+
+  // A login's password is changed, and a login removed, from the sheet.
+  await sheet.getByRole("button", { name: "Change the password of reviewer" }).click()
+  const change = page.getByRole("dialog", { name: "Change the password of reviewer" })
+  await expect(change.getByLabel("New password")).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(change).toBeHidden()
+  await sheet.getByRole("button", { name: "Remove reviewer" }).click()
+  await page
+    .getByRole("dialog", { name: "Remove reviewer" })
+    .getByRole("button", { name: "Remove", exact: true })
+    .click()
+  await expect.poll(() => removed).toEqual(["/api/v1/proxy/auth-files/staging/users/reviewer"])
+
+  // Add login from the sheet names the file.
+  await sheet.getByRole("button", { name: "Add login" }).click()
+  const add = page.getByRole("dialog", { name: "Add a login" })
+  await expect(add.getByLabel("File")).toHaveValue("staging")
 })

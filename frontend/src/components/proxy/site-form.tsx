@@ -1012,11 +1012,16 @@ function SiteFormBody({
   // in the form's own layout. A site whose file is as the form writes it has
   // nothing to save, and no bar.
   const unsaved = start ? changedFields(spec, start).length : 0
-  const rewrites = !dirty && base !== null && changed > 0
+  // Neither is said before the preview has answered for this draft: until
+  // then there is no telling whether a save would change the file, and a bar
+  // that came up offering one command and then made room for a second moved
+  // its buttons under the pointer.
+  const measured = base !== null && file !== null
+  const rewrites = !dirty && measured && changed > 0
   const saveable = dirty || rewrites
   // A disabled site with nothing to save still has one thing a save can do,
   // which is enable it: the bar stays for that, with that command alone.
-  const enableOnly = !saveable && base !== null && saves.secondary?.mode === "enable"
+  const enableOnly = !saveable && measured && saves.secondary?.mode === "enable"
   const onSaveKey = useEffectEvent((event: KeyboardEvent) => {
     const key = event.key.toLowerCase() === "s" && (event.ctrlKey || event.metaKey)
     if (!key || event.altKey || event.shiftKey || rawOpen || discarding || leaving) return

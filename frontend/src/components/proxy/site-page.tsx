@@ -530,7 +530,15 @@ function SiteMain({
         />
       </div>
 
-      <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
+      {/* Chosen by a press, not by focus: Settings ask before they are
+          left, and the focus that question hands back to the tab it came
+          from would choose that tab again and ask again. */}
+      <Tabs
+        value={tab}
+        onValueChange={setTab}
+        activationMode="manual"
+        className="min-h-0 flex-1 gap-0"
+      >
         <div className="flex shrink-0 border-b border-hairline">
           <TabsPrimitive.List
             aria-label={`Views of ${name}`}
@@ -709,7 +717,7 @@ function Unrecorded({ kind, href }: { kind: "off" | "shared"; href?: string }) {
       <span className="min-w-0">
         {kind === "off"
           ? "This site keeps no access log, so there are no requests to read; its errors still are."
-          : "This site has no access log of its own: its requests go to a log that does not say which site answered."}
+          : "This site has no access log of its own: its requests go to nginx's shared log, syslog or a stream."}
       </span>
       {href && (
         <Button size="xs" variant="outline" asChild>

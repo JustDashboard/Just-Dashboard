@@ -59,7 +59,7 @@ import { RouteResolver } from "@/components/proxy/route-resolver"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { useNewSiteLink } from "@/components/proxy/site-link"
 import { DefaultSitePanel } from "@/components/proxy/default-site"
-import { SiteBand, SiteMark } from "@/components/proxy/site-band"
+import { SiteBand } from "@/components/proxy/site-band"
 import {
   errorTone,
   siteApp,
@@ -73,7 +73,13 @@ import { SiteForm } from "@/components/proxy/site-form"
 import { SiteRenameDialog } from "@/components/proxy/site-rename"
 import { SiteImportDialog } from "@/components/proxy/site-import"
 import { SiteBackupsPanel } from "@/components/proxy/site-backups"
-import { ServingStatus, SiteTLS, UpstreamHealth, siteKind } from "@/components/proxy/site-marks"
+import {
+  RouteMark,
+  ServingStatus,
+  SiteTLS,
+  UpstreamHealth,
+  siteKind,
+} from "@/components/proxy/site-marks"
 import { siteDestination } from "@/components/proxy/site-rail"
 import { siteSettingsHref } from "@/components/proxy/site-tabs"
 import { ExpiryStatus } from "@/components/proxy/expiry-status"
@@ -82,6 +88,8 @@ import {
   SORT_LABEL,
   exportBundle,
   isDown,
+  isRedirect,
+  isStatic,
   matchesChip,
   siteCert,
   siteUpstreams,
@@ -1626,8 +1634,9 @@ type CardProps = {
 }
 
 /**
- * A site as one line, the same height whatever it holds: what it fronts over
- * the engine serving it, its name over what it is and where its requests go,
+ * A site as one line, the same height whatever it holds: what it fronts with
+ * the engine serving it in the tile's corner, as the overview's Routes list
+ * draws it, its name over what it is and where its requests go,
  * then in aligned columns its last hour, the ports it listens on, its TLS
  * and how long its certificate has, and its state. Opening it is the site's
  * page, for every site and every reader: a Docker Caddy route with no file
@@ -1686,7 +1695,22 @@ function SiteRow({
       leading={
         <>
           {cursor && <ScrollHere />}
-          <SiteMark vhost={vhost} app={app} />
+          {/* One tile on every row, so the names stand on one edge: what
+              the site's visitors reach, the engine in its corner. */}
+          <RouteMark
+            vhost={vhost}
+            backend={{
+              kind: isRedirect(vhost)
+                ? "redirect"
+                : isStatic(vhost)
+                  ? "files"
+                  : vhost.upstreams.length > 0
+                    ? "app"
+                    : "config",
+              product: app?.product,
+              projectId: activeOwner(vhost)?.projectId,
+            }}
+          />
         </>
       }
       title={vhost.name}

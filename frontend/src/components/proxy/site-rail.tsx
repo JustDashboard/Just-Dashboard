@@ -4,11 +4,13 @@ import { useEffect, useRef } from "react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import type { Listener, VHost } from "@/lib/types"
+import { Box, CornerUpRight, FileText, FolderOpen } from "@/components/icons"
 import { SearchInput } from "@/components/page"
+import { ProductLogo } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { LoadingRows } from "@/components/state"
+import { siteProduct } from "@/components/proxy/marks"
 import { siteApp } from "@/components/proxy/site-apps"
-import { SiteMark } from "@/components/proxy/site-band"
 import { upstreamTargets } from "@/components/proxy/site-details"
 import { isRedirect, isStatic, redirectTargets } from "@/components/proxy/site-filters"
 import { siteHref, type SiteTab } from "@/components/proxy/site-tabs"
@@ -32,6 +34,13 @@ function railState(vhost: VHost): { tone: DotTone; word?: string } {
   if (!vhost.enabled) return { tone: "stopped", word: "disabled" }
   if (vhost.maintenance) return { tone: "warning", word: "maintenance" }
   return { tone: "running" }
+}
+
+/** The glyph for what a site serves, where no logo names it. */
+function kindGlyph(vhost: VHost) {
+  if (isRedirect(vhost)) return CornerUpRight
+  if (isStatic(vhost)) return FolderOpen
+  return vhost.upstreams.length > 0 ? Box : FileText
 }
 
 /** A row's identity: two entries may share a name across layouts. */
@@ -130,7 +139,15 @@ export function SiteRail({
                 )}
               >
                 <span className="relative flex shrink-0">
-                  <SiteMark vhost={vhost} app={siteApp(vhost, listeners, [])} size="sm" />
+                  {/* One tile on every row, so the names stand on one edge:
+                      the application where the host can name it, the kind of
+                      thing the site serves otherwise, the engine failing both. */}
+                  <ProductLogo
+                    id={siteApp(vhost, listeners, [])?.product ?? siteProduct(vhost)}
+                    size="sm"
+                    fallback={kindGlyph(vhost)}
+                    className="size-7 rounded-md [&_img]:size-4"
+                  />
                   <span
                     aria-hidden
                     className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
