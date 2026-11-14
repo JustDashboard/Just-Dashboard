@@ -116,6 +116,8 @@ that does something.
   after the image is read again and nothing uses it, since a forced removal also takes an image a
   stopped container was made from. A pull from an image's page follows the tag to the image it
   points at afterwards.
+
+
 - `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2): the
   server's identity line (the Compose mark, Docker's version, stacks deployed, services running, ports
   published), then `stack-band.tsx`, bar readings
@@ -268,73 +270,85 @@ Firewall findings open enforcement review, and allowlist findings open Access in
 the server: picking "Redis" fills in 6379 *and* raises the warning at the moment of choosing, not in a
 report afterwards; the `ufw` line it would run is in the footer. `ssh-panel.tsx` stages every change and
 applies them together, and its dialog says to keep the session open and check a second terminal — the one
-piece of advice no error message can give afterwards. `site-form.tsx` shows the server-rendered nginx live
-beside the form (same renderer that writes the file, so the form is not a black box), with `DNSCheck`
+piece of advice no error message can give afterwards. `site-form.tsx` shows the server-rendered nginx as
+the form's last part (same renderer that writes the file, so the form is not a black box), with `DNSCheck`
 under the domain field because "the name does not point here yet" causes most certificate failures and
 certbot reports it as "challenge failed". `tls-report.tsx` says out loud what `unknown` means for a
 protocol row.
 
 The security section has four reading pages (§15–16): the overview, SSH, Intrusion and Logins.
 The firewall, connections, interfaces and tools moved to the Network section in 0.7.1 and are
-described with it below; the overview's Firewall and Connections tiles open them there. The overview
-opens on the observed access identity line, then area readings and the ways onto the machine as a
-wiring picture (`perimeter.tsx`: internet through firewall, fail2ban and sshd, and this browser
+described with it below; the overview's Firewall and Connections nodes open them there. The overview
+opens on the observed access identity line and then the ways onto the machine as a
+wiring picture whose nodes carry the area readings (`perimeter.tsx`: internet through firewall, fail2ban and sshd, and this browser
 through the allowlist). The **Access boundary** lists Caddy-only ingress, allowlist, tailnet, SSH
 tunnels and preview boundaries as held, broken or unknown. Automatic posture findings and their
 strip were removed in 0.7.5.
 
 - **SSH:** the page opens on sshd's doors as a picture (`ssh-picture.tsx`) — the port, public keys
   with the keyed accounts' faces, passwords and root — drawn from the draft, so a staged change
-  shows its effect before it is applied. Authentication, access, session limits and other
-  directives are `FormSection aside` groups, two to a row from `xl`, each marked *Edited* while it
-  holds a staged change. Every control occupies the same column; explanatory detail is available beside its label, and a sticky apply bar naming what
-  changed applies the values together. Reverting a draft to its effective value removes it from the change set. The apply
-  dialog still requires `change ssh`; the backend tests and reloads through its existing job. For an
+  shows its effect before it is applied. The auth log's four readings are `ReadingLine`s
+  under it, each a press that narrows the log. Authentication, access, session limits and other
+  directives are one centred column of `SettingSection`s (0.8.7): a row is a directive's name with
+  why behind its ⓘ and its control at the far end (a switch, `Segments`, a list or a field), marked
+  while it holds a staged change with *sshd runs …* under the control, and the product's floating
+  save bar names what changed. Reverting a draft to its effective value removes it from the change
+  set. **Save** opens the review, which lists each old and new value; the backend tests and reloads
+  through its existing job. `?setting=<key>` lands on a directive. For an
   administrator the page ends on the Auth log (`auth.log` or `secure`, else the journal's sshd, sudo,
   su and logind lines); anyone else is told the page needs an administrator and no log is asked for.
   The **Jump host** section reads the five forwarding directives the closed list gained in 0.7.1
   (`AllowTcpForwarding`, `GatewayPorts`, `AllowAgentForwarding`, `PermitTunnel`, `MaxSessions`), stages
   a safe bastion profile into the same draft, and writes a ProxyJump snippet for the hosts behind this
-  server (`bastion.tsx`). Where the host can run the independent recovery watchdog, the apply bar
-  carries a "Restore unless confirmed (90 s)" switch, on by default: the apply is sent pending, and
+  server (`bastion.tsx`). Where the host can run the independent recovery watchdog, the review
+  carries a "Restore unless confirmed within 90 seconds" switch, on by default: the apply is sent pending, and
   the global network confirmation notice, worded for SSH, keeps it only after this session verifies
   a fresh response. A staged change is judged against the access boundary as it is made
-  (`useBoundaryCheck`); the dialog shows what it does to tunnels, and confirming it acknowledges it.
-- **Intrusion:** jail destination rows carry the watched service, current state, counts and a meter
-  of bans still held. The jail sheet retains manual ban and release actions. Its tuning form shows
-  the subject, groups the three policy numbers, and offers the browser's address for the allowlist.
-  Draft values use fail2ban's lowercase parameter names while the saved configuration uses camel
-  case. Repeat offenders take their row alone, and Activity — fail2ban's own log, every strike as
-  well as every ban — follows across the page; where fail2ban writes only to its journal, the
-  offenders' fold says Activity reads it instead rather than "nothing has been banned". CrowdSec
-  and Suricata follow, each opening on its install where it is missing (`network/install.tsx`):
+  (`useBoundaryCheck`); the review shows what it does to tunnels, holds its button while a change
+  would cut the way in, and confirming it acknowledges it.
+- **Intrusion** (0.8.7) opens on an identity line whose state is the worst thing true of any engine
+  and whose command bans an address through either engine (`ban-dialog.tsx`), then a picture of the
+  internet, this server and the three engines (`intrusion-picture.tsx`). One engine is on screen at a
+  time as a view in the address (`?tab=fail2ban`, `crowdsec`, `suricata`; the first installed engine
+  without one), and `?tab=blocked` is every refused address once, with each engine holding it and the
+  broader blocks it already sits inside (`blocks-panel.tsx`). fail2ban's view is its readings as
+  lines, the jails as one-line cards that carry the watched service, current state and counts, repeat
+  offenders as a `RankList`, and Activity: fail2ban's own log, every strike as well as every ban;
+  where fail2ban writes only to its journal, the offenders' fold says Activity reads it instead
+  rather than "nothing has been banned". A jail is a page (`/security/intrusion/jails/[jail]`,
+  `jail-page.tsx`, the other jails as a rail from `xl`): what it holds with Unban and Never ban again
+  on each address, its **Policy** (the rule as a sentence, what it reads, what each action does with
+  a ban, whether the sshd ban covers sshd's actual port, and values a restart would change), and Ban
+  an address, Tune and Release every ban as its verbs. The tuning form is a dialog: it shows the
+  subject, groups the three policy numbers, and offers the browser's address for the allowlist; draft
+  values use fail2ban's lowercase parameter names while the saved configuration uses camel case.
+  CrowdSec and Suricata each open on their install where they are missing (`network/install.tsx`):
   CrowdSec's decisions with release and a ban form that refuses the reader's own address, its alerts
   and bouncers (`crowdsec-panel.tsx`); Suricata's mode, rules and alerts by severity, read from
-  `eve.json` through the log roots (`suricata-panel.tsx`). The page opens on **Blocked across
-  engines** (`blocks-panel.tsx`): every refused address once, with each engine holding it and the
-  broader blocks it already sits inside. Both ban forms say which engine already holds the typed
-  address (`blocks.ts`) and what the ban does to the access boundary, and send the acknowledgement
-  only after showing it. The jail sheet adds the jail's **Policy** — the rule as a sentence, what it
-  reads, what each action does with a ban, whether the sshd ban covers sshd's actual port, and values
-  a restart would change. CrowdSec's head, tile and notice say the server's enforcement verdict
-  (`enforcement.ts`) rather than whether the engine runs, with each bouncer's pull age and the kernel
-  sets under the bouncers. Suricata adds **Setup** (`suricata-setup.tsx`: capture interface with a
-  tested move, whether the capture sees packets, rules with an update job, start) and the read-only
-  **Inline queue**, which says whether each queue rule fails open.
+  `eve.json` through the log roots (`suricata-panel.tsx`). Both ban forms say which engine already
+  holds the typed address (`blocks.ts`) and what the ban does to the access boundary, and send the
+  acknowledgement only after showing it. CrowdSec's head, readings and notice say the server's
+  enforcement verdict (`enforcement.ts`) rather than whether the engine runs, with each bouncer's
+  pull age and the kernel sets under the bouncers. Suricata adds **Setup** (`suricata-setup.tsx`:
+  capture interface with a tested move, whether the capture sees packets, rules with an update job,
+  start) and the read-only **Inline queue**, which says whether each queue rule fails open.
 - **Each area reads its own log in place.** SSH, Firewall and Intrusion read the file an operator
   would open first, each asked after with `GET /logs/source` rather than out of the whole log index,
   and fall back to the journal's reading of the same program, saying in the pane's facts whether the
   file is missing or outside `JD_LOG_ROOTS` (`host-logs.ts`, `log-section.tsx`). The day's counts
-  from the log are a second run of the page's one grid, each a press that narrows the log under it.
+  from the log are reading lines on SSH and Intrusion and stand on the nodes of Firewall's picture,
+  each a press that narrows the log under it.
   The client of a line takes the same address verbs as a peer anywhere else in the section, but the
   block only where the line is an attack a deny answers — a failed or invalid login, a strike or a
   ban, a rate-limited packet — never an accepted login, an `ignoreip` match or an allowed packet,
   which can be the operator's own; an outbound packet's address is this host's, and gets no verbs.
-- **Logins** groups account/terminal, origin and session age, then places attackers and login
-  history beside one another when there is room. Addresses use `PeerIdentity` or the inline
+- **Logins** (0.8.7) opens on this server's identity line and a picture of where sessions are held
+  from, who is attacking and which accounts are in (`logins-picture.tsx`); then the open sessions as
+  one-line cards, attackers as a `RankList` and the login record as the page's one framed table.
+  Addresses use `PeerIdentity` or the inline
   `Address`; address block and lookup actions remain in `address-verbs.tsx`.
 
-**The Network section** (`app/(dashboard)/network/`, `components/network/`) is eleven reading pages
+**The Network section** (`app/(dashboard)/network/`, `components/network/`) is eighteen reading pages
 over the network module; [`feature-map.md`](feature-map.md) lists each and
 [`design-system.md`](design-system.md) §15 records how they are drawn. Its layout renders the same
 `SecurityState` the Security section does, so every page knows the reader's address and observed
@@ -343,15 +357,16 @@ service state. The pages that moved keep their behaviour:
 - **Firewall** (`/network/firewall`): the page opens on its inbound path as a picture (`firewall-picture.tsx`, reading the
   rules through `firewall-reading.ts`): each port the rules admit, drawn as the product that answers
   there with who may reach it, and the default for everything else. The rules are the working
-  column, with default-policy and logging controls beside them on wide screens. Each row carries its
+  column, and the defaults are one settings section under them, staged and saved by the page's save
+  bar (0.8.7). Each row carries its
   action in a `--tag-*` hue down its edge and groups its destination service, port and comment;
   actions stay visible, and the table ends on the default as a row of its own. The rule dialog groups policy, destination and source, using source choice cards
   (Tailscale's own mark for a tailnet source) and service marks where the port identifies a product.
   Address-only deny/reject rules can be edited without inventing a destination port. Existing
   ordinary confirmations for toggle, reset and inbound-deny policy remain. The page ends on the Firewall
   log (`ufw.log`, else `kern.log`, else the kernel ring, read as the firewall lens); while ufw or
-  firewalld says logging is off, the section says so and its button brings the logging control
-  beside the rules into view instead of drawing an empty pane.
+  firewalld says logging is off, the section says so and its button brings the logging default
+  under the rules into view instead of drawing an empty pane.
 - **Connections** (`/network/connections`): opens on its identity line — the sockets, the remote
   addresses and how many are from the internet — and a picture of who is connected
   (`connections/picture.tsx`, on `WireFlow`: the callers by network, this server with what listens and
@@ -382,9 +397,11 @@ service state. The pages that moved keep their behaviour:
   of its ends in a phone's card and in the rail (`shortAddress`), and is whole on its page.
   "Block at the firewall" opens a dialog asking why, for how long (an hour to thirty days, or until
   lifted) and which incident — an existing saved run, or a new one that starts by recording who owns
-  the address (`connections/block-dialog.tsx`); the blocks made here are listed under the table with
-  their end, their incident and whether the rule is still in the firewall, and an administrator with
-  the destructive capability lifts one after confirmation (`connections/blocks-panel.tsx`).
+  the address (`connections/block-dialog.tsx`); it is never offered for an address on the tailnet, a
+  local network or this machine. The blocks made here are listed under the list, two lines each, with
+  their end, their incident and whether the rule is still in the firewall; each opens its address, and
+  an administrator with the destructive capability lifts one after confirmation
+  (`connections/blocks-panel.tsx`).
 - **Tools** (`/network/tools`): 26 probes, the connection path investigator and the browser-only
   IPv4/IPv6 subnet calculator occupy one workbench held to the window (`<Page fill>`), drawn as the Git
   workspace is: a strip across the top of the frame (the server's mark, "sent from this server", Saved
@@ -407,18 +424,6 @@ service state. The pages that moved keep their behaviour:
   model's prediction, a measurement; no colour for unknown, and none of them success's green), with
   the wire dashed where either end is unknown. The four counts that were a tile row are the key to
   those colours.
-  the address (`connections/block-dialog.tsx`); it is never offered for an address on the tailnet, a
-  local network or this machine. The blocks made here are listed under the list, two lines each, with
-  their end, their incident and whether the rule is still in the firewall; each opens its address, and
-  an administrator with the destructive capability lifts one after confirmation
-  (`connections/blocks-panel.tsx`).
-- **Tools** (`/network/tools`): 26 probes plus the browser-only IPv4/IPv6 subnet calculator occupy a two-pane
-  workbench (the four counts that stood over it are gone; where probes are sent from is a fact in the
-  result pane's head). The searchable chooser selects one labelled form and result area; below `md` they
-  are one full-height pane at a time with a bar at the foot (`phone-panes.tsx`), opening on the tool. Other probes
-  stay mounted while hidden, preserving drafts, results and in-flight requests when switching. A new
-  query-string arrival reseeds only the requested probe. Arriving with `?tool=asn&target=…` never runs
-  it; sending traffic remains an explicit Run action.
 - The tools now include route/path-MTU checks, host prerequisites, bounded packet summaries and
   local Wake-on-LAN. All server probes remain administrator-only; decoded packet fields may be
   sensitive. Network forms expose IPv6 GRE/bridge membership, preferred route source, rule outgoing

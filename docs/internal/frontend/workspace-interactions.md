@@ -17,14 +17,17 @@ page's opening on its figures rather than adding a context header.
 | Surface | Behavior |
 | --- | --- |
 | Processes | Pause stops scheduled inventory reads; changing the question (a search, a chip, a workload) and explicit refresh still read it. Ranking and row-count changes retain the live table, its scroll and its last readings while fetching; its footer describes the ranking that actually answered. Pointer inspection, row focus and open menus or details hold the returned order across Live, PM2, Services and timers while readings update. Exited identities disappear and new ones follow the held rows. Leaving inspection releases the ranking; explicit Live refresh or a changed filter/focus choice also releases it. Live identities include PID and creation time; signals retain the existing confirmation and identity checks. Escape clears the search, then the workload, then the held order. A row new since the last read rises once; a changed filter is a new list, not arrivals. Cron row identities exclude disabled state and line position, so enable/disable updates the same row and toggle without losing focus. |
-| PM2 | The application table has the shared row navigation and place memory; Enter opens a row's sheet. Escape clears the search, then the application chosen on the band, then the state chip. A row that arrives with a poll rises into place, and a restart count that moves rises with it. |
+| PM2 | The application table has the shared row navigation and place memory; Enter opens a row's application page (`/processes/pm2/[app]`; `?app=`, which opened the sheet, redirects there), where Alt+Up/Down and the two arrows walk the list as it was left and keep the view. Escape clears the search, then the application chosen on the band, then the state chip. A row that arrives with a poll rises into place, and a restart count that moves rises with it. |
 | Services | The unit list keeps reading every five seconds; a row is a unit by name, so focus and place survive a read that reorders it. Escape clears the search, then the startup chip, then the state chip. The palette's **This page** group toggles the failed units. A new unit rises once; an existing unit updates its state in place without replaying its arrival. A changed filter is a new list, not arrivals. |
 | Docker networks | Both tables have the shared row navigation; Enter on a network row opens its page (`/docker/networks/[name]`; `?network=<id>`, the address of the sheet it replaced, redirects there) and on a container row its page. Escape clears the search, then the network the containers table is narrowed to, then the containers chip, then the owner chip. The palette's **This page** group toggles the unused networks. A new network or container rises once. A network's page keeps its view in `?tab=` (replaced, not pushed, so Back leaves the network), and Alt+↑ / Alt+↓ walk the rail's networks with the view carried along; the rail's search and owner chip are the table's. |
 | Git | Commit messages are session drafts per checkout and clear after a successful commit. Alt+Up/Down and the adjacent-file buttons walk changed files. Escape closes the preview and returns focus to its file. The repository list has the shared row navigation and place memory. Find targets History's existing search. |
 | Logs | Source and mode changes, run handoffs and settled filters become history entries. Typing settles after 400ms; submission commits immediately. Back/Forward rebuild the question from the URL. Consoles remember the opened and active record and following state in memory. Opaque content/position identities match fresh responses, distinguish repeated records and retain no raw log text in Web Storage. F3/Shift+F3, n/N and visible match buttons cycle search hits; opening or walking a line stops following. Refresh reconnects or searches in place. |
-| Docker overview | The container table has the shared row navigation and place memory; Enter opens a row's container, and the table's order is remembered for that page's adjacent-container buttons as the containers page's is. Escape clears the search, then the project chip, then the state chip. The palette's **This page** group toggles the failing containers. A container that appears rises once; one that changes state updates in place. A changed filter is a new list, not arrivals. |
+| Docker overview | The page keeps no list of its own since 0.8.7: the picture's nodes and the project cards are links, and the table of every container is the Containers page's. The palette's **This page** group opens that table narrowed to the failing containers. Refresh reads the containers, stacks, networks, volumes, disk figures and events. |
 | Docker containers | Returning from a detail restores the list's focused container and scroll position. Name typing selects a container. Adjacent-container buttons and Alt+Up/Down use the first 500 rows of the last visible inventory, retained for the tab, and preserve the detail tab. A direct link without a remembered inventory disables unavailable adjacent navigation. |
 | Docker volumes | A row opens the volume's page (`/docker/volumes/<name>`); `?volume=` redirects to it. Rows support keyboard movement and name typing; Enter opens the page. Escape clears the holder chosen on the band, then the mount standing, then the chip, then the search. A volume new since the last read rises once; container state changes update the rows in place from the containers socket. On a volume's page the table is a rail from `xl` with the table's search, filters and order, kept for the tab; Alt+Up/Down and the adjacent-volume buttons walk it and preserve the open view, which is in the address as `?tab=` (replaced, not pushed). A direct link to a volume the rail's filter does not hold draws it first, above the rest. |
+| Database account | `/databases/<id>/access/<account>` has `?tab=` for its view, replaced rather than pushed. The adjacent-account buttons and Alt+Up/Down walk the Access list in the filter and search it was left in (kept for the tab), and preserve the view. The list's chip is in the list's own address and is carried by the way back. While grants are staged or a setting is edited, a link out, another account and a reload ask first; the browser's Back cannot be asked. |
+| Docker stacks | A stack is one card that opens its page; nothing unfolds under it, and a stack's containers are rows on that page. The stack list is read again the moment the containers socket reports a container whose state or health changed, so a card updates in place rather than up to fifteen seconds later. Escape clears the search, then the stack the band narrowed to, then the state chip. On a stack's page Alt+Up/Down and the two arrows walk the list as it was left and keep the view. |
+| Docker images | The image table has the shared row navigation and place memory; a row's name is a link to the image's page (`/docker/images/<id>`, the id's 64 hex digits) and Enter on a row opens it. `?image=` from an older link lands on that page. Escape in the search clears the registry answer chosen on the band or the verdict first, then the search. Refresh reads the images, the disk figures and the containers; it does not ask the registries again, which Check now does. A pulled image rises once into the table. On an image's page `?tab=layers\|containers\|history\|configuration` names the open view (Layers is not said) and is replaced, not pushed; the rail from 1280px is the table's list with its search, chips, registry filter and order, read from the same session; Alt+Up/Down and the adjacent-image buttons walk it and keep the view. A reference in the address (`ghcr.io%2Facme%2Fapi%3Amain`, one escaped segment) is resolved and replaced by the image's own address. |
 
 | Database account | `/databases/<id>/access/<account>` has `?tab=` for its view, replaced rather than pushed. The adjacent-account buttons and Alt+Up/Down walk the Access list in the filter and search it was left in (kept for the tab), and preserve the view. The list's chip is in the list's own address and is carried by the way back. While grants are staged or a setting is edited, a link out, another account and a reload ask first; the browser's Back cannot be asked. |
 | Docker volumes | `?volume=` is shareable and uses the query-selection history contract: Back closes the sheet before leaving the page. Rows support keyboard movement and name typing; Enter opens the sheet. Escape clears the holder chosen on the band, then the mount standing, then the chip, then the search. A volume new since the last read rises once; container state changes update the rows in place from the containers socket. |
@@ -93,6 +96,8 @@ stacking them: `paneShown(shown, until)` on each pane (hidden below the break wh
 picked, untouched from the break up), `PaneBar` at the foot of the frame (one 56px stop for each pane, a
 count on a glyph's shoulder, clear of the home indicator, not drawn from the break up) and `PaneBack` in the
 head of a page a row opened. The page keeps its own state for which pane is shown, and the frame is held
+to the window below the break so the pane has a height to be the whole of. Ten pages are on it:
+
 to the window below the break so the pane has a height to be the whole of. Six pages are on it:
 
 to the window below the break so the pane has a height to be the whole of. Five pages are on it:
@@ -106,6 +111,11 @@ to the window below the break so the pane has a height to be the whole of. Five 
 | `/files` | `lg` | Places, Folder, Details | the folder |
 | `/files/editor` | `lg` | Files, Editor | the editor |
 | `/deploy/[id]/logs` | `md` | Requests, Insights, Output, Builds, Events | the view the address or the project asks for |
+| `/terminal` | `lg` | Sessions, Terminal, Files, Git | the emulator |
+| A Remote Desktop session | `lg` | Screen, Tools, Computers | the screen |
+| The databases map | `lg` | Databases, Map, Inspector | the canvas |
+
+
 
 Logs and the tools run to the screen's edges below `md` and open on the thing the page is for; picking a
 source or a tool returns to it. Logs keeps its tablet layout from `md` to `lg` (the rail stacked over the
@@ -116,8 +126,10 @@ view without scrolling, the bar at the foot, every row reachable), a tablet's st
 `git-panel.spec.ts` and `database-assistant.spec.ts` hold the two that came first. A deployment's Logs
 is the pane under the project's header, which the shell holds to the window below `md`; its readings and
 alerts are not a stop but a page behind the pane's first line, with `PaneBack` and the bar out of its way
-(`deploy-logs-page.spec.ts`). The database
-workbenches and the container, process and stack detail pages are not on it yet.
+(`deploy-logs-page.spec.ts`). The terminal keeps a hidden emulator's socket and grid and fits it again
+when shown, and a session keeps its connection and its size while another pane is up
+(`features-terminal.md`). The server map is not on it: below `lg` it is the canvas alone. Nor are the
+detail pages (a container, a process, a stack and the rest): each is one pane that scrolls as a whole.
 
 Files keeps its pane against the folder it was picked in, so arriving at a folder by any route (a place,
 a crumb, Back, a search result) shows the listing without an effect to put it there, and a place that is
@@ -128,6 +140,8 @@ inspector hidden at a desk and the sidebar hidden at a desk are both still on th
 the tree and the editor mounted while the other is shown, so an unsaved draft outlives a look at the
 tree; choosing the open file returns to it without asking, another file asks first. `files-ui.spec.ts`
 holds both at 390×844, the strip at 800px and the columns at 1280px.
+
+
 
 page and the container, process and stack detail pages are not on it yet.
 
