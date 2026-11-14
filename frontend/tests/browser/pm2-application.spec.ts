@@ -385,8 +385,22 @@ test("the list opens on PM2 with one command and the daemon's verbs in a menu", 
     "Restart all",
     "Stop all",
   ])
-  // Scale opens where it was asked for.
+  // CPU and memory are figures down their columns, their right edges on one
+  // line; a short meter stood beside each in every row, which is a bar a row.
   const first = page.getByRole("row", { name: /api #0/ })
+  const second = page.getByRole("row", { name: /api #2/ })
+  await expect(page.getByRole("table").locator("[class*=bg-meter-track]")).toHaveCount(0)
+  for (const figure of [/^\d+(\.\d+)?%$/, /^\d+(\.\d+)? MB$/]) {
+    const edges = await Promise.all(
+      [first, second].map(async (row) => {
+        const box = (await row.getByText(figure).first().boundingBox())!
+        return Math.round(box.x + box.width)
+      }),
+    )
+    expect(edges[0]).toBe(edges[1])
+  }
+
+  // Scale opens where it was asked for.
   await first.hover()
   await first.getByRole("button", { name: "More actions" }).click()
   await page.getByRole("menuitem", { name: "Scale…" }).click()

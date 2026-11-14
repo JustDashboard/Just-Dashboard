@@ -99,6 +99,17 @@ test("the line a site opens on carries its state, one command and the rest in a 
   await line.getByRole("button", { name: "Edit", exact: true }).click()
   await expect(page).toHaveURL(/\?tab=settings$/)
   await expect(parts(page)).toBeVisible()
+  // On Settings the form is what is on screen, so the line does not offer to
+  // open it: not as its command, and not in the menu, where the rest still is.
+  await expect(line.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0)
+  await line.getByRole("button", { name: "More actions for app.example.com" }).click()
+  const offered = await page.getByRole("menuitem").allTextContents()
+  expect(offered).not.toContain("Edit")
+  expect(offered).toContain("Download")
+  await page.keyboard.press("Escape")
+  // Back on the Overview it is the command again.
+  await page.getByRole("tab", { name: "Overview" }).click()
+  await expect(line.getByRole("button", { name: "Edit", exact: true })).toBeVisible()
 })
 
 test("a read-only account gets a site's Overview and Logs, and nothing that changes it", async ({

@@ -688,7 +688,29 @@ test("ssh changes are staged as a page state and applied together", async ({ pag
   const bar = page.getByRole("region", { name: "Save changes" })
   await expect(bar).toHaveCount(0)
 
+  // With nothing edited there is nothing to narrow to: no chip stands between
+  // the readings and the settings (a lone "All 10" did).
+  await expect(page.getByRole("button", { name: /^(All|Edited)\b/ })).toHaveCount(0)
+  const settings = page.locator("#ssh-settings [data-slot=setting]")
+  // Where the first two sections stand in the settings' own column: the
+  // press below scrolls the page to the switch, which moves everything.
+  const places = async () => {
+    const column = (await page.locator("#ssh-settings").boundingBox())!
+    return Promise.all(
+      [settings.first(), settings.nth(1)].map(
+        async (one) => (await one.boundingBox())!.y - column.y,
+      ),
+    )
+  }
+  await risen(page)
+  const before = await places()
+  expect(before[0]).toBe(0)
+
   await page.getByRole("switch", { name: "Password authentication" }).click()
+  // The filter arrives at the end of the first section's title line, and
+  // moves neither that section nor the one under it.
+  await expect(settings.first().getByRole("button", { name: /^Edited/ })).toBeVisible()
+  expect(await places()).toEqual(before)
   const row = page.locator("[data-slot=ssh-setting]").filter({ hasText: "Password authentication" })
   await expect(row).toHaveAttribute("data-edited", "true")
   await expect(row).toContainText("sshd runs yes")
