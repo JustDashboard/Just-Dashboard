@@ -576,7 +576,9 @@ the cutover behind a statement that the writes have stopped, or a streamed copy'
 the earlier imports as `ChoiceRow`s beside it. Backups' Copy dialog can send a copy to another saved
 connection of the same engine. Alerts opens on who is told (the database, this server reading it
 every thirty seconds, the notification channels its rules tell, red while one fires) over the rules
-as sentences with where each stands — a meter against the line, the reading in words — and what was
+as cards of one height (`ops/alerts-rows.tsx`: the kind's tile, the rule's name over its condition, and
+where it stands in a column of its own with the reading against its line as a small mark; the status
+opens what the server read, the card opens the rule's form) and what was
 told lately; an administrator adds a rule for this database or every database from a sheet of the
 kinds its engine can be watched for (server down, disk, connections, replication, a backup failed or
 missed), with its line, how long it must hold, a cooldown and whether its recovery is told, and
@@ -671,6 +673,22 @@ Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where R
 row limit and the head's menu Format and Save. A schema's and a table's figures are one line of
 facts, a table's Statistics are sentences, and the Diagram is zoomed and fitted from the maps' bar
 at the foot of its canvas (no minimap).
+
+Backups' dumps are one line each in a framed table (a card of two lines on a phone): when, the
+file's name with its tag and note, what it holds, its size, and Download, Restore and Delete. The
+name opens who took it, the tool that wrote it and how long that took. *Back up now* is the one
+command on the title line; *Upload a dump* and *Copy database* are in the menu beside it. Where a
+server's log is not archived, point-in-time recovery draws the path it would take
+(`ops/pitr-picture.tsx`: the server, its write-ahead log, a directory, S3 or Backblaze B2) over one
+sentence and *Set up point-in-time recovery*, or over the server's reason where it cannot be set
+up. Import's plan names the source beside its logo with what it holds as one line, and its copy
+draws the replication (`import/picture.tsx`, words in the unit-tested `import/model.ts`): the
+source, the subscription and the database here, a line that moves while rows or changes are on
+their way with how far behind the target is written on it. Generate draws each generator as the
+project it writes for (`generate/options.ts` `logoKeys`; its language's mark where the project has
+none), and before anything is written its place is that mark, "Nothing written yet" and Generate.
+Search says a limit only when one was hit, as the tail of its summary sentence, and each table's
+*Every match* is a small verb on its title line.
 
 **Implementation:** `components/database/`; backend in
 [`../backend/databases.md`](../backend/databases.md) Adding a database can limit its container from
