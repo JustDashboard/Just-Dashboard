@@ -129,6 +129,31 @@ the tree and the editor mounted while the other is shown, so an unsaved draft ou
 tree; choosing the open file returns to it without asking, another file asks first. `files-ui.spec.ts`
 holds both at 390×844, the strip at 800px and the columns at 1280px.
 
+page and the container, process and stack detail pages are not on it yet.
+
+A database's four workbenches are on it too, through `components/database/workbench/chrome.tsx`
+(`WorkbenchFrame` takes the bar as `bar` and draws it at the foot of the frame, under the head every one
+of them shares). Their break is not a window width: each shows one pane exactly where its side column
+already lay over the work instead of beside it (the table editor and the SQL editor decide that from the
+frame's measured width, the rest at `lg`), so the bar names states the page already had and adds none.
+
+| Workbench | Stops | Opens on |
+| --- | --- | --- |
+| Data, SQL | Tables, Rows, Details | the tables with none open, else the rows; a row's card opens Details |
+| Data, MongoDB | Collections, Documents | the collections with none open |
+| Data, Redis | Keys, Key (Keyspace with none open) | the keys with none open |
+| Query, SQL | Editor, Results, Saved, Assistant where it is offered | the editor; running or explaining shows Results |
+| Query, MongoDB | Collections, Aggregations | the collections with none open, unless the view needs none |
+| Query, Redis | Console, Commands | the console |
+| Schema | Objects (Collections on MongoDB), then Table, Object or Schema | the tree with nothing chosen |
+| Diagram | Diagram, then Table, Relation or Tables | the canvas |
+
+Under 480px of frame the table editor's rows are cards (`data/row-cards.tsx`: a row's first two columns
+over a mono line of the rest, one 52px height in every state) and the row panel is their detail, so
+nothing is read by scrolling sideways; a new row is staged and opened in the panel, since there is no
+grid to move to it. `database-data.spec.ts`, `database-query.spec.ts`, `database-schema.spec.ts`,
+`database-mongo.spec.ts` and `database-redis.spec.ts` each hold their own at 390×844.
+
 Git file drafts stay in memory per checkout/path across SPA previews, with an unload guard across
 repositories; cron builder drafts keep their captured crontab revision in memory per account. Their
 explicit Close/discard and sign-out paths clear the retained content. File Cut clipboard entries are

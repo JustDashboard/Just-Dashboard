@@ -809,7 +809,12 @@ test("on a phone the column lies over the editor, and the page is one pane at a 
   await page.setViewportSize({ width: 390, height: 844 })
   await mockAssistant(page, { settings: ON })
   await openEditor(page)
-  await openAssistant(page)
+  // On a phone the assistant is a stop of the Query page's bar, not a button in its head.
+  await page
+    .locator("[data-slot=pane-bar]")
+    .getByRole("tab", { name: "Assistant", exact: true })
+    .click()
+  await expect(pane(page)).toBeVisible()
   await ask(pane(page), "How many orders has each customer placed?")
   await expect(statements(page)).toBeVisible()
   const sideways = await page.evaluate(

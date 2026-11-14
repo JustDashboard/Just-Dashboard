@@ -247,7 +247,12 @@ test("the row editor submits exact BIGINT digits", async ({ page }) => {
   const field = (name: string) =>
     page.locator("[data-slot=row-field]").filter({ has: page.locator(`label:text-is("${name}")`) })
   await page.getByRole("button", { name: "Insert row" }).click()
-  await page.getByRole("button", { name: "Show the row" }).click()
+  // The row panel is a word in the menu of the workbench's head.
+  await page
+    .locator("[data-slot=database-strip]")
+    .getByRole("button", { name: /^Actions for / })
+    .click()
+  await page.getByRole("menuitem", { name: "Show the row" }).click()
   await field("id").getByRole("textbox").fill("9007199254740993")
   await page.keyboard.press("Enter")
   await field("name").getByRole("textbox").fill("precision")

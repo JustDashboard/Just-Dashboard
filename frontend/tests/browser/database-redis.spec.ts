@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
+import { head, headMenu, paneBar, showPane } from "./database-workbench"
 
 /**
  * Redis — and Valkey, KeyDB, Dragonfly: the key browser, the console and the
@@ -2448,4 +2449,95 @@ test("the claim and the field expiry forms, for the record @shots", async ({ pag
   await pane(page).getByRole("button", { name: "Claim idle entries…" }).click()
   await expect(page.getByRole("dialog", { name: "Claim idle entries" })).toBeVisible()
   await page.screenshot({ path: `${shots}/claim-idle-390.png` })
+})
+
+/* ------------------------------------------- the frame's head, and a phone */
+
+test("the keys and the console stand under the frame's one head, with the glyph-only controls in its menu", async ({
+  page,
+}) => {
+  await mockRedis(page)
+  await page.goto(`${KEYS}?key=user%3A1%3Aprofile`)
+  await expect(pane(page).getByRole("heading", { name: "user:1:profile" })).toBeVisible()
+  await expect(page.locator("[data-slot=database-strip]")).toHaveCount(1)
+  await expect(page.locator("[data-slot=redis-keys] [data-slot=database-strip]")).toHaveCount(1)
+  await expect(head(page).getByRole("link", { name: "Back to cache's Home" })).toHaveAttribute(
+    "href",
+    "/databases/4",
+  )
+  await expect(head(page)).toContainText("Redis")
+
+  // The keys are a column to put away, from the menu.
+  await headMenu(page, "Hide the keys")
+  await expect(rail(page)).toHaveCount(0)
+  await headMenu(page, "Show the keys")
+  await expect(rail(page)).toBeVisible()
+
+  await page.goto(CONSOLE)
+  await expect(page.locator("[data-slot=redis-console] [data-slot=database-strip]")).toHaveCount(1)
+  await head(page)
+    .getByRole("button", { name: /^Actions for / })
+    .click()
+  await expect(page.getByRole("menuitem").nth(0)).toHaveText("Clear the transcript")
+  await expect(page.getByRole("menuitem").nth(1)).toHaveText("Hide the commands")
+  await page.getByRole("menuitem", { name: "Hide the commands" }).click()
+  await expect(page.locator("[data-slot=redis-command-helper]")).toHaveCount(0)
+})
+
+test("on a phone the keys and the open key are two panes, and what the database is made of can be reached", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockRedis(page)
+  await page.goto(KEYS)
+  await expect(rail(page)).toBeVisible()
+  await expect(paneBar(page).getByRole("tab")).toHaveText(["Keys", "Keyspace"])
+  const foot = (await paneBar(page).boundingBox())!
+  expect(Math.round(foot.y + foot.height)).toBe(844)
+
+  // With no key open the other pane is the keyspace: a phone could not reach it before.
+  await showPane(page, "Keyspace")
+  await expect(rail(page)).toHaveCount(0)
+  await expect(page.locator("[data-slot=redis-keyspace]")).toBeVisible()
+
+  // Opening a key puts the keys away, and the bar names the pane for it.
+  await showPane(page, "Keys")
+  await rail(page).getByRole("button", { name: "Open leaderboard" }).click()
+  await expect(pane(page).getByRole("heading", { name: "leaderboard" })).toBeVisible()
+  await expect(rail(page)).toHaveCount(0)
+  await expect(paneBar(page).getByRole("tab")).toHaveText(["Keys", "Key"])
+
+  // The console and its reference are two panes too.
+  await page.goto(CONSOLE)
+  await expect(paneBar(page).getByRole("tab")).toHaveText(["Console", "Commands"])
+  await showPane(page, "Commands")
+  await expect(paneBar(page).getByRole("tab", { name: "Commands" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+})
+
+test("the Redis workbenches, state by state @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to save the screenshots")
+  test.setTimeout(180_000)
+  const shots = process.env.JD_SHOTS!
+  for (const width of [1280, 390]) {
+    const phone = width === 390
+    await page.setViewportSize({ width, height: phone ? 844 : 800 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockRedis(page)
+    const shot = async (name: string) => {
+      await page.waitForTimeout(500)
+      await page.screenshot({ path: `${shots}/after-redis-${name}-${width}.png` })
+    }
+    await page.goto(KEYS)
+    await expect(rail(page)).toBeVisible()
+    await shot("keys")
+    await page.goto(`${KEYS}?key=user%3A1%3Aprofile`)
+    await expect(pane(page).getByRole("heading", { name: "user:1:profile" })).toBeVisible()
+    await shot("key")
+    await page.goto(CONSOLE)
+    await expect(head(page)).toBeVisible()
+    await shot("console")
+  }
 })
