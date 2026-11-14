@@ -34,12 +34,7 @@ import { EngineSetup } from "@/components/proxy/engine-setup"
 import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
 import type { ConfigTest } from "@/components/proxy/test-result"
 import { testedLabel, warningCount } from "@/components/proxy/config-test"
-import {
-  folderOf,
-  includeMap,
-  readCount,
-  unreadCount,
-} from "@/components/proxy/config-tree"
+import { folderOf, includeMap, readCount, unreadCount } from "@/components/proxy/config-tree"
 
 const VIEWS = [
   { key: "files", label: "Files" },
