@@ -238,6 +238,7 @@ export function ControlCenter() {
       facts={facts}
       command={command || undefined}
       menu={menu}
+      foot
     />
   )
 
@@ -393,6 +394,9 @@ export function ControlCenter() {
         facts={facts}
         command={add || undefined}
         menu={menu}
+        // On a phone the command and the menu stand under the facts: beside
+        // the engines' marks they left the server's name a word to a line.
+        foot
       />
 
       <FleetBand

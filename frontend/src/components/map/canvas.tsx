@@ -921,7 +921,7 @@ export function MapCanvas({
       </div>
       {stops && (
         <PaneBar
-          label={board.label}
+          label="Map panes"
           stops={[
             { key: "systems", label: board.rail.label, icon: <Layers /> },
             { key: "map", label: "Map", icon: <ServerMap /> },

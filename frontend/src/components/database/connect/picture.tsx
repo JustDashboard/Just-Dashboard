@@ -1,13 +1,14 @@
 import { Database, Globe } from "@/components/icons"
-import { ProductGlyph } from "@/components/product-logo"
+import { ProductGlyph, ProductGlyphs } from "@/components/product-logo"
 import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 
 /**
  * What Add a database draws beside the catalogue until an engine is picked:
- * the thing about to be made, as a picture. The engines that could be picked
- * stand as marks not added yet, a line runs from them to where the server
- * will be — a container on this machine, or the address of one that already
- * runs — and on to this dashboard, which opens it once it answers.
+ * the thing about to be made, as a picture. The engine is a mark not added
+ * yet, with the ones it could be drawn beside its name; a line runs from it
+ * to where the server will be — a container on this machine, or the address
+ * of one that already runs — and on to this dashboard, which opens it once
+ * it answers.
  *
  * It was a dashed box holding three logos and a sentence: a frame around
  * nothing, on a screen whose other half is a list of things with their own
@@ -44,24 +45,16 @@ export function EnginePicture({
           className="absolute top-8 bottom-8 left-[1.375rem] border-l border-dashed border-border-strong"
         />
         <WireNode
-          mark={
-            <span className="flex">
-              {marks.length > 0 ? (
-                marks.map((id, index) => (
-                  <WirePlaceholder
-                    key={id}
-                    size="md"
-                    product={id}
-                    className={index > 0 ? "-ml-2.5" : undefined}
-                  />
-                ))
-              ) : (
-                <WirePlaceholder size="md" fallback={Database} />
-              )}
+          // One ring, the width of the marks under it, so the three names
+          // start on one edge; the engines it could be are drawn after it.
+          mark={<WirePlaceholder size="md" fallback={Database} />}
+          eyebrow="Engine"
+          title={
+            <span className="flex items-center gap-2">
+              Pick an engine
+              <ProductGlyphs ids={marks} max={3} />
             </span>
           }
-          eyebrow="Engine"
-          title="Pick an engine"
           hint={way === "start" ? "Its settings open here." : "Its address opens here."}
         />
         <WireNode

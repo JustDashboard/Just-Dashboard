@@ -225,20 +225,17 @@ export function RunsAs({ uptimeSeconds }: { uptimeSeconds?: number }) {
               )}
               <span data-slot="container-limits">
                 <ContainerLimits poll={limits} />
-                {/* Not for a compose container: its file owns the limits, and
-                    the page would only say so. */}
-                {can("system.admin") && !container.composeProject && (
-                  <>
-                    {" "}
-                    <Link
-                      href={settingsPageHref(href("settings"), { path: "resources" })}
-                      className="rounded-sm underline focus-ring"
-                    >
-                      Change
-                    </Link>
-                  </>
-                )}
               </span>
+              {/* Not for a compose container: its file owns the limits, and
+                  the page would only say so. */}
+              {can("system.admin") && !container.composeProject && (
+                <Link
+                  href={settingsPageHref(href("settings"), { path: "resources" })}
+                  className="rounded-sm underline focus-ring"
+                >
+                  Change limits
+                </Link>
+              )}
               {limits.data?.restartPolicy && (
                 <span>
                   restarts <span className="font-mono">{limits.data.restartPolicy}</span>

@@ -89,7 +89,7 @@ export function DatabaseHeader({ className }: { className?: string }) {
             <DatabaseStatusMark status={status} />
           )}
           {running && !change && Boolean(status.latencyMs) && (
-            <span className="numeric text-hint text-muted-foreground max-sm:hidden">
+            <span className="numeric text-hint text-muted-foreground">
               answers in {status.latencyMs} ms
             </span>
           )}
