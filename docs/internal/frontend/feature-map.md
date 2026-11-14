@@ -191,8 +191,12 @@ kind's boxes
 
 ### `/dashboard`
 
-The panel's own version: one identity line (the mark and the installed version, the GitHub
-repository and branch it follows, the check's verdict), the upgrade while one runs, and the release
+The panel's own version: one identity line laid out as a project's header (the mark and the
+installed version with the check's verdict beside it, the GitHub repository and branch it follows
+and how far behind it is as the facts, *Check now* and a brand-faced *Update to …* at the far end),
+what the update needs said first as a line each under it (that it wants something done by hand, with
+*Read the notes* going to that release's own note; that the checkout carries uncommitted edits the
+update keeps, with *Show* listing them in a popover), the upgrade while one runs, and the release
 history as a searchable timeline. The sidebar entry is "Settings" — inside a product called
 Dashboard, an entry called Dashboard said nothing — and this page is its "Version". It is also where
 the sidebar's update notice leads: *View patch notes*, *View progress*, *See what's new* and *See
@@ -207,22 +211,29 @@ brand-faced *Update*
 
 ### `/dashboard/configuration`
 
-The panel's own settings. An identity line first: the address it answers at (scheme, host and port
-each in their hue), the checkout with Compose's mark, its compose and `.env` files, the last
-restart, and Running or the restart's state. Then the stack as the path a request takes — this
-browser, the tailnet (or loopback, or the network), Caddy on its port with the certificate's issuer,
-and Next.js and Go on their loopback ports with a state dot — wired with pulsing beams that go still
-and amber during a restart, beside Restart and Rebuild as two cards naming the `docker compose`
-command each runs, and the run record under them with its stages and whole transcript, followed
-across the restart it describes. Then the settings in two columns from `xl`: Certificate across both
-(three cards with their products' logos; picking one carries the address, listening interface and
-allowlist with it, filled from the machine's own tailnet identity), Address beside Access, Sessions
-beside Features. Each head carries what the section currently is and *Edited* while it holds an
-unapplied change. The allowlist is a list of networks drawn as Tailscale, this server, local or
-public, with add and remove (the only loopback entry cannot be removed); session durations are read
-back in words and a value that is not a duration is flagged. Then the [usage
-count](../backend/usage-ping.md) in its own panel, because it applies at once with no Apply or
-restart: its switch, the report as exact bytes, any failure and a link to the totals. Last, a Danger
+The panel's own settings. An identity line first, laid out as a project's header: the address it
+answers at (scheme, host and port each in their hue) with Running or the restart's phase beside it,
+the checkout with Compose's mark, its compose and `.env` files and the last restart as the facts,
+and Restart and Rebuild behind its `⋯`, each with the `docker compose` command it runs and what it
+costs. Then the stack as the path a request takes — this browser, the tailnet (or loopback, or the
+network), Caddy on its port with the certificate's issuer, and Next.js and Go on their loopback
+ports with a state dot — wired with pulsing beams that go still and amber during a restart, and the
+run record under it with its stages and whole transcript, followed across the restart it describes.
+Then the settings as one centred column of sections, the shape a project's settings have
+(`components/settings-column.tsx` around `SettingSection`): Certificate (three cards with their
+products' logos; picking one carries the address, listening interface and allowlist with it, filled
+from the machine's own tailnet identity), Address, Access, Sessions, Features. Each head carries
+what the section currently is and *Edited* while it holds an unapplied change; no sentence stands
+under a field or a switch, the reason is behind the ⓘ beside its name, and a switch is one full-width
+line. What `.env` holds that the running stack does not is the strip at the column's head
+(`PendingStrip`), with the restart that adopts it. The allowlist is a list of networks drawn as
+Tailscale, this server, local or public, with add and remove (the only loopback entry cannot be
+removed); session durations are read back in words in the section's head and a value that is not a
+duration is flagged. An edit raises the settings pages' floating bar, which names the sections the
+edits are in and whose command is *Apply and restart*: it opens the same confirmation, listing every
+change old to new, and sends the same request. Then the [usage count](../backend/usage-ping.md) as a
+section of its own that says it applies at once, with no Apply or restart: its switch, the report as
+exact bytes, any failure, a link to the totals and the pointer to Settings → Connect. Last, a Danger
 zone in the danger rule with Uninstall, whose dialog asks whether the deployments and data are kept
 for a reinstall or wiped — what each removes and leaves is read off the server, a wipe asks for the
 host name and whether the backups go too — and whose run takes the top of the page, hiding the stack
@@ -233,6 +244,7 @@ session_required`
 
 **Implementation:** `components/config/request-path.tsx`, `components/config/allowlist.tsx`,
 `components/config/restart-progress.tsx`, `components/config/uninstall.tsx`,
+`components/config/usage-ping.tsx`, `components/settings-column.tsx`,
 `components/run-transcript.tsx`, `components/run-phases.tsx`, `hooks/use-self-config.tsx`,
 `hooks/use-self-uninstall.tsx`, `lib/uninstall.ts` (`system.admin` only)
 
@@ -288,8 +300,9 @@ it by name either way, and the hub's Connect button opens it as `/dashboard/hub?
 Connect's page pointed at the hub, in the same reading register: an identity line (the hub's address
 as a link, as text while the link is idle, its name said as the hub's, *Just Hub (<name>)*, the
 scope, how many servers it holds once the hub has answered a report, when and by whom it was
-connected — or this server's fingerprint while it is not — and at its far end the link's state, said
-there and nowhere else on the line, with, once connected, **Sync now** and **Disconnect**);
+connected — or this server's fingerprint while it is not — the link's state beside the name, said
+there and nowhere else on the line, and at its far end, once connected, **Sync now** and
+**Disconnect**);
 Connect's picture with the hub at its end (`hub-picture.tsx` over `LinkPicture`, "Reports every 15s"
 in the hub's own interval, the status's `heartbeatSeconds`); then one section at a time. Not
 connected: **Connect this server to Just Hub at <host>** — the address field filled from `?connect=`
@@ -301,9 +314,11 @@ nothing), a notice that the address came from a link, under the field whose mach
 while the check refuses the address — a look-alike name off this tailnet — Connect stays disabled
 and the terminal's command is not offered), the three scope cards with `maintain` chosen when the
 address is typed and none chosen after a `?connect=` link (Connect stays disabled until one is, and
-**What this server will send** appears once it is), a line saying no scope gives the hub a shell,
-files or accounts, **Connect** and `sudo ./scripts/manage.sh hub connect <url>` beside it; nothing
-is sent to the hub until Connect is pressed. Connect's own refusal is *Could not connect* with the
+**What this server will send** appears once it is), **Connect** and `sudo ./scripts/manage.sh hub
+connect <url>` beside it, and one line on turning key expiry off with its link to the Tailscale
+admin console; nothing is sent to the hub until Connect is pressed. No sentence stands under the
+field or the cards: what the address has to be, that no scope gives the hub a shell, files or
+accounts, and why key expiry matters are each behind the ⓘ beside what they explain. Connect's own refusal is *Could not connect* with the
 backend's reason as a sentence; a hub that gave it no answer (`502 hub_unreachable`) is said as the
 Activity section says a failed exchange, *Could not reach <host>: the connection was refused.*, with
 Go's words behind *What this server said* (`exchangeFailure`). Waiting: the code inside a

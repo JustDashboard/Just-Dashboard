@@ -680,10 +680,16 @@ the fields), a game server's settings, the account's Security and each of a data
 column against the left edge of a wide page left the rest of it an empty band nothing explained. A
 form that is one block among full-width ones keeps their left edge instead — the proxy pages'
 password files, access lists, backups and watched domains, Security's findings and SSH — because
-centred there its title stood 180px in from every title above it. Configuration's settings are the
-exception: five short sections under a full-width stack, so from `xl` they run as two columns of
-`FormSection aside`s (`max-w-none`), the certificate across both, rather than one column that left
-two thirds of a wide screen empty. SSH's four directive groups took the same two columns in 0.7.1.
+centred there its title stood 180px in from every title above it. Configuration's settings were the
+exception from 0.7.1, two columns of `FormSection aside`s (`max-w-none`) with the certificate across
+both, so that five short sections did not leave two thirds of a wide screen empty; SSH's four
+directive groups took the same two columns then. In 0.8.7 Configuration went back to the one centred
+column (`components/settings-column.tsx`:
+`SettingsColumn` around `SettingSection`s, the settings pages' floating bar under them): two
+unrelated heads on one line read as a pair, and the operator named a project's settings as the shape
+every settings page should have. What made the single column too tall was the sentence under every
+field and switch, and those are behind each name's ⓘ now (`SwitchRow` is a switch as one full-width
+line).
 
 **Spacing does what the rail was for, and type keeps the ranks apart.** The space is asymmetric on
 purpose: 32px above and below every section, so 64px and a hairline between one section and the
@@ -3217,7 +3223,10 @@ The passes, in order. Each one is a diff you can review on its own.
    coloured by `ShellWords`. The settings are two columns of sections, the certificate across both
    and first; the allowlist is a list of the networks it lets in, each drawn as where its addresses
    are (`components/config/allowlist.tsx`); a section holding a change not yet applied carries
-   *Edited* in `--git-modified`, the colour §3 gives a pending change.
+   *Edited* in `--git-modified`, the colour §3 gives a pending change. In 0.8.7 the two command
+   cards became the identity line's `⋯`, each still with the command it runs, the settings one
+   centred column with the floating save bar (§7), and the Version page's two framed notices one
+   line each under its identity line.
    The account's Security page took it for the same reason — the second factor's state and how many
    sessions are signed in sit in the heads of the sections that change them — and Sessions opens on
    the session it is read through, with the count of the rest on their header.
