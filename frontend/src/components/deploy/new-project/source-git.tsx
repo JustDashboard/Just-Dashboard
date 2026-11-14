@@ -10,7 +10,7 @@ import { githubAppStage, useGitHubAccount, useGitHubApp } from "@/hooks/use-gith
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import type { DeploymentDraftSource, GitHubAppRepository, GitHubRepoSummary } from "@/lib/types"
-import { Disclosure, Field, FormNote, OptionList, OptionRow } from "@/components/form"
+import { Disclosure, Field, OptionList, OptionRow } from "@/components/form"
 import { ChoiceList, ChoiceRow, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select"
 import Link from "next/link"
 import { deploymentName } from "@/components/deploy/vocabulary"
+import { GitHubAppPicture } from "./app-picture"
 import { useSourceInspection } from "./use-source-inspection"
 import {
   inspectAndPrepare,
@@ -289,6 +290,9 @@ export function SourceGit({
   // name read as two accounts.
   const appAccount = installations.map((one) => one.account).join(", ")
   const merged = sameAccount && stage === "import" && signedIn
+  // Not connected, the App is the Credentials page's picture, small, with
+  // Connect on the section's title line; connected, it is the account's row.
+  const pictured = stage === "create" || stage === "install" ? stage : undefined
 
   return (
     // The list and the ways around it, each the height of the window: the
@@ -473,13 +477,21 @@ export function SourceGit({
           <PanelHeader
             title="GitHub"
             actions={
-              app.data?.installUrl && (
+              app.data?.installUrl ? (
                 <Button variant="outline" size="xs" asChild>
                   <a href={app.data.installUrl} target="_blank" rel="noreferrer noopener">
                     <External className="size-3" />
                     Adjust access
                   </a>
                 </Button>
+              ) : (
+                !status.loading &&
+                !app.loading &&
+                stage === "create" && (
+                  <Button variant="outline" size="xs" asChild>
+                    <Link href="/deploy/credentials">Connect</Link>
+                  </Button>
+                )
               )
             }
           />
@@ -490,124 +502,103 @@ export function SourceGit({
             {status.loading || app.loading ? (
               <LoadingRows rows={1} className="pt-1" />
             ) : (
-              <RowList aria-label="GitHub connections">
-                {merged ? (
-                  <Row
-                    leading={<IdentityMark account={cliLogin} kind="app" />}
-                    title={appAccount}
-                    subtitle="GitHub App · GitHub CLI"
-                    trailing={
-                      <>
-                        <span className="numeric text-hint text-muted-foreground">
-                          {plural(pickable.length, "repository", "repositories")}
-                        </span>
-                        <Status tone="running" label="Connected" />
-                      </>
-                    }
-                  />
-                ) : (
-                  <>
+              <>
+                {pictured && !merged && <GitHubAppPicture stage={pictured} />}
+                <RowList aria-label="GitHub connections">
+                  {merged ? (
                     <Row
-                      leading={<IdentityMark account={installations[0]?.account} kind="app" />}
-                      // The account, not the App's generated name: "Just
-                      // Dashboard e4e5" is this dashboard's own label for
-                      // itself, and what the reader is checking is whose
-                      // repositories these are.
-                      title={installations.length > 0 ? appAccount : "GitHub App"}
-                      subtitle={
-                        stage === "import"
-                          ? "GitHub App"
-                          : stage === "install"
-                            ? "Created on GitHub, waiting for an account to install it"
-                            : stage === "create"
-                              ? "Not set up on this server"
+                      leading={<IdentityMark account={cliLogin} kind="app" />}
+                      title={appAccount}
+                      subtitle="GitHub App · GitHub CLI"
+                      trailing={
+                        <>
+                          <span className="numeric text-hint text-muted-foreground">
+                            {plural(pickable.length, "repository", "repositories")}
+                          </span>
+                          <Status tone="running" label="Connected" />
+                        </>
+                      }
+                    />
+                  ) : (
+                    <>
+                      {!pictured && (
+                        <Row
+                          leading={<IdentityMark account={installations[0]?.account} kind="app" />}
+                          // The account, not the App's generated name: "Just
+                          // Dashboard e4e5" is this dashboard's own label for
+                          // itself, and what the reader is checking is whose
+                          // repositories these are.
+                          title={installations.length > 0 ? appAccount : "GitHub App"}
+                          subtitle={
+                            stage === "import"
+                              ? "GitHub App"
                               : // The rows wait for both answers, so no stage
                                 // here is a read that failed, not one pending.
                                 "Could not be read just now"
-                      }
-                      trailing={
-                        <>
-                          {stage === "import" && (
-                            <span className="numeric text-hint text-muted-foreground">
-                              {plural(fromApp.length, "repository", "repositories")}
-                            </span>
-                          )}
-                          <Status
-                            tone={
-                              stage === "import"
-                                ? "running"
-                                : stage === "install"
-                                  ? "warning"
-                                  : "unknown"
-                            }
-                            label={
-                              stage === "import"
-                                ? "Installed"
-                                : stage === "install"
-                                  ? "Uninstalled"
-                                  : stage === "create"
-                                    ? "Disconnected"
-                                    : "Unknown"
-                            }
-                          />
-                          {stage === "create" && (
-                            <Link
-                              href="/deploy/credentials"
-                              className="rounded-sm text-hint underline underline-offset-2 focus-ring"
-                            >
-                              Connect
-                            </Link>
-                          )}
-                        </>
-                      }
-                    />
-                    <Row
-                      leading={
-                        <IdentityMark account={signedIn ? cliLogin : undefined} kind="cli" />
-                      }
-                      title={signedIn ? cliLogin : "GitHub CLI"}
-                      subtitle={
-                        signedIn
-                          ? "GitHub CLI"
-                          : !status.data
-                            ? "Could not be read just now"
-                            : status.data.available === false
-                              ? "gh is not installed on this host, so signing in is not available here"
-                              : "Installed on this host, nobody signed in"
-                      }
-                      trailing={
-                        <>
-                          {signedIn && (
-                            <span className="numeric text-hint text-muted-foreground">
-                              {plural(fromCli.length, "repository", "repositories")}
-                            </span>
-                          )}
-                          <Status
-                            tone={signedIn ? "running" : "unknown"}
-                            label={
-                              signedIn
-                                ? "Signed in"
-                                : !status.data
-                                  ? "Unknown"
-                                  : status.data.available === false
-                                    ? "Unavailable"
-                                    : "Signed out"
-                            }
-                          />
-                          {!signedIn && status.data && status.data.available !== false && (
-                            <Link
-                              href="/git"
-                              className="rounded-sm text-hint underline underline-offset-2 focus-ring"
-                            >
-                              Sign in
-                            </Link>
-                          )}
-                        </>
-                      }
-                    />
-                  </>
-                )}
-              </RowList>
+                          }
+                          trailing={
+                            <>
+                              {stage === "import" && (
+                                <span className="numeric text-hint text-muted-foreground">
+                                  {plural(fromApp.length, "repository", "repositories")}
+                                </span>
+                              )}
+                              <Status
+                                tone={stage === "import" ? "running" : "unknown"}
+                                label={stage === "import" ? "Installed" : "Unknown"}
+                              />
+                            </>
+                          }
+                        />
+                      )}
+                      <Row
+                        leading={
+                          <IdentityMark account={signedIn ? cliLogin : undefined} kind="cli" />
+                        }
+                        title={signedIn ? cliLogin : "GitHub CLI"}
+                        subtitle={
+                          signedIn
+                            ? "GitHub CLI"
+                            : !status.data
+                              ? "Could not be read just now"
+                              : status.data.available === false
+                                ? "gh is not installed on this host, so signing in is not available here"
+                                : "Installed on this host, nobody signed in"
+                        }
+                        trailing={
+                          <>
+                            {signedIn && (
+                              <span className="numeric text-hint text-muted-foreground">
+                                {plural(fromCli.length, "repository", "repositories")}
+                              </span>
+                            )}
+                            <Status
+                              tone={signedIn ? "running" : "unknown"}
+                              label={
+                                signedIn
+                                  ? "Signed in"
+                                  : !status.data
+                                    ? "Unknown"
+                                    : status.data.available === false
+                                      ? "Unavailable"
+                                      : "Signed out"
+                              }
+                            />
+                            {!signedIn && status.data && status.data.available !== false && (
+                              <Link
+                                href="/git"
+                                className="rounded-sm text-hint underline underline-offset-2 focus-ring"
+                              >
+                                Sign in
+                              </Link>
+                            )}
+                          </>
+                        }
+                      />
+                    </>
+                  )}
+                </RowList>
+              </>
             )}
             {/* An optional integration that cannot be read is information, not
                 a failure: the page used to paint a red error block across the
@@ -698,11 +689,6 @@ export function SourceGit({
             </Button>
           </PanelBody>
         </Panel>
-
-        <FormNote>
-          New commits to the selected branch deploy automatically after your first deployment,
-          unless you turn that off on the Review step.
-        </FormNote>
       </div>
     </div>
   )
