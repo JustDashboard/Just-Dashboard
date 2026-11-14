@@ -293,7 +293,7 @@ func storageSummary(snapshot runtimeReleaseSnapshot, observed dependencyObservat
 		}
 		if kind == "docker_volume" {
 			row.Kind = "volume"
-			row.DeepLink = "/docker/volumes?" + url.Values{"volume": {mount.Source}}.Encode()
+			row.DeepLink = "/docker/volumes/" + url.PathEscape(mount.Source)
 		} else {
 			row.Kind = "bind"
 			row.DeepLink = "/files?" + url.Values{"path": {mount.Source}}.Encode()
