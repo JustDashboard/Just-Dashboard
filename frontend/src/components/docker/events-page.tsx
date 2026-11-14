@@ -35,6 +35,7 @@ import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { NumberTicker } from "@/components/ui/number-ticker"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Workspace } from "@/components/workspace/workspace"
 import { DockerIdentity, VerdictButton } from "@/components/docker/docker-identity"
@@ -248,19 +249,29 @@ export function EventsPage() {
 
   const header = <PageContext eyebrow="Docker" title="Events" />
 
-  if (buffer.loading && !buffer.data) {
+  // The line the page opens on is drawn while the record is read, and where
+  // it could not be: the page says what it is about before it has anything
+  // to report, and the readings land under a line that is already there.
+  if (!buffer.data) {
     return (
       <Page>
         {header}
-        <LoadingPanel />
-      </Page>
-    )
-  }
-  if (buffer.error && !buffer.data) {
-    return (
-      <Page>
-        {header}
-        <ErrorState error={buffer.error} onRetry={buffer.refresh} />
+        <DockerIdentity
+          version={ping.data?.serverVersion}
+          host={host ?? undefined}
+          facts={
+            buffer.error ? (
+              <span>The record could not be read</span>
+            ) : (
+              <TextShimmer>Reading what Docker did…</TextShimmer>
+            )
+          }
+        />
+        {buffer.error ? (
+          <ErrorState error={buffer.error} onRetry={buffer.refresh} />
+        ) : (
+          <LoadingPanel />
+        )}
       </Page>
     )
   }

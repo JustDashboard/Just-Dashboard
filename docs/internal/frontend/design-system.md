@@ -3551,10 +3551,10 @@ the end of the field that read as the `/` shortcut and a letter "B". Now:
 was the greyest page in the section: one plain column of 13px sentences with a grey dot each, no
 figure anywhere, and a database in a restart loop as sixteen identical rows that pushed everything
 else off the screen. It is `components/docker/events-page.tsx` over three files beside it. It opens
-on the Containers page's identity line (Docker as its mark and version, the host, how long the
-dashboard has been listening and how much it has kept) with the verdict at its right end — a loop
+on the Docker section's identity line (Docker as its mark and version, the host, how long the
+dashboard has been listening and how much it has kept) with the verdict beside its name — a loop
 still going is named, then the containers that failed, then *Nothing failed* — beside the socket's
-`Status live` and a 1h / 6h / 24h / All window that every block below reads over. Pass 2 is kept,
+`Status live`, and at its end a 1h / 6h / 24h / All window that every block below reads over. Pass 2 is kept,
 the Logs page's way: four `StatButton` tiles (failures, restarts, created or removed, external),
 each counting up as it lands with its shape across the window as its `TileTrend`, keyed by its
 line's colour, and each narrowing the table and the feed to what it counts. The containers the
@@ -3567,7 +3567,9 @@ acted on it. A row narrows the feed; its name opens the container. The feed (`ev
 folds a restart loop into one row and a container's run of events moments apart (a restart's kill,
 exit, stop, start and restart) into another (`foldBursts`), each row its product mark, its subject in
 the project's lane hue and who did it with the audit log's account of how that is known; a row new
-since the page opened rises. An exit moments after a `kill` of the same container was asked for, and
+since the page opened rises. The feed is a plain section since 0.8.7 — a title, a hairline, a
+hairline between rows, scrolling with the page — where it was a framed panel with a scroll of its
+own: it is sentences, and the frame is the table's above it. An exit moments after a `kill` of the same container was asked for, and
 is read as the stop it was (`settleAskedExits`): a restart pressed here used to count as a crash
 because most programs answer SIGTERM with 143. The colours are the sanctioned ones: state hues on
 outcomes, `--tag-*` for kinds (created or removed in cyan, external in violet), lane hues for
@@ -3765,6 +3767,10 @@ strip's figures went, and what took their place (`docker/stack-detail.tsx`):
   service moves more than a kilobyte a second, at the Network section's `pulseDuration`; it is
   dashed and red where a port leads to a service that is not running, and amber where a database
   answers on every interface.
+- **The order and the rail (0.8.7).** The Services view reads as a container's Overview does: the
+  band, the picture, then the table, which came first until then and left the picture as the last
+  block. The Stacks list stands beside the page from `xl` (`docker/stack-rail.tsx`), and the page's
+  own side-by-side blocks wait for the width the rail leaves them (`docker/beside-rail.ts`).
 - **The other views took the same vocabulary**, borrowed from the pages that did each job first:
   every service anywhere on the page is its lane, its product and its name (`ServiceLabel` in
   `docker/stack-diff.tsx`), and every diff of the compose file is one view grouped by the service

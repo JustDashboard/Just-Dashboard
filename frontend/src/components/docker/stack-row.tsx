@@ -201,7 +201,7 @@ const TONE_TEXT: Record<string, string> = {
  * still running a service its file dropped read "3 of 2 services up".
  */
 function declaredUp(stack: ComposeStack) {
-  return stack.services.filter((s) => s.state === "running" && !stack.orphans.includes(s.name))
+  return stack.services.filter((s) => s.state === "running" && !stack.orphans?.includes(s.name))
     .length
 }
 
@@ -372,7 +372,8 @@ function StackMenu({ stack }: { stack: ComposeStack }) {
  */
 export function ServiceStrip({ stack }: { stack: ComposeStack }) {
   const byName = new Map(stack.services.map((s) => [s.name, s]))
-  const names = [...new Set([...stack.declared, ...stack.services.map((s) => s.name)])]
+  // The backend always sends the list; a stack handed over without one still draws its services.
+  const names = [...new Set([...(stack.declared ?? []), ...stack.services.map((s) => s.name)])]
   if (names.length === 0) return null
   const segments = names.map((name) => {
     const service = byName.get(name)

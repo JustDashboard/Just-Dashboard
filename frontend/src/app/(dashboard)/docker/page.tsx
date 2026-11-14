@@ -178,11 +178,20 @@ export default function DockerOverviewPage() {
 
   const header = <PageContext title="Docker" />
 
+  // The containers could not be read at all, though Docker answered the
+  // layout's check: the page still opens on what it is about, says so in a
+  // sentence, and offers the read again.
   if (!read && list.error) {
     return (
       <Page>
         {header}
-        <ErrorState error={list.error} onRetry={list.refresh} />
+        <DockerIdentity
+          version={info.data?.ServerVersion}
+          host={{ hostname: host?.hostname || info.data?.Name, platform: host?.platform }}
+          state={<Status tone="warning" label="Not read" />}
+          facts={<span>The containers could not be read</span>}
+        />
+        <ErrorState error={list.error} onRetry={list.refresh} retryable />
       </Page>
     )
   }

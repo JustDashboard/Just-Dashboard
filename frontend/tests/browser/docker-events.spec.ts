@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { CONTAINERS, EVENTS, mockEvents } from "./docker-events-fixture"
+import { risen } from "./risen"
 
 /**
  * The host's Docker Events page, read against a record with something in it:
@@ -146,16 +147,16 @@ test("the feed is a section under a hairline with its rows on hairlines, and scr
   const feed = page.getByRole("region", { name: "Event feed" })
   await expect(feed.getByText("worker ran out of memory")).toBeVisible()
   // A hairline between every two rows of an hour, whichever of the two draws it.
-  const rules = await feed
-    .locator("ul")
-    .first()
-    .locator("> li")
-    .evaluateAll((rows) =>
-      rows.slice(1).map((row, index) => {
+  // (Which hour holds how many rows depends on the clock, so every hour is read.)
+  const rules = await feed.evaluate((el) =>
+    [...el.querySelectorAll(":scope > div > ul")].flatMap((list) => {
+      const rows = [...list.children]
+      return rows.slice(1).map((row, index) => {
         const above = getComputedStyle(rows[index]).borderBottomWidth
         return above === "1px" || getComputedStyle(row).borderTopWidth === "1px"
-      }),
-    )
+      })
+    }),
+  )
   expect(rules.length).toBeGreaterThan(0)
   expect(rules.every(Boolean)).toBe(true)
   // No scroll region of its own: a frame's privilege, and the feed has none.
@@ -196,3 +197,28 @@ for (const width of [320, 390, 768, 1024, 1280]) {
     expect(unnamed).toEqual([])
   })
 }
+
+test("the line is there while the record is read, and stays where it is when it lands", async ({
+  page,
+}) => {
+  await mockEvents(page)
+  let land!: () => void
+  const held = new Promise<void>((resolve) => (land = resolve))
+  await page.route("**/api/v1/docker/events**", async (route) => {
+    await held
+    await route.fallback()
+  })
+  await page.goto("/docker/events")
+
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("Reading what Docker did…")
+  await expect(identity).toContainText("Docker 28.5.1")
+  await risen(page)
+  const before = await identity.boundingBox()
+
+  land()
+  await expect(page.getByRole("region", { name: "Event feed" })).toBeVisible()
+  await risen(page)
+  const after = await identity.boundingBox()
+  expect([after!.x, after!.y, after!.height]).toEqual([before!.x, before!.y, before!.height])
+})

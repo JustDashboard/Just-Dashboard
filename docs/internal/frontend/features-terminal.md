@@ -35,7 +35,7 @@ tester run on the page and draw no working bar.
   each two-second frame, and **Recent**: Docker's event log over `/docker/events/stream?kinds=container`
   as ticks on the last day, a restart loop folded to one tick and an OOM kill said on the exit it
   caused (`foldRestarts`).
-  `container-table.tsx` is the table — sortable headings, a ticking uptime under each state, CPU and
+  `containers-table.tsx` is the table — sortable headings, a ticking uptime under each state, CPU and
   memory as figures beside short bars (memory against its limit, amber past 85%), the processor's
   hour and the network rate from `2xl`, the compose project in its `hueFor(…, LANES)` hue as a filter
   — drawn down the row below `xl`. `containers.ts` (unit-tested) holds what the rows say: the five
@@ -50,14 +50,22 @@ tester run on the page and draw no working bar.
 - `container-cells.tsx` holds the three cells that were saying something other than what they meant:
   memory against an explicit container limit, CPU with its denominator stated (Docker counts one core
   as 100%), and Docker's runtime state. The security finding underneath that state was removed.
-- `container-band.tsx`, `container-table.tsx` and `overview.ts` are the overview's. The band and the
-  table read the containers socket, so the overview's figures move with every frame where the four
-  tiles it replaced were a poll. `overview.ts` holds the words: a container is *failing* only when
-  its check fails, its restart policy is cycling, or it exited with anything but 0 or 143 — a host
-  of one-shot jobs is otherwise a page of red — and Recent reads Docker's events one line per
-  container, a stop's kill, die and stop as one stop and an OOM kill folded into the exit it caused.
-  The table's figures are plain text: a counting figure starts only once scrolled into view, and a
-  row below the fold read 0.0% until it was.
+- `docker-identity.tsx` is the line the overview, Containers, Events and Stacks open on: Docker's
+  mark, "Docker" and its version, the page's verdict beside the name, the server as the first fact
+  and the page's one command, in `HostIdentity`'s project layout.
+- `container-band.tsx`, `engine-picture.tsx`, `engine-picture-model.ts` and `overview.ts` are the
+  overview's. The band reads the containers socket, so its figures move with every frame.
+  `engine-picture.tsx` draws what the engine holds on `components/wire-flow.tsx`: compose projects and
+  the containers started by hand, Docker, and the networks and volumes it keeps, each node a link to
+  its page. `engine-picture-model.ts` (unit-tested) works the nodes out: the state each line is drawn
+  in, the order (what is failing first), which fold into a count, and which nodes light together. A
+  container is *failing* as `containers.ts` reads it for the Containers page, with the event log
+  telling a kill for memory from a stop, so the overview's verdict and the table it opens count the
+  same containers; until 0.8.7 `overview.ts` kept a second reading (any exit but 0 or 143) and the two
+  could disagree. `overview.ts` still holds Recent's words: Docker's events one line per container, a
+  stop's kill, die and stop as one stop and an OOM kill folded into the exit it caused. The overview
+  drew a table of every container (`container-table.tsx`) until 0.8.7; that table is
+  `/docker/containers` only.
 - `cleanup.tsx` and `stack-preview.tsx` are the two "before you press it" panels: what each category of
   removable object costs, and what a compose deploy is expected to change — including the sentence about
   volumes, stated whether or not any are affected. The preview opens on that decision as one sentence
@@ -94,20 +102,20 @@ that does something.
   ends, and `useSocket` reconnects whatever is still enabled, so a finished pull used to open a new
   one about once a second until the page was left. Tag names the same image again, so the copy a
   container runs can keep a name across the next pull of its tag.
-- `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2): the
-  server's identity line (the Compose mark, Docker's version, stacks deployed, services running, ports
-  published), then `stack-band.tsx`, bar readings
+- `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2):
+  Docker's identity line (stacks running beside its name, stacks deployed, services running, ports
+  published, Create stack as its command), then `stack-band.tsx`, bar readings
   (the five stacks using the most processor and memory as spans of one bar the size of the machine,
-  summed over each stack's containers from the containers socket, a press narrowing the table to that
+  summed over each stack's containers from the containers socket, a press narrowing the list to that
   stack; and Recent, the daemon's last starts, exits with their codes, out-of-memory kills folded into
-  the exit they caused and failed checks, each a tick on the last day opening its stack), then
-  `stack-table.tsx`: the stacks as
-  one framed table of their containers. A stack is a row with its state, how many declared services are
-  up, its summed CPU and memory and the one action that belongs there — deploy when the application is
-  down — and a lane in its name's hue down its containers; each container is a row of the containers
-  page's readings (state with uptime, health or exit code, CPU with its last hour, memory against its
-  limit, published ports) and its verbs, opening the container. Stacks fold their containers away for
-  the session. Rows are worst first; below 1280px the same rows are drawn down rather than across.
+  the exit they caused and failed checks, each a tick on the last day opening its stack), then the
+  stacks as one-line cards (`stack-row.tsx`, a `ChoiceRow` each): logos, name and directory, a strip
+  of its services' states, its state with how many declared services are up, its summed CPU and
+  memory, its published ports, the one action that belongs there (deploy when the application is
+  down), an arrow and a menu, in columns that line up and at one height in every state. A stack's
+  containers are its page: until 0.8.7 they were rows under the stack's own in one table
+  (`stack-table.tsx`), folding away per session. A stack found by a service's name or image says
+  which matched. Stacks are running first, then stopped, then never deployed, each by name.
   The joins, buckets and change words are pure (`stack-readings.ts`, unit-tested). A stack's own page follows the same rule as a container's: the compose verbs that are pressed
   daily (deploy, restart) sit inline, and the rest are behind one overflow menu, one word to a line,
   drawn the same way as the container menu. Its services and the deploy preview's services are framed
@@ -124,7 +132,8 @@ that does something.
   memory against its limit, network rates from 1536 and its published ports, under state chips that
   count and narrow; each row opens its container and carries the compose verbs for that one service
   (`docker compose restart|stop|start|up --force-recreate|pull <service>`, each confirmed with its
-  command). Under it are the Services page's band for the stack (`stack-usage-band.tsx`: its share of
+  command). Over it, in a container page's order since 0.8.7 (the table came first before), are the
+  Services page's band for the stack (`stack-usage-band.tsx`: its share of
   the processor and memory, and Recent from `/docker/events?stack=`) and a picture of its published
   ports, services and networks whose wires pulse with each service's traffic (`stack-map.tsx`); the
   joins and words are `stack-service-readings.ts`, unit-tested. Every other view names a service the
@@ -169,7 +178,11 @@ that does something.
   readings off its stats socket with their last hour (`container-readings.tsx`), a picture of how it is reached and what it keeps (`container-picture.tsx`), the
   containers of its compose project — or of its own networks — as a live table
   (`container-company.tsx`), its recent events with loops folded (`container-recent.tsx`), how it
-  runs, and its ports and networks as tables (`container-tables.tsx`, which also draws the
+  runs, and its ports and networks as tables. From `xl` the Containers table stands beside the page
+  as a rail (`container-rail.tsx`: the table's search, chips and order from its session keys, Alt+↑
+  and Alt+↓ to walk it with the view carried), and a stack's page keeps the Stacks list the same
+  way (`stack-rail.tsx`); `beside-rail.ts` says where the two pages' blocks go side by side now that
+  the rail takes its width. The tables are `container-tables.tsx`, which also draws the
   Environment tab: each name's namespace in its lane hue, each value in its kind's code hue, and
   the kinds — credentials, addresses, paths, switches, numbers — as chips that count and narrow, beside
   a filter that never searches a hidden value). Each other view is the overhauled page it stands in

@@ -447,3 +447,31 @@ test("a host where nothing is failing says so", async ({ page }) => {
   await expect(identity.getByText("Nothing failing")).toBeVisible()
   await expect(identity.getByRole("button", { name: /failing/ })).toHaveCount(0)
 })
+
+test("containers that cannot be read leave the page on Docker's line with a way to try again", async ({
+  page,
+}) => {
+  await mockDockerEngine(page)
+  let failing = true
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/stream/, () => {})
+  await page.route("**/api/v1/docker/containers/", async (route) => {
+    if (!failing) return route.fallback()
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "internal", message: "docker: timeout" } }),
+    })
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/docker")
+
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("Docker")
+  await expect(identity).toContainText("The containers could not be read")
+  await expect(page.locator("[data-slot=error-state]")).toContainText("docker: timeout")
+
+  failing = false
+  await page.getByRole("button", { name: "Try again" }).click()
+  await expect(drawn(page)).toBeVisible()
+  await expect(identity).toContainText("10 of 12 containers running")
+})
