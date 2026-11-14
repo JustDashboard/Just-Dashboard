@@ -1813,7 +1813,7 @@ rail's head and every engine picker, which are one `EngineCard` (`choice-card.ts
 shapes that had already drifted. A flavour with no artwork of its own draws the database glyph on
 the same tile and never borrows its driver's logo with its own name beside it.
 A network has no product of its own. Its row carries its lane colour down its leading edge and its
-members' products (`ProductLogos`), and its sheet draws its bridge as Docker's mark.
+members' products (`ProductLogos`), and its page draws its bridge as Docker's mark.
 
 **What a backup covers is a product, and so is what a terminal runs.** A coverage row is drawn as
 the thing it protects — a saved database as its engine, the proxy's configuration as nginx or Caddy,
@@ -4157,8 +4157,8 @@ reading page, and what makes them alive is the sanctioned five, held hard:
 - **Colour that names a kind.** A device's role takes a lane hue (`ROLE_HUE`, from the palette that
   cannot be read as a state), an address's prefix the port hue (`network/address.tsx`), in and out
   their chart colours everywhere they are drawn.
-- **The lit edge on what is taken.** Devices, peers, forwards and lists open their sheets and are lit
-  rows; route tables, rule lists and shaping are readings and stay framed tables. (The tailnet's
+- **The lit edge on what is taken.** Peers, forwards and lists open their sheets and a device its
+  page (0.8.7), and all are lit rows; route tables, rule lists and shaping are readings and stay framed tables. (The tailnet's
   machines were a framed table until 0.8.7; they are cards now, below.)
 
 What the guard refuses is drawn, not hidden: a control the server would refuse stays, disabled,
