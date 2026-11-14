@@ -8,14 +8,8 @@ import {
   SQL_VIEWS,
 } from "@/components/database/home/charts"
 import { HomeIdentity } from "@/components/database/home/identity"
-import { Columns } from "@/components/database/home/layout"
 import { POWER } from "@/components/database/home/power"
-import {
-  BackupsBlock,
-  ReachableFrom,
-  RunsAs,
-  useBackups,
-} from "@/components/database/home/reference"
+import { ServerLines, useBackups } from "@/components/database/home/reference"
 import { mongoSample, redisSample, sqlSample } from "@/components/database/home/samples"
 import { ServerLog } from "@/components/database/home/server-log"
 import { StateRegion } from "@/components/database/home/state-region"
@@ -35,10 +29,16 @@ import { useCallback } from "react"
  * The home of a database that is not answering.
  *
  * It is still that database's page: the identity line, what state the server
- * is in and why, the one thing to do about it, and the reference blocks that
- * need no dial — what it runs as, where it listens, the dumps that would
- * bring it back — with the last lines its log holds. Nothing that asks the engine a question is mounted, so a
- * stopped server is not dialled by its own home any more than by the fleet.
+ * is in and why, the one thing to do about it, and the lines that need no
+ * dial — what it runs as, where it listens, the dumps that would bring it
+ * back — with the activity recorded before it went and the last lines its log
+ * holds. Nothing that asks the engine a question is mounted, so a stopped
+ * server is not dialled by its own home any more than by the fleet.
+ *
+ * The recorded activity stays as charts here, where an answering home reads
+ * it as lines: a line says what a measure reads now, and a server that is
+ * down has no now. What it has is the shape of the hours before it stopped,
+ * with the times on it, and no other page draws that while it is down.
  */
 export function DownHome() {
   const { engine, status } = useDatabase()
@@ -52,16 +52,12 @@ export function DownHome() {
       <StateRegion>
         <StateNotice />
       </StateRegion>
+      {known && (
+        <ServerLines backups={engine.can("dump") ? backups : undefined} answering={false} />
+      )}
       {engine.can("stats") && !engine.can("fileBased") && <RecordedHistory />}
       {/* The lines a server wrote before it stopped are usually the ones that say why. */}
       {known && engine.has("logs") && <ServerLog />}
-      {known && (
-        <Columns>
-          <RunsAs />
-          {engine.can("server") && <ReachableFrom />}
-          {engine.can("dump") && <BackupsBlock backups={backups} answering={false} />}
-        </Columns>
-      )}
     </>
   )
 }

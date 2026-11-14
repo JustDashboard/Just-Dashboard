@@ -72,12 +72,22 @@ export const Activity = memo(function Activity({
         title="Activity"
         actions={
           <>
+            {/* What was a sentence under the charts: how much is recorded and
+                how long it is kept, on the line that picks the window. */}
+            <span
+              className="text-hint text-muted-foreground max-sm:hidden"
+              title={`Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed.`}
+            >
+              {held > 0
+                ? `${duration(held)} recorded, kept for ${keptFor(retentionHours)}`
+                : `kept for ${keptFor(retentionHours)}`}
+            </span>
             {error && samples.length > 0 && <NotUpdating error={error} />}
             <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
         }
       />
-      <PanelBody className="space-y-4">
+      <PanelBody>
         <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2 [&>*]:min-w-0">
           {offered.map((view, index) => (
             <ViewChart
@@ -91,11 +101,6 @@ export const Activity = memo(function Activity({
             />
           ))}
         </div>
-        <p className="text-hint text-muted-foreground">
-          {held > 0
-            ? `Recorded activity over ${duration(held)}. Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed; kept for ${keptFor(retentionHours)}.`
-            : `Activity is recorded in the background every 30 seconds and kept for ${keptFor(retentionHours)}.`}
-        </p>
       </PanelBody>
     </Panel>
   )

@@ -1,21 +1,14 @@
 "use client"
 
-import { Activity } from "@/components/database/home/activity"
+import { ActivityLines } from "@/components/database/home/activity-lines"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { BusiestCommands } from "@/components/database/home/busiest"
 import { REDIS_VIEWS } from "@/components/database/home/charts"
-import { chartEvents } from "@/components/database/home/events"
 import { HomeIdentity } from "@/components/database/home/identity"
 import { LargestNamespacesBlock } from "@/components/database/home/largest"
-import { Columns, Pair } from "@/components/database/home/layout"
+import { Pair } from "@/components/database/home/layout"
 import { read, record } from "@/components/database/home/read"
-import {
-  BackupsBlock,
-  Keyspaces,
-  ReachableFrom,
-  RunsAs,
-  useBackups,
-} from "@/components/database/home/reference"
+import { Keyspaces, ServerLines, useBackups } from "@/components/database/home/reference"
 import { nameHue } from "@/components/database/home/kinds"
 import { HomePicture, type Holding } from "@/components/database/home/picture"
 import { compact } from "@/components/database/home/readings"
@@ -72,8 +65,6 @@ export function KeyValueHome() {
   const samples = stats.samples
   const unread = stats.error && samples.length === 0 ? stats.error : undefined
   const loading = stats.loading || !walked
-  const dumps = backups.data?.files
-  const events = useMemo(() => chartEvents(samples, "uptime_in_seconds", dumps), [samples, dumps])
   const keyspace = server.data?.keyspace
   const holdings = useMemo<Holding[] | undefined>(
     () =>
@@ -94,7 +85,7 @@ export function KeyValueHome() {
 
   return (
     <>
-      <HomeIdentity uptimeSeconds={gauge(samples, "uptime_in_seconds")} />
+      <HomeIdentity />
       <StateRegion />
       {unread && (
         <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
@@ -106,7 +97,11 @@ export function KeyValueHome() {
         size={gauge(samples, "used_memory")}
         backups={engine.can("dump") ? backups : undefined}
       />
-      <Activity
+      <ServerLines
+        backups={engine.can("dump") ? backups : undefined}
+        uptimeSeconds={gauge(samples, "uptime_in_seconds")}
+      />
+      <ActivityLines
         hours={stats.hours}
         onHours={stats.setHours}
         retentionHours={stats.retentionHours}
@@ -114,18 +109,12 @@ export function KeyValueHome() {
         samples={samples}
         loading={loading}
         error={stats.error}
-        events={events}
       />
       {engine.has("logs") && <ServerLog />}
       <Pair>
         {engine.can("commandStats") && <BusiestCommands />}
         {walks && <LargestNamespacesBlock poll={tree} />}
       </Pair>
-      <Columns>
-        <RunsAs />
-        {engine.can("server") && <ReachableFrom />}
-        {engine.can("dump") && <BackupsBlock backups={backups} />}
-      </Columns>
       {engine.can("serverInfo") && <Keyspaces server={server} />}
     </>
   )

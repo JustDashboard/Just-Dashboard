@@ -1,21 +1,14 @@
 "use client"
 
-import { Activity } from "@/components/database/home/activity"
+import { ActivityLines } from "@/components/database/home/activity-lines"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { SlowOperations } from "@/components/database/home/busiest"
 import { MONGO_VIEWS } from "@/components/database/home/charts"
-import { chartEvents } from "@/components/database/home/events"
 import { HomeIdentity } from "@/components/database/home/identity"
 import { LargestCollectionsBlock } from "@/components/database/home/largest"
-import { Columns, Pair } from "@/components/database/home/layout"
+import { Pair } from "@/components/database/home/layout"
 import { read } from "@/components/database/home/read"
-import {
-  BackupsBlock,
-  ReachableFrom,
-  RunsAs,
-  ServerDatabases,
-  useBackups,
-} from "@/components/database/home/reference"
+import { ServerDatabases, ServerLines, useBackups } from "@/components/database/home/reference"
 import { nameHue } from "@/components/database/home/kinds"
 import { HomePicture, type Holding } from "@/components/database/home/picture"
 import { compact } from "@/components/database/home/readings"
@@ -49,8 +42,6 @@ export function DocumentHome() {
 
   const samples = stats.samples
   const unread = stats.error && samples.length === 0 ? stats.error : undefined
-  const dumps = backups.data?.files
-  const events = useMemo(() => chartEvents(samples, "uptimeSeconds", dumps), [samples, dumps])
   const listed = collections.data
   const holdings = useMemo<Holding[] | undefined>(
     () =>
@@ -75,7 +66,7 @@ export function DocumentHome() {
 
   return (
     <>
-      <HomeIdentity uptimeSeconds={gauge(samples, "uptimeSeconds")} />
+      <HomeIdentity />
       <StateRegion />
       {unread && (
         <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
@@ -87,7 +78,11 @@ export function DocumentHome() {
         size={stored}
         backups={engine.can("dump") ? backups : undefined}
       />
-      <Activity
+      <ServerLines
+        backups={engine.can("dump") ? backups : undefined}
+        uptimeSeconds={gauge(samples, "uptimeSeconds")}
+      />
+      <ActivityLines
         hours={stats.hours}
         onHours={stats.setHours}
         retentionHours={stats.retentionHours}
@@ -95,18 +90,12 @@ export function DocumentHome() {
         samples={samples}
         loading={stats.loading}
         error={stats.error}
-        events={events}
       />
       {engine.has("logs") && <ServerLog />}
       <Pair>
         {engine.can("profiler") && <SlowOperations />}
         {engine.can("collections") && <LargestCollectionsBlock poll={collections} />}
       </Pair>
-      <Columns>
-        <RunsAs />
-        {engine.can("server") && <ReachableFrom />}
-        {engine.can("dump") && <BackupsBlock backups={backups} />}
-      </Columns>
       {engine.can("server") && <ServerDatabases />}
     </>
   )

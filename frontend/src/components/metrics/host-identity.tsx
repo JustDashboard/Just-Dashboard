@@ -53,6 +53,7 @@ export function HostIdentity({
   state,
   command,
   menu,
+  foot,
   label,
   slot = "host-identity",
   className,
@@ -81,6 +82,14 @@ export function HostIdentity({
   command?: React.ReactNode
   /** The `⋯` menu after the command, holding the rest of the verbs. */
   menu?: React.ReactNode
+  /**
+   * In a project's layout: where the line itself is narrower than 42rem, the
+   * command and the menu take a row of their own under the facts. For a line
+   * whose title is a name that must be read whole and whose end holds more
+   * than one control: sharing a narrow row, the controls kept theirs and the
+   * name and its facts were left a column a word wide.
+   */
+  foot?: boolean
   /** The line's landmark name ("About api"): set, the line is a `section`. */
   label?: string
   /** The `data-slot`, for a page whose specs know its header by another name. */
@@ -105,6 +114,7 @@ export function HostIdentity({
         command={command}
         menu={menu}
         aside={aside}
+        foot={foot}
         label={label}
         slot={slot}
         className={className}
@@ -182,6 +192,7 @@ function ProjectLine({
   command,
   menu,
   aside,
+  foot,
   label,
   slot,
   className,
@@ -193,12 +204,13 @@ function ProjectLine({
   command?: React.ReactNode
   menu?: React.ReactNode
   aside?: React.ReactNode
+  foot?: boolean
   label?: string
   slot: string
   className?: string
 }) {
   const Line = label ? "section" : "div"
-  return (
+  const line = (
     <Line
       aria-label={label}
       data-slot={slot}
@@ -209,7 +221,12 @@ function ProjectLine({
       )}
     >
       <div className="flex sm:row-span-2">{tile}</div>
-      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:contents">
+      <div
+        className={cn(
+          "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:contents",
+          foot && "@max-2xl:col-span-2",
+        )}
+      >
         {/* A flex box, so a title that is a link or an address sits on the
             row's centre rather than on the baseline of a taller line box. */}
         <p className="flex max-w-full min-w-0 text-title font-semibold tracking-tight">{title}</p>
@@ -219,7 +236,15 @@ function ProjectLine({
           </div>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2 max-sm:order-1 sm:row-span-2">
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-2 max-sm:order-1 sm:row-span-2",
+          // Important, so the row of its own wins over the phone's place for
+          // it whichever of the two rules the sheet happens to write last.
+          foot &&
+            "@max-2xl:order-last! @max-2xl:col-span-3 @max-2xl:row-span-1! @max-2xl:mt-1.5 @max-2xl:flex-wrap",
+        )}
+      >
         {aside}
         {command}
         {menu}
@@ -229,6 +254,9 @@ function ProjectLine({
       </div>
     </Line>
   )
+  // The line measures itself, not the window (§12): a rail beside it takes a
+  // column of its own, so a laptop's worth of window is a tablet's of line.
+  return foot ? <div className="@container min-w-0">{line}</div> : line
 }
 
 /** A fact in the identity line, with the product it names drawn before it. */
