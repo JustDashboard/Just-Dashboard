@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { NETS, mockNetworks } from "./docker-networks-fixture"
+import { NETS, mockNetworks, user } from "./docker-networks-fixture"
 import { risen } from "./risen"
 
 /**
@@ -25,11 +25,17 @@ test("opens on the engine, with the unused networks as its verdict", async ({ pa
   await verdict.click()
   await expect(verdict).toHaveAttribute("aria-pressed", "true")
   const table = page.getByRole("table").first()
-  await expect(table.getByRole("button", { name: "old-staging", exact: true })).toBeVisible()
-  await expect(table.getByRole("button", { name: "wiki_default", exact: true })).toBeVisible()
-  await expect(table.getByRole("button", { name: "proxy", exact: true })).toHaveCount(0)
+  await expect(table.getByRole("link", { name: "old-staging", exact: true })).toBeVisible()
+  await expect(table.getByRole("link", { name: "wiki_default", exact: true })).toBeVisible()
+  await expect(table.getByRole("link", { name: "proxy", exact: true })).toHaveCount(0)
   await verdict.click()
-  await expect(table.getByRole("button", { name: "proxy", exact: true })).toBeVisible()
+  await expect(table.getByRole("link", { name: "proxy", exact: true })).toBeVisible()
+
+  // The line is a project's: the verdict beside the name, Create network its one command.
+  await expect(identity).toHaveAttribute("data-layout", "project")
+  await expect(identity.getByRole("button", { name: "Create network", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Create network", exact: true })).toHaveCount(1)
+  await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
 })
 
 test("the band says which networks are busy, how much of the pool is taken and who moved", async ({
@@ -67,9 +73,9 @@ test("the band says which networks are busy, how much of the pool is taken and w
   await recent.getByRole("button", { name: "Open monitoring_default" }).hover()
   await expect(line).toContainText("monitoring-alertmanager-1 left monitoring_default")
 
-  // A press opens its network.
+  // A press opens its network's own page.
   await traffic.getByRole("button", { name: "Open shop_backend" }).click()
-  await expect(page).toHaveURL(new RegExp(`network=${id("shop_backend")}`))
+  await expect(page).toHaveURL(/\/docker\/networks\/shop_backend$/)
 })
 
 test("the band is there before anything lands, and does not move when it does", async ({
@@ -99,12 +105,43 @@ test("the band is there before anything lands, and does not move when it does", 
   expect(new Set(heights).size).toBe(1)
   await risen(page)
   const before = await band.boundingBox()
+  const identity = page.locator("[data-slot=host-identity]")
+  const line = await identity.boundingBox()
 
   release()
   await expect(page.getByRole("table").first()).toBeVisible()
   await expect(band.getByText("First free")).toBeVisible()
   await risen(page)
+  expect(await identity.boundingBox()).toEqual(line)
   expect(await band.boundingBox()).toEqual(before)
+})
+
+test("on a phone the opening line and the band are where they will be before the list lands", async ({
+  page,
+}) => {
+  await mockNetworks(page)
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/docker/networks/", async (route) => {
+    await held
+    return route.fallback()
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/docker/networks")
+
+  const identity = page.locator("[data-slot=host-identity]")
+  const band = page.locator("[data-slot=network-band]")
+  await expect(band.locator("[data-slot=bar-reading]")).toHaveCount(3)
+  await risen(page)
+  const line = await identity.boundingBox()
+  const top = (await band.boundingBox())!.y
+
+  release()
+  await expect(identity.getByRole("button", { name: "2 networks unused" })).toBeVisible()
+  await expect(band.getByText("First free")).toBeVisible()
+  await risen(page)
+  expect(await identity.boundingBox()).toEqual(line)
+  expect((await band.boundingBox())!.y).toBe(top)
 })
 
 test("the networks table reads who made each network, its subnet and its members", async ({
@@ -143,9 +180,25 @@ test("the networks table reads who made each network, its subnet and its members
   const staging = table.getByRole("row").filter({ hasText: "old-staging" })
   await expect(staging.getByRole("button", { name: "Remove old-staging" })).toBeEnabled()
 
+  // A network nothing is on, one carrying megabytes, the host network and one
+  // with two subnets are the same row.
+  const heights = await table
+    .getByRole("row")
+    .evaluateAll((rows) => rows.slice(1).map((row) => row.getBoundingClientRect().height))
+  expect(heights).toHaveLength(11)
+  expect(new Set(heights).size).toBe(1)
+
   // The owner chips count and narrow.
   await page.getByRole("button", { name: /^Compose\s*4$/ }).click()
   await expect(table.getByRole("row")).toHaveCount(5)
+
+  // The name is the link to the network's own page, and the row is its larger target.
+  await expect(table.getByRole("link", { name: "shop_backend", exact: true })).toHaveAttribute(
+    "href",
+    "/docker/networks/shop_backend",
+  )
+  await backend.getByText("via 172.19.0.1").click()
+  await expect(page).toHaveURL(/\/docker\/networks\/shop_backend$/)
 })
 
 test("the containers table answers which network each container is on, at what address and by what name", async ({
@@ -174,39 +227,24 @@ test("the containers table answers which network each container is on, at what a
 
   // Rates arrive with the socket's second frame.
   await expect(api.getByText(/↓ .*\/s/)).toBeVisible({ timeout: 10_000 })
-})
 
-test("a network's sheet is a live readout with its members as a table", async ({ page }) => {
-  const mocks = await mockNetworks(page)
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto("/docker/networks")
-
-  await page
-    .getByRole("table")
-    .first()
-    .getByRole("button", { name: "shop_backend", exact: true })
-    .click()
-  await expect(page).toHaveURL(new RegExp(`network=${id("shop_backend")}`))
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByText("compose · shop")).toBeVisible()
-  await expect(sheet.getByText("all running")).toBeVisible()
-  await expect(sheet.getByText("of 65,533")).toBeVisible()
-
-  const members = sheet.getByRole("table")
-  const db = members.getByRole("row").filter({ hasText: "shop-db-1" })
-  await expect(db.getByText("172.19.0.2")).toBeVisible()
-  await expect(db.getByText("db", { exact: true })).toBeVisible()
-  await expect(db.getByText("database", { exact: true })).toBeVisible()
-
-  // What detaching disturbs is read first; the button is the dialog's.
-  await db.getByRole("button", { name: "Detach shop-db-1" }).click()
-  await page
-    .getByRole("dialog", { name: "Detach shop-db-1" })
-    .getByRole("button", { name: "Detach", exact: true })
-    .click()
-  await expect
-    .poll(() => mocks.writes.map((w) => w.path))
-    .toContain(`/docker/networks/${id("shop_backend")}/disconnect`)
+  // One network or two, names or none, stopped or carrying: one height, and
+  // the row under a container on two networks is where the row under one is.
+  const rows = table.getByRole("row")
+  const boxes = await rows.evaluateAll((all) =>
+    all.slice(1).map((row) => {
+      const box = row.getBoundingClientRect()
+      return { y: box.y, height: box.height }
+    }),
+  )
+  expect(boxes).toHaveLength(16)
+  expect(new Set(boxes.map((box) => box.height)).size).toBe(1)
+  for (let i = 1; i < boxes.length; i++) {
+    expect(boxes[i].y - boxes[i - 1].y).toBe(boxes[0].height)
+  }
+  // Two long names stay on the row's one line.
+  const alertmanager = table.getByRole("row").filter({ hasText: "monitoring-alertmanager-1" })
+  await expect(alertmanager.getByText("alertmanager", { exact: true })).toBeVisible()
 })
 
 test("Remove unused prunes the networks nothing is attached to, after reading the prune", async ({
@@ -237,7 +275,7 @@ test("on a phone both lists read down the row and nothing scrolls sideways", asy
 
   await expect(page.getByRole("columnheader")).toHaveCount(0)
   const networks = page.getByRole("list", { name: "Networks" })
-  await expect(networks.getByRole("button", { name: "shop_backend", exact: true })).toBeVisible()
+  await expect(networks.getByRole("link", { name: "shop_backend", exact: true })).toBeVisible()
   const containers = page.getByRole("list", { name: "Containers" })
   await expect(containers.getByRole("button", { name: "shop-db-1" })).toBeVisible()
 
@@ -245,20 +283,63 @@ test("on a phone both lists read down the row and nothing scrolls sideways", asy
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   )
   expect(overflow).toBeLessThanOrEqual(1)
+
+  // Every chip of both strips is on the screen: they wrap rather than run off its edge.
+  for (const strip of ["Made by", "Which containers"]) {
+    const chips = page.getByLabel(strip, { exact: true }).getByRole("button")
+    const edges = await chips.evaluateAll((all) =>
+      all.map((chip) => {
+        const box = chip.getBoundingClientRect()
+        return { left: box.left, right: box.right }
+      }),
+    )
+    expect(edges.length).toBeGreaterThan(2)
+    for (const edge of edges) {
+      expect(edge.left).toBeGreaterThanOrEqual(0)
+      expect(edge.right).toBeLessThanOrEqual(390)
+    }
+  }
+
+  // A network with traffic, one with none and one with nothing on it are one
+  // height, and so is every container, on one network or on two.
+  await expect(networks.getByText(/↓ .*\/s/).first()).toBeVisible({ timeout: 10_000 })
+  for (const list of [networks, containers]) {
+    const boxes = await list.getByRole("listitem").evaluateAll((all) =>
+      all
+        .filter((item) => item.parentElement?.getAttribute("aria-label"))
+        .map((item) => {
+          const box = item.getBoundingClientRect()
+          return { y: box.y, height: box.height }
+        }),
+    )
+    expect(boxes.length).toBeGreaterThan(10)
+    expect(new Set(boxes.map((box) => Math.round(box.height))).size).toBe(1)
+  }
+
+  // A row opens the network's page.
+  await networks.getByRole("link", { name: "shop_backend", exact: true }).click()
+  await expect(page).toHaveURL(/\/docker\/networks\/shop_backend$/)
 })
 
-test("a stopped member stays on its network's sheet, which then offers no Remove", async ({
-  page,
-}) => {
+test("a reader sees every network and is offered no change", async ({ page }) => {
   await mockNetworks(page)
+  await page.route("**/api/v1/auth/session", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...user,
+        capabilities: ["read"],
+        user: { ...user.user, role: "readonly" },
+      }),
+    }),
+  )
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto(`/docker/networks?network=${id("monitoring_default")}`)
+  await page.goto("/docker/networks")
 
-  const sheet = page.getByRole("dialog")
-  const alertmanager = sheet.getByRole("table").getByRole("row").filter({
-    hasText: "monitoring-alertmanager-1",
-  })
-  await expect(alertmanager.getByText("exited")).toBeVisible()
-  await expect(sheet.getByText("3 running")).toBeVisible()
-  await expect(sheet.getByRole("button", { name: "Remove" })).toHaveCount(0)
+  const table = page.getByRole("table").first()
+  await expect(table.getByRole("link", { name: "shop_backend", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Create network" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Remove unused" })).toHaveCount(0)
+  await expect(table.getByRole("button")).toHaveCount(0)
 })

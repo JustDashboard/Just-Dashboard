@@ -717,7 +717,7 @@ test("the network list reads down the row on a phone", async ({ page }) => {
   await page.goto("/docker/networks")
   await expect(page.getByRole("columnheader")).toHaveCount(0)
   const networkList = page.getByRole("list").filter({ hasText: "172.17.0.0/16" })
-  await expect(networkList.getByRole("button", { name: "bridge" })).toBeVisible()
+  await expect(networkList.getByRole("link", { name: "bridge" })).toBeVisible()
   await expect(networkList.getByText("172.17.0.0/16")).toBeVisible()
   await expect(networkList.getByText("2 containers")).toBeVisible()
   await expect(networkList.getByText(/Docker's own/)).toBeVisible()

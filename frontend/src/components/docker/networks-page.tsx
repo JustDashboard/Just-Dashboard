@@ -6,7 +6,6 @@ import { Box, Cross, NetworkDevice, Plus, Trash } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
-import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useNow } from "@/components/deploy/vocabulary"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
@@ -21,48 +20,36 @@ import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useLiveTraffic } from "@/components/network/use-live-traffic"
 import { get } from "@/lib/api"
-import { containerRates } from "@/lib/container-usage"
 import { plural } from "@/lib/format"
-import type {
-  Container,
-  ContainerStats,
-  DockerEvent,
-  DockerNetwork,
-  DockerNetworkingInfo,
-  NetworkLivePoint,
-} from "@/lib/types"
+import type { DockerEvent, DockerNetwork, DockerNetworkingInfo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { membersKnown } from "@/lib/docker-networks"
 import { useSessionState } from "@/lib/view-state"
 import { HueKey, NetworkBand, type NetworkRate } from "@/components/docker/network-band"
 import { NetworkRows } from "@/components/docker/network-table"
-import {
-  ContainerNetworkRows,
-  type ContainerTraffic,
-  type Placement,
-} from "@/components/docker/network-members"
-import { NetworkSheet } from "@/components/docker/network-sheet"
+import { ContainerNetworkRows, type Placement } from "@/components/docker/network-members"
+import { useContainersLive, useMemberCounts } from "@/components/docker/network-live"
 import { AttachDialog, PruneDialog, RemoveNetworkDialog } from "@/components/docker/network-dialogs"
 import { NewNetworkDialog } from "@/components/docker/network-create"
 import {
+  NETWORK_FILTER_KEYS,
   OWNER_KINDS,
   addressPlan,
   endpointsByContainer,
+  filterNetworks,
   isUnused,
   networkChanges,
+  networkHref,
   networkHue,
   networkOrder,
   networkOwner,
-  type OwnerKind,
+  shelfLabel,
+  shelfOf,
 } from "@/components/docker/networks"
 
 /** How often the list is read; each read is one network list and one container list. */
 const POLL = 10_000
 
-/** A container's last minute of rates, at the socket's two-second frames. */
-const KEEP = 30
-
-type Shelf = OwnerKind | "unused" | ""
 type Lens = "several" | "default" | "stopped" | ""
 
 const LENSES: { value: Exclude<Lens, "">; label: string; title: string; tone?: "warning" }[] = [
@@ -104,7 +91,8 @@ const LENSES: { value: Exclude<Lens, "">; label: string; title: string; tone?: "
  * every container as a second table of where it sits — each network it is on
  * with its address, the names the others reach it by and its traffic — so
  * "can these two see each other" is answered by whether their rows share a
- * colour. A network opens its sheet; a container its own page.
+ * colour. A network opens its own page (`network-page.tsx`), which was a
+ * sheet over this table and its `?network=` until 0.8.7; a container its own.
  *
  * The page was a column of grey cards, each a name, a subnet and a count,
  * with the members one press away and nothing on it that moved. Its three
@@ -116,7 +104,6 @@ export function Networks() {
   const router = useRouter()
   const { can } = useAuth()
   const { host } = useMetrics()
-  const [selected, select] = useQuerySelection("network")
   const [creating, setCreating] = useState(false)
   const [attachTo, setAttachTo] = useState<DockerNetwork | null>(null)
   const [removing, setRemoving] = useState<DockerNetwork | null>(null)
@@ -135,13 +122,11 @@ export function Networks() {
     setCreating(open)
     if (!open && initialReservationId) setDismissedReservation(initialReservationId)
   }
-  const [query, setQuery] = useSessionState("docker.networks.query", "")
-  const [rememberedShelf, setShelf] = useSessionState<string>("docker.networks.shelf", "")
-  const shelf = (
-    ["compose", "dashboard", "standalone", "docker", "unused"].includes(rememberedShelf)
-      ? rememberedShelf
-      : ""
-  ) as Shelf
+  // Kept for the tab under keys a network's page reads too: its rail is this
+  // table as it was left.
+  const [query, setQuery] = useSessionState(NETWORK_FILTER_KEYS.query, "")
+  const [rememberedShelf, setShelf] = useSessionState<string>(NETWORK_FILTER_KEYS.shelf, "")
+  const shelf = shelfOf(rememberedShelf)
   const [lens, setLens] = useSessionState<Lens>("docker.networks.lens", "")
   const [onNetwork, setOnNetwork] = useSessionState<string>("docker.networks.on", "")
   const containersPanel = useRef<HTMLElement>(null)
@@ -156,55 +141,10 @@ export function Networks() {
     300_000,
   )
   const traffic = useLiveTraffic()
+  // Remembered for a network's page, whose waiting picture is drawn to it.
+  useMemberCounts(list.data)
 
-  // Undefined until the socket's first answer, so an empty host is told
-  // apart from one still being read.
-  const [listed, setContainers] = useState<Container[]>()
-  const containers = useMemo(() => listed ?? [], [listed])
-  const [containerTraffic, setContainerTraffic] = useState<Map<string, ContainerTraffic>>(
-    () => new Map(),
-  )
-  const previous = useRef(new Map<string, ContainerStats>())
-  const onContainers = useCallback((envelope: Envelope) => {
-    if (envelope.type === "containers") {
-      setContainers(envelope.data as Container[])
-      return
-    }
-    if (envelope.type !== "stats") return
-    const frames = envelope.data as ContainerStats[]
-    // Measured here rather than in the updater: React may run that later,
-    // after the next frame has replaced the one each rate is taken against.
-    const before = previous.current
-    previous.current = new Map(frames.map((f) => [f.id, f]))
-    const measured = frames.map((frame) => ({
-      frame,
-      rates: containerRates(frame, before.get(frame.id)),
-    }))
-    setContainerTraffic((held) => {
-      const next = new Map<string, ContainerTraffic>()
-      for (const { frame, rates } of measured) {
-        const prior = held.get(frame.id)
-        if (rates.rx === null || rates.tx === null) {
-          // One frame Docker could not measure keeps the last reading; a
-          // container that has lost its interfaces stops reading at all.
-          if (prior && !prior.held) next.set(frame.id, { ...prior, held: true })
-          continue
-        }
-        const point: NetworkLivePoint = {
-          t: Date.parse(frame.ts) / 1000,
-          rx: rates.rx,
-          tx: rates.tx,
-        }
-        next.set(frame.id, {
-          rx: rates.rx,
-          tx: rates.tx,
-          points: [...(prior?.points ?? []), point].slice(-KEEP),
-        })
-      }
-      return next
-    })
-  }, [])
-  useSocket("/docker/containers/stream", { onMessage: onContainers })
+  const { listed, containers, byId: byContainer, traffic: containerTraffic } = useContainersLive()
 
   const [events, setEvents] = useState<DockerEvent[]>([])
   const onEvents = useCallback((envelope: Envelope) => {
@@ -214,7 +154,6 @@ export function Networks() {
   useSocket("/docker/events/stream", { onMessage: onEvents, query: { kinds: "network" } })
 
   const networks = useMemo(() => [...(list.data ?? [])].sort(networkOrder), [list.data])
-  const byContainer = useMemo(() => new Map(containers.map((c) => [c.id, c])), [containers])
   const rates = useMemo(() => {
     const out = new Map<string, NetworkRate>()
     for (const network of networks) {
@@ -262,20 +201,10 @@ export function Networks() {
   }, [networks])
   const unused = networks.filter(isUnused)
 
-  const visibleNetworks = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    return networks.filter((n) => {
-      if (shelf === "unused" && !isUnused(n)) return false
-      if (shelf && shelf !== "unused" && networkOwner(n).kind !== shelf) return false
-      if (!needle) return true
-      return (
-        n.name.toLowerCase().includes(needle) ||
-        n.driver.toLowerCase().includes(needle) ||
-        n.subnets.some((s) => s.toLowerCase().includes(needle)) ||
-        n.usedBy.some((c) => c.toLowerCase().includes(needle))
-      )
-    })
-  }, [networks, query, shelf])
+  const visibleNetworks = useMemo(
+    () => filterNetworks(networks, query, shelf),
+    [networks, query, shelf],
+  )
 
   const lensCounts = useMemo(() => {
     const out = { several: 0, default: 0, stopped: 0 }
@@ -322,7 +251,7 @@ export function Networks() {
   // A failed container listing leaves members unread, which is not none.
   const unread = networks.filter((n) => !membersKnown(n))
   const version = info.data?.ServerVersion
-  const selectedNetwork = networks.find((n) => n.id === selected)
+  const openNetwork = (network: DockerNetwork) => router.push(networkHref(network.name))
 
   return (
     <Workspace
@@ -379,13 +308,16 @@ export function Networks() {
           title={version ? `Docker ${version}` : "Docker"}
           facts={
             <>
+              {/* The server and the joiners are left off a phone, where the
+                  line would run to a second one once the list landed and push
+                  the band down. */}
               {(host?.hostname || info.data?.Name) && (
-                <>
+                <span className="contents max-sm:hidden">
                   <HostFact product={platformProduct(host?.platform)}>
                     {host?.hostname || info.data?.Name}
                   </HostFact>
                   {list.data && <FactDot />}
-                </>
+                </span>
               )}
               {list.data ? (
                 <>
@@ -405,28 +337,40 @@ export function Networks() {
                 <span aria-hidden>&nbsp;</span>
               )}
               {lensCounts.several > 0 && (
-                <>
+                <span className="contents max-sm:hidden">
                   <FactDot />
                   <span className="numeric">{lensCounts.several} joining two or more</span>
-                </>
+                </span>
               )}
             </>
           }
-          aside={
-            <div className="flex flex-wrap items-center gap-3">
-              {list.data && (
-                <Verdict
-                  plan={plan}
-                  unused={unused.length}
-                  unread={unread.length}
-                  pressed={shelf === "unused"}
-                  onUnused={() => setShelf(shelf === "unused" ? "" : "unused")}
-                />
+          state={
+            list.data ? (
+              <Verdict
+                plan={plan}
+                unused={unused.length}
+                unread={unread.length}
+                pressed={shelf === "unused"}
+                onUnused={() => setShelf(shelf === "unused" ? "" : "unused")}
+              />
+            ) : (
+              // The verdict's line, empty: on a phone it has a row of its own,
+              // which is there before the list is.
+              <span aria-hidden className="text-xs">
+                &nbsp;
+              </span>
+            )
+          }
+          command={
+            <>
+              <WorkspaceHelp compact />
+              {can("service.control") && (
+                <Button size="sm" onClick={() => setCreating(true)}>
+                  <Plus className="size-4" />
+                  Create network
+                </Button>
               )}
-              <div className="flex items-center gap-1">
-                <WorkspaceHelp compact />
-              </div>
-            </div>
+            </>
           }
         />
 
@@ -443,7 +387,12 @@ export function Networks() {
           containersReady={listed !== undefined}
           containers={byContainer}
           now={now}
-          onOpen={(network) => select(typeof network === "string" ? network : network.id)}
+          onOpen={(network) => {
+            // A change names its network by id; one removed since opens nothing.
+            const found =
+              typeof network === "string" ? networks.find((n) => n.id === network) : network
+            if (found) openNetwork(found)
+          }}
         />
 
         {list.loading && !list.data ? (
@@ -465,7 +414,7 @@ export function Networks() {
                   </>
                 }
               >
-                <ChipStrip aria-label="Made by" className="mr-auto">
+                <ChipStrip aria-label="Made by" className={cn("mr-auto", CHIPS_WRAP)}>
                   {OWNER_KINDS.map(({ kind, label, title }) => {
                     const count = counts[kind] ?? 0
                     if (count === 0 && shelf !== kind) return null
@@ -503,9 +452,7 @@ export function Networks() {
                 />
                 {shelf && (
                   <FilterChip selected aria-label="Show every network" onClick={() => setShelf("")}>
-                    {shelf === "unused"
-                      ? "Unused"
-                      : OWNER_KINDS.find((k) => k.kind === shelf)?.label}
+                    {shelfLabel(shelf)}
                     <Cross aria-hidden className="size-3" />
                   </FilterChip>
                 )}
@@ -519,12 +466,6 @@ export function Networks() {
                     >
                       <Trash className="size-3.5" />
                       Remove unused
-                    </Button>
-                  )}
-                  {can("service.control") && (
-                    <Button size="sm" onClick={() => setCreating(true)}>
-                      <Plus className="size-3.5" />
-                      Create network
                     </Button>
                   )}
                 </div>
@@ -562,7 +503,6 @@ export function Networks() {
                     rows={visibleNetworks}
                     rates={rates}
                     containers={byContainer}
-                    onOpen={(network) => select(network.id)}
                     onAttach={setAttachTo}
                     onRemove={setRemoving}
                   />
@@ -592,7 +532,7 @@ export function Networks() {
                   </>
                 }
               >
-                <ChipStrip aria-label="Which containers" className="mr-auto">
+                <ChipStrip aria-label="Which containers" className={cn("mr-auto", CHIPS_WRAP)}>
                   {LENSES.map(({ value, label, title, tone }) => {
                     const count = lensCounts[value]
                     if (count === 0 && lens !== value) return null
@@ -664,16 +604,6 @@ export function Networks() {
               </PanelFooter>
             </Panel>
 
-            <NetworkSheet
-              id={selected}
-              listed={selectedNetwork}
-              rate={selectedNetwork ? rates.get(selectedNetwork.id) : undefined}
-              traffic={containerTraffic}
-              containers={byContainer}
-              onOpenChange={(open) => !open && select(null)}
-              onChanged={list.refresh}
-              onRemove={setRemoving}
-            />
             <AttachDialog
               open={attachTo !== null}
               networkId={attachTo?.id ?? null}
@@ -685,10 +615,7 @@ export function Networks() {
             <RemoveNetworkDialog
               network={removing}
               onOpenChange={(open) => !open && setRemoving(null)}
-              onRemoved={(network) => {
-                if (network.id === selected) select(null)
-                list.refresh()
-              }}
+              onRemoved={list.refresh}
             />
             <PruneDialog open={pruning} onOpenChange={setPruning} onPruned={list.refresh} />
             <NewNetworkDialog
@@ -706,6 +633,14 @@ export function Networks() {
     </Workspace>
   )
 }
+
+/**
+ * A run of chips that wraps on a phone. `ChipStrip` scrolls sideways there,
+ * which on this page cut the last owner off at the edge of a panel that has
+ * the height to spare: five chips are two short lines.
+ */
+const CHIPS_WRAP =
+  "max-sm:mx-0 max-sm:my-0 max-sm:flex-wrap max-sm:overflow-visible max-sm:px-0 max-sm:py-0"
 
 /**
  * The line's verdict: the pool spent or nearly, which is what fails the next
@@ -743,7 +678,9 @@ function Verdict({
         aria-pressed={pressed}
         onClick={onUnused}
         title="Each holds a block of the address pool"
-        className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
+        // A flex box, so the button is as tall as the verdict in it and the
+        // line keeps one height whichever verdict it holds.
+        className="inline-flex rounded-sm focus-ring hover:underline"
       >
         <Status tone="warning" label={`${plural(unused, "network")} unused`} />
       </button>
