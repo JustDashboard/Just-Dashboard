@@ -1,45 +1,90 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
-import { ArrowLeft, Globe, Logs, Pencil } from "@/components/icons"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { Tabs as TabsPrimitive } from "radix-ui"
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  CloudUpload,
+  Globe,
+  Logs,
+  Warning,
+} from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
-import { forgetSessionState, useSessionState } from "@/lib/view-state"
+import { useSessionState } from "@/lib/view-state"
 import type { DeploymentRequests, SiteSpec, UpstreamReport, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { Page, PageContext, PageState } from "@/components/page"
+import { useConfirm } from "@/components/confirm-dialog"
+import { IconAction } from "@/components/icon-action"
+import { Page, PageContext } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
-import { VerbBar } from "@/components/verbs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { TextShimmer } from "@/components/ui/text-shimmer"
+import { VerbMenu } from "@/components/verbs"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { EMPTY_REQUEST_QUERY, type RequestQuery } from "@/components/deploy/requests-workspace"
 import { siteProduct } from "@/components/proxy/marks"
 import { useProxy, useProxyRead } from "@/components/proxy/proxy-context"
-import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
-import { siteCert } from "@/components/proxy/site-filters"
+import { ServingStatus, SiteFeatures, SiteNotes, SiteTLS } from "@/components/proxy/site-marks"
+import {
+  CHIP_LABEL,
+  matchesChip,
+  siteCert,
+  sortSites,
+  type SiteChip,
+  type SiteSort,
+} from "@/components/proxy/site-filters"
 import { siteLogPlan } from "@/components/proxy/site-log-plan"
 import { SiteLogs, siteLogViews, type SiteLogView } from "@/components/proxy/site-logs"
 import { SiteRouteMap } from "@/components/proxy/site-route-map"
 import { siteVerdict, type SiteVerdict } from "@/components/proxy/site-overview"
-import { activeOwner } from "@/components/proxy/site-details"
-import { SiteForm } from "@/components/proxy/site-form"
+import { activeOwner, matchesSearch } from "@/components/proxy/site-details"
+import { SiteSettings, type LeaveGuard } from "@/components/proxy/site-form"
 import { retireRoute, routeRetirement, useSiteVerbs } from "@/components/proxy/site-verbs"
-import { useConfirm } from "@/components/confirm-dialog"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { SiteFileVerbs } from "@/components/proxy/vhosts-panel"
 import { SiteBalancing } from "@/components/proxy/site-balancing"
 import { SiteControls } from "@/components/proxy/site-controls-panel"
+import { SiteRail } from "@/components/proxy/site-rail"
+import {
+  SITE_TABS,
+  SITE_TAB_LABEL,
+  settingsView,
+  siteHref,
+  siteSettingsHref,
+  siteTab,
+  type SiteTab,
+} from "@/components/proxy/site-tabs"
 import { poolsOfSite } from "@/components/proxy/upstream-pools"
 
 /** The site's file read back: the form's fields, and where it logs. */
 type SiteRead = { spec: SiteSpec; managed: boolean; warnings: string[] }
 
-/** The site's verbs its page draws: the way here is the page itself. */
-const PAGE_VERBS = ["edit", "raw", "open", "scan", "retire"]
+/**
+ * The site's verbs its page draws. The way here is the page itself, and the
+ * ones that change what nginx serves — the switch, a rename, a delete — are
+ * the list's, which follows a reload through to what nginx then has loaded.
+ */
+const PAGE_VERBS = [
+  "deployment",
+  "edit",
+  "raw",
+  "open",
+  "scan",
+  "access-log",
+  "errors",
+  "download",
+  "retire",
+]
 
 const BACK = (
   <Link
@@ -50,57 +95,231 @@ const BACK = (
   </Link>
 )
 
-export function SitePage() {
-  const { name } = useParams<{ name: string }>()
-  const site = decodeURIComponent(name)
-  return <SiteBody key={site} name={site} />
+/** The route's segment as a site name; decoding a decoded name twice is harmless. */
+function decodeName(segment: string | undefined): string {
+  if (!segment) return ""
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
 }
 
 /**
- * One site, as a place: what it is and whether it is well, on the identity
- * line the section's other destinations open on, with its verbs beside the
- * way back; the way a request reaches it, drawn as the visitors, the names,
- * the engine and what answers behind it (`site-route-map.tsx`); and its logs
- * in the pane a deployment's are read in, where it is rather than on the
- * host Logs page it used to send the reader to, which knew it only as a path.
- * How it spreads its requests and what limits it sets come last: they are
- * how it is set up, read after whether it works.
+ * The chips the rail can answer from the listing and the certificates. Not
+ * live and Upstream down need what nginx has loaded and the health check,
+ * which the Sites page reads and a site's page does not: under one of those
+ * the rail lists every site rather than an empty column.
+ */
+const railChip = (chip: SiteChip): SiteChip =>
+  chip === "notlive" || chip === "down" ? "all" : chip
+
+/**
+ * One site, as a place of its own.
  *
- * It opened on four figures over the logs — requests a minute, server
- * errors, refused, upstream failures — and lost them at the operator's
- * request. Each went where it is said better: the rate and the probes refused
- * are the route's first node; the server errors are the identity line's
- * verdict, a press of which narrows Requests to them as the tile's did; and
- * the upstream failures are the Errors tab's count.
+ * It opens on the identity line the section's other destinations open on:
+ * the engine's mark, the site's name and whether it is serving, what it is,
+ * and at the far end whether it is well, the one command that edits it and
+ * the rest behind `⋯`. Under it its views, as the underlined strip with the
+ * view in the address (`?tab=`):
+ *
+ *   **Overview** — how a request reaches it, drawn as the visitors, the
+ *   names, the engine and what answers behind it (`site-route-map.tsx`);
+ *   what its link or its owner makes of it; how nginx spreads its requests
+ *   and what limits it sets.
+ *   **Logs** — its requests and errors in the pane a deployment's are read
+ *   in, where it is rather than on the host Logs page.
+ *   **Settings** — its whole configuration, as a deployment's settings are
+ *   read (`SiteSettings` in `site-form.tsx`). Until 0.8.7 this was a sheet
+ *   4,280 lines long opened over the page.
+ *
+ * The Sites list stays beside it from `xl` (`SiteRail`), with the list's own
+ * search, chip and order, so the next site is one press away; Alt+↑ and
+ * Alt+↓ walk it. On a phone the page is the one pane, and scrolls as a whole.
  *
  * Which logs those are is the site's own business (`site-log-plan.ts`): an
  * nginx site's two files, wherever its directives put them; a route on the
- * shared Caddy ingress, whose requests the ingress records for it. A site
- * whose requests go nowhere of its own says so, with the form that fixes it
- * a press away, because an empty Requests view reads as a site nobody visits.
+ * shared Caddy ingress, whose requests the ingress records for it.
  */
-function SiteBody({ name }: { name: string }) {
+export function SitePage() {
+  const params = useParams<{ name: string }>()
+  const search = useSearchParams()
+  const router = useRouter()
+  const name = decodeName(params.name)
   const { can } = useAuth()
   const admin = can("system.admin")
+  const asked = siteTab(search.get("tab"))
+  const view = settingsView(search.get("view"))
+
+  // The section's own read of the sites, which the Sites page answers from
+  // too: the page asking again on a timer of its own was a second read of
+  // the same list every thirty seconds.
+  const vhosts = useProxyRead("vhosts")
+  const certs = useProxyRead("certs")
+  const ports = useProxyRead("ports")
+  const hosts = useMemo(() => vhosts.data ?? [], [vhosts.data])
+  const vhost = hosts.find((v) => v.name === name)
+  // The form is an administrator's, for a file it saves back where it read
+  // it. Until the listing says which this is, the view asked for is kept.
+  const editable = admin && Boolean(vhost?.formEditable)
+  const tab: SiteTab = asked === "settings" && vhosts.data && !editable ? "overview" : asked
+
+  // Settings ask before unsaved changes are left: the form holds the
+  // question, and every way off it that is not a link comes through here.
+  const guardRef = useRef<LeaveGuard | null>(null)
+  const guarded = useCallback((go: () => void) => {
+    if (guardRef.current) guardRef.current(go)
+    else go()
+  }, [])
+  const setTab = useCallback(
+    // Replaced rather than pushed: the view is not a place Back should step through.
+    (next: string) =>
+      guarded(() => router.replace(siteHref(name, siteTab(next)), { scroll: false })),
+    [router, name, guarded],
+  )
+
+  const [chip, setChip] = useSessionState<SiteChip>("proxy.sites.chip.075", "all")
+  const [query, setQuery] = useSessionState("proxy.sites.query", "")
+  const [sort] = useSessionState<SiteSort>("proxy.sites.sort", "urgency")
+  const shownChip = railChip(chip)
+  const railed = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    const readings = { notLive: () => false, certs: certs.data }
+    return sortSites(
+      hosts.filter((v) => matchesChip(v, shownChip, readings) && matchesSearch(v, needle)),
+      // The hour's traffic is the Sites page's reading; without it the order is its usual one.
+      sort === "traffic" ? "urgency" : sort,
+    )
+  }, [hosts, shownChip, query, sort, certs.data])
+  const at = railed.findIndex((v) => v.name === name)
+  const step = (direction: number) => {
+    const next = at >= 0 ? railed[at + direction] : railed[direction > 0 ? 0 : railed.length - 1]
+    // The next site opens on the view on screen, except Settings: a form is
+    // gone to on purpose, not walked through.
+    if (next) {
+      guarded(() => router.push(siteHref(next.name, tab === "settings" ? "overview" : tab)))
+    }
+  }
+  const previous = { disabled: at <= 0, run: () => step(-1) }
+  const next = { disabled: railed.length === 0 || at >= railed.length - 1, run: () => step(1) }
+  const narrowed = shownChip !== "all" || query.trim() !== ""
+  const caption = vhosts.data
+    ? `${narrowed ? `${railed.length} of ${hosts.length}` : `${hosts.length} ${hosts.length === 1 ? "site" : "sites"}`}${shownChip !== "all" ? ` · ${CHIP_LABEL[shownChip]}` : sort === "urgency" ? " · worst first" : ""}`
+    : "Reading the sites…"
+
+  return (
+    <Workspace
+      name="Site"
+      stateKey="proxy.site.page"
+      refresh={vhosts.refresh}
+      commands={[
+        {
+          id: "previous",
+          label: "Previous site",
+          keys: "Alt+↑",
+          chord: "Alt+ArrowUp",
+          disabled: previous.disabled,
+          run: previous.run,
+        },
+        {
+          id: "next",
+          label: "Next site",
+          keys: "Alt+↓",
+          chord: "Alt+ArrowDown",
+          disabled: next.disabled,
+          run: next.run,
+        },
+      ]}
+    >
+      {/* Held to the window where the rail stands beside it, so the list and
+          the identity line stay put while a view scrolls; narrower, the page
+          is the one pane and scrolls as a whole. */}
+      <Page fill="xl" className="gap-0 md:gap-0">
+        <div className="flex min-w-0 flex-1 gap-5 xl:min-h-0">
+          <SiteRail
+            className="hidden w-64 shrink-0 xl:flex"
+            sites={railed}
+            current={name}
+            tab={tab}
+            loading={vhosts.loading}
+            listeners={ports.error ? undefined : ports.data}
+            query={query}
+            onQuery={setQuery}
+            filtered={shownChip !== "all"}
+            onClearFilter={() => setChip("all")}
+            caption={caption}
+          />
+          <SiteMain
+            key={name}
+            name={name}
+            admin={admin}
+            vhost={vhost}
+            editable={editable}
+            tab={tab}
+            setTab={setTab}
+            view={view}
+            guardRef={guardRef}
+            previous={previous}
+            next={next}
+          />
+        </div>
+      </Page>
+    </Workspace>
+  )
+}
+
+type Step = { disabled: boolean; run: () => void }
+
+function SiteMain({
+  name,
+  admin,
+  vhost,
+  editable,
+  tab,
+  setTab,
+  view,
+  guardRef,
+  previous,
+  next,
+}: {
+  name: string
+  admin: boolean
+  vhost: VHost | undefined
+  editable: boolean
+  tab: SiteTab
+  setTab: (tab: string) => void
+  view: ReturnType<typeof settingsView>
+  guardRef: React.RefObject<LeaveGuard | null>
+  previous: Step
+  next: Step
+}) {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
   const { status, loading, refresh: refreshStatus } = useProxy()
-  const [form, setForm] = useState({ open: false, session: 0 })
   const [raw, setRaw] = useState(false)
   const [asked, setAsked] = useState<SiteLogView>()
   const [query, setQuery] = useSessionState<RequestQuery>(
     `proxy.site.${name}.requests`,
     EMPTY_REQUEST_QUERY,
   )
-  const logsRef = useRef<HTMLDivElement>(null)
+  // A deployment writes its route again on every deploy, so its Settings
+  // open on that rather than on the form; "Edit anyway" is kept for the tab.
+  // The Sites list asks the same question before it sends a reader here, and
+  // says so in the address (`anyway=1`), which is taken off once it is read.
+  const [overridden, setOverridden] = useSessionState(`proxy.site.${name}.override`, false)
+  const search = useSearchParams()
+  const anyway = search.get("anyway") === "1"
+  const adopt = useEffectEvent(() => {
+    setOverridden(true)
+    router.replace(siteSettingsHref(name, view), { scroll: false })
+  })
+  useEffect(() => {
+    if (anyway) adopt()
+  }, [anyway])
 
-  // The section's own read of the sites, which the rail's marks and the
-  // Sites page answer from: the page asking again on a timer of its own was
-  // a second read of the same list every thirty seconds.
   const vhosts = useProxyRead("vhosts")
   const certs = useProxyRead("certs")
   const ports = useProxyRead("ports")
-  const vhost = vhosts.data?.find((v) => v.name === name)
   const nginx = vhost?.kind === "nginx"
   const read = usePoll(
     (signal) => get<SiteRead>(`/proxy/sites/${encodeURIComponent(name)}`, undefined, signal),
@@ -138,12 +357,11 @@ function SiteBody({ name }: { name: string }) {
     upstreams.refresh()
     hour.refresh()
   }
-  const openForm = () => setForm((f) => ({ open: true, session: f.session + 1 }))
 
   const verbs = useSiteVerbs({
     vhost: vhost ?? PLACEHOLDER,
     admin,
-    onEdit: openForm,
+    onEdit: () => setTab("settings"),
     onRaw: () => setRaw(true),
     onServed: () => {},
     onDuplicate: () => {},
@@ -165,17 +383,51 @@ function SiteBody({ name }: { name: string }) {
       }),
   }).filter((verb) => PAGE_VERBS.includes(verb.key))
 
+  const walk = (
+    <span className="flex items-center">
+      <IconAction label="Previous site" disabled={previous.disabled} onClick={previous.run}>
+        <ChevronUp />
+      </IconAction>
+      <IconAction label="Next site" disabled={next.disabled} onClick={next.run}>
+        <ChevronDown />
+      </IconAction>
+      <span className="max-sm:hidden">
+        <WorkspaceHelp compact />
+      </span>
+    </span>
+  )
+
   // A route on the Docker Caddy ingress is read through the ingress the
   // proxy's status names, so its page waits for that as an nginx site's
   // waits for its file: drawn before, it said the ingress was not running.
   const routed = vhost?.kind === "caddy" && !vhost.path && !vhost.name.startsWith("docker-caddy:")
   if (!vhosts.data || (nginx && !read.data && !read.error) || (routed && !status && loading)) {
-    return <PageState eyebrow={BACK} title={name} error={vhosts.error} onRetry={refresh} />
+    return (
+      <div className="flex min-w-0 flex-1 flex-col gap-5">
+        <PageContext eyebrow={BACK} title={name} actions={walk} />
+        {vhosts.error && !vhosts.data ? (
+          <ErrorState error={vhosts.error} onRetry={refresh} />
+        ) : (
+          // The page's own silhouette, so nothing moves when the site lands.
+          <>
+            <HostIdentity
+              className="border-b-0 pb-0"
+              mark={vhost ? siteProduct(vhost) : undefined}
+              fallback={Globe}
+              title={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
+              facts={<span>&nbsp;</span>}
+              state={<span>&nbsp;</span>}
+            />
+            <LoadingRows />
+          </>
+        )}
+      </div>
+    )
   }
   if (!vhost || !plan) {
     return (
-      <Page>
-        <PageContext eyebrow={BACK} title={name} />
+      <div className="flex min-w-0 flex-1 flex-col gap-5">
+        <PageContext eyebrow={BACK} title={name} actions={walk} />
         <EmptyState
           icon={Globe}
           title={`No site called ${name}`}
@@ -186,7 +438,7 @@ function SiteBody({ name }: { name: string }) {
             </Button>
           }
         />
-      </Page>
+      </div>
     )
   }
 
@@ -196,190 +448,283 @@ function SiteBody({ name }: { name: string }) {
   const cert = siteCert(vhost, certs.data)
   const summary = hour.data?.status === "available" ? hour.data.summary : undefined
   const verdict = siteVerdict({ vhost, summary, pools, cert })
+  const owner = activeOwner(vhost)
 
-  const views = siteLogViews(plan)
-  const view = asked && views.includes(asked) ? asked : views[0]
-  const failedOnly = view === "requests" && query.classes.length === 1 && query.classes[0] === "5xx"
-  // The verdict's figure is a question about the rows under it, as the tile
-  // it replaced was: pressed, Requests narrows to what it counts and comes
-  // into view; pressed again, it lets go.
+  const logViews = siteLogViews(plan)
+  const logView = asked && logViews.includes(asked) ? asked : logViews[0]
+  const failedOnly =
+    tab === "logs" &&
+    logView === "requests" &&
+    query.classes.length === 1 &&
+    query.classes[0] === "5xx"
+  // The verdict's figure is a question about the requests it counts, as the
+  // tile it replaced was: pressed, Logs opens narrowed to them; pressed
+  // again, it lets go.
   const narrowToFailed = () => {
     setQuery({ ...query, classes: failedOnly ? [] : ["5xx"] })
     setAsked("requests")
-    logsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    if (tab !== "logs") setTab("logs")
   }
 
+  // The one command at the line's end: the deployment that writes the route,
+  // the form, or the file, whichever this site has first; the rest in `⋯`.
+  const primary =
+    verbs.find((verb) => verb.key === "deployment") ??
+    verbs.find((verb) => verb.key === "edit") ??
+    verbs.find((verb) => verb.key === "raw")
+  const rest = verbs.filter((verb) => verb !== primary)
+  const tabs = SITE_TABS.filter((key) => key !== "settings" || editable)
+
   return (
-    <Page className="animate-rise">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
       {dialog}
-      <PageContext
-        eyebrow={BACK}
-        title={name}
-        actions={
-          verbs.length > 0 && <VerbBar verbs={verbs} menuLabel={`More actions for ${name}`} />
-        }
-      />
+      <div className="flex min-w-0 shrink-0 flex-col gap-5">
+        <PageContext eyebrow={BACK} title={name} actions={walk} />
 
-      {/* What the site is, as the facts the Sites card carries, laid out as
-          the line the section's other destinations open on, and at its end
-          whether it is well. */}
-      <HostIdentity
-        mark={siteProduct(vhost)}
-        fallback={Globe}
-        title={name}
-        facts={
-          <>
-            <span>{kindWord(vhost, spec)}</span>
-            {read.data && !read.data.managed && (
-              <>
-                <FactDot />
-                <span>written by hand</span>
-              </>
-            )}
-            <FactDot />
-            <SiteTLS vhost={vhost} />
-            {vhost.modified && (
-              <>
-                <FactDot />
-                <span>edited {relativeTime(vhost.modified)}</span>
-              </>
-            )}
-            <FactDot />
-            <ServingStatus vhost={vhost} />
-          </>
-        }
-        aside={
-          verdict && <Verdict verdict={verdict} pressed={failedOnly} onPress={narrowToFailed} />
-        }
-      />
+        {/* What the site is, as the facts the Sites row carries, laid out as
+            a project's header: beside its name whether it is serving and
+            whether it is well, and at the far end its command and the rest
+            of its verbs. */}
+        <HostIdentity
+          className="animate-rise border-b-0 pb-0"
+          mark={siteProduct(vhost)}
+          fallback={Globe}
+          label={`About ${name}`}
+          title={<span className="truncate">{name}</span>}
+          state={
+            <>
+              <ServingStatus vhost={vhost} />
+              {verdict && (
+                <Verdict verdict={verdict} pressed={failedOnly} onPress={narrowToFailed} />
+              )}
+            </>
+          }
+          facts={
+            <>
+              <span>{kindWord(vhost, spec)}</span>
+              {read.data && !read.data.managed && (
+                <>
+                  <FactDot />
+                  <span>written by hand</span>
+                </>
+              )}
+              <FactDot />
+              <SiteTLS vhost={vhost} />
+              {vhost.modified && (
+                <>
+                  <FactDot />
+                  <span>edited {relativeTime(vhost.modified)}</span>
+                </>
+              )}
+            </>
+          }
+          command={
+            primary && (
+              <Button size="sm" onClick={primary.run} disabled={primary.disabled}>
+                <primary.icon className="size-4" />
+                {primary.label}
+              </Button>
+            )
+          }
+          menu={rest.length > 0 && <VerbMenu verbs={rest} label={`More actions for ${name}`} />}
+        />
+      </div>
 
-      <SiteRouteMap
-        vhost={vhost}
-        spec={spec}
-        engine={{ product: siteProduct(vhost), name: engine }}
-        summary={summary}
-        recorded={Boolean(plan.requests)}
-        cert={cert}
-        pools={pools}
-        listeners={ports.data}
-      />
+      <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
+        <div className="flex shrink-0 border-b border-hairline">
+          <TabsPrimitive.List
+            aria-label={`Views of ${name}`}
+            className="flex min-w-0 [scrollbar-width:none] gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+          >
+            {tabs.map((key) => (
+              <TabsPrimitive.Trigger
+                key={key}
+                value={key}
+                className={tabClasses(tab === key, "h-10")}
+              >
+                {SITE_TAB_LABEL[key]}
+              </TabsPrimitive.Trigger>
+            ))}
+          </TabsPrimitive.List>
+        </div>
 
-      {nginx && !spec && read.error ? (
-        // Where an nginx site logs is its file's to say. Unread, the page
-        // does not guess: the guess was nginx's shared log, under a notice
-        // that the site kept no log of its own.
-        <ErrorState error={read.error} onRetry={read.refresh} />
-      ) : (
-        <>
-          {plan.unrecorded && (
-            <Notice
-              icon={Logs}
-              title={
-                plan.unrecorded === "off"
-                  ? "This site keeps no access log"
-                  : "This site has no access log of its own"
-              }
-            >
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span>
-                  {plan.unrecorded === "off"
-                    ? "Nothing records the requests it serves, so there are none to read here — its errors still are."
-                    : "Its requests go to nginx's shared log, syslog or a stream, where a line does not say which site answered it."}{" "}
-                  Turn its access log on in the site&rsquo;s form to read its requests here.
-                </span>
-                {admin && (
-                  <Button size="xs" variant="outline" onClick={openForm}>
-                    <Pencil className="size-3" />
-                    Edit
-                  </Button>
+        <TabsContent value="overview" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+          {tab === "overview" && (
+            <div className="flex min-w-0 flex-col gap-8 pb-2">
+              <SiteRouteMap
+                vhost={vhost}
+                spec={spec}
+                engine={{ product: siteProduct(vhost), name: engine }}
+                summary={summary}
+                recorded={Boolean(plan.requests)}
+                cert={cert}
+                pools={pools}
+                listeners={ports.data}
+              />
+              <SiteAbout vhost={vhost} />
+              {nginx && upstreams.data && (
+                <SiteBalancing pools={pools} evidence={upstreams.data.evidence} />
+              )}
+              {nginx && <SiteControls name={name} admin={admin} />}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="logs" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+          {tab === "logs" &&
+            (nginx && !spec && read.error ? (
+              // Where an nginx site logs is its file's to say. Unread, the
+              // page does not guess: the guess was nginx's shared log, under
+              // a notice that the site kept no log of its own.
+              <ErrorState error={read.error} onRetry={read.refresh} />
+            ) : (
+              <div className="flex min-w-0 flex-col gap-4 pb-2">
+                {plan.unrecorded && (
+                  <Unrecorded
+                    kind={plan.unrecorded}
+                    href={editable ? siteSettingsHref(name, "hardening") : undefined}
+                  />
+                )}
+                {plan.sources.length > 0 && logView ? (
+                  <div data-slot="site-logs">
+                    <SiteLogs
+                      key={plan.sources.map((s) => s.id).join("|")}
+                      name={name}
+                      plan={plan}
+                      engine={engine}
+                      view={logView}
+                      onViewChange={setAsked}
+                      query={query}
+                      onQueryChange={setQuery}
+                    />
+                  </div>
+                ) : (
+                  <EmptyState
+                    icon={Logs}
+                    title="Nothing to read for this site"
+                    description={
+                      status
+                        ? "The Caddy ingress that serves this route is not running, so neither its requests nor its errors can be read. Its state is on the Proxy overview."
+                        : "The proxy's state could not be read, so neither is which ingress serves this route, and its requests and errors are read through that ingress."
+                    }
+                    action={
+                      !status && (
+                        <Button size="sm" variant="outline" onClick={refreshStatus}>
+                          Try again
+                        </Button>
+                      )
+                    }
+                  />
                 )}
               </div>
-            </Notice>
-          )}
+            ))}
+        </TabsContent>
 
-          {plan.sources.length > 0 && view ? (
-            // The pane leads with its strip when a verdict brings it into
-            // view, rather than tucking it under the sticky chrome.
-            <div ref={logsRef} data-slot="site-logs" className="scroll-mt-4">
-              <SiteLogs
-                key={plan.sources.map((s) => s.id).join("|")}
-                name={name}
-                plan={plan}
-                engine={engine}
-                view={view}
-                onViewChange={setAsked}
-                query={query}
-                onQueryChange={setQuery}
-              />
-            </div>
-          ) : (
-            <EmptyState
-              icon={Logs}
-              title="Nothing to read for this site"
-              description={
-                status
-                  ? "The Caddy ingress that serves this route is not running, so neither its requests nor its errors can be read. Its state is on the Proxy overview."
-                  : "The proxy's state could not be read, so neither is which ingress serves this route, and its requests and errors are read through that ingress."
-              }
-              action={
-                !status && (
-                  <Button size="sm" variant="outline" onClick={refreshStatus}>
-                    Try again
-                  </Button>
-                )
-              }
-            />
-          )}
-        </>
-      )}
+        {editable && (
+          <TabsContent value="settings" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+            {tab === "settings" &&
+              (owner && !overridden && !anyway ? (
+                <EmptyState
+                  icon={CloudUpload}
+                  title={`${owner.project} writes this route`}
+                  description="Its next deploy replaces whatever is changed here with what the deployment's own settings say, so a lasting change belongs there."
+                  action={
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      <Button size="sm" asChild>
+                        <Link href={`/deploy/${owner.projectId}`}>Open deployment</Link>
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setOverridden(true)}>
+                        <Warning className="size-4" />
+                        Edit anyway
+                      </Button>
+                    </div>
+                  }
+                />
+              ) : (
+                <SiteSettings name={name} view={view} guardRef={guardRef} onSaved={refresh} />
+              ))}
+          </TabsContent>
+        )}
+      </Tabs>
 
-      {nginx && upstreams.data && (
-        <SiteBalancing pools={pools} evidence={upstreams.data.evidence} />
-      )}
-      {nginx && <SiteControls name={name} admin={admin} />}
-
-      <SiteForm
-        open={form.open}
-        editing={name}
-        session={form.session}
-        onOpenChange={(open) => {
-          setForm((f) => ({ ...f, open }))
-          if (!open) forgetSessionState("proxy.site.form.")
-        }}
-        onSaved={refresh}
-      />
       <ConfigEditor
-        open={raw && Boolean(vhost)}
+        open={raw}
         onOpenChange={(open) => !open && setRaw(false)}
-        path={vhost?.path ?? ""}
-        kind={vhost?.kind ?? "nginx"}
-        title={vhost?.name ?? "Configuration"}
-        readOnly={!admin || Boolean(vhost && activeOwner(vhost))}
-        siteDisabled={vhost?.kind === "nginx" && Boolean(vhost.enabledPath) && !vhost.enabled}
+        path={vhost.path}
+        kind={vhost.kind}
+        title={vhost.name}
+        readOnly={!admin || Boolean(owner)}
+        siteDisabled={vhost.kind === "nginx" && Boolean(vhost.enabledPath) && !vhost.enabled}
         onSaved={refresh}
-        actions={(busy) =>
-          vhost && (
-            <SiteFileVerbs
-              vhost={vhost}
-              admin={admin}
-              busy={busy}
-              onEdit={() => {
-                setRaw(false)
-                openForm()
-              }}
-              verbs={["open", "scan", "edit"]}
-            />
-          )
-        }
+        actions={(busy) => (
+          <SiteFileVerbs
+            vhost={vhost}
+            admin={admin}
+            busy={busy}
+            onEdit={() => {
+              setRaw(false)
+              setTab("settings")
+            }}
+            verbs={["open", "scan", "edit"]}
+          />
+        )}
       />
-    </Page>
+    </div>
   )
 }
 
 /**
- * Whether the site is well, at the identity line's end. A verdict that
+ * What the route picture cannot say about the site: a name in sites-enabled
+ * that does not serve its file, who writes it, where its file really is —
+ * the lines the Sites card carried under its route — and what it does
+ * besides naming and listening, one word each.
+ */
+function SiteAbout({ vhost }: { vhost: VHost }) {
+  const notes = <SiteNotes vhost={vhost} />
+  const tagged = Boolean(vhost.features?.length)
+  return (
+    <div data-slot="site-about" className="flex min-w-0 flex-col gap-2 empty:hidden">
+      {notes}
+      {tagged && (
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <SiteFeatures vhost={vhost} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A site whose requests are written nowhere of its own, said in one line
+ * with the way to change it: an empty Requests view reads as a site nobody
+ * visits.
+ */
+function Unrecorded({ kind, href }: { kind: "off" | "shared"; href?: string }) {
+  return (
+    <p
+      data-slot="site-unrecorded"
+      className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-body text-muted-foreground"
+    >
+      <Logs aria-hidden className="size-4 shrink-0" />
+      <span className="min-w-0">
+        {kind === "off"
+          ? "This site keeps no access log, so there are no requests to read; its errors still are."
+          : "This site has no access log of its own: its requests go to a log that does not say which site answered."}
+      </span>
+      {href && (
+        <Button size="xs" variant="outline" asChild>
+          <Link href={href}>Turn it on</Link>
+        </Button>
+      )}
+    </p>
+  )
+}
+
+/**
+ * Whether the site is well, beside whether it is serving. A verdict that
  * counts failed requests is a press away from them; the others say what is
- * wrong where nothing on the page narrows to it.
+ * wrong where nothing on the page narrows to it. It stood at the line's far
+ * end, in two lines, until the command and the menu took that place.
  */
 function Verdict({
   verdict,
@@ -391,7 +736,7 @@ function Verdict({
   onPress: () => void
 }) {
   const body = (
-    <span className="flex flex-col items-end gap-0.5 max-sm:items-start">
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2">
       <Status tone={verdict.tone} label={verdict.label} />
       {verdict.hint && <span className="text-hint text-muted-foreground">{verdict.hint}</span>}
     </span>
@@ -403,7 +748,7 @@ function Verdict({
       aria-pressed={pressed}
       aria-label={pressed ? "Show every request again" : "Show the requests that failed"}
       onClick={onPress}
-      className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover aria-pressed:bg-accent"
+      className="-mx-1.5 rounded-md px-1.5 py-0.5 focus-ring transition-colors hover:bg-row-hover aria-pressed:bg-accent"
     >
       {body}
     </button>
