@@ -312,7 +312,8 @@ never by hand. `database/shell/routes.ts` holds the one spelling of an id (`DATA
 no leading zero), which the layout, the rail and the palette all read, so `/databases/007` is not
 database 7 to one of them and an unknown address to another. An id no saved connection has is
 "Database not found" with a way back, never some other database; any other path under a database is
-"Page not found" inside its shell (`[id]/[...missing]/page.tsx`), rail and strip kept. A database's
+"Page not found" inside its shell (`[id]/[...missing]/page.tsx`), rail and header kept, drawn with
+the database's engine. A database's
 panel has Home alone and then Work, Schema, Insights and Operate (`database/shell/nav-groups.ts`),
 each holding only what the engine has, in the engine's words. The connection used to be a query
 parameter (`/databases/browse?conn=3`), and those addresses are still out there — a board stores the

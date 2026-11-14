@@ -518,7 +518,11 @@ in 0.8.6). The map (`/databases/map`) is the server map's canvas with one diagra
 — what reads it, the database, the container it runs in, the volume that keeps it and the backups
 that take it — its rail by engine, its arrangement kept per account under its own name,
 `?database=<id>` opening on one ([server map](../server-map.md#the-databases-map);
-`lib/database-systems.ts`, unit-tested). The control center opens a Metrics export dialog (the
+`lib/database-systems.ts`, unit-tested). On a phone the map is one pane at a time, the databases, the
+canvas and the inspector, picked from a bar at the foot (`MapCanvas panes`; the server map keeps the
+canvas alone). The control center opens on the server's line with *Add a database* as its one
+command; a card reads who is connected with its last hour and its newest dumps as a strip; and the
+`⋯` menu at the line's end opens a Metrics export dialog (the
 Prometheus URL, a metrics-only API key, a scrape config and how long activity is kept) and an MCP
 server dialog (`fleet/mcp-server-dialog.tsx`: the MCP endpoint, the account's MCP keys with what
 each reaches, a key made for chosen databases each to read or change — protected ones and non-SQL
@@ -537,8 +541,12 @@ its rows now and after, its first rows under two-line column heads naming each c
 and the generator filling it (changed there), and the statement a row is inserted with — and inserts
 them behind `SqlReview` for a role that may change data on an unprotected connection; the preview is
 every role's, and what was written, refused or left out is said table by table with a link to each
-table's Data. Home draws how the database is used (readers, what it holds, its dumps), every
-activity view as a chart and its server log followed live. Performance opens on who is connected
+table's Data. Add a database (`/databases/new`) draws what is about to be made beside its catalogue
+until an engine is picked (`connect/picture.tsx`): the engine as a mark not added yet, wired to the
+container or the address and on to this dashboard. Home draws how the database is used (readers, what it holds, its dumps), one line each
+for what it runs as, where it is reachable from and its dumps, every activity view as a line of
+words with the chosen window's shape (the charts are Performance's; a stopped server keeps them),
+and its server log followed live. Performance opens on who is connected
 right now (each client as its program's logo, wired to what its sessions are doing) over the
 recorded activity charts; Redis and MongoDB charts open on the recorder's last hour. Where
 PostgreSQL never loaded pg_stat_statements, *Turn on statement statistics* (Performance →

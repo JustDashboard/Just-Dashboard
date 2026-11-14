@@ -3337,13 +3337,30 @@ and their resource name in the first facts or identity row. The deployment fleet
 pages and create command with the list filters; an empty fleet has its create command in the empty
 state.
 The Databases section omits the top metric-card sections on every page. The control center starts
-with the server's databases as an identity line — its commands at the line's end beside the verdict —
-then a band of storage, sessions and backups, then the saved databases as cards with search, engine
+with the server's databases as an identity line laid out as a project's header (0.8.7): the engines
+as the mark, the server's name with the verdict after it, the figures as facts with no dot between
+them, *Add a database* as the one command and a `⋯` menu holding the rest (Metrics export, MCP
+server, Scan this server again, which were three grey controls beside the command). The line is
+drawn while the fleet is being read, when the read failed and with no database connected, so it is
+in place from the first paint; an empty server keeps it and leaves the command to its empty state.
+Then a band of storage, sessions and backups (each Backups standing marked with the engine of the
+database its line names, not a bare count), then the saved databases as cards with search, engine
 chips and how they are shelved. The attention findings it opened on were removed in 0.7.1; each fix they carried is a
 verb on the database's card. The former metric-card `?show=` filters no longer narrow the inventory.
-Individual database cards retain the facts needed to compare connections. A database home starts with its
-identity line, then a picture of how it is used, its recorded activity, its server log, its rankings
-and its reference blocks (below). Activity is recorded by the backend every 30 seconds
+Individual database cards retain the facts needed to compare connections, and read them as one line
+rather than three figures under three labels (`fleet/fleet-card.tsx`, 0.8.7): who is connected in
+words ("4 sessions open") with the last hour of it as a line in the database's hue, its newest dumps
+as the strip a database's own Backups draws with "backed up 3h ago" under it, and what it holds as
+words under the reading ("23.4 MB stored · 13 tables"). The hour is the recorder's history for that
+database (`fleet/trend.ts`, unit-tested), asked once and then every five minutes; the strip is the
+backup summary's `recent`. Every part keeps its place with nothing to draw, so a card with no
+recorded hour, one never dumped and one that failed stand as tall. A collector that could not read
+(*Found on this server*) is drawn as the product draws any missing thing: Docker's own unavailable
+state with the step that fixes it (`DockerMissing`), the daemon's sentence folded away, and no
+claim that everything found is connected. A database home starts with its
+header, then a picture of how it is used with one line each for what it runs as, where it is reachable
+from and its dumps, its recorded activity as lines, its server log, its rankings and the server's
+other databases (below). Activity is recorded by the backend every 30 seconds
 while the dashboard runs, including when no database page is open. Performance opens on its view
 strip, Advisor on its findings with severity and category filters, Access on its accounts and list
 filters, and Backups on its schedule state, next run, action and dump list. These controls stay beside
@@ -3477,6 +3494,25 @@ identity line and no tiles (the Databases rule above); what changed, block by bl
 - **The reference blocks** — Runs as, Reachable from, Backups — and the file's facts are `FactRow`s
   (`blocks.tsx`): the name on the left at the body's size, the value beside it, a hairline under each,
   as a project's Runtime lists what a container may use.
+
+**The home lost its charts, its columns and its footnotes in 0.8.7**, to read as a project's Overview
+does. *Activity* is one `ReadingLine` a view (`home/activity-lines.tsx`, worded by `home/lines.ts`,
+unit-tested): a mark in the measurement's hue, the newest reading as words ("12 open of 100", "10
+transactions a second") with the view's other measures after it, and the chosen window as the shape
+at the line's end. The block's link and every line open Performance, where the charts with their
+axes, Min/Mean/Max/Now and the marks on the time axis are; the range stays on the title's line, with
+how long the record is kept beside it and how it is collected on the pointer. A line is one height
+with a reading and without. A server that is not answering keeps its recorded activity as charts
+(`Activity`): a line says what a measure reads now, and a stopped server has no now. *Runs as*,
+*Reachable from* and *Backups* are one line each directly under the picture (`ServerLines` in
+`home/reference.tsx`): a mark, the thing in a name or a word, one run of facts with no labels, and
+the way to the page that changes them at the line's end. What a reach word means in full is behind
+an ⓘ, not a sentence in the line; how long the server has been up is a fact of *Runs as* rather than
+of the identity line, where it arrived late and wrapped it. A sentence under a block became a fact
+on its title's line with the whole of it on the pointer ("share of runtime since 42d ago", "by
+rows", "of the last 20 kept · slower than 100 ms"). The header keeps one brand-faced command (*Open
+data*, in the engine's own word) and *Connect* as the one outline verb; *Query* is a word in the `⋯`
+menu, on every page of the database, a workbench's own head included (`useOpenVerbs`).
 
 **A database's Performance took the home's shape in 0.7.5**, at the operator's request — "more
 alive, more real logos and colouring" — because beside the new home it read as the grey page of the
