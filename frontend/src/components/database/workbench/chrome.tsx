@@ -1,7 +1,6 @@
 "use client"
 
 import {
-  Fragment,
   createContext,
   useContext,
   useId,
@@ -77,7 +76,6 @@ export function WorkbenchFrame({
   bar,
   verbs,
   menu,
-  full,
   children,
 }: {
   ref?: React.Ref<HTMLDivElement>
@@ -92,8 +90,6 @@ export function WorkbenchFrame({
   verbs?: React.ReactNode
   /** Verbs of the page itself for the head's menu, after those its parts hand up. */
   menu?: readonly Verb[]
-  /** The frame is the whole window (the diagram's full screen): the head goes. */
-  full?: boolean
   children: React.ReactNode
 }) {
   const { engine } = useDatabase()
@@ -114,7 +110,7 @@ export function WorkbenchFrame({
           className,
         )}
       >
-        <FrameHead hidden={full} onSlot={setSlot} />
+        <FrameHead onSlot={setSlot} />
         <div data-slot="workbench-columns" className="relative flex min-h-0 min-w-0 flex-1">
           {children}
         </div>
@@ -160,10 +156,8 @@ function FrameMenu({ verbs }: { verbs: readonly Verb[] }) {
 }
 
 function FrameHead({
-  hidden,
   onSlot,
 }: {
-  hidden?: boolean
   /** Told the element the page's verbs are drawn in. */
   onSlot: (node: HTMLElement | null) => void
 }) {
@@ -174,10 +168,7 @@ function FrameHead({
     <div
       data-slot="database-strip"
       data-head="workbench"
-      className={cn(
-        "@container shrink-0 border-b border-hairline bg-surface-header",
-        hidden && "hidden",
-      )}
+      className="@container shrink-0 border-b border-hairline bg-surface-header"
     >
       {/* Narrower than one row holds it folds on purpose, as the Git head
           does: who, with the menu at its end, then the page's verbs on a line
@@ -202,44 +193,47 @@ function FrameHead({
           </Tooltip>
           <EngineMark engine={engine} size="sm" />
           <div className="min-w-0 shrink">
-            <ConnectionSwitcher inset className="font-semibold" />
+            {/* Whether it answers stands beside the name, so the line under
+                them has the block's whole width for the two words a
+                workbench must not lose on a phone. */}
+            <div className="flex min-w-0 items-center gap-2.5">
+              <ConnectionSwitcher inset className="font-semibold" />
+              <DatabaseStatusMark status={status} />
+            </div>
             {/* What it is for comes before what it is: "production" and
-                "protected" are the two words a workbench must not lose, and
-                the facts after them give way first. */}
+                "protected" stay, and the facts after them give way first. */}
             <div className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
               {labelled && (
-                <span data-slot="database-labels" className="flex min-w-0 items-center gap-1.5">
-                  <EnvironmentTag environment={conn.environment} />
+                <span data-slot="database-labels" className="flex shrink-0 items-center gap-1.5">
+                  <EnvironmentTag environment={conn.environment} className="max-w-32" />
                   {readOnly && <ProtectedTag />}
                 </span>
               )}
               <span
                 className={cn(
-                  "flex min-w-0 shrink-[1000] items-center gap-1.5 overflow-hidden",
+                  "flex min-w-0 shrink-[1000] items-center overflow-hidden",
                   labelled && "@max-xl:hidden",
                 )}
               >
                 {facts.map((fact, index) => (
-                  <Fragment key={fact.key}>
+                  <span
+                    key={fact.key}
+                    title={fact.title ?? fact.text}
+                    className={cn(
+                      "flex items-center gap-1.5",
+                      // The address and the database go before the engine does.
+                      index === 0 ? "shrink-0" : "min-w-0 @max-md:hidden",
+                      (index > 0 || labelled) && "pl-1.5",
+                    )}
+                  >
+                    {/* Inside the fact, so a fact that gives way takes its dot. */}
                     {(index > 0 || labelled) && <FactDot />}
-                    <span
-                      title={fact.title ?? fact.text}
-                      className={cn(
-                        "truncate",
-                        fact.mono && "font-mono",
-                        // The address and the database go before the engine does.
-                        index === 0 ? "shrink-0" : "min-w-0",
-                        index > 0 && "@max-md:hidden",
-                      )}
-                    >
-                      {fact.text}
-                    </span>
-                  </Fragment>
+                    <span className={cn("truncate", fact.mono && "font-mono")}>{fact.text}</span>
+                  </span>
                 ))}
               </span>
             </div>
           </div>
-          <DatabaseStatusMark status={status} className="ml-1" />
         </div>
 
         <div

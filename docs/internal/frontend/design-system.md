@@ -233,6 +233,29 @@ taking a frame:
   and with nothing below it the first surface the body draws — a row's hover wash, a table header —
   butted into it and the rule read as an edge of that surface rather than as the line under the title.
 
+**A database's workbench has one head, and it is the frame's.** Data, Query, Schema and the Diagram
+stood under the database's strip and each opened on a toolbar of its own: two bars before the work,
+with unnamed glyphs among the commands. They now share one head inside the frame
+(`components/database/workbench/chrome.tsx`, `WorkbenchFrame`), the Git workspace's bar for a
+database: the way back to its Home, the engine's mark, the name as the switcher over one micro line
+(the environment and *protected* first, then engine, address and database, which give way before
+they do), whether it answers, then the page's verbs, Connect and one `⋯`. The shell draws no strip
+over these four (`shell/database-shell.tsx`, where the engine has the page). A part of the page hands
+its verbs up rather than the page being rebuilt around the head: `HeadVerbs` draws its children in
+the head's verb slot and `useHeadMenu` puts verbs in the menu, under the page's name and above the
+database's own. The rules it keeps: **one** brand-faced command in the head (Insert row, Insert, Add
+label or Edit; on Query the command is Run, which stays between the statement and its result with
+Explain beside it, the row limit inside Run's menu and Format and Save in the head's); every
+icon-only control of a workbench (read again, show or hide a side column, lay out the other way,
+clear the transcript) is a word in the menu; an object's own verbs (a table's rename and drop) stay
+beside the object's name, not among the database's. What a schema or a table amounts to is one
+`FactsLine` under its name ("~9,000 rows · 3.2 MB · owned by app", `workbench/table-facts.ts`),
+never a strip of captioned figures, and a table's Statistics are sentences
+(`schema/stat-sentences.ts`). The Diagram's canvas is the maps': a zoom bar at its foot (out, the
+size as a figure, in, Fit, tidy), the inspector's toggle and full screen floating at its top right,
+the keys as caps at the foot of the inspector, and no minimap. Below the width where a side column
+lies over the work each is one pane with a `PaneBar` (`workspace-interactions.md`).
+
 **A picture of things wired through one hub is `WireFlow`.** Most of the pictures above have one
 shape — a column of things on the left, this server (or an engine, a tunnel, a resolver) in the middle,
 a column on the right, a line from each thing to the hub — and until 0.8.7 each drew it by hand on

@@ -261,9 +261,9 @@ export function ErDiagram() {
       )}
     >
       {/* Framed: a canvas is a working region with its own scroll (§2), under
-          the head every workbench of a database has. In full screen the head
-          goes, and the canvas's own floats carry the way back. */}
-      <WorkbenchFrame section="diagram" full={fullscreen || immersive}>
+          the head every workbench of a database has. The head stays in full
+          screen: Export and the menu are in it. */}
+      <WorkbenchFrame section="diagram">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {ready ? (
             <ReactFlowProvider>
@@ -1148,8 +1148,7 @@ function Canvas({
             onUnlock={() => update({ locked: false })}
           />
           {/* The panel and the whole screen, on the canvas they act on, as
-              the server's map has them. They are the two controls that must
-              be there when the frame's head is not: in full screen. */}
+              the server's map has them. */}
           <div className={cn(FLOAT, "top-3 right-3")}>
             <IconAction
               label={inspector ? "Hide the inspector (I)" : "Show the inspector (I)"}
@@ -1199,22 +1198,20 @@ function Canvas({
         )}
       </div>
 
-      {!full && (
-        <PaneBar<"diagram" | "inspector">
-          label="Diagram"
-          active={inspector ? "inspector" : "diagram"}
-          onPick={(pane) => setAskedFor(pane === "inspector")}
-          stops={[
-            { key: "diagram", label: "Diagram", icon: <Layout /> },
-            {
-              key: "inspector",
-              // Named for what it would be about.
-              label: focused ? "Table" : pickedRelation ? "Relation" : "Tables",
-              icon: <SidebarRightOpen />,
-            },
-          ]}
-        />
-      )}
+      <PaneBar<"diagram" | "inspector">
+        label="Diagram"
+        active={inspector ? "inspector" : "diagram"}
+        onPick={(pane) => setAskedFor(pane === "inspector")}
+        stops={[
+          { key: "diagram", label: "Diagram", icon: <Layout /> },
+          {
+            key: "inspector",
+            // Named for what it would be about.
+            label: focused ? "Table" : pickedRelation ? "Relation" : "Tables",
+            icon: <SidebarRightOpen />,
+          },
+        ]}
+      />
 
       {/* One menu for every table, opened at the point it was asked for from —
           a table's own button or a right-click — rather than a menu per node.

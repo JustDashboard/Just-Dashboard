@@ -54,7 +54,7 @@ const NO_STAGED: Record<string, number> = {}
 const NO_VERBS: Verb[] = []
 
 /** The frame's width under which a table's rows are read as cards rather than a grid. */
-const CARDS_UNDER = 640
+const CARDS_UNDER = 480
 
 /** The panes of the table editor where it shows one at a time. */
 type DataPane = "tables" | "rows" | "details"
@@ -133,13 +133,17 @@ export function SqlData() {
   // the window answers.
   const [frame, frameWidth] = useColumnWidth<HTMLDivElement>()
   const windowWide = useMediaQuery("(min-width: 1024px)")
-  const windowPhone = useMediaQuery("(max-width: 639px)")
+  const windowPhone = useMediaQuery("(max-width: 479px)")
   const [railPinned, setRailPinned] = useViewState("databases.data.rail", true)
   const [railWidth, setRailWidth, resetRailWidth] = usePanelSize(
     "databases.data.rail",
     RAIL.fallback,
   )
-  const [inspecting, setInspecting] = useViewState("databases.data.inspector", false)
+  const [inspectingKept, setInspectingKept] = useViewState("databases.data.inspector", false)
+  // Laid over the table the row panel is a pane somebody opened, not a
+  // column they keep: a phone that remembered a desk's open panel arrived on
+  // "No row selected" with the rows under it.
+  const [inspectingOver, setInspectingOver] = useState(false)
   const [inspectorWidth, setInspectorWidth, resetInspectorWidth] = usePanelSize(
     "databases.data.inspector",
     INSPECTOR.fallback,
@@ -151,6 +155,8 @@ export function SqlData() {
     railPinned,
   )
   const railBeside = panes.rail === "beside"
+  const inspecting = panes.inspector === "over" ? inspectingOver : inspectingKept
+  const setInspecting = panes.inspector === "over" ? setInspectingOver : setInspectingKept
   // Narrower than a grid can be read at, rows are cards (`row-cards.tsx`).
   const cards = frameWidth > 0 ? frameWidth < CARDS_UNDER : windowPhone
 

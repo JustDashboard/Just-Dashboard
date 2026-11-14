@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 import { heldResponse, recordProgress } from "./progress-recording"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
+import { head, headMenu, paneBar, showPane } from "./database-workbench"
 
 /**
  * MongoDB: documents behind a query bar, the aggregation builder with the
@@ -1517,7 +1518,7 @@ test.describe("documents", () => {
     mongo.collections.users.docs[0] = doc(
       USERS[0].canonical.replace('"age":{"$numberInt":"19"}', '"age":{"$numberInt":"40"}'),
     )
-    await page.getByRole("button", { name: "Read the documents again" }).click()
+    await headMenu(page, "Read the documents again")
     const pending = documents(page).first().locator("[data-slot=mongo-pending]")
     await expect(pending).toContainText("has been written to since this edit was made")
     await pending.getByRole("button", { name: "Update" }).click()
@@ -2745,4 +2746,99 @@ test("an expired streamed export rechecks once and returns to sign-in", async ({
   await expect(page).toHaveURL(/\/login\?reason=session$/)
   await expect(page.getByText("Your session ended. Sign in again to continue.")).toBeVisible()
   expect(rechecks).toBe(1)
+})
+
+/* ------------------------------------------- the frame's head, and a phone */
+
+test("the MongoDB workbenches stand under the frame's one head, with the collection's verbs in it", async ({
+  page,
+}) => {
+  await mockMongo(page)
+  await page.goto(collection("users"))
+  await expect(page.locator("[data-slot=mongo-documents]")).toBeVisible()
+  await expect(page.locator("[data-slot=database-strip]")).toHaveCount(1)
+  await expect(page.locator("[data-slot=mongo-workbench] [data-slot=database-strip]")).toHaveCount(
+    1,
+  )
+  await expect(head(page)).toContainText("MongoDB")
+  await expect(head(page).locator("[data-slot=workbench-verbs]").getByRole("button")).toHaveText([
+    "Insert",
+    "Import",
+    "Export",
+  ])
+
+  // Reading again and the collections' column are words in the one menu.
+  await head(page)
+    .getByRole("button", { name: /^Actions for / })
+    .click()
+  await expect(page.getByRole("menuitem").nth(0)).toHaveText("Read the documents again")
+  await expect(page.getByRole("menuitem").nth(1)).toHaveText("Hide the collections")
+  await page.getByRole("menuitem", { name: "Hide the collections" }).click()
+  await expect(rail(page)).toHaveCount(0)
+  await headMenu(page, "Show the collections")
+  await expect(rail(page)).toBeVisible()
+
+  // Aggregations and Schema are the same frame.
+  for (const path of [QUERY, SCHEMA]) {
+    await page.goto(`${path}?db=${DB}&collection=users`)
+    await expect(head(page)).toBeVisible()
+    await expect(page.locator("[data-slot=database-strip]")).toHaveCount(1)
+  }
+})
+
+test("on a phone the collections and the open one are two panes of the MongoDB workbench", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockMongo(page)
+  await page.goto(`${DATA}?db=${DB}`)
+  await expect(rail(page)).toBeVisible()
+  await expect(paneBar(page).getByRole("tab")).toHaveText(["Collections", "Documents"])
+  const foot = (await paneBar(page).boundingBox())!
+  expect(Math.round(foot.y + foot.height)).toBe(844)
+
+  // With none open the other pane is what the database holds.
+  await showPane(page, "Documents")
+  await expect(rail(page)).toHaveCount(0)
+  await showPane(page, "Collections")
+  await expect(rail(page)).toBeVisible()
+
+  // Choosing one puts the collections away.
+  await rail(page)
+    .getByRole("link", { name: /^users/ })
+    .click()
+  await expect(page.locator("[data-slot=mongo-documents]")).toBeVisible()
+  await expect(rail(page)).toHaveCount(0)
+  await expect(paneBar(page).getByRole("tab", { name: "Documents" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+})
+
+test("the MongoDB workbenches, state by state @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to save the screenshots")
+  test.setTimeout(180_000)
+  const shots = process.env.JD_SHOTS!
+  for (const width of [1280, 390]) {
+    const phone = width === 390
+    await page.setViewportSize({ width, height: phone ? 844 : 800 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockMongo(page)
+    const shot = async (name: string) => {
+      await page.waitForTimeout(500)
+      await page.screenshot({ path: `${shots}/after-mongo-${name}-${width}.png` })
+    }
+    await page.goto(`${DATA}?db=${DB}`)
+    await expect(rail(page)).toBeVisible()
+    await shot("collections")
+    await page.goto(collection("users"))
+    await expect(page.locator("[data-slot=mongo-documents]")).toBeVisible()
+    await shot("documents")
+    await page.goto(`${QUERY}?db=${DB}&collection=users`)
+    await expect(head(page)).toBeVisible()
+    await shot("aggregations")
+    await page.goto(`${SCHEMA}?db=${DB}&collection=users`)
+    await expect(head(page)).toBeVisible()
+    await shot("schema")
+  }
 })

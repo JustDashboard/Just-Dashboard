@@ -84,7 +84,9 @@ export function RedisKeys() {
   const walk = useKeyWalk(
     redis,
     epoch,
-    tree && (view === "tree" || (wide && selected === undefined)),
+    // Walked for the tree, and for the pane that reads it wherever that
+    // pane is on screen: beside the list, or as a phone's second pane.
+    tree && (view === "tree" || ((wide || !railOver) && selected === undefined)),
   )
 
   const open = (key: RedisBytes | undefined) => {

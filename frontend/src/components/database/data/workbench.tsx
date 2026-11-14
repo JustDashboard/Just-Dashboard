@@ -316,9 +316,13 @@ export function TableWorkbench({
     }),
     [columns, page, changeSet.changes, rowId],
   )
+  // A phone reaches the panel from the bar as well as from a card: with no
+  // row chosen yet it opens on the first, not on an instruction to press a
+  // cell of a grid that is not there.
+  const shownRow = cards && activeRow < 0 ? 0 : activeRow
   const inspected = useMemo(
-    () => (inspecting && view.view === "data" ? inspectRow(source, activeRow) : null),
-    [inspecting, view.view, source, activeRow],
+    () => (inspecting && view.view === "data" ? inspectRow(source, shownRow) : null),
+    [inspecting, view.view, source, shownRow],
   )
 
   /* ------------------------------------------------------- the staged set */
@@ -1000,7 +1004,7 @@ export function TableWorkbench({
         label={`${table} rows`}
         source={source}
         offset={page?.offset ?? 0}
-        active={inspecting ? activeRow : -1}
+        active={activeRow}
         readOnlyReason={reason}
         rowErrors={rowErrors}
         loading={browse.loading || detail.loading}
