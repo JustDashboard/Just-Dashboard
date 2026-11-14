@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils"
 /**
  * The marks an image is drawn with wherever it appears: its row in the table,
  * its row in the rail beside another image's page, and its own page's line.
+ * The table keeps its own registry column (`image-table`), whose words are a
+ * reading in lower case with the reason an answer is missing on hover.
  */
 
 /** The image as the product it is; a layer with no name keeps the tile with a glyph in it. */
@@ -66,17 +68,14 @@ export function ReferenceWords({ reference }: { reference: string }) {
 export function RegistryState({
   state,
   pulling,
-  lower,
   className,
 }: {
   state: Freshness
   /** Its tag is being pulled right now. */
   pulling?: boolean
-  /** In a table's column the answer is a reading, in lower case; beside a title it is a state. */
-  lower?: boolean
   className?: string
 }) {
-  const label = lower ? FRESHNESS_LABEL[state].toLowerCase() : FRESHNESS_LABEL[state]
+  const label = FRESHNESS_LABEL[state]
   if (pulling) {
     return (
       <span className={cn("text-xs font-medium", className)}>
