@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { Box } from "@/components/icons"
 import { dedupeEvents } from "@/lib/docker-events"
 import { bytes, percent, plural } from "@/lib/format"
@@ -9,11 +9,10 @@ import type { Container, ContainerStats, DockerEvent } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { SearchInput } from "@/components/page"
 import { ProductLogo, containerProduct } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
-import { LoadingRows } from "@/components/state"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
+import { DockerRail, DockerRailRow } from "@/components/docker/item-rail"
 import {
   CONTAINER_FILTER_KEYS,
   DEFAULT_CONTAINER_SORT,
@@ -124,10 +123,11 @@ export function useContainerRail() {
  * as a dot in the logo's corner, its name, its project or how it stopped,
  * and, while it runs, its two readings; the one on screen is filled.
  *
- * The processes and the services have the same column (`procs/process-rail`,
- * which this copies); the rows hold their order while the pointer or focus is
- * in the column (`useInspectionOrder`), so a container that fails under the
- * pointer does not move the row about to be pressed.
+ * The column itself is the one every Docker item's page has (`item-rail.tsx`);
+ * this file is where the list comes from, and the container's row. The rows
+ * hold their order while the pointer or focus is in the column
+ * (`useInspectionOrder`), so a container that fails under the pointer does not
+ * move the row about to be pressed.
  */
 export function ContainerRail({
   rows,
@@ -162,78 +162,34 @@ export function ContainerRail({
   bindings: React.HTMLAttributes<HTMLElement>
   className?: string
 }) {
-  const here = (row: Container) => row.id === current || row.name === current
-  const listed = rows.some(here)
-  const pinned = !listed && currentRow ? currentRow : undefined
-  const list = useRef<HTMLOListElement>(null)
-  // The container on screen is kept in view: opened from a link or by Alt+↓
-  // past the column's edge, it would otherwise be off its own list.
-  useEffect(() => {
-    const row = list.current?.querySelector<HTMLElement>("[aria-current='page']")
-    row?.scrollIntoView({ block: "nearest" })
-  }, [current, rows.length])
-
   return (
-    <nav
-      aria-label="Containers"
-      data-slot="container-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <SearchInput
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          placeholder="Name, image or stack"
-          aria-label="Search the containers"
-          containerClassName="sm:w-full"
+    <DockerRail
+      slot="container-rail"
+      label="Containers"
+      search={{ label: "Search the containers", placeholder: "Name, image or stack" }}
+      rows={rows}
+      keyOf={(row) => row.id}
+      current={(row) => row.id === current || row.name === current}
+      pinned={currentRow}
+      row={(row, on) => (
+        <RailRow
+          row={row}
+          current={on}
+          stat={stats[row.id]}
+          oom={oomKilled.has(row.id)}
+          onOpen={onOpen}
         />
-        <p className="flex min-w-0 items-center justify-between gap-2 text-hint text-muted-foreground">
-          <span className="truncate">{caption}</span>
-          {filtered && (
-            <button
-              type="button"
-              onClick={onClearFilters}
-              className="shrink-0 rounded-sm font-medium focus-ring hover:text-foreground"
-            >
-              Clear filters
-            </button>
-          )}
-        </p>
-      </div>
-      <ol
-        ref={list}
-        aria-label="Containers to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-        {...bindings}
-      >
-        {pinned && (
-          <RailRow
-            row={pinned}
-            current
-            stat={stats[pinned.id]}
-            oom={oomKilled.has(pinned.id)}
-            onOpen={onOpen}
-          />
-        )}
-        {pinned && rows.length > 0 && (
-          <li aria-hidden className="mx-3 my-1.5 border-t border-hairline" />
-        )}
-        {rows.map((row) => (
-          <RailRow
-            key={row.id}
-            row={row}
-            current={here(row)}
-            stat={stats[row.id]}
-            oom={oomKilled.has(row.id)}
-            onOpen={onOpen}
-          />
-        ))}
-        {loading && rows.length === 0 && !pinned && <LoadingRows rows={8} />}
-        {!loading && rows.length === 0 && !pinned && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">No container matches.</li>
-        )}
-      </ol>
-    </nav>
+      )}
+      loading={loading}
+      empty="No container matches."
+      query={query}
+      onQuery={onQuery}
+      filtered={filtered}
+      onClearFilters={onClearFilters}
+      caption={caption}
+      bindings={bindings}
+      className={className}
+    />
   )
 }
 
@@ -269,48 +225,23 @@ function RailRow({
   const line = railLine(row, oom)
   const running = row.state === "running" && stat
   return (
-    <li className="min-w-0">
-      <button
-        type="button"
-        data-workspace-item={row.id}
-        data-workspace-name={row.name}
-        aria-current={current ? "page" : undefined}
-        aria-label={row.name}
-        title={row.image}
-        onClick={() => onOpen(row.id)}
-        className={cn(
-          "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-          current ? "bg-accent" : "hover:bg-row-hover",
-        )}
-      >
-        <span className="relative flex shrink-0">
-          <ProductLogo
-            id={containerProduct(row)}
-            size="sm"
-            fallback={Box}
-            className="size-7 rounded-md [&_img]:size-4"
-          />
-          <span
-            aria-hidden
-            className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-          >
-            <StatusDot tone={bucketTone(containerBucket(row, oom))} className="size-1.5" />
-          </span>
-        </span>
-        <span className="min-w-0 flex-1">
-          <span
-            className={cn("block truncate text-body", current ? "font-semibold" : "font-medium")}
-          >
-            {row.name}
-          </span>
-          <span
-            className={cn("block truncate text-hint", line.tone || "text-muted-foreground")}
-            style={line.color ? { color: line.color } : undefined}
-          >
-            {line.text}
-          </span>
-        </span>
-        {running && (
+    <DockerRailRow
+      item={row.id}
+      name={row.name}
+      title={row.image}
+      current={current}
+      onOpen={() => onOpen(row.id)}
+      mark={
+        <ProductLogo
+          id={containerProduct(row)}
+          size="sm"
+          fallback={Box}
+          className="size-7 rounded-md [&_img]:size-4"
+        />
+      }
+      dot={<StatusDot tone={bucketTone(containerBucket(row, oom))} className="size-1.5" />}
+      end={
+        running && (
           <span className="flex shrink-0 flex-col items-end">
             {/* Plain: a share of one core is not an alarm for a container, which
                 may be given several. The table tones it against its limit. */}
@@ -321,8 +252,18 @@ function RailRow({
               {stat.memUsage ? bytes(stat.memUsage) : "—"}
             </span>
           </span>
-        )}
-      </button>
-    </li>
+        )
+      }
+    >
+      <span className={cn("block truncate text-body", current ? "font-semibold" : "font-medium")}>
+        {row.name}
+      </span>
+      <span
+        className={cn("block truncate text-hint", line.tone || "text-muted-foreground")}
+        style={line.color ? { color: line.color } : undefined}
+      >
+        {line.text}
+      </span>
+    </DockerRailRow>
   )
 }

@@ -13,6 +13,7 @@ import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { BuildDialog } from "@/components/docker/build-dialog"
+import { DockerTitle } from "@/components/docker/docker-identity"
 import { Term } from "@/components/docker/explain"
 import { useImageActions } from "@/components/docker/image-actions"
 import { ImageBand } from "@/components/docker/image-band"
@@ -209,16 +210,7 @@ export function ImagesPage() {
           className="animate-rise"
           mark="docker"
           fallback={Layers}
-          title={
-            <span className="inline-flex min-w-0 items-baseline gap-2">
-              Docker
-              {engine?.serverVersion && (
-                <span className="font-mono text-body font-normal text-muted-foreground">
-                  {engine.serverVersion}
-                </span>
-              )}
-            </span>
-          }
+          title={<DockerTitle version={engine?.serverVersion} />}
           state={
             outdated > 0 ? (
               <button

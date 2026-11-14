@@ -25,6 +25,7 @@ import type { DockerEvent, DockerNetwork, DockerNetworkingInfo } from "@/lib/typ
 import { cn } from "@/lib/utils"
 import { membersKnown } from "@/lib/docker-networks"
 import { useSessionState } from "@/lib/view-state"
+import { DockerTitle } from "@/components/docker/docker-identity"
 import { HueKey, NetworkBand, type NetworkRate } from "@/components/docker/network-band"
 import { NetworkRows } from "@/components/docker/network-table"
 import { ContainerNetworkRows, type Placement } from "@/components/docker/network-members"
@@ -305,7 +306,7 @@ export function Networks() {
         <HostIdentity
           mark="docker"
           fallback={Box}
-          title={version ? `Docker ${version}` : "Docker"}
+          title={<DockerTitle version={version} />}
           facts={
             <>
               {/* The server and the joiners are left off a phone, where the

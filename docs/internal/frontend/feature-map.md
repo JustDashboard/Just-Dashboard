@@ -999,7 +999,10 @@ page's order (the band, the ports-and-networks picture, the services table), and
 keep their list beside them from `xl` (`stack-rail.tsx`, `container-rail.tsx`, copies of
 `procs/process-rail.tsx`): the list's own search, chips and order from its session keys, the item
 on screen filled (and drawn first when the filter does not hold it), Alt+↑ and Alt+↓ and the two
-arrows walking it with `?tab=` carried. Beside the rail the blocks that went side by side at 1280px
+arrows walking it with `?tab=` carried. The column itself is one component for a container, a
+stack, an image, a volume and a network (`docker/item-rail.tsx`: `DockerRail` and `DockerRailRow`);
+each `*-rail.tsx` is its row and where its list comes from.
+Beside the rail the blocks that went side by side at 1280px
 and 1536px do so at 1600px and 1856px (`beside-rail.ts`)
 
 **Implementation:** `components/docker/`; checked by `tests/browser/docker-overview.spec.ts`,

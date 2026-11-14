@@ -14,6 +14,7 @@ import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useConfirm } from "@/components/confirm-dialog"
+import { DockerTitle } from "@/components/docker/docker-identity"
 import { Hint, Term } from "@/components/docker/explain"
 import { useVolumeVerbs } from "@/components/docker/volume-actions"
 import { VolumeBand } from "@/components/docker/volume-band"
@@ -293,16 +294,7 @@ export function VolumesPage() {
           className="animate-rise"
           mark="docker"
           fallback={Database}
-          title={
-            <span className="truncate">
-              Docker
-              {engine?.serverVersion && (
-                <span className="ml-2 font-mono text-body font-normal text-muted-foreground">
-                  {engine.serverVersion}
-                </span>
-              )}
-            </span>
-          }
+          title={<DockerTitle version={engine?.serverVersion} />}
           state={
             share.volumes.length > 0 ? (
               <button
