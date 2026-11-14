@@ -15,10 +15,12 @@ import {
   isLit,
   loadingRows,
   staggerOf,
+  waitingLines,
+  type WaitingHint,
   type WireLine,
 } from "@/components/wire-flow-model"
 
-export type { WireLine, WireState } from "@/components/wire-flow-model"
+export type { WaitingHint, WireLine, WireState } from "@/components/wire-flow-model"
 
 type MarkSize = "lg" | "md" | "sm"
 /** A mark, or one drawn at the size it is given: `md` wide, `sm` in the phone's rows. */
@@ -48,6 +50,31 @@ export type WireFlowNode = {
   placeholder?: boolean
 }
 
+/**
+ * The shape a node waits in, for a column or a hub whose nodes are not a
+ * grey tile beside three lines. A picture is one height loading and loaded
+ * only if a waiting node holds the lines its words will: a node with no
+ * eyebrow waits a line short, one with two lines of detail a line long, and
+ * pages drew grey nodes of their own to get it right. What is known before
+ * the read (this server's mark, a column's fixed eyebrow, the hub's name) is
+ * drawn as itself rather than as a grey bar.
+ */
+export type WireFlowWaiting = {
+  /** The mark, where it is known before the read. A grey tile otherwise. */
+  mark?: Drawn
+  /**
+   * The eyebrow's line: grey by default, the words where they are known
+   * before the read, `false` for a node that has no eyebrow.
+   */
+  eyebrow?: boolean | React.ReactNode
+  /** The name, where it is known before the read. A grey line otherwise. */
+  title?: React.ReactNode
+  /** The lines of detail under the name: one by default. */
+  hint?: WaitingHint
+  /** What stands under the lines at one size whatever is read: a sparkline's box. */
+  foot?: React.ReactNode
+}
+
 export type WireFlowColumn = {
   /** The column's name: its landmark's label and its heading. */
   title: string
@@ -67,6 +94,11 @@ export type WireFlowColumn = {
   empty?: React.ReactNode
   /** Rows the column holds while loading; by default `max` and its "more", or three. */
   loadingRows?: number
+  /**
+   * The shape of those rows, one for all or one for each by its place. By
+   * default a grey tile beside an eyebrow, a name and one line of detail.
+   */
+  loadingLines?: WireFlowWaiting | ((row: number) => WireFlowWaiting)
 }
 
 export type WireFlowHub = {
@@ -76,6 +108,13 @@ export type WireFlowHub = {
   hint?: React.ReactNode
   /** On the hub's cell: room above and below for a hub with long words. */
   className?: string
+  /**
+   * The lines under the hub's mark while loading. Given, a phone's rows of
+   * marks draw them too; by default the hub waits on a name and one line
+   * wide and on its name alone down a phone, whose rows of marks then stand
+   * a line higher than they will for every line of detail the hub has.
+   */
+  loadingLines?: Pick<WireFlowWaiting, "title" | "hint" | "foot">
 }
 
 /**
@@ -99,7 +138,10 @@ export type WireFlowHub = {
  *   the proxy's alerts — where the words would be said twice.
  *
  * `loading` draws the picture's final shape — the hub, and grey rows where
- * the nodes will be — so nothing under it moves when the data lands.
+ * the nodes will be — so nothing under it moves when the data lands. A column
+ * says how many rows with `loadingRows` and what a row holds with
+ * `loadingLines`, the hub what stands under its mark with its own
+ * `loadingLines` (`WireFlowWaiting`).
  */
 export function WireFlow({
   start,
@@ -152,6 +194,7 @@ export function WireFlow({
           onBlur: () => setFocus((held) => (held === node.id ? null : held)),
         }
   const port = PORT[size]
+  const hubWaits = hub.loadingLines && waitingDetail(hub.loadingLines, HUB_WIDTHS)
 
   const beams = all.map((node, index) => {
     const ref = refs.get(node.id)
@@ -197,9 +240,14 @@ export function WireFlow({
           {beams}
           {hub.eyebrow && <p className="eyebrow">{hub.eyebrow}</p>}
           {loading ? (
-            <p className="text-body leading-snug font-medium">
-              <WaitingWords className="w-32" />
-            </p>
+            <>
+              <p className="text-body leading-snug font-medium">
+                {hub.loadingLines?.title ?? <WaitingWords className="w-32" />}
+              </p>
+              {hubWaits && (
+                <div className="text-hint leading-snug text-muted-foreground">{hubWaits}</div>
+              )}
+            </>
           ) : (
             <>
               {hub.title && <p className="text-body leading-snug font-medium">{hub.title}</p>}
@@ -252,8 +300,18 @@ export function WireFlow({
               align="center"
               mark={draw(hub.mark, "lg")}
               eyebrow={hub.eyebrow}
-              title={loading ? <WaitingWords className="w-28" /> : hub.title}
-              hint={loading ? <WaitingWords className="w-36" /> : hub.hint}
+              title={
+                loading ? (hub.loadingLines?.title ?? <WaitingWords className="w-28" />) : hub.title
+              }
+              hint={
+                !loading ? (
+                  hub.hint
+                ) : hub.loadingLines ? (
+                  hubWaits
+                ) : (
+                  <WaitingWords className="w-36" />
+                )
+              }
             />
           </div>
 
@@ -278,7 +336,12 @@ export function WireFlow({
   )
 }
 
-type Laid = WireFlowNode & { side: "start" | "end"; more?: boolean }
+type Laid = WireFlowNode & {
+  side: "start" | "end"
+  more?: boolean
+  /** A row drawn while loading, and the shape its column gave it. */
+  waiting?: WireFlowWaiting | true
+}
 
 /** A column's nodes as drawn: what fits, its "N more", or grey rows while loading. */
 function laid(column: WireFlowColumn, side: "start" | "end", loading: boolean): Laid[] {
@@ -287,6 +350,10 @@ function laid(column: WireFlowColumn, side: "start" | "end", loading: boolean): 
       id: `${side}:loading:${i}`,
       side,
       mark: null,
+      waiting:
+        (typeof column.loadingLines === "function"
+          ? column.loadingLines(i)
+          : column.loadingLines) ?? true,
     }))
   const { shown, hidden } = fitColumn(column.nodes, column.max)
   const nodes: Laid[] = shown.map((node) => ({ ...node, side }))
@@ -375,19 +442,28 @@ function Item({
   loading: boolean
 } & React.HTMLAttributes<HTMLLIElement>) {
   const align = node.side === "start" ? "end" : "start"
-  if (loading)
+  if (loading) {
+    const shape = typeof node.waiting === "object" ? node.waiting : undefined
     return (
       <li className="min-w-0" aria-hidden>
         <WireNode
           nodeRef={nodeRef}
           align={align}
-          mark={<Skeleton className={cn("rounded-xl", SKELETON_SIZE[size])} />}
-          eyebrow={<WaitingWords className="w-16" />}
-          title={<WaitingWords className="w-28" />}
-          hint={<WaitingWords className="w-20" />}
+          mark={waitingMark(shape, size)}
+          eyebrow={
+            shape?.eyebrow === false ? undefined : shape?.eyebrow === undefined ||
+              shape.eyebrow === true ? (
+              <WaitingWords className="w-16" />
+            ) : (
+              shape.eyebrow
+            )
+          }
+          title={shape?.title ?? <WaitingWords className="w-28" />}
+          hint={shape ? waitingDetail(shape, NODE_WIDTHS) : <WaitingWords className="w-20" />}
         />
       </li>
     )
+  }
   return (
     <li
       {...handlers}
@@ -408,6 +484,46 @@ function Item({
 }
 
 const SKELETON_SIZE = { lg: "size-14", md: "size-11", sm: "size-9" } as const
+
+/** How long each waiting line of detail is drawn, by its place: no two alike. */
+const NODE_WIDTHS = ["w-24", "w-20", "w-16"]
+const HUB_WIDTHS = ["w-32", "w-24", "w-28"]
+
+/** A waiting row's mark: the one its column knows before the read, or a grey tile. */
+function waitingMark(shape: WireFlowWaiting | undefined, size: MarkSize) {
+  return shape?.mark !== undefined ? (
+    draw(shape.mark, size)
+  ) : (
+    <Skeleton className={cn("rounded-xl", SKELETON_SIZE[size])} />
+  )
+}
+
+/**
+ * A waiting node's lines of detail and what stands under them, each line a
+ * block as a drawn node's lines are; nothing at all for a node that has
+ * neither, so its name is not followed by an empty line.
+ */
+function waitingDetail(shape: WireFlowWaiting, widths: string[]) {
+  const lines = waitingLines(shape.hint)
+  if (lines.length === 0 && !shape.foot) return undefined
+  return (
+    <>
+      {lines.map((where, i) => (
+        <span
+          key={i}
+          className={cn(
+            "block",
+            where === "wide" && "max-lg:hidden",
+            where === "narrow" && "lg:hidden",
+          )}
+        >
+          <WaitingWords className={widths[i % widths.length]} />
+        </span>
+      ))}
+      {shape.foot}
+    </>
+  )
+}
 
 /**
  * A grey bar where a line of words will be. It is an inline box shorter than
@@ -471,8 +587,8 @@ function MarkRow({
         {nodes.map((node) => (
           <li key={node.id} data-node={node.more ? undefined : node.id} className="min-w-0">
             <div ref={refs.get(node.id)} className="relative z-10 flex">
-              {node.id.includes(":loading:") ? (
-                <Skeleton className={cn("rounded-xl", SKELETON_SIZE.sm)} />
+              {node.waiting ? (
+                waitingMark(typeof node.waiting === "object" ? node.waiting : undefined, "sm")
               ) : (
                 <Pressable node={node}>{draw(node.mark, "sm")}</Pressable>
               )}

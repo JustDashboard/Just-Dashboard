@@ -285,16 +285,26 @@ since 0.8.7; a new picture of
 this shape uses it, and lays its nodes by hand only when it is not this shape (the routing decision's
 two columns, a project's Runtime lanes).
 
-**A picture whose nodes are not three lines draws its own waiting state.** `loading` draws rows of an
-eyebrow, a name and a hint, each bar on its line's own height. That is the loaded height of a three-line
-node and not of any other: Socket history's nodes are a name and one line, an approved service on
-External checks carries two lines of hint, and each page moved under its picture when the first read
-landed. Those two keep every node to one shape in every state and pass `WireFlow` nodes whose unread
-words are a `LinePlaceholder` (`components/network/identity-facts.tsx`): a
-grey bar after a real space, so the line box is the one the words will have. The same file holds
-`IdentityFacts`, which keeps two lines' room for an identity line's facts on a phone, where four facts
-wrap and a single bar in their place did not. Both pictures are `marks` on a phone, since the lists under
-them name each node again, which is also what stops a stacked column growing with every source.
+**A picture whose nodes are not three lines says so, and still waits on `loading`.** By default
+`loading` draws rows of a grey tile beside an eyebrow, a name and a hint, each bar on its line's own
+height. That is the loaded height of a three-line node and not of any other: Socket history's nodes are a
+name and one line, an approved service on External checks carries two lines of hint, a place on
+Connections has a sparkline's box under its line, and down a phone (`marks`) the hub waited on its name
+alone, so the rows of marks stood a line or two higher until the read landed. Five Network pages drew
+grey nodes of their own for that. A column now gives its waiting rows their shape with `loadingLines`
+(`WireFlowWaiting`, one for every row or a function of the row's place): the `mark` and the `eyebrow`
+and `title` words where they are known before the read (this server's mark, "Tier 1", the three things
+the recorder keeps), `eyebrow: false` for a node that has none, `hint` as a count of lines (or
+`{ wide, narrow }` where a phone says a line more), and a `foot` for what stands under the lines at one
+size. The hub takes the same `loadingLines` for its caption, and with it a phone's rows of marks draw
+those lines too. With neither given a picture waits exactly as it did. A page never draws grey nodes
+of its own; it says how many rows (`loadingRows`, remembered from the last visit where the count is the
+server's) and what a row holds. `LinePlaceholder` (`components/network/identity-facts.tsx`) is still the
+grey bar for a line of words outside a picture, a grey bar after a real space so the line box is the
+one the words will have, and the same file holds `IdentityFacts`, which keeps two lines' room for an
+identity line's facts on a phone, where four facts wrap and a single bar in their place did not. Those
+pictures are `marks` on a phone, since the lists under them name each node again, which is also what
+stops a stacked column growing with every source.
 
 **A section page beside Notifications reads as Notifications does.** Log drains, Secret stores, Shared
 variables and Templates each open on a `WireFlow` picture (`marks` on a phone, since the list under it
@@ -4188,8 +4198,8 @@ pixels each, under a row of six equal buttons and a switch. Where each went
   members by tier, each drawn as what carries it (a tunnel's product, else a router). Only the
   carrying member's wire moves, and only while the group is on; a member that is down is dashed,
   red where it is the one carrying. Every node says the same number of lines, and the loading
-  picture is drawn from the same nodes in grey, so the views under it do not move when a group of
-  two members lands.
+  picture is `WireFlow`'s own with those lines given to it (`loadingLines`) and as many members as
+  the group had on the last visit, so the views under it do not move when a group lands.
 - **Members** stays a framed table, because its rows are read down their columns (state, round
   trip, loss, the strip of recent samples), one line a member. The second line of each row and the
   sixth column (path, tier, mark, table, probe source) were a member's fixed identity rather than
@@ -4250,9 +4260,9 @@ where all of it would land. Where each figure went (`components/network/protecti
   colour), then each limited port as the product that listens there, the exceptions and the
   addresses never refused. A wire pulses when its counter grew since the last read and is dashed
   while its entry is off. It keeps one height: three lists and "N more", one or two limits, in a
-  frame with room for four rows, so the lists under it never move. Its grey state is nodes of its
-  own on the drawn nodes' lines, because `WireFlow`'s `loading` draws a phone's hub without the
-  lines under its name.
+  frame with room for four rows, so the lists under it never move. Its waiting state is
+  `WireFlow`'s own `loading`, with both lines of the hub's caption named so a phone's rows of marks
+  stand where the drawn picture's will.
 - **Rows at one height.** A blocklist's coverage is on the line under its name; when it was fetched
   and when it next is, its networks and drops, and its one state (`listState`: a failed fetch in
   red before a stale copy before a verified set) are columns; the error's words, the enforcement
