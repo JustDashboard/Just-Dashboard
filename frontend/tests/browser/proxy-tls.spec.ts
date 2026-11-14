@@ -40,7 +40,7 @@ test("a watched endpoint's link scans the port it names", async ({ page }) => {
     domain: url.searchParams.get("domain"),
     port: Number(url.searchParams.get("port")),
   }))
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   await page
     .getByRole("list", { name: "Watched domains" })
     .getByRole("link", { name: "Inspect mail.example.com:993" })
@@ -371,7 +371,7 @@ test("a long name in the hint or the refusal wraps under the field", async ({ pa
   expect(seen).toHaveLength(0)
 
   await page.setViewportSize({ width: 390, height: 900 })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   await page.getByLabel("Domain to watch").fill(`https://${bad}/`)
   await page.getByRole("button", { name: "Watch", exact: true }).click()
   const refusal = page.getByRole("alert").filter({ hasText: "is not a domain name" })
@@ -683,7 +683,7 @@ test("watching takes what is pasted and keeps each port", async ({ page }) => {
     }
     return json(route, [])
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const field = page.getByLabel("Domain to watch")
   const watch = page.getByRole("button", { name: "Watch", exact: true })
 
@@ -726,7 +726,7 @@ test("a read-only account reads the last check and cannot ask for another", asyn
       { id: 2, domain: "new.example.com", port: 443 },
     ])
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const watched = page.getByRole("list", { name: "Watched domains" })
   await expect(watched.getByText(/checked 3m( \d+s)? ago/)).toBeVisible()
   await expect(watched.getByText("waiting for its first check")).toBeVisible()
@@ -752,7 +752,7 @@ test("a network probe on the watch list reads its connection, not a certificate"
       },
     ]),
   )
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const watched = page.getByRole("list", { name: "Watched domains" })
   const row = watched.locator("[data-slot='choice-row']").filter({ hasText: "db.example.com" })
   await expect(row).toContainText("Network probe: connects over TCP to 10.0.0.5:5432")
@@ -875,7 +875,7 @@ test("re-checking the watch list says so until the new checks arrive", async ({ 
     await new Promise<void>((resolve) => (release = resolve))
     return json(route, [mailRow()])
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const recheck = page.getByRole("button", { name: "Re-check now" })
   await expect(recheck).toBeVisible()
   const loaded = lists.length
@@ -917,7 +917,7 @@ test("stopping a watch says what happened, and a failure keeps the row", async (
   })
   const errors: string[] = []
   page.on("pageerror", (error) => errors.push(error.message))
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const list = page.getByRole("list", { name: "Watched domains" })
   await expect(list.getByRole("listitem")).toHaveCount(3)
   const loaded = lists.length
@@ -968,7 +968,7 @@ test("on a phone every watched row keeps how old its check is in full", async ({
       certificate: { ...certs[0], issuer: "A Rather Long Issuing Authority Name R11" },
     },
   ])
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   const age = page
     .getByRole("list", { name: "Watched domains" })
     .getByText(/^checked 3m( \d+s)? ago$/)
@@ -999,7 +999,7 @@ test("a new watch shows its row waiting for the server's first check", async ({ 
     lists++
     return json(route, rows)
   })
-  await page.goto("/proxy/certificates")
+  await page.goto("/proxy/certificates?tab=watched")
   await expect(page.getByText("Nothing watched yet.", { exact: false })).toBeVisible()
   const field = page.getByLabel("Domain to watch")
   const watch = page.getByRole("button", { name: "Watch", exact: true })

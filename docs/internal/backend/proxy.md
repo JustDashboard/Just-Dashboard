@@ -888,8 +888,8 @@
   since 4.0, and Caddy's — and never more than 30 days out. `summarise` (`certs.go`) sets `expiring`
   by it, so the certificate inventory, the watch list and the report agree; a 6-day certificate is no
   longer expiring for its whole life. Not everything reads it yet: certbot's lineage cards and an import's warning still count 30 days (`certbot-panel.tsx`,
-  `import.go`), and the Certificates page's expiring reading counts by the window under a 30-day label
-  (`certs-panel.tsx`). The report notes a certificate inside that window (`tls.renewal-due`) and grades B once
+  `import.go`), and the Certificates page's identity line counts what is expiring by the window, with
+  the days the soonest has left (`certs-panel.tsx`). The report notes a certificate inside that window (`tls.renewal-due`) and grades B once
   half of it has passed with the certificate still served (`tls.expiring`); `lifetimeHours` and
   `renewalWindowHours` are in hours because a short-lived term is 160 of them. **HSTS preload** is
   measured for a name on 443 that answered HTTP (`preload`, `tlsscan_preload.go`) against

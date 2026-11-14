@@ -1255,7 +1255,7 @@ test("a draft survives a trip to Certificates, and a change on disk under it is 
   await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4000")
 
   await page.goto("/proxy/certificates")
-  await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+  await expect(page.getByRole("list", { name: "Installed certificates" })).toBeVisible()
   sheet = await openApp(page)
   await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:4000")
   await expect(sheet.getByText("unsaved", { exact: true })).toBeVisible()
@@ -1265,7 +1265,7 @@ test("a draft survives a trip to Certificates, and a change on disk under it is 
   // asked which of the two wins before anything can be saved.
   version = "d2"
   await page.goto("/proxy/certificates")
-  await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+  await expect(page.getByRole("list", { name: "Installed certificates" })).toBeVisible()
   sheet = await openApp(page)
   const banner = sheet.getByRole("alert")
   await expect(banner).toContainText("app.example.com changed on disk")

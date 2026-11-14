@@ -518,7 +518,7 @@ test("watched probes are the watch list's own, checked and stopped from the runs
   await expect(panel.getByText("app.example.test")).toHaveCount(0)
   await expect(panel.getByRole("link", { name: "Watch list" })).toHaveAttribute(
     "href",
-    "/proxy/certificates",
+    "/proxy/certificates?tab=watched",
   )
 
   await panel.getByRole("button", { name: "Check now" }).click()

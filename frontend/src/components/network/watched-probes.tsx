@@ -57,7 +57,7 @@ export function WatchedProbes({ admin }: { admin: boolean }) {
         actions={
           <>
             <Button asChild variant="ghost" size="sm">
-              <Link href="/proxy/certificates">Watch list</Link>
+              <Link href="/proxy/certificates?tab=watched">Watch list</Link>
             </Button>
             {admin && probes.length > 0 && (
               <Button size="sm" variant="outline" onClick={checkNow} pending={busy === "check"}>
