@@ -545,8 +545,9 @@ on* that sets the same parameters through `PUT /databases/{id}/settings` (Postgr
 included) and reads the log again; a Postgres role that is not a superuser is told so rather than
 offered a change it would be refused. Performance's Statement history view
 (`ops/performance-history.tsx`) lists what each statement cost over the Overview's window, each with
-its time drawn across it and ordered by the column pressed, and opens one statement on charts of its
-time, calls, time per call (with p50, p95 and p99 where the engine keeps run times) and rows. Access
+its time drawn across it and ordered by the column pressed, and opens that statement's page on its
+History: its time, calls, time per call (how long half, 19 in 20 and 99 in 100 took, where the
+engine keeps run times) and rows. Access
 opens on who signs in (each account wired to the server, pulsing while it holds sessions) over the
 accounts with counted filters; Backups on where the dumps go (the database and its schedule, this
 server's dump tool, the directory) over the dumps table, then, for a PostgreSQL server the dashboard
@@ -610,6 +611,27 @@ hypothetical index (HypoPG) and shows the cost before and after, and offers the 
 CONCURRENTLY` through the schema change dialog, and **Missing indexes** on SQL Server, over its
 `sys.dm_db_missing_index_*` views. Automatic Home findings and the Advisor route/API were removed in
 0.7.5
+
+A statement, a table and a session each open as a page of their own under Performance
+(`/databases/[id]/performance/statements/[key]`, `/tables/[name]`, `/sessions/[pid]`), on the
+process page's shape (`ops/performance-detail.tsx`): the way back to the list, an identity line with
+one command and a `⋯` menu, the views as an underlined strip with the open one in `?tab=`, and from
+`xl` the list it came from as a rail with that list's own filter, order and narrowing
+(`ops/performance-lists.ts` holds the keys both read), Alt+↑ and Alt+↓ walking it with the view
+kept; on a phone the page is the one pane and its two arrows step. A statement
+(`ops/performance-statement.tsx`) has Figures as `ReadingLine`s with the recorded window at each
+line's end, Text, Plan and History; it is the one place the Statements view, Statement history and
+the top statements on Logs open. A table (`ops/performance-table.tsx`) has its size as one strip,
+its rows and how it is read, and its housekeeping and maintenance. A session
+(`ops/performance-session.tsx`) reads the session list at the list's cadence, has its statement,
+its timing and who it waits on or holds up, and its stop verbs; one that ends while open is said to
+have ended and stays as last seen. The address is one path segment with no percent sign
+(`ops/performance-address.ts`, unit-tested): what would be escaped is written with `~`, and a dot
+inside a name is escaped so the dot left is the one between schema and name. The addresses that
+opened the sheets these were (`?statement=`, `?object=`, `?session=`) are sent on to the pages. No
+list of Performance draws a bar per row: a share is a figure in its own column, and what a view's
+footnote said is a fact on its title line (`ops/performance-words.tsx`);
+`tests/browser/database-performance.spec.ts`.
 
 **Implementation:** `components/database/`; backend in
 [`../backend/databases.md`](../backend/databases.md) Adding a database can limit its container from
