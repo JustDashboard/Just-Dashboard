@@ -342,12 +342,13 @@ function KeyRow({ sshKey, onChanged }: { sshKey: SSHKey; onChanged: () => void }
             {sshKey.file && (
               <span className="min-w-0 shrink-[99] truncate font-mono">{sshKey.file}</span>
             )}
-            {restrictions.map((word) => (
-              <span key={word} className="min-w-0 truncate text-warning">
-                {word}
+            {/* One run of words, so a phone cuts the last of them and not
+                the middle of each. */}
+            {(restrictions.length > 0 || sshKey.weak) && (
+              <span className="min-w-0 truncate text-warning">
+                {[...restrictions, sshKey.weak].filter(Boolean).join(" · ")}
               </span>
-            ))}
-            {sshKey.weak && <span className="min-w-0 truncate text-warning">{sshKey.weak}</span>}
+            )}
           </span>
         }
         trailing={

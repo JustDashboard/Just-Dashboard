@@ -78,6 +78,7 @@ export function AccountSettings() {
 
 function agingFacts(user: SystemUser) {
   const parts = [
+    user.disabled && "Account disabled",
     user.expiresOn && !user.disabled && `Account expires ${user.expiresOn}`,
     user.aging.maxDays !== undefined && `Password lasts ${plural(user.aging.maxDays, "day")}`,
   ].filter(Boolean)
