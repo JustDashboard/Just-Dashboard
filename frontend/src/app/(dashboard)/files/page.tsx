@@ -1570,8 +1570,8 @@ export default function FilesPage() {
             >
               {showSidebar ? <SidebarLeftClose /> : <SidebarLeftOpen />}
             </IconAction>
-            {/* The sidebar lists the places; where it is not drawn, the same
-                list sits behind this button so a phone can still jump. */}
+            {/* The sidebar lists the places; put away at a desk, the same
+                list sits behind this button. A phone has them as a pane. */}
             <div className={showSidebar ? "hidden" : "max-lg:hidden"}>
               <PlacesMenu
                 places={places.data}
