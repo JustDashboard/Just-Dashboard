@@ -25,28 +25,6 @@ test("software filters include dependencies and Escape clears the selection", as
   await expect(page.getByRole("row", { name: /postgresql-16/ })).toHaveCount(0)
 })
 
-test("the sheet follows dependencies and reports failed usage reads", async ({ page }) => {
-  await mockHost(page)
-  await page.route("**/api/v1/packages/libc6/usage", (route) =>
-    route.fulfill({
-      status: 500,
-      contentType: "application/json",
-      body: JSON.stringify({
-        error: { code: "internal", message: "Package file list is not readable" },
-      }),
-    }),
-  )
-  await page.goto("/packages?package=nginx")
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByRole("heading", { name: "Commands", exact: true })).toBeVisible()
-  await sheet.getByRole("button", { name: "Inspect dependency libc6", exact: true }).click()
-  await expect(page).toHaveURL(/package=libc6/)
-  await expect(sheet.getByText("Package file list is not readable")).toBeVisible()
-  await expect(sheet.getByRole("button", { name: "Copy nginx", exact: true })).toHaveCount(0)
-  await page.goBack()
-  await expect(sheet.getByRole("button", { name: "Copy nginx", exact: true })).toBeVisible()
-})
-
 test("missing sizes and advisory data are stated without made-up readings", async ({ page }) => {
   await mockHost(page)
   await page.route("**/api/v1/packages/", (route) =>
@@ -94,19 +72,30 @@ test("an unreadable update report is an error in the queue and the Updates view"
   await expect(page.getByText("Everything is up to date", { exact: true })).toHaveCount(0)
 })
 
-test("read-only accounts can inspect software but have no package mutations", async ({ page }) => {
+test("read-only accounts can read the software and are offered no package mutation", async ({
+  page,
+}) => {
   await mockHost(page)
   await page.route("**/api/v1/auth/session", (route) =>
     route.fulfill({ json: { ...user, capabilities: ["read"] } }),
   )
-  await page.goto("/packages?package=nginx")
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByRole("button", { name: "Copy nginx", exact: true })).toBeVisible()
-  await expect(sheet.getByRole("button", { name: /^Remove|^Update to|^Install$/ })).toHaveCount(0)
-  await page.keyboard.press("Escape")
+  await page.goto("/packages")
+  await expect(page.getByRole("row", { name: /nginx/ })).toBeVisible()
   await expect(
     page.getByRole("button", { name: /^Upgrade all|^Install security|^Refresh index/ }),
   ).toHaveCount(0)
+  // The menu holds what is left: reading the host again.
+  await page.getByRole("button", { name: "Package actions" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText(["Re-read"])
+  await page.keyboard.press("Escape")
+  await page
+    .getByRole("navigation", { name: "Package views" })
+    .getByRole("button", { name: "Add software" })
+    .click()
+  await page.getByPlaceholder(/What do you need/).fill("htop")
+  await expect(page.getByText("2 matches")).toBeVisible()
+  await expect(page.getByRole("listitem").filter({ hasText: "htop" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^(Retry install|Install)$/ })).toHaveCount(0)
 })
 
 test("a new catalogue query hides old results while it is being read", async ({ page }) => {
@@ -130,68 +119,127 @@ test("a new catalogue query hides old results while it is being read", async ({ 
   await input.fill("htop")
   await expect(page.getByText("2 matches")).toBeVisible()
   await input.fill("redis")
-  await expect(page.getByRole("button", { name: "htop", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "htop", exact: true })).toHaveCount(0)
   await expect(page.getByText("Searching the repositories…")).toBeVisible()
   release?.()
-  await expect(page.getByRole("button", { name: "redis-server", exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "redis-server", exact: true })).toHaveAttribute(
+    "href",
+    "/packages/redis-server",
+  )
 })
 
-test("the phone keeps identity controls and the installed table inside the screen", async ({
-  page,
-}) => {
+test("on a phone the line keeps its controls and each package is a card", async ({ page }) => {
   await mockHost(page)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/packages")
   const identity = page.locator("[data-slot='host-identity']")
-  for (const name of ["Refresh index", "Re-read", "Packages shortcuts"]) {
+  for (const name of ["Refresh index", "Package actions"]) {
     const control = identity.getByRole("button", { name, exact: true })
     await expect(control).toBeInViewport()
     const box = await control.boundingBox()
     expect(box!.x + box!.width).toBeLessThanOrEqual(390)
   }
   await page.getByRole("button", { name: /^Everything/ }).click()
-  const table = page.locator("[data-slot='table-container']")
-  await expect(table).toBeVisible()
-  expect(await table.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+  // No table squeezed to two cut-off columns: a card a package, one height
+  // whether it is behind, a security fix, or neither, each inside the screen.
+  await expect(page.locator("[data-slot='table-container']")).toHaveCount(0)
+  const cards = page.getByRole("list", { name: "Installed packages" }).getByRole("listitem")
+  await expect(cards).toHaveCount(installed.length)
+  await risen(page)
+  const boxes = await cards.evaluateAll((items) =>
+    items.map((item) => item.getBoundingClientRect().toJSON()),
+  )
+  expect(new Set(boxes.map((box) => box.height)).size).toBe(1)
+  const step = boxes[1].y - boxes[0].y
+  boxes.slice(1).forEach((box, i) => expect(box.y - boxes[i].y).toBe(step))
+  for (const box of boxes) expect(box.x + box.width).toBeLessThanOrEqual(390)
+  const openssl = cards.filter({ hasText: "openssl" })
+  await expect(openssl).toContainText("3.0.13-0ubuntu3.4")
+  await expect(openssl.getByText(".4", { exact: true })).toHaveClass(/text-warning/)
+  await expect(cards.filter({ hasText: "postgresql-16" })).toContainText("45.8 MB")
+
   await page
-    .getByRole("row", { name: /nginx/ })
-    .getByRole("button", { name: "nginx", exact: true })
+    .getByRole("navigation", { name: "Package views" })
+    .getByRole("button", { name: /^Updates/ })
     .click()
-  const sheet = page.getByRole("dialog")
-  await expect(
-    sheet.getByRole("link", { name: "Open nginx.service", exact: true }),
-  ).toHaveAttribute("href", "/processes/services/nginx.service")
-  await expect(
-    sheet.getByRole("link", { name: "Open /etc/nginx/nginx.conf", exact: true }),
-  ).toHaveAttribute("href", "/files?path=%2Fetc%2Fnginx%2Fnginx.conf")
-  expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+  const behind = page.getByRole("list", { name: "Packages behind" }).getByRole("listitem")
+  await expect(behind).toHaveCount(3)
+  await expect(behind.filter({ hasText: "openssl" })).toContainText("security")
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    ),
+  ).toBe(false)
+
+  await behind
+    .filter({ hasText: "nginx" })
+    .getByRole("link", { name: "nginx", exact: true })
+    .click()
+  await expect(page).toHaveURL(/\/packages\/nginx$/)
 })
 
-test("package removal and upgrades still require confirmation", async ({ page }) => {
+test("upgrades still require confirmation, from the band and from the menu", async ({ page }) => {
   await mockHost(page)
   const mutations: string[] = []
   page.on("request", (request) => {
     if (request.method() === "POST") mutations.push(new URL(request.url()).pathname)
   })
-  await page.goto("/packages?package=nginx")
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Remove and purge", exact: true })
-    .click()
-  const confirm = page.getByRole("dialog", {
-    name: "Remove nginx and its configuration",
-    exact: true,
-  })
-  await expect(confirm).toContainText("and deletes the files it put in /etc")
-  await expect(confirm.getByRole("textbox")).toHaveCount(0)
-  expect(mutations).toEqual([])
-  await confirm.getByRole("button", { name: "Cancel", exact: true }).click()
-  await page.keyboard.press("Escape")
+  await page.goto("/packages")
   await page.getByRole("button", { name: "Install security updates", exact: true }).click()
-  await expect(
-    page.getByRole("dialog", { name: "Install security updates", exact: true }),
-  ).toContainText("restricted to the security pocket")
+  const security = page.getByRole("dialog", { name: "Install security updates", exact: true })
+  await expect(security).toContainText("restricted to the security pocket")
   expect(mutations).toEqual([])
+  await security.getByRole("button", { name: "Cancel", exact: true }).click()
+
+  await page.getByRole("button", { name: "Package actions" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText([
+    "Re-read",
+    "Install security updates",
+    "Upgrade all 3",
+  ])
+  await page.getByRole("menuitem", { name: "Upgrade all 3", exact: true }).click()
+  const all = page.getByRole("dialog", { name: "Upgrade all packages", exact: true })
+  await expect(all).toContainText("Affected services may restart")
+  expect(mutations).toEqual([])
+  await all.getByRole("button", { name: "Upgrade", exact: true }).click()
+  await expect.poll(() => mutations).toEqual(["/api/v1/packages/upgrade"])
+})
+
+test("the index is refreshed from the line, without a confirmation", async ({ page }) => {
+  await mockHost(page)
+  const mutations: string[] = []
+  page.on("request", (request) => {
+    if (request.method() === "POST") mutations.push(new URL(request.url()).pathname)
+  })
+  let reads = 0
+  page.on("request", (request) => {
+    if (/\/api\/v1\/packages\/$/.test(request.url())) reads++
+  })
+  await page.goto("/packages")
+  const identity = page.locator("[data-slot='host-identity']")
+  await identity.getByRole("button", { name: "Refresh index", exact: true }).click()
+  await expect.poll(() => mutations).toEqual(["/api/v1/packages/refresh"])
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  const before = reads
+  await page.getByRole("button", { name: "Package actions" }).click()
+  await page.getByRole("menuitem", { name: "Re-read", exact: true }).click()
+  await expect.poll(() => reads).toBeGreaterThan(before)
+})
+
+test("a search handed over in the address opens Add software on it", async ({ page }) => {
+  await mockHost(page)
+  await page.goto("/packages?q=htop")
+  await expect(page.getByPlaceholder(/What do you need/)).toHaveValue("htop")
+  await expect(page.getByText("2 matches")).toBeVisible()
+  // The address is the page's again, and the strip still switches views.
+  await expect(page).toHaveURL(/\/packages$/)
+  const strip = page.getByRole("navigation", { name: "Package views" })
+  await expect(strip.getByRole("button", { name: "Add software" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await strip.getByRole("button", { name: /^Installed/ }).click()
+  await expect(page.getByRole("row", { name: /nginx/ })).toBeVisible()
 })
 
 const recordWorkspace = process.env.JD_WORKSPACE_VIDEO === "1"
@@ -208,10 +256,12 @@ test.use({ video: recordWorkspace ? "on" : "off" })
  * that every package is drawn as the software it is (§14) and an upgrade shows
  * the part of the version it changes; that the one decision worth making in a
  * hurry (security updates waiting) carries its own button above the fold; that
- * a row's fixed properties sit at its edge; that the search, the install
- * verb and the package sheet are all reachable from the strip; and that the
- * package manager's own log is read in place, through its lens. The
- * screenshots at 1280 and 1720 are the eyes the assertions do not have.
+ * a row is one line with its fixed properties at its edge and its size a
+ * figure in a column; that the search and the install verb are reachable
+ * from the strip and a package's name is the way to its page
+ * (`package-page.spec.ts`); and that the package manager's own log is read in
+ * place, through its lens. The screenshots at 1280 and 1720 are the eyes the
+ * assertions do not have.
  */
 
 /**
@@ -244,9 +294,13 @@ test("the page opens on software and updates without summary cards", async ({ pa
   await expect(identity).toContainText("index refreshed")
   await expect(identity).toContainText("1 security update")
   await expect(identity.locator("img[src='/logos/ubuntu.svg']")).toHaveCount(1)
+  // Laid out as a project's header: one command, and the rest behind a menu.
+  await expect(identity).toHaveAttribute("data-layout", "project")
   await expect(identity.getByRole("button", { name: "Refresh index" })).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Package actions" })).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Re-read" })).toHaveCount(0)
 
-  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  await expect(page.locator("[data-slot='stat-tile'], [data-slot='stat-grid']")).toHaveCount(0)
   const band = page.locator("[data-slot='software-band']")
   await expect(band.getByRole("heading", { name: "On disk" })).toBeVisible()
   await expect(band.getByRole("heading", { name: "Updates waiting" })).toBeVisible()
@@ -283,15 +337,22 @@ test("the band is there before the inventory, and keeps its height when it lands
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto("/packages")
   const band = page.locator("[data-slot='software-band']")
+  const identity = page.locator("[data-slot='host-identity']")
+  const strip = page.getByRole("navigation", { name: "Package views" })
   await expect(band.getByText("Reading the installed packages…")).toBeVisible()
   await risen(page)
   const before = await band.boundingBox()
+  const line = await identity.boundingBox()
+  const views = await strip.boundingBox()
   release()
   await expect(band.getByRole("button", { name: "Only Linux packages" })).toBeVisible()
   await risen(page)
   const after = await band.boundingBox()
   expect(after?.height).toBe(before?.height)
   expect(after?.y).toBe(before?.y)
+  // The line above it and the strip of views under it were already there.
+  expect(await identity.boundingBox()).toEqual(line)
+  expect(await strip.boundingBox()).toEqual(views)
 })
 
 test("each package is drawn as the software it is", async ({ page }) => {
@@ -333,16 +394,50 @@ test("the installed view filters and puts a row's properties at its edge", async
   await expect(page.getByRole("row", { name: /postgresql-16/ })).toHaveCount(0)
   await expect(page.getByRole("row", { name: /curl/ })).toBeVisible()
 
-  // The readout opens directly on commands and files without a hidden usage tab.
-  await page.getByRole("row", { name: /nginx/ }).getByRole("button", { name: "nginx" }).click()
-  const sheet = page.getByRole("dialog")
-  await expect(sheet).toContainText("nginx")
-  await expect(sheet.getByRole("tab")).toHaveCount(0)
-  await expect(sheet).toContainText("systemctl start nginx.service")
-  await expect(sheet).toContainText("/etc/nginx/nginx.conf")
-  await expect(sheet.getByRole("heading", { name: "Commands", exact: true })).toBeVisible()
-  await expect(sheet.getByRole("heading", { name: "Services", exact: true })).toBeVisible()
-  await expect(sheet.getByRole("button", { name: "Copy nginx", exact: true })).toBeVisible()
+  // The name is the way to the package's own page; nothing opens over the list.
+  const name = page.getByRole("row", { name: /nginx/ }).getByRole("link", { name: "nginx" })
+  await expect(name).toHaveAttribute("href", "/packages/nginx")
+  await name.click()
+  await expect(page).toHaveURL(/\/packages\/nginx$/)
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+})
+
+test("a row is one line, and its size is a figure in a column", async ({ page }) => {
+  await mockHost(page)
+  await page.goto("/packages")
+  await page.getByRole("button", { name: /^Everything/ }).click()
+  const rows = page.locator("[data-slot='table-body'] [data-slot='table-row']")
+  await expect(rows).toHaveCount(installed.length)
+  await risen(page)
+  // Behind, a security fix with two tags, essential, and none of them: one
+  // height. The last row has no rule under it, which is its only difference.
+  const heights = await rows.evaluateAll((items) =>
+    items.map((item) => item.getBoundingClientRect().height),
+  )
+  expect(new Set(heights.slice(0, -1)).size).toBe(1)
+  expect(heights[0] - heights.at(-1)!).toBeLessThanOrEqual(1)
+  expect(heights[0]).toBeLessThan(60)
+  // The description is the row's title, not a second line under the name.
+  const nginx = page.getByRole("row", { name: /nginx/ })
+  await expect(nginx).not.toContainText("small, powerful")
+  await expect(nginx.locator("[title='small, powerful, scalable web/proxy server']")).toHaveCount(1)
+  // No bar under a size; the figures share an edge.
+  await expect(page.locator("[data-slot='table'] [style*='width']")).toHaveCount(0)
+  const size = (row: string) =>
+    page.getByRole("row", { name: row }).getByRole("cell").nth(3).boundingBox()
+  const [small, large] = [await size("nginx"), await size("postgresql-16")]
+  expect(small!.x + small!.width).toBe(large!.x + large!.width)
+  await expect(
+    page
+      .getByRole("row", { name: /postgresql-16/ })
+      .getByRole("cell")
+      .nth(3),
+  ).toHaveText("45.8 MB")
+  // Largest first re-orders the rows and moves nothing else.
+  const table = await page.locator("[data-slot='table-container']").boundingBox()
+  await page.getByRole("button", { name: "By name" }).click()
+  await expect(rows.first()).toContainText("linux-image")
+  expect(await page.locator("[data-slot='table-container']").boundingBox()).toEqual(table)
 })
 
 test("updates and add software are reachable from the strip", async ({ page }) => {
@@ -627,21 +722,16 @@ test("workspace: package links, Back, keyboard movement and local commands prese
   const second = page.locator("[data-workspace-item]").nth(1)
   await expect(second).toBeFocused()
   await page.keyboard.press("Enter")
-  await expect(page.getByRole("dialog")).toBeVisible()
-  await expect(page).toHaveURL(/package=/)
+  await expect(page).toHaveURL(/\/packages\/postgresql-16$/)
+  await expect(page.locator("[data-slot='package-identity']")).toContainText("postgresql-16")
   if (recordWorkspace) {
     await page.waitForTimeout(700)
-    await page.screenshot({ path: testInfo.outputPath("package-inspector.png") })
+    await page.screenshot({ path: testInfo.outputPath("package-page.png") })
   }
-  const shared = page.url()
   await page.goBack()
-  await expect(page.getByRole("dialog")).toHaveCount(0)
-  await expect(second).toBeFocused()
+  await expect(page).toHaveURL(/\/packages$/)
+  await expect(page.getByRole("row", { name: /postgresql-16/ })).toBeVisible()
   if (recordWorkspace) await page.waitForTimeout(700)
-  await page.goto(shared)
-  await expect(page.getByRole("dialog")).toBeVisible()
-  await page.keyboard.press("Escape")
-  await expect(page.getByRole("dialog")).toHaveCount(0)
   await page.keyboard.press("Control+f")
   await expect(page.locator("[data-page-search]")).toBeFocused()
   await page.locator("[data-page-search]").fill("nginx")
@@ -674,7 +764,12 @@ test("workspace: Add software arrows inspect results without starting an install
   await page.locator("[data-workspace-item]").first().focus()
   await page.keyboard.press("ArrowDown")
   await expect(page.locator("[data-workspace-item]").nth(1)).toBeFocused()
+  const posts: string[] = []
+  page.on("request", (request) => {
+    if (request.method() === "POST") posts.push(new URL(request.url()).pathname)
+  })
   await page.keyboard.press("Enter")
-  await expect(page.getByRole("dialog")).toContainText("btop")
-  await expect(page.getByText("Started", { exact: true })).toHaveCount(0)
+  await expect(page).toHaveURL(/\/packages\/btop$/)
+  await expect(page.locator("[data-slot='package-identity']")).toContainText("btop")
+  expect(posts).toEqual([])
 })
