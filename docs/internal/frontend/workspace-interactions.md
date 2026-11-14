@@ -93,7 +93,7 @@ stacking them: `paneShown(shown, until)` on each pane (hidden below the break wh
 picked, untouched from the break up), `PaneBar` at the foot of the frame (one 56px stop for each pane, a
 count on a glyph's shoulder, clear of the home indicator, not drawn from the break up) and `PaneBack` in the
 head of a page a row opened. The page keeps its own state for which pane is shown, and the frame is held
-to the window below the break so the pane has a height to be the whole of. Four pages are on it:
+to the window below the break so the pane has a height to be the whole of. Six pages are on it:
 
 | Page | Break | Stops | Opens on |
 | --- | --- | --- | --- |
@@ -101,6 +101,8 @@ to the window below the break so the pane has a height to be the whole of. Four 
 | Assistant chat | `lg` | Chat, Chats, What it did | Chat |
 | `/logs` | `md` | Log, Sources | the log |
 | `/network/tools` | `md` | Tool, Every tool | the tool, the one a link asked for |
+| `/files` | `lg` | Places, Folder, Details | the folder |
+| `/files/editor` | `lg` | Files, Editor | the editor |
 
 Logs and the tools run to the screen's edges below `md` and open on the thing the page is for; picking a
 source or a tool returns to it. Logs keeps its tablet layout from `md` to `lg` (the rail stacked over the
@@ -110,6 +112,16 @@ were hidden at a desk. `tests/browser/phone-panes.spec.ts` holds both at 390×84
 view without scrolling, the bar at the foot, every row reachable), a tablet's stack and a desk's columns;
 `git-panel.spec.ts` and `database-assistant.spec.ts` hold the two that came first. The database
 workbenches, a deployment's Logs page and the container, process and stack detail pages are not on it yet.
+
+Files keeps its pane against the folder it was picked in, so arriving at a folder by any route (a place,
+a crumb, Back, a search result) shows the listing without an effect to put it there, and a place that is
+already open is still shown when picked. Its strip is one row below `lg` (back, the path scrolled to the
+open folder, find, New) and the rest of the wide strip is a `MoreMenu` of words. A touch has no drag, so
+moving is Cut or Copy from the selection bar or a long press and Paste from the bar or More. The
+inspector hidden at a desk and the sidebar hidden at a desk are both still on the bar. The editor keeps
+the tree and the editor mounted while the other is shown, so an unsaved draft outlives a look at the
+tree; choosing the open file returns to it without asking, another file asks first. `files-ui.spec.ts`
+holds both at 390×844, the strip at 800px and the columns at 1280px.
 
 Git file drafts stay in memory per checkout/path across SPA previews, with an unload guard across
 repositories; cron builder drafts keep their captured crontab revision in memory per account. Their

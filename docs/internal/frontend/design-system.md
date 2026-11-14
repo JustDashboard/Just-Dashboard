@@ -2550,6 +2550,19 @@ command. Name and content search share a compact keyboard palette with
 file identities, paths and highlighted matching lines. Quick editors keep these same controls when
 opened in the full workspace beside a collapsible tree.
 
+Below `lg` Files and `/files/editor` show one pane at a time with a bar at the foot (`phone-panes.tsx`):
+Places, Folder and Details, and Files and Editor. The strip is then one row and never wraps: Back, the
+path (its crumbs scrolled to the open folder), Find, New, and a `MoreMenu` holding the rest of the wide
+strip as words, drawn by the listing's own `VerbList`. The inspector says what a folder holds as a
+sentence ("12 folders, 40 files, 1.2 GB", `files/counts.ts`), the size joining once it is measured,
+instead of two boxed figures. The editor's commands (`editor-toolbar.tsx`; the two Files pages ask for
+it with `grouped`, an editor embedded in another page keeps the row it had) are `StripGroup`s like the
+strip's: find and replace, undo and redo, wrap and minimap, then format, review and discard, with text
+size, indentation and Monaco's palette as words in a menu at the end. Review and Discard are drawn
+disabled until there is a draft, so the first keystroke moves nothing. Below `lg` the row is the
+language, find, undo, redo and the menu, which then also holds the groups it has no room to draw, and
+the caret's position moves from the footer to the status line so the footer is one row too.
+
 The Files search palette reserves its viewport-bounded height before results arrive. The input is
 borderless even while focused, with the caret and active result carrying its keyboard state; other
 controls retain their focus rings. Only the results scroll. Its footer is one line on a wide screen and
