@@ -1095,34 +1095,75 @@ unit-tested); checked by `tests/browser/processes-ui.spec.ts` and
 ### `/proxy/*`
 
 Proxy overview, Sites and site details, Certificates, Streams, Ports, Configuration, TLS tools and
-Traffic show observed inventories and records. Alerts (`/proxy/alerts`, administrators) is its own
+Traffic show observed inventories and records. Certificates keeps its views in the address
+(`?tab=`: certificates, renewal, DNS challenge, ACME accounts, local CA, signing requests, watched
+domains), and a certificate is a page of its own, `/proxy/certificates/<name>` with `?path=` where
+two share a name (`certificate-page.tsx`, its rail and picture; the shared console, forms and verbs
+in `certificate-work.tsx`, the certificates layout); the sheet's old `?cert=<file>` lands there. Alerts (`/proxy/alerts`, administrators) is its own
 page: what the rules watch wired to the channels told, what fires with its mute, the rules edited in
 a sheet, and a test per channel (the parts that do not know the proxy's kinds are
 `components/alerts/alert-parts.tsx`, shared with `/metrics/alerts`); the overview's identity bar
-links there with the firing count. Site/stream configuration, certificate issuance/renewal,
+links there with the firing count. Ports (`/proxy/ports`) opens on its counts, a picture of which
+networks reach which listening programs and the list of sockets; each listening port has its own page
+(`/proxy/ports/[port]`, keyed `tcp-443` or `udp-53-127.0.0.53` where two rows share a port) with its
+reach, owner, clients and history, and the list as a rail; the old `?socket=` sheet address opens
+it. Site/stream configuration, certificate issuance/renewal,
 requested TLS scans, nginx tests/lint and traffic diagnostics keep their own controls and
 authorization. The overview has no automatic attention list or domain suggestions. Certificate
 hygiene and finding snoozes are removed; nginx Settings exposes current values and edit constraints
 without advice or recommended values
 
+Streams (`/proxy/streams`, 0.8.7) opens on its identity line — the forwards as the services their
+ports are, the stream module's state, how many forward and how many are open to anyone, the hour's
+sessions, the verdict (a press narrows the list to what it counts) and New stream — then the wiring
+picture of the host's ports through nginx to where they go (`stream-picture.tsx`), the module and
+include steps where they are still to do (`stream-setup.tsx`), and the forwards as one-line rows,
+each a way to its own page. Without nginx it is the overview's install screen (`engine-setup.tsx`).
+A stream's page (`/proxy/streams/<name>`, `stream-page.tsx`, with the list as a rail from `xl`,
+`stream-rail.tsx`) holds what the traffic sheet and the edit form did: Overview (the forward drawn,
+what it carried as reading lines and its sessions and outcomes), Clients (with Deny or Allow),
+Connected now, and Settings (the form as a settings column with one save bar, administrators only),
+`?tab=` in the address. New stream stays a sheet (`stream-form.tsx`); the verbs both places share are
+`stream-verbs.tsx`, and what they say is `stream-facts.ts` (unit-tested). `?stream=<name>` lands on
+the stream's page; checked by `tests/browser/proxy-streams.spec.ts`
+Configuration (`/proxy/config`) opens on nginx's directory as an identity line with Test config, the
+include picture over the files by folder, and for administrators What nginx loads, Settings (one
+column, one save bar, a reload switch), Lint and History as `?tab=` views; a file's revisions and
+restore are the config editor's History view (`?view=history`, the old `?history=` link lands
+there). Tunnel (`/proxy/tunnel`) opens on the tunnel's identity line with Check now, the picture of
+hostname → Cloudflare's edge → connector → this server, and the hostnames as one-line cards; not
+connected, the dashed picture, a choice of token or API and one form (administrators only).
+
 **Implementation:** `app/(dashboard)/proxy/`, `components/proxy/`; backend in
 [`../backend/proxy.md`](../backend/proxy.md#proxy)
 
+Traffic (`/proxy/traffic`, every account) is the last hour across every site from
+`GET /proxy/traffic`: requests a minute, the failing share, the slowest site's response time in
+words and bytes sent, the hour by the minute, the sites busiest first (each opening its site page,
+where its requests are read), and nginx's error log grouped from `GET /proxy/errors` over a window,
+for every site or one (`?tab=errors&site=`). The old one-site address `?site=<name>` redirects to
+`/proxy/sites/<name>`. Checked by `tests/browser/proxy-traffic.spec.ts`; the logic is
+`components/proxy/site-traffic.ts` (unit-tested)
+
 ### `/network/*`
 
-Nineteen reporting pages: topology/overview, interfaces/namespaces, IPv4/IPv6 routes and policy
+Eighteen reporting pages: topology/overview, interfaces/namespaces, IPv4/IPv6 routes and policy
 rules, monitored egress groups, firewall, gateway/NAT, protections/blocklists,
 WireGuard/Tailscale/Headscale, resolver/hosts/lookup and private retained native DNS policy/trust
-evidence, traffic/shaping/eBPF, connections and tools. Connection path adds source/container
+evidence, traffic/shaping/eBPF, connections and tools. Connection path (a tool of the Tools
+workbench since 0.8.7; `/network/investigate` redirects to it) adds source/container
 evidence with explicit basis and scope, the native nginx stream on the destination port as observed
 evidence with the backend leg nginx logged for a measured connection, and each forwarding site's
 service policy; Saved runs adds bounded durable lifecycle, retention, export and compatible
-comparison, and lists the **Watched probes** beside them: TCP endpoints the proxy watch list's own
+comparison, each run a page of its own (`/network/runs/[id]`, `components/network/run-page.tsx`:
+Result, Compare, History and Details, with the list as a rail), and lists the **Watched probes**
+under them: TCP endpoints the proxy watch list's own
 monitor connects to on its schedule, with each connect time, check-now and stop for administrators
 (`components/network/watched-probes.tsx`, `lib/watched-probes.ts`), started from the TCP port
 check's **Watch on a schedule**; Packet captures adds bounded immutable scope, dated native
-progress/cleanup, original private PCAP access and separately redacted support export; reload never
-starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
+progress/cleanup, original private PCAP access and separately redacted support export, each capture
+a page of its own (`/network/captures/[id]`, `components/network/capture-page.tsx`: the interface,
+filter and file as a picture, the record on a second view); reload never starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
 selected owned repair with mandatory reconnection. Egress groups (`components/network/egress/`) read
 each group's policy and carrying member, every member measured through its own path (state, round
 trip, loss, a strip of recent samples, its mark, table and probe source), the rules' current advice,
@@ -1131,6 +1172,23 @@ after, the measurements and the connections moved, pinned and flushed, and the l
 expectations and phases; destructive confirmations guard fail over/fail back now, enable, disable,
 removal and turning automation on, which stays disabled until a passed simulation of the current
 configuration. Address planning joins held reservations with fresh overlap coverage and native owner
+progress/cleanup, original private PCAP access and separately redacted support export; reload never
+starts capture. Drift adds desired/render/runtime identities, measured activation and reviewed
+selected owned repair with mandatory reconnection. Egress groups (`components/network/egress/`) are
+a list and a page a group: `/network/egress` opens on an identity line (how many of the six slots
+are used, how many carry traffic, how many switch on their own, members proven) over one card a
+group (its carrying member as the state, how it switches, its verbs in a menu), and
+`/network/egress/[name]` is the group: the carrying member as its state, **Run simulation** as the
+command, a `WireFlow` picture of the selected traffic, the group and its members (the carrying wire
+moves, a failed member is dashed), then views in the address (`?tab=`): Members (state, round trip,
+loss and a strip of recent samples a member, the rules' current advice, readiness, what each member
+is bound to and how the group decides), Decisions (a timeline whose evidence opens on the routes
+before and after, the measurements and the connections moved, pinned and flushed) and Simulation
+(the last run's expectations and phases). From `xl` the list stands beside it as a rail; Alt+↑/↓
+walk it with the view kept. Destructive confirmations guard fail over/fail back now, enable,
+disable, removal and turning automation on, which stays disabled until a passed simulation of the
+current configuration; an account that cannot use a verb is not shown it.
+Address planning joins held reservations with fresh overlap coverage and native owner
 handoffs; External checks retain scoped signed source evidence; Socket history defaults off and
 separates native TCP deltas from explicitly reviewed kernel TCP/UDP payload subtotals, retained
 ownership and coverage gaps. Traffic explicitly distinguishes download policing from owned IFB/CAKE
@@ -1149,14 +1207,29 @@ place, CAKE shows its measured per-class delay and takes
 an upload profile, congestion control is compared on live sockets before and after a switch, eBPF
 programs open into maps, attachments and cost with the dashboard's observer marked, and an install
 is followed by configured/active/verified phases (`components/network/traffic/`, `install.tsx`);
-Connections opens an address into its tuples, closes and layers, reads a past hour from socket
-history, and blocks with a reason, an end and an incident (`components/network/connections/`); VPN
+Connections opens on its identity line and picture, lists each address as a one-line card, gives an
+address a page of its own (`/network/connections/[address]`: its sockets, closes and layers, a past
+hour from socket history), and blocks with a reason, an end and an incident
+(`components/network/connections/`); VPN
 opts in to IPv6 addressing and separate egress with per-family evidence and translated-connection
 counts; each tunnel calls out stale always-on handshakes, captured transports and passed budgets,
 opens a record (endpoint evidence, trend, lifecycle with outcomes), and each peer's sheet adds its
 trend, endpoint history, alert-only budget, editing (a device's regenerated configuration), site
 verification and a Linux kill-switch download, with archived tunnels restorable and
 Tailscale/Headscale approval and key expiry read-only (`components/network/vpn/record.tsx`,
+Connections opens an address into its tuples, closes and layers, reads a past hour from socket
+history, and blocks with a reason, an end and an incident (`components/network/connections/`); VPN
+opens each VPN on its own identity line with no tile row, opts in to IPv6 addressing and separate
+egress with per-family evidence and translated-connection counts on the row that switches that
+family's exit; each tunnel's picture marks stale always-on handshakes, captured transports and
+passed budgets on the peer they are about, a tunnel has a page of its own (`/network/vpn/<name>`:
+endpoint evidence, trend and what each peer moved, lifecycle with outcomes, kept for a removed
+tunnel beside its restore), and each peer's sheet adds its trend, endpoint history, alert-only
+budget, editing (a device's regenerated configuration), site verification and a Linux kill-switch
+download, with archived tunnels restorable, tailnet machines and Headscale nodes as one-line cards,
+the exit-node offer and subnet routes as settings on one save bar, a Tailscale that waits for
+sign-in offering the address it waits at, and Headscale approval and key expiry read-only
+(`components/network/vpn/`: `tunnel-page.tsx`, `tunnel-reading.ts`, `tailscale-offers.tsx`,
 `peer-actions.tsx`, `archive.tsx`). Twenty-six admin-only server diagnostics, each rendering one
 shared structured result (verdict, checks, findings with owners, facts with their basis, tables with
 in-product row links, metrics and limits) with raw output behind a disclosure, a server-held quick
@@ -1182,17 +1255,54 @@ Gateway separates installed readiness from measured reachability (a target check
 and, for administrators, external evidence after the last change), previews each forward or NAT
 change's impacts and modeled policy layers while the form is edited, offers one-to-one, IPv6 prefix
 and destination-scoped NAT, flags a drifted auto source-translation decision with its re-decide, and
-labels live counters by table generation beside totals carried across reloads. Protection adds
+labels live counters by table generation beside totals carried across reloads. Protection
+(`components/network/protection/`) opens on an identity line (what the lists dropped and the limits
+refused, New blocklist as its command) and a `WireFlow` picture of who is refused, this server's
+filter and what gets through, and has three views in the address (`?tab=`): the lists, limits,
+exceptions and trusted addresses as one-height rows, the connection table (administrators), and the
+kernel's protections as a settings column on the shared save bar. It adds
 service-profile limits with a ceiling for everyone, meter occupancy and per-limit refusal trends,
 scoped expiring exceptions, trusted-address notes with staleness review, feed schedules, signatures,
-diffs and provenance, a list preview naming local networks and open sessions, explicit session
-revocation, workload kernel profiles staged into the existing apply bar with per-interface effective
-values, and an administrator's connection-table pressure panel. Private verification is available,
+diffs and provenance (a list's standing and enforcement evidence head its editor), a list preview
+naming local networks and open sessions, explicit session revocation, workload kernel profiles
+staged beside hand edits with per-interface effective values, and the connection table's band,
+charts, shares and what they point at. Private verification is available,
 and IPv4 WireGuard full tunnels explain IPv6 leak blocking. DNS, VPN and Interfaces each end on
 their service's log — the resolvers, tunnels and link daemons the page lists, read in the shared
 `ServiceLogs` pane ([`docker-files-logs.md`](../backend/docker-files-logs.md)). The [complete
 inventory](../../audits/2026-10-08-network-audit/README.md) distinguishes UI, API and inspection
 limits
+
+**The three evidence pages share one layout (0.8.7).** External checks, Address planning and Socket
+history each opened on four tiles over a paragraph, a form and a framed table, with their forms folded
+into disclosures. Each now opens on an identity line (`HostIdentity` in its project layout, its facts
+through `IdentityFacts`) whose state is the page's verdict and whose one command is its main verb, and
+none has a `StatGrid`:
+
+- **External checks** (`components/network/external/`): the picture is the enrolled sources, the
+  internet and this server's approved services, each line the last check's outcome (`reading.ts`:
+  reached, a measured stage refused, partly unknown, in flight, or no measurement, which is dashed and
+  never red). Checks are one framed table, a line each, the chosen one read out under it; sources are
+  `ChoiceRow`s whose press runs a check from them. Run a check, Enroll a source (the one-use credential
+  is shown in the sheet that made it and stays reachable from the source's menu until it expires) and
+  Compare are sheets. Revoke needs `destructive` as well as `system.admin`.
+- **Address planning** (`components/network/ipam/`): named as the rail names it. A pool is a card
+  holding one `BarReading` of planned, observed and free blocks with the server's exact counts and its
+  owners as logos (`reading.ts` joins a pool's held plans with the native observations inside its
+  network); the prefix preview is a field over the bands; reservations are `ChoiceRow`s that link to
+  the Docker or WireGuard creation form while they are only reserved (`?ipamReservation=`); coverage is
+  a framed table. New pool and Reserve are sheets. Retire and Release need `destructive`.
+- **Socket history** (`components/network/flows/`, `components/network/kernel-observer.tsx`): with the
+  recorder off and nothing kept, the page is the picture of what would be sampled and kept, one
+  sentence and Start recording. With a record, the picture is the latest sample's sources, the
+  recorder and what it keeps; the UTC day and the two filters are the table's toolbar; a socket hour
+  is one line and the chosen one is read out under the table; the totals of the rows shown are the
+  table's foot, native counters and kernel payload apart; the day's twenty-four hours are a strip
+  that reads one hour on a fixed line. Sampling policy is a sheet, Erase is in the menu, and the
+  kernel observer keeps its own reviewed activation.
+
+Every reading these pages gave as "Unknown" is still given as "Unknown": a check that expired or was
+cancelled measured nothing, a UDP row has no byte counters, and an hour with no block was not sampled.
 
 **Implementation:** network pages, `components/network/`, shared security firewall/connection
 components; checked by `network-*.spec.ts`, `security-ui.spec.ts` and `design-system.spec.ts`
@@ -1360,6 +1470,35 @@ ordinary preference off was the first line of all nineteen Network pages until 0
 so a reload arms the guard again; `tests/browser/network-confirmation.spec.ts`). These interactions
 are checked by `network-native-profile.spec.ts`; the native manager's separate evidence and limits are
 documented in [the backend contract](../backend/network-native-managers.md).
+
+The Routing page (`app/(dashboard)/network/routing/page.tsx`, `components/network/routing/`) opens on
+its identity line (`identity.tsx`): the default way out, the counts of tables, routes and rules,
+whether the server forwards as its state, *Add route* as the command and *Add rule* and *Refresh*
+behind the `⋯`. Under it are four views named in the address (`?tab=history`, `bgp`, `forwarding`;
+the first has no parameter). Overview is the decision picture (`decision-map.tsx`, hand-laid: two
+columns wired to each other) with its question in its head: the family chips and one target field
+(`route-lookup.tsx`). An address or network typed there narrows the routes to those covering it
+and the history to the changes touching it; one literal address is also put to the kernel
+(`GET /network/routing/lookup`, when the typing pauses and every fifteen seconds after), with the
+packet's source and mark behind the field's sliders, and the table the kernel names is lit in the
+picture, with the rule where one rule alone leads to that table. The line under the head is the
+answer; with nothing asked it is this browser's reply path and how far the kernel vouches for the
+highlight, the long form behind an `ⓘ`. Every route is then one line of one framed table
+(`route-tables.tsx`), the routing table a column and a chip, the device and its source on one mono
+line, Edit and Remove on the dashboard's own rows and why a guarded row stays behind an `ⓘ` a
+keyboard reaches; the policy rules are a second framed table with *Add rule* on its title line.
+Below 1100px a route is two lines of one height, and a rule below 768px. History
+(`route-history.tsx`) is a line a change with the observer's limits behind an `ⓘ`; BGP (`bgp.tsx`)
+is FRR's neighbours, OSPF adjacencies and the route browser as framed tables, or a designed empty
+state that links to Packages. Forwarding (`forwarding.tsx`) is a setting: a `WireFlow` of each
+family, this server and what needs it, then a switch row a family, changed as a draft and written
+by the page's save bar (`SaveBarProvider`), which asks before it stops a family; the view stays
+mounted so a draft stays on the bar while another view is read. An account that cannot change
+anything is shown no command, no row verb and no switch. The page is drawn before its first read
+at the size it had last time (`useViewState("network.routing.shape")`). Checked by
+`tests/browser/network-routing.spec.ts`, with what the forms send in
+`network-routing-firewall.spec.ts` and `network-audit.spec.ts`; the pure readings are
+`route-reading.test.js`.
 
 ## A deployment's project pages in more detail
 

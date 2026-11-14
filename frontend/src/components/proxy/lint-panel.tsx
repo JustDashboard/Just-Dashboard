@@ -10,6 +10,8 @@ import { Panel, PanelHeader, PanelBody } from "@/components/panel"
 import { ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { relativePath } from "@/components/proxy/config-tree"
+import { RefusedConfig } from "@/components/proxy/config-search"
+import { refusalOf } from "@/components/proxy/engine-lifecycle"
 
 const LEVEL_ORDER: Record<Finding["level"], number> = { critical: 0, warning: 1, notice: 2 }
 
@@ -47,6 +49,17 @@ export function ConfigLintView({
     [lint.data, root, onOpen],
   )
 
+  const refusal = refusalOf(lint.error)
+  if (refusal) {
+    return (
+      <RefusedConfig
+        refusal={refusal}
+        root={root}
+        onOpen={onOpen}
+        what="With nothing it would load, there is nothing to lint."
+      />
+    )
+  }
   if (lint.error) return <ErrorState error={lint.error} onRetry={lint.refresh} />
   return (
     <Panel plain>
