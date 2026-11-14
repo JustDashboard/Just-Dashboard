@@ -18,6 +18,7 @@ import {
   FullscreenClose,
   MoreHorizontal,
   Trash,
+  Layers,
   ShieldOff,
   SidebarLeftClose,
   SidebarLeftOpen,
@@ -42,6 +43,7 @@ import {
   type ShortcutAction,
 } from "@/lib/terminal-keymap"
 import { usePanelSize } from "@/lib/panel-size"
+import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
@@ -82,9 +84,13 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { SessionRail } from "@/components/terminal/session-rail"
 import { WindowStrip } from "@/components/terminal/window-strip"
-import { WorkspaceTools } from "@/components/terminal/workspace-tools"
+import { WorkspaceTools, type ToolsTab } from "@/components/terminal/workspace-tools"
+import { SourceBranch } from "@/components/git/glyphs"
+import { MissingOrError, MissingScreen } from "@/components/missing-thing"
+import { moduleOff } from "@/components/missing-thing-model"
+import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { ResizeHandle } from "@/components/resize-handle"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyState, LoadingPanel, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -96,11 +102,23 @@ const AGENTS = {
 const RAIL = { min: 208, max: 480, base: 288 }
 const TOOLS = { min: 256, max: 640, base: 336 }
 const TERMINAL_MIN = 360
-// Tailwind's `lg`, below which the columns stop fitting beside each other.
+// Tailwind's `lg`, below which the columns stop fitting beside each other
+// and the page shows one of them at a time (`phone-panes.tsx`).
 const STACKED = "(max-width: 1023px)"
+
+/** What a phone shows one of: the bar's stops. The last two are the tools column's two halves. */
+type PhonePane = "sessions" | "terminal" | ToolsTab
+
+const PANE_GLYPH: Record<PhonePane, React.ReactNode> = {
+  sessions: <Layers />,
+  terminal: <TerminalWindow />,
+  files: <FolderOpen />,
+  git: <SourceBranch />,
+}
 
 export default function TerminalPage() {
   const router = useRouter()
+  const { can } = useAuth()
   // Which session, and within each session which window, was on screen. Kept
   // in the browser rather than in component state, so leaving for another
   // page and coming back lands where you were instead of on the first
@@ -144,11 +162,28 @@ export default function TerminalPage() {
   const [gridSize, setGridSize] = useState({ width: 0, height: 0 })
   const [showRail, setShowRail] = useViewState("terminal.rail", true)
   const [showTools, setShowTools] = useViewState("terminal.tools", true)
-  // Below `lg` the rail and the tools column cover the emulator instead of
-  // sitting beside it. Stacked under and over it, they left a phone's terminal
-  // one line tall — the two side panels are each "the whole screen" there, so
-  // only one is up at a time and picking a session puts the rail away.
-  const overlay = useMediaQuery(STACKED)
+  // Below `lg` the page is one pane at a time, picked from a bar at its foot:
+  // the sessions, the emulator, and the two halves of the tools column. The
+  // rail and the column used to cover the emulator there, each with a button
+  // of its own to put it away and nothing to say which of the three was up.
+  // A phone opens on the emulator: it is what the page is for, and the
+  // session it shows is the one that was on screen last.
+  const phone = useMediaQuery(STACKED)
+  const [pane, setPane] = useState<PhonePane>("terminal")
+  // Which half of the tools column is open, kept across a navigation:
+  // somebody working out of git is on that tab all afternoon. Held here
+  // because a phone's bar picks it as well as the column's own strip.
+  const [storedTab, setToolsTab] = useViewState<ToolsTab | "diff">("terminal.tools.tab", "files")
+  // A browser that last had the Diff tab open comes back to the tab it grew into.
+  const toolsTab: ToolsTab = storedTab === "diff" ? "git" : storedTab
+  const [changed, setChanged] = useState(0)
+  // The emulator is put away, not covered, while another pane is up: covered
+  // it was still laid out, so a phone's keyboard rising for the session
+  // filter fitted it to five rows and told the shell so. Out of sight it
+  // keeps its grid and its socket (`XtermPane`'s `visible`), and is fitted
+  // and says its size again when it is shown.
+  const terminalShown = !phone || pane === "terminal"
+  const focusOnShow = useRef(false)
   const [immersive, setImmersive] = useState(false)
   const workspaceRef = useRef<HTMLDivElement>(null)
   const focusPaneRef = useRef<(() => void) | null>(null)
@@ -200,6 +235,8 @@ export default function TerminalPage() {
         await refresh()
         setRemembered(session.id)
         setRememberedWindows((windows) => ({ ...windows, [session.id]: session.windowId }))
+        // A session opened from a phone's list is opened to be typed into.
+        setPane("terminal")
       } catch (err) {
         notify.error("Could not open a terminal", err)
       }
@@ -318,7 +355,12 @@ export default function TerminalPage() {
   useEffect(() => {
     const grid = gridRef.current
     if (!grid) return
-    const measure = () => setGridSize({ width: grid.clientWidth, height: grid.clientHeight })
+    // Put away on a phone, the grid measures nothing. The panes keep the
+    // size they had, so coming back changes nothing a shell could see.
+    const measure = () => {
+      if (grid.clientWidth > 0 && grid.clientHeight > 0)
+        setGridSize({ width: grid.clientWidth, height: grid.clientHeight })
+    }
     const observer = new ResizeObserver(measure)
     observer.observe(grid)
     measure()
@@ -356,20 +398,36 @@ export default function TerminalPage() {
     [refresh, windows],
   )
 
+  // On a phone the two chords move between panes, since there is no rail or
+  // column to put away: the first press shows it, the second goes back.
   const toggleRail = () => {
-    if (!showRail && overlay) setShowTools(false)
-    setShowRail(!showRail)
+    if (phone) setPane(pane === "sessions" ? "terminal" : "sessions")
+    else setShowRail(!showRail)
   }
   const toggleTools = () => {
-    if (!showTools && overlay) setShowRail(false)
-    setShowTools(!showTools)
+    if (phone) setPane(pane === "files" || pane === "git" ? "terminal" : toolsTab)
+    else setShowTools(!showTools)
+  }
+  const pickPane = (next: PhonePane) => {
+    if (next === "files" || next === "git") setToolsTab(next)
+    setPane(next)
   }
 
   const select = (session: TerminalWorkspace) => {
     setRemembered(session.id)
-    if (overlay) setShowRail(false)
+    // Picking a session on a phone is asking for its shell. The emulator is
+    // not there to take the keyboard until the pane is drawn.
+    if (phone && pane !== "terminal") {
+      focusOnShow.current = true
+      setPane("terminal")
+    }
     focusPaneRef.current?.()
   }
+  useEffect(() => {
+    if (!terminalShown || !focusOnShow.current) return
+    focusOnShow.current = false
+    focusPaneRef.current?.()
+  }, [terminalShown, active])
   const showWindow = (id: string) => {
     if (active) setRememberedWindows((windows) => ({ ...windows, [active]: id }))
   }
@@ -653,7 +711,7 @@ export default function TerminalPage() {
 
   if (loading)
     return (
-      <Page fill className="px-2 py-2 md:px-3 md:py-3">
+      <Page fill className="p-2 lg:p-3">
         <h1 className="sr-only">Terminal</h1>
         <LoadingPanel rows={4} />
       </Page>
@@ -663,31 +721,56 @@ export default function TerminalPage() {
   // are still running, and each pane reconnects to its own on its own.
   if (error && !data)
     return (
-      <Page className="px-2 py-2 md:px-3 md:py-3">
+      <Page>
         <h1 className="sr-only">Terminal</h1>
-        <ErrorState error={error} />
+        <MissingOrError
+          error={error}
+          onRetry={refresh}
+          size="page"
+          canConfigure={can("system.admin")}
+        />
       </Page>
     )
+  // Turned off is a switch on the Configuration page, so the screen is the
+  // product's one for a missing thing and its step is the way to that switch,
+  // not the name of an environment variable.
   if (!data?.enabled)
     return (
-      <Page className="px-2 py-2 md:px-3 md:py-3">
+      <Page>
         <h1 className="sr-only">Terminal</h1>
-        <EmptyState
-          icon={TerminalWindow}
-          title="The web terminal is disabled"
-          description="Set JD_TERMINAL_ENABLED=true on the backend to turn it on."
+        <MissingScreen
+          missing={moduleOff(
+            { name: "The web terminal", thing: "terminal", setting: "Features" },
+            can("system.admin"),
+          )}
         />
       </Page>
     )
 
+  const stops: PaneStop<PhonePane>[] = [
+    { key: "sessions", label: "Sessions", icon: PANE_GLYPH.sessions },
+    { key: "terminal", label: "Terminal", icon: PANE_GLYPH.terminal },
+    { key: "files", label: "Files", icon: PANE_GLYPH.files },
+    {
+      key: "git",
+      label: "Git",
+      icon: PANE_GLYPH.git,
+      count: changed,
+      countClassName: "bg-(--git-modified)",
+    },
+  ]
+
   const terminalHeader = (
     <>
+      {/* The two toggles put a column away; a phone has no columns, and its
+          bar says which pane is up. */}
       <WorkspaceToggle
         active={showRail}
         onClick={toggleRail}
         label={showRail ? "Hide the sessions rail" : "Show the sessions rail"}
         action="workspace.rail"
         icon={showRail ? SidebarLeftClose : SidebarLeftOpen}
+        className="max-lg:hidden"
       />
       {active ? (
         <WindowStrip
@@ -856,26 +939,29 @@ export default function TerminalPage() {
         label={showTools ? "Hide files & git" : "Show files & git"}
         action="workspace.tools"
         icon={showTools ? SidebarRightClose : SidebarRightOpen}
+        className="max-lg:hidden"
       />
     </>
   )
 
   return (
-    <Page fill className="gap-2 px-2 py-2 md:px-3 md:py-3">
+    <Page fill className="gap-2 p-0 lg:px-3 lg:py-3">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Terminal</h1>
       {data.persistenceError && (
-        <div role="alert">
+        <div role="alert" className="max-lg:px-2 max-lg:pt-2">
           <Notice icon={ShieldOff} tone="danger" title="New terminals are unavailable">
             {data.persistenceError}. Existing sessions keep running on the server.
           </Notice>
         </div>
       )}
       {data.login.error && (
-        <Notice icon={ShieldOff} tone="danger" title="No account to log in as">
-          {data.login.error} Set <code className="font-mono">JD_TERMINAL_USER</code> to an account
-          that exists.
-        </Notice>
+        <div className="max-lg:px-2 max-lg:pt-2">
+          <Notice icon={ShieldOff} tone="danger" title="No account to log in as">
+            {data.login.error} Set <code className="font-mono">JD_TERMINAL_USER</code> to an account
+            that exists.
+          </Notice>
+        </div>
       )}
       {/* One frame around the whole workbench. The rail, the emulator and the
           tools column are separated by a hairline each rather than by a gutter
@@ -884,18 +970,28 @@ export default function TerminalPage() {
           surface. The three columns' top strips are all 40px, so their
           hairlines run across the frame as one rule. The panel toggles live
           only in the emulator's strip; a second copy inside each panel said
-          the same thing twice. Below `lg` a panel covers that strip, so there
-          it carries its own way out. */}
+          the same thing twice. Below `lg` the frame is the screen, edge to
+          edge as the Git workspace's is, and holds one of the three at a
+          time over the bar that picks it. */}
       <div
         ref={workspaceRef}
+        data-slot="terminal-workspace"
         style={{ "--jd-rail": `${railPx}px`, "--jd-tools": `${toolsPx}px` } as React.CSSProperties}
         className={cn(
-          "relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card",
-          immersive && "fixed inset-0 z-50 rounded-none border-0 bg-background",
+          "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border",
+          immersive && "fixed inset-0 z-50 rounded-none border-0 bg-background lg:rounded-none",
         )}
       >
-        {showRail && (
-          <div className="absolute inset-0 z-20 flex bg-card lg:relative lg:inset-auto lg:z-auto lg:w-(--jd-rail) lg:shrink-0 lg:border-r lg:border-hairline">
+        <div className="flex min-h-0 min-w-0 flex-1">
+          {/* Always drawn and hidden by a class, so the filter typed into it
+              is still there after a look at the shell. */}
+          <div
+            className={cn(
+              "relative flex min-w-0 max-lg:flex-1 lg:w-(--jd-rail) lg:shrink-0 lg:border-r lg:border-hairline",
+              paneShown(pane === "sessions"),
+              !showRail && "lg:hidden",
+            )}
+          >
             <SessionRail
               sessions={sessions}
               activeId={active}
@@ -904,7 +1000,6 @@ export default function TerminalPage() {
               onSelect={select}
               onClose={closeSession}
               onNew={() => void openSession()}
-              onHide={overlay ? () => setShowRail(false) : undefined}
             />
             <ResizeHandle
               side="left"
@@ -914,238 +1009,254 @@ export default function TerminalPage() {
               max={RAIL.max}
               onChange={(px, commit) => setRailWidth(px, commit)}
               onReset={resetRailWidth}
-              className="absolute inset-y-0 -right-1 z-20"
+              className="absolute inset-y-0 -right-1 z-20 max-lg:hidden"
             />
           </div>
-        )}
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <PaneHeader className="min-h-10 shrink-0 flex-wrap gap-1 py-0.5">
-            {terminalHeader}
-          </PaneHeader>
           <div
-            ref={gridRef}
-            className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
-            aria-label="Terminal panes"
+            data-slot="terminal-pane"
+            className={cn("flex min-h-0 min-w-0 flex-1 flex-col", paneShown(pane === "terminal"))}
           >
-            {openWindows.map((window) => {
-              const rect = window.sessionId === active ? geometry.panes[window.id] : undefined
-              const focused = window.id === activeWindow?.id
-              const item = windowList.find((item) => item.id === window.id)
-              const label = item ? windowLabel(item, activity[window.id]) : "Terminal"
-              const state = item ? windowActivity(item, activity[window.id]) : undefined
-              return (
-                <div
-                  key={window.id}
-                  data-terminal-window={window.id}
-                  data-focused={focused}
-                  className={cn(
-                    "absolute flex min-h-0 min-w-0 overflow-hidden",
-                    !rect && "hidden",
-                    visibleWindows.length > 1 && focused && "ring-1 ring-primary/60 ring-inset",
-                  )}
-                  style={
-                    rect
-                      ? { left: rect.x, top: rect.y, width: rect.width, height: rect.height }
-                      : undefined
-                  }
-                  onPointerDownCapture={() => {
-                    if (!focused && rect) showWindow(window.id)
-                  }}
-                  onFocusCapture={() => {
-                    if (!focused && rect) showWindow(window.id)
-                  }}
-                  onDragOverCapture={(event) => {
-                    if (!event.dataTransfer.types.includes(TERMINAL_WINDOW_DRAG)) return
-                    event.preventDefault()
-                    event.stopPropagation()
-                    if (!rect || !draggedLayout || leaves(draggedLayout).includes(window.id)) {
-                      event.dataTransfer.dropEffect = "none"
-                      setDropTarget(null)
-                      return
+            <PaneHeader className="min-h-10 shrink-0 flex-wrap gap-1 py-0.5">
+              {terminalHeader}
+            </PaneHeader>
+            <div
+              ref={gridRef}
+              className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
+              aria-label="Terminal panes"
+            >
+              {openWindows.map((window) => {
+                const rect = window.sessionId === active ? geometry.panes[window.id] : undefined
+                const focused = window.id === activeWindow?.id
+                const item = windowList.find((item) => item.id === window.id)
+                const label = item ? windowLabel(item, activity[window.id]) : "Terminal"
+                const state = item ? windowActivity(item, activity[window.id]) : undefined
+                return (
+                  <div
+                    key={window.id}
+                    data-terminal-window={window.id}
+                    data-focused={focused}
+                    className={cn(
+                      "absolute flex min-h-0 min-w-0 overflow-hidden",
+                      !rect && "hidden",
+                      visibleWindows.length > 1 && focused && "ring-1 ring-primary/60 ring-inset",
+                    )}
+                    style={
+                      rect
+                        ? { left: rect.x, top: rect.y, width: rect.width, height: rect.height }
+                        : undefined
                     }
-                    const box = event.currentTarget.getBoundingClientRect()
-                    const direction = dropDirection(
-                      { x: box.x, y: box.y, width: box.width, height: box.height },
-                      event.clientX,
-                      event.clientY,
-                    )
-                    if (!direction) return
-                    const blocked = !canSplit(rect, direction, draggedLayout)
-                    event.dataTransfer.dropEffect = blocked ? "none" : "move"
-                    setDropTarget((previous) =>
-                      previous?.window === window.id &&
-                      previous.direction === direction &&
-                      previous.blocked === blocked
-                        ? previous
-                        : { window: window.id, direction, blocked },
-                    )
-                  }}
-                  onDragLeaveCapture={(event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+                    onPointerDownCapture={() => {
+                      if (!focused && rect) showWindow(window.id)
+                    }}
+                    onFocusCapture={() => {
+                      if (!focused && rect) showWindow(window.id)
+                    }}
+                    onDragOverCapture={(event) => {
+                      if (!event.dataTransfer.types.includes(TERMINAL_WINDOW_DRAG)) return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      if (!rect || !draggedLayout || leaves(draggedLayout).includes(window.id)) {
+                        event.dataTransfer.dropEffect = "none"
+                        setDropTarget(null)
+                        return
+                      }
+                      const box = event.currentTarget.getBoundingClientRect()
+                      const direction = dropDirection(
+                        { x: box.x, y: box.y, width: box.width, height: box.height },
+                        event.clientX,
+                        event.clientY,
+                      )
+                      if (!direction) return
+                      const blocked = !canSplit(rect, direction, draggedLayout)
+                      event.dataTransfer.dropEffect = blocked ? "none" : "move"
                       setDropTarget((previous) =>
-                        previous?.window === window.id ? null : previous,
-                      )
-                  }}
-                  onDropCapture={(event) => {
-                    if (!event.dataTransfer.types.includes(TERMINAL_WINDOW_DRAG)) return
-                    event.preventDefault()
-                    event.stopPropagation()
-                    const source = event.dataTransfer.getData(TERMINAL_WINDOW_DRAG)
-                    const box = event.currentTarget.getBoundingClientRect()
-                    const direction = dropDirection(
-                      { x: box.x, y: box.y, width: box.width, height: box.height },
-                      event.clientX,
-                      event.clientY,
-                    )
-                    if (source === draggedWindow && direction)
-                      dockWindow(source, window.id, direction)
-                    clearWindowDrag()
-                  }}
-                >
-                  <XtermPane
-                    flush
-                    hideToolbar
-                    actionsRef={actionsRef}
-                    path={`/terminal/${window.id}/attach`}
-                    terminalSessionId={window.id}
-                    active={focused}
-                    visible={Boolean(rect)}
-                    layoutSize={rect}
-                    headerContent={
-                      rect && visibleWindows.length > 1 ? (
-                        <>
-                          <button
-                            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left text-xs focus-ring-inset"
-                            onClick={() => {
-                              showWindow(window.id)
-                              focusPaneRef.current?.()
-                            }}
-                            aria-label={`Focus terminal ${label}`}
-                            aria-pressed={focused}
-                          >
-                            <ProgramMark
-                              process={item ? windowProgram(item, activity[window.id]) : undefined}
-                            />
-                            <span className="min-w-0 flex-1 truncate">{label}</span>
-                            <ActivityMark
-                              working={Boolean(state?.working)}
-                              disconnected={disconnectedWindows.has(window.id)}
-                            />
-                          </button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`Open pane ${label} as separate window`}
-                            title="Open as separate window"
-                            onClick={() => detachPane(window.id)}
-                          >
-                            <External className="size-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`Close pane ${label}`}
-                            onClick={() => closeWindow(window.id)}
-                          >
-                            <Cross className="size-3" />
-                          </Button>
-                        </>
-                      ) : undefined
-                    }
-                    cwd={focused ? currentDir : undefined}
-                    onOpenFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
-                    focusRef={focusPaneRef}
-                    className="min-h-0 min-w-0 flex-1"
-                    onActivity={(state) => {
-                      setActivity((prev) => ({ ...prev, [window.id]: state }))
-                      setDropped((prev) =>
-                        prev[window.id] ? { ...prev, [window.id]: false } : prev,
+                        previous?.window === window.id &&
+                        previous.direction === direction &&
+                        previous.blocked === blocked
+                          ? previous
+                          : { window: window.id, direction, blocked },
                       )
                     }}
-                    onExit={() => {
-                      setDropped((prev) => ({ ...prev, [window.id]: true }))
-                      setActivity((prev) => {
-                        if (!(window.id in prev)) return prev
-                        const next = { ...prev }
-                        delete next[window.id]
-                        return next
-                      })
-                      void windows.refresh()
-                      void refresh()
+                    onDragLeaveCapture={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+                        setDropTarget((previous) =>
+                          previous?.window === window.id ? null : previous,
+                        )
                     }}
-                    onToggleFullscreen={toggleImmersive}
-                    fullscreenActive={immersive}
-                  />
-                  {rect && visibleWindows.length > 1 && focused && (
-                    <span
-                      aria-hidden="true"
-                      className="pointer-events-none absolute inset-0 z-20 ring-1 ring-ring ring-inset"
+                    onDropCapture={(event) => {
+                      if (!event.dataTransfer.types.includes(TERMINAL_WINDOW_DRAG)) return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      const source = event.dataTransfer.getData(TERMINAL_WINDOW_DRAG)
+                      const box = event.currentTarget.getBoundingClientRect()
+                      const direction = dropDirection(
+                        { x: box.x, y: box.y, width: box.width, height: box.height },
+                        event.clientX,
+                        event.clientY,
+                      )
+                      if (source === draggedWindow && direction)
+                        dockWindow(source, window.id, direction)
+                      clearWindowDrag()
+                    }}
+                  >
+                    <XtermPane
+                      flush
+                      hideToolbar
+                      actionsRef={actionsRef}
+                      path={`/terminal/${window.id}/attach`}
+                      terminalSessionId={window.id}
+                      active={focused}
+                      visible={Boolean(rect) && terminalShown}
+                      layoutSize={rect}
+                      headerContent={
+                        rect && visibleWindows.length > 1 ? (
+                          <>
+                            <button
+                              className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left text-xs focus-ring-inset"
+                              onClick={() => {
+                                showWindow(window.id)
+                                focusPaneRef.current?.()
+                              }}
+                              aria-label={`Focus terminal ${label}`}
+                              aria-pressed={focused}
+                            >
+                              <ProgramMark
+                                process={
+                                  item ? windowProgram(item, activity[window.id]) : undefined
+                                }
+                              />
+                              <span className="min-w-0 flex-1 truncate">{label}</span>
+                              <ActivityMark
+                                working={Boolean(state?.working)}
+                                disconnected={disconnectedWindows.has(window.id)}
+                              />
+                            </button>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Open pane ${label} as separate window`}
+                              title="Open as separate window"
+                              onClick={() => detachPane(window.id)}
+                            >
+                              <External className="size-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Close pane ${label}`}
+                              onClick={() => closeWindow(window.id)}
+                            >
+                              <Cross className="size-3" />
+                            </Button>
+                          </>
+                        ) : undefined
+                      }
+                      cwd={focused ? currentDir : undefined}
+                      onOpenFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
+                      focusRef={focusPaneRef}
+                      className="min-h-0 min-w-0 flex-1"
+                      onActivity={(state) => {
+                        setActivity((prev) => ({ ...prev, [window.id]: state }))
+                        setDropped((prev) =>
+                          prev[window.id] ? { ...prev, [window.id]: false } : prev,
+                        )
+                      }}
+                      onExit={() => {
+                        setDropped((prev) => ({ ...prev, [window.id]: true }))
+                        setActivity((prev) => {
+                          if (!(window.id in prev)) return prev
+                          const next = { ...prev }
+                          delete next[window.id]
+                          return next
+                        })
+                        void windows.refresh()
+                        void refresh()
+                      }}
+                      onToggleFullscreen={toggleImmersive}
+                      fullscreenActive={immersive}
                     />
-                  )}
-                  {rect && dropTarget?.window === window.id && (
-                    <SplitDropOverlay
-                      direction={dropTarget.direction}
-                      blocked={dropTarget.blocked}
-                    />
-                  )}
-                </div>
-              )
-            })}
-            {geometry.dividers.map((divider) => (
-              <SplitDivider
-                key={divider.id}
-                divider={divider}
-                onChange={(ratio, commit) => changeSplit(divider.id, ratio, commit)}
-              />
-            ))}
-            {!activeWindow && active && <LoadingPanel rows={4} />}
-            {!activeWindow && !active && (
-              <Pane flush className="flex-1">
-                <EmptyState
-                  className="flex-1"
-                  icon={TerminalWindow}
-                  title="No sessions yet"
-                  description={
-                    data.persistent
-                      ? "Sessions keep running on the server until you close them, even with nobody connected or the dashboard restarting or rebuilding."
-                      : "Restore restart protection before opening a terminal."
-                  }
-                  action={
-                    <Button
-                      size="sm"
-                      disabled={!data.persistent}
-                      onClick={() => void openSession()}
-                    >
-                      <Plus className="size-4" />
-                      Open session
-                    </Button>
-                  }
+                    {rect && visibleWindows.length > 1 && focused && (
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 z-20 ring-1 ring-ring ring-inset"
+                      />
+                    )}
+                    {rect && dropTarget?.window === window.id && (
+                      <SplitDropOverlay
+                        direction={dropTarget.direction}
+                        blocked={dropTarget.blocked}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+              {geometry.dividers.map((divider) => (
+                <SplitDivider
+                  key={divider.id}
+                  divider={divider}
+                  onChange={(ratio, commit) => changeSplit(divider.id, ratio, commit)}
                 />
-              </Pane>
-            )}
+              ))}
+              {!activeWindow && active && <LoadingPanel rows={4} />}
+              {!activeWindow && !active && (
+                <Pane flush className="flex-1">
+                  <EmptyState
+                    className="flex-1"
+                    icon={TerminalWindow}
+                    title="No sessions yet"
+                    description={
+                      data.persistent
+                        ? "Sessions keep running on the server until you close them, even with nobody connected or the dashboard restarting or rebuilding."
+                        : "Restore restart protection before opening a terminal."
+                    }
+                    action={
+                      <Button
+                        size="sm"
+                        disabled={!data.persistent}
+                        onClick={() => void openSession()}
+                      >
+                        <Plus className="size-4" />
+                        Open session
+                      </Button>
+                    }
+                  />
+                </Pane>
+              )}
+            </div>
           </div>
-        </div>
 
-        {showTools && (
-          <div className="absolute inset-0 z-20 flex flex-col bg-card lg:relative lg:inset-auto lg:z-auto lg:w-(--jd-tools) lg:shrink-0 lg:border-l lg:border-hairline">
-            <ResizeHandle
-              side="right"
-              label="Files and git panel width"
-              value={toolsPx}
-              min={TOOLS.min}
-              max={TOOLS.max}
-              onChange={(px, commit) => setToolsWidth(px, commit)}
-              onReset={resetToolsWidth}
-              className="absolute inset-y-0 -left-1 z-20"
-            />
-            <WorkspaceTools
-              dir={currentDir}
-              onOpenInFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
-              onClose={overlay ? () => setShowTools(false) : undefined}
-            />
-          </div>
-        )}
+          {/* A phone keeps the column drawn while it is put away on a wide
+              screen: its bar counts the changed files on the Git stop. */}
+          {(showTools || phone) && (
+            <div
+              className={cn(
+                "relative flex min-w-0 flex-col max-lg:flex-1 lg:w-(--jd-tools) lg:shrink-0 lg:border-l lg:border-hairline",
+                paneShown(pane === "files" || pane === "git"),
+                !showTools && "lg:hidden",
+              )}
+            >
+              <ResizeHandle
+                side="right"
+                label="Files and git panel width"
+                value={toolsPx}
+                min={TOOLS.min}
+                max={TOOLS.max}
+                onChange={(px, commit) => setToolsWidth(px, commit)}
+                onReset={resetToolsWidth}
+                className="absolute inset-y-0 -left-1 z-20 max-lg:hidden"
+              />
+              <WorkspaceTools
+                dir={currentDir}
+                tab={toolsTab}
+                onTab={setToolsTab}
+                onChangedCount={setChanged}
+                onOpenInFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
+              />
+            </div>
+          )}
+        </div>
+        {!immersive && <PaneBar label="Terminal" stops={stops} active={pane} onPick={pickPane} />}
       </div>
     </Page>
   )
@@ -1157,12 +1268,14 @@ function WorkspaceToggle({
   label,
   action,
   icon: Icon,
+  className,
 }: {
   active: boolean
   onClick: () => void
   label: string
   action?: ShortcutAction
   icon: React.ComponentType<{ className?: string }>
+  className?: string
 }) {
   const map = useKeymap()
   const chord = action ? map[action] : undefined
@@ -1178,6 +1291,7 @@ function WorkspaceToggle({
           className={cn(
             "size-7 shrink-0 rounded-md p-0",
             active ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
+            className,
           )}
           onClick={onClick}
         >
