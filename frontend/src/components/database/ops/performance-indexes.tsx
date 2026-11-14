@@ -1,12 +1,12 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Copy } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { bytes } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { FormNote } from "@/components/form"
 import { RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, LoadingPanel } from "@/components/state"
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { compact } from "@/components/database/home/readings"
+import { tableHref } from "@/components/database/ops/performance-address"
 import { STORAGE_LIMIT, readIndexStats } from "@/components/database/ops/performance-api"
 import {
   MaintenanceUnread,
@@ -41,11 +42,11 @@ import {
   countFlags,
   flaggedBytes,
   indexFlags,
-  objectParam,
   qualified,
   schemasOf,
   type IndexFlag,
 } from "@/components/database/ops/performance-storage"
+import { Fig, ShareCell, ShareHead, TitleFact } from "@/components/database/ops/performance-words"
 import type { DbIndexStat } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 
@@ -96,7 +97,8 @@ const COLUMNS_FROM = 840
  * no index is accused.
  */
 export function IndexesView() {
-  const { id, engine, param, select, goto } = useDatabase()
+  const { id, engine, param, select } = useDatabase()
+  const router = useRouter()
   const [frame, width] = useColumnWidth<HTMLDivElement>()
   const stats = usePoll((signal) => readIndexStats(id, signal), 60_000, [id])
   const maintenance = useMaintenance(stats.refresh)
@@ -117,8 +119,9 @@ export function IndexesView() {
     [all, scope],
   )
   const counts = useMemo(() => countFlags(inScope), [inScope])
-  const largest = useMemo(
-    () => inScope.reduce((most, index) => Math.max(most, index.bytes), 0),
+  // What a row's share is a share of: every index listed in the scope.
+  const whole = useMemo(
+    () => inScope.reduce((sum, index) => sum + Math.max(index.bytes, 0), 0),
     [inScope],
   )
   const counted = inScope.some((index) => index.scans >= 0)
@@ -149,13 +152,9 @@ export function IndexesView() {
   ]
 
   const wide = width >= COLUMNS_FROM
-  // The table an index is on, as the way to it: its place in the other view.
+  // The table an index is on, as the way to it: the table's own page.
   const toTable = (index: DbIndexStat) =>
-    goto("performance", {
-      view: "tables",
-      ...(scope ? { scope } : {}),
-      object: objectParam(index.schema, index.table),
-    })
+    router.push(tableHref(id, index.schema, index.table, { scope: scope || null }))
   const onTable = (index: DbIndexStat) => (
     <span className="flex min-w-0 items-center gap-1 text-hint text-muted-foreground">
       on
@@ -170,23 +169,6 @@ export function IndexesView() {
       )}
     </span>
   )
-  const sized = (index: DbIndexStat) => (
-    <span className="flex min-w-0 items-center justify-end gap-2.5">
-      <span
-        aria-hidden
-        className="relative h-1 min-w-8 flex-1 overflow-hidden rounded-full bg-meter-track"
-      >
-        <span
-          className="absolute inset-y-0 left-0 rounded-full bg-(--chart-2)"
-          style={{
-            width: `${largest > 0 ? Math.max((index.bytes / largest) * 100, 2) : 0}%`,
-          }}
-        />
-      </span>
-      <span className="numeric w-16 shrink-0 text-right">{bytes(index.bytes)}</span>
-    </span>
-  )
-
   return (
     <Panel plain aria-label="Indexes" ref={frame} className="focus-ring" {...RETURNS_FOCUS}>
       {maintenance.dialogs}
@@ -194,6 +176,11 @@ export function IndexesView() {
         title="Indexes"
         actions={
           <>
+            {stats.data?.truncated && (
+              <TitleFact title="A copy smaller than the cut can go unmarked.">
+                the <Fig>{STORAGE_LIMIT}</Fig> largest of more
+              </TitleFact>
+            )}
             <Stale poll={stats} />
             <SearchInput
               dense
@@ -275,18 +262,19 @@ export function IndexesView() {
                       return (
                         <li
                           key={`${index.schema}.${index.table}.${index.name}`}
+                          data-slot="index-row"
                           className="space-y-1.5 px-4 py-2.5 text-xs"
                         >
                           <div className="flex min-w-0 items-center gap-2">
                             <span className="min-w-0 flex-1 truncate font-mono" title={index.name}>
                               {index.name}
                             </span>
+                            <span className="numeric shrink-0">{bytes(index.bytes)}</span>
                             {verbs.length > 0 && (
                               <VerbMenu verbs={verbs} label={`Actions for index ${index.name}`} />
                             )}
                           </div>
                           {onTable(index)}
-                          {sized(index)}
                           <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                             {counted && index.scans >= 0 && (
                               <span className="numeric text-hint text-muted-foreground">
@@ -306,7 +294,8 @@ export function IndexesView() {
                     <colgroup>
                       <col />
                       {wide && <col className="w-52" />}
-                      <col className="w-36" />
+                      <col className="w-20" />
+                      <col className="w-14" />
                       {counted && <col className="w-16" />}
                       <col className="w-52" />
                       <col className="w-12" />
@@ -316,6 +305,7 @@ export function IndexesView() {
                         <TableHead>Index</TableHead>
                         {wide && <TableHead className="px-2">Columns</TableHead>}
                         <TableHead className="px-2 text-right">Size</TableHead>
+                        <ShareHead />
                         {counted && <TableHead className="px-2 text-right">Scans</TableHead>}
                         <TableHead className="px-2">Notes</TableHead>
                         <TableHead className="px-2">
@@ -327,7 +317,10 @@ export function IndexesView() {
                       {rows.map((index) => {
                         const verbs = verbsFor(index)
                         return (
-                          <TableRow key={`${index.schema}.${index.table}.${index.name}`}>
+                          <TableRow
+                            key={`${index.schema}.${index.table}.${index.name}`}
+                            data-slot="index-row"
+                          >
                             <TableCell className="py-2">
                               <span className="block truncate font-mono" title={index.name}>
                                 {index.name}
@@ -335,8 +328,11 @@ export function IndexesView() {
                               {onTable(index)}
                             </TableCell>
                             {wide && (
-                              <TableCell className="px-2 py-2 whitespace-normal">
-                                <span className="flex flex-wrap items-center gap-1">
+                              <TableCell
+                                className="px-2 py-1.5 whitespace-normal"
+                                title={index.columns.join(", ")}
+                              >
+                                <span className="flex max-h-9 flex-wrap items-center gap-x-1 gap-y-0.5 overflow-hidden">
                                   {index.columns.map((column) => (
                                     <Tag key={column} mono className="max-w-full truncate">
                                       {column}
@@ -350,13 +346,16 @@ export function IndexesView() {
                                 </span>
                               </TableCell>
                             )}
-                            <TableCell className="px-2 py-2">{sized(index)}</TableCell>
+                            <TableCell className="numeric px-2 py-2 text-right">
+                              {bytes(index.bytes)}
+                            </TableCell>
+                            <ShareCell part={index.bytes} whole={whole} />
                             {counted && (
                               <TableCell className="numeric px-2 py-2 text-right">
                                 {index.scans < 0 ? <NoFigure /> : compact(index.scans)}
                               </TableCell>
                             )}
-                            <TableCell className="px-2 py-2 whitespace-normal">
+                            <TableCell className="px-2 py-1.5 whitespace-normal">
                               <IndexTags index={index} />
                             </TableCell>
                             <TableCell className="px-2 py-1 text-right">
@@ -371,12 +370,6 @@ export function IndexesView() {
                   </Table>
                 )}
               </PanelBody>
-              {data.truncated && (
-                <FormNote>
-                  The {STORAGE_LIMIT} largest are listed; this database holds more indexes than
-                  that, and a copy smaller than the cut can go unmarked.
-                </FormNote>
-              )}
               <Notes notes={data.notes} />
             </div>
           )
@@ -389,7 +382,10 @@ export function IndexesView() {
 /** What an index is, and what is wrong with it, as the words at its row's edge. */
 function IndexTags({ index }: { index: DbIndexStat }) {
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+    // Two lines at most, which is what a row's name and its table already
+    // take: an index with a third thing wrong does not make its row taller
+    // than its neighbours, and the chips over the list narrow to each.
+    <span className="flex max-h-9 min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 overflow-hidden">
       {index.primary ? <Tag>primary key</Tag> : index.unique && <Tag>unique</Tag>}
       {!index.valid && <Tag tone="danger">invalid</Tag>}
       {index.duplicateOf && (

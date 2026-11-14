@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { bytes, duration, relativeTime, timestamp, plural } from "@/lib/format"
 import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { Disclosure, FormNote } from "@/components/form"
+import { Disclosure } from "@/components/form"
 import { Meter } from "@/components/meter"
 import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -35,6 +35,7 @@ import {
   StatementLine,
   ViewRead,
 } from "@/components/database/ops/performance-parts"
+import { Fig, ShareCell, ShareHead, TitleFact } from "@/components/database/ops/performance-words"
 import type { ChPartition } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 
@@ -67,15 +68,28 @@ export function PartsView() {
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1])
   }, [partitions])
-  const largest = (partitions ?? []).reduce((most, entry) => Math.max(most, entry.bytes), 0)
 
   return (
     <Panel plain aria-label="Parts">
-      <PanelHeader title="Partitions and parts" actions={<Stale poll={parts} />} />
+      <PanelHeader
+        title="Partitions and parts"
+        actions={
+          <>
+            {parts.data?.truncated && (
+              <TitleFact>
+                the <Fig>500</Fig> largest of more
+              </TitleFact>
+            )}
+            <Stale poll={parts} />
+          </>
+        }
+      />
       <ViewRead poll={parts} what="the parts" skeleton={<LoadingPanel plain rows={5} />}>
         {(data) => {
           const shown = data.partitions.filter((entry) => !table || entry.table === table)
           const listed = data.parts.filter((entry) => !table || entry.table === table)
+          // What a partition's share is a share of: every partition on screen.
+          const whole = shown.reduce((sum, entry) => sum + Math.max(entry.bytes, 0), 0)
           return (
             <div className="animate-rise space-y-3 pt-3">
               {tables.length > 1 && (
@@ -108,7 +122,8 @@ export function PartsView() {
                         <TableHead>Partition</TableHead>
                         <TableHead className="px-2 text-right">Parts</TableHead>
                         <TableHead className="px-2 text-right">Rows</TableHead>
-                        <TableHead className="px-2">On disk</TableHead>
+                        <TableHead className="px-2 text-right">On disk</TableHead>
+                        <ShareHead className="@max-[30rem]:hidden" />
                         <TableHead className="px-2 text-right @max-[38rem]:hidden">
                           Compressed
                         </TableHead>
@@ -130,24 +145,14 @@ export function PartsView() {
                           <TableCell className="numeric px-2 py-2 text-right">
                             {compact(partition.rows)}
                           </TableCell>
-                          <TableCell className="px-2 py-2">
-                            <span className="flex items-center justify-end gap-2.5 @min-[30rem]:min-w-32">
-                              <span
-                                aria-hidden
-                                className="relative h-1 min-w-10 flex-1 overflow-hidden rounded-full bg-meter-track @max-[30rem]:hidden"
-                              >
-                                <span
-                                  className="absolute inset-y-0 left-0 rounded-full bg-(--chart-1)"
-                                  style={{
-                                    width: `${largest > 0 ? Math.max((partition.bytes / largest) * 100, 2) : 0}%`,
-                                  }}
-                                />
-                              </span>
-                              <span className="numeric w-16 shrink-0 text-right">
-                                {bytes(partition.bytes)}
-                              </span>
-                            </span>
+                          <TableCell className="numeric px-2 py-2 text-right">
+                            {bytes(partition.bytes)}
                           </TableCell>
+                          <ShareCell
+                            part={partition.bytes}
+                            whole={whole}
+                            className="@max-[30rem]:hidden"
+                          />
                           <TableCell className="numeric px-2 py-2 text-right text-muted-foreground @max-[38rem]:hidden">
                             {ratio(partition) ?? <NoFigure />}
                           </TableCell>
@@ -163,11 +168,6 @@ export function PartsView() {
                   </Table>
                 )}
               </PanelBody>
-              {data.truncated && (
-                <FormNote>
-                  The 500 largest partitions and parts are listed; there are more.
-                </FormNote>
-              )}
               {listed.length > 0 && (
                 <Disclosure
                   quiet
