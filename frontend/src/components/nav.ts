@@ -547,6 +547,44 @@ export function navOwns(entry: NavEntry, pathname: string): boolean {
 }
 
 /**
+ * Landing pages that are themselves the list whose items open under the
+ * section's own address: a process at `/processes/<pid>`, a project at
+ * `/deploy/<id>` and the new-project page, a database at `/databases/<id>`.
+ */
+const LIST_LANDINGS = new Set(["/processes", "/deploy", "/databases"])
+
+const pathOf = (href: string) => href.split("?")[0]
+
+/**
+ * Whether a row inside a section's panel is where the reader is: on its page,
+ * or on a page opened from it (a container under Containers, a jail under
+ * Intrusion, a statement under a database's Performance).
+ *
+ * A row owns the addresses under its own, with one exception that keeps a
+ * parent and its child from both being lit. A row other rows of the panel
+ * hang under is the section's landing page (Docker's Overview at `/docker`, a
+ * database's Home at `/databases/<id>`, Metrics above its Alerts): everything
+ * under it is another row's page, so it is current on its own address alone.
+ * A landing page in `LIST_LANDINGS` also keeps the pages no other row owns,
+ * which are the items it lists.
+ *
+ * `siblings` is every row of the panel, the row itself included. A row's href
+ * may carry the reader's place in its query string (a database's panel keeps
+ * the schema and the table there), which is not part of which page it is.
+ */
+export function navCurrent(href: string, siblings: readonly string[], pathname: string): boolean {
+  // A run is opened from its project's Deployments, and is one of them.
+  const run = /^(\/deploy\/\d+)\/runs\//.exec(pathname)
+  const here = run ? `${run[1]}/deployments` : pathname
+  const path = pathOf(href)
+  if (path === here) return true
+  if (!navMatches(path, here)) return false
+  const paths = siblings.map(pathOf).filter((other) => other !== path)
+  if (!paths.some((other) => other.startsWith(`${path}/`))) return true
+  return LIST_LANDINGS.has(path) && !paths.some((other) => navMatches(other, here))
+}
+
+/**
  * The section an entry is the root of, if it is one an account can hide.
  * Only the section's own row counts: Docker's Images is a page *inside* a
  * section, drawn whenever Docker's panel is, and never hidden on its own.

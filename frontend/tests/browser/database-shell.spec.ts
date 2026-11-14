@@ -592,6 +592,11 @@ test("the page of one item keeps the one-line strip over its own line", async ({
     await expect(strip(page).getByText("production", { exact: true })).toBeVisible()
     await expect(strip(page).getByRole("button", { name: "Actions for shop" })).toBeVisible()
     expect((await strip(page).boundingBox())!.height, path).toBeLessThan(60)
+    // The rail lights the page the item was opened from, and Home stays unlit.
+    await expect(
+      rail(page).locator('[data-sidebar="menu-button"][data-active="true"]'),
+      path,
+    ).toHaveText([path.includes("/access/") ? "Access" : "Performance"])
   }
   // The list an item belongs to is not an item: it opens on the header.
   await page.goto("/databases/1/access")
