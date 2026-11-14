@@ -1334,13 +1334,10 @@ test("/proxy/sites/legacy.example.com says why it has no requests to read, and r
     .toBe(true)
   await expect(page.getByText(/Connection refused/)).toBeVisible()
 
-  // The form that turns its log on is a press away, in the notice itself.
-  const notice = page
-    .locator("div")
-    .filter({ has: page.getByText("This site has no access log of its own", { exact: true }) })
-    .last()
-  await notice.getByRole("button", { name: "Edit" }).click()
-  await expect(page.getByText("Edit legacy.example.com")).toBeVisible()
+  // The setting that turns its log on is a press away, in the note itself.
+  await note.getByRole("link", { name: "Turn it on" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/legacy\.example\.com\?tab=settings&view=hardening$/)
+  await expect(page.getByRole("switch", { name: "Access log" })).toBeVisible()
 })
 
 /** A route on the Docker Caddy ingress: Caddy's JSON, which records the host and the time taken. */

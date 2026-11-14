@@ -103,6 +103,23 @@ export function AuthFilesPanel() {
     })
   }
   const addLogin = (file = "") => setTarget({ file, user: "", change: false })
+  // The login dialog and the confirmations. Opened from a file's sheet they
+  // are drawn inside it, so each is layered over it: Escape and a press
+  // outside close the dialog, not the sheet behind it.
+  const over = (
+    <>
+      {target && (
+        <AuthUserDialog
+          key={`${target.file}:${target.user}`}
+          target={target}
+          files={data ?? []}
+          onClose={() => setTarget(null)}
+          onDone={refresh}
+        />
+      )}
+      {dialog}
+    </>
+  )
 
   return (
     <>
@@ -195,17 +212,10 @@ export function AuthFilesPanel() {
         onChange={(file, user) => setTarget({ file: file.name, user, change: true })}
         onRemove={removeUser}
         onDelete={removeFile}
-      />
-      {target && (
-        <AuthUserDialog
-          key={`${target.file}:${target.user}`}
-          target={target}
-          files={data ?? []}
-          onClose={() => setTarget(null)}
-          onDone={refresh}
-        />
-      )}
-      {dialog}
+      >
+        {over}
+      </AuthFileSheet>
+      {!open && over}
     </>
   )
 }
@@ -229,8 +239,11 @@ function AuthFileSheet({
   onChange,
   onRemove,
   onDelete,
+  children,
 }: {
   file: AuthFile | undefined
+  /** What opens over the sheet: the login dialog and the confirmations. */
+  children: React.ReactNode
   onClose: () => void
   onAdd: (file: AuthFile) => void
   onChange: (file: AuthFile, user: string) => void
@@ -322,6 +335,7 @@ function AuthFileSheet({
           </FormSection>
         </div>
       )}
+      {children}
     </SidePanel>
   )
 }
@@ -430,8 +444,9 @@ function AuthUserDialog({
         <Field
           label={target.change ? "New password" : "Password"}
           htmlFor="auth-password"
-          hint="8 to 72 characters."
-          info="bcrypt truncates anything longer than 72, which would quietly make it a different password from the one you typed."
+          // Under the field, not behind an ⓘ: the tip would be the dialog's
+          // first stop, open on arrival, and take the Escape meant for the dialog.
+          hint="8 to 72 characters. bcrypt ignores anything past 72."
         >
           <InputGroup>
             <InputGroupInput

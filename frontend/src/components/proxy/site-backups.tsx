@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Archive, RotateCounterClockwise, Trash } from "@/components/icons"
 import { del, errorMessage, post } from "@/lib/api"
+import { notify } from "@/lib/toast"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import type { SiteBackup, SitePlacementResult } from "@/lib/types"
 import type { PollState } from "@/hooks/use-poll"
@@ -20,6 +21,8 @@ import { Input } from "@/components/ui/input"
 
 const SITE_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/
 
+const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
 function backupPath(b: SiteBackup) {
   return `/proxy/site-backups/${encodeURIComponent(b.layout)}/${encodeURIComponent(b.file)}`
 }
@@ -31,7 +34,8 @@ function backupPath(b: SiteBackup) {
  * restore is tested like an import; a purge is for good.
  *
  * Each is one line: the file over where it is, how big and how old, and at
- * its end what a restore would do. A press on the row is the restore.
+ * its end what a restore would do. A press on the row is the restore, or,
+ * for a file that cannot be one, why.
  */
 export function SiteBackupsPanel({
   backups,
@@ -93,9 +97,17 @@ export function SiteBackupsPanel({
               {data.map((b) => (
                 <ChoiceRow
                   key={b.path}
-                  onSelect={() => setRestoring(b)}
-                  disabled={!b.restorable}
-                  verb={`Restore ${b.file}`}
+                  // One that cannot be restored still answers a press, with
+                  // why: a row that did nothing would be drawn without its
+                  // edge, two pixels shorter than the rows around it.
+                  onSelect={() =>
+                    b.restorable
+                      ? setRestoring(b)
+                      : notify.info(`${b.file} cannot be restored`, {
+                          description: b.reason ? `${capital(b.reason)}.` : undefined,
+                        })
+                  }
+                  verb={b.restorable ? `Restore ${b.file}` : `Why ${b.file} cannot be restored`}
                   leading={<ProductLogo id={undefined} size="sm" fallback={Archive} />}
                   title={<span className="font-mono">{b.file}</span>}
                   description={`${b.layout} · ${bytes(b.size)} · ${relativeTime(b.modified)}`}

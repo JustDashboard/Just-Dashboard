@@ -631,12 +631,13 @@ test("backups are one line each, and a press on one is its restore", async ({ pa
   expect(new Set(heights).size).toBe(1)
   await expect(rows.nth(0)).toContainText("restores as old.example.com")
   await expect(rows.nth(1)).toContainText("app.example.com exists")
-  // One that cannot be restored has nothing to press but its menu.
+  // One that cannot be restored says why when pressed, and restores nothing.
   await expect(rows.nth(2)).toContainText("cannot be restored")
-  await expect(
-    rows.nth(2).getByTitle("Cannot be restored: it holds no server block."),
-  ).toBeVisible()
-  await expect(rows.nth(2).getByRole("button", { name: "Restore notes.txt~" })).toHaveCount(0)
+  await rows.nth(2).getByRole("button", { name: "Why notes.txt~ cannot be restored" }).click()
+  await expect(toast(page, "notes.txt~ cannot be restored")).toContainText(
+    "It holds no server block.",
+  )
+  await expect(page.getByRole("dialog")).toHaveCount(0)
 
   await rows.nth(0).getByRole("button", { name: "Restore old.example.com.bak" }).click()
   const restore = page.getByRole("dialog", { name: "Restore old.example.com.bak" })
