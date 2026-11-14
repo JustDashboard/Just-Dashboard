@@ -83,8 +83,8 @@ taking a frame:
 - a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
   body, footer) and drops the border and ground, so a title and a hairline mark the block. Recent
   activity on the Overview, every chart, list and hardware reading on the
-  metrics page, every block on the Docker pages but the overview's container table (the
-  overview's band, attention, compose projects, cleanup and disk; the containers, stacks and
+  metrics page, every block on the Docker pages (the
+  overview's band, engine picture, compose projects, cleanup and disk; the containers, stacks and
   events lists with their toolbars; the Networks page's band; the Images page's band of what
   Docker holds on disk and what the registries say, over its framed table; the Volumes page's
   band of who holds the data and where each volume stands, over its framed table; the attention
@@ -94,12 +94,9 @@ taking a frame:
   picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
   facts, route picture, traffic, certificate and error band, attention list, sites and Engine log;
   the sites, certificates and
-  streams inventories and the ports table with their toolbars; the Renewals section on
-  Certificates; a site's own page, its route picture on the page's ground and its logs one `Pane`
-  under it; the TLS report's findings, protocol, certificate, chain, HTTP and
   streams inventories and the ports table with their toolbars; the Renewal view's sections on
   Certificates and a certificate's own page; a site's own page, its route picture on the page's
-  ground and its logs one `Pane` under it; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
+  ground and its logs one `Pane` under it; the TLS report's findings, protocol, certificate, chain, HTTP and
   preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
   connection rows; the password files and DNS provider lists),
   the runtime-health bar, and every block of the deployment section — the fleet
@@ -183,22 +180,16 @@ taking a frame:
   `Pane` and whose jobs and timers open sheets of their own — with a detail sheet built
   from plain panels that opens on the thing's own mark, the unit's journal, a timer's runs and a
   job's cron lines a `Pane` in their sheets, a PM2 application's logs a `Pane` on its page — and the
-  two System pages follow the same shape: on System users the identity line and what to change over
-  the accounts as a table of readings whose row opens the account, each account's page plain lists
-  of rows and plain forms, and on the audit
-
-  from plain panels that opens on the thing's own mark, the unit's journal, a PM2
-  application's logs, a timer's runs and a job's cron lines a `Pane` in their sheets — and the
   two System pages follow the same shape: on System users the identity line, what to change and the
   ways to root as one picture over the accounts as one-line cards that open the account, each
   account's page three views of plain lists of rows and one settings column, and on the audit
-  log four readings of the last day over its table and filters, where a request's outcome is a
+  log the identity line and the day as one strip over its table and filters, where a request's outcome is a
   `Status` dot and the code in its family's colour rather than a wash across the row; and
   both of the dashboard's own pages — on Version the identity line, the update in flight and the
   history (a timeline: the version in a sticky column, a rail with a mark per release, the notes at
-  a readable measure), and on Configuration the stack (its checkout and three services as a
-  `RowList`, beside Restart and Rebuild as two `ChoiceCard`s), the restart record, and the settings
-  as `FormSection aside`s, each head over its fields — the framed things on those two pages are the
+  a readable measure), and on Configuration the identity line with Restart and Rebuild behind its
+  `⋯`, the request's path, the restart record, and the settings as one centred column of
+  `SettingSection`s, each head over its fields — the framed things on those two pages are the
   transcript console, which is a `Pane`, and the cards you pick; the Backups page —
   a picture of where the server's data goes, on the page's own ground (what it
   has by kind, wired through this server to every directory and bucket a job writes to), an
@@ -671,7 +662,7 @@ exactly as it did and can be carried on. One another tab is answering is followe
 box — a breathing dot, *This chat is running in another tab*, and **Take over** — and the tab it was taken from says
 *Continued somewhere else* and stops. Below the chats, what it has changed with a shortcut to each, and what it has
 read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot
-(`phone-panes.tsx`, which Git, Logs, a project's Logs and the network tools share: `workspace-interactions.md`).
+(`phone-panes.tsx`, shared by every page that shows one pane at a time: `workspace-interactions.md` lists them).
 
 A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a transition
 on an outline, not a fifth animation. The floating **Back to chat** is the same surface as Remote Desktop's dock, in
@@ -1915,33 +1906,19 @@ or into the default (`firewall-reading.ts`, unit-tested) — and its rule table 
 a `--tag-*` hue down the row's edge, ending on the default as its last row. SSH's
 (`ssh-picture.tsx`) draws the port, password authentication, root login and the keyed accounts as
 the doors a login can take, following the draft as it is edited; it replaced four tiles that said
-the same facts one at a time. Firewall's policy controls sit beside its bounded rule table; SSH
+the same facts one at a time. Firewall's defaults are a settings section under its rule table,
+saved by the page's save bar (0.8.7, below); SSH
 sets its directives in one centred column of `SettingSection`s behind the product's save bar, and
 Intrusion's jail choices carry their watched service's mark, state and comparable readings (both
 are described in the next paragraph). SSH, Firewall and
-
-the same facts one at a time. Firewall's defaults are a settings section under its rule table,
-saved by the page's save bar (0.8.7, below); SSH
-lays its directive groups out two to a row from `xl`, as Configuration does, each head over its
-fields with *Edited* in `--git-modified` while it holds a staged change, and its apply bar follows
-the reader and names what changed. Intrusion's jail choices carry their watched service's mark,
-state and comparable readings. SSH, Firewall and
 Intrusion each end on their own log — the auth log, the firewall's log, fail2ban's Activity — read
 through its lens in one `Pane` under a title across the page, since a log needs the width a rail or a
-half row does not have; the last day's counts join the page's one `StatGrid` rather than drawing a
-second (Firewall's are on its picture's nodes since 0.8.7), and an attacker's address is blocked
-from the line it is on. Repeat offenders therefore take
-Intrusion's row alone. Logins and Network combine related facts into fewer,
+half row does not have; the last day's counts are on Firewall's picture's nodes and are `ReadingLine`s
+on SSH and Intrusion (0.8.7), and an attacker's address is blocked from the line it is on. Repeat offenders
+therefore take Intrusion's row alone. Logins and Network combine related facts into fewer,
 richer columns: an account and its terminal, an
 interface and its kind. Their action columns are always drawn. Connections lists each address as a
-one-line card that opens the address's own page (`network/connections/`).
-Tools is a two-pane working surface,
-
-half row does not have; the last day's counts join Firewall's one `StatGrid` and are `ReadingLine`s
-on SSH and Intrusion, and an attacker's address is blocked from the line it is on. Repeat offenders
-therefore take Intrusion's row alone. Connections, Logins and Network combine related facts into fewer,
-richer columns: a peer and its network, a service and its ports, an account and its terminal, an
-interface and its kind. Their action columns are always drawn. Tools is a two-pane working surface,
+one-line card that opens the address's own page (`network/connections/`). Tools is a two-pane working surface,
 with a searchable choice rail and one visible form/result, retaining every other probe's work.
 
 **Intrusion and SSH read like a project's pages (0.8.7).** Intrusion stacked a merged table and three
@@ -2005,8 +1982,8 @@ below `sm`. Empty, each list says so on one line at a row's height; a host witho
 **The proxy section draws routes, engines and authorities.** All seven pages stay in the reading
 register. Sites opens on its identity line and the site band (§15, *The proxy's Sites page*); what
 the reader has to act on first — a failed read, nginx not running, changes on disk nginx has not
-loaded, with Test config and Reload nginx — stands under the line as a `Notice`. The other pages but
-the overview begin with four `StatTile` readings, two per row on phones. The overview took §15's exit
+loaded, with Test config and Reload nginx — stands under the line as a `Notice`. No page of the section
+begins with a row of tiles since 0.8.7; each opens on its identity line. The overview took §15's exit
 in 0.7.1 (pass 2 has the paragraph): it opens on the engine identity, its facts ending on the sites,
 certificates, streams and internet-facing ports, each a link, the routes' verdict beside the name
 with the engine's state, and its one command at the end with the rest behind `⋯` (pass 2's fifth
@@ -2114,26 +2091,14 @@ and the grade last) that open the report. The request tester's line is the reque
 the answer's status in its colour, protocol, first byte, total and bytes read; its redirect chain
 is cards that pick a hop, and a host with no nginx gets the section's empty card with Install.
 
-Certificates has a searchable inventory beside renewal and DNS management. Each inventory card opens
-its details — all names, dates, the full path and links to the sites using it — so it takes the lit
-edge; its issuer, expiry and lifetime meter remain on the card. An unreadable certificate carries a
-short verdict on the card and its complete error in the detail sheet; unavailable dates and signing
-status stay unknown, and it draws no invented lifetime. A test certificate — a staging authority's —
-draws no issuer mark, reads "test certificate" and a red meter whatever its days, and carries its
-sentence and its one verb, the real issuance, on a line of its own under the card.
-The panel's command is split rather than doubled: "Issue certificate" is Let's Encrypt on the brand
-face, and a chevron joined to it opens every other way to get one — the local CA, self-signed, a
-signing request — as words in a menu; without certbot the menu is the whole command. What the server
-makes itself is said where it is read: the local CA's certificates carry a `local CA` Tag, and the
-details of one nothing trusts by default say where it is trusted in a hint line, not a Notice. The
-rail adds Signing requests at its head only while one waits — what the operator owes an answer to —
-and a Local CA panel after DNS providers, which is an administrator's offer to create one and nothing
-to a reader until it exists.
 Certificates (overhauled in 0.8.7) opens on its identity line rather than four figure tiles: the
 issuers' marks, certbot, how many certificates, how many expire inside the renewal window and in how
 many days, how many browsers refuse (expired, test or unreadable, the split in its title) and the
 renewal reading as a link to the Renewal view, with the verdict and the split Issue command at the far
-end and Import and Paste a certificate in its `⋯` menu. Under it the page's jobs are views in the
+end and Import and Paste a certificate in its `⋯` menu. The command is split rather than doubled:
+"Issue certificate" is Let's Encrypt on the brand face, and a chevron joined to it opens every other
+way to get one — the local CA, self-signed, a signing request — as words in a menu; without certbot
+the menu is the whole command. Under it the page's jobs are views in the
 address (`?tab=`): Certificates, then what issues and renews them — Renewal, DNS challenge, ACME
 accounts (administrators), Local CA, Signing requests — then Watched domains, with the transparency
 logs. Each certificate is one `ChoiceRow` read down its columns — issuer mark, name over its names in
@@ -2229,6 +2194,7 @@ log is turned on, or Sites) rather than four zeros; a host with no reverse proxy
 `EngineSetup`. One site's requests were a second, older copy of that site's own page here
 (`?site=`); that address now lands on the site's page, and `?site=…&view=errors` is the Errors view
 narrowed to it. `proxy-traffic.spec.ts` covers every state at 1280 and 390.
+
 **Configuration and Tunnel open on what they are about.** Neither draws a way back over its line,
 as no page of the section does. Configuration (`/proxy/config`) is an
 identity line — nginx's mark, its directory in mono, how many files in how many folders, how many
@@ -2640,6 +2606,32 @@ the page being redesigned and make the second one read like the first.
 where two things meet. Type doing the hierarchy. One blue. Motion only to say something arrived.
 "Modern and clean" here means *fewer edges*, never more decoration — no gradients, no glow, no glass,
 no shadows, no icon plates, no badges, no rounded cards floating over the ground.
+
+**What the 0.8.7 run settled.** The run that brought every page to the deploy pages' look closed
+questions these passes had left open. Each is written once, where the list points, and a page
+redesigned now starts from them:
+
+- **A page opens on an identity line in the project's layout**: `HostIdentity` with a `state`, one
+  `command` and a `menu` (§14, *Any page can open as a project does*).
+- **No row of tiles opens a page.** A figure that is a reading is a fact on that line, a node of the
+  picture or a `ReadingLine` (§16, *A project's Overview reads in sentences*); pass 2 below still
+  holds where a run of figures is read as a table.
+- **A picture of things wired through one hub is `WireFlow`**, and it waits at its loaded shape
+  (§2, the two paragraphs on it).
+- **An item's detail is a page with a rail, not a sheet**: a route of its own on the process page's
+  shape (`procs/process-page.tsx`, `process-rail.tsx`), which is a way back, the identity line with
+  its one command, the views as an underlined strip named in `?tab=`, and from `xl` the list it came
+  from as a rail with that list's own filter, Alt+↑ and Alt+↓ walking it with the view kept. The
+  address that opened the sheet redirects to the page. A sheet stays for a small add or edit form.
+- **Settings are one centred column** under one save bar, with a `PendingStrip` for what is stored
+  and not in force; the same bar serves a setting on a reading page and a column beside a rail (§7).
+- **A thing that is not there has one screen**, `components/missing-thing.tsx` (the paragraph of
+  that name, below).
+- **On a phone a page of several panels is one pane at a time** over a bar at the foot
+  (`components/phone-panes.tsx`; the pages on it are listed in `workspace-interactions.md`).
+- **A Remote Desktop session is the one workbench that keeps full bleed** (§16's table).
+- **Every page of one database opens on the database's header**, with the exceptions decided in
+  `shell/header-rule.ts` (the paragraph of that name, below).
 
 The passes, in order. Each one is a diff you can review on its own.
 
@@ -4180,8 +4172,11 @@ the same, without the after-install phases the server keeps only for the network
 (`usePackageKnown`, one `GET /packages/tailscale`), since Debian and Ubuntu do not until its own
 repository is added, and is pointed at otherwise. PM2 is an npm package for a host account, not
 something the package manager installs, so its page names the command and opens the terminal
-(`procs/pm2-missing.tsx`). What the Docker pages say when the daemon cannot be asked is which fault
-it is (`docker/unreachable.ts`): a socket that refused the dashboard, a `docker.service` systemd says
+(`procs/pm2-missing.tsx`). The same file draws PM2's two other absences under its mark: installed
+with no account's daemon running (it starts with the first application, so the block names
+`pm2 start`), and not answering (what the page asked for, PM2's own words under that sentence
+rather than as the headline, and Try again). What the Docker pages say when the daemon cannot be
+asked is which fault it is (`docker/unreachable.ts`): a socket that refused the dashboard, a `docker.service` systemd says
 is not running (with **Start Docker** for `service.control`), a daemon that runs but not at the
 address asked, no `docker.service` at all (not installed: **Install Docker** for `system.admin` where
 the package manager carries `docker.io` or `docker`, Docker's own instructions otherwise), or no
@@ -4212,15 +4207,6 @@ Scheduled's Timers share `procs/no-systemd.tsx`. The step is always real: a rout
 exists (`POST /systemd/docker.service/start`, `POST /packages/install`), a link to the page that
 helps, or a line to copy. An empty list is still `EmptyState` and a failed read still
 `ErrorState`; a tool the package manager installs in place keeps `InstallHandoff`.
-
-(`procs/pm2-missing.tsx`). The same file draws PM2's two other absences under its mark: installed
-with no account's daemon running (it starts with the first application, so the block names
-`pm2 start`), and not answering (what the page asked for, PM2's own words under that sentence
-rather than as the headline, and Try again). Docker is never missing on an install that runs in it; what its pages say
-when the daemon cannot be asked is which fault it is (`docker/unreachable.ts`): a socket that refused
-the dashboard, a `docker.service` systemd says is not running (with **Start Docker** for
-`service.control`), a daemon that runs but not at the address asked, or no answer where systemd cannot
-be asked. The client's own sentence is behind *What the server said*.
 
 **Network drift took the exit on 2026-10-10**, at the operator's request, because it was dead:
 four grey figures (known differences, incomplete readings, matching observations, owned repair
@@ -4346,6 +4332,7 @@ pixels each, under a row of six equal buttons and a switch. Where each went
   readings: they are the **Bound to** list under it, with **How it decides** (probes, thresholds,
   holds, connections, protected addresses), which only the form showed before. What the rules would
   do now (`advice`) is a notice above the table when they would act.
+
 **The VPN page is one kind of VPN at a time** since 2026-11-14: it opens on its own line (VPN, how
 many tunnels are up and whether the server is on its tailnet, then each kind in a few words under its
 mark), and under it WireGuard, Tailscale, Headscale (where this server runs one) and the log are views
@@ -4395,6 +4382,7 @@ family facts and a paragraph. Where each went (`components/network/vpn/`):
 - **A verb the session would be refused is not drawn**: taking a tunnel down, removing it, removing a
   peer, forgetting its saved copy, clearing a budget and withdrawing an offer are destructive routes,
   and are shown to an account that holds `destructive`.
+
 **Protection took the exit in 0.8.7** (2026-11-13). It opened on four tiles with no header over
 five sections, the last of them fifteen kernel settings in two columns, and a `LoadingPanel` stood
 where all of it would land. Where each figure went (`components/network/protection/`):
@@ -4612,10 +4600,8 @@ the reader through it.
 | Deploy settings, credentials, notifications, templates | Reading | Editable readings of state, not a sequence with an end. |
 | Sign-in, first-run setup, `/welcome` — the first-run question | **Flow** | A sequence with an outcome: the account's sidebar. |
 | Remote Desktop — the computers (`/remote-desktop`) | Reading | The reader arrives to find out which computers can be opened now. |
-| A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's columns held to the window around the live screen, but edge to edge: no measure, gutter or frame, since every pixel of those was taken from the screen; a stream's frame is the computer's own shape, so the space left round it is the workspace's ground rather than black bars; drawn by guacd (Control) or streamed by Sunshine (Stream); what a stream waits on (its bridge, Sunshine, the PIN) is said in the screen's place, with Sunshine's own mark. |
 | `/system-users/new` — add an account | **Flow** | What it is for, then who it is and how they get in, ending in the one command that creates it. An account nobody can sign in to has to be asked for by name, which is the failure this replaced: a dialog that took a name and left the way in optional made an administrator nobody could ever sign in as. The form is the one focused surface and the column beside it draws what the answers add up to (the way in, the account, how far it reaches). An account's own page, the groups, a group's page and the defaults are reading pages. |
 | A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's columns held to the window around the live screen, but edge to edge: no measure, gutter or frame, since every pixel of those was taken from the screen. **It is the one workbench that keeps full bleed at every width**: the terminal, Files, a Git working copy, a drawing and a database's views stand in the page's gutter inside one rounded frame from `lg`, and a session does not, because it is a screen. On a phone it is one pane at a time (Screen, Tools, Computers) over the shared bar; a stream's frame is the computer's own shape, so the space left round it is the workspace's ground rather than black bars; drawn by guacd (Control) or streamed by Sunshine (Stream); what a stream waits on (its bridge, Sunshine, the PIN) is said in the screen's place, with Sunshine's own mark. |
-| `/system-users/new` — add an account | **Flow** | What it is for, then who it is and how they get in, ending in the one command that creates it. An account nobody can sign in to has to be asked for by name, which is the failure this replaced: a dialog that took a name and left the way in optional made an administrator nobody could ever sign in as. An account's own page, the groups and the defaults are reading pages. |
 | `/remote-desktop/new` — add a computer | **Flow** | Which computer, is its remote desktop on, and the sign-in: ending in the one command that saves it and opens the screen. |
 
 A section does not pick a register — a *page* does. The deployment section has pages in both, which
