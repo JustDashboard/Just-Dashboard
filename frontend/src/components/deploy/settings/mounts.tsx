@@ -132,6 +132,7 @@ export function MountRows({
   emptyLabel = "Whatever the container writes is gone on its next release.",
   rowError,
   product,
+  headOnce,
 }: {
   mounts: MountValue[]
   onChange: (next: MountValue[]) => void
@@ -142,7 +143,16 @@ export function MountRows({
   rowError?: (index: number) => string | undefined
   /** The product whose data a named volume keeps — the container's image, when it names one. */
   product?: string
+  /**
+   * Name the two columns once, over the first row, where a row's fields stand
+   * side by side; under that width, and for a caller that leaves this out,
+   * every row carries its own labels.
+   */
+  headOnce?: boolean
 }) {
+  // A later row's label is still the field's name for a screen reader.
+  const head = (label: string, index: number) =>
+    headOnce && index > 0 ? <span className="@min-[36rem]:sr-only">{label}</span> : label
   if (mounts.length === 0)
     return <EmptyState icon={Servers} title="No persistent mounts" description={emptyLabel} />
   const change = (index: number, next: Partial<MountValue>) =>
@@ -162,7 +172,11 @@ export function MountRows({
             <span key={kind ?? "none"} className="row-start-1 mb-0.5 flex animate-rise">
               <MountMark source={source} product={source ? product : undefined} />
             </span>
-            <Field label="Source" htmlFor={`${idPrefix}-source-${index}`} className="row-start-1">
+            <Field
+              label={head("Source", index)}
+              htmlFor={`${idPrefix}-source-${index}`}
+              className="row-start-1"
+            >
               <InputGroup>
                 <InputGroupInput
                   id={`${idPrefix}-source-${index}`}
@@ -188,7 +202,7 @@ export function MountRows({
               className="row-start-1 mb-3 hidden size-3.5 text-muted-foreground @min-[36rem]:block"
             />
             <Field
-              label="Container path"
+              label={head("Container path", index)}
               htmlFor={`${idPrefix}-target-${index}`}
               className="col-[2/span_2] row-start-2 @min-[36rem]:col-[4] @min-[36rem]:row-start-1"
             >
