@@ -1,30 +1,34 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Connection, LockClosed, ShieldCheck, Topology } from "@/components/icons"
+import { ArrowDown, ArrowUp, Crosshair, Globe, RefreshClockwise, Wrench } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, rate } from "@/lib/format"
 import type { NetworkLink, NetworkOverview } from "@/lib/types"
+import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { NetworkChange } from "@/components/network/change-status"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { ReconnectGuardPanel } from "@/components/network/reconnect-guard"
-import { Page, PageContext, Section } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
-import { ErrorState, LoadingPanel } from "@/components/state"
+import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
+import { ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { NumberTicker } from "@/components/ui/number-ticker"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { HostIdentity, HostFact, FactDot } from "@/components/metrics/host-identity"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import { NetworkFact } from "@/components/client-mark"
-import { ProductGlyphs } from "@/components/product-logo"
-import { LiveBytes, SeriesKey, StreamState } from "@/components/overview/readings"
-import { Topology as TopologyPicture } from "@/components/network/topology"
-import { linkProduct } from "@/components/network/marks"
-import { EgressIdentityTable } from "@/components/network/egress-identity"
+import { LiveBytes, StreamState } from "@/components/overview/readings"
+import { WireMark } from "@/components/deploy/wire"
+import {
+  Topology as TopologyPicture,
+  TopologyLoading,
+  buildNodes,
+} from "@/components/network/topology"
+import { WaysOut } from "@/components/network/egress-identity"
 import { FlowPaths, type FlowNode } from "@/components/network/flow-paths"
 import {
   ageWords,
@@ -34,6 +38,10 @@ import {
   windowBreakdown,
 } from "@/components/network/topology-reading"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { TextShimmer } from "@/components/ui/text-shimmer"
+import { VerbMenu, type Verb } from "@/components/verbs"
+import { useViewState } from "@/lib/view-state"
 import {
   lastValues,
   sumSeries,
@@ -56,26 +64,36 @@ const SERIES = [
 const formatRate = (value: number) => rate(value)
 const axisRate = (value: number) => `${bytes(value, 0)}/s`
 
+/** What the picture drew at the last visit, so the grey page is the page's own shape. */
+type Shape = { outside: number; inside: number }
+const FIRST_VISIT: Shape = { outside: 3, inside: 3 }
+
 /**
  * Is the network doing what it should, and what is it carrying right now?
  *
- * The page answers in the host Overview's order: what the machine is on the
- * network (the address the internet reaches it at, its uplink and gateway,
- * and how this browser reaches it — the path every guard on these pages
- * protects — with the verdict at the line's end); the topology, which is the
+ * The page opens on what the machine is on the network, as a project's page
+ * opens on the project: the address the internet reaches it at, whether its
+ * uplink is up, its uplink and gateway, and how this browser reaches it (the
+ * path every guard on these pages protects), with Run a check as its command
+ * and the other diagnostics behind the menu. Then the topology, which is the
  * page (the internet, the tailnet and every tunnel on the left, this server
- * in the middle, the networks it is the gateway of on the right, each wire
- * moving with its device's bytes), and under it the paths traffic is taking
- * through it, from connection tracking; the readings that move, each live and
- * with its last fifteen minutes and the age of its newest reading; that
- * quarter of an hour as a chart whose selection lists the devices that
- * carried it; each family's way out, the NIC's source apart from what the
- * internet sees; and what needs attention, worst first, each opening the page
- * that fixes it, with its history under it.
+ * in the middle with its firewall, routing, connections and what it refused,
+ * the networks it is the gateway of on the right, each wire moving with its
+ * device's bytes), and under it the paths traffic is taking through it, from
+ * connection tracking; what the uplink receives and sends, each a line with
+ * its last fifteen minutes; that quarter of an hour as a chart whose
+ * selection lists the devices that carried it; and each family's way out.
+ *
+ * Five tiles stood under the picture. In and Out are the two lines; the VPN
+ * peers online and the packets refused were said a second time, the picture's
+ * own nodes carrying them already, and the connections are this server's, so
+ * they went onto its node.
  *
  * The overview is read every fifteen seconds and the throughput every two, so
  * the wires and figures move between reads of the rest: the devices are drawn
- * with the live ring's newest rates over the overview's own.
+ * with the live ring's newest rates over the overview's own. The page has its
+ * shape before the first read lands: the line, the picture grey with as many
+ * rows as it drew last time, and the two lines waiting.
  */
 export default function NetworkOverviewPage() {
   const overview = usePoll<NetworkOverview>(
@@ -83,36 +101,46 @@ export default function NetworkOverviewPage() {
     15_000,
   )
   const live = useLiveTraffic()
+  const [shape, setShape] = useViewState<Shape>("network.overview.shape", FIRST_VISIT)
 
   const links = useMemo(
     () => withLiveRates(overview.data?.links ?? [], live),
     [overview.data, live],
   )
-
-  if (!overview.data) {
-    return (
-      <Page className="animate-rise">
-        <PageContext eyebrow="Network" title="Network" />
-        {overview.error ? (
-          <ErrorState error={overview.error} onRetry={overview.refresh} />
-        ) : (
-          <LoadingPanel />
-        )}
-      </Page>
-    )
-  }
   const data = overview.data
-  const nodeOf = (id: string) => flowNode(id, data, links)
+  const drawn = useMemo(() => (data ? buildNodes(data, links) : undefined), [data, links])
+  const outside = drawn?.filter((node) => node.lane === "outside").length
+  const inside = drawn?.filter((node) => node.lane === "inside").length
+  useEffect(() => {
+    if (outside === undefined || inside === undefined) return
+    setShape((held) =>
+      held.outside === outside && held.inside === inside ? held : { outside, inside },
+    )
+  }, [outside, inside, setShape])
+
+  const failed = !data && Boolean(overview.error)
+  const nodeOf = (id: string) => flowNode(id, data!, links)
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Network" />
-      <NetworkIdentity overview={data} links={links} />
-      <NetworkReadWarning
-        error={overview.error}
-        refresh={overview.refresh}
-        lastSuccess={overview.lastSuccess}
+      <NetworkIdentity
+        overview={data}
+        links={links}
+        failed={failed}
+        onRefresh={() => {
+          overview.refresh()
+          live.refresh()
+        }}
       />
-      {live.error && live.now > 0 && (
+      {failed && <ErrorState error={overview.error!} onRetry={overview.refresh} />}
+      {data && (
+        <NetworkReadWarning
+          error={overview.error}
+          refresh={overview.refresh}
+          lastSuccess={overview.lastSuccess}
+        />
+      )}
+      {data && live.error && live.now > 0 && (
         <NetworkReadWarning
           error={live.error}
           refresh={live.refresh}
@@ -120,7 +148,7 @@ export default function NetworkOverviewPage() {
           reading="live throughput"
         />
       )}
-      {(data.observations ?? [])
+      {(data?.observations ?? [])
         .filter((source) => source.state === "failed")
         .map((source) => (
           <ErrorState
@@ -129,36 +157,48 @@ export default function NetworkOverviewPage() {
             onRetry={overview.refresh}
           />
         ))}
-      {data.persistence.change && <NetworkChange change={data.persistence.change} />}
+      {data?.persistence.change && <NetworkChange change={data.persistence.change} />}
 
-      <Panel plain>
-        <PanelHeader
-          title="Topology"
-          actions={
-            <span className="text-hint text-muted-foreground">
-              {plural(
-                links.filter((l) => l.owner !== "kernel" && l.role !== "container").length,
-                "device",
-              )}
-              {" · "}
-              {plural(data.dockerNetworks.length, "Docker network")}
-            </span>
-          }
-        />
-        <PanelBody>
-          <TopologyPicture overview={data} links={links} />
-        </PanelBody>
-      </Panel>
+      {!failed && (
+        <Panel plain>
+          <PanelHeader
+            title="Topology"
+            actions={
+              <span className="numeric text-hint text-muted-foreground">
+                {data ? (
+                  <>
+                    {plural(
+                      links.filter((l) => l.owner !== "kernel" && l.role !== "container").length,
+                      "device",
+                    )}
+                    {" · "}
+                    {plural(data.dockerNetworks.length, "Docker network")}
+                  </>
+                ) : (
+                  <Skeleton className="inline-block h-3 w-40 align-middle" />
+                )}
+              </span>
+            }
+          />
+          <PanelBody>
+            {data ? (
+              <TopologyPicture overview={data} links={links} />
+            ) : (
+              <TopologyLoading outside={shape.outside} inside={shape.inside} />
+            )}
+          </PanelBody>
+        </Panel>
+      )}
 
-      <FlowPaths flows={data.flows} nodes={nodeOf} />
+      {data && <FlowPaths flows={data.flows} nodes={nodeOf} />}
 
-      <Readings overview={data} links={links} live={live} />
+      {!failed && <Readings links={data ? links : undefined} live={live} />}
 
-      <TrafficChart links={links} live={live} />
+      {data && <TrafficChart links={links} live={live} />}
 
-      <EgressIdentityTable identity={data.identity} />
+      {data && <WaysOut identity={data.identity} />}
 
-      <ReconnectGuardPanel />
+      {data && <ReconnectGuardPanel />}
     </Page>
   )
 }
@@ -192,28 +232,123 @@ function withLiveRates(links: NetworkLink[], live: LiveTraffic): NetworkLink[] {
 }
 
 /**
- * What the machine is on the network, as the host Overview's identity line:
- * the address the internet reaches it at as the name, its uplink, gateway and
- * second family as facts, and how this browser reaches it last, because that
- * is the path every guard on these pages protects.
+ * The line of facts as one block. On a phone it wraps, so it holds two lines
+ * of room there from the start and the picture under it does not move when
+ * the read lands.
  */
-function NetworkIdentity({ overview, links }: { overview: NetworkOverview; links: NetworkLink[] }) {
+const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-2 gap-y-1 max-sm:min-h-9"
+
+/** Whether the default route's device can carry anything, as a dot and a word. */
+function uplinkState(overview: NetworkOverview, links: NetworkLink[]) {
+  const primary = overview.defaults[0]
+  if (!primary) return { tone: "warning", label: "No default route" } as const
+  const uplink = links.find((l) => l.name === primary.device)
+  if (uplink && (!uplink.adminUp || !uplink.carrier))
+    return { tone: "danger", label: "Uplink down" } as const
+  return { tone: "running", label: "Uplink up" } as const
+}
+
+/**
+ * What the machine is on the network, laid out as a project's header: the
+ * address the internet reaches it at as the name, whether its uplink is up
+ * beside it, its uplink, gateway and second family as facts, and how this
+ * browser reaches it last, because that is the path every guard on these
+ * pages protects. Run a check is the command; the other diagnostics and the
+ * refresh are behind the menu.
+ */
+function NetworkIdentity({
+  overview,
+  links,
+  failed,
+  onRefresh,
+}: {
+  /** Undefined until the first read. */
+  overview?: NetworkOverview
+  links: NetworkLink[]
+  failed: boolean
+  onRefresh: () => void
+}) {
+  const router = useRouter()
+  // The two diagnostics behind the menu are an administrator's; a reader's
+  // menu holds the refresh alone rather than a way to a page that refuses.
+  const { can } = useAuth()
+  const verbs: Verb[] = [
+    { key: "refresh", label: "Refresh", icon: RefreshClockwise, run: onRefresh },
+    ...(can("system.admin")
+      ? [
+          {
+            key: "external",
+            label: "Check from outside",
+            icon: Globe,
+            run: () => router.push("/network/external"),
+          },
+          {
+            key: "captures",
+            label: "Capture packets",
+            icon: Crosshair,
+            run: () => router.push("/network/captures"),
+          },
+        ]
+      : []),
+  ]
+  const command = (
+    <Button asChild size="sm">
+      <Link href="/network/tools">
+        <Wrench className="size-3.5" />
+        Run a check
+      </Link>
+    </Button>
+  )
+  const menu = <VerbMenu verbs={verbs} label="Network actions" />
+  if (!overview)
+    return (
+      <HostIdentity
+        label="About the network"
+        fallback={Globe}
+        title={failed ? "Network" : <Skeleton className="my-1 h-5 w-40" />}
+        state={
+          failed ? (
+            <Status tone="danger" label="Not read" />
+          ) : (
+            <span className="text-xs font-medium">
+              <TextShimmer>Reading the network…</TextShimmer>
+            </span>
+          )
+        }
+        facts={
+          failed ? (
+            <span>The network could not be read.</span>
+          ) : (
+            <span className={FACTS}>
+              <Skeleton className="my-0.5 h-3 w-72 max-w-full" />
+            </span>
+          )
+        }
+        command={command}
+        menu={menu}
+      />
+    )
   const v4 = overview.publicAddresses.find((a) => !a.includes(":"))
   const v6 = overview.publicAddresses.find((a) => a.includes(":"))
   const primary = overview.defaults[0]
   const uplink = links.find((l) => l.name === primary?.device)
   const family = (name: "inet" | "inet6") => overview.identity.find((id) => id.family === name)
   const way = family(primary?.family === "inet6" ? "inet6" : "inet")
+  const state = uplinkState(overview, links)
   return (
     <HostIdentity
-      fallback={Topology}
+      label="About the network"
+      fallback={Globe}
       title={
-        <span className="font-mono">
+        <span className="truncate font-mono">
           {(v4 ?? v6)?.replace(/\/\d+$/, "") ?? overview.hostname ?? "No public address"}
         </span>
       }
+      state={<Status tone={state.tone} label={state.label} />}
+      command={command}
+      menu={menu}
       facts={
-        <>
+        <span className={FACTS}>
           {primary ? (
             <HostFact>
               <span className="font-mono">{primary.device}</span>
@@ -282,7 +417,7 @@ function NetworkIdentity({ overview, links }: { overview: NetworkOverview; links
               </span>
             </>
           )}
-        </>
+        </span>
       }
     />
   )
@@ -303,166 +438,95 @@ function speed(mbps: number) {
 }
 
 /**
- * The five readings that move: in and out through the uplink, each live and
- * with its last fifteen minutes as its trend; the connections, the VPN peers
- * online across WireGuard and the tailnet, and what the gateway's blocklists
- * and limits have refused since the table was loaded. What the dashboard has
- * made and whether it comes back at boot is a fact in the identity line.
+ * What the uplink receives and sends, each a line: its mark on the measure's
+ * own hue, the rate as it is read every two seconds, and its last fifteen
+ * minutes at the line's end. Each is the way to the uplink's own page. Before
+ * the first read the lines stand in their place and say they are waiting.
  */
-function Readings({
-  overview,
-  links,
-  live,
-}: {
-  overview: NetworkOverview
-  links: NetworkLink[]
-  live: LiveTraffic
-}) {
-  const uplinks = links.filter((l) => l.uplink)
+function Readings({ links, live }: { links?: NetworkLink[]; live: LiveTraffic }) {
+  const uplinks = (links ?? []).filter((l) => l.uplink)
   const uplinkSeries = sumSeries(uplinks.map((l) => live.series[l.name] ?? []))
   const rx = uplinks.reduce((n, l) => n + l.rxRate, 0)
   const tx = uplinks.reduce((n, l) => n + l.txRate, 0)
-  const tunnels = links.filter((l) => l.role === "tunnel" && l.owner !== "kernel")
-  const tunnelsUp = tunnels.filter((l) => l.adminUp)
-  const vpnPeers = overview.vpn.wireguard.peers + overview.vpn.tailscale.peers
-  const vpnOnline = overview.vpn.wireguard.online + overview.vpn.tailscale.online
-  const uplinkHref = uplinks[0]
+  const href = uplinks[0]
     ? `/network/interfaces?device=${encodeURIComponent(uplinks[0].name)}`
-    : "/network/interfaces"
-  const tile = (key: string, label: string, children: React.ReactNode) =>
-    uplinks.length > 0 ? (
-      <StatLink key={key} href={uplinkHref} label={label}>
-        {children}
-      </StatLink>
-    ) : (
-      children
-    )
+    : undefined
+  const names = uplinks.map((l) => l.name).join(", ")
+  const waiting = !links ? "Reading the uplink…" : "No uplink"
   return (
-    <Section
-      title="Throughput"
-      actions={
-        live.now > 0 ? (
-          <span className="flex items-center gap-3">
-            <ObservationAge live={live} />
-            <StreamState connection={live.error ? "closed" : "open"} />
-          </span>
-        ) : undefined
-      }
-    >
-      <StatGrid columns={5}>
-        {tile(
-          "in",
-          `Open ${uplinks[0]?.name ?? "the uplink"}: what it received`,
-          <StatTile
-            label={
-              <>
-                <SeriesKey color={IN} />
-                In
-              </>
-            }
-            value={<LiveBytes value={rx} suffix="/s" />}
-            trend={
-              <TileTrend
-                values={lastValues(uplinkSeries, "rx")}
-                color={IN}
-                label="Received through the uplink over the last fifteen minutes"
-              />
-            }
-            hint={`from the internet · ${uplinks.map((l) => l.name).join(", ") || "no uplink"}`}
-            className="group-hover:bg-row-hover"
-          />,
-        )}
-        {tile(
-          "out",
-          `Open ${uplinks[0]?.name ?? "the uplink"}: what it sent`,
-          <StatTile
-            label={
-              <>
-                <SeriesKey color={OUT} />
-                Out
-              </>
-            }
-            value={<LiveBytes value={tx} suffix="/s" />}
-            trend={
-              <TileTrend
-                values={lastValues(uplinkSeries, "tx")}
-                color={OUT}
-                label="Sent through the uplink over the last fifteen minutes"
-              />
-            }
-            hint="to the internet"
-            className="group-hover:bg-row-hover"
-          />,
-        )}
-        <StatTile
-          label={
-            <>
-              <Connection
-                aria-hidden
-                className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand"
-              />
-              Connections
-            </>
-          }
-          value={<NumberTicker value={overview.connections.total} />}
-          hint={`${overview.connections.fromInternet} from the internet · ${overview.connections.listening} listening`}
-        />
-        <StatTile
-          label={
-            <>
-              <LockClosed
-                aria-hidden
-                className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand"
-              />
-              VPN
-            </>
-          }
-          value={
-            vpnPeers === 0 && tunnels.length === 0 ? (
-              "None"
-            ) : (
-              <>
-                <NumberTicker value={vpnOnline} />
-                <span className="text-muted-foreground"> / {vpnPeers}</span>
-              </>
-            )
-          }
-          trailing={vpnPeers > 0 ? "online" : undefined}
-          hint={
-            <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-              <span className="truncate">
-                {tunnels.length === 0
-                  ? "no VPN or tunnel"
-                  : tunnelsUp.map((l) => l.name).join(", ")}
-              </span>
-              <ProductGlyphs
-                ids={[
-                  ...new Set(tunnels.map((l) => linkProduct(l)).filter((p): p is string => !!p)),
-                ]}
-              />
+    <Panel plain>
+      <PanelHeader
+        title="Throughput"
+        actions={
+          live.now > 0 ? (
+            <span className="flex items-center gap-3">
+              <ObservationAge live={live} />
+              <StreamState connection={live.error ? "closed" : "open"} />
             </span>
-          }
-        />
-        <StatTile
-          label={
-            <>
-              <ShieldCheck
-                aria-hidden
-                className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand"
-              />
-              Refused
-            </>
-          }
-          value={<NumberTicker value={overview.gateway.dropped} />}
-          trailing="packets"
-          hint={
-            overview.gateway.blocklists + overview.gateway.limits === 0
-              ? "no blocklist or rate limit yet"
-              : `${plural(overview.gateway.blocklists, "blocklist")} · ${plural(overview.gateway.limits, "limit")} since loaded`
-          }
-        />
-      </StatGrid>
-    </Section>
+          ) : undefined
+        }
+      />
+      <PanelBody>
+        <ReadingLines>
+          <ReadingLine
+            href={href}
+            label={`Open ${uplinks[0]?.name ?? "the uplink"}: what it received`}
+            mark={
+              <WireMark size="md" hue={IN}>
+                <ArrowDown aria-hidden />
+              </WireMark>
+            }
+            name="In"
+            hint={uplinks.length > 0 ? `from the internet · ${names}` : waiting}
+            trend={
+              uplinks.length > 0 && (
+                <TileTrend
+                  values={lastValues(uplinkSeries, "rx")}
+                  color={IN}
+                  label="Received through the uplink over the last fifteen minutes"
+                />
+              )
+            }
+          >
+            {uplinks.length > 0 ? (
+              <>
+                <LiveBytes value={rx} suffix="/s" /> received
+              </>
+            ) : (
+              <NoReading>No reading yet</NoReading>
+            )}
+          </ReadingLine>
+          <ReadingLine
+            href={href}
+            label={`Open ${uplinks[0]?.name ?? "the uplink"}: what it sent`}
+            mark={
+              <WireMark size="md" hue={OUT}>
+                <ArrowUp aria-hidden />
+              </WireMark>
+            }
+            name="Out"
+            hint={uplinks.length > 0 ? `to the internet · ${names}` : waiting}
+            trend={
+              uplinks.length > 0 && (
+                <TileTrend
+                  values={lastValues(uplinkSeries, "tx")}
+                  color={OUT}
+                  label="Sent through the uplink over the last fifteen minutes"
+                />
+              )
+            }
+          >
+            {uplinks.length > 0 ? (
+              <>
+                <LiveBytes value={tx} suffix="/s" /> sent
+              </>
+            ) : (
+              <NoReading>No reading yet</NoReading>
+            )}
+          </ReadingLine>
+        </ReadingLines>
+      </PanelBody>
+    </Panel>
   )
 }
 
