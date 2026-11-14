@@ -93,12 +93,13 @@ test("a new account is asked what the server is for, and the answer shapes the s
   // goes with its rows, and Administration is in every answer.
   await expect(rail(page).getByText("Workspace", { exact: true })).toHaveCount(0)
   await expect(rail(page).getByText("Administration")).toBeVisible()
-  // The Overview keeps the tiles and blocks of what was chosen — Packages
+  // The Overview keeps the rows and blocks of what was chosen — Packages
   // among them, because every answer keeps it — and Databases is a block.
-  const tile = (name: RegExp) => page.locator("[data-slot=stat-tile]", { hasText: name })
-  for (const name of [/^Docker/, /^Security/, /^Packages/]) {
-    await expect(tile(name)).toBeVisible()
+  const services = page.getByRole("list", { name: "Services" })
+  for (const name of ["Docker", "Security", "Packages"]) {
+    await expect(services.getByRole("link", { name: `Open ${name}`, exact: true })).toBeVisible()
   }
+  await expect(services.getByRole("link", { name: "Open Git", exact: true })).toHaveCount(0)
   await expect(page.getByRole("heading", { name: "Databases", exact: true })).toBeVisible()
 
   // Answered once, never asked again.
