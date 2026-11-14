@@ -125,8 +125,8 @@ export function CommandsView({ redis }: { redis: Redis }) {
                   const failed = (command.failed ?? 0) + (command.rejected ?? 0)
                   return (
                     <TableRow key={command.command}>
-                      <TableCell className="py-2 font-mono font-medium">
-                        {command.command}
+                      <TableCell className="py-2">
+                        <span className="font-mono font-medium">{command.command}</span>
                       </TableCell>
                       <TableCell className="numeric text-right">{micros(command.usec)}</TableCell>
                       <ShareCell part={command.usec} whole={data.totalUsec} />

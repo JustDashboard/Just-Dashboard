@@ -329,7 +329,7 @@ export function TablesView() {
                       {rows.map((table) => (
                         <TableRow
                           key={objectParam(table.schema, table.table)}
-                          data-slot="table-row"
+                          data-list-row="table"
                         >
                           <TableCell className="py-2">
                             <span className="flex min-w-0 items-center gap-2">
@@ -408,7 +408,7 @@ export function TablesView() {
                     {rows.map((table) => (
                       <li
                         key={objectParam(table.schema, table.table)}
-                        data-slot="table-row"
+                        data-list-row="table"
                         className="space-y-1 px-4 py-2.5"
                       >
                         <div className="flex min-w-0 items-center gap-2">

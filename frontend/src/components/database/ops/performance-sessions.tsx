@@ -390,7 +390,7 @@ function SessionRows({
         {sessions.map((session) => (
           // Three lines in every state: what a session waits on stands
           // beside its state, and one with no statement keeps the line.
-          <li key={session.pid} data-slot="session-row" className="space-y-1.5 px-4 py-2.5">
+          <li key={session.pid} data-list-row="session" className="space-y-1.5 px-4 py-2.5">
             <div className="flex h-6 min-w-0 items-center justify-between gap-3">
               <span className="flex min-w-0 items-center gap-2 overflow-hidden">
                 <SessionState status={statusOf(session)} late={Boolean(concernOf(session))} />
@@ -450,7 +450,7 @@ function SessionRows({
         {sessions.map((session) => (
           <TableRow
             key={session.pid}
-            data-slot="session-row"
+            data-list-row="session"
             onActivate={() => onOpen(session.pid)}
             aria-label={`Session ${session.pid}`}
           >

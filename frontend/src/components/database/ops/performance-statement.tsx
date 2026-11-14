@@ -14,7 +14,7 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
-import { percent, relativeTime, timestamp } from "@/lib/format"
+import { percent, relativeTime } from "@/lib/format"
 import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -276,14 +276,6 @@ function Statement({ address }: { address: string | null }) {
                     <FactDot />
                     <span className="text-warning">
                       {shareWords(1 - missing.hitRatio)} of its reads miss the cache
-                    </span>
-                  </>
-                )}
-                {data?.since && (
-                  <>
-                    <FactDot />
-                    <span title={timestamp(data.since)}>
-                      counted from {relativeTime(data.since)}
                     </span>
                   </>
                 )}

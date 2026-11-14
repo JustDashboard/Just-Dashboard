@@ -262,7 +262,7 @@ export function IndexesView() {
                       return (
                         <li
                           key={`${index.schema}.${index.table}.${index.name}`}
-                          data-slot="index-row"
+                          data-list-row="index"
                           className="space-y-1.5 px-4 py-2.5 text-xs"
                         >
                           <div className="flex min-w-0 items-center gap-2">
@@ -275,7 +275,9 @@ export function IndexesView() {
                             )}
                           </div>
                           {onTable(index)}
-                          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                          {/* One line in every state: an index with nothing
+                              to say keeps it, and one with much is cut. */}
+                          <span className="flex h-5 min-w-0 items-center gap-x-3 overflow-hidden whitespace-nowrap">
                             {counted && index.scans >= 0 && (
                               <span className="numeric text-hint text-muted-foreground">
                                 {compact(index.scans)} {index.scans === 1 ? "scan" : "scans"}
@@ -319,7 +321,7 @@ export function IndexesView() {
                         return (
                           <TableRow
                             key={`${index.schema}.${index.table}.${index.name}`}
-                            data-slot="index-row"
+                            data-list-row="index"
                           >
                             <TableCell className="py-2">
                               <span className="block truncate font-mono" title={index.name}>
