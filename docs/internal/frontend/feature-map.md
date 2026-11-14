@@ -781,6 +781,13 @@ issue badges, failure/anomaly suggestions and recommendation cards were removed 
 [`features-terminal.md`](features-terminal.md#feature-panels) and
 [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md)
 
+A volume is a page of its own (`/docker/volumes/[name]`, `components/docker/volume-page.tsx`): its
+identity line with one command, a picture of the containers that mount it and the backup jobs that
+cover it, and its views in the address as `?tab=` — Files, Mounts, Backups, Configuration — with
+the Volumes table as a rail beside it from `xl`. `/docker/volumes?volume=<name>`, which opened the
+sheet this replaced, redirects to it. Specs: `tests/browser/docker-volumes.spec.ts`,
+`tests/browser/docker-volume-page.spec.ts`.
+
 ### `/metrics`
 
 Redesigned per design-system §15, last in 0.7.1 to read as the Overview does: the identity line (the
