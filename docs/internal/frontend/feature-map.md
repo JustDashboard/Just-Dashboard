@@ -760,8 +760,6 @@ list of Performance draws a bar per row: a share is a figure in its own column, 
 footnote said is a fact on its title line (`ops/performance-words.tsx`);
 `tests/browser/database-performance.spec.ts`.
 
-
-
 Data, Query, Schema and Diagram are four workbenches under one head
 (`components/database/workbench/chrome.tsx`): the database's identity and the open thing's verbs in
 the frame's own bar, the glyph-only controls as words in its one menu, and on a phone one pane with
@@ -770,6 +768,7 @@ Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where R
 row limit and the head's menu Format and Save. A schema's and a table's figures are one line of
 facts, a table's Statistics are sentences, and the Diagram is zoomed and fitted from the maps' bar
 at the foot of its canvas (no minimap).
+
 Backups' dumps are one line each in a framed table (a card of two lines on a phone): when, the
 file's name with its tag and note, what it holds, its size, and Download, Restore and Delete. The
 name opens who took it, the tool that wrote it and how long that took. *Back up now* is the one
@@ -785,17 +784,6 @@ project it writes for (`generate/options.ts` `logoKeys`; its language's mark whe
 none), and before anything is written its place is that mark, "Nothing written yet" and Generate.
 Search says a limit only when one was hit, as the tail of its summary sentence, and each table's
 *Every match* is a small verb on its title line.
-
-Data, Query, Schema and Diagram are four workbenches under one head
-(`components/database/workbench/chrome.tsx`): the database's identity and the open thing's verbs in
-the frame's own bar, the glyph-only controls as words in its one menu, and on a phone one pane with
-a bar at the foot — Tables, Rows and Details on Data, where a row is a card and its full row the
-Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where Run's menu holds the
-row limit and the head's menu Format and Save. A schema's and a table's figures are one line of
-facts, a table's Statistics are sentences, and the Diagram is zoomed and fitted from the maps' bar
-at the foot of its canvas (no minimap).
-
-
 
 **Implementation:** `components/database/`; backend in
 [`../backend/databases.md`](../backend/databases.md) Adding a database can limit its container from
@@ -969,15 +957,6 @@ changes. Configure retains the administrator-reviewed replacement specification 
 containers and opens the owning Compose file for Compose containers. Automatic overview findings,
 issue badges, failure/anomaly suggestions and recommendation cards were removed in 0.7.5
 
-
-
-An image is a page of its own, `/docker/images/[id]` (`image-page.tsx`; the old `?image=` address
-redirects there): its identity line with Pull or Tag and the rest in a menu, a picture of its
-registry, the image and the containers made from it, the views Layers, Containers, History and
-Configuration in `?tab=`, and from `xl` the images as a rail with the table's own filters.
-`tests/browser/docker-image-page.spec.ts`
-
-**Implementation:** `components/docker/`; see
 The overview, Containers, Events and Stacks open on one line (`docker-identity.tsx`, `HostIdentity`
 laid out as a project's header): Docker's mark, "Docker" and its version, the page's verdict beside
 the name, the server as the first fact, and the page's one command at the far end (Open Deployments,
@@ -1009,12 +988,6 @@ redirects there): its identity line with Pull or Tag and the rest in a menu, a p
 registry, the image and the containers made from it, the views Layers, Containers, History and
 Configuration in `?tab=`, and from `xl` the images as a rail with the table's own filters.
 `tests/browser/docker-image-page.spec.ts`
-
-**Implementation:** `components/docker/`; checked by `tests/browser/docker-overview.spec.ts`,
-`stacks-ui.spec.ts`, `stack-detail.spec.ts`, `container-page.spec.ts`, `docker-events.spec.ts` and
-`docker-ui.spec.ts`; see
-[`features-terminal.md`](features-terminal.md#feature-panels) and
-[`../backend/docker-files-logs.md`](../backend/docker-files-logs.md)
 
 A volume is a page of its own (`/docker/volumes/[name]`, `components/docker/volume-page.tsx`): its
 identity line with one command, a picture of the containers that mount it and the backup jobs that
@@ -1573,16 +1546,6 @@ there). Tunnel (`/proxy/tunnel`) opens on the tunnel's identity line with Check 
 hostname → Cloudflare's edge → connector → this server, and the hostnames as one-line cards; not
 connected, the dashed picture, a choice of token or API and one form (administrators only).
 
-
-
-Every page of the section opens on an identity line laid out as a project's header (0.8.7): the
-name with its state beside it, the facts under them, one command at the end and the rest behind
-`⋯`. The overview's command is Reload (Start while the engine is stopped), and Test config, Alerts,
-Refresh, Service details, Restart and Stop are in its menu (`useEngineCommands` and `EngineMenu` in
-`engine.tsx`); Alerts' is Add rule, Streams' New stream, Ports' Find a free port, Certificates'
-Issue certificate, the TLS fleet's Scan all sites, Configuration's Test config and Tunnel's Check
-now. Traffic's old `?site=<name>` lands on that site's page at its Logs view; checked by
-`tests/browser/proxy-opening-lines.spec.ts`
 Sites (`/proxy/sites`, 0.8.7) lists every site as a one-line row (`SiteRow` in `vhosts-panel.tsx`):
 what it fronts with its engine in the tile's corner, its name over where its requests go, then its
 hour, ports, TLS, certificate and state in aligned columns, every verb in its menu. New site is the
@@ -1610,8 +1573,6 @@ Refresh, Service details, Restart and Stop are in its menu (`useEngineCommands` 
 Issue certificate, the TLS fleet's Scan all sites, Configuration's Test config and Tunnel's Check
 now. Traffic's old `?site=<name>` lands on that site's page at its Logs view; checked by
 `tests/browser/proxy-opening-lines.spec.ts`
-
-
 
 **Implementation:** `app/(dashboard)/proxy/`, `components/proxy/`; backend in
 [`../backend/proxy.md`](../backend/proxy.md#proxy)

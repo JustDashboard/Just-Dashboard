@@ -184,17 +184,6 @@ taking a frame:
   ways to root as one picture over the accounts as one-line cards that open the account, each
   account's page three views of plain lists of rows and one settings column, and on the audit
   log the identity line and the day as one strip over its table and filters, where a request's outcome is a
-
-  two System pages follow the same shape: on System users the identity line and what to change over
-  the accounts as a table of readings whose row opens the account, each account's page plain lists
-  of rows and plain forms, and on the audit
-
-  from plain panels that opens on the thing's own mark, the unit's journal, a PM2
-  application's logs, a timer's runs and a job's cron lines a `Pane` in their sheets — and the
-  two System pages follow the same shape: on System users the identity line, what to change and the
-  ways to root as one picture over the accounts as one-line cards that open the account, each
-  account's page three views of plain lists of rows and one settings column, and on the audit
-  log four readings of the last day over its table and filters, where a request's outcome is a
   `Status` dot and the code in its family's colour rather than a wash across the row; and
   both of the dashboard's own pages — on Version the identity line, the update in flight and the
   history (a timeline: the version in a sticky column, a rail with a mark per release, the notes at
@@ -1930,34 +1919,6 @@ therefore take Intrusion's row alone. Logins and Network combine related facts i
 richer columns: an account and its terminal, an
 interface and its kind. Their action columns are always drawn. Connections lists each address as a
 one-line card that opens the address's own page (`network/connections/`). Tools is a two-pane working surface,
-
-the same facts one at a time. Firewall's policy controls sit beside its bounded rule table; SSH
-sets its directives in one centred column of `SettingSection`s behind the product's save bar, and
-Intrusion's jail choices carry their watched service's mark, state and comparable readings (both
-are described in the next paragraph). SSH, Firewall and
-
-the same facts one at a time. Firewall's defaults are a settings section under its rule table,
-saved by the page's save bar (0.8.7, below); SSH
-lays its directive groups out two to a row from `xl`, as Configuration does, each head over its
-fields with *Edited* in `--git-modified` while it holds a staged change, and its apply bar follows
-the reader and names what changed. Intrusion's jail choices carry their watched service's mark,
-state and comparable readings. SSH, Firewall and
-Intrusion each end on their own log — the auth log, the firewall's log, fail2ban's Activity — read
-through its lens in one `Pane` under a title across the page, since a log needs the width a rail or a
-half row does not have; the last day's counts join the page's one `StatGrid` rather than drawing a
-second (Firewall's are on its picture's nodes since 0.8.7), and an attacker's address is blocked
-from the line it is on. Repeat offenders therefore take
-Intrusion's row alone. Logins and Network combine related facts into fewer,
-richer columns: an account and its terminal, an
-interface and its kind. Their action columns are always drawn. Connections lists each address as a
-one-line card that opens the address's own page (`network/connections/`).
-Tools is a two-pane working surface,
-
-half row does not have; the last day's counts join Firewall's one `StatGrid` and are `ReadingLine`s
-on SSH and Intrusion, and an attacker's address is blocked from the line it is on. Repeat offenders
-therefore take Intrusion's row alone. Connections, Logins and Network combine related facts into fewer,
-richer columns: a peer and its network, a service and its ports, an account and its terminal, an
-interface and its kind. Their action columns are always drawn. Tools is a two-pane working surface,
 with a searchable choice rail and one visible form/result, retaining every other probe's work.
 
 **Intrusion and SSH read like a project's pages (0.8.7).** Intrusion stacked a merged table and three
@@ -4216,9 +4177,6 @@ with no account's daemon running (it starts with the first application, so the b
 `pm2 start`), and not answering (what the page asked for, PM2's own words under that sentence
 rather than as the headline, and Try again). What the Docker pages say when the daemon cannot be
 asked is which fault it is (`docker/unreachable.ts`): a socket that refused the dashboard, a `docker.service` systemd says
-
-(`procs/pm2-missing.tsx`). What the Docker pages say when the daemon cannot be asked is which fault
-it is (`docker/unreachable.ts`): a socket that refused the dashboard, a `docker.service` systemd says
 is not running (with **Start Docker** for `service.control`), a daemon that runs but not at the
 address asked, no `docker.service` at all (not installed: **Install Docker** for `system.admin` where
 the package manager carries `docker.io` or `docker`, Docker's own instructions otherwise), or no
@@ -4249,17 +4207,6 @@ Scheduled's Timers share `procs/no-systemd.tsx`. The step is always real: a rout
 exists (`POST /systemd/docker.service/start`, `POST /packages/install`), a link to the page that
 helps, or a line to copy. An empty list is still `EmptyState` and a failed read still
 `ErrorState`; a tool the package manager installs in place keeps `InstallHandoff`.
-
-
-
-(`procs/pm2-missing.tsx`). The same file draws PM2's two other absences under its mark: installed
-with no account's daemon running (it starts with the first application, so the block names
-`pm2 start`), and not answering (what the page asked for, PM2's own words under that sentence
-rather than as the headline, and Try again). Docker is never missing on an install that runs in it; what its pages say
-when the daemon cannot be asked is which fault it is (`docker/unreachable.ts`): a socket that refused
-the dashboard, a `docker.service` systemd says is not running (with **Start Docker** for
-`service.control`), a daemon that runs but not at the address asked, or no answer where systemd cannot
-be asked. The client's own sentence is behind *What the server said*.
 
 **Network drift took the exit on 2026-10-10**, at the operator's request, because it was dead:
 four grey figures (known differences, incomplete readings, matching observations, owned repair
@@ -4655,10 +4602,6 @@ the reader through it.
 | Remote Desktop — the computers (`/remote-desktop`) | Reading | The reader arrives to find out which computers can be opened now. |
 | `/system-users/new` — add an account | **Flow** | What it is for, then who it is and how they get in, ending in the one command that creates it. An account nobody can sign in to has to be asked for by name, which is the failure this replaced: a dialog that took a name and left the way in optional made an administrator nobody could ever sign in as. The form is the one focused surface and the column beside it draws what the answers add up to (the way in, the account, how far it reaches). An account's own page, the groups, a group's page and the defaults are reading pages. |
 | A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's columns held to the window around the live screen, but edge to edge: no measure, gutter or frame, since every pixel of those was taken from the screen. **It is the one workbench that keeps full bleed at every width**: the terminal, Files, a Git working copy, a drawing and a database's views stand in the page's gutter inside one rounded frame from `lg`, and a session does not, because it is a screen. On a phone it is one pane at a time (Screen, Tools, Computers) over the shared bar; a stream's frame is the computer's own shape, so the space left round it is the workspace's ground rather than black bars; drawn by guacd (Control) or streamed by Sunshine (Stream); what a stream waits on (its bridge, Sunshine, the PIN) is said in the screen's place, with Sunshine's own mark. |
-| A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's columns held to the window around the live screen, but edge to edge: no measure, gutter or frame, since every pixel of those was taken from the screen; a stream's frame is the computer's own shape, so the space left round it is the workspace's ground rather than black bars; drawn by guacd (Control) or streamed by Sunshine (Stream); what a stream waits on (its bridge, Sunshine, the PIN) is said in the screen's place, with Sunshine's own mark. |
-| `/system-users/new` — add an account | **Flow** | What it is for, then who it is and how they get in, ending in the one command that creates it. An account nobody can sign in to has to be asked for by name, which is the failure this replaced: a dialog that took a name and left the way in optional made an administrator nobody could ever sign in as. The form is the one focused surface and the column beside it draws what the answers add up to (the way in, the account, how far it reaches). An account's own page, the groups, a group's page and the defaults are reading pages. |
-| A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's columns held to the window around the live screen, but edge to edge: no measure, gutter or frame, since every pixel of those was taken from the screen. **It is the one workbench that keeps full bleed at every width**: the terminal, Files, a Git working copy, a drawing and a database's views stand in the page's gutter inside one rounded frame from `lg`, and a session does not, because it is a screen. On a phone it is one pane at a time (Screen, Tools, Computers) over the shared bar; a stream's frame is the computer's own shape, so the space left round it is the workspace's ground rather than black bars; drawn by guacd (Control) or streamed by Sunshine (Stream); what a stream waits on (its bridge, Sunshine, the PIN) is said in the screen's place, with Sunshine's own mark. |
-| `/system-users/new` — add an account | **Flow** | What it is for, then who it is and how they get in, ending in the one command that creates it. An account nobody can sign in to has to be asked for by name, which is the failure this replaced: a dialog that took a name and left the way in optional made an administrator nobody could ever sign in as. An account's own page, the groups and the defaults are reading pages. |
 | `/remote-desktop/new` — add a computer | **Flow** | Which computer, is its remote desktop on, and the sign-in: ending in the one command that saves it and opens the screen. |
 
 A section does not pick a register — a *page* does. The deployment section has pages in both, which
