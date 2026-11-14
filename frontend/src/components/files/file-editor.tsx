@@ -278,6 +278,38 @@ function FileEditorPanel({
     router.push(editorHref(path, root, revealLine))
   }
 
+  // The grouped row is drawn while the file is still being read, with what
+  // needs the file or the editor disabled, so the code arrives under it
+  // rather than pushing a row in above itself. A file that could not be
+  // read, or that is not text, has no commands to offer.
+  const toolbar =
+    grouped && !error && !file?.binary && !(path && !file && isImage(path)) ? (
+      <EditorToolbar
+        loading={!file}
+        language={language}
+        languages={LANGUAGES}
+        onLanguage={setLanguage}
+        commands={commands}
+        canEdit={canEdit}
+        dirty={dirty}
+        wrap={wrap}
+        onWrap={setWrap}
+        minimap={minimap}
+        onMinimap={setMinimap}
+        fontSize={fontSize}
+        onFontSize={setFontSize}
+        indent={indent}
+        onIndent={setIndent}
+        onFormat={() => format?.()}
+        reviewing={reviewing}
+        onReview={setReviewing}
+        onRevert={revert}
+        fullscreen={destination ? undefined : fullscreen}
+        onFullscreen={destination ? undefined : setFullscreen}
+        onOpenFull={destination ? undefined : openFull}
+      />
+    ) : undefined
+
   // Closing with unsaved work asks first. Every other way out of this panel —
   // Escape, the overlay, the X — comes through here, so one guard covers them
   // all rather than one per affordance.
@@ -323,33 +355,8 @@ function FileEditorPanel({
       description={path ?? undefined}
       bodyClassName="flex min-h-0 flex-1 flex-col"
       actions={
-        file &&
-        !file.binary &&
-        (grouped ? (
-          <EditorToolbar
-            language={language}
-            languages={LANGUAGES}
-            onLanguage={setLanguage}
-            commands={commands}
-            canEdit={canEdit}
-            dirty={dirty}
-            wrap={wrap}
-            onWrap={setWrap}
-            minimap={minimap}
-            onMinimap={setMinimap}
-            fontSize={fontSize}
-            onFontSize={setFontSize}
-            indent={indent}
-            onIndent={setIndent}
-            onFormat={() => format?.()}
-            reviewing={reviewing}
-            onReview={setReviewing}
-            onRevert={revert}
-            fullscreen={destination ? undefined : fullscreen}
-            onFullscreen={destination ? undefined : setFullscreen}
-            onOpenFull={destination ? undefined : openFull}
-          />
-        ) : (
+        toolbar ??
+        (file && !file.binary && (
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             <Select value={language} onValueChange={setLanguage}>
               <SelectTrigger size="sm" aria-label="File language" className="h-8 w-32 text-body">
@@ -527,7 +534,10 @@ function FileEditorPanel({
           {/* A phone's footer holds the mode and the two saves and nothing
               more, so where the caret is is said up here instead. */}
           {grouped && file && !file.binary && <span className="numeric lg:hidden">{caret} · </span>}
-          {dirty ? "Unsaved changes" : canEdit ? "Saved to disk" : "Read only"}
+          {/* Nothing is saved or unsaved about a file that has not been read
+              (the row an embedded editor keeps says it regardless). */}
+          {(file || !grouped) &&
+            (dirty ? "Unsaved changes" : canEdit ? "Saved to disk" : "Read only")}
         </span>
       </div>
       {conflict && (

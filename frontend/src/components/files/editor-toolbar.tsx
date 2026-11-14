@@ -64,6 +64,7 @@ const PRESSED = "aria-pressed:bg-accent aria-pressed:text-accent-foreground"
  * arriving, so typing the first character does not move the row.
  */
 export function EditorToolbar({
+  loading,
   language,
   languages,
   onLanguage,
@@ -86,6 +87,8 @@ export function EditorToolbar({
   onFullscreen,
   onOpenFull,
 }: {
+  /** The file is still being read: the row is drawn, and waits. */
+  loading?: boolean
   language: string | undefined
   languages: string[]
   onLanguage: (language: string) => void
@@ -119,7 +122,7 @@ export function EditorToolbar({
 
   return (
     <div data-slot="editor-toolbar" className="flex min-w-0 flex-1 items-center gap-2 lg:flex-wrap">
-      <Select value={language} onValueChange={onLanguage}>
+      <Select value={language} onValueChange={onLanguage} disabled={loading}>
         <SelectTrigger
           size="sm"
           aria-label="File language"
@@ -357,6 +360,8 @@ export function EditorToolbar({
           variant="outline"
           aria-label="Open full editor"
           className="ml-auto max-lg:w-8 max-lg:px-0"
+          // The draft it hands over is the file's, once there is one.
+          disabled={loading}
           onClick={onOpenFull}
         >
           <External className="size-3.5" />

@@ -3030,6 +3030,38 @@ test.describe("the file editor at a desk", () => {
   })
 })
 
+test("the editor's commands are drawn before the file is read, and stay put when it lands", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockFiles(page)
+  let release = () => {}
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/files/read**", async (route) => {
+    await gate
+    await route.fallback()
+  })
+  await page.goto(editorAddress("notes.md"))
+  const editor = page.getByRole("region", { name: "File editor" })
+  const toolbar = editor.locator("[data-slot=editor-toolbar]")
+  const menu = toolbar.getByRole("button", { name: "More editor commands" })
+  await expect(toolbar).toBeVisible()
+  await risen(page)
+  const waiting = { toolbar: await boxOf(toolbar), menu: await boxOf(menu) }
+  // What needs the file waits for it, and nothing is called saved yet.
+  await expect(toolbar.getByRole("button", { name: "Find", exact: true })).toBeDisabled()
+  await expect(toolbar.getByRole("combobox", { name: "File language" })).toBeDisabled()
+  await expect(editor).not.toContainText("Saved to disk")
+
+  release()
+  await expect(editor.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await expect(editor).toContainText("Saved to disk")
+  await expect(toolbar.getByRole("button", { name: "Find", exact: true })).toBeEnabled()
+  await risen(page)
+  expect(await boxOf(toolbar)).toEqual(waiting.toolbar)
+  expect(await boxOf(menu)).toEqual(waiting.menu)
+})
+
 test("a reader's editor is not shown the commands that change a file", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await mockFiles(page)
