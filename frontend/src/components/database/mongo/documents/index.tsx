@@ -110,6 +110,7 @@ import {
   type Workbench,
 } from "@/components/database/mongo/workbench"
 import { ReadError } from "@/components/database/redis/read-error"
+import { HeadVerbs, useHeadMenu } from "@/components/database/workbench/chrome"
 
 /** The documents before they land: a few of them, each a short run of fields. */
 function DocumentsSkeleton() {
@@ -595,6 +596,10 @@ function Documents({
   const empty = result !== undefined && result.returned === 0
   const kind = info ? collectionKind(info) : "collection"
 
+  useHeadMenu([
+    { key: "reload", label: "Read the documents again", icon: RefreshClockwise, run: reread },
+  ])
+
   return (
     <div data-slot="mongo-documents" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <WorkbenchHead leading={leading}>
@@ -615,36 +620,36 @@ function Documents({
           </span>
         )}
         <span className="min-w-0 flex-1" />
-        <div className="flex min-w-0 flex-wrap items-center gap-1">
-          {canWrite && !view_ && (
-            <Button size="xs" variant="outline" onClick={() => setInserting({})}>
-              <Plus />
-              Insert
-            </Button>
-          )}
-          {canWrite && !view_ && engine.can("import") && (
-            <Button size="xs" variant="ghost" onClick={() => setImporting(true)}>
-              <CloudUpload />
-              Import
-            </Button>
-          )}
-          {engine.can("export") && (
-            <Button
-              size="xs"
-              variant="ghost"
-              pending={exporting}
-              onClick={() => exportCollection(isEmptyDraft(applied) ? undefined : applied)}
-            >
-              <Download />
-              Export
-            </Button>
-          )}
-          <IconAction label="Read the documents again" className="size-7" onClick={reread}>
-            <RefreshClockwise />
-          </IconAction>
-          <VerbMenu verbs={pageVerbs} label={`More actions for ${collection}`} />
-        </div>
+        <VerbMenu verbs={pageVerbs} label={`More actions for ${collection}`} />
       </WorkbenchHead>
+      {/* The collection's commands, in the frame's head; reading again is a
+          word in its menu. */}
+      <HeadVerbs>
+        {/* Outlined: Find, in the bar under this, is the page's one command. */}
+        {canWrite && !view_ && (
+          <Button size="sm" variant="outline" onClick={() => setInserting({})}>
+            <Plus />
+            Insert
+          </Button>
+        )}
+        {canWrite && !view_ && engine.can("import") && (
+          <Button size="sm" variant="outline" onClick={() => setImporting(true)}>
+            <CloudUpload />
+            Import
+          </Button>
+        )}
+        {engine.can("export") && (
+          <Button
+            size="sm"
+            variant="outline"
+            pending={exporting}
+            onClick={() => exportCollection(isEmptyDraft(applied) ? undefined : applied)}
+          >
+            <Download />
+            Export
+          </Button>
+        )}
+      </HeadVerbs>
 
       <QueryBar
         draft={draft}

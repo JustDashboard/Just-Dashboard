@@ -1,5 +1,6 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
 import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
+import { head, headMenu, paneBar, showPane } from "./database-workbench"
 
 /**
  * The schema browser (`/databases/<id>/schema`) and the diagram
@@ -690,21 +691,27 @@ test("on a phone the tree lies over the schema, and has a way off it with nothin
   const rail = page.getByRole("navigation", { name: "Objects of this schema" })
   await expect(rail).toBeVisible()
   // What the tree covers is not there to the keyboard.
-  await expect(page.locator("[data-slot=schema-browser] > [inert]")).toHaveCount(1)
+  await expect(page.locator("[data-slot=schema-browser] [inert]")).toHaveCount(1)
   // The schema's own verbs are in the tree's head: it is all a phone shows.
   await rail.getByRole("button", { name: "More for sales" }).click()
   await expect(page.getByRole("menuitem", { name: "Drop schema…" })).toBeVisible()
   await page.keyboard.press("Escape")
 
-  await page.getByRole("button", { name: "Show sales" }).click()
+  // The bar at the foot is the way off the tree: to the schema with nothing
+  // chosen, and back to the tree again.
+  await expect(paneBar(page).getByRole("tab")).toHaveText(["Objects", "Schema"])
+  await showPane(page, "Schema")
   await expect(rail).toBeHidden()
   await expect(page.getByRole("region", { name: "Largest in sales" })).toBeVisible()
-  await page.getByRole("button", { name: "Show the objects" }).click()
+  await showPane(page, "Objects")
   await expect(rail).toBeVisible()
 
-  // With a table open the same foot leads back to it, and the head keeps its schema.
+  // Choosing a table puts the tree away; the bar's second stop is named for
+  // it, and the head keeps its schema.
   await rail.getByRole("link", { name: /^orders/ }).click()
   await expect(page.getByRole("heading", { name: "sales.orders" })).toContainText("sales")
+  await expect(rail).toBeHidden()
+  await expect(paneBar(page).getByRole("tab")).toHaveText(["Objects", "Table"])
 })
 
 test("a table is its schema and its name: two schemas' orders are two tables", async ({ page }) => {
@@ -1472,7 +1479,8 @@ test("a function is read as its definition and handed to Query; an overload is t
   await expect(page.getByRole("heading", { name: /public\.armor/ })).toBeVisible()
   expect(sent.objects.at(-1)?.searchParams.get("signature")).toBe("bytea, text[], text[]")
   await expect(page.locator("[data-slot=code-view]")).toBeVisible()
-  await expect(page.getByText("Arguments", { exact: true })).toBeVisible()
+  // What the function takes is a fact in the line under its name.
+  await expect(page.locator("[data-slot=facts-line]")).toContainText("arguments cid bigint")
 
   await page.getByRole("button", { name: "Open in Query" }).click()
   await expect.poll(() => new URL(page.url()).pathname).toBe("/databases/1/query")
@@ -2164,7 +2172,10 @@ for (const [label, viewport] of [
 
     for (const view of ["columns", "indexes", "keys", "triggers", "definition", "statistics"]) {
       await page.goto(`${TABLE}&view=${view}`)
-      await expect(page.getByRole("tab", { selected: true })).toBeVisible()
+      // The table's own reading: a phone's bar at the foot has a selected stop too.
+      await expect(
+        page.locator("[data-slot=workbench-columns]").getByRole("tab", { selected: true }),
+      ).toBeVisible()
       await keepsTheRules(page, `a table's ${view}`)
     }
 
@@ -2207,3 +2218,165 @@ for (const [label, viewport] of [
     await keepsTheRules(page, "an empty schema's diagram")
   })
 }
+
+/* ------------------------------------------- the frame's head, and a phone */
+
+test("a table opens under the frame's one head, on one line of what it is, and its statistics are sentences", async ({
+  page,
+}) => {
+  await mockSchema(page)
+  await page.goto(TABLE)
+  await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
+
+  // The strip is the frame's own head, with the table's two ways out as its verbs.
+  await expect(page.locator("[data-slot=database-strip]")).toHaveCount(1)
+  await expect(page.locator("[data-slot=schema-browser] [data-slot=database-strip]")).toHaveCount(1)
+  await expect(
+    head(page)
+      .locator("[data-slot=workbench-verbs]")
+      .getByRole("link")
+      .or(head(page).locator("[data-slot=workbench-verbs]").getByRole("button")),
+  ).toHaveText(["Open data", "Open in Query"])
+
+  // What the table amounts to is a line of words under its name: no captioned figures.
+  const line = page.locator("[data-slot=facts-line]").first()
+  await expect(line).toContainText("~9,000 rows")
+  await expect(line).toContainText("data")
+  await expect(line).toContainText("indexes")
+  await expect(line).toContainText("owned by app")
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+
+  // And what the engine has counted of it is said.
+  await page.getByRole("tab", { name: /Statistics/ }).click()
+  const said = page.locator("[data-slot=stat-sentences] li")
+  await expect(said.nth(0)).toHaveText("About 9,000 rows, and 12 dead rows, under 1% of the table")
+  await expect(said.nth(1)).toHaveText(
+    "9,000 inserted, 9,000 updated and 0 deleted since the counters were reset",
+  )
+  await expect(said.nth(2)).toHaveText("0 rows changed since it was last analyzed")
+  await expect(said.nth(3)).toContainText("Vacuumed")
+  await expect(said.nth(4)).toContainText("Analyzed")
+
+  // The tree is a column to put away from the head's menu.
+  const rail = page.getByRole("navigation", { name: "Objects of this schema" })
+  await headMenu(page, "Hide the objects")
+  await expect(rail).toHaveCount(0)
+  await headMenu(page, "Show the objects")
+  await expect(rail).toBeVisible()
+})
+
+test("the diagram is zoomed and fitted from one bar at its foot, as the maps are", async ({
+  page,
+}) => {
+  await mockSchema(page, { graphs: GRAPHS })
+  await page.goto("/databases/1/diagram?schema=public")
+  await expect(tableNode(page, "public.orders")).toBeVisible()
+  await diagramStill(page)
+
+  await expect(page.locator("[data-slot=database-strip]")).toHaveCount(1)
+  await expect(page.locator("[data-slot=diagram] [data-slot=database-strip]")).toHaveCount(1)
+  await expect(head(page).locator("[data-slot=workbench-verbs]").getByRole("button")).toHaveText([
+    "Export",
+  ])
+
+  // One bar: out, the size as a figure, in, Fit, tidy. No minimap.
+  const bar = page.locator("[data-slot=diagram-zoom]")
+  await expect(bar.getByRole("button")).toHaveCount(5)
+  await expect(page.locator(".react-flow__minimap")).toHaveCount(0)
+  const before = (await diagramView(page)).zoom
+  await bar.getByRole("button", { name: "Zoom in" }).click()
+  await expect.poll(async () => (await diagramView(page)).zoom).toBeGreaterThan(before)
+  await bar.getByRole("button", { name: /^Zoom \d+%/ }).click()
+  await expect.poll(async () => (await diagramView(page)).zoom).toBe(1)
+  await expect(bar).toContainText("100%")
+  await bar.getByRole("button", { name: "Fit" }).click()
+  await diagramStill(page)
+
+  // The keys are said as caps at the foot of the inspector.
+  await page.getByRole("button", { name: "Show the inspector (I)" }).click()
+  await expect(page.locator("[data-slot=diagram-keys] kbd")).toHaveText(["F", "/", "I", "H", "Esc"])
+
+  // Which way the layout runs is a word in the head's menu.
+  await headMenu(page, "Lay out top to bottom")
+  await head(page)
+    .getByRole("button", { name: /^Actions for / })
+    .click()
+  await expect(page.getByRole("menuitem", { name: "Lay out left to right" })).toBeVisible()
+})
+
+test("on a phone the diagram and its inspector are two panes of one frame", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockSchema(page, { graphs: GRAPHS })
+  await page.goto("/databases/1/diagram?schema=public")
+  await expect(tableNode(page, "public.orders")).toBeVisible()
+  const inspector = page.getByRole("complementary", { name: "Diagram inspector" })
+  await expect(paneBar(page).getByRole("tab")).toHaveText(["Diagram", "Tables"])
+  const foot = (await paneBar(page).boundingBox())!
+  expect(Math.round(foot.y + foot.height)).toBe(844)
+
+  // The inspector is the whole pane, not the lower part of the canvas.
+  await showPane(page, "Tables")
+  await expect(inspector).toBeVisible()
+  await expect(page.locator(".react-flow")).toBeHidden()
+  // It had 42% of what the canvas had; it has the pane now.
+  const panel = (await inspector.boundingBox())!
+  expect(panel.height).toBeGreaterThan(500)
+  expect(Math.round(panel.y + panel.height)).toBe(Math.round(foot.y))
+  await showPane(page, "Diagram")
+  await expect(inspector).toBeHidden()
+  await expect(tableNode(page, "public.orders")).toBeVisible()
+})
+
+test("the schema and the diagram, state by state @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to save the screenshots")
+  test.setTimeout(240_000)
+  const shots = process.env.JD_SHOTS!
+  for (const width of [1280, 390]) {
+    const phone = width === 390
+    await page.setViewportSize({ width, height: phone ? 844 : 800 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockSchema(page, { graphs: GRAPHS })
+    const shot = async (name: string) => {
+      await page.waitForTimeout(500)
+      await page.screenshot({ path: `${shots}/after-${name}-${width}.png` })
+    }
+    await page.goto("/databases/1/schema?schema=public")
+    if (phone) {
+      await expect(paneBar(page)).toBeVisible()
+      await shot("schema-objects")
+      await showPane(page, "Schema")
+    }
+    await expect(page.getByRole("region", { name: "Largest in public" })).toBeVisible()
+    await shot("schema-landing")
+    await page.goto(TABLE)
+    // A phone draws the columns as cards, not cells.
+    await expect(page.getByText("customer_id", { exact: true }).first()).toBeVisible()
+    await shot("schema-full")
+    await page.getByRole("tab", { name: /Statistics/ }).click()
+    await expect(page.locator("[data-slot=stat-sentences]")).toBeVisible()
+    await shot("schema-statistics")
+    await head(page)
+      .getByRole("button", { name: /^Actions for / })
+      .click()
+    await shot("schema-menu")
+    await page.keyboard.press("Escape")
+
+    await page.goto("/databases/1/diagram?schema=public")
+    await expect(tableNode(page, "public.orders")).toBeVisible()
+    await diagramStill(page)
+    await shot("diagram-full")
+    if (phone) await showPane(page, "Tables")
+    else await tableNode(page, "public.orders").click()
+    await expect(page.getByRole("complementary", { name: "Diagram inspector" })).toBeVisible()
+    await shot("diagram-inspector")
+
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockSchema(page, {
+      viewer: true,
+      rows: { 1: { environment: "production", readOnly: true } },
+    })
+    await page.goto(TABLE)
+    await expect(page.getByText("customer_id", { exact: true }).first()).toBeVisible()
+    await shot("schema-readonly")
+  }
+})

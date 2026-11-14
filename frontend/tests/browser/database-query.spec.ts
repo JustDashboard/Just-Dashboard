@@ -1,5 +1,6 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
 import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
+import { head, headMenu, paneBar, showPane } from "./database-workbench"
 
 /**
  * The SQL editor (`/databases/<id>/query`), find-a-value (`…/search`) and code
@@ -1148,7 +1149,7 @@ test("a statement is saved under a name, saved again, renamed and deleted", asyn
   const { sent } = await mockWork(page)
   await openEditor(page)
   await write(page, "select * from customers where tier = 'pro'")
-  await commands(page).getByRole("button", { name: "Save as" }).click()
+  await headMenu(page, "Save as…")
   await page.locator("#saved-query-name").fill("Pro customers")
   await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click()
 
@@ -1271,7 +1272,7 @@ test("Format lays the statement out and changes nothing but space and capitals",
   await mockWork(page)
   await openEditor(page)
   await write(page, "select id, email from customers where tier = 'pro' order by id limit 5")
-  await commands(page).getByRole("button", { name: "Format" }).click()
+  await headMenu(page, "Format")
   await expect
     .poll(() => editorText(page))
     .toBe("SELECT id, email\nFROM customers\nWHERE tier = 'pro'\nORDER BY id\nLIMIT 5\n")
@@ -2172,7 +2173,7 @@ for (const [label, viewport] of [
     // On a phone the rail lies over the editor, and is put away by choosing from it.
     if (phone) {
       await expect(rail).toHaveCount(0)
-      await page.getByRole("button", { name: "Show the rail" }).click()
+      await showPane(page, "Saved")
     }
     for (const name of ["Saved", "History", "Schema", "Snippets"]) {
       await rail.getByRole("tab", { name: new RegExp(`^${name}`) }).click()
@@ -2489,6 +2490,8 @@ async function explained(page: Page, sql = ADVICE_SQL) {
 /** The Plan view of a tab that has not been explained: its empty state offers the tools that need no plan. */
 async function openPlanTab(page: Page, sql: string) {
   await write(page, sql)
+  // On a phone what a statement returned is a pane of its own, and so are its tabs.
+  if (await paneBar(page).isVisible()) await showPane(page, "Results")
   await results(page).getByRole("tab", { name: /^Plan/ }).click()
   await expect(results(page)).toContainText("No plan yet")
 }
@@ -2915,4 +2918,143 @@ test("missing indexes, state by state @shots", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await settled(dialog)
   await page.screenshot({ path: `${shots}/missing-indexes-390.png` })
+})
+
+/* ------------------------------------------- the frame's head, and a phone */
+
+test("Run is the page's one command: the row limit is in its menu, Format and Save in the head's", async ({
+  page,
+}) => {
+  const { sent } = await mockWork(page)
+  await openEditor(page)
+  await write(page, "select many from customers")
+
+  // The strip is the frame's own head, and there is one of it.
+  await expect(head(page)).toBeVisible()
+  await expect(page.locator("[data-slot=database-strip]")).toHaveCount(1)
+  await expect(page.locator("[data-slot=sql-workbench] [data-slot=database-strip]")).toHaveCount(1)
+  await expect(head(page).getByRole("link", { name: "Back to shop's Home" })).toHaveAttribute(
+    "href",
+    "/databases/1",
+  )
+
+  // Between the statement and its result: Run, and Explain beside it. No
+  // row of limits, no Format, no Save.
+  await expect(commands(page).getByRole("button")).toHaveText(["Run", "", "Explain", ""])
+  await expect(commands(page).getByRole("radio")).toHaveCount(0)
+
+  // How many rows come back is a way of running it.
+  await commands(page).getByRole("button", { name: "More ways to run" }).click()
+  await expect(page.getByRole("menuitemradio")).toHaveText(["100", "500", "1,000", "5,000"])
+  await expect(page.getByRole("menuitemradio", { name: "500", exact: true })).toBeChecked()
+  await page.getByRole("menuitemradio", { name: "1,000" }).click()
+  await page.keyboard.press("Escape")
+  await editor(page).click()
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await expect.poll(() => sent.query.at(-1)?.maxRows).toBe(1000)
+
+  // What is done to the statement besides running it, and the rail, are
+  // words in the head's menu, above the database's own verbs.
+  await head(page)
+    .getByRole("button", { name: /^Actions for / })
+    .click()
+  const items = page.getByRole("menuitem")
+  await expect(items.nth(0)).toHaveText("Format")
+  await expect(items.nth(1)).toHaveText("Save as…")
+  await expect(items.nth(2)).toHaveText("Hide the rail")
+  await expect(items.nth(3)).toHaveText("Check connection")
+  await items.nth(2).click()
+  await expect(page.locator("[data-slot=query-rail]")).toHaveCount(0)
+  await headMenu(page, "Show the rail")
+  await expect(page.locator("[data-slot=query-rail]")).toBeVisible()
+})
+
+test("on a phone the query page is one pane at a time: the statement, what it returned, the saved queries", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockWork(page, {
+    saved: [{ id: 3, name: "Pro customers", sql: "select * from customers where tier = 'pro'" }],
+  })
+  await openEditor(page)
+  const selected = (name: string) =>
+    expect(paneBar(page).getByRole("tab", { name, exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+  // The statement has the frame; the bar is at the very foot of the screen.
+  await selected("Editor")
+  await expect(results(page)).toBeHidden()
+  const foot = (await paneBar(page).boundingBox())!
+  expect(Math.round(foot.y + foot.height)).toBe(844)
+
+  // Running shows what it returned, with the commands still over it.
+  await write(page, "select count(*) from orders")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await selected("Results")
+  await expect(results(page).getByRole("gridcell").first()).toBeVisible()
+  await expect(editor(page)).toBeHidden()
+  await expect(runButton(page)).toBeVisible()
+
+  await showPane(page, "Editor")
+  await expect(editor(page)).toBeVisible()
+  await expect(results(page)).toBeHidden()
+
+  // The saved queries are a stop of their own, put away by opening one.
+  await showPane(page, "Saved")
+  const rail = page.locator("[data-slot=query-rail]")
+  await expect(rail.getByRole("tab", { name: /^Saved/ })).toHaveAttribute("aria-selected", "true")
+  await rail.getByText("Pro customers").click()
+  await expect(rail).toHaveCount(0)
+  await selected("Editor")
+  await expect(openTabs(page).last()).toHaveText("Pro customers")
+})
+
+test("the query page, state by state @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to save the screenshots")
+  test.setTimeout(240_000)
+  const shots = process.env.JD_SHOTS!
+  for (const width of [1280, 390]) {
+    const phone = width === 390
+    await page.setViewportSize({ width, height: phone ? 844 : 800 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockWork(page, {
+      saved: [{ id: 3, name: "Pro customers", sql: "select * from customers where tier = 'pro'" }],
+    })
+    const shot = async (name: string) => {
+      await page.waitForTimeout(400)
+      await page.screenshot({ path: `${shots}/after-query-${name}-${width}.png` })
+    }
+    await openEditor(page)
+    await shot("empty")
+    await write(page, "select count(*) from orders;\nselect many from customers;")
+    await shot("editor")
+    await commands(page).getByRole("button", { name: "More ways to run" }).click()
+    await shot("run-menu")
+    await page.keyboard.press("Escape")
+    await editor(page).click()
+    await page.keyboard.press("ControlOrMeta+Shift+Enter")
+    await results(page)
+      .getByRole("group", { name: "Statements of this run" })
+      .getByRole("button")
+      .nth(1)
+      .click()
+    await expect(results(page).locator("[data-slot=result-truncated]")).toBeVisible()
+    await shot("full")
+    await head(page)
+      .getByRole("button", { name: /^Actions for / })
+      .click()
+    await shot("menu")
+    await page.keyboard.press("Escape")
+    if (phone) {
+      await showPane(page, "Saved")
+      await shot("saved")
+    }
+
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockWork(page, { viewer: true })
+    await openEditor(page)
+    await shot("readonly")
+  }
 })
