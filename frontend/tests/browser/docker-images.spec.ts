@@ -5,8 +5,9 @@ import { risen } from "./risen"
 /**
  * /docker/images after its overhaul: the engine's identity line, a band of
  * what Docker holds on disk beside what the registries say, and the images as
- * one framed table whose rows open a sheet. The fixture is a self-hosting
- * server with fourteen images, two of them behind their registry.
+ * one framed table whose rows open the image's page (`docker-image-page.spec.ts`).
+ * The fixture is a self-hosting server with fourteen images, two of them
+ * behind their registry.
  */
 
 const body = (page: Page) => page.locator("[data-slot=table-body] tr")
@@ -19,10 +20,15 @@ test("the page opens on the engine, what it holds and what the registries say", 
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/docker/images")
 
+  // The line a project opens on: the verdict beside the name, one command,
+  // the rest behind the menu. No row of figures opens the page.
   const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity).toHaveAttribute("data-layout", "project")
   await expect(identity.getByText("29.8.0")).toBeVisible()
   await expect(identity.getByText("14 images")).toBeVisible()
   await expect(identity.getByText("2 updates available")).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Pull image" })).toBeVisible()
+  await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
 
   const disk = page.getByRole("region", { name: "Docker on disk" })
   await expect(disk.getByRole("img", { name: /^On disk: Images/ })).toBeVisible()
@@ -36,6 +42,23 @@ test("the page opens on the engine, what it holds and what the registries say", 
   await registry.getByRole("button", { name: /pinned by digest/ }).hover()
   await expect(answer).toContainText("Pinned by digest")
   await expect(answer).toContainText("1")
+  // Each answer's mark in the strip is its dot and its count, in the band's order.
+  const marks = registry.locator("[data-slot=reading-strip] button")
+  await expect(marks).toHaveText(["2", "4", "1", "1", "1", "3"])
+  for (const mark of await marks.all()) {
+    await expect(mark.locator("span.rounded-full")).toHaveCount(1)
+  }
+  await expect(marks.first().locator("span.rounded-full")).toHaveCSS(
+    "background-color",
+    await page.evaluate(() => {
+      const probe = document.createElement("span")
+      probe.style.background = "var(--warning)"
+      document.body.append(probe)
+      const colour = getComputedStyle(probe).backgroundColor
+      probe.remove()
+      return colour
+    }),
+  )
 
   for (const name of ["Image", "Containers", "Registry", "Created", "Size"]) {
     await expect(page.getByRole("columnheader", { name, exact: true })).toBeVisible()
@@ -52,6 +75,9 @@ test("the page opens on the engine, what it holds and what the registries say", 
   await expect(nginx.getByRole("link", { name: "docs" })).toBeVisible()
   await expect(nginx.getByText("update available")).toBeVisible()
   await expect(nginx.locator("img")).toHaveAttribute("src", "/logos/nginx.svg")
+  // Size is a figure at the column's edge: no bar grows from row to row.
+  await expect(nginx.getByRole("cell", { name: "48.0 MB", exact: true })).toBeVisible()
+  await expect(page.locator("[data-slot=table-body] .bg-meter-track")).toHaveCount(0)
 })
 
 test("a registry answer, the verdict and the use chips each narrow the table", async ({ page }) => {
@@ -81,30 +107,66 @@ test("a registry answer, the verdict and the use chips each narrow the table", a
   await expect(body(page).first()).toContainText("acme/api")
 })
 
-test("a row opens its sheet: who runs it and where the size went", async ({ page }) => {
+test("a row's name is the way to the image's page, and the way back finds the table", async ({
+  page,
+}) => {
   await mockImages(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/docker/images")
 
-  await row(page, /nginx:1\.27-alpine/)
-    .getByRole("button", { name: "nginx:1.27-alpine", exact: true })
-    .click()
-  await expect(page).toHaveURL(/\?image=sha256%3Aa1a1|\?image=sha256:a1a1/)
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByText("Where the size went")).toBeVisible()
-  await expect(sheet.getByText("5 layers · 48.0 MB")).toBeVisible()
-  // In build order: the base layer first.
-  const steps = sheet.locator("ol").first().locator("li")
-  await expect(steps.first()).toContainText("ADD")
-  await expect(sheet.getByRole("link", { name: "Open web" })).toHaveAttribute(
-    "href",
-    "/docker/containers/1111111111111111",
-  )
-  await expect(sheet.getByText("Update available")).toBeVisible()
-  // In use: the sheet draws Remove, and Docker would refuse it.
-  await expect(sheet.getByRole("button", { name: "Remove" })).toBeDisabled()
-  await expect(sheet.getByRole("button", { name: "Pull" })).toBeEnabled()
+  const key = "a1".repeat(32)
+  const name = row(page, /nginx:1\.27-alpine/).getByRole("link", {
+    name: "nginx:1.27-alpine",
+    exact: true,
+  })
+  await expect(name).toHaveAttribute("href", `/docker/images/${key}`)
+  await name.click()
+  await expect(page).toHaveURL(new RegExp(`/docker/images/${key}$`))
+  await expect(
+    page.locator("[data-slot=image-identity]").getByText("nginx:1.27-alpine"),
+  ).toBeVisible()
+  // Nothing opens over the table any more.
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await page.goBack()
+  await expect(body(page)).toHaveCount(IMAGES.length)
+
+  // Enter on a row opens it too; an untagged layer is reached by its id.
+  await row(page, /untagged cdcdcdcdcdcd/).focus()
+  await page.keyboard.press("Enter")
+  await expect(page).toHaveURL(new RegExp(`/docker/images/${"cd".repeat(32)}$`))
 })
+
+test("Build is behind the menu beside the one command", async ({ page }) => {
+  await mockImages(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/docker/images")
+  await page.getByRole("button", { name: "More image actions" }).click()
+  await page.getByRole("menuitem", { name: "Build image…" }).click()
+  await expect(page.getByRole("dialog", { name: "Build an image" })).toBeVisible()
+})
+
+for (const width of [1280, 390]) {
+  test(`every row is one height at ${width}px, whatever the image has`, async ({ page }) => {
+    await mockImages(page)
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/docker/images")
+    await expect(body(page)).toHaveCount(IMAGES.length)
+    await risen(page)
+    // In use and not, checked and not, built here, untagged, with a second tag.
+    const boxes = await body(page).evaluateAll((rows) =>
+      rows.map((r) => {
+        const box = r.getBoundingClientRect()
+        return { top: box.top, height: box.height }
+      }),
+    )
+    // The last row draws no rule under it, so it is the one a hairline shorter.
+    const ruled = boxes.slice(0, -1)
+    expect(new Set(ruled.map((b) => b.height.toFixed(2))).size).toBe(1)
+    boxes.slice(1).forEach((box, i) => {
+      expect(Math.abs(box.top - (boxes[i].top + boxes[i].height))).toBeLessThan(0.1)
+    })
+  })
+}
 
 test("a pull draws its layers and does not start again once it ends", async ({ page }) => {
   const mocks = await mockImages(page, { pull: "finish" })
@@ -246,6 +308,7 @@ test("a reader without control sees the readings and no verbs", async ({ page })
 
   await expect(body(page)).toHaveCount(IMAGES.length)
   await expect(page.getByRole("button", { name: "Pull image" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "More image actions" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Reclaim/ })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Prune untagged" })).toHaveCount(0)

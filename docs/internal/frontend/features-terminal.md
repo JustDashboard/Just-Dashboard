@@ -83,17 +83,31 @@ eight headings. It started here and now holds product-wide — the prop is gone 
 `Modal`, `SidePanel` and `Section`, and the title sits at `text-title` instead
 (`docs/internal/frontend/design-system.md` §14). The `?` stays: it is the one mark on those headers
 that does something.
-- The Images page is `app/(dashboard)/docker/images/page.tsx` over `image-band.tsx`, `image-table.tsx`,
-  `image-sheet.tsx` and `image-pull.tsx`, with the pure parts — a reference split as a registry reads
-  it, one registry answer per image, the table's filters and order, a pull's stream folded by layer
-  and a history line read as its instruction — in `images.ts` (unit-tested). Each kind on its disk
+- The Images page is `app/(dashboard)/docker/images/page.tsx` over `image-band.tsx`, `image-table.tsx`
+  and `image-pull.tsx`, with the pure parts — a reference split as a registry reads
+  it, one registry answer per image, the table's filters and order, a pull's stream folded by layer,
+  a history line read as its instruction, and an image's address — in `images.ts` (unit-tested).
+  An image's own page is `app/(dashboard)/docker/images/[id]/page.tsx` over `image-page.tsx`
+  (the identity line, the tabs, the address), `image-rail.tsx` (the table's list beside it, and the
+  hook that reads it with the table's own filters), `image-picture.tsx` (registry, image, containers
+  on `wire-flow`) and `image-views.tsx` (Layers, Containers, History, Configuration). The verbs of an
+  image and the Pull and Tag dialogs they open are declared once in `image-actions.tsx` for the row
+  and the page, and `image-marks.tsx` holds the marks both draw an image with. The address names an
+  image by the hex of its id: unique, stable while the image exists, and in need of no escaping; a
+  reference escaped into one segment is resolved by the API and replaced. The list, the registry
+  answers and the containers are keyed polls (`/docker/images/`, `/docker/images/updates`,
+  `/docker/containers/`), so the rail is drawn from what the table last read. Each kind on its disk
   reading reclaims itself, from its line or its mark: unused images through `POST /docker/images/prune?all=true`, the build cache through
   `POST /docker/build-cache/prune` and stopped containers through `POST /docker/containers/prune`;
   only Reclaim in the block's head runs the sweep, and says it reaches stopped containers and networks.
   The pull socket is enabled only while a pull is in flight: the server closes it when the pull
   ends, and `useSocket` reconnects whatever is still enabled, so a finished pull used to open a new
   one about once a second until the page was left. Tag names the same image again, so the copy a
-  container runs can keep a name across the next pull of its tag.
+  container runs can keep a name across the next pull of its tag. Removing an image with more than
+  one name sends `force=true`, because Docker refuses an id two names point at; it is forced only
+  after the image is read again and nothing uses it, since a forced removal also takes an image a
+  stopped container was made from. A pull from an image's page follows the tag to the image it
+  points at afterwards.
 - `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2): the
   server's identity line (the Compose mark, Docker's version, stacks deployed, services running, ports
   published), then `stack-band.tsx`, bar readings
