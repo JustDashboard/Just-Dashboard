@@ -1413,53 +1413,94 @@ shared save bar and a review dialog; `?setting=<key>` still lands on a directive
 
 ### `/system-users`
 
-Host accounts as a table read down its columns and opened by a press: who can sign in and how
-(password, keys, or the one thing closing them), how far each reaches root (read from the sudoers
-files, `docker`, `lxd`, `libvirt` and `disk` as root by another name), and when each last signed in,
-under the host's identity line and, only when there is something to change, a list of findings each
-with where to change it. Root is in the list however the system-accounts chip is set, and daemons
-are a shelf of their own drawn as their products. A row's checkbox selects it for lock, disable,
-enable, end sessions and delete; Groups and Defaults are in the line's end.
+Host accounts, under the host's identity line (how many can sign in as its state, New account as its
+command, Groups and Account defaults in its menu) and, only when there is something to change, a list
+of findings each with where to change it. Then the ways to root as one picture (`RootPicture`, a
+`WireFlow`): the accounts that become root on the left, by sudo or by a group that is root by another
+name (`docker`, `lxd`, `libvirt`, `disk`), each line in the tone of how strong it is; root in the
+middle; and on the right whether root itself signs in by password and by key. Under it every account
+is a one-line card (`ChoiceRow`) that opens the account: who can sign in and how (password, keys, or
+the one thing closing them), how far each reaches root (read from the sudoers files), and when each
+last signed in, in columns from `xl` and on two lines of their own under the name below it, so no
+account is taller than another. Root is in the list however the system-accounts chip is set, and
+daemons are a shelf of their own drawn as their products. A row's checkbox selects it for lock,
+disable, enable, end sessions and delete (one request at a time); its menu goes to that account's
+terminal, files, settings and history. The page has its shape while it waits: the line, the picture
+and the rows are drawn at the height the last read gave them.
 
-**Implementation:** `app/(dashboard)/system-users/page.tsx`, `components/system-users/access.ts` and
-`marks.tsx`
+The whole section is `system.admin`, reads included. An account without the role is shown a closed
+door on every page of it (`read-state.tsx`) rather than controls that fail.
+
+**Implementation:** `app/(dashboard)/system-users/page.tsx`, `components/system-users/access.ts`,
+`marks.tsx`, `root-picture.tsx`, `wire-marks.tsx` and `read-state.tsx`
 
 ### `/system-users/user/[name]`
 
-One account: its password and every SSH key as rows of one list (set or generate a password, require
-a change, lock, unlock only when there is a password behind the lock, remove; add a key by paste,
-GitHub import or generation, with label, restrictions, last use and a weak-key warning, and give it
-to other accounts); its routes to root with the file each rule is in, its own sudo rule, and its
-groups; what it is running right now, drawn only when it is running something; one history of
-sign-ins, refusals, sudo commands and dashboard changes; folded profile, password rules and limits.
-Disable, a terminal as that account (`/terminal?as=<name>`, which `/terminal` passes on as
-`asUser`), files, end sessions and a delete that reads what would go first. A system account is
-read-only until `Allow changes` is pressed.
+One account, on the shape a service's page has: a way back, its identity line (sign-in state beside
+the name; a terminal as that account as the command, `/terminal?as=<name>`, which `/terminal` passes
+on as `asUser`, or its files where it has no shell; Files, Disable or Enable, End sessions and a
+delete that reads what would go first in the menu), and three views as an underlined strip with the
+one on screen in the address (`?tab=`). **Overview**: its password and every SSH key as rows of one
+list (set or generate a password, require a change, lock, unlock only when there is a password
+behind the lock, remove; add a key by paste, GitHub import or generation, with label, restrictions,
+last use and a weak-key warning, and give it to other accounts); its routes to root with the file
+each rule is in, its own sudo rule, and its groups; what it is running right now, drawn only when it
+is running something. **Settings**: profile, password rules and limits as one centred column of
+sections under one floating save bar; they are still three writes, and the bar sends each form that
+holds an edit. A disabled account's expiry is not offered and not sent, since an empty one is how an
+account is enabled. **History**: sign-ins, refusals, sudo commands and dashboard changes on one line
+of time, narrowed by chips; an account with nothing on record is drawn as itself with one sentence.
+From `xl` the accounts stand in a column beside it (`AccountRail`) with the list's own search, filter
+and order; Alt+↑ and Alt+↓ walk them and the view on screen goes along. A system account is read-only
+until `Allow changes` is pressed.
 
-**Implementation:** `components/system-users/account-page.tsx` and its `account-*.tsx`
+**Implementation:** `components/system-users/account-page.tsx`, `account-rail.tsx`, `detail-shell.tsx`
+and the `account-*.tsx` views
 
 ### `/system-users/new`
 
 A flow page: what the account is for, as templates (the operator's own beside the built-in ones),
-then its name, how it signs in, its root access, groups and shell, ending in Create. An account
-nobody can sign in to has to be asked for by name.
+then its name, how it signs in, its root access, groups and shell in the one focused surface, ending
+in Create with Save as template beside it. The column beside the form (`NewAccountPicture`; under it
+below `xl`) draws what the answers add up to: the way in, the account, how far it will reach. An
+account nobody can sign in to has to be asked for by name.
 
-**Implementation:** `components/system-users/new-account.tsx`
+**Implementation:** `components/system-users/new-account.tsx`, `new-account-picture.tsx`
 
 ### `/system-users/groups`
 
-The host's groups, what reaches root first, with what each hands over and who is in it; a private
-group is hidden and system groups are behind a chip; a sheet edits members, and name and number and
-deletion once a system group's changes are allowed.
+The host's groups under an identity line that says how many reach root (a press narrows the rows to
+those) with New group as its command. Each group is a one-line card: its mark, its name over its
+number, what it hands over in its tone, and who is in it; on a phone what it hands over takes the
+line under the name. What reaches root comes first; a private group is hidden and system groups are
+behind a chip. A row opens the group's page; `?group=<name>` lands there too.
 
-**Implementation:** `app/(dashboard)/system-users/groups/page.tsx`
+**Implementation:** `app/(dashboard)/system-users/groups/page.tsx`, `components/system-users/groups.ts`,
+`group-parts.tsx`
+
+### `/system-users/groups/[name]`
+
+One group, on the same shape as an account: its identity line (what it hands over as its state, its
+number, how many are in it, whether a package made it), three views in the address and from `xl` the
+groups in a column beside it (`GroupRail`) with the list's search and switch, walked by Alt+↑ and
+Alt+↓. **Overview**: who is in it, the group, and what being in it reaches as a picture, then the
+sudo rules that say so, each with its file and line. **Members**: a switch per account (those already
+in it that the people's list does not hold as well); an account it is the main group of is said, not
+offered. **Settings**: name and number, held for a package's group until `Allow changes` and never
+offered for one the system depends on, and deletion. Membership, name and number are one write, saved
+by the one floating bar whichever view the edit was made in. It was a sheet over the list until
+0.8.7.
+
+**Implementation:** `components/system-users/group-page.tsx`, `group-rail.tsx`, `detail-shell.tsx`
 
 ### `/system-users/defaults`
 
-What an account is born under: default shell, password rules and quality, what `/etc/skel` holds,
-naming the file each writes; and the operator's own templates.
+What an account is born under, as one centred column: New accounts (default shell, grace after a
+password expires, what `/etc/skel` holds with a link to it) and Passwords (how long one lasts, how
+soon it can change, the warning, the shortest allowed and how many kinds of character), each head
+naming the file it writes; one floating save bar; and the operator's own templates, one line each.
 
-**Implementation:** `app/(dashboard)/system-users/defaults/page.tsx`
+**Implementation:** `app/(dashboard)/system-users/defaults/page.tsx`, `components/system-users/fields.ts`
 
 ### `/terminal`
 
