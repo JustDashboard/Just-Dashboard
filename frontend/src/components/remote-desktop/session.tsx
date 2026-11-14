@@ -650,49 +650,62 @@ export function RemoteSession({
               >
                 <ArrowLeft className="size-4" />
               </Link>
-              {computer && (
-                <span className="flex min-w-0 flex-1 items-center gap-2.5 px-1">
-                  <ComputerMark os={computer.os} size="sm" className="scale-75" />
-                  <span className="flex min-w-0 items-baseline gap-2">
-                    <span className="truncate text-body font-semibold">{computer.name}</span>
-                    <span className="hidden shrink-0 items-center gap-1 self-center text-hint text-muted-foreground @2xl:flex">
-                      {!control && <ProductGlyph id="sunshine" className="size-3" />}
-                      {drawn}
+              {/* On a phone the name stands over the state, and the system's
+                  mark is left to the other panes: beside each other they
+                  left the name a letter wide. From `lg` the group is not a
+                  box at all, and its two parts sit in the strip's row. */}
+              <span className="flex min-w-0 flex-1 flex-col justify-center lg:contents">
+                {computer && (
+                  <span className="flex min-w-0 items-center gap-2.5 px-1 lg:flex-1">
+                    <ComputerMark os={computer.os} size="sm" className="scale-75 max-lg:hidden" />
+                    <span className="flex min-w-0 items-baseline gap-2">
+                      <span className="truncate text-body font-semibold">{computer.name}</span>
+                      <span className="hidden shrink-0 items-center gap-1 self-center text-hint text-muted-foreground @2xl:flex">
+                        {!control && <ProductGlyph id="sunshine" className="size-3" />}
+                        {drawn}
+                      </span>
                     </span>
                   </span>
+                )}
+                {!computer && <span className="flex-1" />}
+                <span className="flex min-w-0 items-center gap-1 max-lg:-ml-1 max-lg:[&>*]:truncate">
+                  {!control ? (
+                    <StreamStatus
+                      stream={stream}
+                      playing={playing}
+                      stats={streamStats}
+                      path={path}
+                    />
+                  ) : phase.kind === "connected" ? (
+                    <>
+                      <Status
+                        tone="running"
+                        live
+                        label={latency(computer?.reach.latencyMs) ?? "connected"}
+                        className="px-2"
+                      />
+                      <SessionFigures
+                        fps={
+                          controlStats && controlStats.clientFps > 0
+                            ? controlStats.clientFps
+                            : undefined
+                        }
+                        path={path}
+                      />
+                    </>
+                  ) : phase.kind === "connecting" ? (
+                    <TextShimmer className="px-2 text-xs font-medium">connecting…</TextShimmer>
+                  ) : phase.kind === "sign-in" ? (
+                    <Status tone="notice" label="waiting for a sign-in" className="px-2" />
+                  ) : (
+                    <Status
+                      tone={phase.kind === "failed" ? "warning" : "stopped"}
+                      label={phase.kind === "failed" ? "not connected" : "ended"}
+                      className="px-2"
+                    />
+                  )}
                 </span>
-              )}
-              {!computer && <span className="flex-1" />}
-              {!control ? (
-                <StreamStatus stream={stream} playing={playing} stats={streamStats} path={path} />
-              ) : phase.kind === "connected" ? (
-                <>
-                  <Status
-                    tone="running"
-                    live
-                    label={latency(computer?.reach.latencyMs) ?? "connected"}
-                    className="px-2"
-                  />
-                  <SessionFigures
-                    fps={
-                      controlStats && controlStats.clientFps > 0
-                        ? controlStats.clientFps
-                        : undefined
-                    }
-                    path={path}
-                  />
-                </>
-              ) : phase.kind === "connecting" ? (
-                <TextShimmer className="px-2 text-xs font-medium">connecting…</TextShimmer>
-              ) : phase.kind === "sign-in" ? (
-                <Status tone="notice" label="waiting for a sign-in" className="px-2" />
-              ) : (
-                <Status
-                  tone={phase.kind === "failed" ? "warning" : "stopped"}
-                  label={phase.kind === "failed" ? "not connected" : "ended"}
-                  className="px-2"
-                />
-              )}
+              </span>
               {computer && control && phase.kind === "connected" && (
                 <VerbMenu
                   label="Send keys"

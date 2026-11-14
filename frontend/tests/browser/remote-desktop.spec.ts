@@ -1033,6 +1033,10 @@ test("on a phone a session is one pane at a time, and the screen keeps its conne
   await tools.getByRole("radio", { name: /Stream/ }).click()
   await expect(bar.getByRole("tab", { name: "Screen" })).toHaveAttribute("aria-selected", "true")
   await expect(page.locator('iframe[data-slot="remote-stream"]')).toBeVisible()
+  // A stream's state is a longer word, under the name rather than beside it.
+  await expect(strip.getByText("ready to stream")).toBeVisible()
+  expect(await name.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+  expect((await strip.boundingBox())!.height).toBeLessThanOrEqual(44)
   await bar.getByRole("tab", { name: "Tools" }).click()
   await expect(tools.getByRole("radiogroup", { name: "Stream quality" })).toBeVisible()
   await expect(
