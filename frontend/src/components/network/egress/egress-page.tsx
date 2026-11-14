@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
@@ -13,6 +13,7 @@ import {
 } from "@/lib/network-egress"
 import type { PollState } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
+import { useViewState } from "@/lib/view-state"
 import { ArrowLeft, ChevronDown, ChevronUp, Lifebuoy } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
@@ -100,6 +101,15 @@ export function EgressGroupPage() {
   const links = useEgressLinks(true)
   const groups = read.data?.groups ?? []
   const group = findEgressGroup(groups, name)
+  // How many members each group had when it was last read, so its picture
+  // waits at the height it will have: a group of three grew when it landed.
+  const [members, setMembers] = useViewState<Record<string, number>>("network.egress.members", {})
+  const known = group ? members[group.name.toLowerCase()] : undefined
+  const count = group?.members.length
+  useEffect(() => {
+    if (group && count !== undefined && known !== count)
+      setMembers((held) => ({ ...held, [group.name.toLowerCase()]: count }))
+  }, [group, count, known, setMembers])
   const go = (target?: EgressGroup) => target && router.push(egressHref(target.name, tab))
   const at = group ? groups.indexOf(group) : -1
   const previous: Step = {
@@ -193,7 +203,7 @@ export function EgressGroupPage() {
             ) : read.error ? (
               <ErrorState error={read.error} onRetry={read.refresh} />
             ) : (
-              <Loading name={name} />
+              <Loading name={name} members={members[name.toLowerCase()]} />
             )}
           </div>
         </div>
@@ -203,7 +213,7 @@ export function EgressGroupPage() {
 }
 
 /** The page's final shape before the read lands: the line, the picture and the strip. */
-function Loading({ name }: { name: string }) {
+function Loading({ name, members }: { name: string; members?: number }) {
   return (
     <>
       <HostIdentity
@@ -213,7 +223,7 @@ function Loading({ name }: { name: string }) {
         state={<Status tone="unknown" label="Reading" />}
         facts={<TextShimmer>Reading the group…</TextShimmer>}
       />
-      <EgressPicture links={[]} />
+      <EgressPicture links={[]} expected={members} />
       <div className="h-10 border-b border-hairline" />
       <LoadingRows rows={3} />
     </>

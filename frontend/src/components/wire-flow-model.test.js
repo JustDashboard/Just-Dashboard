@@ -1,5 +1,13 @@
 import { expect, test } from "bun:test"
-import { beamOf, fitColumn, flowTemplate, isLit, loadingRows, staggerOf } from "./wire-flow-model"
+import {
+  beamOf,
+  fitColumn,
+  flowTemplate,
+  isLit,
+  loadingRows,
+  staggerOf,
+  waitingLines,
+} from "./wire-flow-model"
 
 test("a line that is up pulses only while something moves on it", () => {
   expect(beamOf({ state: "up", moving: true })).toEqual({
@@ -68,4 +76,24 @@ test("a loading column holds the rows it will have", () => {
   expect(loadingRows({ max: 4 })).toBe(5)
   expect(loadingRows({ max: 4, loadingRows: 2 })).toBe(2)
   expect(loadingRows({ loadingRows: -1 })).toBe(0)
+})
+
+test("a waiting node with no shape holds one line of detail", () => {
+  expect(waitingLines(undefined)).toEqual(["both"])
+})
+
+test("a count of waiting lines is that many at both widths", () => {
+  expect(waitingLines(2)).toEqual(["both", "both"])
+  expect(waitingLines(0)).toEqual([])
+})
+
+test("a waiting line only one width has comes after the shared ones", () => {
+  expect(waitingLines({ wide: 1, narrow: 2 })).toEqual(["both", "narrow"])
+  expect(waitingLines({ wide: 3, narrow: 1 })).toEqual(["both", "wide", "wide"])
+})
+
+test("a count of waiting lines that is not a count is none", () => {
+  expect(waitingLines(-1)).toEqual([])
+  expect(waitingLines(Number.NaN)).toEqual([])
+  expect(waitingLines(1.9)).toEqual(["both"])
 })

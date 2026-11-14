@@ -51,9 +51,9 @@ const PROGRAMS = 5
  * only ever "now" cannot show that the burst was ten minutes ago.
  *
  * Before the first read it is drawn at the height it will have: the three
- * places and as many programs as the last visit drew, each a grey node on the
- * very lines its words will stand on (`ghostNode`), so the list under the
- * picture does not move when the read lands.
+ * places and as many programs as the last visit drew, on `WireFlow`'s own
+ * waiting rows with the lines a place and the hub say (`loadingLines`), so
+ * the list under the picture does not move when the read lands.
  */
 export function ConnectionsPicture({
   data,
@@ -83,10 +83,14 @@ export function ConnectionsPicture({
     <WireFlow
       className="animate-rise"
       phone="marks"
+      loading={waiting}
       start={{
         title: "Where the callers are",
+        loadingRows: PLACES.length,
+        // A place's line of addresses, over the box its trend is drawn in.
+        loadingLines: { foot: <Trend values={[]} label="" align="end" /> },
         nodes: waiting
-          ? PLACES.map((place) => ghostNode(`place:${place.kind}`, "place"))
+          ? []
           : places.map((place) =>
               placeNode(place, history.places[place.kind] ?? [], {
                 pressed: place.kind === "internet" && internetOnly,
@@ -98,17 +102,10 @@ export function ConnectionsPicture({
       hub={{
         mark: <WireHost />,
         eyebrow: "This server",
-        title: data ? plural(data.total, "socket") : <Ghost className="w-20" />,
-        hint: !data ? (
-          <>
-            <span className="block">
-              <Ghost className="w-32" />
-            </span>
-            <span className="block lg:hidden">
-              <Ghost className="w-40" />
-            </span>
-          </>
-        ) : (
+        // Down a phone the hub says a second line: who is on each place.
+        loadingLines: { hint: { wide: 1, narrow: 2 } },
+        title: data && plural(data.total, "socket"),
+        hint: data && (
           <>
             <span className="numeric block">
               {/* Listening goes to the page that names each socket: this page
@@ -136,60 +133,14 @@ export function ConnectionsPicture({
       }}
       end={{
         title: "What they reached",
-        nodes: waiting
-          ? Array.from({ length: drawn }, (_, i) => ghostNode(`program:waiting:${i}`, "program"))
-          : programs.map((program) => programNode(program, onProgram)),
+        loadingRows: drawn,
+        nodes: waiting ? [] : programs.map((program) => programNode(program, onProgram)),
         max: PROGRAMS,
         more: { words: (hidden) => `${hidden} more programs` },
         empty: "Nothing reached",
       }}
     />
   )
-}
-
-/**
- * A line of words not read yet: a grey bar on the line the words will stand
- * on, taking no height of its own, so a waiting node is exactly as tall as
- * the node that replaces it.
- */
-function Ghost({ className }: { className?: string }) {
-  return (
-    <span aria-hidden className={cn("relative inline-block", className)}>
-      {"\u00a0"}
-      <span
-        data-slot="skeleton"
-        className="absolute inset-x-0 top-1/2 h-2.5 -translate-y-1/2 animate-pulse rounded-md bg-muted"
-      />
-    </span>
-  )
-}
-
-/** A place or a program before the first read: its tile and its lines, grey. */
-function ghostNode(id: string, kind: "place" | "program"): WireFlowNode {
-  return {
-    id,
-    placeholder: true,
-    mark: (size) => (
-      <span
-        data-slot="skeleton"
-        className={cn(
-          "block animate-pulse rounded-xl bg-muted",
-          size === "sm" ? "size-9" : "size-11",
-        )}
-      />
-    ),
-    eyebrow: <Ghost className="w-24" />,
-    title: <Ghost className="w-20" />,
-    hint: (
-      <>
-        <span className="block">
-          <Ghost className="w-28" />
-        </span>
-        {kind === "place" && <Trend values={[]} label="" align="end" />}
-      </>
-    ),
-    line: { state: "up" },
-  }
 }
 
 /** A place in the phone's one line under the hub. */

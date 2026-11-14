@@ -974,6 +974,8 @@ test.describe("a group's page", () => {
       await expect(header(page)).toContainText("Reading the group")
       const picture = page.locator('[data-slot="wire-flow"]')
       await expect(picture).toBeVisible()
+      // The waiting picture is the shared one's own, not grey nodes of this page's.
+      await expect(picture).toHaveAttribute("data-loading", "true")
       await risen(page)
       const before = await box(header(page))
       const drawn = await box(picture)

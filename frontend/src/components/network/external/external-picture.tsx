@@ -3,7 +3,6 @@
 import { Globe, Location, Plus, Servers } from "@/components/icons"
 import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
 import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
-import { LinePlaceholder } from "@/components/network/identity-facts"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { ExternalCheck, ExternalVantage } from "@/lib/network-external"
@@ -18,6 +17,7 @@ import {
 } from "@/components/network/external/reading"
 
 const DRAWN = 5
+const HUB_NAME = "The internet"
 /** Room under the hub for its caption, which hangs below a column one node tall. */
 const HUB_ROOM = "lg:py-14"
 
@@ -44,9 +44,8 @@ export function ExternalPicture({
   onSource?: (vantage: ExternalVantage) => void
   onEnroll?: () => void
 }) {
-  // While the sources load the picture keeps the shape it most often has, a
-  // node's unread words as grey bars on the words' own lines, so the table
-  // under it does not move when the read lands.
+  // While the sources load the picture keeps the shape it most often has, so
+  // the table under it does not move when the read lands.
   if (loading) return <Waiting />
   const sorted = newestFirst(checks)
   const live = vantages.filter((v) => !v.revokedAt)
@@ -135,7 +134,7 @@ export function ExternalPicture({
         mark: <InternetMark />,
         className: HUB_ROOM,
         eyebrow: "Across",
-        title: "The internet",
+        title: HUB_NAME,
         hint: kept
           ? `${kept} measurement${kept === 1 ? "" : "s"} kept · 7 days`
           : "nothing measured yet",
@@ -152,52 +151,33 @@ function InternetMark() {
   )
 }
 
-/** The picture before its first read: two sources, the internet, one service. */
+/**
+ * The picture before its first read: two sources, the internet, one service,
+ * on `WireFlow`'s own waiting rows. A service says two lines of detail (its
+ * ports, then its outcome) under this server's mark, which is known before
+ * anything is read.
+ */
 function Waiting() {
-  const source = (id: string): WireFlowNode => ({
-    id,
-    mark: (size) => (
-      <WireMark size={size}>
-        <Location aria-hidden className="opacity-40" />
-      </WireMark>
-    ),
-    eyebrow: <LinePlaceholder className="h-2 w-20" />,
-    title: <LinePlaceholder className="h-3 w-28" />,
-    hint: <LinePlaceholder className="h-2.5 w-24" />,
-    line: { state: "idle" },
-  })
   return (
     <WireFlow
+      loading
       phone="marks"
-      start={{ title: "Measured from", nodes: [source("wait:a"), source("wait:b")] }}
+      start={{ title: "Measured from", nodes: [], loadingRows: 2 }}
       end={{
         title: "Approved services",
-        nodes: [
-          {
-            id: "wait:service",
-            mark: (size) => <WireHost size={size === "lg" ? "md" : size} />,
-            eyebrow: "This server",
-            title: <LinePlaceholder className="h-3 w-28" />,
-            hint: (
-              <>
-                <span className="block">
-                  <LinePlaceholder className="h-2.5 w-20" />
-                </span>
-                <span className="block">
-                  <LinePlaceholder className="h-2.5 w-24" />
-                </span>
-              </>
-            ),
-            line: { state: "idle" },
-          },
-        ],
+        nodes: [],
+        loadingRows: 1,
+        loadingLines: {
+          mark: (size) => <WireHost size={size === "lg" ? "md" : size} />,
+          eyebrow: "This server",
+          hint: 2,
+        },
       }}
       hub={{
         mark: <InternetMark />,
         className: HUB_ROOM,
         eyebrow: "Across",
-        title: "The internet",
-        hint: <LinePlaceholder className="h-2.5 w-28" />,
+        loadingLines: { title: HUB_NAME, hint: 1 },
       }}
     />
   )

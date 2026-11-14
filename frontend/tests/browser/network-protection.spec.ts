@@ -266,6 +266,8 @@ for (const width of [1280, 390]) {
       })
       await page.goto("/network/protection")
       await page.waitForSelector("[data-slot=protection-picture][data-loading]")
+      // The waiting picture is the shared one's own, not grey nodes of this page's.
+      await expect(page.locator("[data-slot=wire-flow]")).toHaveAttribute("data-loading", "true")
       const parts = {
         line: identity(page),
         tabs: page.getByRole("tablist", { name: "Views of protection" }),
