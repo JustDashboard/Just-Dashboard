@@ -1249,12 +1249,18 @@ Gateway separates installed readiness from measured reachability (a target check
 and, for administrators, external evidence after the last change), previews each forward or NAT
 change's impacts and modeled policy layers while the form is edited, offers one-to-one, IPv6 prefix
 and destination-scoped NAT, flags a drifted auto source-translation decision with its re-decide, and
-labels live counters by table generation beside totals carried across reloads. Protection adds
+labels live counters by table generation beside totals carried across reloads. Protection
+(`components/network/protection/`) opens on an identity line (what the lists dropped and the limits
+refused, New blocklist as its command) and a `WireFlow` picture of who is refused, this server's
+filter and what gets through, and has three views in the address (`?tab=`): the lists, limits,
+exceptions and trusted addresses as one-height rows, the connection table (administrators), and the
+kernel's protections as a settings column on the shared save bar. It adds
 service-profile limits with a ceiling for everyone, meter occupancy and per-limit refusal trends,
 scoped expiring exceptions, trusted-address notes with staleness review, feed schedules, signatures,
-diffs and provenance, a list preview naming local networks and open sessions, explicit session
-revocation, workload kernel profiles staged into the existing apply bar with per-interface effective
-values, and an administrator's connection-table pressure panel. Private verification is available,
+diffs and provenance (a list's standing and enforcement evidence head its editor), a list preview
+naming local networks and open sessions, explicit session revocation, workload kernel profiles
+staged beside hand edits with per-interface effective values, and the connection table's band,
+charts, shares and what they point at. Private verification is available,
 and IPv4 WireGuard full tunnels explain IPv6 leak blocking. DNS, VPN and Interfaces each end on
 their service's log — the resolvers, tunnels and link daemons the page lists, read in the shared
 `ServiceLogs` pane ([`docker-files-logs.md`](../backend/docker-files-logs.md)). The [complete
