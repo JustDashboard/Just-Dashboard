@@ -27,7 +27,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useNow } from "@/components/deploy/vocabulary"
 import { useConfirm } from "@/components/confirm-dialog"
 import { InfoTip } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
+import { Status, StatusDot } from "@/components/status-dot"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
@@ -171,9 +171,8 @@ function PortsLoading() {
   return (
     <Page>
       {header}
-      <HostIdentity
-        fallback={Router}
-        title="Listening ports"
+      <Identity
+        state={<Status tone="unknown" label="Reading" />}
         facts={<TextShimmer>Reading the sockets…</TextShimmer>}
       />
       <LoadingRows rows={7} />
@@ -247,16 +246,30 @@ function PortsView() {
 
   useEffect(() => {
     if (legacy !== null) return
-    // Written a moment after the last keystroke: Safari refuses a page more
-    // than a hundred history writes in thirty seconds.
-    const timer = setTimeout(() => {
+    const write = () => {
       const url = new URL(window.location.href)
       const next = withView(url.search, { q: query, reach, proto, sort })
       if (next !== url.search) {
         window.history.replaceState(null, "", `${url.pathname}${next}${url.hash}`)
       }
-    }, 250)
-    return () => clearTimeout(timer)
+    }
+    // Written a moment after the last keystroke: Safari refuses a page more
+    // than a hundred history writes in thirty seconds.
+    const timer = setTimeout(write, 250)
+    // A press writes it first. The router takes a history write for a
+    // navigation of its own and drops the one it had under way, so a port
+    // pressed inside that moment, on a server slow to answer, was written
+    // over and never opened; ahead of the press, the write is the entry Back
+    // returns to.
+    const early = () => {
+      clearTimeout(timer)
+      write()
+    }
+    window.addEventListener("click", early, { capture: true, once: true })
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener("click", early, { capture: true })
+    }
   }, [query, reach, proto, sort, legacy])
 
   const listeners = useMemo(() => data?.value ?? [], [data])
@@ -349,7 +362,10 @@ function PortsView() {
     return (
       <Page>
         {header}
-        <Identity facts={<span>couldn&apos;t read the sockets</span>} />
+        <Identity
+          state={<Status tone="danger" label="Not read" />}
+          facts={<span>couldn&apos;t read the sockets</span>}
+        />
         <ErrorState
           error={shared.error ?? new Error("The sockets could not be read.")}
           onRetry={refreshNow}
@@ -360,9 +376,8 @@ function PortsView() {
 
   const internetTone =
     counts.internet > 0 ? "text-warning" : onTheUplink > 0 ? undefined : "text-success"
-  const dangerTone = dangerous.some((d) => d.level === "critical")
-    ? "font-medium text-destructive"
-    : "text-warning"
+  const critical = dangerous.some((d) => d.level === "critical")
+  const dangerTone = critical ? "font-medium text-destructive" : "font-medium text-warning"
 
   const empty = (() => {
     if (all.length === 0) {
@@ -420,10 +435,10 @@ function PortsView() {
       <Identity
         facts={
           <>
+            {/* How many, and how many of them the internet reaches: the page's
+                reading. The protocols and the private networks were here too,
+                each the figure on its chip over the list, said twice. */}
             <span className="numeric text-foreground">{counts.all} listening</span>
-            <span className="numeric">
-              {counts.tcp} TCP, {counts.udp} UDP
-            </span>
             <FactDot />
             <span className={cn("numeric", internetTone)} title={internetHint(all)}>
               {counts.internet > 0
@@ -432,22 +447,6 @@ function PortsView() {
                   ? `${onTheUplink} internet-facing if the uplink is mapped`
                   : "nothing the internet can reach"}
             </span>
-            {counts.private > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric" title={privateHint(all)}>
-                  {counts.private} on private networks
-                </span>
-              </>
-            )}
-            {dangerous.length > 0 && (
-              <>
-                <FactDot />
-                <span className={cn("numeric", dangerTone)} title="Counted once per port">
-                  {plural(dangerous.length, "dangerous service")} exposed
-                </span>
-              </>
-            )}
             <FactDot />
             <Freshness
               at={data.at}
@@ -457,43 +456,58 @@ function PortsView() {
             />
           </>
         }
-        aside={
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-            <span className="flex items-center">
-              {!paused && (
-                <IconAction label="Refresh now" pending={refreshing} onClick={refreshNow}>
-                  <RefreshClockwise />
-                </IconAction>
-              )}
-              <IconAction
-                label={paused ? "Resume refreshing" : "Pause refreshing"}
-                aria-pressed={paused}
-                onClick={paused ? refreshNow : pause}
-              >
-                {paused ? <Play /> : <Pause />}
-              </IconAction>
-              <VerbMenu
-                label="More actions for the list"
-                verbs={[
-                  {
-                    key: "csv",
-                    label: "Export as CSV",
-                    icon: AcronymCsv,
-                    disabled: visible.length === 0,
-                    run: () => exportRows("csv"),
-                  },
-                  {
-                    key: "json",
-                    label: "Export as JSON",
-                    icon: AcronymJson,
-                    disabled: visible.length === 0,
-                    run: () => exportRows("json"),
-                  },
-                ]}
-              />
+        state={
+          dangerous.length > 0 ? (
+            <span className="inline-flex items-center gap-1.5 text-xs whitespace-nowrap">
+              <StatusDot tone={critical ? "danger" : "warning"} />
+              <span className={cn("numeric", dangerTone)} title="Counted once per port">
+                {plural(dangerous.length, "dangerous service")} exposed
+              </span>
             </span>
-            {admin && <FreePortFinder />}
-          </div>
+          ) : (
+            <Status tone="running" label="Nothing dangerous exposed" />
+          )
+        }
+        command={admin && <FreePortFinder />}
+        menu={
+          <VerbMenu
+            label="More actions for the list"
+            verbs={[
+              ...(paused
+                ? []
+                : [
+                    {
+                      key: "refresh",
+                      label: refreshing ? "Refreshing…" : "Refresh now",
+                      icon: RefreshClockwise,
+                      disabled: refreshing,
+                      run: refreshNow,
+                    },
+                  ]),
+              {
+                key: "pause",
+                label: paused ? "Resume refreshing" : "Pause refreshing",
+                icon: paused ? Play : Pause,
+                run: paused ? refreshNow : pause,
+              },
+              {
+                key: "csv",
+                label: "Export as CSV",
+                icon: AcronymCsv,
+                group: "Export",
+                disabled: visible.length === 0,
+                run: () => exportRows("csv"),
+              },
+              {
+                key: "json",
+                label: "Export as JSON",
+                icon: AcronymJson,
+                group: "Export",
+                disabled: visible.length === 0,
+                run: () => exportRows("json"),
+              },
+            ]}
+          />
         }
       />
 
@@ -561,7 +575,13 @@ function PortsView() {
                   {(Object.keys(REACH_LABEL) as ReachFilter[])
                     .filter((key) => key === "all" || key === reach || facets.reach[key] > 0)
                     .map((key) => (
-                      <FilterChip key={key} selected={reach === key} onClick={() => setReach(key)}>
+                      <FilterChip
+                        key={key}
+                        selected={reach === key}
+                        onClick={() => setReach(key)}
+                        // Which networks, where the count alone does not say.
+                        title={key === "private" ? privateHint(all) : undefined}
+                      >
                         {REACH_LABEL[key]} <ChipCount>{facets.reach[key]}</ChipCount>
                       </FilterChip>
                     ))}
@@ -833,9 +853,33 @@ function PortsView() {
   )
 }
 
-/** The line the page opens on: what it is about, how much, and the page's commands. */
-function Identity({ facts, aside }: { facts: React.ReactNode; aside?: React.ReactNode }) {
-  return <HostIdentity fallback={Router} title="Listening ports" facts={facts} aside={aside} />
+/**
+ * The line the page opens on, laid out as a project's header: what it is
+ * about and how much, what is dangerous beside the name, one command at the
+ * end and the rest behind `⋯`. The state is always given, so the line has the
+ * one layout while the list is read, when it fails and when it lands.
+ */
+function Identity({
+  facts,
+  state,
+  command,
+  menu,
+}: {
+  facts: React.ReactNode
+  state?: React.ReactNode
+  command?: React.ReactNode
+  menu?: React.ReactNode
+}) {
+  return (
+    <HostIdentity
+      fallback={Router}
+      title="Listening ports"
+      state={state ?? null}
+      facts={facts}
+      command={command}
+      menu={menu}
+    />
+  )
 }
 
 /** The port, as the keyboard's way to its page; the pointer's is the whole row. */

@@ -23,7 +23,7 @@ import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { ProductLogo } from "@/components/product-logo"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState, Spinner } from "@/components/state"
-import { StatusDot, type DotTone } from "@/components/status-dot"
+import { Status, StatusDot, type DotTone } from "@/components/status-dot"
 import { JobConsole, useJobConsole } from "@/components/job-console"
 import { VerbMenu } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -224,6 +224,9 @@ function TLSFleetPage() {
     <Page className="animate-rise">
       <PageContext eyebrow="Proxy" title="TLS report" />
       <HostIdentity
+        // The view strip under the line draws the rule: the line's own under
+        // it made two.
+        className="border-b-0 pb-0"
         fallback={LockClosed}
         title={
           <span role="heading" aria-level={2}>
@@ -241,27 +244,38 @@ function TLSFleetPage() {
             <FleetFacts targets={all} />
           )
         }
-        aside={
-          <div className="flex items-center gap-2">
-            {admin && (
-              <Button size="sm" pending={starting} disabled={running || loading} onClick={scanAll}>
-                <Play />
-                {running ? "Scanning…" : "Scan all sites"}
-              </Button>
-            )}
-            <VerbMenu
-              label="More actions for every site"
-              verbs={[
-                {
-                  key: "csv",
-                  label: "Export CSV",
-                  icon: Download,
-                  run: exportCsv,
-                  disabled: visible.length === 0,
-                },
-              ]}
-            />
-          </div>
+        // Laid out as a project's header: the worst of what the reports
+        // say beside the name, Scan all sites at the end, the rest in `⋯`.
+        state={
+          loading ? (
+            <Status tone="unknown" label="Reading" />
+          ) : fleet.error && !fleet.data ? (
+            <Status tone="danger" label="Not read" />
+          ) : (
+            <FleetState targets={all} />
+          )
+        }
+        command={
+          admin && (
+            <Button size="sm" pending={starting} disabled={running || loading} onClick={scanAll}>
+              <Play />
+              {running ? "Scanning…" : "Scan all sites"}
+            </Button>
+          )
+        }
+        menu={
+          <VerbMenu
+            label="More actions for every site"
+            verbs={[
+              {
+                key: "csv",
+                label: "Export CSV",
+                icon: Download,
+                run: exportCsv,
+                disabled: visible.length === 0,
+              },
+            ]}
+          />
         }
       />
       <TLSTools current="fleet" />
@@ -368,32 +382,44 @@ function TLSFleetPage() {
 }
 
 /** The fleet's figures in words: only what is not zero, the alarming ones in their colour. */
+/** The worst thing the stored reports say, which the line's state leads with. */
+function fleetWorst(facts: ReturnType<typeof fleetFacts>) {
+  return facts.unreachable > 0
+    ? "unreachable"
+    : facts.belowA > 0
+      ? "below"
+      : facts.expiring > 0
+        ? "expiring"
+        : undefined
+}
+
+/** The fleet's state: the worst of its reports, or that there is nothing against any of them. */
+function FleetState({ targets }: { targets: FleetTarget[] }) {
+  const facts = fleetFacts(targets)
+  switch (fleetWorst(facts)) {
+    case "unreachable":
+      return <Status tone="danger" label={`${facts.unreachable} unreachable`} />
+    case "below":
+      return <Status tone="warning" label={`${facts.belowA} below A`} />
+    case "expiring":
+      return <Status tone="warning" label={`${facts.expiring} expiring`} />
+  }
+  if (facts.total === 0) return <Status tone="stopped" label="No names" />
+  if (facts.scanned === 0) return <Status tone="stopped" label="Not scanned" />
+  return <Status tone="running" label="Nothing below A" />
+}
+
 function FleetFacts({ targets }: { targets: FleetTarget[] }) {
   const facts = fleetFacts(targets)
+  // The state beside the name says the worst of the reports. How many are
+  // below A, expiring or unreachable are the chips over the list, where a
+  // press narrows to them; they were counted here as well.
   const parts: React.ReactNode[] = [
     <span key="total">{plural(facts.total, "name")}</span>,
     <span key="scanned">
       {facts.scanned === facts.total ? "all scanned" : `${facts.scanned} scanned`}
     </span>,
   ]
-  if (facts.belowA > 0)
-    parts.push(
-      <span key="below" className="font-medium text-warning">
-        {facts.belowA} below A
-      </span>,
-    )
-  if (facts.expiring > 0)
-    parts.push(
-      <span key="expiring" className="font-medium text-warning">
-        {facts.expiring} expiring
-      </span>,
-    )
-  if (facts.unreachable > 0)
-    parts.push(
-      <span key="unreachable" className="font-medium text-destructive">
-        {facts.unreachable} unreachable
-      </span>,
-    )
   if (facts.newest) parts.push(<span key="newest">last report {relativeTime(facts.newest)}</span>)
   return parts.flatMap((part, index) =>
     index === 0 ? [part] : [<FactDot key={`dot-${index}`} />, part],

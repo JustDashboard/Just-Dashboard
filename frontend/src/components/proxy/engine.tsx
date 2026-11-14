@@ -9,6 +9,7 @@ import {
   Globe,
   ListOrdered,
   Logs,
+  MoreHorizontal,
   Play,
   RefreshClockwise,
   Stop,
@@ -33,8 +34,17 @@ import { Status, type DotTone } from "@/components/status-dot"
 import { JobConsole, useJobConsole } from "@/components/job-console"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { engineProduct } from "@/components/proxy/marks"
-import { VerbMenu, type Verb } from "@/components/verbs"
+import type { Verb } from "@/components/verbs"
+import { useNow } from "@/components/deploy/vocabulary"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { engineKind, engineUnit, type ProxyStatus } from "@/components/proxy/proxy-context"
@@ -49,6 +59,7 @@ import {
 } from "@/components/proxy/engine-lifecycle"
 import { warningCount } from "@/components/proxy/config-test"
 import { loadProofText, provenLive } from "@/components/proxy/load-proof"
+import { updatedLabel } from "@/components/proxy/freshness"
 
 /**
  * The engine itself: whether it is running, and the three things done to it.
@@ -123,17 +134,19 @@ export function EngineStatus({
 }
 
 /**
- * What this host's proxy is, as the line the host Overview opens on: the
- * engine drawn as itself on the tile, its name and version, and after it the
- * facts a person opens the page to check — whether it is running, the
- * directory it reads, the ingress it serves through, whether certbot is here
- * and who renews — then what it serves. The verdict on its routes and the
- * service commands sit at the line's right end, where the Overview keeps its
- * verdict.
+ * What this host's proxy is, as the line a project opens on: the engine drawn
+ * as itself on the tile, its name and version, and beside them whether it is
+ * running and how its routes are answering. Under the name the facts a person
+ * opens the page to check — the ingress it serves through, whether certbot is
+ * here and who renews — then what it serves. One command stands at the far
+ * end, the one the service's state calls for, and the rest are behind `⋯`.
  *
- * It was a row of grey words. The engine is the one product this section is
- * about, and a page about nginx that never draws nginx opened on less than
- * the Docker overview's idle list says about a stopped container.
+ * It was a framed bar holding five controls of one weight (refresh, Alerts,
+ * Test config, Reload, the menu) where a project's header is one line on the
+ * page's own ground with one command; and before that a row of grey words.
+ * The engine is the one product this section is about, and a page about nginx
+ * that never draws nginx opened on less than the Docker overview's idle list
+ * says about a stopped container.
  */
 export function EngineIdentity({
   status,
@@ -150,8 +163,8 @@ export function EngineIdentity({
   inventory,
   verdict,
   modules,
-  controls,
-  actions,
+  command,
+  menu,
 }: {
   status: ProxyStatus
   unit: SystemdUnit | undefined
@@ -178,15 +191,12 @@ export function EngineIdentity({
    * height grew a third row holding nothing else.
    */
   modules?: React.ReactNode
-  /** How its routes are answering, at the line's right end before the commands. */
+  /** How its routes are answering, beside its own state. */
   verdict?: React.ReactNode
-  /**
-   * The page's own controls — how old it is, Refresh, Alerts — drawn in the
-   * line's bar before the engine's commands, where they stood in a row of
-   * their own over it.
-   */
-  controls?: React.ReactNode
-  actions?: React.ReactNode
+  /** The one command the service's state calls for. */
+  command?: React.ReactNode
+  /** The `⋯` after it: the config test, the alerts, a refresh and the service's other verbs. */
+  menu?: React.ReactNode
 }) {
   const engine = status.nginx || status.caddy
   // The ingress's Caddyfile is the container's own, not the host path the
@@ -200,11 +210,13 @@ export function EngineIdentity({
   )?.replace(/^(nginx|caddy)\//i, "")
   return (
     <HostIdentity
-      bar
       mark={engineProduct(status)}
       fallback={Globe}
       title={
-        <>
+        // One box of the line's own: the header's title is a flex row, where
+        // the name, its version and the modules would each be an item and
+        // the spaces between them nothing.
+        <span className="min-w-0">
           {/* The directory it reads is nearly always the default, so it is the
               name's tooltip rather than a fact the line spends width on. */}
           <span
@@ -223,14 +235,14 @@ export function EngineIdentity({
             </>
           )}
           {modules}
-        </>
+        </span>
       }
-      facts={
+      state={
         <>
           {pending ? (
             <EngineStatus unit={unit} pending={pending} />
           ) : unitError && unitName ? (
-            <span className="font-medium text-warning" title={errorMessage(unitError)}>
+            <span className="text-xs font-medium text-warning" title={errorMessage(unitError)}>
               {`couldn't read ${unitName}`}
             </span>
           ) : unit ? (
@@ -240,26 +252,30 @@ export function EngineIdentity({
             </>
           ) : engine && status.ingressContainer ? (
             <IngressUptime startedAt={status.ingressStartedAt} at={statusAt} />
-          ) : engine ? (
-            <span>no service unit</span>
           ) : (
-            <span>nothing found on this host</span>
+            <span className="text-xs text-muted-foreground">
+              {engine ? "no service unit" : "nothing found on this host"}
+            </span>
           )}
+          {verdict}
+        </>
+      }
+      facts={
+        <>
           {status.ingressContainer && (
             <>
-              <FactDot />
               <HostFact product="docker">
                 ingress <span className="font-mono text-[0.9em]">{status.ingressContainer}</span>
               </HostFact>
+              <FactDot />
             </>
           )}
           {status.ingressState === "provisionable" && (
             <>
-              <FactDot />
               <HostFact product="docker">a Caddy ingress starts with the first deployment</HostFact>
+              <FactDot />
             </>
           )}
-          <FactDot />
           {/* certbot is Let's Encrypt's client, and the mark says what it
               issues rather than who wrote it. */}
           {/* Who renews is said with certbot rather than as a fact of its
@@ -288,18 +304,8 @@ export function EngineIdentity({
           {inventory}
         </>
       }
-      aside={
-        (verdict || controls || actions) && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            {verdict}
-            {controls && <div className="flex flex-wrap items-center gap-1">{controls}</div>}
-            {controls && actions && (
-              <span aria-hidden className="h-5 w-px bg-hairline max-sm:hidden" />
-            )}
-            {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-          </div>
-        )
-      }
+      command={command}
+      menu={menu}
     />
   )
 }
@@ -340,8 +346,7 @@ function EngineBoot({
   if (!boot?.warn) return null
   return (
     <>
-      <FactDot />
-      <span className={boot.warn ? "font-medium text-warning" : undefined}>{boot.label}</span>
+      <span className="text-xs font-medium text-warning">{boot.label}</span>
       {boot.canEnable && onStartAtBoot && (
         <Button
           size="xs"
@@ -358,9 +363,9 @@ function EngineBoot({
 }
 
 /**
- * Test, the command the service's state calls for, and the rest behind the
- * menu. A running engine's command is Reload; a stopped or failed one's is
- * Start, and Reload stands disabled beside it, because reloading an engine
+ * The one command the service's state calls for, and the rest as the menu's
+ * verbs. A running engine's command is Reload; a stopped or failed one's is
+ * Start, and Reload waits in the menu, greyed, because reloading an engine
  * that is not running reported "invalid PID" and left the reader to guess.
  * Restart and stop, which take every site offline for a moment, confirm
  * first.
@@ -373,9 +378,13 @@ function EngineBoot({
  * itself and runs the config test before either: this host's nginx.service
  * tests before it starts, so a restart over a broken file used to stop nginx
  * and leave every site down. A refusal opens on the test's own lines.
+ *
+ * They were four buttons in a row. A project's header has one, so the page
+ * says which of them it expects to be pressed.
  */
-export function EngineActions({
+export function useEngineCommands({
   status,
+  enabled,
   unitName,
   unit,
   control,
@@ -384,7 +393,9 @@ export function EngineActions({
   onReloadTested,
   onChanged,
 }: {
-  status: ProxyStatus
+  status: ProxyStatus | undefined
+  /** An administrator, on a host that has an engine: nothing is offered otherwise. */
+  enabled: boolean
   unitName: string | undefined
   unit: SystemdUnit | undefined
   control: EngineControl
@@ -394,13 +405,22 @@ export function EngineActions({
   /** Shows a reload's own test: one that refused it, or passed it with warnings. */
   onReloadTested: (validation: ProxyValidation) => void
   onChanged: () => void
-}) {
+}): {
+  /** The brand-faced command at the line's end. */
+  command: React.ReactNode
+  /** The config test, which leads the menu. */
+  test: Verb[]
+  /** The service's other verbs, which close it. */
+  service: Verb[]
+  dialog: React.ReactNode
+} {
   const router = useRouter()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [busy, setBusy] = useState<"reload" | "restart-container" | "">("")
-  const kind = engineKind(status)
   const engine = control.engine
+  if (!status || !enabled) return { command: undefined, test: [], service: [], dialog }
+  const kind = engineKind(status)
 
   const reload = async () => {
     setBusy("reload")
@@ -469,27 +489,31 @@ export function EngineActions({
   // is and Reload says so if it cannot.
   const run = unitName && unit ? engineRun(unit) : undefined
   const lifecycle = control.pending !== undefined
-  const verbs: Verb[] = []
+  const stopped = run === "stopped"
+
+  const test: Verb[] = [
+    {
+      key: "test",
+      label: testing ? "Testing…" : "Test config",
+      icon: CheckCircle,
+      disabled: testing,
+      run: onTest,
+    },
+  ]
+  const service: Verb[] = []
+  // Start has the line's end while it is stopped; Reload is kept where it is
+  // looked for, and cannot be pressed.
+  if (stopped) {
+    service.push({
+      key: "reload",
+      label: `Reload ${engine}`,
+      icon: RefreshClockwise,
+      disabled: true,
+      run: () => {},
+    })
+  }
   if (unitName && unit) {
-    if (run !== "stopped") {
-      verbs.push({
-        key: "restart",
-        label: `Restart ${engine}`,
-        icon: RefreshClockwise,
-        danger: true,
-        disabled: lifecycle,
-        run: () => control.ask("restart"),
-      })
-      verbs.push({
-        key: "stop",
-        label: `Stop ${engine}`,
-        icon: Stop,
-        danger: true,
-        disabled: lifecycle,
-        run: () => control.ask("stop"),
-      })
-    }
-    verbs.push({
+    service.push({
       key: "unit",
       label: "Service details",
       icon: ListOrdered,
@@ -499,82 +523,172 @@ export function EngineActions({
   // The ingress's lifecycle is its container's, so its restart and its log
   // are Docker's, through the Docker routes and their own gates.
   if (ingressId) {
-    if (can("destructive")) {
-      verbs.push({
-        key: "restart-container",
-        label: "Restart container",
-        icon: RefreshClockwise,
-        danger: true,
-        disabled: busy !== "",
-        run: restartContainer,
-      })
-    }
-    verbs.push({
+    service.push({
       key: "container-logs",
       label: "Container logs",
       icon: Logs,
       run: () => router.push(`/docker/containers/${encodeURIComponent(ingressId)}?tab=logs`),
     })
   }
+  if (unitName && unit && !stopped) {
+    service.push({
+      key: "restart",
+      label: `Restart ${engine}`,
+      icon: RefreshClockwise,
+      danger: true,
+      disabled: lifecycle,
+      run: () => control.ask("restart"),
+    })
+    service.push({
+      key: "stop",
+      label: `Stop ${engine}`,
+      icon: Stop,
+      danger: true,
+      disabled: lifecycle,
+      run: () => control.ask("stop"),
+    })
+  }
+  if (ingressId && can("destructive")) {
+    service.push({
+      key: "restart-container",
+      label: "Restart container",
+      icon: RefreshClockwise,
+      danger: true,
+      disabled: busy !== "",
+      run: restartContainer,
+    })
+  }
 
-  // Why Reload cannot run, when the service says it cannot.
+  // Why Reload cannot run, when the service is on its way somewhere.
   const reloadBlocked =
-    run === "stopped"
-      ? `${engine} is not running`
-      : run === "changing" && unit
-        ? `${engine} is ${stoppedLabel(unit)}`
-        : undefined
+    run === "changing" && unit ? `${engine} is ${stoppedLabel(unit)}` : undefined
   const startBlocked = unit && isMasked(unit) ? `${unitName} is masked` : undefined
 
-  return (
-    <>
-      <Button size="sm" variant="outline" onClick={onTest} pending={testing}>
-        <CheckCircle className="size-3.5" />
-        Test config
-      </Button>
-      {/* Named after the engine: beside the page's Refresh, a bare Reload
-          read as reloading the page. */}
-      {reloadBlocked ? (
-        <Blocked reason={reloadBlocked}>
-          <Button size="sm" variant="outline" disabled>
-            <RefreshClockwise className="size-3.5" />
-            Reload {engine}
-          </Button>
-        </Blocked>
-      ) : (
-        <Button
-          size="sm"
-          onClick={reload}
-          pending={busy === "reload"}
-          disabled={busy !== "" || lifecycle}
-        >
-          <RefreshClockwise className="size-3.5" />
-          Reload {engine}
+  // Named after the engine: beside the page's Refresh, a bare Reload read as
+  // reloading the page.
+  const command = stopped ? (
+    startBlocked ? (
+      <Blocked reason={startBlocked}>
+        <Button size="sm" disabled>
+          <Play className="size-3.5" />
+          Start {engine}
         </Button>
-      )}
-      {run === "stopped" &&
-        (startBlocked ? (
-          <Blocked reason={startBlocked}>
-            <Button size="sm" disabled>
-              <Play className="size-3.5" />
-              Start {engine}
-            </Button>
-          </Blocked>
-        ) : (
-          <Button
-            size="sm"
-            onClick={() => control.run("start")}
-            pending={control.pending === "start"}
-            disabled={lifecycle}
-          >
-            <Play className="size-3.5" />
-            {control.pending === "start" ? PARTICIPLE.start : `Start ${engine}`}
-          </Button>
-        ))}
-      {verbs.length > 0 && <VerbMenu verbs={verbs} label={`More ${engine} actions`} />}
-      {dialog}
-    </>
+      </Blocked>
+    ) : (
+      <Button
+        size="sm"
+        onClick={() => control.run("start")}
+        pending={control.pending === "start"}
+        disabled={lifecycle}
+      >
+        <Play className="size-3.5" />
+        {control.pending === "start" ? PARTICIPLE.start : `Start ${engine}`}
+      </Button>
+    )
+  ) : reloadBlocked ? (
+    <Blocked reason={reloadBlocked}>
+      <Button size="sm" disabled>
+        <RefreshClockwise className="size-3.5" />
+        Reload {engine}
+      </Button>
+    </Blocked>
+  ) : (
+    <Button
+      size="sm"
+      onClick={reload}
+      pending={busy === "reload"}
+      disabled={busy !== "" || lifecycle}
+    >
+      <RefreshClockwise className="size-3.5" />
+      Reload {engine}
+    </Button>
   )
+
+  return { command, test, service, dialog }
+}
+
+/**
+ * The `⋯` at the end of the engine's line: the verbs that lead it, the one
+ * press that reads every source again with how old the page is beside it,
+ * then the service's own, those that take sites offline last.
+ *
+ * The age is said where the refresh is, as it was the refresh button's
+ * tooltip: "Updated just now" spent the line's width on the one reading that
+ * is nearly always fine. It counts only while the menu is open.
+ */
+export function EngineMenu({
+  label,
+  lead,
+  refresh,
+  service,
+}: {
+  label: string
+  lead: Verb[]
+  refresh: {
+    /** When the page's oldest reading was taken. */
+    at: number | undefined
+    /** A refresh is out and not every source has answered. */
+    refreshing: boolean
+    run: () => void
+  }
+  service: Verb[]
+}) {
+  const calm = service.filter((verb) => !verb.danger)
+  const danger = service.filter((verb) => verb.danger)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={label}
+          className="[&_svg:not([class*='size-'])]:size-3.5"
+        >
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-56">
+        {lead.map((verb) => (
+          <MenuVerb key={verb.key} verb={verb} />
+        ))}
+        <DropdownMenuItem disabled={refresh.refreshing} onSelect={() => refresh.run()}>
+          <RefreshClockwise className="size-3.5" />
+          Refresh
+          <DropdownMenuShortcut className="pl-4 tracking-normal">
+            <PageAge at={refresh.at} refreshing={refresh.refreshing} />
+          </DropdownMenuShortcut>
+        </DropdownMenuItem>
+        {calm.length > 0 && <DropdownMenuSeparator />}
+        {calm.map((verb) => (
+          <MenuVerb key={verb.key} verb={verb} />
+        ))}
+        {danger.length > 0 && <DropdownMenuSeparator />}
+        {danger.map((verb) => (
+          <MenuVerb key={verb.key} verb={verb} />
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function MenuVerb({ verb }: { verb: Verb }) {
+  return (
+    <DropdownMenuItem
+      variant={verb.danger ? "destructive" : "default"}
+      disabled={verb.disabled}
+      onSelect={() => verb.run()}
+    >
+      <verb.icon className="size-3.5" />
+      {verb.label}
+    </DropdownMenuItem>
+  )
+}
+
+/** How old the page's oldest reading is, counted only while it is on screen. */
+function PageAge({ at, refreshing }: { at: number | undefined; refreshing: boolean }) {
+  const now = useNow(1000, at !== undefined && !refreshing)
+  if (refreshing) return "reading…"
+  return at === undefined ? null : updatedLabel(at, now).toLowerCase()
 }
 
 /**

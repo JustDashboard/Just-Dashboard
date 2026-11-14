@@ -52,14 +52,16 @@ export function trafficTab(params: Pick<URLSearchParams, "get">): TrafficTab {
 
 /**
  * Where an old one-site address goes. `?site=<name>` opened that site's
- * requests here; they are its page's now. With `view=errors` it asked for the
- * site's error log, grouped and explained, which only this page reads, so
+ * requests here; they are its page's now, in its Logs view, which the address
+ * names so the Sites list's Traffic verb and an old bookmark land on the
+ * requests rather than a view away from them. With `view=errors` it asked for
+ * the site's error log, grouped and explained, which only this page reads, so
  * that one stays: the Errors view narrowed to the site.
  */
 export function legacySiteTarget(params: Pick<URLSearchParams, "get">): string | undefined {
   const site = params.get("site")
   if (!site || trafficTab(params) === "errors") return undefined
-  return readingHref({ site })
+  return `${readingHref({ site })}?tab=logs`
 }
 
 /** The share that failed, as the deployment pages say it: "1.0% of requests failed". */

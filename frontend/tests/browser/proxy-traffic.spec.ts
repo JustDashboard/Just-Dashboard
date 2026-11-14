@@ -193,9 +193,11 @@ test("the opening block stands where it will be while the hour is read", async (
   ).toEqual(lines)
 })
 
-test("a site's old address lands on the site's page", async ({ page }) => {
+test("a site's old address lands on the site's page, at its requests", async ({ page }) => {
   await open(page, BUSY, { path: "/proxy/traffic?site=app.example.com" })
-  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com$/)
+  // The site's page reads its requests in its Logs view, which the address names.
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com\?tab=logs$/)
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("app.example.com")
 })
 
 test("the error log is a view in the address, and ?view=errors still opens it", async ({

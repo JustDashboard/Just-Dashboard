@@ -18,7 +18,7 @@ import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogos } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { Status } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
 import { ChipCount, tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -352,20 +352,40 @@ function CertificatesIdentity() {
     { key: "decode", label: "Paste a certificate", icon: FileText, run: work.decode },
   ]
 
-  const verdict = !list ? undefined : counts.refused > 0 ? (
-    <Status verdict="critical" label={`${plural(counts.refused, "certificate")} refused`} />
+  // Always a state, so the line is one height on a phone, where the state
+  // has a row of its own, while the list is read and once it lands.
+  const verdict = !list ? (
+    certs.error ? (
+      <Status tone="danger" label="Not read" />
+    ) : (
+      <Status tone="unknown" label="Reading" />
+    )
+  ) : counts.refused > 0 ? (
+    // The worst of the counts stands beside the name, and is not said again
+    // among the facts under it.
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap">
+      <StatusDot tone="danger" />
+      <span className="numeric text-destructive" title={counts.refusedWhy}>
+        {counts.refused} refused
+      </span>
+    </span>
   ) : counts.expiring > 0 ? (
-    <Status verdict="warning" label={`${counts.expiring} expiring`} />
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap">
+      <StatusDot tone="warning" />
+      <ExpiringWords counts={counts} />
+    </span>
   ) : counts.all > 0 ? (
     <Status verdict="ok" label="all valid" />
-  ) : undefined
+  ) : (
+    <Status tone="stopped" label="None yet" />
+  )
 
   return (
     <HostIdentity
       className="animate-rise border-b-0 pb-0"
       logo={
         marks.length > 0 ? (
-          <span className="flex h-12 shrink-0 items-center">
+          <span className="flex h-10 shrink-0 items-center">
             <ProductLogos ids={marks} size="md" />
           </span>
         ) : undefined
@@ -375,6 +395,10 @@ function CertificatesIdentity() {
       facts={
         !list && certs.loading ? (
           <TextShimmer>Reading the certificates…</TextShimmer>
+        ) : !list && certs.error ? (
+          // A list that was not read has no count: the line said "0
+          // certificates" over the failure.
+          <span className="font-medium text-warning">couldn&apos;t read the certificates</span>
         ) : (
           <>
             {/* On a phone the line keeps to what fits on one, so it is the
@@ -394,21 +418,10 @@ function CertificatesIdentity() {
               {(certbot.data || certbotGone) && <FactDot />}
             </span>
             <span className="numeric">{plural(counts.all, "certificate")}</span>
-            {counts.expiring > 0 && (
+            {counts.expiring > 0 && counts.refused > 0 && (
               <>
                 <FactDot />
-                <span className="numeric font-medium text-warning">
-                  {counts.expiring} expiring
-                  <span className="max-sm:hidden"> in {plural(counts.soonest, "day")}</span>
-                </span>
-              </>
-            )}
-            {counts.refused > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric font-medium text-destructive" title={counts.refusedWhy}>
-                  {counts.refused} refused
-                </span>
+                <ExpiringWords counts={counts} />
               </>
             )}
             {certbot.data && !certbotGone && (
@@ -433,22 +446,28 @@ function CertificatesIdentity() {
           </>
         )
       }
-      aside={
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          {verdict}
-          <div className="flex items-center gap-2">
-            {admin && (
-              <IssueCommand
-                onLetsEncrypt={work.issue ? () => work.issue?.() : undefined}
-                onPrivate={(kind) => work.issuePrivate?.(kind)}
-                onRequest={() => work.requestSigning?.()}
-              />
-            )}
-            <VerbMenu verbs={more} label="More certificate actions" />
-          </div>
-        </div>
+      state={verdict}
+      command={
+        admin && (
+          <IssueCommand
+            onLetsEncrypt={work.issue ? () => work.issue?.() : undefined}
+            onPrivate={(kind) => work.issuePrivate?.(kind)}
+            onRequest={() => work.requestSigning?.()}
+          />
+        )
       }
+      menu={<VerbMenu verbs={more} label="More certificate actions" />}
     />
+  )
+}
+
+/** How many are running out and how soon the first does; on a phone, how many. */
+function ExpiringWords({ counts }: { counts: ReturnType<typeof countCertificates> }) {
+  return (
+    <span className="numeric font-medium text-warning">
+      {counts.expiring} expiring
+      <span className="max-sm:hidden"> in {plural(counts.soonest, "day")}</span>
+    </span>
   )
 }
 

@@ -584,7 +584,7 @@ function StreamFields({
       {spec.protocol !== "tcp" && (
         <Field
           label="UDP sessions"
-          hint={
+          info={
             (spec.udpMode === "request"
               ? "Each reply ends the session: one question, one answer, as DNS works."
               : "One session per client until it goes quiet, so a game server, WireGuard or VoIP sees one peer.") +
@@ -616,9 +616,12 @@ function StreamFields({
             ? "The default: host:port or unix:/path for any TLS name no route below matches."
             : spec.samePort
               ? "The backend's IP address alone: each port of the range goes to the same port there."
-              : target?.exposed
-                ? `${target.container} publishes this port on every address, so it is reachable around the stream, where these rules do not apply. Publish it on 127.0.0.1 instead.`
-                : "host:port of the service behind it, or unix:/path for a local socket."
+              : "host:port of the service behind it, or unix:/path for a local socket."
+        }
+        warning={
+          !spec.routes && !spec.samePort && target?.exposed
+            ? `${target.container} publishes this port on every address, so it is reachable around the stream, where these rules do not apply. Publish it on 127.0.0.1 instead.`
+            : undefined
         }
         placeholder={spec.samePort ? "10.0.0.5" : `10.0.0.5:${presetPort ?? 5432}`}
         picker={

@@ -339,6 +339,9 @@ function TLSReport() {
     <Page className="animate-rise">
       <PageContext eyebrow="Proxy" title="TLS report" />
       <HostIdentity
+        // The view strip under the line draws the rule: the line's own under
+        // it made two.
+        className="border-b-0 pb-0"
         mark={scan?.certificate ? issuerProduct(scan.certificate.issuer) : undefined}
         fallback={Inspect}
         title={
@@ -356,38 +359,40 @@ function TLSReport() {
             sites={offeredSites.length}
           />
         }
-        aside={
+        // Laid out as a project's header: the answer's sentence beside the
+        // name, the report's verbs behind `⋯`. Scan is the form's, under it.
+        state={
           // Held from the moment a target is asked: on a phone the verdict is
           // a row of its own, and arriving with the answer it pushed the
           // picture down.
-          // It is never narrower than a summary, so a short line and the
-          // answer's sentence wrap under the title at the same width.
           (scan || target) && (
-            <div className="flex max-w-full min-w-[17rem] items-center justify-between gap-x-3">
-              <p
-                data-slot="report-verdict"
-                className={cn(
-                  "max-w-md min-w-0 text-hint text-pretty",
-                  scan ? TONE_TEXT[gradeVerdict(scan.grade)] : "text-muted-foreground",
-                )}
-              >
-                {scan ? scan.summary : busy ? "waiting for its answer" : "no answer"}
-              </p>
-              <VerbMenu
-                label={`More actions for ${scanned || targetKey}`}
-                verbs={
-                  scan
-                    ? reportVerbs({
-                        scan,
-                        admin,
-                        busy,
-                        onScanAgain: scanAgain,
-                        onGo: (href) => router.push(href),
-                      })
-                    : [COPY_LINK]
-                }
-              />
-            </div>
+            <p
+              data-slot="report-verdict"
+              className={cn(
+                "max-w-md min-w-0 text-hint text-pretty",
+                scan ? TONE_TEXT[gradeVerdict(scan.grade)] : "text-muted-foreground",
+              )}
+            >
+              {scan ? scan.summary : busy ? "waiting for its answer" : "no answer"}
+            </p>
+          )
+        }
+        menu={
+          (scan || target) && (
+            <VerbMenu
+              label={`More actions for ${scanned || targetKey}`}
+              verbs={
+                scan
+                  ? reportVerbs({
+                      scan,
+                      admin,
+                      busy,
+                      onScanAgain: scanAgain,
+                      onGo: (href) => router.push(href),
+                    })
+                  : [COPY_LINK]
+              }
+            />
           )
         }
       />
