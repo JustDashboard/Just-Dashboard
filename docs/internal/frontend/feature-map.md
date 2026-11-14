@@ -501,7 +501,7 @@ archive and restores. Automatic overdue/attention recommendations were removed i
 
 Routes: `/databases`, `/databases/map`, `/databases/new`, `/databases/[id]` (+ `/assistant`,
 `/data`, `/query`, `/search`, `/schema`, `/diagram`, `/generate`, `/performance`, `/logs`,
-`/access`, `/backups`, `/alerts`, `/import`, `/settings`, `/settings/network`,
+`/access`, `/access/[account]`, `/backups`, `/alerts`, `/import`, `/settings`, `/settings/network`,
 `/settings/resources`, `/settings/pooling`, `/settings/parameters`, `/settings/extensions`,
 `/settings/version`, `/settings/danger`)
 
@@ -549,7 +549,21 @@ its time drawn across it and ordered by the column pressed, and opens that state
 History: its time, calls, time per call (how long half, 19 in 20 and 99 in 100 took, where the
 engine keeps run times) and rows. Access
 opens on who signs in (each account wired to the server, pulsing while it holds sessions) over the
-accounts with counted filters; Backups on where the dumps go (the database and its schedule, this
+accounts with counted filters, one card to an account and one height in every state. **An account
+is a page of its own** (`/databases/[id]/access/[account]`, `ops/account-page.tsx` and
+`account-frame.tsx`; the sheet's `?account=` address redirects there): its line (mark, name, whether
+a session is open as it, its tags, what its grants add up to), one command (a new password) with
+the drop in the `⋯` menu, its views in the address (`?tab=`), and from `xl` the list beside it as a
+rail in the filter the list was left in, walked by Alt+↑ and Alt+↓ with the view carried. A SQL
+account has Grants (memberships and the privilege matrix, staged and reviewed as the server's
+statements), Sessions (Performance's sessions narrowed to it, each a way to its panel there) and
+Settings (its attributes on one save bar, sending only what changed); a key–value user has Rule
+(the rule as the server holds it, and its commands, keys and channels) and Settings (the form that
+rewrites it); a document user has its roles, with no strip. The name is one segment of the path,
+written once and read back from the path (`ops/account-address.ts`), and a MySQL host or a document
+user's database is `?host=`. The page asks before it is left over unsaved work, and a reader who
+may not change an account is shown its attributes as words rather than as switches. Backups opens
+on where the dumps go (the database and its schedule, this
 server's dump tool, the directory) over the dumps table, then, for a PostgreSQL server the dashboard
 runs, its point-in-time recovery: the moments it can be recovered to, how archiving is going, its
 base backups and restore points, setup with the command line the server restarts with, a recovery
