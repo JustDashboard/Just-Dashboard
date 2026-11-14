@@ -215,8 +215,10 @@ export default function BoardWorkspace({ id }: { id: number }) {
     return (
       <Page className="animate-rise">
         <h1 className="sr-only">Drawing</h1>
+        {/* Reading a drawing changes nothing, so it is always worth asking again. */}
         <ErrorState
           error={error}
+          retryable
           onRetry={() => {
             setError(null)
             setAttempt((held) => held + 1)
@@ -674,7 +676,9 @@ function LoadedBoard({ board }: { board: Board }) {
               )}
             />
           </span>
-          <span className="flex min-w-0 items-center gap-x-3 gap-y-1 max-sm:order-last max-sm:col-span-3 max-sm:pb-0.5 max-sm:pl-10 sm:mr-auto sm:pl-1">
+          {/* As tall as the button a failed save puts in it, so the bar is
+              one height whatever the state says. */}
+          <span className="flex min-w-0 items-center gap-x-3 max-sm:order-last max-sm:col-span-3 max-sm:h-6 max-sm:pl-10 sm:mr-auto sm:pl-1">
             <span role="status" className="flex min-w-0">
               <Status tone={said.tone} label={said.label} className="min-w-0 font-normal" />
             </span>
