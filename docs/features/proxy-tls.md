@@ -17,7 +17,7 @@ Every domain drawn through nginx or Caddy to the application it reaches, with it
 <table>
 <tr>
 <td width="50%" valign="top">
-<a href="../readme/proxy-sites.png"><img src="../readme/proxy-sites.png" alt="The sites page with certificates, applications and every site as a card"></a>
+<a href="../readme/proxy-sites.png"><img src="../readme/proxy-sites.png" alt="The sites page with certificates, applications and every site"></a>
 <p align="center"><b>Sites</b><br><sub>Ordinary config, with a builder beside it</sub></p>
 </td>
 <td width="50%" valign="top">

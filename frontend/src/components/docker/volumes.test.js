@@ -4,14 +4,19 @@ import {
   holderOf,
   holders,
   isAnonymous,
+  mountLines,
   prunable,
   pruneShare,
   pruneSurprise,
+  railCaption,
   redactOption,
+  shortName,
   sizeReading,
   splitName,
   standing,
+  standingWords,
   visibleVolumes,
+  volumeHref,
   volumeProduct,
   withLiveStates,
 } from "./volumes"
@@ -161,7 +166,7 @@ test("backupOf tells a paused job from no job", () => {
     }),
   ).toEqual({
     state: "protected",
-    jobs: [{ id: 1, name: "Nightly" }],
+    jobs: [{ id: 1, name: "Nightly", enabled: true }],
     lastAt: "2026-10-08T00:00:00Z",
   })
   expect(
@@ -285,4 +290,60 @@ test("a driver option is shown without the password a CIFS mount carries", () =>
   expect(redactOption("o", "addr=10.0.0.2,rw")).toBe("addr=10.0.0.2,rw")
   expect(redactOption("device", "//nas/share")).toBe("//nas/share")
   expect(redactOption("secret", "abc")).toBe("••••••")
+})
+
+test("a volume's page is addressed by its name, and a view other than the first by ?tab=", () => {
+  expect(volumeHref("shop_pgdata")).toBe("/docker/volumes/shop_pgdata")
+  expect(volumeHref("shop_pgdata", "files")).toBe("/docker/volumes/shop_pgdata")
+  expect(volumeHref("shop_pgdata", "mounts")).toBe("/docker/volumes/shop_pgdata?tab=mounts")
+  expect(volumeHref("odd name/x")).toBe("/docker/volumes/odd%20name%2Fx")
+})
+
+test("a row names every container that fits its lines, else one fewer and a count", () => {
+  expect(mountLines(["a"])).toEqual({ shown: ["a"], more: 0 })
+  expect(mountLines(["a", "b"])).toEqual({ shown: ["a", "b"], more: 0 })
+  // Three in two lines: the second line is the count, so the row is no taller.
+  expect(mountLines(["a", "b", "c"])).toEqual({ shown: ["a"], more: 2 })
+  expect(mountLines(["a", "b", "c", "d"], 3)).toEqual({ shown: ["a", "b"], more: 2 })
+  expect(mountLines([])).toEqual({ shown: [], more: 0 })
+})
+
+test("what nothing mounts is said as what a prune does to it", () => {
+  expect(standingWords(volume("a", { usedBy: [user("c", "running")] }))).toEqual({
+    word: "in use",
+    warning: false,
+  })
+  expect(standingWords(volume("a", { usedBy: [user("c", "exited")] }))).toEqual({
+    word: "stopped",
+    warning: false,
+  })
+  expect(standingWords(volume("a"))).toEqual({ word: "prune deletes it", warning: true })
+  expect(standingWords(volume("a"), false).word).toBe("prune deletes")
+  // A CIFS mount nothing uses is not mounted, and a prune leaves it alone.
+  expect(standingWords(volume("nas", { extra: { mountType: "cifs" } }))).toEqual({
+    word: "not mounted",
+    warning: false,
+  })
+})
+
+test("an anonymous volume is its first twelve characters in a row", () => {
+  const hash = "3f9ad2c81e7b4f60a5d29c3e8b7f1a04d6e2c95b8a7f3d1e0c4b6a92f8e5d7c1"
+  expect(shortName(volume(hash))).toBe("3f9ad2c81e7b")
+  expect(shortName(volume("shop_pgdata"))).toBe("shop_pgdata")
+})
+
+test("the rail's caption says how many it lists and by what", () => {
+  const sort = { key: "size", desc: true }
+  expect(railCaption({ total: 16, shown: 16, narrowed: [], sort })).toBe(
+    "16 volumes · largest first",
+  )
+  expect(railCaption({ total: 1, shown: 1, narrowed: [], sort })).toBe("1 volume · largest first")
+  expect(railCaption({ total: 16, shown: 3, narrowed: ["shop"], sort })).toBe("3 of 16 · shop")
+  // A search alone narrows the count and keeps the order's words.
+  expect(
+    railCaption({ total: 16, shown: 2, narrowed: [], sort: { key: "name", desc: false } }),
+  ).toBe("2 of 16 · by name")
+  expect(railCaption({ total: 16, shown: 5, narrowed: ["not mounted", "nextcloud"], sort })).toBe(
+    "5 of 16 · not mounted, nextcloud",
+  )
 })

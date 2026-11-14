@@ -4,6 +4,7 @@ import { BarReading, type ReadingPart } from "@/components/bar-reading"
 import { ChartActivity } from "@/components/icons"
 import { HUE, LiveBytes, LiveFigure } from "@/components/overview/readings"
 import { ProductGlyph, pm2Product } from "@/components/product-logo"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { bytes, percent, plural } from "@/lib/format"
 import type { Snapshot } from "@/lib/types"
 import { cores } from "@/components/procs/shared"
@@ -29,18 +30,28 @@ const SHOWN = 5
  *
  * PM2's list is polled, so neither bar is marked live. A press narrows the
  * table to its application.
+ *
+ * Drawn before the list has been read (`loading`), with both bars in place
+ * and a sentence where the applications will be, so the table under it does
+ * not move when the list lands.
  */
 export function PM2Band({
   apps,
   snapshot,
   selected,
   onSelect,
+  loading,
 }: {
   apps: PM2App[]
   snapshot?: Snapshot
   selected: string
   onSelect: (key: string) => void
+  /** There is no list to draw yet: it is still being read. */
+  loading?: boolean
 }) {
+  const waiting = loading ? <TextShimmer>Reading PM2…</TextShimmer> : undefined
+  // The figure's place, held while there is nothing to put in it.
+  const blank = <span className="h-7" />
   const byCPU = [...apps]
     .filter((a) => a.cpu > 0)
     .sort((a, b) => b.cpu - a.cpu)
@@ -106,22 +117,27 @@ export function PM2Band({
         rest={busy !== undefined ? Math.max(busy - cpuShown, 0) : 0}
         format={cores}
         figure={
-          <span
-            className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground"
-            title={`${percent(cpu)} of one core, summed over every PM2 process`}
-          >
-            <span className="font-medium text-foreground">
-              <LiveFigure value={cpu / 100} decimals={2} />
+          loading ? (
+            blank
+          ) : (
+            <span
+              className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground"
+              title={`${percent(cpu)} of one core, summed over every PM2 process`}
+            >
+              <span className="font-medium text-foreground">
+                <LiveFigure value={cpu / 100} decimals={2} />
+              </span>
+              {coreCount > 0 ? `of ${plural(coreCount, "core")}` : "cores"}
             </span>
-            {coreCount > 0 ? `of ${plural(coreCount, "core")}` : "cores"}
-          </span>
+          )
         }
         message={
-          byCPU.length > 0
+          waiting ??
+          (byCPU.length > 0
             ? undefined
             : apps.some((a) => a.online > 0)
               ? "Every application is idle."
-              : "Nothing PM2 runs is online."
+              : "Nothing PM2 runs is online.")
         }
         parts={byCPU.map((a) => ({
           ...line(a),
@@ -148,14 +164,18 @@ export function PM2Band({
         free="Free"
         format={(v) => bytes(v)}
         figure={
-          <span className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground">
-            <span className="font-medium text-foreground">
-              <LiveBytes value={memory} />
+          loading ? (
+            blank
+          ) : (
+            <span className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground">
+              <span className="font-medium text-foreground">
+                <LiveBytes value={memory} />
+              </span>
+              {memTotal > 0 && `of ${bytes(memTotal, 0)}`}
             </span>
-            {memTotal > 0 && `of ${bytes(memTotal, 0)}`}
-          </span>
+          )
         }
-        message={byMemory.length === 0 ? "Nothing PM2 runs is online." : undefined}
+        message={waiting ?? (byMemory.length === 0 ? "Nothing PM2 runs is online." : undefined)}
         parts={byMemory.map((a) => ({
           ...line(a),
           value: a.memory,

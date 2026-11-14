@@ -159,6 +159,28 @@ export function upgradeSteps(
   ]
 }
 
+/** Where one of an upgrade's four steps stands: taken, being taken, or still to come. */
+export type UpgradeStepState = "done" | "running" | "ahead"
+
+/**
+ * The four steps (dump, new server, copy, switch) against the phase the
+ * record is in. The server names three phases: `prepare` covers the dump and
+ * starting the new release beside the old one, `copy` the copy, `cutover` the
+ * switch. With no upgrade running every step is ahead; with one running whose
+ * phase has not been read yet, the first is being taken.
+ */
+export function stepStates(phase: string | undefined, running: boolean): UpgradeStepState[] {
+  if (!running) return ["ahead", "ahead", "ahead", "ahead"]
+  switch (phase) {
+    case "copy":
+      return ["done", "done", "running", "ahead"]
+    case "cutover":
+      return ["done", "done", "done", "running"]
+    default:
+      return ["running", "running", "ahead", "ahead"]
+  }
+}
+
 /** What the kept server is, for the head of its section. */
 export function keptWords(record: DbUpgradeRecord): string {
   const when = record.upgradedAt ? ` ${since(record.upgradedAt)}` : ""

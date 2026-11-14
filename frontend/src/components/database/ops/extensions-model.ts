@@ -188,6 +188,28 @@ export function waitingLibraries(preload: PreloadState) {
   }
 }
 
+/**
+ * What an extension needs before it works, read off what the server loads, in
+ * the few words a row's one line has room for. Amber where it is created and
+ * not doing anything, or waiting on a restart.
+ */
+export function libraryState(
+  extension: DbExtension,
+  preload: PreloadState | undefined,
+): { text: string; tone?: "warning" } | undefined {
+  if (extension.unavailable) return { text: "not in this server's image" }
+  const library = extension.library
+  if (!library || !preload) return undefined
+  if (preload.loaded.includes(library)) return { text: "loaded at start" }
+  if (preload.configured.includes(library)) {
+    return { text: "loaded once the server restarts", tone: "warning" }
+  }
+  if (extension.installed) {
+    return { text: `idle: the server does not load ${library} at start`, tone: "warning" }
+  }
+  return { text: `needs ${library} loaded at start, and a restart` }
+}
+
 /** The engine's word for a kind of object, for more than one: "operator families". */
 function kinds(kind: string): string {
   if (/(s|x|ch|sh)$/.test(kind)) return `${kind}es`

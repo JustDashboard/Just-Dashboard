@@ -287,6 +287,11 @@ where it has one, and otherwise its mono path filled with the brand's colour
 and white for xAI's black mark), because a mono file's currentColor is black in an
 image and disappears on a dark ground.
 
+opentelemetry.svg, the mark of a log drain that speaks OTLP, is devicon's
+opentelemetry-original.svg as of v2.18.0, under the MIT License above, with
+the blue #425cc7 of its lower half lifted to #819fff, the same hue at the
+L 0.72 rung, so it reads on a dark ground. dashboard-icons has no file for it.
+
 The generators on a database's Generate page are drawn as the project each
 writes for. prisma.svg, typeorm.svg, zod.svg, drizzle.svg, sequelize.svg and
 sqlalchemy.svg are from Simple Icons 15.22.0 (https://simpleicons.org), CC0 1.0,

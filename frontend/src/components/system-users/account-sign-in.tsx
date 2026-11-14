@@ -319,23 +319,36 @@ function KeyRow({ sshKey, onChanged }: { sshKey: SSHKey; onChanged: () => void }
       <Row
         leading={<ProductLogo id={keyProduct(sshKey.comment)} size="sm" fallback={Key} />}
         title={
-          <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+          <span className="flex min-w-0 items-center gap-x-2">
             <span className="min-w-0 truncate">
               {keyLabel(sshKey) || <span className="text-muted-foreground">No label</span>}
             </span>
-            {sshKey.weak && <Status tone="warning" label="Weak" />}
+            {sshKey.weak && <Status tone="warning" label="Weak" className="shrink-0" />}
           </span>
         }
         subtitle={
-          <span className="flex min-w-0 flex-wrap items-center gap-x-2">
-            <span className="truncate font-mono">{sshKey.fingerprint}</span>
-            {sshKey.file && <span className="truncate font-mono">{sshKey.file}</span>}
-            {restrictions.map((word) => (
-              <span key={word} className="text-warning">
-                {word}
+          // One line, whatever the key carries: a key with three restrictions
+          // was a row two lines taller than the one above it. The fingerprint
+          // gives way first (it is whole in the hover title and in the key's
+          // own dialog), because what limits a key is what a row is read for.
+          <span
+            data-slot="key-line"
+            title={[sshKey.fingerprint, sshKey.file, ...restrictions, sshKey.weak]
+              .filter(Boolean)
+              .join(" · ")}
+            className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap"
+          >
+            <span className="min-w-0 shrink-[999] truncate font-mono">{sshKey.fingerprint}</span>
+            {sshKey.file && (
+              <span className="min-w-0 shrink-[99] truncate font-mono">{sshKey.file}</span>
+            )}
+            {/* One run of words, so a phone cuts the last of them and not
+                the middle of each. */}
+            {(restrictions.length > 0 || sshKey.weak) && (
+              <span className="min-w-0 truncate text-warning">
+                {[...restrictions, sshKey.weak].filter(Boolean).join(" · ")}
               </span>
-            ))}
-            {sshKey.weak && <span className="text-warning">{sshKey.weak}</span>}
+            )}
           </span>
         }
         trailing={

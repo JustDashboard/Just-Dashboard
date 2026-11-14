@@ -10,6 +10,7 @@ import {
   filterCounts,
   folderOf,
   groupByFolder,
+  includeMap,
   MAX_MATCHES,
   readCount,
   readLabel,
@@ -316,4 +317,82 @@ test("how long ago nginx was read, in its largest unit", () => {
   expect(readLabel(at, at + 3_000)).toBe("read just now")
   expect(readLabel(at, at + 14_000)).toBe("read 14s ago")
   expect(readLabel(at, at + 3 * 3_600_000 + 7_000)).toBe("read 3h ago")
+})
+
+describe("includeMap", () => {
+  const main = `${root}/nginx.conf`
+  const by = (path, line = 1, via) => ({
+    included: true,
+    includedBy: { file: `${root}/${path}`, line, ...(via ? { via: `${root}/${via}` } : {}) },
+  })
+  const files = [
+    file("nginx.conf", { kind: "main", included: true }),
+    file("mime.types", by("nginx.conf", 20)),
+    file("conf.d/gzip.conf", by("nginx.conf", 60)),
+    file("sites-enabled/app", { kind: "link", ...by("nginx.conf", 61) }),
+    file("sites-available/app", { managed: true, ...by("nginx.conf", 61, "sites-enabled/app") }),
+    file("sites-available/old"),
+    file("snippets/ssl.conf", by("sites-available/app", 12)),
+    file("snippets/unused.conf"),
+    file("stream.d/pg.conf", { managed: true }),
+    file("jd-auth/shop", { kind: "password", protected: true, managed: true }),
+  ]
+
+  test("lays folders out by how far nginx walks to reach them", () => {
+    const map = includeMap(files, root, main)
+    expect(map.reached.map((n) => [n.folder, n.depth, n.from])).toEqual([
+      ["", 1, ["main"]],
+      ["conf.d", 1, ["main"]],
+      ["sites-enabled", 1, ["main"]],
+      ["sites-available", 2, ["sites-enabled"]],
+      ["snippets", 3, ["sites-available"]],
+    ])
+    expect(map.depth).toBe(3)
+  })
+
+  test("counts what each folder holds and what nginx reads of it", () => {
+    const map = includeMap(files, root, main)
+    const sites = map.reached.find((n) => n.folder === "sites-available")
+    expect(sites).toMatchObject({ files: 2, read: 1, managed: 1, broken: 0 })
+    const snippets = map.reached.find((n) => n.folder === "snippets")
+    expect(snippets).toMatchObject({ files: 2, read: 1 })
+  })
+
+  test("keeps folders nginx reads nothing in apart, and password folders out", () => {
+    const map = includeMap(files, root, main)
+    expect(map.unread.map((n) => n.folder)).toEqual(["stream.d"])
+    expect([...map.reached, ...map.unread].some((n) => n.folder === "jd-auth")).toBe(false)
+  })
+
+  test("caps the lanes, and wires a folder only from an earlier lane", () => {
+    const deep = [
+      file("a/one", by("nginx.conf")),
+      file("b/two", by("a/one")),
+      file("c/three", by("b/two")),
+      file("d/four", by("c/three")),
+      // A loop back from d to a draws no line up the picture.
+      file("a/five", by("d/four")),
+    ]
+    const map = includeMap(deep, root, main)
+    expect(map.reached.map((n) => [n.folder, n.depth, n.from])).toEqual([
+      ["a", 1, ["main"]],
+      ["b", 2, ["a"]],
+      ["c", 3, ["b"]],
+      ["d", 3, ["c"]],
+    ])
+    expect(map.depth).toBe(3)
+  })
+
+  test("a broken link and a backup nginx reads are counted on their folder", () => {
+    const map = includeMap(
+      [
+        file("sites-enabled/gone", { kind: "link", missing: true, ...by("nginx.conf") }),
+        file("conf.d/x.conf~", { backup: true, ...by("nginx.conf") }),
+      ],
+      root,
+      main,
+    )
+    expect(map.reached.find((n) => n.folder === "sites-enabled")?.broken).toBe(1)
+    expect(map.reached.find((n) => n.folder === "conf.d")?.backups).toBe(1)
+  })
 })
