@@ -777,6 +777,12 @@ changes. Configure retains the administrator-reviewed replacement specification 
 containers and opens the owning Compose file for Compose containers. Automatic overview findings,
 issue badges, failure/anomaly suggestions and recommendation cards were removed in 0.7.5
 
+An image is a page of its own, `/docker/images/[id]` (`image-page.tsx`; the old `?image=` address
+redirects there): its identity line with Pull or Tag and the rest in a menu, a picture of its
+registry, the image and the containers made from it, the views Layers, Containers, History and
+Configuration in `?tab=`, and from `xl` the images as a rail with the table's own filters.
+`tests/browser/docker-image-page.spec.ts`
+
 **Implementation:** `components/docker/`; see
 [`features-terminal.md`](features-terminal.md#feature-panels) and
 [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md)
