@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { createRef, useMemo, useRef, useState, type RefObject } from "react"
+import { createRef, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { WireNode } from "@/components/deploy/wire"
@@ -106,7 +106,11 @@ export type WireFlowHub = {
   eyebrow?: React.ReactNode
   title?: React.ReactNode
   hint?: React.ReactNode
-  /** On the hub's cell: room above and below for a hub with long words. */
+  /**
+   * On the hub's cell. The picture keeps room under itself for the hub's
+   * words (`useHubRoom`), so this is for a picture that holds its height open
+   * around the mark: a volume's, for three rows a side.
+   */
   className?: string
   /**
    * The lines under the hub's mark while loading. Given, a phone's rows of
@@ -194,6 +198,8 @@ export function WireFlow({
           onBlur: () => setFocus((held) => (held === node.id ? null : held)),
         }
   const port = PORT[size]
+  const root = useRef<HTMLDivElement>(null)
+  const room = useHubRoom(root, hubRef)
   const hubWaits = hub.loadingLines && waitingDetail(hub.loadingLines, HUB_WIDTHS)
 
   const beams = all.map((node, index) => {
@@ -267,6 +273,7 @@ export function WireFlow({
 
   return (
     <div
+      ref={root}
       data-slot="wire-flow"
       data-loading={loading || undefined}
       aria-busy={loading || undefined}
@@ -332,8 +339,50 @@ export function WireFlow({
           </Column>
         </div>
       </div>
+      <div ref={room} data-slot="wire-hub-room" aria-hidden />
     </div>
   )
+}
+
+/**
+ * Room under the picture for the hub's words.
+ *
+ * Wide, they hang under the hub's mark out of the flow (`WireNode`'s
+ * `align="center"`), so every mark sits on one line; they take no room, and
+ * in a picture whose columns are shorter than the hub and its lines they ran
+ * into whatever stood under it. Pages padded their own hub by a guess at how
+ * tall its words were. The picture keeps the room itself now: whatever of
+ * the words reaches past its own box is measured and held open under it, so
+ * a picture that already has the room (tall columns, a frame of its own) is
+ * exactly what it was, and one that has not ends where its words do.
+ *
+ * Measured before the browser paints, and again when the words or the
+ * picture change size, so nothing is seen to move. Stacked, the words are in
+ * the flow and there is nothing to hold.
+ */
+function useHubRoom(root: RefObject<HTMLDivElement | null>, hub: RefObject<HTMLDivElement | null>) {
+  const room = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const box = root.current
+    const held = room.current
+    const words = hub.current?.nextElementSibling
+    if (!box || !held || !(words instanceof HTMLElement)) return
+    const measure = () => {
+      const hung = getComputedStyle(words).position === "absolute"
+      // The box without the room already held under it. Whole pixels up, so a
+      // fraction of one does not set the two observers on each other.
+      const foot = box.getBoundingClientRect().bottom - held.offsetHeight
+      const over = hung ? Math.ceil(words.getBoundingClientRect().bottom - foot) : 0
+      const height = over > 0 ? `${over}px` : ""
+      if (held.style.height !== height) held.style.height = height
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(words)
+    observer.observe(box)
+    return () => observer.disconnect()
+  })
+  return room
 }
 
 type Laid = WireFlowNode & {

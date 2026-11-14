@@ -299,7 +299,11 @@ the recorder keeps), `eyebrow: false` for a node that has none, `hint` as a coun
 size. The hub takes the same `loadingLines` for its caption, and with it a phone's rows of marks draw
 those lines too. With neither given a picture waits exactly as it did. A page never draws grey nodes
 of its own; it says how many rows (`loadingRows`, remembered from the last visit where the count is the
-server's) and what a row holds. `LinePlaceholder` (`components/network/identity-facts.tsx`) is still the
+server's) and what a row holds (a volume's and an image's pictures, the last two that drew their own,
+wait this way too). Wide, the hub's words hang under its mark out of the flow, so the picture
+measures what of them reaches past its own box and holds that room open under itself (`useHubRoom`):
+a page does not pad its hub for them, and a picture that already had the room is what it was.
+`LinePlaceholder` (`components/network/identity-facts.tsx`) is still the
 grey bar for a line of words outside a picture, a grey bar after a real space so the line box is the
 one the words will have, and the same file holds `IdentityFacts`, which keeps two lines' room for an
 identity line's facts on a phone, where four facts wrap and a single bar in their place did not. Those

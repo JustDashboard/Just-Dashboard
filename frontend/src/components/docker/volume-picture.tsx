@@ -3,7 +3,6 @@
 import { Archive, Box, Database } from "@/components/icons"
 import { bytes, relativeTime } from "@/lib/format"
 import type { BackupJob, VolumeDetail, VolumeUser } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { DestinationGlyph, destinations } from "@/components/backups/marks"
 import { WireMark, WirePlaceholder } from "@/components/deploy/wire"
 import {
@@ -17,7 +16,6 @@ import {
   type Backup,
 } from "@/components/docker/volumes"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
-import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
 
@@ -69,26 +67,20 @@ export function VolumePicture({
   /** Opens the Backups form on this volume; undefined when the reader may not write a job. */
   onBackUp?: () => void
 }) {
-  // Drawn waiting with the nodes it will most often have, one on each side,
-  // rather than through `WireFlow`'s own `loading`: that holds the wide
-  // picture's height, and on a phone gives the hub one line of words where
-  // the volume has two, so the views under it moved when the volume landed.
+  // Waiting, with the one node a side a volume most often has and the two
+  // lines its hub will say, on a phone too (`loadingLines`).
   if (!volume)
     return (
       <WireFlow
+        loading
         phone="marks"
         className="py-0"
-        start={{ title: "Mounted by", nodes: [waiting("start")] }}
-        end={{ title: "Backed up by", nodes: [waiting("end")] }}
+        start={{ title: "Mounted by", nodes: [], loadingRows: 1 }}
+        end={{ title: "Backed up by", nodes: [], loadingRows: 1 }}
         hub={{
           mark: <HubMark />,
           eyebrow: "Volume",
-          title: <Waiting className="w-28" />,
-          hint: (
-            <span className="block">
-              <Waiting className="w-36" />
-            </span>
-          ),
+          loadingLines: { hint: 1 },
           className: HUB_ROOM,
         }}
       />
@@ -352,32 +344,4 @@ function copies(
           : { state: "up", moving: running },
     } satisfies WireFlowNode
   })
-}
-
-const TILE = { lg: "size-14", md: "size-11", sm: "size-9" } as const
-
-/** A grey bar the height of a line's words, so the line is as tall as it will be. */
-function Waiting({ className }: { className?: string }) {
-  return (
-    <span
-      data-slot="skeleton"
-      className={cn(
-        "inline-block h-[0.7em] max-w-full animate-pulse rounded-md bg-muted align-middle",
-        className,
-      )}
-    />
-  )
-}
-
-/** A node not read yet: a grey tile and three grey lines, on a dashed wire. */
-function waiting(id: string): WireFlowNode {
-  return {
-    id: `waiting:${id}`,
-    placeholder: true,
-    mark: (size) => <Skeleton className={cn("rounded-xl", TILE[size])} />,
-    eyebrow: <Waiting className="w-16" />,
-    title: <Waiting className="w-28" />,
-    hint: <Waiting className="w-20" />,
-    line: { state: "idle" },
-  }
 }
