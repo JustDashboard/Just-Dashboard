@@ -1,6 +1,7 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
 import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
 import { risen } from "./risen"
+import { tallShot } from "./database-settings-shots"
 
 /**
  * A PostgreSQL database's Pooling page, and the pooled string Connect offers
@@ -677,7 +678,7 @@ test("every state of the Pooling page, for the pull request @shots", async ({ pa
   const shot = async (name: string, width: number) => {
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     await settle(page)
-    await page.screenshot({ path: `${shots}/after-pooling-${name}-${width}.png`, fullPage: true })
+    await tallShot(page, `${shots}/after-pooling-${name}-${width}.png`)
   }
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })

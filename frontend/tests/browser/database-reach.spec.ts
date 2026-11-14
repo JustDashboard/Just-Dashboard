@@ -1,6 +1,7 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
 import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
 import { risen } from "./risen"
+import { tallShot } from "./database-settings-shots"
 
 /**
  * Where a database can be reached from, on its Network settings page: the
@@ -522,10 +523,7 @@ test("at a phone's width the list and its picture fit without scrolling sideways
  * control, which reads as a second selection.
  */
 async function settle(page: Page) {
-  for (const close of await page.locator("[data-sonner-toast] [data-close-button]").all()) {
-    await close.click({ force: true }).catch(() => undefined)
-  }
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0)
+  await page.addStyleTag({ content: "[data-sonner-toaster]{display:none!important}" })
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 }
 
@@ -535,7 +533,7 @@ test("the reach states, for the record @shots", async ({ page }) => {
   const shots = process.env.JD_SHOTS
   const shot = async (name: string, width: number) => {
     await risen(page)
-    await page.screenshot({ path: `${shots}/after-network-${name}-${width}.png`, fullPage: true })
+    await tallShot(page, `${shots}/after-network-${name}-${width}.png`)
   }
 
   for (const width of [1280, 390]) {

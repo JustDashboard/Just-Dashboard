@@ -1,6 +1,7 @@
 import { expect as baseExpect, test, type Page } from "@playwright/test"
-import { mockDatabases, type DatabaseMock } from "./database-fixture"
+import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
 import { risen } from "./risen"
+import { tallShot } from "./database-settings-shots"
 
 /**
  * A database's Access, Backups and Settings pages, and the verbs its menu
@@ -1758,9 +1759,9 @@ test("several parameters are saved by one press, one request each, and a refused
     { name: "wal_level", value: "logical" },
   ])
   const change = parameters.locator("[data-slot=parameter-change]")
-  await expect(change).toContainText("bgwriter_delay: Now 250 ms. In effect now.")
+  await expect(change).toContainText("bgwriter_delay: Set to 250 ms. In effect now.")
   await expect(change).toContainText(
-    "wal_level: Now logical. Stored. It takes effect when the server is restarted.",
+    "wal_level: Set to logical. Stored. It takes effect when the server is restarted.",
   )
   // The one the server refused is still to be saved, as it was typed, with the server's words.
   await expect(saveBar(page)).toContainText("1 unsaved change")
@@ -1782,16 +1783,6 @@ test("what waits for a restart is restarted from the head of the page, after bei
       "POST 1/power": { action: "restart", via: "docker", target: "shop-db", state: "running" },
     },
   })
-  await visit(page, "/databases/1/settings/parameters")
-  await strip(page).locator("xpath=..").getByRole("button", { name: "Restart" }).click()
-  await expect(dialog(page)).toContainText("Restart shop")
-  await expect(dialog(page)).toContainText("Every session on it is disconnected")
-  expect(server.sent).toEqual([])
-  await dialog(page).getByRole("button", { name: "Restart", exact: true }).click()
-  await expect
-    .poll(() => server.sent.find((one) => one.request === "POST 1/power")?.body)
-    .toEqual({ action: "restart" })
-
   // The same strip is at the head of every settings page, with the way to the parameter.
   await visit(page, "/databases/1/settings")
   await expect(strip(page)).toContainText("1 waiting for a restart")
@@ -1799,6 +1790,20 @@ test("what waits for a restart is restarted from the head of the page, after bei
     .getByRole("link", { name: /shared_buffers/ })
     .click()
   await expect.poll(() => where(page)).toBe("/databases/1/settings/parameters?q=shared_buffers")
+
+  const reads = () => server.seen.filter((one) => one === "GET 1/settings").length
+  await expect(section(page, "parameters").locator("[data-parameter]")).toHaveCount(1)
+  const before = reads()
+  await page.getByRole("button", { name: "Restart", exact: true }).click()
+  await expect(dialog(page)).toContainText("Restart shop")
+  await expect(dialog(page)).toContainText("Every session on it is disconnected")
+  expect(server.sent).toEqual([])
+  await dialog(page).getByRole("button", { name: "Restart", exact: true }).click()
+  await expect
+    .poll(() => server.sent.find((one) => one.request === "POST 1/power")?.body)
+    .toEqual({ action: "restart" })
+  // Restarted, what waited is in force: the page reads what the server holds again.
+  await expect.poll(reads).toBeGreaterThan(before)
 })
 
 test("an edit never makes the strip arrive, and a server with nothing waiting has none", async ({
@@ -1824,6 +1829,36 @@ test("an edit never makes the strip arrive, and a server with nothing waiting ha
   await expect(strip(page)).toHaveCount(0)
   // The field being typed in is where it was.
   expect((await name.boundingBox())?.y).toBe(before?.y)
+})
+
+test("the strip is in its place when the next settings page opens, before that page has read anything", async ({
+  page,
+}) => {
+  const read = hold()
+  await page.setViewportSize({ width: 1280, height: 1100 })
+  await mockOperate(page, {
+    answers: {
+      // The first page's read answers; every later one waits to be let go.
+      "GET 1/settings": async (call: number) => {
+        if (call > 0) await read.until
+        return SETTINGS
+      },
+    },
+  })
+  await visit(page, "/databases/1/settings")
+  await expect(strip(page)).toContainText("shared_buffers")
+  await rail(page).getByRole("link", { name: "Resources", exact: true }).click()
+  const resources = section(page, "resources")
+  await expect(resources).toBeVisible()
+  // Drawn from what General learnt, while this page's own read is still out.
+  await expect(strip(page)).toContainText("shared_buffers")
+  await risen(page)
+  const before = await resources.boundingBox()
+  read.release()
+  await page.waitForLoadState("networkidle")
+  await risen(page)
+  expect((await resources.boundingBox())?.y).toBe(before?.y)
+  await expect(strip(page)).toContainText("1 waiting for a restart")
 })
 
 test("a chip pressed right after typing keeps the search that was typed", async ({ page }) => {
@@ -1880,10 +1915,14 @@ test("a parameter's row is one height, whatever it has to say", async ({ page })
     expect(heights.length).toBeGreaterThan(4)
     expect(new Set(heights).size, `rows at ${width}: ${heights.join(", ")}`).toBe(1)
     // Editing one, and its value being out of range, moves nothing under it.
-    const next = await rows.nth(1).boundingBox()
-    await rows.first().getByRole("textbox").first().fill("not a number")
-    await expect(rows.first().getByRole("alert")).toBeVisible()
-    expect((await rows.nth(1).boundingBox())?.y).toBe(next?.y)
+    const edited = section(page, "parameters").locator("[data-parameter=bgwriter_delay]")
+    const next = edited.locator("xpath=following-sibling::li[1]")
+    // Where typing will not scroll the page: the row is already in view.
+    await edited.getByLabel("Change bgwriter_delay").focus()
+    const before = await next.boundingBox()
+    await edited.getByLabel("Change bgwriter_delay").fill("not a number")
+    await expect(edited.getByRole("alert")).toBeVisible()
+    expect((await next.boundingBox())?.y).toBe(before?.y)
   }
 })
 
@@ -2997,6 +3036,8 @@ for (const [label, viewport] of [
     ]) {
       await visit(page, path)
       await expect(section(page, id)).toBeVisible()
+      // A settings page is a form you read: no figures in tiles, anywhere on it.
+      await expect(page.locator("[data-slot=stat-grid], [data-slot=stat-tile]")).toHaveCount(0)
       await keepsTheRules(page, `${path}${label}`)
     }
     // The catalogue of what could be enabled, open.
@@ -3091,7 +3132,7 @@ test("the settings pages, for the record @shots", async ({ page }) => {
   const shot = async (name: string, width: number) => {
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     await risen(page)
-    await page.screenshot({ path: `${shots}/after-${name}-${width}.png`, fullPage: true })
+    await tallShot(page, `${shots}/after-${name}-${width}.png`)
   }
   const calm = {
     ...SETTINGS,

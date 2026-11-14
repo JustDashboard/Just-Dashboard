@@ -1,5 +1,6 @@
 import { expect as baseExpect, test, type Locator, type Page } from "@playwright/test"
 import { SHOP, mockDatabases, summaryOf, type DatabaseMock } from "./database-fixture"
+import { tallShot } from "./database-settings-shots"
 
 /**
  * A database's Version page: which release its server runs, and moving it to
@@ -591,7 +592,7 @@ test("an upgrade already running is shown on arrival, and nothing else begins be
   await expect(picture.locator("[data-step=copy]")).toHaveAttribute("data-state", "done")
 })
 
-test("the picture holds its place while the release is read, wide and on a phone", async ({
+test("every step is on the screen with its words, on one line when wide and in a column on a phone", async ({
   page,
 }) => {
   for (const width of [1280, 390]) {
@@ -784,13 +785,13 @@ test("the Version page, in each of its states @shots", async ({ page }) => {
     const upgrade = section(page, "upgrade")
     await expect(upgrade).toContainText("Not checked yet")
     await settled(page.locator("[data-slot=page]").first())
-    await page.screenshot({ path: shot("full", width), fullPage: true })
+    await tallShot(page, shot("full", width))
 
     // Checked, ready, with one thing to know.
     await upgrade.getByRole("button", { name: "Check PostgreSQL 17" }).click()
     await expect(report_(page)).toBeVisible()
     await settled(page.locator("[data-slot=page]").first())
-    await page.screenshot({ path: shot("report", width), fullPage: true })
+    await tallShot(page, shot("report", width))
 
     // The upgrade asked for, over the page from its top.
     await atTop(section(page, "version"))
@@ -809,7 +810,7 @@ test("the Version page, in each of its states @shots", async ({ page }) => {
     ).toBeVisible()
     await atTop(section(page, "version"))
     await settled(underWay)
-    await page.screenshot({ path: shot("upgrading", width), fullPage: true })
+    await tallShot(page, shot("upgrading", width))
 
     // A check that stops it.
     state = OFFERED
@@ -821,20 +822,20 @@ test("the Version page, in each of its states @shots", async ({ page }) => {
       "blocker",
     )
     await settled(page.locator("[data-slot=page]").first())
-    await page.screenshot({ path: shot("blocked", width), fullPage: true })
+    await tallShot(page, shot("blocked", width))
 
     // Upgraded, with the old server kept.
     state = KEPT
     await visit(page, PAGE)
     await expect(section(page, "kept")).toBeVisible()
     await settled(page.locator("[data-slot=page]").first())
-    await page.screenshot({ path: shot("kept", width), fullPage: true })
+    await tallShot(page, shot("kept", width))
 
     // A server with nowhere to go, and one the page cannot move.
     state = { ...KEPT, window: undefined, reason: "PostgreSQL 17 is the newest release offered." }
     await visit(page, PAGE)
     await expect(section(page, "version")).toContainText("newest release")
     await settled(page.locator("[data-slot=page]").first())
-    await page.screenshot({ path: shot("newest", width), fullPage: true })
+    await tallShot(page, shot("newest", width))
   }
 })

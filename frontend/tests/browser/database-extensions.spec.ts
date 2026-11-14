@@ -1,5 +1,6 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
 import { risen } from "./risen"
+import { tallShot } from "./database-settings-shots"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
 
 /**
@@ -702,10 +703,7 @@ test("extension states @shots", async ({ page }) => {
   test.setTimeout(240_000)
   const shot = async (name: string, width: number) => {
     await risen(page)
-    await page.screenshot({
-      path: `${process.env.JD_SHOTS}/after-extensions-${name}-${width}.png`,
-      fullPage: true,
-    })
+    await tallShot(page, `${process.env.JD_SHOTS}/after-extensions-${name}-${width}.png`)
   }
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
 import { risen } from "./risen"
+import { tallShot } from "./database-settings-shots"
 
 /**
  * A database's Network settings, and the section on them that says whether the
@@ -544,7 +545,7 @@ test("every state of the section @shots", async ({ page }) => {
   const shot = async (name: string, width: number) => {
     await risen(page)
     await tls(page).scrollIntoViewIfNeeded()
-    await page.screenshot({ path: `${out}/after-network-tls-${name}-${width}.png`, fullPage: true })
+    await tallShot(page, `${out}/after-network-tls-${name}-${width}.png`)
   }
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
