@@ -529,16 +529,27 @@ func renderListen(l *lines, spec *SiteSpec) {
 		l.add("    listen [::]:80;")
 		return
 	}
-	l.add("    listen 443 ssl;")
-	l.add("    listen [::]:443 ssl;")
-	if spec.HTTP2 {
-		// The directive rather than the listen parameter: nginx 1.25
-		// deprecated `listen ... http2` and warns on every reload.
-		l.add("    http2 on;")
-	}
+	renderTLSListen(l, spec)
 	if !spec.ForceHTTPS {
 		l.add("    listen 80;")
 		l.add("    listen [::]:80;")
+	}
+}
+
+// renderTLSListen is a server's HTTPS listen lines and its HTTP/2. The
+// directive rather than the listen parameter where nginx reads it: 1.25.1
+// deprecated `listen ... http2` and warns on every reload. An older nginx
+// refuses the directive, so it gets the parameter (nginx_http2.go).
+func renderTLSListen(l *lines, spec *SiteSpec) {
+	if spec.HTTP2 && spec.listenHTTP2 {
+		l.add("    listen 443 ssl http2;")
+		l.add("    listen [::]:443 ssl http2;")
+		return
+	}
+	l.add("    listen 443 ssl;")
+	l.add("    listen [::]:443 ssl;")
+	if spec.HTTP2 {
+		l.add("    http2 on;")
 	}
 }
 

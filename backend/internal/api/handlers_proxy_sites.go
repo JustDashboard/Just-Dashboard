@@ -212,6 +212,7 @@ func (s *Server) handleSitePreview(w http.ResponseWriter, r *http.Request) error
 	s.modules.proxy.SetPagesDir(&req.Spec)
 	s.modules.proxy.SetRealIPDir(&req.Spec)
 	s.modules.proxy.SetAccessListDir(&req.Spec)
+	s.modules.proxy.ForHostNginx(&req.Spec)
 	content, err := proxysvc.RenderNginx(&req.Spec)
 	if err != nil {
 		return httpx.Refused(err)
