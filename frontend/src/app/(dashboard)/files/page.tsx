@@ -16,10 +16,13 @@ import {
   Clipboard,
   CloudUpload,
   Cross,
+  Eye,
+  EyeOff,
   FileZip,
   FolderOpen,
   FolderPlus,
   GridSquare,
+  Information,
   Linked,
   ListUnordered,
   Location,
@@ -75,6 +78,10 @@ import { filesOwnKeyboard, isTypingTarget } from "@/components/files/keyboard"
 import { matchName } from "@/components/files/navigation"
 import { FilesShortcuts } from "@/components/files/shortcuts-dialog"
 import { PlacesMenu } from "@/components/files/places-menu"
+import { MoreMenu } from "@/components/files/more-menu"
+import { StripGroup, STRIP_SEGMENT } from "@/components/files/strip"
+import { folderSentence } from "@/components/files/counts"
+import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { Modal } from "@/components/modal"
 import { PermissionsDialog } from "@/components/files/permissions-dialog"
 import { PreviewPanel } from "@/components/files/preview-panel"
@@ -146,11 +153,28 @@ type SortKey = "name" | "size" | "modified" | "owner" | "mode"
 type Sort = { key: SortKey; dir: "asc" | "desc" }
 type ViewMode = "list" | "grid"
 type Clip = HeldClip
+type FilesPane = "places" | "folder" | "details"
 type FolderVisit = { active: string | null; selected: string[]; scroll: number; view: ViewMode }
+
+const SORT_KEYS: { id: SortKey; label: string }[] = [
+  { id: "name", label: "Name" },
+  { id: "size", label: "Size" },
+  { id: "modified", label: "Modified" },
+  { id: "owner", label: "Owner" },
+  { id: "mode", label: "Mode" },
+]
+const TILE_NAMES: Record<TileSize, string> = { sm: "Small", md: "Medium", lg: "Large" }
+const PANES: PaneStop<FilesPane>[] = [
+  { key: "places", label: "Places", icon: <Location /> },
+  { key: "folder", label: "Folder", icon: <FolderOpen /> },
+  { key: "details", label: "Details", icon: <Information /> },
+]
 
 const RAIL = { base: 264, min: 200, max: 440 }
 const INSPECTOR = { base: 320, min: 260, max: 560 }
 const EMPTY = new Set<string>()
+/** A verb as a phone's menu words it: there is no Ctrl to name beside it. */
+const withoutShortcut = (verb: Verb): Verb => ({ ...verb, shortcut: undefined })
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
 // Reading register: the workbench owns its scroll boundaries; directory and
@@ -218,6 +242,15 @@ export default function FilesPage() {
   const [searchLocation, setSearchLocation] = useState<{ path: string; line?: number }>()
   const [clip, setClip] = useState<Clip | null>(null)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  // Which pane a phone shows. The choice belongs to the folder it was made
+  // in: every way of arriving somewhere else — a place, a crumb, Back, a
+  // search result — is asking to see that folder, so the listing comes back
+  // without an effect to put it there.
+  const [picked, setPicked] = useState<{ pane: FilesPane; dir: string | null }>({
+    pane: "folder",
+    dir: null,
+  })
+  const pane: FilesPane = picked.dir === path ? picked.pane : "folder"
   const [visits, setVisits] = useSessionState<Record<string, FolderVisit>>("files.visits", {})
   // A directory's explicit selection wins over its remembered visit; neither
   // is allowed to select a path in another directory or a vanished entry.
@@ -563,6 +596,16 @@ export default function FilesPage() {
     },
     [path, rememberFolder, navigation],
   )
+
+  /**
+   * A place picked from the sidebar. On a phone that sidebar is a pane, and
+   * the place may be the folder already open, which changes no path to bring
+   * the listing back by; choosing it is still asking to see it.
+   */
+  const pickPlace = (next: string) => {
+    setPicked({ pane: "folder", dir: path })
+    navigate(next)
+  }
 
   const viewEntry = useCallback(
     (entry: FileEntry) => {
@@ -932,6 +975,43 @@ export default function FilesPage() {
     onColour: (colour) => void setColour(entry, colour),
   })
 
+  const pasteVerbs: Verb[] =
+    canWrite && clip
+      ? [
+          {
+            id: "paste",
+            label: `Paste ${plural(clip.paths.length, "item")}`,
+            icon: Clipboard,
+            onSelect: () => void paste(),
+            shortcut: "⌃V",
+          },
+        ]
+      : []
+  const selectAllVerb: Verb = {
+    id: "select-all",
+    label: "Select all",
+    icon: Check,
+    onSelect: () => setSelected(new Set(entries.map((e) => e.path))),
+    shortcut: "⌃A",
+  }
+  const refreshVerb: Verb = {
+    id: "refresh",
+    label: "Refresh",
+    icon: RefreshClockwise,
+    onSelect: reload,
+  }
+  const starVerbs: Verb[] =
+    canWrite && here
+      ? [
+          {
+            id: "star",
+            label: starred ? "Unstar this folder" : "Star this folder",
+            icon: starred ? StarFill : Star,
+            onSelect: () => toggleStar(here.path, here.name),
+          },
+        ]
+      : []
+
   /** What a right-click on the space between rows offers: the folder's verbs. */
   const backgroundVerbs: Verb[][] = [
     canWrite
@@ -946,40 +1026,143 @@ export default function FilesPage() {
           },
         ]
       : [],
-    canWrite && clip
-      ? [
-          {
-            id: "paste",
-            label: `Paste ${plural(clip.paths.length, "item")}`,
-            icon: Clipboard,
-            onSelect: () => void paste(),
-            shortcut: "⌃V",
-          },
-        ]
-      : [],
-    [
-      {
-        id: "select-all",
-        label: "Select all",
-        icon: Check,
-        onSelect: () => setSelected(new Set(entries.map((e) => e.path))),
-        shortcut: "⌃A",
-      },
-      { id: "refresh", label: "Refresh", icon: RefreshClockwise, onSelect: reload },
-    ],
+    pasteVerbs,
+    [selectAllVerb, refreshVerb],
     canWrite && here
       ? [
-          {
-            id: "star",
-            label: starred ? "Unstar this folder" : "Star this folder",
-            icon: starred ? StarFill : Star,
-            onSelect: () => toggleStar(here.path, here.name),
-          },
+          ...starVerbs,
           colourVerb(folderColourOf(colours, here.path, here.name, defaultColour), (colour) => {
             void setColour(here, colour)
           }),
         ]
       : [],
+  ]
+
+  /**
+   * What a phone's strip has no room to draw: everything the wide strip
+   * holds beyond back, the path, find and New. The folder's own colour is not
+   * among them because the Details pane opens on its swatches.
+   */
+  const moreVerbs: Verb[][] = [
+    [
+      ...(navigation.canForward
+        ? [{ id: "forward", label: "Forward", icon: ArrowRight, onSelect: navigation.forward }]
+        : []),
+      ...(parentReachable && parent
+        ? [
+            {
+              id: "parent",
+              label: "Parent folder",
+              icon: ArrowUp,
+              onSelect: () => navigate(parent),
+            },
+          ]
+        : []),
+      refreshVerb,
+    ],
+    [
+      {
+        id: "search-inside",
+        label: "Search inside files",
+        icon: PreviewDocument,
+        onSelect: () => {
+          setQuickMode("content")
+          setQuickOpen(true)
+        },
+      },
+    ],
+    canWrite
+      ? [
+          {
+            id: "upload",
+            label: "Upload",
+            icon: CloudUpload,
+            submenu: [
+              {
+                id: "upload-files",
+                label: "Files…",
+                icon: CloudUpload,
+                onSelect: () => fileInput.current?.click(),
+              },
+              {
+                id: "upload-folder",
+                label: "Folder…",
+                icon: FolderOpen,
+                onSelect: () => folderInput.current?.click(),
+              },
+            ],
+          },
+          ...pasteVerbs.map(withoutShortcut),
+        ]
+      : [],
+    [
+      {
+        id: "view",
+        label: "View",
+        icon: view === "grid" ? GridSquare : ListUnordered,
+        submenu: [
+          {
+            id: "view-list",
+            label: "List",
+            icon: ListUnordered,
+            checked: view === "list",
+            onSelect: () => setView("list"),
+          },
+          {
+            id: "view-grid",
+            label: "Tiles",
+            icon: GridSquare,
+            checked: view === "grid",
+            onSelect: () => setView("grid"),
+          },
+          ...(view === "grid"
+            ? (["sm", "md", "lg"] as const).map((size) => ({
+                id: `tile-${size}`,
+                label: `${TILE_NAMES[size]} tiles`,
+                icon: GridSquare,
+                checked: tile === size,
+                onSelect: () => setTile(size),
+              }))
+            : []),
+          {
+            id: "hidden",
+            label: "Hidden files",
+            icon: showHidden ? Eye : EyeOff,
+            checked: showHidden,
+            onSelect: () => setShowHidden(!showHidden),
+          },
+        ],
+      },
+      {
+        id: "sort",
+        label: "Sort by",
+        icon: SettingsSliders,
+        submenu: SORT_KEYS.map((key) => ({
+          id: `sort-${key.id}`,
+          label: sort.key === key.id ? `${key.label} ${sort.dir === "asc" ? "↑" : "↓"}` : key.label,
+          icon: SettingsSliders,
+          checked: sort.key === key.id,
+          onSelect: () =>
+            setSort({
+              key: key.id,
+              dir: sort.key === key.id && sort.dir === "asc" ? "desc" : "asc",
+            }),
+        })),
+      },
+    ],
+    [
+      withoutShortcut(selectAllVerb),
+      ...starVerbs,
+      ...(canWrite
+        ? [
+            {
+              ...colourVerb(defaultColour ?? "blue", (colour) => void setDefaultColour(colour)),
+              id: "colour-all",
+              label: "Colour all folders",
+            },
+          ]
+        : []),
+    ],
   ]
 
   const dragStart = (entry: FileEntry, event: React.DragEvent) => {
@@ -1338,7 +1521,7 @@ export default function FilesPage() {
   })
 
   return (
-    <Page fill data-files-workspace className="gap-2 px-2 py-2 md:px-3 md:py-3">
+    <Page fill data-files-workspace className="gap-2 p-0 lg:px-3 lg:py-3">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Files</h1>
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
@@ -1363,15 +1546,21 @@ export default function FilesPage() {
               "--panel-ground": "var(--card)",
             } as React.CSSProperties
           }
-          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border"
         >
           {/* Every control in the strip has a face, and the faces come in
               groups: the way back and forward, where you are, finding, how
               the folder is drawn, and what you can make here. It used to be
               a row of bare glyphs with three boxed controls dropped among
               them, so nothing said which buttons belonged together and the
-              boxed ones read as the only ones that were buttons. */}
-          <PaneHeader className="flex-wrap gap-x-2 gap-y-1.5 px-2 py-1.5">
+              boxed ones read as the only ones that were buttons.
+
+              Below `lg` there is one row of it and no more: the way back, the
+              path, find and New, and one button for the rest. Wrapped, it was
+              three rows of glyphs over a phone's listing; the places and the
+              details it had no room to offer at all are panes on the bar at
+              the foot. */}
+          <PaneHeader className="gap-x-2 gap-y-1.5 px-2 py-1.5 lg:flex-wrap">
             <IconAction
               variant="outline"
               label={showSidebar ? "Hide the sidebar" : "Show the sidebar"}
@@ -1383,7 +1572,7 @@ export default function FilesPage() {
             </IconAction>
             {/* The sidebar lists the places; where it is not drawn, the same
                 list sits behind this button so a phone can still jump. */}
-            <div className={cn(showSidebar && "lg:hidden")}>
+            <div className={showSidebar ? "hidden" : "max-lg:hidden"}>
               <PlacesMenu
                 places={places.data}
                 recent={recent}
@@ -1407,7 +1596,7 @@ export default function FilesPage() {
               </IconAction>
               <IconAction
                 label="Forward to next folder"
-                className={STRIP_SEGMENT}
+                className={cn(STRIP_SEGMENT, "max-lg:hidden")}
                 disabled={!navigation.canForward}
                 onClick={navigation.forward}
               >
@@ -1415,13 +1604,17 @@ export default function FilesPage() {
               </IconAction>
               <IconAction
                 label="Go to parent folder"
-                className={STRIP_SEGMENT}
+                className={cn(STRIP_SEGMENT, "max-lg:hidden")}
                 disabled={!parentReachable}
                 onClick={() => parent && navigate(parent)}
               >
                 <ArrowUp />
               </IconAction>
-              <IconAction label="Refresh" className={STRIP_SEGMENT} onClick={reload}>
+              <IconAction
+                label="Refresh"
+                className={cn(STRIP_SEGMENT, "max-lg:hidden")}
+                onClick={reload}
+              >
                 <RefreshClockwise />
               </IconAction>
             </StripGroup>
@@ -1429,7 +1622,7 @@ export default function FilesPage() {
             {/* Where you are, drawn as the field it turns into on Ctrl+L: the
                 folder's colour at its head, the crumbs, and the star at its
                 end, because starring is a fact about this path. */}
-            <div className="flex h-8 min-w-0 flex-1 basis-64 items-center gap-0.5 rounded-md border border-input bg-input/30 pr-0.5 pl-0.5 focus-ring-within">
+            <div className="flex h-8 min-w-0 flex-1 basis-0 items-center gap-0.5 rounded-md border border-input bg-input/30 pr-0.5 pl-0.5 focus-ring-within lg:basis-64">
               {here &&
                 (canWrite ? (
                   <FolderColourMenu
@@ -1440,13 +1633,13 @@ export default function FilesPage() {
                     <button
                       type="button"
                       aria-label="Colour all folders"
-                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md focus-ring-inset transition-colors hover:bg-accent"
+                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md focus-ring-inset transition-colors hover:bg-accent max-lg:hidden"
                     >
                       <FolderSwatch colour={defaultColour ?? "blue"} className="size-4" />
                     </button>
                   </FolderColourMenu>
                 ) : (
-                  <span className="inline-flex size-7 shrink-0 items-center justify-center">
+                  <span className="inline-flex size-7 shrink-0 items-center justify-center max-lg:hidden">
                     <FolderIcon name={here.name} path={here.path} className="size-4" />
                   </span>
                 ))}
@@ -1462,7 +1655,7 @@ export default function FilesPage() {
                 <IconAction
                   label={starred ? "Unstar this folder" : "Star this folder"}
                   aria-pressed={starred}
-                  className="size-7 focus-ring-inset"
+                  className="size-7 focus-ring-inset max-lg:hidden"
                   onClick={() => toggleStar(here.path, here.name)}
                 >
                   {starred ? <StarFill className="text-warning" /> : <Star />}
@@ -1476,15 +1669,15 @@ export default function FilesPage() {
                   <button
                     type="button"
                     aria-label="Find"
-                    className="flex items-center gap-2 px-2.5 text-body text-muted-foreground focus-ring-inset transition-colors hover:bg-accent hover:text-foreground md:w-44"
+                    className="flex items-center gap-2 px-2.5 text-body text-muted-foreground focus-ring-inset transition-colors hover:bg-accent hover:text-foreground max-lg:w-8 max-lg:justify-center max-lg:px-0 lg:w-44"
                     onClick={() => {
                       setQuickMode("names")
                       setQuickOpen(true)
                     }}
                   >
                     <MagnifyingGlass className="size-4 shrink-0" />
-                    <span className="hidden flex-1 text-left md:inline">Find files</span>
-                    <kbd className="hidden rounded-sm border border-hairline px-1 font-mono text-micro md:inline">
+                    <span className="hidden flex-1 text-left lg:inline">Find files</span>
+                    <kbd className="hidden rounded-sm border border-hairline px-1 font-mono text-micro lg:inline">
                       Ctrl P
                     </kbd>
                   </button>
@@ -1493,7 +1686,7 @@ export default function FilesPage() {
               </Tooltip>
               <IconAction
                 label="Search inside files"
-                className={STRIP_SEGMENT}
+                className={cn(STRIP_SEGMENT, "max-lg:hidden")}
                 onClick={() => {
                   setQuickMode("content")
                   setQuickOpen(true)
@@ -1503,7 +1696,7 @@ export default function FilesPage() {
               </IconAction>
             </StripGroup>
 
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2 max-lg:hidden">
               <ToggleGroup
                 type="single"
                 size="sm"
@@ -1545,6 +1738,7 @@ export default function FilesPage() {
                     onSymlink={() => setSymlinkOpen(true)}
                   />
                   <UploadMenu
+                    className="max-lg:hidden"
                     onFiles={openFileInput}
                     onFolder={() => folderInput.current?.click()}
                   />
@@ -1574,18 +1768,27 @@ export default function FilesPage() {
               >
                 {showInspector ? <SidebarRightClose /> : <SidebarRightOpen />}
               </IconAction>
+              <MoreMenu groups={moreVerbs} className="lg:hidden" />
             </div>
           </PaneHeader>
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-            {showSidebar && (
-              <div className="relative hidden shrink-0 border-r border-hairline lg:flex lg:w-(--jd-files-rail)">
+            {/* Hidden at a desk is a desk's choice: a phone reaches the places
+                on its bar whether or not the column was put away. */}
+            {(showSidebar || pane === "places") && (
+              <div
+                className={cn(
+                  "relative flex shrink-0 border-hairline max-lg:min-h-0 max-lg:flex-1 lg:w-(--jd-files-rail) lg:border-r",
+                  !showSidebar && "lg:hidden",
+                  paneShown(pane === "places"),
+                )}
+              >
                 <FilesSidebar
                   places={places.data}
                   path={path ?? "/"}
                   recent={recent}
                   canWrite={canWrite}
-                  onNavigate={navigate}
+                  onNavigate={pickPlace}
                   onBookmarksChange={(next) => void saveBookmarks(next)}
                   onDropPaths={(paths, dir, mode) => void movePaths(paths, dir, mode)}
                   onDropFiles={(transfer, dir) => void dropFiles(transfer, dir)}
@@ -1598,12 +1801,17 @@ export default function FilesPage() {
                   max={RAIL.max}
                   onChange={(px, commit) => setRailWidth(clamp(px, RAIL.min, RAIL.max), commit)}
                   onReset={resetRailWidth}
-                  className="absolute inset-y-0 -right-1 z-20"
+                  className="absolute inset-y-0 -right-1 z-20 max-lg:hidden"
                 />
               </div>
             )}
 
-            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            <div
+              className={cn(
+                "relative flex min-h-0 min-w-0 flex-1 flex-col",
+                paneShown(pane === "folder"),
+              )}
+            >
               <div
                 data-file-actions
                 className="pointer-events-none absolute inset-x-2 bottom-12 z-20 flex justify-center"
@@ -1857,14 +2065,7 @@ export default function FilesPage() {
                       ? `${plural(selected.size, "item")} selected${
                           selectedBytes > 0 ? ` · ${bytes(selectedBytes)}` : ""
                         }`
-                      : entries.length === 0
-                        ? "Empty folder"
-                        : [
-                            folderCount > 0 && plural(folderCount, "folder"),
-                            fileCount > 0 && plural(fileCount, "file"),
-                          ]
-                            .filter(Boolean)
-                            .join(", ")
+                      : (folderSentence(folderCount, fileCount) ?? "Empty folder")
                     : ""}
                 </span>
                 <IconAction
@@ -1878,8 +2079,17 @@ export default function FilesPage() {
               </PaneFooter>
             </div>
 
-            {showInspector && (
-              <div className="relative hidden shrink-0 flex-col border-l border-hairline xl:flex xl:w-(--jd-files-inspector)">
+            {/* A column from `xl`, a pane of its own below `lg`, and between
+                the two not drawn, as it never was: a listing that narrow has
+                no room beside it. */}
+            {(showInspector || pane === "details") && (
+              <div
+                className={cn(
+                  "relative flex shrink-0 flex-col border-hairline max-lg:min-h-0 max-lg:flex-1 lg:max-xl:hidden xl:w-(--jd-files-inspector) xl:border-l",
+                  !showInspector && "xl:hidden",
+                  paneShown(pane === "details"),
+                )}
+              >
                 <ResizeHandle
                   side="right"
                   label="Details width"
@@ -1890,7 +2100,7 @@ export default function FilesPage() {
                     setInspectorWidth(clamp(px, INSPECTOR.min, INSPECTOR.max), commit)
                   }
                   onReset={resetInspectorWidth}
-                  className="absolute inset-y-0 -left-1 z-20"
+                  className="absolute inset-y-0 -left-1 z-20 max-lg:hidden"
                 />
                 <PreviewPanel
                   entry={activeEntry}
@@ -1906,6 +2116,12 @@ export default function FilesPage() {
               </div>
             )}
           </div>
+          <PaneBar
+            label="Files"
+            stops={PANES}
+            active={pane}
+            onPick={(next) => setPicked({ pane: next, dir: path })}
+          />
         </div>
       </FolderColourProvider>
       <FilesShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
@@ -1945,6 +2161,7 @@ export default function FilesPage() {
         }}
       />
       <FileEditorSheet
+        grouped
         path={editing}
         root={path ?? undefined}
         revealLine={searchLocation?.path === editing ? searchLocation.line : undefined}
@@ -1998,27 +2215,6 @@ function EmptyFolder({ canWrite, onUpload }: { canWrite: boolean; onUpload: () =
   )
 }
 
-/** One segment of a `StripGroup`: the group draws the edge, the segment only its hover. */
-const STRIP_SEGMENT = "h-full w-8 min-w-8 rounded-none px-0 focus-ring-inset"
-
-/**
- * Controls that are one idea, inside one edge — the same shape as the Git
- * workspace's fetch, pull and push. Each segment is a ghost the full height of
- * the box, and the hairline between two is the group's, never the segment's.
- */
-function StripGroup({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      role="group"
-      className={cn(
-        "flex h-8 shrink-0 items-stretch overflow-hidden rounded-md border border-input bg-control [&>*+*]:border-l [&>*+*]:border-input",
-        className,
-      )}
-      {...props}
-    />
-  )
-}
-
 /**
  * Sorting, hidden files and tile size in one menu.
  *
@@ -2043,13 +2239,6 @@ function ArrangeMenu({
   setTile: (v: TileSize) => void
   grid: boolean
 }) {
-  const keys: { id: SortKey; label: string }[] = [
-    { id: "name", label: "Name" },
-    { id: "size", label: "Size" },
-    { id: "modified", label: "Modified" },
-    { id: "owner", label: "Owner" },
-    { id: "mode", label: "Mode" },
-  ]
   return (
     <DropdownMenu>
       <Tooltip>
@@ -2064,7 +2253,7 @@ function ArrangeMenu({
       </Tooltip>
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuLabel>Sort by</DropdownMenuLabel>
-        {keys.map((key) => (
+        {SORT_KEYS.map((key) => (
           <DropdownMenuCheckboxItem
             key={key.id}
             checked={sort.key === key.id}
@@ -2103,7 +2292,7 @@ function ArrangeMenu({
                   setTile(size)
                 }}
               >
-                {size === "sm" ? "Small" : size === "lg" ? "Large" : "Medium"}
+                {TILE_NAMES[size]}
               </DropdownMenuCheckboxItem>
             ))}
           </>
@@ -2257,11 +2446,19 @@ function NewMenu({
  * the folder picker is what makes "put this site here" a single gesture
  * rather than a directory made by hand and forty files dragged into it.
  */
-function UploadMenu({ onFiles, onFolder }: { onFiles: () => void; onFolder: () => void }) {
+function UploadMenu({
+  onFiles,
+  onFolder,
+  className,
+}: {
+  onFiles: () => void
+  onFolder: () => void
+  className?: string
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" aria-label="Upload">
+        <Button size="sm" aria-label="Upload" className={className}>
           <CloudUpload className="size-4" />
           <span className="hidden sm:inline">Upload</span>
           <ChevronDown className="size-3 opacity-70" />
