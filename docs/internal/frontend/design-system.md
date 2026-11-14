@@ -1274,7 +1274,10 @@ above:
   once, the shimmer is `jd-shimmer`, the update notice's wire `jd-wire`, and the release path's
   running `Segment` is `animate-sweep`. Reduced motion stills each of them in CSS. A new *live*
   mark is written the same way: an endless `motion` animation keeps a page that looks still busy
-  sixty times a second (`design-system.spec.ts` counts the frames a page with wires asks for);
+  sixty times a second (`design-system.spec.ts` counts the frames a page with wires asks for).
+  The element a `BorderBeam` is put in clips (`overflow-hidden`) when it is not the frame itself:
+  the light is a square centred on the edge it lights, so half of it lies outside the frame, and on
+  a phone that half reached past the page and scrolled it sideways each lap;
 - *once* — `Confetti` fires only when a release goes live in front of the reader — on the run page,
   on the Overview when a run watched there from start to finish ends in success, and from the
   sidebar's update notice when an update of the dashboard itself finishes while the tab is open —
