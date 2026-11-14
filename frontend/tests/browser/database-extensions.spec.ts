@@ -1,4 +1,5 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
+import { risen } from "./risen"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
 
 /**
@@ -361,19 +362,14 @@ const section = (page: Page) => page.locator("section#extensions")
 const dialog = (page: Page) => page.getByRole("dialog")
 const row = (page: Page, name: string) => section(page).locator(`[data-extension="${name}"]`)
 const chip = (page: Page, name: RegExp) => section(page).getByRole("button", { name })
-
-/**
- * Closes every toast, so a screenshot shows the page and not the news about it.
- *
- * The press is the page's own: a pointer pressed outside an open dialog is the
- * reader closing the dialog, and the dialog hides the rest of the page from
- * the accessibility tree, so the toasts are found by their markup.
- */
-async function dismissToasts(page: Page) {
-  for (const close of await page.locator("[data-sonner-toast] [data-close-button]").all()) {
-    await close.evaluate((button: HTMLElement) => button.click())
-  }
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0)
+/** The strip at the head of the page: what the server loads at its next start and not at this one. */
+const strip = (page: Page) => page.getByRole("region", { name: "Waiting for a restart" })
+/** Disable is behind a row's menu: the one command that removes it is not the one beside its name. */
+async function askToDisable(page: Page, name: string) {
+  await row(page, name)
+    .getByRole("button", { name: `More for ${name}` })
+    .click()
+  await page.getByRole("menuitem", { name: "Disable" }).click()
 }
 
 async function noSidewaysScroll(page: Page) {
@@ -395,8 +391,12 @@ test("the catalogue is read by what each is for, searched, filtered and told apa
   // row needs is said beside it.
   await expect(row(page, "hstore")).toContainText("1.4")
   await expect(row(page, "hstore")).toContainText("1.8 available")
-  await expect(row(page, "pg_stat_statements")).toContainText(
-    "The server loads pg_stat_statements when it starts.",
+  await expect(row(page, "pg_stat_statements").locator("[data-slot=extension-facts]")).toHaveText(
+    "loaded at start",
+  )
+  // Where it lives and what it does are the same line.
+  await expect(row(page, "hstore")).toContainText(
+    "in public · Sets of key–value pairs in one column.",
   )
   // A row you read, not one you take; a contrib module has no mark of its own, so it is its
   // category's glyph and not a logo.
@@ -408,9 +408,7 @@ test("the catalogue is read by what each is for, searched, filtered and told apa
   for (const heading of ["Data types", "Geospatial", "Monitoring", "Scheduling", "Search"]) {
     await expect(section(page).getByText(heading, { exact: true })).toBeVisible()
   }
-  await expect(row(page, "pg_cron")).toContainText(
-    "Needs pg_cron loaded when the server starts, and a restart.",
-  )
+  await expect(row(page, "pg_cron")).toContainText("needs pg_cron loaded at start, and a restart")
   await section(page).getByLabel("Filter the extensions").fill("trigram")
   await expect(section(page).locator("[data-extension]")).toHaveCount(1)
   await expect(row(page, "pg_trgm")).toBeVisible()
@@ -421,12 +419,47 @@ test("the catalogue is read by what each is for, searched, filtered and told apa
   await expect(row(page, "citext")).toBeVisible()
 
   await chip(page, /^Not in this image/).click()
-  await expect(row(page, "vector")).toContainText("Not in this server's image.")
+  await expect(row(page, "vector")).toContainText("not in this server's image")
   await expect(row(page, "vector").getByRole("button")).toHaveCount(0)
 
   await chip(page, /^Update available/).click()
   await expect(section(page).locator("[data-extension]")).toHaveCount(1)
   await expect(row(page, "hstore").getByRole("button", { name: "Update hstore" })).toBeVisible()
+})
+
+test("a row is one height whatever is true of it, and its commands are a button and a menu", async ({
+  page,
+}) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await mockExtensions(page, { preload: { configured: ["pg_stat_statements", "pg_cron"] } })
+    await visit(page)
+    // One with an update and a menu, one with a library loaded, one with neither.
+    await expect(row(page, "hstore")).toBeVisible()
+    await risen(page)
+    const heights = async () =>
+      section(page)
+        .locator("li[data-extension]")
+        .evaluateAll((all) => all.map((one) => Math.round(one.getBoundingClientRect().height)))
+    expect(new Set(await heights()).size, `enabled rows at ${width}`).toBe(1)
+    // Update is the row's one button; Disable is behind its menu.
+    await expect(row(page, "hstore").getByRole("button")).toHaveCount(2)
+    await expect(row(page, "hstore").getByRole("button", { name: "Disable hstore" })).toHaveCount(0)
+    await row(page, "hstore").getByRole("button", { name: "More for hstore" }).click()
+    await expect(page.getByRole("menuitem", { name: "Disable" })).toBeVisible()
+    await page.keyboard.press("Escape")
+
+    // The catalogue: one that needs a library, one waiting on a restart, one that needs nothing.
+    await chip(page, /^Available/).click()
+    await expect(row(page, "pg_cron")).toBeVisible()
+    await risen(page)
+    const all = await heights()
+    expect(all.length).toBeGreaterThan(6)
+    expect(new Set(all).size, `catalogue rows at ${width}: ${all.join(", ")}`).toBe(1)
+    await expect(row(page, "pg_cron").locator("[data-slot=extension-facts]")).toHaveText(
+      "loaded once the server restarts",
+    )
+  }
 })
 
 test("an extension is enabled with a version, a schema and CASCADE, and runs the statement it showed", async ({
@@ -492,7 +525,7 @@ test("a drop lists what depends on the extension first, and waits for CASCADE by
 }) => {
   const { sent } = await mockExtensions(page)
   await visit(page)
-  await row(page, "hstore").getByRole("button", { name: "Disable hstore" }).click()
+  await askToDisable(page, "hstore")
   const form = dialog(page)
   await expect(form).toContainText("57 functions, 22 operators, 4 operator classes and 2 types")
   const dependents = form.getByRole("list", { name: "What depends on hstore" })
@@ -535,7 +568,6 @@ test("a library loaded at start is added, the server restarted, then the extensi
   await expect(restart).toBeVisible()
   await expect(steps.getByRole("listitem").nth(0)).toContainText("Done")
   await expect(flow).toContainText("Every session on it is disconnected")
-  await expect(section(page)).toContainText("pg_cron is loaded once shop restarts")
   await restart.click()
 
   const create = flow.getByRole("button", { name: "Enable pg_cron" })
@@ -549,25 +581,33 @@ test("a library loaded at start is added, the server restarted, then the extensi
   expect(sent.find((one) => one.path === "/power")?.body).toEqual({ action: "restart" })
 })
 
-test("a restart that is still owed is said at the top, and taken from there", async ({ page }) => {
+test("a restart that is still owed is said at the head of the page, and taken from there", async ({
+  page,
+}) => {
   const { sent } = await mockExtensions(page, {
     preload: { configured: ["pg_stat_statements", "pg_cron"] },
   })
   await visit(page)
-  await expect(section(page)).toContainText("Waiting for a restart")
-  await expect(section(page)).toContainText("pg_cron is loaded once shop restarts")
+  // The library is named, as added: not the parameter that lists it.
+  await expect(strip(page)).toContainText("1 waiting for a restart")
+  await expect(strip(page)).toContainText("pg_cron")
+  await expect(strip(page)).toContainText("added")
+  await expect(section(page).locator("[data-slot=notice]")).toHaveCount(0)
   await chip(page, /^Available/).click()
-  await expect(row(page, "pg_cron")).toContainText("pg_cron is loaded once the server restarts.")
+  await expect(row(page, "pg_cron")).toContainText("loaded once the server restarts")
   // The dialog opens on the step the server is at.
   await row(page, "pg_cron").getByRole("button", { name: "Enable pg_cron" }).click()
   await expect(dialog(page).getByRole("button", { name: "Restart shop" })).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(dialog(page)).toHaveCount(0)
 
-  await section(page).getByRole("button", { name: "Restart shop" }).click()
+  await page.getByRole("button", { name: "Restart", exact: true }).click()
+  await expect(dialog(page)).toContainText("Restart shop")
+  expect(sent.map((one) => `${one.method} ${one.path}`)).not.toContain("POST /power")
   await dialog(page).getByRole("button", { name: "Restart", exact: true }).click()
-  await expect(section(page)).not.toContainText("Waiting for a restart")
-  expect(sent.map((one) => `${one.method} ${one.path}`)).toContain("POST /power")
+  // Restarted, the library is loaded and nothing waits.
+  await expect(strip(page)).toHaveCount(0)
+  expect(sent.find((one) => one.path === "/power")?.body).toEqual({ action: "restart" })
 })
 
 test("a list the dashboard cannot change says why, and offers nothing that would be refused", async ({
@@ -627,10 +667,11 @@ test("a role that may only read is shown the catalogue and offered none of its c
   })
   await visit(page)
   await expect(row(page, "hstore")).toContainText("1.8 available")
-  await expect(section(page)).toContainText("pg_cron is loaded once shop restarts")
-  // No row carries a command, and the notice carries no restart; the chips still filter.
+  await expect(strip(page)).toContainText("pg_cron")
+  await expect(strip(page)).toContainText("Restarting it is for a role that may interrupt it.")
+  // No row carries a command, and the strip carries no restart; the chips still filter.
   const commands = section(page).locator("li[data-extension] button")
-  const restart = section(page).getByRole("button", { name: /^Restart / })
+  const restart = page.getByRole("button", { name: /^Restart/ })
   await expect(commands).toHaveCount(0)
   await expect(restart).toHaveCount(0)
   await chip(page, /^Available/).click()
@@ -658,51 +699,63 @@ test("at a phone's width the list and the dialogs keep to the screen", async ({ 
 
 test("extension states @shots", async ({ page }) => {
   test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the screenshots go in")
-  test.setTimeout(180_000)
-  const shot = (name: string) => page.screenshot({ path: `${process.env.JD_SHOTS}/${name}.png` })
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await mockExtensions(page)
-  await visit(page)
-  await expect(row(page, "hstore")).toBeVisible()
-  await shot("extensions-enabled-1440")
+  test.setTimeout(240_000)
+  const shot = async (name: string, width: number) => {
+    await risen(page)
+    await page.screenshot({
+      path: `${process.env.JD_SHOTS}/after-extensions-${name}-${width}.png`,
+      fullPage: true,
+    })
+  }
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockExtensions(page)
+    await visit(page)
+    await expect(row(page, "hstore")).toBeVisible()
+    await shot("full", width)
 
-  await chip(page, /^Available/).click()
-  await expect(row(page, "pg_cron")).toBeVisible()
-  await shot("extensions-catalogue-1440")
+    await chip(page, /^Available/).click()
+    await expect(row(page, "pg_cron")).toBeVisible()
+    await shot("catalogue", width)
 
-  await row(page, "earthdistance").getByRole("button", { name: "Enable earthdistance" }).click()
-  await expect(dialog(page)).toContainText('CREATE EXTENSION IF NOT EXISTS "earthdistance" CASCADE')
-  await shot("extensions-enable-1440")
-  await page.keyboard.press("Escape")
+    await chip(page, /^Not in this image/).click()
+    await expect(row(page, "postgis")).toBeVisible()
+    await shot("not-in-image", width)
 
-  await row(page, "pg_cron").getByRole("button", { name: "Enable pg_cron" }).click()
-  await expect(dialog(page)).toContainText("ALTER SYSTEM SET shared_preload_libraries")
-  await shot("extensions-preload-1440")
-  await dialog(page).getByRole("button", { name: "Load at start" }).click()
-  // Drawn once the server has answered: the command live, the news of the step taken gone.
-  await expect(dialog(page).getByRole("button", { name: "Restart shop" })).toBeEnabled()
-  await dismissToasts(page)
-  await shot("extensions-restart-1440")
-  await page.keyboard.press("Escape")
+    await chip(page, /^Enabled/).click()
+    await row(page, "hstore").getByRole("button", { name: "More for hstore" }).click()
+    await expect(page.getByRole("menuitem", { name: "Disable" })).toBeVisible()
+    await page.screenshot({ path: `${process.env.JD_SHOTS}/after-extensions-menu-${width}.png` })
+    await page.keyboard.press("Escape")
 
-  await chip(page, /^Enabled/).click()
-  await row(page, "hstore").getByRole("button", { name: "Update hstore" }).click()
-  await expect(dialog(page)).toContainText(`ALTER EXTENSION "hstore" UPDATE TO '1.8'`)
-  await dismissToasts(page)
-  await shot("extensions-update-1440")
-  await page.keyboard.press("Escape")
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockExtensions(page, { preload: { configured: ["pg_stat_statements", "pg_cron"] } })
+    await visit(page)
+    await expect(strip(page)).toBeVisible()
+    await shot("waiting", width)
 
-  await row(page, "hstore").getByRole("button", { name: "Disable hstore" }).click()
-  await dialog(page).getByRole("switch", { name: "Drop these 2 with the extension" }).click()
-  await expect(dialog(page)).toContainText('DROP EXTENSION "hstore" CASCADE')
-  await dismissToasts(page)
-  await shot("extensions-disable-1440")
-  // A choice was made, so a slip would ask; Cancel is the reader saying so.
-  await dialog(page).getByRole("button", { name: "Cancel" }).click()
-  await expect(dialog(page)).toHaveCount(0)
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockExtensions(page, { extensions: EXTENSIONS.filter((one) => !one.installed) })
+    await visit(page)
+    await expect(section(page)).toContainText("No extension is enabled")
+    await shot("empty", width)
 
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(row(page, "hstore")).toBeVisible()
-  await dismissToasts(page)
-  await shot("extensions-enabled-390")
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockExtensions(page, {
+      list: () => ({
+        status: 502,
+        body: { error: { code: "query_failed", message: "permission denied for pg_extension" } },
+      }),
+    })
+    await visit(page)
+    await expect(section(page)).toContainText("Could not read the extensions")
+    await shot("failed", width)
+
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockExtensions(page, { viewer: true })
+    await visit(page)
+    await expect(row(page, "hstore")).toBeVisible()
+    await shot("readonly", width)
+  }
 })
