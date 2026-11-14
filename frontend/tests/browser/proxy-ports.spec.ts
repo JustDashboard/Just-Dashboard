@@ -33,6 +33,16 @@ async function mockHost(page: Page, listeners: unknown[] = hostPorts) {
   )
 }
 
+/**
+ * A verb behind the `⋯` at the end of the page's line, the menu left open on
+ * it: the line has one command, and the refresh, its pause and the exports
+ * are here.
+ */
+async function listVerb(page: Page, name: string) {
+  await page.getByRole("button", { name: "More actions for the list" }).click()
+  return page.getByRole("menuitem", { name })
+}
+
 /** One of the identity line's facts, which the four tiles became. */
 function fact(page: Page, text: string) {
   return page.locator("[data-slot='host-identity']").getByText(text, { exact: true })
@@ -629,9 +639,12 @@ test("refreshing can be paused, resumed at once, and asked for", async ({ page }
   const initialRequests = requests
   expect(initialRequests).toBe(1)
 
-  await page.getByRole("button", { name: "Pause refreshing" }).click()
+  await (await listVerb(page, "Pause refreshing")).click()
   await expect(page.getByText("Paused · updated just now")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Refresh now" })).toHaveCount(0)
+  // Paused, there is nothing to refresh: the menu offers the way back.
+  await expect(await listVerb(page, "Resume refreshing")).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Refresh now" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
   // Polling schedules its next timer after the response settles. A single minute jump
   // can outrun network responses and skip the remaining timers on a busy runner.
   for (let interval = 0; interval < 4; interval++) {
@@ -649,10 +662,10 @@ test("refreshing can be paused, resumed at once, and asked for", async ({ page }
   expect(requests).toBeLessThanOrEqual(initialRequests + 4)
   const pausedRequests = requests
 
-  await page.getByRole("button", { name: "Resume refreshing" }).click()
+  await (await listVerb(page, "Resume refreshing")).click()
   await expect(page.getByText("Updated just now")).toBeVisible()
   await expect.poll(() => requests).toBe(pausedRequests + 1)
-  await page.getByRole("button", { name: "Refresh now" }).click()
+  await (await listVerb(page, "Refresh now")).click()
   await expect.poll(() => requests).toBe(pausedRequests + 2)
   await expect(page.getByText("Updated just now")).toBeVisible()
   await page.clock.runFor(15_001)
@@ -1024,7 +1037,7 @@ for (const width of [1280, 390]) {
     const second = rows.nth(1)
     const before = await second.boundingBox()
     listeners = [...withClients, ...ownedPorts]
-    await page.getByRole("button", { name: "Refresh now" }).click()
+    await (await listVerb(page, "Refresh now")).click()
     if (width === 1280) {
       await expect(rowsOf(page).filter({ hasText: "sshd" }).locator("td").nth(4)).toHaveText("3")
     }
