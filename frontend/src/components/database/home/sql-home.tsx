@@ -1,24 +1,16 @@
 "use client"
 
-import { Activity } from "@/components/database/home/activity"
+import { ActivityLines } from "@/components/database/home/activity-lines"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { BusiestStatements, FileFacts } from "@/components/database/home/busiest"
 import { CLICKHOUSE_VIEWS, SQL_VIEWS } from "@/components/database/home/charts"
-import { chartEvents } from "@/components/database/home/events"
-import { HomeIdentity } from "@/components/database/home/identity"
 import { LargestTablesBlock, type LargestTables } from "@/components/database/home/largest"
 import { bySchema, schemaDetail } from "@/components/database/home/holdings"
 import { nameHue } from "@/components/database/home/kinds"
-import { Columns, Pair } from "@/components/database/home/layout"
+import { Pair } from "@/components/database/home/layout"
 import { HomePicture, type Holding } from "@/components/database/home/picture"
 import { read } from "@/components/database/home/read"
-import {
-  BackupsBlock,
-  ReachableFrom,
-  RunsAs,
-  ServerDatabases,
-  useBackups,
-} from "@/components/database/home/reference"
+import { ServerDatabases, ServerLines, useBackups } from "@/components/database/home/reference"
 import { gauge, sqlSample } from "@/components/database/home/samples"
 import { ServerLog } from "@/components/database/home/server-log"
 import { StateRegion } from "@/components/database/home/state-region"
@@ -49,8 +41,6 @@ export function SqlHome() {
   const unread = stats.error && samples.length === 0 ? stats.error : undefined
   const refused = answer && !answer.supported ? answer : undefined
 
-  const dumps = backups.data?.files
-  const events = useMemo(() => chartEvents(samples, "uptimeSeconds", dumps), [samples, dumps])
   const tables = largest.data
   const holdings = useMemo<Holding[] | undefined>(
     () =>
@@ -69,7 +59,6 @@ export function SqlHome() {
 
   return (
     <>
-      <HomeIdentity uptimeSeconds={answer?.uptimeSeconds} />
       <StateRegion />
       {refused && (
         <Notice title="This server's statistics are not available">
@@ -86,8 +75,12 @@ export function SqlHome() {
         size={answer?.databaseBytes ?? gauge(samples, "databaseBytes")}
         backups={engine.can("dump") ? backups : undefined}
       />
+      <ServerLines
+        backups={engine.can("dump") ? backups : undefined}
+        uptimeSeconds={answer?.uptimeSeconds}
+      />
       {engine.can("stats") && !file && (
-        <Activity
+        <ActivityLines
           hours={stats.hours}
           onHours={stats.setHours}
           retentionHours={stats.retentionHours}
@@ -95,7 +88,6 @@ export function SqlHome() {
           samples={samples}
           loading={stats.loading}
           error={stats.error}
-          events={events}
         />
       )}
       {engine.has("logs") && <ServerLog />}
@@ -107,11 +99,6 @@ export function SqlHome() {
         ) : null}
         <LargestTablesBlock poll={largest} />
       </Pair>
-      <Columns>
-        <RunsAs />
-        {engine.can("server") && <ReachableFrom />}
-        {engine.can("dump") && <BackupsBlock backups={backups} />}
-      </Columns>
       {engine.can("server") && <ServerDatabases />}
     </>
   )

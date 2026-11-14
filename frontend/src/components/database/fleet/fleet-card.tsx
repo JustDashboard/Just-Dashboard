@@ -1,13 +1,17 @@
 "use client"
 
+import { useMemo } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, LockClosed, Play, Wrench } from "@/components/icons"
-import { bytes, relativeTime, truncateMiddle } from "@/lib/format"
+import { get } from "@/lib/api"
+import { bytes, plural, relativeTime, truncateMiddle } from "@/lib/format"
 import type { DbFleetEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { usePoll } from "@/hooks/use-poll"
 import { CONTROL } from "@/components/flow"
-import { Metric } from "@/components/page"
+import { Sparkline } from "@/components/metrics/sparkline"
+import { OutcomeStrip } from "@/components/outcome-strip"
 import { ProductGlyphs } from "@/components/product-logo"
 import { Tag } from "@/components/tag"
 import { BlurFade } from "@/components/ui/blur-fade"
@@ -24,13 +28,44 @@ import {
   type BackupReading,
   type Concern,
 } from "@/components/database/fleet/fleet"
+import {
+  dumpStrip,
+  sessionsTrend,
+  trendCeiling,
+  type Snapshot,
+} from "@/components/database/fleet/trend"
 import type { FleetControl } from "@/components/database/fleet/use-fleet-control"
 import { EngineMark, EnvironmentTag } from "@/components/database/kit"
 import { DatabaseStatusMark, fleetStatus } from "@/components/database/shell/status"
 
-/** What a card's third figure is called: a key–value store has clients, not sessions. */
+/** What a card's reading counts: a key–value store has clients, not sessions. */
 export function sessionsWord(engine: Engine) {
   return engine.kind === "keyvalue" ? "Clients" : "Sessions"
+}
+
+/** How often a card asks for its last hour again: the line is a shape, not a figure. */
+const TREND_EVERY = 5 * 60_000
+
+/**
+ * A database's open sessions over the last hour, from the recorder's history:
+ * a read of the dashboard's own store that dials nothing, asked only of a
+ * server that answers and counts its sessions. The figure beside the line is
+ * the fleet's, read every thirty seconds; the line is asked for once and then
+ * every five minutes.
+ */
+function useSessionsTrend(entry: DbFleetEntry, engine: Engine): number[] {
+  const history = usePoll(
+    (signal) =>
+      get<{ samples?: Snapshot[] }>(`/databases/${entry.id}/stats/history`, { hours: 1 }, signal),
+    TREND_EVERY,
+    [entry.id],
+    { enabled: entry.ok && engine.can("stats") && !engine.can("fileBased") },
+  )
+  const samples = history.data?.samples
+  return useMemo(
+    () => (Array.isArray(samples) ? sessionsTrend(engine.kind, samples) : []),
+    [engine.kind, samples],
+  )
 }
 
 /** The engine's word for what it holds, as a column or a figure is headed. */
@@ -81,11 +116,18 @@ export function workPages(engine: Engine) {
  * the name is the real link a keyboard reaches.
  *
  * Top to bottom it is what the reader asks of a database in that order: which
- * one and whether it answers; what it holds, in its engine's words; and the
- * quiet facts — what it feeds, when it was last dumped, how far it reaches —
- * which take a colour only when one of them is wrong. A stopped server keeps
- * its card with its figures stepped back and Start as its verb; one that is
- * being started, stopped or dumped runs a light round its edge and says so.
+ * one and whether it answers; who is connected, as a sentence with its last
+ * hour drawn beside it, and its newest dumps as a strip; and the quiet facts
+ * — what it feeds, how far it reaches — which take a colour only when one of
+ * them is wrong. A stopped server keeps its card with its reading stepped
+ * back and Start as its verb; one that is being started, stopped or dumped
+ * runs a light round its edge and says so.
+ *
+ * The reading was three figures under three labels (Stored, Tables,
+ * Sessions): a row of tiles in small, which nothing on it moved. It is one
+ * line now, as a project's card reads its traffic: the sessions in words, the
+ * hour as a line in the database's hue, the dumps as the strip a database's
+ * own Backups draws, and what it holds as the words under them.
  *
  * What the operator said of it — what it is for, that it is protected — are
  * properties, not readings, and stand at the edge of the head's two lines:
@@ -93,11 +135,10 @@ export function workPages(engine: Engine) {
  * facts an amber `staging` sat beside an amber "never backed up" and nobody
  * could tell which of them was the problem.
  *
- * What it stores is drawn as a short bar in the database's hue — the same as
- * its span on the band's bars and its key in a row there — against the
- * largest database on the server, so "which one is the big one" is answered
- * across the shelf without reading a figure. The card's edge carries no hue: the operator found the coloured stripe down it
- * noise rather than a reading.
+ * The line of its last hour is drawn in the database's hue — the same as its
+ * span on the band's bars and its key in a row there — so "the blue one is
+ * shop" holds from the bar to the card. The card's edge carries no hue: the
+ * operator found the coloured stripe down it noise rather than a reading.
  */
 export function FleetCard({
   entry,
@@ -107,7 +148,7 @@ export function FleetCard({
   feeds,
   stored,
   hue,
-  largest,
+  dumps,
   control,
   index,
 }: {
@@ -120,8 +161,8 @@ export function FleetCard({
   stored: number | undefined
   /** The database's own hue (`fleetHues`). */
   hue: string
-  /** What the largest database on the server stores: the size bar's full width. */
-  largest: number
+  /** Whether the engine can be dumped from here at all: one that cannot has no strip. */
+  dumps: boolean
   control: FleetControl
   index: number
 }) {
@@ -139,6 +180,17 @@ export function FleetCard({
   const has = (kind: Concern["kind"]) => concerns.some((concern) => concern.kind === kind)
   const pages = workPages(engine)
   const product = `${engine.label}${entry.versionNumber ? ` ${entry.versionNumber}` : ""}`
+  const trend = useSessionsTrend(entry, engine)
+  const strip = useMemo(
+    () => (dumps ? dumpStrip(backup?.recent, Boolean(backup?.running)) : []),
+    [dumps, backup],
+  )
+  const sessions = sessionsWord(engine).toLowerCase()
+  const backedUp = backup?.newest
+    ? { words: `backed up ${relativeTime(backup.newest)}`, kind: "stale-backup" as const }
+    : has("never-backed-up")
+      ? { words: "never backed up", kind: "never-backed-up" as const }
+      : undefined
 
   return (
     // The slot is the one every lit row in the section carries: a card is a
@@ -224,46 +276,70 @@ export function FleetCard({
                 )}
               </div>
             ) : (
-              // The middle column is the engine's own noun and the widest of
-              // the three words ("Collections"), so it takes the larger share.
+              // Two lines in the height the failure's two take. The first is
+              // the reading and its pictures, the second the words under each;
+              // every part keeps its place with nothing to draw, so a card
+              // with no recorded hour and one with no dump stand as tall.
               <div
+                data-slot="fleet-reading"
                 className={cn(
-                  "grid min-h-12 grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-x-2.5 [&>*+*]:border-l [&>*+*]:border-hairline [&>*+*]:pl-2.5",
+                  "grid min-h-12 grid-cols-[minmax(0,1fr)_auto] content-center items-center gap-x-4 gap-y-1",
                   down && "opacity-60",
                 )}
               >
-                <Metric
-                  label="Stored"
-                  value={stored !== undefined ? bytes(stored) : "—"}
-                  // The track is drawn on every card, empty where nothing
-                  // reports a size: without it a card whose size is unknown
-                  // stood a bar's height shorter than its neighbours.
-                  hint={
-                    <span
-                      aria-hidden
-                      className="mt-1.5 block h-1 w-full max-w-20 overflow-hidden rounded-full bg-meter-track"
-                    >
-                      {stored !== undefined && largest > 0 && (
-                        <span
-                          data-slot="fleet-size"
-                          className="block h-full rounded-full transition-[width] duration-700 ease-out"
-                          style={{
-                            width: `${Math.max((stored / largest) * 100, stored > 0 ? 4 : 0)}%`,
-                            background: hue,
-                          }}
-                        />
-                      )}
+                <div className="flex h-5 min-w-0 items-center gap-2.5">
+                  <span className="numeric shrink-0 text-body font-medium">
+                    {down ? (
+                      <span className="font-normal text-muted-foreground">No reading</span>
+                    ) : (
+                      <>
+                        {entry.sessions.toLocaleString()}{" "}
+                        <span className="font-normal text-muted-foreground">
+                          {entry.sessions === 1 ? sessions.replace(/s$/, "") : sessions} open
+                        </span>
+                      </>
+                    )}
+                  </span>
+                  <span data-slot="fleet-trend" className="flex h-5 min-w-0 flex-1 items-center">
+                    {!down && trend.length > 1 && (
+                      <Sparkline
+                        values={trend}
+                        max={trendCeiling(trend)}
+                        color={hue}
+                        width={120}
+                        height={20}
+                        className="h-5 w-full animate-rise"
+                        label={`${sessionsWord(engine)} open on ${entry.name} over the last hour`}
+                      />
+                    )}
+                  </span>
+                </div>
+                <span data-slot="fleet-dumps" className="flex h-5 items-center justify-end">
+                  <OutcomeStrip
+                    items={strip}
+                    label={`The last ${plural(strip.length, "dump")} of ${entry.name}`}
+                  />
+                </span>
+                <div
+                  data-slot="fleet-holds"
+                  className="flex h-4 min-w-0 items-center gap-x-3 text-hint whitespace-nowrap text-muted-foreground"
+                >
+                  {stored !== undefined && <span className="numeric">{bytes(stored)} stored</span>}
+                  {!down && (
+                    <span className="numeric min-w-0 truncate">
+                      {entry.objects.toLocaleString()}{" "}
+                      {entry.objects === 1 ? entry.objectWord.replace(/s$/, "") : entry.objectWord}
                     </span>
-                  }
-                />
-                <Metric
-                  label={objectsWord(entry)}
-                  value={down ? "—" : entry.objects.toLocaleString()}
-                />
-                <Metric
-                  label={sessionsWord(engine)}
-                  value={down ? "—" : entry.sessions.toLocaleString()}
-                />
+                  )}
+                </div>
+                <span
+                  className={cn(
+                    "flex h-4 items-center justify-end text-hint whitespace-nowrap text-muted-foreground",
+                    backedUp && factTone(concernLevel(concerns, backedUp.kind)),
+                  )}
+                >
+                  {backedUp?.words}
+                </span>
               </div>
             )}
 
@@ -284,25 +360,6 @@ export function FleetCard({
                     <ProductGlyphs ids={feeds.products} max={3} />
                     <span className="numeric">{feeds.count}</span>
                   </span>
-                )}
-                {backup?.newest ? (
-                  <span
-                    className={cn("shrink-0", factTone(concernLevel(concerns, "stale-backup")))}
-                    title={`backed up ${relativeTime(backup.newest)}`}
-                  >
-                    backed up {relativeTime(backup.newest)}
-                  </span>
-                ) : (
-                  has("never-backed-up") && (
-                    <span
-                      className={cn(
-                        "shrink-0",
-                        factTone(concernLevel(concerns, "never-backed-up")),
-                      )}
-                    >
-                      never backed up
-                    </span>
-                  )
                 )}
                 {entry.exposure !== "unknown" && (
                   <span className={factTone(concernLevel(concerns, "public"))}>

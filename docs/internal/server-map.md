@@ -160,7 +160,10 @@ on the dashboard's own system from its head at no less than half size (a system 
 across a phone was a fifth of its size), since every system at once is too small to read or tap. A
 finger pans and pinches, and nothing can be dragged. A tap on
 a box or a system's head floats one button, *Open …*, to its page; a tap on open ground takes it away.
-A phone writes nothing to the account's arrangement.
+A phone writes nothing to the account's arrangement. A page may ask the canvas for more there
+(`MapCanvas panes`): the rail and the inspector as panes of their own over the canvas, and a bar at
+the foot that picks which of the three is shown (`components/phone-panes.tsx`). The databases map
+asks for it; `/map` does not.
 
 ## Reading it
 
@@ -326,6 +329,11 @@ the danger or warning colour, and the inspector names each with its sessions (`l
 `linked database · 3 sessions`). Either reading may fail and the other is still drawn, with what
 could not be read said over the canvas; both failing is the page's error state.
 
+Below `lg` it is one pane at a time, *Databases*, *Map* and *Inspector*, picked from a bar at the
+foot. A database picked from the rail is shown on the canvas, and so is a link or a kind picked in
+the inspector; the canvas stays drawn under the other two, so it is where it was left. Like the
+server map's, a phone's view keeps nothing against the account.
+
 What differs from `/map` is a `MapBoard` (`components/map/board.ts`): the rail grouped by engine and
 named *Databases*, a diagram summed up as what it feeds, the sessions open and where it runs, and the
 inspector's account of every database at once. `?database=<id>` opens on one. It replaced, in 0.8.6
@@ -384,4 +392,4 @@ center's own copy of that picture went at the same time.
   the other is saved. `tests/browser/database-control-center.spec.ts` (*the map*): the rail by
   engine, a diagram's columns and shapes, the inspector's link words, a diagram carried and kept under
   `boards.databases` beside the server map's own arrangement, what could not be read, and a phone's
-  bare canvas.
+  three panes with the server map's phone left as it was.

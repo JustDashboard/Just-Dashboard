@@ -421,19 +421,32 @@ const SCAN_WORDS: Record<DbInventoryScan["source"], string> = {
   files: "database files",
 }
 
+/** The collectors that read from Docker: both go quiet when the daemon does. */
+const DOCKER_SOURCES: readonly DbInventoryScan["source"][] = ["docker", "compose"]
+
 /**
  * What the list is silent about and why: a collector that could not read is a
  * stated silence, never an empty healthy list. Collectors that failed for the
  * same reason are named together ("containers and compose services").
+ *
+ * `docker` marks a silence that is Docker's alone: the page then draws
+ * Docker's own unavailable state, with the step that fixes it, where the
+ * daemon's sentence used to be printed.
  */
-export function scanSilences(scans: DbInventoryScan[]): { what: string; reason: string }[] {
-  const byReason = new Map<string, string[]>()
+export function scanSilences(
+  scans: DbInventoryScan[],
+): { what: string; reason: string; docker: boolean }[] {
+  const byReason = new Map<string, DbInventoryScan["source"][]>()
   for (const scan of scans) {
     if (scan.ok) continue
     const reason = scan.reason ?? "it could not be read"
-    byReason.set(reason, [...(byReason.get(reason) ?? []), SCAN_WORDS[scan.source]])
+    byReason.set(reason, [...(byReason.get(reason) ?? []), scan.source])
   }
-  return [...byReason].map(([reason, words]) => ({ what: listWords(words), reason }))
+  return [...byReason].map(([reason, sources]) => ({
+    what: listWords(sources.map((source) => SCAN_WORDS[source])),
+    reason,
+    docker: sources.every((source) => DOCKER_SOURCES.includes(source)),
+  }))
 }
 
 /** What a collector that did read wants said about how far it got. */

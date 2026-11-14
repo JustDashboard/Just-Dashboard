@@ -3,17 +3,19 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Archive, Plus } from "@/components/icons"
-import { get, post } from "@/lib/api"
-import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
+import { Archive, Cpu, File, Globe, LockClosed, Plus } from "@/components/icons"
+import { errorMessage, get, post } from "@/lib/api"
+import { bytes, duration, plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type { Container, DbAccess, DbConnection } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll, type PollState } from "@/hooks/use-poll"
-import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
+import { WireMark } from "@/components/deploy/wire"
+import { Field, FormFact, FormFacts, FormNote, InfoTip } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { OutcomeStrip, type Outcome } from "@/components/outcome-strip"
+import { ProductGlyph } from "@/components/product-logo"
 import { ChoiceRow } from "@/components/flow"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -27,9 +29,7 @@ import {
   Block,
   BlockLink,
   CardsSkeleton,
-  FactRow,
-  FactRows,
-  FactsSkeleton,
+  NotUpdating,
   Quiet,
   Read,
   staleOf,
@@ -48,14 +48,95 @@ import { useDatabases } from "@/components/database/shell/databases-context"
 import { settingsPageHref } from "@/components/database/shell/settings-pages"
 
 /**
- * The reference blocks at the foot of a home: what the server runs as, where
- * it is reachable from, its dumps, and what else is on the same server. Each
- * is a short list of facts with the one way to the page that changes them.
- * None of them dials the database, so a stopped one keeps them all.
+ * What a database runs as, where it is reachable from and what is kept of it:
+ * one line each, directly under the picture that draws the same three things
+ * as nodes and beams. A line is a mark, what the thing is in a word or a name,
+ * and one run of facts after it, with the way to the page that changes them
+ * at its end. None of them dials the database, so a stopped one keeps them
+ * all.
+ *
+ * They were three columns of label and value rows at the page's foot (Where,
+ * Start and stop, From, Listens on, Firewall, Changed, Kept, Newest,
+ * Directory): a grey table a third of the page wide, whose values wrapped
+ * into sentences. Everything they said is still said, as facts on a line.
  */
+export function ServerLines({
+  backups,
+  answering = true,
+  uptimeSeconds,
+}: {
+  /** The dumps, for an engine that has them. */
+  backups?: PollState<DbBackups>
+  /** How long the server has been up, where its statistics say. */
+  uptimeSeconds?: number
+  /** Whether the server is there to dump. The dumps already taken are listed either way. */
+  answering?: boolean
+}) {
+  const { engine } = useDatabase()
+  return (
+    <div data-slot="server-lines" className="-my-2 flex min-w-0 flex-col">
+      <RunsAs uptimeSeconds={answering ? uptimeSeconds : undefined} />
+      {engine.can("server") && <ReachableFrom />}
+      {backups && <BackupsLine backups={backups} answering={answering} />}
+    </div>
+  )
+}
 
-/** What the server runs as: its container, its unit, its file, or another machine. */
-export function RunsAs() {
+/**
+ * One of those lines. Its facts wrap where the line is narrow and keep a
+ * line's height where there are none yet, so a line that is still being read
+ * stands as tall as one that has been.
+ */
+function FactLine({
+  name,
+  mark,
+  reading,
+  facts,
+  actions,
+}: {
+  /** What the line is about, which is also its accessible name: "Runs as". */
+  name: string
+  mark: React.ReactNode
+  reading: React.ReactNode
+  facts?: React.ReactNode
+  actions?: React.ReactNode
+}) {
+  return (
+    <section
+      aria-label={name}
+      data-slot="fact-line"
+      className="flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-1.5 py-2"
+    >
+      {mark}
+      <div className="min-w-0 flex-[1_1_16rem]">
+        <p className="eyebrow">{name}</p>
+        <div className="flex min-h-5 min-w-0 items-center gap-2 text-body leading-snug font-medium">
+          {reading}
+        </div>
+        <div className="flex min-h-4 min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-hint leading-snug text-muted-foreground">
+          {facts}
+        </div>
+      </div>
+      {actions && (
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 max-sm:pl-[3.625rem]">
+          {actions}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** A literal in a run of facts: a name, an address, a path. */
+function Mono({ className, ...props }: React.ComponentProps<"span">) {
+  return <span className={cn("min-w-0 font-mono wrap-anywhere", className)} {...props} />
+}
+
+/**
+ * What the server runs as: its container, its unit, its file, or another
+ * machine, and how long it has been up by its own count. That last stood on
+ * the identity line, and came a moment after the line was drawn.
+ */
+export function RunsAs({ uptimeSeconds }: { uptimeSeconds?: number }) {
   const { conn, summary, engine, href } = useDatabase()
   const { can } = useAuth()
   const inspected = summary?.container?.id
@@ -80,10 +161,116 @@ export function RunsAs() {
   const file = summary.file
   const logs = engine.has("logs")
   const directory = file ? file.path.replace(/\/[^/]*$/, "") || "/" : ""
+  const power =
+    summary.power.via === "docker"
+      ? "started and stopped from here, through Docker"
+      : summary.power.via === "systemd"
+        ? "started and stopped from here, through systemd"
+        : (summary.power.reason ?? "not started or stopped from here")
 
   return (
-    <Block
-      title="Runs as"
+    <FactLine
+      name="Runs as"
+      mark={
+        <WireMark tone="logo" size="md">
+          {container ? (
+            <ProductGlyph id="docker" />
+          ) : unit ? (
+            <ProductGlyph id="systemd" />
+          ) : file ? (
+            <File aria-hidden />
+          ) : summary.source === "remote" ? (
+            <Globe aria-hidden />
+          ) : (
+            <Cpu aria-hidden />
+          )}
+        </WireMark>
+      }
+      reading={
+        container ? (
+          <Mono className="text-xs">{container.name}</Mono>
+        ) : unit ? (
+          <Mono className="text-xs">{unit.name}</Mono>
+        ) : file ? (
+          <Mono className="text-xs">{file.path}</Mono>
+        ) : (
+          <span className="min-w-0 truncate">
+            {summary.source === "remote"
+              ? `Another machine, at ${conn.host}${conn.port ? `:${conn.port}` : ""}`
+              : summary.source === "host"
+                ? `A process on this server, listening on port ${conn.port}`
+                : "Not known"}
+          </span>
+        )
+      }
+      facts={
+        <span className="contents">
+          {uptimeSeconds !== undefined && (
+            <span className="numeric" title="How long the server has been up, by its own count">
+              up {duration(uptimeSeconds)}
+            </span>
+          )}
+          {container && (
+            <>
+              <Mono title="Image">{container.image}</Mono>
+              <span title="What Docker says of it">
+                {container.status ?? container.state}
+                {container.health ? ` · ${container.health}` : ""}
+              </span>
+              {container.composeProject && (
+                <Mono title="Compose project and service">
+                  {container.composeProject}
+                  {container.composeService ? ` / ${container.composeService}` : ""}
+                </Mono>
+              )}
+              <span data-slot="container-limits">
+                <ContainerLimits poll={limits} />
+              </span>
+              {/* Not for a compose container: its file owns the limits, and
+                  the page would only say so. */}
+              {can("system.admin") && !container.composeProject && (
+                <Link
+                  href={settingsPageHref(href("settings"), { path: "resources" })}
+                  className="rounded-sm underline focus-ring"
+                >
+                  Change limits
+                </Link>
+              )}
+              {limits.data?.restartPolicy && (
+                <span>
+                  restarts <span className="font-mono">{limits.data.restartPolicy}</span>
+                </span>
+              )}
+              {/* Set without asking where MongoDB 8 needs it to start, so it
+                  is said where the container is described. */}
+              {container.kernelMitigation && <span>{container.kernelMitigation}</span>}
+            </>
+          )}
+          {!container && unit && (
+            <span title="What systemd says of it">
+              {unit.activeState}
+              {unit.subState ? ` (${unit.subState})` : ""}
+            </span>
+          )}
+          {file &&
+            (file.exists ? (
+              <span>
+                {bytes(file.size)} on disk
+                {file.modified ? (
+                  <span title={timestamp(file.modified)}>
+                    {" "}
+                    · written {relativeTime(file.modified)}
+                  </span>
+                ) : null}
+              </span>
+            ) : (
+              <span className="flex">
+                <Status tone="danger" label="the file is missing" />
+              </span>
+            ))}
+          <span>{power}</span>
+        </span>
+      }
       actions={
         <>
           {container && (
@@ -102,107 +289,7 @@ export function RunsAs() {
           {logs && <BlockLink href={href("logs")}>Logs</BlockLink>}
         </>
       }
-    >
-      <FactRows className="animate-rise">
-        {container && (
-          <>
-            <FactRow label="Container" className="font-mono wrap-anywhere">
-              {container.name}
-            </FactRow>
-            <FactRow label="Image" className="font-mono wrap-anywhere">
-              {container.image}
-            </FactRow>
-            <FactRow label="Docker says">
-              {container.status ?? container.state}
-              {container.health ? ` · ${container.health}` : ""}
-            </FactRow>
-            {/* Set without asking where MongoDB 8 needs it to start, so it
-                is said where the container is described. */}
-            {container.kernelMitigation && (
-              <FactRow label="Kernel">{container.kernelMitigation}</FactRow>
-            )}
-            {container.composeProject && (
-              <FactRow label="Compose" className="font-mono wrap-anywhere">
-                {container.composeProject}
-                {container.composeService ? ` / ${container.composeService}` : ""}
-              </FactRow>
-            )}
-            <FactRow label="Limits">
-              <ContainerLimits poll={limits} />
-              {/* Not for a compose container: its file owns the limits, and
-                  the page would only say so. */}
-              {can("system.admin") && !container.composeProject && (
-                <>
-                  <span className="text-muted-foreground"> · </span>
-                  <Link
-                    href={settingsPageHref(href("settings"), { path: "resources" })}
-                    className="rounded-sm underline focus-ring"
-                  >
-                    Change
-                  </Link>
-                </>
-              )}
-            </FactRow>
-            {limits.data?.restartPolicy && (
-              <FactRow label="Restarts" className="font-mono">
-                {limits.data.restartPolicy}
-              </FactRow>
-            )}
-          </>
-        )}
-        {!container && unit && (
-          <>
-            <FactRow label="Unit" className="font-mono wrap-anywhere">
-              {unit.name}
-            </FactRow>
-            <FactRow label="systemd says">
-              {unit.activeState}
-              {unit.subState ? ` (${unit.subState})` : ""}
-            </FactRow>
-          </>
-        )}
-        {file && (
-          <>
-            <FactRow label="File" className="font-mono wrap-anywhere">
-              {file.path}
-            </FactRow>
-            <FactRow label="On disk">
-              {file.exists ? (
-                <>
-                  {bytes(file.size)}
-                  {file.modified ? (
-                    <span title={timestamp(file.modified)}>
-                      {" "}
-                      · written {relativeTime(file.modified)}
-                    </span>
-                  ) : null}
-                </>
-              ) : (
-                <span className="flex">
-                  <Status tone="danger" label="the file is missing" />
-                </span>
-              )}
-            </FactRow>
-          </>
-        )}
-        {!container && !unit && !file && (
-          <FactRow label="Where">
-            {summary.source === "remote"
-              ? `On another machine, at ${conn.host}${conn.port ? `:${conn.port}` : ""}`
-              : summary.source === "host"
-                ? `A process on this server, listening on port ${conn.port}`
-                : "Not known"}
-          </FactRow>
-        )}
-        <FactRow label="Start and stop">
-          {summary.power.via === "docker"
-            ? "From here, through Docker"
-            : summary.power.via === "systemd"
-              ? "From here, through systemd"
-              : (summary.power.reason ?? "Not from here")}
-        </FactRow>
-      </FactRows>
-    </Block>
+    />
   )
 }
 
@@ -216,26 +303,24 @@ function ContainerLimits({ poll }: { poll: PollState<Container> }) {
   if (!data) {
     return poll.error ? (
       <>
-        <span className="text-muted-foreground">Could not be read: {poll.error.message}</span>{" "}
+        <span>The limits could not be read: {poll.error.message}</span>{" "}
         <button type="button" className="rounded-sm underline focus-ring" onClick={poll.refresh}>
           Try again
         </button>
       </>
     ) : (
-      <Skeleton className="my-0.5 h-3 w-32" />
+      <Skeleton className="inline-block h-3 w-32 align-middle" />
     )
   }
-  if (!data.inspected) {
-    return <span className="text-muted-foreground">Not read while the container is down</span>
-  }
+  if (!data.inspected) return "limits not read while the container is down"
   const memory = data.memoryLimit ? `${bytes(data.memoryLimit, 0)} of memory` : undefined
   const cpu = data.cpuLimit
     ? `${Number(data.cpuLimit.toFixed(2))} ${data.cpuLimit === 1 ? "core" : "cores"}`
     : undefined
-  if (!memory && !cpu) return "None: it may use all of this machine's memory and processors"
+  if (!memory && !cpu) return "no limits: it may use all of this machine's memory and processors"
   return (
     <span className="numeric">
-      {memory ?? "no memory limit"} · {cpu ?? "no processor quota"}
+      limited to {memory ?? "no memory limit"} · {cpu ?? "no processor quota"}
     </span>
   )
 }
@@ -270,7 +355,7 @@ const EXPOSURE: Record<string, { word: string; sentence: string }> = {
 /**
  * Where the database is reachable from. Any role reads the summary's word;
  * the addresses and the firewall are an administrator's read, and are asked
- * for only by one.
+ * for only by one. What the word means in full is behind the ⓘ beside it.
  */
 export function ReachableFrom() {
   const { id, conn, summary, href } = useDatabase()
@@ -292,66 +377,78 @@ export function ReachableFrom() {
   const exposure = EXPOSURE[summary.exposure] ?? EXPOSURE.unknown
   const open = summary.exposure === "public"
   const firewall = access.data?.firewall
+  const stale = staleOf(access)
   return (
-    <Block
-      title="Reachable from"
-      stale={staleOf(access)}
-      actions={<BlockLink href={href("settings")}>{admin ? "Change" : "Settings"}</BlockLink>}
-    >
-      <FactRows className="animate-rise">
-        <FactRow label="From">
+    <FactLine
+      name="Reachable from"
+      mark={
+        <WireMark tone={open ? "warning" : "logo"} size="md">
+          {open ? <Globe aria-hidden /> : <LockClosed aria-hidden />}
+        </WireMark>
+      }
+      reading={
+        <>
           {open ? (
             <span className="flex">
               <Status verdict="warning" label={exposure.word} />
             </span>
           ) : (
-            <span className="font-medium">{exposure.word}</span>
+            <span className="min-w-0 truncate">{exposure.word}</span>
           )}
-          <span className="mt-0.5 block text-muted-foreground">{exposure.sentence}</span>
-        </FactRow>
-        {conn.port && (
-          <FactRow label="Listens on" className="font-mono">
-            {conn.host}:{conn.port}
-          </FactRow>
-        )}
-        {admin && open && access.data && access.data.publicAddresses.length > 0 && (
-          <FactRow label="Public address" className="font-mono wrap-anywhere">
-            {access.data.publicAddresses.join(", ")}
-          </FactRow>
-        )}
-        {admin && access.data && access.data.exposure === "allowlist" && (
-          <FactRow label="Allowed" className="font-mono wrap-anywhere">
-            {access.data.allow.join(", ")}
-          </FactRow>
-        )}
-        {admin && firewall && (
-          <FactRow label="Firewall">
-            {firewall.active
-              ? `${firewall.backend ?? "The firewall"} is on, and port ${access.data?.port ?? conn.port} is ${firewall.open ? "open" : firewall.allowed.length > 0 ? `open to ${plural(firewall.allowed.length, "listed address", "listed addresses")}` : "closed"}`
-              : "No firewall is active on this machine"}
-          </FactRow>
-        )}
-        {admin && access.error && !access.data && (
-          <FactRow label="Firewall">
-            <span className="text-muted-foreground">Could not be read: {access.error.message}</span>{" "}
-            <button
-              type="button"
-              className="rounded-sm underline focus-ring"
-              onClick={access.refresh}
-            >
-              Try again
-            </button>
-          </FactRow>
-        )}
-        <FactRow label="Changed">
-          {summary.managed
-            ? "From Settings: the dashboard owns the binding"
-            : summary.source === "remote"
-              ? "On the machine it runs on"
-              : "In the server's own configuration"}
-        </FactRow>
-      </FactRows>
-    </Block>
+          <InfoTip label={`What “${exposure.word}” means`}>{exposure.sentence}</InfoTip>
+          {stale && <NotUpdating error={stale} />}
+        </>
+      }
+      facts={
+        <span className="contents">
+          {conn.port && (
+            <span>
+              listens on{" "}
+              <span className="font-mono">
+                {conn.host}:{conn.port}
+              </span>
+            </span>
+          )}
+          {admin && open && access.data && access.data.publicAddresses.length > 0 && (
+            <span>
+              public at <Mono>{access.data.publicAddresses.join(", ")}</Mono>
+            </span>
+          )}
+          {admin && access.data && access.data.exposure === "allowlist" && (
+            <span>
+              allows <Mono>{access.data.allow.join(", ")}</Mono>
+            </span>
+          )}
+          {admin && firewall && (
+            <span>
+              {firewall.active
+                ? `${firewall.backend ?? "the firewall"} is on, and port ${access.data?.port ?? conn.port} is ${firewall.open ? "open" : firewall.allowed.length > 0 ? `open to ${plural(firewall.allowed.length, "listed address", "listed addresses")}` : "closed"}`
+                : "no firewall is active on this machine"}
+            </span>
+          )}
+          {admin && access.error && !access.data && (
+            <span>
+              The firewall could not be read: {access.error.message}{" "}
+              <button
+                type="button"
+                className="rounded-sm underline focus-ring"
+                onClick={access.refresh}
+              >
+                Try again
+              </button>
+            </span>
+          )}
+          <span>
+            {summary.managed
+              ? "changed from Settings: the dashboard owns the binding"
+              : summary.source === "remote"
+                ? "changed on the machine it runs on"
+                : "changed in the server's own configuration"}
+          </span>
+        </span>
+      }
+      actions={<BlockLink href={href("settings")}>{admin ? "Change" : "Settings"}</BlockLink>}
+    />
   )
 }
 
@@ -359,7 +456,7 @@ export function ReachableFrom() {
  * The dumps kept of this database, read every thirty seconds — and every two
  * while one is being taken, since a dump in flight is not in the list and the
  * list is the only place its end shows. The read dials no database, so it is
- * made for a stopped server too; the tile above and the block below share it.
+ * made for a stopped server too; the picture above and the line below share it.
  */
 export function useBackups(enabled: boolean) {
   const { id } = useDatabase()
@@ -386,12 +483,12 @@ export function useBackups(enabled: boolean) {
 const STRIP = 14
 
 /**
- * The dumps kept — the newest few as a strip, the newest one's facts — and
- * the way to take one now. A dump runs in the background on the server: the
- * block says it is running in the dump's own words, and reports how it ended
- * when the list stops carrying it.
+ * The dumps kept — the newest few as a strip, how many and how much, the
+ * newest one's facts and where they are — and the way to take one now. A dump
+ * runs in the background on the server: the line says it is running in the
+ * dump's own words, and reports how it ended when the list stops carrying it.
  */
-export function BackupsBlock({
+export function BackupsLine({
   backups,
   answering = true,
 }: {
@@ -404,7 +501,8 @@ export function BackupsBlock({
   const [starting, setStarting] = useState(false)
   // The dump this page began, so its end can be told from one begun elsewhere.
   const mine = useRef<string | undefined>(undefined)
-  const job = backups.data?.job
+  const data = backups.data
+  const job = data?.job
   const refresh = backups.refresh
   const check = status.refresh
   const name = conn.name
@@ -455,70 +553,91 @@ export function BackupsBlock({
     return strip
   }, [backups.data, job])
 
+  const newest = data?.files[0]
+  const kept = data?.files.reduce((sum, file) => sum + file.size, 0) ?? 0
+  const none = data !== undefined && data.files.length === 0 && !job
+  const stale = staleOf(backups)
   return (
-    <Block
-      title="Backups"
-      stale={staleOf(backups)}
-      actions={<BlockLink href={href("backups")}>All backups</BlockLink>}
-    >
-      <Read poll={backups} what="the dumps" skeleton={<FactsSkeleton rows={3} />}>
-        {(data) => {
-          const newest = data.files[0]
-          const kept = data.files.reduce((sum, file) => sum + file.size, 0)
-          return (
-            <div className="space-y-3">
-              {data.files.length === 0 && !job ? (
-                <Quiet>
-                  No dump of {name} has been taken here. A dump is one file in this
-                  dashboard&rsquo;s dump directory that Backups can restore from
-                  {answering ? "." : "; one can be taken once the server answers."}
-                </Quiet>
-              ) : (
-                <FactRows>
-                  <FactRow label="Kept">
-                    <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <OutcomeStrip
-                        items={outcomes}
-                        label={`The last ${plural(Math.min(data.files.length, STRIP), "dump")}${job ? ", and one running now" : ""}`}
-                      />
-                      <span className="numeric">
-                        {plural(data.files.length, "dump")} · {bytes(kept)}
-                      </span>
-                    </span>
-                  </FactRow>
-                  {newest && (
-                    <FactRow label="Newest">
-                      <span title={timestamp(newest.takenAt)}>{relativeTime(newest.takenAt)}</span>
-                      {" · "}
-                      {bytes(newest.size)}
-                      {" · "}
-                      {newest.tool ?? newest.format}
-                      {newest.summary ? ` · ${newest.summary}` : ""}
-                    </FactRow>
-                  )}
-                  <FactRow label="Directory" className="font-mono wrap-anywhere">
-                    {data.dir}
-                  </FactRow>
-                </FactRows>
-              )}
-              {job ? (
-                <p className="flex text-xs font-medium" data-slot="backup-running">
-                  <TextShimmer>{`${job.title}…`}</TextShimmer>
-                </p>
-              ) : (
-                answering &&
-                can("service.control") && (
-                  <Button size="sm" variant="outline" pending={starting} onClick={start}>
-                    <Archive />
-                    Back up now
-                  </Button>
-                )
-              )}
-            </div>
-          )
-        }}
-      </Read>
-    </Block>
+    <FactLine
+      name="Backups"
+      mark={
+        <WireMark tone="logo" size="md">
+          <Archive aria-hidden className={cn(newest && "text-success")} />
+        </WireMark>
+      }
+      reading={
+        data ? (
+          <span className="flex min-w-0 animate-rise items-center gap-x-3">
+            {job ? (
+              <span className="flex text-body font-medium" data-slot="backup-running">
+                <TextShimmer>{`${job.title}…`}</TextShimmer>
+              </span>
+            ) : none ? (
+              <span className="min-w-0 truncate font-normal text-muted-foreground">
+                No dump of {name} has been taken here
+              </span>
+            ) : null}
+            <OutcomeStrip
+              items={outcomes}
+              label={`The last ${plural(Math.min(data.files.length, STRIP), "dump")}${job ? ", and one running now" : ""}`}
+            />
+            {data.files.length > 0 && (
+              <span className="numeric min-w-0 truncate">
+                {plural(data.files.length, "dump")} · {bytes(kept)}
+              </span>
+            )}
+            {stale && <NotUpdating error={stale} />}
+          </span>
+        ) : backups.error ? (
+          <span className="font-normal text-muted-foreground">The dumps could not be read</span>
+        ) : (
+          <Skeleton className="h-3 w-40" />
+        )
+      }
+      facts={
+        data ? (
+          <span className="contents">
+            {newest && (
+              <span>
+                newest <span title={timestamp(newest.takenAt)}>{relativeTime(newest.takenAt)}</span>
+                {" · "}
+                {bytes(newest.size)}
+                {" · "}
+                {newest.tool ?? newest.format}
+                {newest.summary ? ` · ${newest.summary}` : ""}
+              </span>
+            )}
+            {none && (
+              <span>
+                a dump is one file Backups can restore from
+                {answering ? "" : "; one can be taken once the server answers"}
+              </span>
+            )}
+            <Mono title="The dashboard's dump directory for this database">{data.dir}</Mono>
+          </span>
+        ) : backups.error ? (
+          <span>
+            {errorMessage(backups.error)}{" "}
+            <button type="button" className="rounded-sm underline focus-ring" onClick={refresh}>
+              Try again
+            </button>
+          </span>
+        ) : (
+          <Skeleton className="h-2.5 w-56" />
+        )
+      }
+      actions={
+        <>
+          {data && !job && answering && can("service.control") && (
+            <Button size="xs" variant="outline" pending={starting} onClick={start}>
+              <Archive />
+              Back up now
+            </Button>
+          )}
+          <BlockLink href={href("backups")}>All backups</BlockLink>
+        </>
+      }
+    />
   )
 }
 
@@ -861,7 +980,19 @@ export function Keyspaces({ server }: { server: PollState<RedisServer> }) {
   const { href } = useDatabase()
   const [all, setAll] = useState(false)
   return (
-    <Block title="Databases on this server" stale={staleOf(server)}>
+    <Block
+      title="Databases on this server"
+      stale={staleOf(server)}
+      actions={
+        server.data &&
+        server.data.keyspace.length > 0 && (
+          <span className="numeric text-hint text-muted-foreground">
+            {server.data.keyspace.length} of its {server.data.databases} numbered databases hold
+            keys
+          </span>
+        )
+      }
+    >
       <Read
         poll={server}
         what="the keyspace"
@@ -885,9 +1016,6 @@ export function Keyspaces({ server }: { server: PollState<RedisServer> }) {
                 ))}
               </CardGrid>
               <ShowAll count={data.keyspace.length} all={all} onToggle={setAll} />
-              <p className="mt-2 text-hint text-muted-foreground">
-                {data.keyspace.length} of its {data.databases} numbered databases hold keys.
-              </p>
             </>
           )
         }

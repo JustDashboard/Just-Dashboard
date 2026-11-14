@@ -4,29 +4,39 @@ import { Fragment } from "react"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { FactDot } from "@/components/metrics/host-identity"
-import type { SectionId } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit/engine-mark"
 import { EnvironmentTag, ProtectedTag } from "@/components/database/kit/environment-tag"
 import { ConnectPopover } from "@/components/database/shell/connect-popover"
 import { ConnectionSwitcher } from "@/components/database/shell/connection-switcher"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { DatabaseHeader } from "@/components/database/shell/database-header"
 import { DatabaseVerbs } from "@/components/database/shell/database-verbs"
 import { connectionFacts } from "@/components/database/shell/facts"
+import { databaseHead, fillsUnderHeader } from "@/components/database/shell/header-rule"
 import { useDatabaseNavScope } from "@/components/database/shell/nav-scope"
-import { databasePlace } from "@/components/database/shell/routes"
 import { DatabaseStatusMark } from "@/components/database/shell/status"
-
-/** The workbenches whose frame draws the strip itself, as its head. */
-const HEADED: readonly SectionId[] = ["data", "query", "schema", "diagram"]
 
 /**
  * The frame around every page of one database.
  *
- * It publishes the database's pages to the rail, draws the identity strip,
- * and hands the rest of the window to the page. The strip is a fixed row and
- * the page's region below it is a definite height with its own scroll, so a
- * reading page scrolls inside it and a workbench (`<Page fill>`) is exactly
- * the space that is left — the strip never pushes a grid past the window.
+ * It publishes the database's pages to the rail, draws what the page opens
+ * on, and hands the rest of the window to the page. What a page opens on is
+ * decided in `header-rule.ts`, once for all of them:
+ *
+ * - **The database's header**, on every page that has no line of its own to
+ *   open on: Home, Performance, Access, Alerts, Backups, Import, Logs,
+ *   Generate, Search, the assistant, every Settings page, and an address that
+ *   is none of them. It is the same header at the same height on each, as a
+ *   project's is, and it scrolls with a reading page as a project's does.
+ * - **The one-line strip**, over the page of one item (a statement, a table,
+ *   a session, an account), which opens on that item's own identity line.
+ * - **Nothing**, over Data, Query, Schema and the Diagram: their frame's own
+ *   head is the database's line (`workbench/chrome.tsx`).
+ *
+ * The page's region is a definite height with its own scroll, so a reading
+ * page scrolls inside it, header and all, and a page held to the window is
+ * exactly the space that is left: under the strip, or under the header for
+ * the two that are held to the window beneath it (the assistant, Logs).
  *
  * The page region is keyed on the connection and on what it is: every read
  * under it names the connection in its own dependencies, and a switch that
@@ -40,57 +50,64 @@ export function DatabaseShell({ children }: { children: React.ReactNode }) {
   const { conn, engine } = useDatabase()
   const pathname = usePathname()
   useDatabaseNavScope()
-  const place = databasePlace(pathname)
-  // Data, Query, Schema and the Diagram carry the strip as the head of their
-  // own frame (`workbench/chrome.tsx`). Only where the engine has the page:
-  // the statement that it has none is a reading page, under the strip.
-  const headed = Boolean(
-    place && HEADED.includes(place.section) && engine.section(place.section)?.workbench,
-  )
+  const head = databaseHead(pathname, engine.section)
+  const fills = head === "full" && fillsUnderHeader(pathname, engine.section)
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* The home opens on its own identity line, large; the strip under it
-          would be the same facts twice. */}
-      {place?.section !== "home" && !headed && <IdentityStrip />}
-      <div key={`${conn.id}:${engine.id}`} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-        {children}
+      {head === "strip" && <IdentityStrip />}
+      <div
+        key={`${conn.id}:${engine.id}`}
+        data-slot="database-pages"
+        className={cn(
+          "min-h-0 min-w-0 flex-1 overflow-y-auto",
+          // A page that arrives is brought into view by its own first
+          // element, which stands under the header: without room above it
+          // the region stopped with the header scrolled just out of sight.
+          head === "full" && "[&_[data-slot=page]]:scroll-mt-96",
+          fills && "flex flex-col",
+        )}
+      >
+        {head === "full" && (
+          // The page's own gutters and measure, so the header's edges are the
+          // edges of what stands under it. It keeps the strip's slot name:
+          // whatever asks a database's page which database it is finds it here.
+          <div
+            data-slot="database-strip"
+            data-head="page"
+            className="mx-auto w-full max-w-[1440px] min-w-0 shrink-0 px-5 pt-4 md:px-8 md:pt-5"
+          >
+            <DatabaseHeader />
+          </div>
+        )}
+        {fills ? <div className="min-h-0 min-w-0 flex-1">{children}</div> : children}
       </div>
     </div>
   )
 }
 
 /**
- * Which database this is, on every page under it: its engine, its name as
- * the control that goes to another, what it is and where, what it is for,
- * whether it answers, and the two things asked of a database from any page —
- * how to connect to it, and its verbs.
+ * Which database this is, over the page of one of its items: its engine, its
+ * name as the control that goes to another, what it is and where, what it is
+ * for, whether it answers, and the two things asked of a database from any
+ * page — how to connect to it, and its verbs.
  *
- * It is one compact row, not a header: the page's name is the rail's to say
- * (§14), and the facts are muted text rather than a second line of chrome.
- * On a workbench it takes the workbench's narrow gutters so its edge is the
- * frame's edge.
+ * It is one compact row, not a header: the page under it opens on the item's
+ * own identity line, and the facts are muted text rather than a second line
+ * of chrome.
  *
  * What fits is decided by the strip's own width, not the window's (§12): the
  * rail beside it takes a fifth of a laptop. The name gives way before
  * anything is drawn over anything — it truncates, and the facts go first.
  * Below the width where the labels fit beside the status they take a line of
  * their own under the name rather than leave: "production" and "protected"
- * are the two words a workbench must not lose on a phone.
+ * are the two words a page must not lose on a phone.
  */
 function IdentityStrip() {
   const { conn, summary, engine, status, readOnly } = useDatabase()
-  const pathname = usePathname()
-  const section = databasePlace(pathname)?.section
-  const workbench = Boolean(section && engine.section(section)?.workbench)
   const labelled = Boolean(conn.environment?.trim()) || readOnly
   return (
     <div data-slot="database-strip" className="@container shrink-0 border-b border-hairline">
-      <div
-        className={cn(
-          "mx-auto flex w-full max-w-[1440px] min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 py-2",
-          workbench ? "px-2 md:px-3" : "px-5 md:px-8",
-        )}
-      >
+      <div className="mx-auto flex w-full max-w-[1440px] min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-2 md:px-8">
         <div className="flex min-w-0 flex-1 items-center gap-x-3">
           <EngineMark engine={engine} size="sm" />
           <ConnectionSwitcher />

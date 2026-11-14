@@ -6,6 +6,7 @@ import { bytes, percent, plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
+import { InfoTip } from "@/components/form"
 import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { Button } from "@/components/ui/button"
 import {
@@ -70,6 +71,23 @@ export function millis(value: number): string {
   if (value >= 1000) return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)} s`
   if (value >= 10) return `${Math.round(value)} ms`
   return `${value.toFixed(value >= 1 ? 1 : 2)} ms`
+}
+
+/**
+ * What a ranked block's figures are of, on its title's line: the share's
+ * whole, the window it was counted over. It was a sentence under the list;
+ * the whole of it is still on the pointer.
+ */
+function HeadFact({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <span
+      data-slot="head-fact"
+      title={title}
+      className="numeric text-hint text-muted-foreground max-sm:hidden"
+    >
+      {children}
+    </span>
+  )
 }
 
 /**
@@ -139,7 +157,17 @@ export function BusiestStatements() {
       stale={staleOf(statements)}
       actions={
         statements.data?.supported && (
-          <BlockLink href={href("performance", { view: "statements" })}>Performance</BlockLink>
+          <>
+            {items.length > 0 && (
+              <HeadFact
+                title={`Share of the runtime of every ${engine.nouns.statement} counted${statements.data.since ? `, starting ${relativeTime(statements.data.since)}` : ""}.`}
+              >
+                share of runtime
+                {statements.data.since ? ` since ${relativeTime(statements.data.since)}` : ""}
+              </HeadFact>
+            )}
+            <BlockLink href={href("performance", { view: "statements" })}>Performance</BlockLink>
+          </>
         )
       }
     >
@@ -150,13 +178,7 @@ export function BusiestStatements() {
               No {engine.nouns.statement} has been counted yet. The list fills as they run.
             </Quiet>
           ) : data.supported ? (
-            <>
-              <RankList items={items} />
-              <p className="mt-2 text-hint text-muted-foreground">
-                Share of the runtime of every {engine.nouns.statement} counted
-                {data.since ? `, starting ${relativeTime(data.since)}` : ""}.
-              </p>
-            </>
+            <RankList items={items} />
           ) : (
             <div className="space-y-3">
               <Quiet>
@@ -248,25 +270,32 @@ export function BusiestCommands() {
     <Block
       title="Busiest commands"
       stale={staleOf(stats)}
-      actions={<BlockLink href={href("performance", { view: "commands" })}>Performance</BlockLink>}
+      actions={
+        <>
+          {items.length > 0 && ranked && (
+            <>
+              <HeadFact>share of time on keys since it started</HeadFact>
+              <InfoTip label="What the shares are of">
+                Share of the time spent in {plural(ranked.count, "command")} on keys since the
+                server started.
+                {ranked.apart > 0 && stats.data && stats.data.totalUsec > 0
+                  ? ` INFO, COMMAND and the other commands that ask about the server — this dashboard's own among them — took another ${percent((ranked.apart / stats.data.totalUsec) * 100, 0)} of the server's time and are left out.`
+                  : ""}
+              </InfoTip>
+            </>
+          )}
+          <BlockLink href={href("performance", { view: "commands" })}>Performance</BlockLink>
+        </>
+      }
     >
       <Read poll={stats} what="the command statistics" skeleton={<RankSkeleton rows={TOP} />}>
-        {(data) =>
+        {() =>
           items.length === 0 ? (
             <Quiet>
               No command that reads or writes a key has been counted since the server started.
             </Quiet>
           ) : (
-            <>
-              <RankList items={items} />
-              <p className="mt-2 text-hint text-muted-foreground">
-                Share of the time spent in {plural(ranked?.count ?? 0, "command")} on keys since the
-                server started.
-                {ranked && ranked.apart > 0 && data.totalUsec > 0
-                  ? ` INFO, COMMAND and the other commands that ask about the server — this dashboard's own among them — took another ${percent((ranked.apart / data.totalUsec) * 100, 0)} of the server's time and are left out.`
-                  : ""}
-              </p>
-            </>
+            <RankList items={items} />
           )
         }
       </Read>
@@ -330,19 +359,26 @@ export function SlowOperations() {
     <Block
       title="Slowest operations"
       stale={staleOf(profiler)}
-      actions={<BlockLink href={href("performance", { view: "slow" })}>Performance</BlockLink>}
+      actions={
+        <>
+          {items.length > 0 && profiler.data && (
+            <HeadFact
+              title={`The slowest of the last ${profiler.data.entries.length} operations the profiler of ${profiler.data.database} kept${profiler.data.level === 0 ? "; it is off now" : ` (slower than ${profiler.data.slowMs} ms)`}.`}
+            >
+              of the last {profiler.data.entries.length} kept
+              {profiler.data.level === 0
+                ? " · profiler off now"
+                : ` · slower than ${profiler.data.slowMs} ms`}
+            </HeadFact>
+          )}
+          <BlockLink href={href("performance", { view: "slow" })}>Performance</BlockLink>
+        </>
+      }
     >
       <Read poll={profiler} what="the profiler" skeleton={<RankSkeleton rows={TOP} />}>
         {(data) =>
           items.length > 0 ? (
-            <>
-              <RankList items={items} />
-              <p className="mt-2 text-hint text-muted-foreground">
-                The slowest of the last {data.entries.length} operations the profiler of{" "}
-                <span className="font-mono">{data.database}</span> kept
-                {data.level === 0 ? "; it is off now" : ` (slower than ${data.slowMs} ms)`}.
-              </p>
-            </>
+            <RankList items={items} />
           ) : data.level === 0 ? (
             <div className="space-y-3">
               <Quiet>
