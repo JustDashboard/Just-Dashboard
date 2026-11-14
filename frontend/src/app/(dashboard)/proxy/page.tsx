@@ -585,7 +585,7 @@ export default function ProxyOverviewPage() {
                   // arriving where two lines of text stood.
                   <div className="space-y-2">
                     {[0, 1, 2].map((row) => (
-                      <Skeleton key={row} className="h-[3.625rem] w-full rounded-xl" />
+                      <Skeleton key={row} className="h-[3.875rem] w-full rounded-xl" />
                     ))}
                   </div>
                 ) : vhosts.error ? (

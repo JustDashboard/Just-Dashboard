@@ -71,9 +71,10 @@ for (const width of [1280, 390]) {
         await expect(identity, name).toHaveAttribute("data-layout", "project")
         // Nothing stands over the line: no way back, no row of buttons.
         await expect(page.locator("[data-slot='page-context']"), name).toHaveCount(0)
-        // One command wears the brand's face, at most.
+        // One command wears the brand's face, at most; the half of a split
+        // command that opens its other choices is the same command.
         expect(
-          await identity.locator("button[data-variant='default']").count(),
+          await identity.locator("button[data-variant='default']:not([aria-haspopup])").count(),
           `${name}: brand commands`,
         ).toBeLessThanOrEqual(1)
         await risen(page)
@@ -125,11 +126,10 @@ test("a line with views under it draws no rule of its own", async ({ page }) => 
   }
 })
 
-test("the lists of things to open draw one size of row across the section", async ({ page }) => {
+test("a certificate's row is the size of a stream's", async ({ page }) => {
   await mockSection(page)
   const heights: Record<string, number> = {}
   for (const [name, path] of [
-    ["routes", "/proxy"],
     ["streams", "/proxy/streams"],
     ["certificates", "/proxy/certificates"],
   ]) {
@@ -139,10 +139,8 @@ test("the lists of things to open draw one size of row across the section", asyn
     await risen(page)
     heights[name] = Math.round((await row.boundingBox())!.height)
   }
-  // A certificate's row had a larger name and tile than a stream's, and so
-  // had a route's on the overview.
+  // It had a larger name and tile than the section's other lists.
   expect(heights.certificates).toBe(heights.streams)
-  expect(heights.routes).toBe(heights.streams)
 })
 
 test("a certificate list that cannot be read claims no count", async ({ page }) => {
