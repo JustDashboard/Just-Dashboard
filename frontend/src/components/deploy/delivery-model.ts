@@ -28,3 +28,69 @@ export function deliveryLead(data: DeploymentInsights, format: (seconds: number)
   else if (data.failed > 0) parts.push("no failure followed by a success yet")
   return { title, hint: parts.join(" · ") }
 }
+
+/** One fact of the line under the history's lead: its words, and what they were worked out from. */
+export type DeliveryFact = {
+  key: "rate" | "frequency" | "duration" | "recovery"
+  /** The figure, drawn in the page's ink. */
+  figure: string
+  /** The words after it. */
+  words: string
+  /** The figure's basis, for a `title`. */
+  basis: string
+  tone?: "warning"
+}
+
+/**
+ * The same figures as a line of facts, for the Deployments page: the success
+ * rate, how often, how long and how fast it recovers, each with the basis the
+ * four captioned figures used to print under themselves. A fact with nothing
+ * behind it is left out rather than drawn as a dash: a window nothing
+ * succeeded in has no release time, and one with no failure has no recovery.
+ * `within` words the slow tail, so the page says it as it says every other.
+ */
+export function deliveryFacts(
+  data: DeploymentInsights,
+  format: (seconds: number) => string,
+  within: (figure: string) => string,
+): DeliveryFact[] {
+  const decided = data.succeeded + data.failed
+  const facts: DeliveryFact[] = []
+  if (decided > 0)
+    facts.push({
+      key: "rate",
+      figure: `${Math.round(data.successRate * 100)}%`,
+      words: "succeeded",
+      basis: `${data.succeeded} of ${decided} decided ${decided === 1 ? "release" : "releases"}`,
+      tone: data.failureStreak > 0 ? "warning" : undefined,
+    })
+  if (data.succeeded > 0)
+    facts.push({
+      key: "frequency",
+      figure: data.deploysPerWeek.toFixed(1),
+      words: "a week",
+      basis: `${data.succeeded} successful over ${data.windowDays} ${data.windowDays === 1 ? "day" : "days"}`,
+    })
+  if (data.medianDurationSeconds > 0)
+    facts.push({
+      key: "duration",
+      figure: format(data.medianDurationSeconds),
+      words: `usually, ${within(format(data.p95DurationSeconds))}`,
+      basis: "The median release, from claim to finish",
+    })
+  if (data.recoveredFailures > 0)
+    facts.push({
+      key: "recovery",
+      figure: format(data.meanRecoverySeconds),
+      words: "to recover",
+      basis: `Mean over ${data.recoveredFailures} recovered ${data.recoveredFailures === 1 ? "failure" : "failures"}`,
+    })
+  else if (data.failed > 0)
+    facts.push({
+      key: "recovery",
+      figure: "",
+      words: "no failure followed by a success yet",
+      basis: "A failure is recovered when a later release succeeds",
+    })
+  return facts
+}

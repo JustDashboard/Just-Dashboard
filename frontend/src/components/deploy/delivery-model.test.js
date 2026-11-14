@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { deliveryLead } from "./delivery-model"
+import { deliveryFacts, deliveryLead } from "./delivery-model"
 
 const format = (seconds) => `${seconds}s`
 const data = (overrides) => ({
   windowDays: 30,
   succeeded: 14,
   failed: 0,
+  successRate: 1,
+  failureStreak: 0,
   deploysPerWeek: 3.27,
   medianDurationSeconds: 131,
   p95DurationSeconds: 181,
@@ -47,5 +49,56 @@ describe("deliveryLead", () => {
     expect(
       deliveryLead(data({ succeeded: 0, windowDays: 7, medianDurationSeconds: 0 }), format).title,
     ).toBe("No release finished in the last 7 days")
+  })
+})
+
+describe("deliveryFacts", () => {
+  const within = (figure) => `19 in 20 inside ${figure}`
+  const words = (facts) => facts.map((fact) => `${fact.figure} ${fact.words}`.trim())
+
+  test("a clean window has a rate, a frequency and a time, and no recovery", () => {
+    const facts = deliveryFacts(data(), format, within)
+    expect(words(facts)).toEqual([
+      "100% succeeded",
+      "3.3 a week",
+      "131s usually, 19 in 20 inside 181s",
+    ])
+    expect(facts[0].basis).toBe("14 of 14 decided releases")
+    expect(facts[0].tone).toBeUndefined()
+    expect(facts[1].basis).toBe("14 successful over 30 days")
+  })
+
+  test("failures add how recovery went, and a streak colours the rate", () => {
+    const facts = deliveryFacts(
+      data({
+        succeeded: 9,
+        failed: 3,
+        successRate: 0.75,
+        failureStreak: 1,
+        recoveredFailures: 2,
+        meanRecoverySeconds: 5400,
+      }),
+      format,
+      within,
+    )
+    expect(words(facts).at(0)).toBe("75% succeeded")
+    expect(facts[0].tone).toBe("warning")
+    expect(words(facts).at(-1)).toBe("5400s to recover")
+    expect(facts.at(-1).basis).toBe("Mean over 2 recovered failures")
+  })
+
+  test("a window nothing succeeded in has no frequency and no time", () => {
+    const facts = deliveryFacts(
+      data({ succeeded: 0, failed: 2, successRate: 0, medianDurationSeconds: 0 }),
+      format,
+      within,
+    )
+    expect(words(facts)).toEqual(["0% succeeded", "no failure followed by a success yet"])
+  })
+
+  test("a window of only cancelled runs has no facts", () => {
+    expect(deliveryFacts(data({ succeeded: 0, medianDurationSeconds: 0 }), format, within)).toEqual(
+      [],
+    )
   })
 })

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import { useViewState } from "@/lib/view-state"
 import { get } from "@/lib/api"
 import { dayAt, relativeTime, weekdayAt } from "@/lib/format"
@@ -8,15 +8,17 @@ import { latencyWords } from "@/lib/latency-words"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentInsights } from "@/lib/types"
+import { FactDot } from "@/components/metrics/host-identity"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { Skeleton } from "@/components/ui/skeleton"
 import { RankList } from "@/components/rank-list"
 import { Rocket } from "@/components/icons"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { formatDuration } from "@/components/deploy/vocabulary"
 import { causeTitle } from "@/components/deploy/failure-cause"
-import { deliveryLead } from "@/components/deploy/delivery-model"
+import { deliveryFacts, deliveryLead } from "@/components/deploy/delivery-model"
 import { WireMark, WireNode } from "@/components/deploy/wire"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
@@ -68,6 +70,10 @@ function dayLabel(date: string) {
 function dayHeading(date: string) {
   return weekdayAt(new Date(`${date}T00:00:00`))
 }
+
+/** The charts' grid, and a chart's place while its days are read: its head, its bars and its axis. */
+const CHARTS = "grid min-w-0 gap-x-10"
+const CHART_WAITING = "h-[10.375rem] w-full rounded-lg"
 
 type Day = DeploymentInsights["daily"][number]
 type DayLine = { text: string; fill?: string }
@@ -208,13 +214,14 @@ function DayBars({
  * `onFailureClick` lets a page that lists the runs narrow to the failed ones
  * from a reason's row.
  *
- * History puts each pair of readings over the chart it explains, rather than
- * in a second row of tiles above the deployment records (§15 pass 2): success
- * and frequency over the releases per day, duration and recovery over the
- * release time per day. The two charts share their days, so the day a release
- * failed and the day one ran long are found at the same place in each. Why
- * the releases failed runs under both, since it explains the first chart's
- * red and the second's recovery.
+ * History opens on the same sentence on the same mark, and says the rest as
+ * one line of facts under it — the success rate, how often, how long and how
+ * fast it recovers — where it had four figures, each over a caption, that the
+ * reader put together into the sentence the Overview already wrote. A fact's
+ * basis ("9 of 12 decided releases") is its title. Then the two charts, which
+ * share their days, so the day a release failed and the day one ran long are
+ * found at the same place in each. Why the releases failed runs under both,
+ * since it explains the first chart's red and the second's recovery.
  */
 export function Insights({
   projectId,
@@ -247,15 +254,12 @@ export function Insights({
     [projectId, range, environmentId],
   )
   const data = insights.data
-  const decided = (data?.succeeded ?? 0) + (data?.failed ?? 0)
   const daily = data?.daily ?? []
   const durationValues = daily.map((day) => day.medianDurationSeconds).filter((value) => value > 0)
   // The window's median is drawn across the days, so it has to be on their scale.
   const slowest = Math.max(data?.medianDurationSeconds ?? 0, ...durationValues)
   const total = (day: Day) => day.succeeded + day.failed + day.cancelled
   const peak = Math.max(1, ...daily.map(total))
-  const reading = "space-y-1"
-  const figure = "numeric text-2xl font-semibold tracking-tight"
   const axis = daily.length > 0 && (
     <p className="numeric flex justify-between gap-3 text-micro text-muted-foreground">
       <span>{dayLabel(daily[0].date)}</span>
@@ -315,40 +319,14 @@ export function Insights({
 
   const charts = data && data.runs > 0 && (
     <div
+      data-slot="delivery-charts"
       className={cn(
-        "grid min-w-0 gap-x-10",
+        CHARTS,
         history ? "gap-y-8" : "gap-y-6",
         (history || failures) && "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
       )}
     >
       <div className="min-w-0 space-y-2">
-        {history && (
-          <dl className="mb-5 grid grid-cols-2 gap-x-8">
-            <div className={reading}>
-              <dt className="text-hint text-muted-foreground">Success rate</dt>
-              <dd className={cn(figure, data.failureStreak > 0 && "text-warning")}>
-                {decided ? `${Math.round(data.successRate * 100)}%` : "—"}
-              </dd>
-              <dd className="text-hint text-muted-foreground">
-                <span>
-                  {data.succeeded} of {decided} decided release{decided === 1 ? "" : "s"}
-                </span>
-                {data.failureStreak > 0 && (
-                  <span className="ml-2 text-destructive">
-                    {data.failureStreak} failed in a row
-                  </span>
-                )}
-              </dd>
-            </div>
-            <div className={reading}>
-              <dt className="text-hint text-muted-foreground">Deploys per week</dt>
-              <dd className={figure}>{data.deploysPerWeek.toFixed(1)}</dd>
-              <dd className="text-hint text-muted-foreground">
-                {data.succeeded} successful over {data.windowDays} days
-              </dd>
-            </div>
-          </dl>
-        )}
         <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h3 className="text-title font-medium">Releases per day</h3>
           <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
@@ -404,30 +382,6 @@ export function Insights({
 
       {history && (
         <div className="min-w-0 space-y-2">
-          <dl className="mb-5 grid grid-cols-2 gap-x-8">
-            <div className={reading}>
-              <dt className="text-hint text-muted-foreground">Median release</dt>
-              <dd className={figure}>{seconds(data.medianDurationSeconds)}</dd>
-              <dd className="text-hint text-muted-foreground">
-                {data.medianDurationSeconds
-                  ? `${latencyWords("p95", seconds(data.p95DurationSeconds))} · claim to finish`
-                  : "no release succeeded in this window"}
-              </dd>
-            </div>
-            <div className={reading}>
-              <dt className="text-hint text-muted-foreground">Recovery time</dt>
-              <dd className={figure}>
-                {data.recoveredFailures ? seconds(data.meanRecoverySeconds) : "—"}
-              </dd>
-              <dd className="text-hint text-muted-foreground">
-                {data.recoveredFailures
-                  ? `mean over ${data.recoveredFailures} recovered failure${data.recoveredFailures === 1 ? "" : "s"}`
-                  : data.failed
-                    ? "no failure followed by a success yet"
-                    : "no failures in this window"}
-              </dd>
-            </div>
-          </dl>
           {/* A window nothing succeeded in has no release time, and a row of
               empty days would draw one as zero (§10). */}
           {durationValues.length > 0 && (
@@ -492,7 +446,14 @@ export function Insights({
     </div>
   )
 
-  const lead = !history && data && data.runs > 0 ? deliveryLead(data, seconds) : undefined
+  const lead = data && data.runs > 0 ? deliveryLead(data, seconds) : undefined
+  const facts =
+    history && data && data.runs > 0
+      ? deliveryFacts(data, seconds, (figure) => latencyWords("p95", figure))
+      : []
+  const streak = data && data.failureStreak > 0 && (
+    <span className="text-destructive">{data.failureStreak} failed in a row</span>
+  )
 
   return (
     <div className={children ? "space-y-8" : undefined}>
@@ -514,9 +475,31 @@ export function Insights({
             </Select>
           }
         />
-        <PanelBody className={cn("space-y-6", lead && "pt-4")}>
+        <PanelBody className={cn("space-y-6", (lead || history) && "pt-4")}>
           {insights.error && <ErrorState error={insights.error} />}
-          {insights.loading && !data && <LoadingRows rows={2} />}
+          {insights.loading &&
+            !data &&
+            (history ? (
+              // The lead and the two charts at the size they will have, so
+              // the charts land where their placeholders stood and, in a
+              // window with no failure to explain, the deployments under
+              // them do not move.
+              <div aria-hidden data-slot="delivery-waiting" className="space-y-6">
+                <div className="flex min-h-11 items-center gap-3.5">
+                  <Skeleton className="size-11 shrink-0 rounded-xl" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Skeleton className="h-3.5 w-72 max-w-full" />
+                    <Skeleton className="h-3 w-96 max-w-full" />
+                  </div>
+                </div>
+                <div className={cn(CHARTS, "gap-y-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]")}>
+                  <Skeleton className={CHART_WAITING} />
+                  <Skeleton className={CHART_WAITING} />
+                </div>
+              </div>
+            ) : (
+              <LoadingRows rows={2} />
+            ))}
           {data && data.runs === 0 && (
             <EmptyNote>
               No release finished in this window. Figures appear after the first deployment ends.
@@ -540,14 +523,38 @@ export function Insights({
               }
               title={lead.title}
               hint={
-                <>
-                  {lead.hint}
-                  {data.failureStreak > 0 && (
-                    <span className="ml-2 text-destructive">
-                      {data.failureStreak} failed in a row
-                    </span>
-                  )}
-                </>
+                history ? (
+                  <span
+                    data-slot="delivery-facts"
+                    className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5"
+                  >
+                    {facts.map((fact, index) => (
+                      <Fragment key={fact.key}>
+                        {index > 0 && <FactDot />}
+                        <span title={fact.basis}>
+                          {fact.figure && (
+                            <span
+                              className={cn(
+                                "numeric font-medium",
+                                fact.tone === "warning" ? "text-warning" : "text-foreground",
+                              )}
+                            >
+                              {fact.figure}{" "}
+                            </span>
+                          )}
+                          {fact.words}
+                        </span>
+                      </Fragment>
+                    ))}
+                    {streak && facts.length > 0 && <FactDot />}
+                    {streak}
+                  </span>
+                ) : (
+                  <>
+                    {lead.hint}
+                    {streak && <span className="ml-2">{streak}</span>}
+                  </>
+                )
               }
             />
           )}
